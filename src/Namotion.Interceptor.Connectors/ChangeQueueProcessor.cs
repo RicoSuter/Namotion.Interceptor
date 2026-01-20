@@ -17,7 +17,6 @@ public class ChangeQueueProcessor : IDisposable
 {
     private const int FlushDedupedBufferMinSize = 256;
     private const int FlushDedupedBufferMaxSize = 1024;
-    private const int FlushBufferWarningThreshold = 10_000;
 
     private readonly IInterceptorSubjectContext _context;
     private readonly Func<RegisteredSubjectProperty, bool> _propertyFilter;
@@ -30,7 +29,6 @@ public class ChangeQueueProcessor : IDisposable
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
     private int _flushGate; // 0 = free, 1 = flushing
     private bool _disposed;
-    private bool _bufferWarningLogged;
 
     // Scratch buffers used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
@@ -165,22 +163,7 @@ public class ChangeQueueProcessor : IDisposable
 
             if (_flushChanges.Count == 0)
             {
-                _bufferWarningLogged = false; // Reset warning flag when buffer is empty
                 return;
-            }
-
-            // Warn if buffer is growing too large (indicates write handler is slower than change rate)
-            if (_flushChanges.Count >= FlushBufferWarningThreshold && !_bufferWarningLogged)
-            {
-                _bufferWarningLogged = true;
-                _logger.LogWarning(
-                    "Change queue buffer exceeded {Threshold} items ({ActualCount} pending). " +
-                    "Write handler may be slower than change rate. Consider increasing buffer time or optimizing write performance.",
-                    FlushBufferWarningThreshold, _flushChanges.Count);
-            }
-            else if (_flushChanges.Count < FlushBufferWarningThreshold / 2)
-            {
-                _bufferWarningLogged = false; // Reset warning when buffer drops below half threshold
             }
 
             _flushTouchedChanges.Clear();

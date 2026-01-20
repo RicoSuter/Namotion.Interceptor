@@ -14,19 +14,12 @@ namespace Namotion.Interceptor.Connectors;
 /// </remarks>
 public sealed class SubjectPropertyWriter
 {
-    /// <summary>
-    /// Default maximum number of updates to buffer during initialization/reconnection.
-    /// </summary>
-    public const int DefaultMaxBufferedUpdates = 100_000;
-
     private readonly ISubjectSource _source;
     private readonly ILogger _logger;
     private readonly Func<CancellationToken, ValueTask<bool>>? _flushRetryQueueAsync;
-    private readonly int _maxBufferedUpdates;
     private readonly Lock _lock = new();
 
-    private Queue<Action>? _updates = new();
-    private int _droppedUpdates;
+    private List<Action>? _updates = [];
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SubjectPropertyWriter"/> class.
@@ -34,17 +27,11 @@ public sealed class SubjectPropertyWriter
     /// <param name="source">The source associated with this writer.</param>
     /// <param name="flushRetryQueueAsync">Optional callback to flush pending outbound writes from the retry queue.</param>
     /// <param name="logger">The logger.</param>
-    /// <param name="maxBufferedUpdates">Maximum updates to buffer during initialization. Oldest updates are dropped when exceeded.</param>
-    public SubjectPropertyWriter(
-        ISubjectSource source,
-        Func<CancellationToken, ValueTask<bool>>? flushRetryQueueAsync,
-        ILogger logger,
-        int maxBufferedUpdates = DefaultMaxBufferedUpdates)
+    public SubjectPropertyWriter(ISubjectSource source, Func<CancellationToken, ValueTask<bool>>? flushRetryQueueAsync, ILogger logger)
     {
         _source = source;
         _logger = logger;
         _flushRetryQueueAsync = flushRetryQueueAsync;
-        _maxBufferedUpdates = maxBufferedUpdates;
     }
 
     /// <summary>
@@ -56,8 +43,7 @@ public sealed class SubjectPropertyWriter
     {
         lock (_lock)
         {
-            _updates = new Queue<Action>();
-            _droppedUpdates = 0;
+            _updates = [];
         }
     }
 
@@ -97,17 +83,6 @@ public sealed class SubjectPropertyWriter
             }
 
             _updates = null;
-            var droppedCount = _droppedUpdates;
-            _droppedUpdates = 0;
-
-            if (droppedCount > 0)
-            {
-                _logger.LogWarning(
-                    "Dropped {DroppedCount} buffered updates during reconnection (buffer limit: {MaxBuffered}). " +
-                    "Consider increasing MaxBufferedUpdates or reducing reconnection time.",
-                    droppedCount, _maxBufferedUpdates);
-            }
-
             foreach (var action in updates)
             {
                 try
@@ -141,15 +116,8 @@ public sealed class SubjectPropertyWriter
                 updates = _updates;
                 if (updates is not null)
                 {
-                    // Enforce buffer limit - drop oldest updates when exceeded (O(1) with Queue)
-                    if (updates.Count >= _maxBufferedUpdates)
-                    {
-                        updates.Dequeue();
-                        _droppedUpdates++;
-                    }
-
                     // Still initializing, buffer the update (cold path, allocations acceptable)
-                    EnqueueUpdate(updates, state, update);
+                    AddBeforeInitializationUpdate(updates, state, update);
                     return;
                 }
             }
@@ -166,10 +134,10 @@ public sealed class SubjectPropertyWriter
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static void EnqueueUpdate<TState>(Queue<Action> updates, TState state, Action<TState> update)
+    private static void AddBeforeInitializationUpdate<TState>(List<Action> beforeInitializationUpdates, TState state, Action<TState> update)
     {
         // The allocation for the closure happens only on the cold path (needs to be in an own non-inlined method
         // to avoid capturing unnecessary locals and causing allocations on the hot path).
-        updates.Enqueue(() => update(state));
+        beforeInitializationUpdates.Add(() => update(state));
     }
 }
