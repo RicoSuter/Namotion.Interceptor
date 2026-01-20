@@ -31,6 +31,16 @@ internal class OpcUaSubjectServer : StandardServer
 
     protected override void OnServerStarted(IServerInternal server)
     {
+        // Unsubscribe any existing handlers to prevent accumulation on server restart
+        if (_server is not null && _sessionCreatedHandler is not null)
+        {
+            _server.SessionManager.SessionCreated -= _sessionCreatedHandler;
+        }
+        if (_server is not null && _sessionClosingHandler is not null)
+        {
+            _server.SessionManager.SessionClosing -= _sessionClosingHandler;
+        }
+
         _server = server;
 
         _sessionCreatedHandler = (session, _) =>
