@@ -28,7 +28,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
 
     // Fields for deferred async work (handled by health check loop)
-    private volatile Session? _pendingOldSession; // Old session needing disposal after reconnection
+    private Session? _pendingOldSession; // Old session needing disposal after reconnection (accessed via Interlocked)
     private volatile bool _needsInitialization;   // Flag for health check to complete initialization
 
     /// <summary>
@@ -58,7 +58,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// <summary>
     /// Gets the pending old session that needs async disposal by the health check loop.
     /// </summary>
-    public Session? PendingOldSession => _pendingOldSession;
+    public Session? PendingOldSession => Volatile.Read(ref _pendingOldSession);
 
     /// <summary>
     /// Gets the current subscriptions managed by the subscription manager.
@@ -275,7 +275,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 // Store old session for async disposal by health check
                 if (oldSession is not null)
                 {
-                    _pendingOldSession = oldSession;
+                    Volatile.Write(ref _pendingOldSession, oldSession);
                 }
 
                 Volatile.Write(ref _session, reconnectedSession);
@@ -352,10 +352,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// </summary>
     public async Task DisposePendingOldSessionAsync(CancellationToken cancellationToken)
     {
-        var oldSession = _pendingOldSession;
+        var oldSession = Interlocked.Exchange(ref _pendingOldSession, null);
         if (oldSession is not null)
         {
-            _pendingOldSession = null;
             try
             {
                 await DisposeSessionAsync(oldSession, cancellationToken).ConfigureAwait(false);
@@ -381,6 +380,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// </summary>
     public async Task ClearSessionAsync(CancellationToken cancellationToken)
     {
+        Session? sessionToDispose;
+
         lock (_reconnectingLock)
         {
             // Reset the reconnect handler to prevent it from trying to use the disposed session
@@ -399,13 +400,16 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 (int)_configuration.ReconnectHandlerTimeout.TotalMilliseconds);
 
             Interlocked.Exchange(ref _isReconnecting, 0);
+
+            // Read and clear session inside lock to prevent race with OnReconnectComplete
+            sessionToDispose = Volatile.Read(ref _session);
+            Volatile.Write(ref _session, null);
         }
 
-        var session = Volatile.Read(ref _session);
-        if (session is not null)
+        // Dispose outside lock to avoid blocking SDK callbacks
+        if (sessionToDispose is not null)
         {
-            await DisposeSessionAsync(session, cancellationToken).ConfigureAwait(false);
-            Volatile.Write(ref _session, null);
+            await DisposeSessionAsync(sessionToDispose, cancellationToken).ConfigureAwait(false);
         }
     }
 

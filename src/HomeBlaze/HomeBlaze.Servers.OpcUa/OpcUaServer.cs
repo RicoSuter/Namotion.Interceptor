@@ -246,7 +246,6 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
                 BaseAddress = BaseAddress ?? defaults.BaseAddress,
                 CleanCertificateStore = CleanCertificateStore ?? defaults.CleanCertificateStore,
                 BufferTime = BufferTimeMs.HasValue ? TimeSpan.FromMilliseconds(BufferTimeMs.Value) : defaults.BufferTime,
-                RetryTime = RetryTimeSeconds.HasValue ? TimeSpan.FromSeconds(RetryTimeSeconds.Value) : defaults.RetryTime
             };
 
             _serverService = targetSubject.CreateOpcUaServer(configuration, _logger);
