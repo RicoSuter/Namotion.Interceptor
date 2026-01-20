@@ -167,20 +167,21 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                     serverToClean?.ClearPropertyData();
                 }
             }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                // Normal shutdown - don't log as error
+            }
             catch (Exception ex)
             {
-                if (ex is not TaskCanceledException)
-                {
-                    _consecutiveFailures++;
-                    _lastError = ex;
-                    _logger.LogError(ex, "Failed to start OPC UA server (attempt {Attempt}).", _consecutiveFailures);
+                _consecutiveFailures++;
+                _lastError = ex;
+                _logger.LogError(ex, "Failed to start OPC UA server (attempt {Attempt}).", _consecutiveFailures);
 
-                    // Exponential backoff with jitter: 1s, 2s, 4s, 8s, 16s, 30s (capped) + 0-2s random jitter
-                    // Jitter prevents thundering herd when multiple servers fail simultaneously
-                    var baseDelay = Math.Min(Math.Pow(2, _consecutiveFailures - 1), 30);
-                    var jitter = Random.Shared.NextDouble() * 2;
-                    await Task.Delay(TimeSpan.FromSeconds(baseDelay + jitter), stoppingToken);
-                }
+                // Exponential backoff with jitter: 1s, 2s, 4s, 8s, 16s, 30s (capped) + 0-2s random jitter
+                // Jitter prevents thundering herd when multiple servers fail simultaneously
+                var baseDelay = Math.Min(Math.Pow(2, _consecutiveFailures - 1), 30);
+                var jitter = Random.Shared.NextDouble() * 2;
+                await Task.Delay(TimeSpan.FromSeconds(baseDelay + jitter), stoppingToken);
             }
             finally
             {

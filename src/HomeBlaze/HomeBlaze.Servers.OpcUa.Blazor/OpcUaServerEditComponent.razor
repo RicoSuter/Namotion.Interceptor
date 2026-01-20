@@ -115,7 +115,6 @@
     private string? _originalRootName;
     private bool? _originalCleanCertificateStore;
     private int? _originalBufferTimeMs;
-    private int? _originalRetryTimeSeconds;
 
     public bool IsValid => !string.IsNullOrWhiteSpace(_name) && !string.IsNullOrWhiteSpace(_path);
 
@@ -127,8 +126,7 @@
                            _namespaceUri != _originalNamespaceUri ||
                            _rootName != _originalRootName ||
                            _cleanCertificateStore != _originalCleanCertificateStore ||
-                           _bufferTimeMs != _originalBufferTimeMs ||
-                           _retryTimeSeconds != _originalRetryTimeSeconds;
+                           _bufferTimeMs != _originalBufferTimeMs;
 
     public string PreferredDialogSize => "Medium";
 
@@ -148,7 +146,6 @@
             _rootName = ServerSubject.RootName;
             _cleanCertificateStore = ServerSubject.CleanCertificateStore;
             _bufferTimeMs = ServerSubject.BufferTimeMs;
-            _retryTimeSeconds = ServerSubject.RetryTimeSeconds;
 
             _originalName = _name;
             _originalPath = _path;
@@ -159,7 +156,6 @@
             _originalRootName = _rootName;
             _originalCleanCertificateStore = _cleanCertificateStore;
             _originalBufferTimeMs = _bufferTimeMs;
-            _originalRetryTimeSeconds = _retryTimeSeconds;
         }
     }
 
@@ -199,7 +195,6 @@
             _originalRootName = _rootName;
             _originalCleanCertificateStore = _cleanCertificateStore;
             _originalBufferTimeMs = _bufferTimeMs;
-            _originalRetryTimeSeconds = _retryTimeSeconds;
 
             IsDirtyChanged?.Invoke(false);
         }
