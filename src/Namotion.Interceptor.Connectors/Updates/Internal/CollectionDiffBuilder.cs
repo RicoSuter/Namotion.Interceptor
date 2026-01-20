@@ -43,7 +43,9 @@ internal sealed class CollectionDiffBuilder
         for (var i = 0; i < newItems.Count; i++)
             _newIndexMap[newItems[i]] = i;
 
-        // Generate Remove operations (process from the highest index first, then reverse for correct order)
+        // Generate Remove operations in descending order.
+        // Descending order ensures each remove doesn't affect indices of subsequent removes
+        // when applied sequentially.
         for (var i = oldItems.Count - 1; i >= 0; i--)
         {
             var item = oldItems[i];
@@ -57,8 +59,7 @@ internal sealed class CollectionDiffBuilder
                 });
             }
         }
-        // Reverse to get ascending index order (O(n) once instead of O(n²) from Insert(0,...))
-        operations?.Reverse();
+        // Keep descending order - do NOT reverse
 
         // Generate Insert operations for new items
         for (var i = 0; i < newItems.Count; i++)
@@ -85,12 +86,26 @@ internal sealed class CollectionDiffBuilder
                 _newCommonOrder.Add(newItems[i]);
         }
 
-        // Detect reordering
+        // Detect reordering and compute intermediate indices for moves
         if (_oldCommonOrder.Count > 0 && !_oldCommonOrder.SequenceEqual(_newCommonOrder))
         {
             _oldCommonIndexMap.Clear();
             for (var i = 0; i < _oldCommonOrder.Count; i++)
                 _oldCommonIndexMap[_oldCommonOrder[i]] = i;
+
+            // Build set of removed indices to compute index shifts for moves
+            HashSet<int>? removedIndices = null;
+            if (operations is not null)
+            {
+                foreach (var op in operations)
+                {
+                    if (op.Action == SubjectCollectionOperationType.Remove)
+                    {
+                        removedIndices ??= [];
+                        removedIndices.Add((int)op.Index);
+                    }
+                }
+            }
 
             for (var i = 0; i < _newCommonOrder.Count; i++)
             {
@@ -98,11 +113,36 @@ internal sealed class CollectionDiffBuilder
                 var oldCommonIndex = _oldCommonIndexMap[item];
                 if (oldCommonIndex != i)
                 {
+                    var originalOldIndex = _oldIndexMap[item];
+                    var originalNewIndex = _newIndexMap[item];
+
+                    // Compute intermediate fromIndex: original index minus removes before it
+                    // This accounts for index shifts after removes are applied
+                    var removesBeforeOldIndex = CountRemovesBefore(removedIndices, originalOldIndex);
+                    var intermediateFromIndex = originalOldIndex - removesBeforeOldIndex;
+
                     reorderedItems ??= [];
-                    reorderedItems.Add((_oldIndexMap[item], _newIndexMap[item], item));
+                    reorderedItems.Add((intermediateFromIndex, originalNewIndex, item));
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Counts how many removed indices are less than the given index.
+    /// </summary>
+    private static int CountRemovesBefore(HashSet<int>? removedIndices, int index)
+    {
+        if (removedIndices is null)
+            return 0;
+
+        var count = 0;
+        foreach (var removedIndex in removedIndices)
+        {
+            if (removedIndex < index)
+                count++;
+        }
+        return count;
     }
 
     /// <summary>

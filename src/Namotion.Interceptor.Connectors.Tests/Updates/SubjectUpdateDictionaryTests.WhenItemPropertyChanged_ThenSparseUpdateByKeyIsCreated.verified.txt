@@ -4,7 +4,7 @@
     1: {
       Lookup: {
         Kind: Collection,
-        Collection: [
+        Items: [
           {
             Index: key1,
             Id: 2
