@@ -434,5 +434,12 @@ public class OpcUaClientConfiguration
                 $"ReconnectInterval must be at least 100ms, got: {ReconnectInterval}",
                 nameof(ReconnectInterval));
         }
+
+        if (StallDetectionIterations < 1)
+        {
+            throw new ArgumentException(
+                $"StallDetectionIterations must be at least 1, got: {StallDetectionIterations}",
+                nameof(StallDetectionIterations));
+        }
     }
 }
