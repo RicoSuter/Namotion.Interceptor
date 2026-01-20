@@ -473,26 +473,23 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Synchronous dispose - prefer DisposeAsync() for proper cleanup.
-    /// This is only called if the caller doesn't check for IAsyncDisposable.
+    /// Satisfies IDisposable for interface compatibility.
+    /// Delegates to DisposeAsync() via fire-and-forget to ensure cleanup.
+    /// SubjectSourceBackgroundService checks for IAsyncDisposable first, so this is never called in normal operation.
     /// </summary>
-    public void Dispose()
+    void IDisposable.Dispose()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        _logger.LogWarning("Sync Dispose() called on SessionManager - prefer DisposeAsync() for proper cleanup.");
+        _ = Task.Run(async () =>
         {
-            return;
-        }
-
-        try { _reconnectHandler.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing reconnect handler."); }
-        try { SubscriptionManager.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing subscription manager."); }
-        try { PollingManager?.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing polling manager."); }
-
-        var sessionToDispose = _session;
-        if (sessionToDispose is not null)
-        {
-            sessionToDispose.KeepAlive -= OnKeepAlive;
-            try { sessionToDispose.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing session."); }
-            Volatile.Write(ref _session, null);
-        }
+            try
+            {
+                await DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during fire-and-forget disposal of SessionManager.");
+            }
+        });
     }
 }
