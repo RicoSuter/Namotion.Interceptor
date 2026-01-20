@@ -408,6 +408,11 @@ The library ensures thread-safe operations across all OPC UA interactions. Prope
 
 Write queue operations use `Interlocked` operations for thread-safe counter updates and flush operations are protected by semaphores to prevent concurrent flush issues.
 
+**Update ordering:**
+By default (`SubscriptionSequentialPublishing = false`), subscription callbacks may be processed in parallel for higher throughput. This means that for the same property, if two rapid updates arrive in different publish responses, they could theoretically be applied out of order. Each update carries a `SourceTimestamp` from the server, but the library does not enforce timestamp-based ordering.
+
+For most use cases (sensor values, status updates), this is acceptable since you typically want the latest value. If your application requires strict ordering guarantees, set `SubscriptionSequentialPublishing = true` to process all subscription messages sequentially at the cost of reduced throughput.
+
 To prevent feedback loops when external sources update properties, use `SubjectChangeContext.WithSource()` to mark the change source:
 
 ```csharp
@@ -448,6 +453,7 @@ For 24/7 production use, the default configuration provides robust resilience:
 | `StallDetectionIterations` | 10 | Health checks before forcing stall reset |
 | `WriteRetryQueueSize` | 1000 | Updates buffered during disconnection |
 | `SessionDisposalTimeout` | 5s | Max wait for graceful session close |
+| `SubscriptionSequentialPublishing` | false | Process subscription messages in order (see Thread Safety) |
 
 Total stall recovery time = `StallDetectionIterations` × `SubscriptionHealthCheckInterval` (default: 50s).
 

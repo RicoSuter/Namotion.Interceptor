@@ -78,6 +78,7 @@ internal class SubscriptionManager : IAsyncDisposable
                 Priority = _configuration.SubscriptionPriority,
                 MaxNotificationsPerPublish = _configuration.SubscriptionMaximumNotificationsPerPublish,
                 RepublishAfterTransfer = true, // Enable SDK's automatic republish of missed messages after transfer
+                SequentialPublishing = _configuration.SubscriptionSequentialPublishing,
             };
 
             if (!session.AddSubscription(subscription))

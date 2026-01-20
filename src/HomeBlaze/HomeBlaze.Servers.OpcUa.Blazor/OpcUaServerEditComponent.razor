@@ -76,12 +76,6 @@
                              HelperText="Change buffer time, leave empty for default"
                              Min="0"
                              Class="mt-4" />
-
-            <MudNumericField @bind-Value="_retryTimeSeconds"
-                             Label="Retry Time (seconds)"
-                             HelperText="Retry delay, leave empty for default"
-                             Min="0"
-                             Class="mt-4" />
         </MudForm>
     </MudTabPanel>
 </MudTabs>
@@ -104,7 +98,6 @@
     private string? _rootName;
     private bool? _cleanCertificateStore;
     private int? _bufferTimeMs;
-    private int? _retryTimeSeconds;
 
     private string _originalName = string.Empty;
     private string _originalPath = string.Empty;
@@ -184,7 +177,6 @@
             ServerSubject.RootName = _rootName;
             ServerSubject.CleanCertificateStore = _cleanCertificateStore;
             ServerSubject.BufferTimeMs = _bufferTimeMs;
-            ServerSubject.RetryTimeSeconds = _retryTimeSeconds;
 
             _originalName = _name;
             _originalPath = _path;

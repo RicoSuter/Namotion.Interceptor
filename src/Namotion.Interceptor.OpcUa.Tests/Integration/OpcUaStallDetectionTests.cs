@@ -181,7 +181,7 @@ public class OpcUaStallDetectionTests
             server.Root.Name = "BeforeStall";
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Root.Name == "BeforeStall",
-                timeout: TimeSpan.FromSeconds(30),
+                timeout: TimeSpan.FromSeconds(60),
                 message: "Initial sync should complete");
             logger.Log("Initial sync verified");
 

@@ -141,6 +141,15 @@ public class OpcUaClientConfiguration
     public uint SubscriptionMaximumNotificationsPerPublish { get; init; } = 0;
 
     /// <summary>
+    /// Gets or sets whether to process subscription messages sequentially (in order).
+    /// When true, callbacks are invoked one at a time in sequence order, reducing throughput but guaranteeing order.
+    /// When false (default), messages may be processed in parallel for higher throughput.
+    /// Only enable this if your application requires strict ordering of property updates.
+    /// Default is false for optimal performance.
+    /// </summary>
+    public bool SubscriptionSequentialPublishing { get; init; } = false;
+
+    /// <summary>
     /// Gets or sets the maximum references per node to read per browse request. 0 uses server default.
     /// </summary>
     public uint MaximumReferencesPerNode { get; init; } = 0;

@@ -78,12 +78,6 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
     public partial int? BufferTimeMs { get; set; }
 
     /// <summary>
-    /// Retry delay time in seconds. Uses default if not specified.
-    /// </summary>
-    [Configuration]
-    public partial int? RetryTimeSeconds { get; set; }
-
-    /// <summary>
     /// Whether the server is enabled and should auto-start on application startup.
     /// When stopped manually, this is set to false to prevent auto-restart.
     /// </summary>
