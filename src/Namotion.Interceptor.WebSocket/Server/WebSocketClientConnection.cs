@@ -20,14 +20,19 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
     private readonly ILogger _logger;
     private readonly CancellationTokenSource _cts = new();
     private readonly IWebSocketSerializer _serializer = new JsonWebSocketSerializer();
+    private readonly SemaphoreSlim _sendLock = new(1, 1);
+    private readonly long _maxMessageSize;
+
+    private int _disposed;
 
     public string ConnectionId { get; } = Guid.NewGuid().ToString("N")[..8];
     public bool IsConnected => _webSocket.State == WebSocketState.Open;
 
-    public WebSocketClientConnection(System.Net.WebSockets.WebSocket webSocket, ILogger logger)
+    public WebSocketClientConnection(System.Net.WebSockets.WebSocket webSocket, ILogger logger, long maxMessageSize = 10 * 1024 * 1024)
     {
         _webSocket = webSocket;
         _logger = logger;
+        _maxMessageSize = maxMessageSize;
     }
 
     public async Task<HelloPayload?> ReceiveHelloAsync(CancellationToken cancellationToken)
@@ -58,23 +63,34 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
 
     public async Task SendWelcomeAsync(SubjectUpdate initialState, CancellationToken cancellationToken)
     {
-        var welcome = new WelcomePayload
+        await _sendLock.WaitAsync(cancellationToken);
+        try
         {
-            Version = 1,
-            Format = WebSocketFormat.Json,
-            State = initialState
-        };
+            var welcome = new WelcomePayload
+            {
+                Version = 1,
+                Format = WebSocketFormat.Json,
+                State = initialState
+            };
 
-        var bytes = _serializer.SerializeMessage(MessageType.Welcome, null, welcome);
-        await _webSocket.SendAsync(bytes, WebSocketMessageType.Text, true, cancellationToken);
+            var bytes = _serializer.SerializeMessage(MessageType.Welcome, null, welcome);
+            await _webSocket.SendAsync(bytes, WebSocketMessageType.Text, true, cancellationToken);
+        }
+        finally
+        {
+            _sendLock.Release();
+        }
     }
 
     public async Task SendUpdateAsync(SubjectUpdate update, CancellationToken cancellationToken)
     {
         if (!IsConnected) return;
 
+        await _sendLock.WaitAsync(cancellationToken);
         try
         {
+            if (!IsConnected) return;  // Re-check after acquiring lock
+
             var bytes = _serializer.SerializeMessage(MessageType.Update, null, update);
             await _webSocket.SendAsync(bytes, WebSocketMessageType.Text, true, cancellationToken);
         }
@@ -82,20 +98,31 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         {
             _logger.LogWarning(ex, "Failed to send update to client {ConnectionId}", ConnectionId);
         }
+        finally
+        {
+            _sendLock.Release();
+        }
     }
 
     public async Task SendErrorAsync(ErrorPayload error, CancellationToken cancellationToken)
     {
         if (!IsConnected) return;
 
+        await _sendLock.WaitAsync(cancellationToken);
         try
         {
+            if (!IsConnected) return;  // Re-check after acquiring lock
+
             var bytes = _serializer.SerializeMessage(MessageType.Error, null, error);
             await _webSocket.SendAsync(bytes, WebSocketMessageType.Text, true, cancellationToken);
         }
         catch (WebSocketException ex)
         {
             _logger.LogWarning(ex, "Failed to send error to client {ConnectionId}", ConnectionId);
+        }
+        finally
+        {
+            _sendLock.Release();
         }
     }
 
@@ -116,6 +143,12 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
                 {
                     _logger.LogInformation("Client {ConnectionId}: Received close message", ConnectionId);
                     return null;
+                }
+
+                if (messageStream.Length + result.Count > _maxMessageSize)
+                {
+                    _logger.LogWarning("Client {ConnectionId}: Message exceeds maximum size of {MaxSize} bytes", ConnectionId, _maxMessageSize);
+                    throw new InvalidOperationException($"Message exceeds maximum size of {_maxMessageSize} bytes");
                 }
 
                 messageStream.Write(buffer, 0, result.Count);
@@ -177,8 +210,35 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
+
         await _cts.CancelAsync();
-        await CloseAsync();
+
+        // Wait for pending sends to release the lock before disposing
+        var lockAcquired = false;
+        try
+        {
+            lockAcquired = await _sendLock.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        catch (ObjectDisposedException)
+        {
+            // Lock already disposed, continue with cleanup
+        }
+
+        try
+        {
+            await CloseAsync();
+        }
+        finally
+        {
+            if (lockAcquired)
+            {
+                _sendLock.Release();
+            }
+
+            _sendLock.Dispose();
+        }
+
         _webSocket.Dispose();
         _cts.Dispose();
     }
