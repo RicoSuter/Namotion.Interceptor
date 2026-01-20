@@ -107,12 +107,70 @@ public class LateHandler : IWriteInterceptor { }
 
 ## Interceptor Pipeline
 
-The context builds an interceptor chain for property operations. When a property is read or written, the chain executes in order:
+Property reads and writes flow through a configurable chain of interceptors. Each interceptor receives a `next` delegate and can run code **before** and **after** calling it. The "after" code runs in reverse order, creating a nested pipeline.
+
+### Write Pipeline (`IWriteInterceptor`)
 
 ```
-Write: Interceptor1 → Interceptor2 → ... → Actual Write
-Read:  Interceptor1 → Interceptor2 → ... → Actual Read
+person.Name = "John"
+    │
+    ▼
+┌─ Interceptor 1 ─────────────────────────────┐
+│  (before next)  validate, transform, etc.   │
+│      │                                      │
+│      ▼                                      │
+│  ┌─ Interceptor 2 ───────────────────────┐  │
+│  │  (before next)  equality check        │  │
+│  │      │                                │  │
+│  │      ▼                                │  │
+│  │  ┌─ Interceptor 3 ─────────────────┐  │  │
+│  │  │  (before next)                  │  │  │
+│  │  │      │                          │  │  │
+│  │  │      ▼                          │  │  │
+│  │  │    _name = "John"  ← field set  │  │  │
+│  │  │      │                          │  │  │
+│  │  │      ▼                          │  │  │
+│  │  │  (after next)                   │  │  │
+│  │  └────────────────────────────────-┘  │  │
+│  │      │                                │  │
+│  │      ▼                                │  │
+│  │  (after next)  fire change event      │  │
+│  └───────────────────────────────────────┘  │
+│      │                                      │
+│      ▼                                      │
+│  (after next)  notify observers             │
+└─────────────────────────────────────────────┘
 ```
+
+### Read Pipeline (`IReadInterceptor`)
+
+```
+var name = person.Name
+    │
+    ▼
+┌─ Interceptor 1 ─────────────────────────────┐
+│  (before next)  record access, etc.         │
+│      │                                      │
+│      ▼                                      │
+│  ┌─ Interceptor 2 ───────────────────────┐  │
+│  │  (before next)                        │  │
+│  │      │                                │  │
+│  │      ▼                                │  │
+│  │    return _name  ← field read         │  │
+│  │      │                                │  │
+│  │      ▼                                │  │
+│  │  (after next)  transform value        │  │
+│  └───────────────────────────────────────┘  │
+│      │                                      │
+│      ▼                                      │
+│  (after next)                               │
+└─────────────────────────────────────────────┘
+    │
+    ▼
+  "John"
+```
+
+### Implementing an Interceptor
 
 Each interceptor can:
 - Modify the value before passing to the next interceptor
@@ -124,8 +182,9 @@ public class LoggingInterceptor : IWriteInterceptor
 {
     public void WriteProperty<T>(ref PropertyWriteContext<T> context, WritePropertyDelegate<T> next)
     {
-        Console.WriteLine($"Writing {context.Property.Name}");
+        Console.WriteLine($"Before: Writing {context.Property.Name} = {context.NewValue}");
         next(ref context); // Call next interceptor or actual write
+        Console.WriteLine($"After: Wrote {context.Property.Name}");
     }
 }
 ```

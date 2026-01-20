@@ -16,7 +16,7 @@ internal static class OpcUaPropertyExtensions
                 return null;
 
             // TODO: Create property reference node instead of __?
-            return ResolvePropertyName(attributedProperty, pathProvider) + "__" + propertyName;
+            return attributedProperty.ResolvePropertyName(pathProvider) + "__" + propertyName;
         }
 
         return pathProvider.TryGetPropertySegment(property);

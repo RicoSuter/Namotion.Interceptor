@@ -3,7 +3,7 @@
   Subjects: {
     1: {
       Lookup: {
-        Kind: Collection,
+        Kind: Dictionary,
         Timestamp: DateTimeOffset_1,
         Operations: [
           {
@@ -22,14 +22,14 @@
     },
     2: {
       Child: {
-        Kind: Item
+        Kind: Object
       },
       Items: {
         Kind: Collection,
         Count: 0
       },
       Lookup: {
-        Kind: Collection,
+        Kind: Dictionary,
         Count: 0
       },
       Name: {
@@ -43,22 +43,22 @@
         }
       },
       Parent: {
-        Kind: Item
+        Kind: Object
       },
       Self: {
-        Kind: Item
+        Kind: Object
       }
     },
     3: {
       Child: {
-        Kind: Item
+        Kind: Object
       },
       Items: {
         Kind: Collection,
         Count: 0
       },
       Lookup: {
-        Kind: Collection,
+        Kind: Dictionary,
         Count: 0
       },
       Name: {
@@ -72,10 +72,10 @@
         }
       },
       Parent: {
-        Kind: Item
+        Kind: Object
       },
       Self: {
-        Kind: Item
+        Kind: Object
       }
     }
   }

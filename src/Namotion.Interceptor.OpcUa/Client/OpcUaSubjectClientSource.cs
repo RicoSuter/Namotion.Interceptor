@@ -30,15 +30,63 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private volatile bool _isStarted;
     private int _reconnectingIterations; // Tracks health check iterations while reconnecting (for stall detection)
 
-    private IReadOnlyList<MonitoredItem>? _initialMonitoredItems;
+    // Diagnostics tracking - accessed from multiple threads via Diagnostics property
+    private long _totalReconnectionAttempts;
+    private long _successfulReconnections;
+    private long _failedReconnections;
+    private long _lastConnectedAtTicks; // 0 = never connected, otherwise UTC ticks (thread-safe via Interlocked)
+    private OpcUaClientDiagnostics? _diagnostics;
 
     internal string OpcUaNodeIdKey { get; } = "OpcUaNodeId:" + Guid.NewGuid();
 
+    /// <summary>
+    /// Gets diagnostic information about the client connection state.
+    /// </summary>
+    public OpcUaClientDiagnostics Diagnostics => _diagnostics ??= new OpcUaClientDiagnostics(this);
+
+    /// <summary>
+    /// Gets the session manager for internal diagnostics access.
+    /// </summary>
+    internal SessionManager? SessionManager => _sessionManager;
+
     internal SourceOwnershipManager Ownership => _ownership;
 
-    internal bool IsReconnecting => _sessionManager?.IsReconnecting == true;
+    // Diagnostics accessors
+    internal long TotalReconnectionAttempts => Interlocked.Read(ref _totalReconnectionAttempts);
+    internal long SuccessfulReconnections => Interlocked.Read(ref _successfulReconnections);
+    internal long FailedReconnections => Interlocked.Read(ref _failedReconnections);
+    internal DateTimeOffset? LastConnectedAt
+    {
+        get
+        {
+            var ticks = Interlocked.Read(ref _lastConnectedAtTicks);
+            return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
+        }
+    }
 
-    internal void RemoveItemsForSubject(IInterceptorSubject subject)
+    /// <summary>
+    /// Called by SessionManager when a reconnection attempt starts (via SDK's SessionReconnectHandler).
+    /// Updates diagnostics metrics to track the reconnection attempt.
+    /// </summary>
+    internal void RecordReconnectionAttemptStart()
+    {
+        Interlocked.Increment(ref _totalReconnectionAttempts);
+    }
+
+    /// <summary>
+    /// Called by SessionManager when SDK's SessionReconnectHandler successfully reconnects.
+    /// Updates diagnostics metrics to track the successful reconnection.
+    /// Note: Does not increment TotalReconnectionAttempts - that's done in RecordReconnectionAttemptStart.
+    /// </summary>
+    private void RecordReconnectionSuccess()
+    {
+        Interlocked.Increment(ref _successfulReconnections);
+        Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
+    }
+
+    private bool IsReconnecting => _sessionManager?.IsReconnecting == true;
+
+    private void RemoveItemsForSubject(IInterceptorSubject subject)
     {
         _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
         _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
@@ -90,6 +138,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
         var session = await _sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
 
+        Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
         _logger.LogInformation("Connected to OPC UA server successfully.");
 
         var rootNode = await TryGetRootNodeAsync(session, cancellationToken).ConfigureAwait(false);
@@ -98,7 +147,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             var monitoredItems = await _subjectLoader.LoadSubjectAsync(_subject, rootNode, session, cancellationToken).ConfigureAwait(false);
             if (monitoredItems.Count > 0)
             {
-                _initialMonitoredItems = monitoredItems;
                 await _sessionManager.CreateSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
             }
             else
@@ -119,8 +167,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     public async Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
     {
-        var initialMonitoredItems = _initialMonitoredItems;
-        if (initialMonitoredItems is null)
+        var ownedProperties = GetOwnedPropertiesWithNodeIds();
+        if (ownedProperties.Count == 0)
         {
             return null;
         }
@@ -131,7 +179,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             throw new InvalidOperationException("No active OPC UA session available.");
         }
 
-        var itemCount = initialMonitoredItems.Count;
+        var itemCount = ownedProperties.Count;
         var batchSize = (int)(session.OperationLimits?.MaxNodesPerRead ?? DefaultChunkSize);
         batchSize = batchSize is 0 ? int.MaxValue : batchSize;
 
@@ -145,7 +193,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             {
                 readValues.Add(new ReadValueId
                 {
-                    NodeId = initialMonitoredItems[offset + i].StartNodeId,
+                    NodeId = ownedProperties[offset + i].NodeId,
                     AttributeId = Opc.Ua.Attributes.Value
                 });
             }
@@ -163,10 +211,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 if (StatusCode.IsGood(readResponse.Results[i].StatusCode))
                 {
                     var dataValue = readResponse.Results[i];
-                    if (initialMonitoredItems[offset + i].Handle is RegisteredSubjectProperty property)
-                    {
-                        result[property] = dataValue;
-                    }
+                    result[ownedProperties[offset + i].Property] = dataValue;
                 }
             }
         }
@@ -184,55 +229,127 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         };
     }
 
+    /// <summary>
+    /// Gets all owned properties that have OPC UA NodeIds, for reading or recreating subscriptions.
+    /// This avoids holding onto heavy MonitoredItem objects and allows GC of SDK objects.
+    /// </summary>
+    private List<(RegisteredSubjectProperty Property, NodeId NodeId)> GetOwnedPropertiesWithNodeIds()
+    {
+        var result = new List<(RegisteredSubjectProperty, NodeId)>();
+        foreach (var property in _ownership.Properties)
+        {
+            if (property.TryGetPropertyData(OpcUaNodeIdKey, out var nodeIdObj) && 
+                nodeIdObj is NodeId nodeId &&
+                property.GetRegisteredProperty() is { } registeredProperty)
+            {
+                result.Add((registeredProperty, nodeId));
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Creates MonitoredItems for reconnection from owned properties.
+    /// This recreates SDK objects on demand instead of holding them in memory.
+    /// Called by SessionManager when subscription transfer fails after server restart.
+    /// </summary>
+    private IReadOnlyList<MonitoredItem> CreateMonitoredItemsForReconnection()
+    {
+        var ownedProperties = GetOwnedPropertiesWithNodeIds();
+        var monitoredItems = new List<MonitoredItem>(ownedProperties.Count);
+
+        foreach (var (property, nodeId) in ownedProperties)
+        {
+            var monitoredItem = _configuration.CreateMonitoredItem(nodeId, property);
+            monitoredItems.Add(monitoredItem);
+        }
+
+        return monitoredItems;
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // Single-threaded health check loop. Coordinates with automatic reconnection via IsReconnecting flag.
+        // All async work from SDK reconnection callbacks is deferred to this loop for simplicity.
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 var sessionManager = _sessionManager; // Capture reference to avoid TOCTOU
-                if (sessionManager is not null && _isStarted)
+                var propertyWriter = _propertyWriter;
+                if (sessionManager is not null && propertyWriter is not null && _isStarted)
                 {
-                    var isReconnecting = sessionManager.IsReconnecting;
-                    if (isReconnecting)
+                    // 1. Cleanup pending old session from SDK reconnection
+                    if (sessionManager.PendingOldSession is not null)
                     {
-                        var iterations = Interlocked.Increment(ref _reconnectingIterations);
-                        if (iterations > 10)
-                        {
-                            // Timeout: 10 iterations × health check interval (default 10s) = ~100s
-                            if (sessionManager.TryForceResetIfStalled())
-                            {
-                                _logger.LogWarning(
-                                    "Stall confirmed: Reconnecting flag reset to allow manual recovery. " +
-                                    "Session will be recreated on next health check.");
-                            }
+                        await sessionManager.DisposePendingOldSessionAsync(stoppingToken).ConfigureAwait(false);
+                    }
 
-                            Interlocked.Exchange(ref _reconnectingIterations, 0);
+                    // 2. Complete initialization after SDK reconnection with subscription transfer
+                    if (sessionManager.NeedsInitialization)
+                    {
+                        try
+                        {
+                            await propertyWriter.CompleteInitializationAsync(stoppingToken).ConfigureAwait(false);
+                            sessionManager.ClearInitializationFlag();
+                            RecordReconnectionSuccess();
+                            _logger.LogInformation("SDK reconnection initialization completed successfully.");
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "SDK reconnection initialization failed. Clearing session for full restart.");
+                            sessionManager.ClearInitializationFlag();
+                            await sessionManager.ClearSessionAsync(stoppingToken).ConfigureAwait(false);
                         }
                     }
-                    else
-                    {
-                        Interlocked.Exchange(ref _reconnectingIterations, 0); // Reset when not reconnecting
-                    }
 
+                    // 3. Check session health and trigger reconnection if needed
+                    var isReconnecting = sessionManager.IsReconnecting;
                     var currentSession = sessionManager.CurrentSession;
-                    if (currentSession is not null)
+                    var sessionIsConnected = currentSession?.Connected ?? false;
+
+                    if (currentSession is not null && sessionIsConnected && !isReconnecting)
                     {
-                        // Temporal separation: subscriptions added to collection AFTER initialization (see SubscriptionManager.cs:112)
+                        // Session healthy - validate subscriptions
+                        Interlocked.Exchange(ref _reconnectingIterations, 0);
                         await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(
                             sessionManager.Subscriptions,
                             stoppingToken).ConfigureAwait(false);
                     }
-                    else if (!isReconnecting)
+                    else if (!isReconnecting && (currentSession is null || !sessionIsConnected))
                     {
+                        // Session is dead and no reconnection in progress
+                        Interlocked.Exchange(ref _reconnectingIterations, 0);
                         _logger.LogWarning(
-                            "OPC UA session is dead with no active reconnection. " +
-                            "SessionReconnectHandler likely timed out after {Timeout}ms. " +
-                            "Restarting session manager...",
-                            _configuration.ReconnectHandlerTimeout);
+                            "OPC UA session is dead (session={HasSession}, connected={IsConnected}). " +
+                            "Starting manual reconnection...",
+                            currentSession is not null,
+                            sessionIsConnected);
 
                         await ReconnectSessionAsync(stoppingToken).ConfigureAwait(false);
+                    }
+                    else if (isReconnecting)
+                    {
+                        // SDK reconnection in progress - check for stall
+                        // Note: We check stall regardless of session.Connected state because the old
+                        // session's Connected property can return stale values during SDK reconnection.
+                        var iterations = Interlocked.Increment(ref _reconnectingIterations);
+                        if (iterations >= _configuration.StallDetectionIterations)
+                        {
+                            // SDK handler likely timed out or is stuck - force reset and trigger manual reconnection
+                            if (sessionManager.TryForceResetIfStalled())
+                            {
+                                _logger.LogWarning(
+                                    "SDK reconnection stalled (session={HasSession}, connected={IsConnected}, iterations={Iterations}). " +
+                                    "Starting manual reconnection...",
+                                    currentSession is not null,
+                                    sessionIsConnected,
+                                    iterations);
+
+                                Interlocked.Exchange(ref _reconnectingIterations, 0);
+                                await ReconnectSessionAsync(stoppingToken).ConfigureAwait(false);
+                            }
+                        }
                     }
                 }
 
@@ -244,9 +361,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             }
             catch (Exception ex)
             {
-                // Log error but continue health monitoring loop
-                _logger.LogError(ex, "Error during health check or session restart. Will retry.");
-                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
+                _logger.LogError(ex, "Error during health check or session restart. Retrying after delay.");
+                await Task.Delay(_configuration.SubscriptionHealthCheckInterval, stoppingToken).ConfigureAwait(false);
             }
         }
 
@@ -254,7 +370,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     }
 
     /// <summary>
-    /// Restarts the session after SessionReconnectHandler timeout.
+    /// Restarts the session when connection is lost.
     /// Reuses existing SessionManager (CreateSessionAsync disposes old session internally).
     /// Thread-safe: Only called from single-threaded ExecuteAsync loop.
     /// </summary>
@@ -272,11 +388,11 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             return;
         }
 
+        Interlocked.Increment(ref _totalReconnectionAttempts);
+
         try
         {
-            _logger.LogInformation(
-                "Restarting OPC UA session after SessionReconnectHandler timeout ({Timeout}ms)...",
-                _configuration.ReconnectHandlerTimeout);
+            _logger.LogInformation("Restarting OPC UA session...");
 
             // Start collecting updates - any incoming subscription notifications will be buffered
             // until we complete the full state reload
@@ -287,22 +403,31 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             var session = await sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
             _logger.LogInformation("New OPC UA session created successfully.");
 
-            if (_initialMonitoredItems is not null && _initialMonitoredItems.Count > 0)
+            // Recreate MonitoredItems from owned properties (avoids memory leak from holding SDK objects)
+            var monitoredItems = CreateMonitoredItemsForReconnection();
+            if (monitoredItems.Count > 0)
             {
-                await sessionManager.CreateSubscriptionsAsync(_initialMonitoredItems, session, cancellationToken).ConfigureAwait(false);
+                await sessionManager.CreateSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
 
                 _logger.LogInformation(
                     "Subscriptions recreated successfully with {Count} monitored items.",
-                    _initialMonitoredItems.Count);
+                    monitoredItems.Count);
             }
 
             await propertyWriter.CompleteInitializationAsync(cancellationToken).ConfigureAwait(false);
 
+            Interlocked.Increment(ref _successfulReconnections);
+            Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
             _logger.LogInformation("Session restart complete.");
         }
         catch (Exception ex)
         {
+            Interlocked.Increment(ref _failedReconnections);
             _logger.LogError(ex, "Failed to restart session. Will retry on next health check.");
+
+            // Clear the session so health check can trigger a new reconnection attempt
+            await sessionManager.ClearSessionAsync(cancellationToken).ConfigureAwait(false);
+
             throw; // Re-throw to trigger retry in ExecuteAsync
         }
     }
@@ -380,7 +505,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         for (var i = 0; i < span.Length && resultIndex < results.Count; i++)
         {
             var change = span[i];
-            if (!IsWritableOpcUaProperty(change))
+            if (!TryGetWritableNodeId(change, out _, out _))
                 continue;
 
             if (!StatusCode.IsGood(results[resultIndex]))
@@ -405,11 +530,24 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             : WriteResult.Failure(failedChanges.ToArray(), error);
     }
 
-    private bool IsWritableOpcUaProperty(SubjectPropertyChange change)
+    private bool TryGetWritableNodeId(SubjectPropertyChange change, out NodeId nodeId, out RegisteredSubjectProperty registeredProperty)
     {
-        return change.Property.TryGetPropertyData(OpcUaNodeIdKey, out var nodeId)
-            && nodeId is NodeId
-            && change.Property.TryGetRegisteredProperty() is { HasSetter: true };
+        nodeId = null!;
+        registeredProperty = null!;
+
+        if (!change.Property.TryGetPropertyData(OpcUaNodeIdKey, out var value) || value is not NodeId id)
+        {
+            return false;
+        }
+
+        if (change.Property.TryGetRegisteredProperty() is not { HasSetter: true } property)
+        {
+            return false;
+        }
+
+        nodeId = id;
+        registeredProperty = property;
+        return true;
     }
 
     private WriteValueCollection CreateWriteValuesCollection(ReadOnlyMemory<SubjectPropertyChange> changes)
@@ -420,19 +558,13 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         for (var i = 0; i < span.Length; i++)
         {
             var change = span[i];
-           
-            if (!IsWritableOpcUaProperty(change))
+
+            if (!TryGetWritableNodeId(change, out var nodeId, out var registeredProperty))
             {
                 continue;
             }
 
-            if (!change.Property.TryGetPropertyData(OpcUaNodeIdKey, out var v) || v is not NodeId nodeId)
-            {
-                continue;
-            }
-
-            var registeredProperty = change.Property.GetRegisteredProperty();
-            var value = _configuration.ValueConverter.ConvertToNodeValue(
+            var convertedValue = _configuration.ValueConverter.ConvertToNodeValue(
                 change.GetNewValue<object?>(),
                 registeredProperty);
 
@@ -442,7 +574,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 AttributeId = Opc.Ua.Attributes.Value,
                 Value = new DataValue
                 {
-                    Value = value,
+                    Value = convertedValue,
                     StatusCode = StatusCodes.Good,
                     SourceTimestamp = change.ChangedTimestamp.UtcDateTime
                 }
@@ -456,7 +588,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// Determines if a write failure status code represents a transient error that should be retried.
     /// Returns true for transient errors (connectivity, timeouts, server load), false for permanent errors.
     /// </summary>
-    private static bool IsTransientWriteError(StatusCode statusCode)
+    internal static bool IsTransientWriteError(StatusCode statusCode)
     {
         // Permanent design-time errors: Don't retry
         if (statusCode == StatusCodes.BadNodeIdUnknown ||
@@ -497,7 +629,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private void Reset()
     {
         _isStarted = false;
-        _initialMonitoredItems = null;
         CleanupPropertyData();
     }
 

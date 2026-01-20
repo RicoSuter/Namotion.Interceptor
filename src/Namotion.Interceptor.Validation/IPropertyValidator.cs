@@ -10,11 +10,10 @@ public interface IPropertyValidator
     /// <summary>
     /// Validates the new value of a property.
     /// </summary>
+    /// <typeparam name="TProperty">The property type.</typeparam>
     /// <param name="property">The property.</param>
-    /// <param name="value">The new property.</param>
-    /// <returns>The validation result.</returns>
-    IEnumerable<ValidationResult> Validate(PropertyReference property, object? value);
-    
-    // TODO(perf): Use TProperty instead of object? (generics) in IPropertyValidator interface
+    /// <param name="value">The new value.</param>
+    /// <returns>The validation results, empty if valid.</returns>
+    IEnumerable<ValidationResult> Validate<TProperty>(PropertyReference property, TProperty value);
 }
 

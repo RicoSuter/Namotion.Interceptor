@@ -76,12 +76,6 @@
                              HelperText="Change buffer time, leave empty for default"
                              Min="0"
                              Class="mt-4" />
-
-            <MudNumericField @bind-Value="_retryTimeSeconds"
-                             Label="Retry Time (seconds)"
-                             HelperText="Retry delay, leave empty for default"
-                             Min="0"
-                             Class="mt-4" />
         </MudForm>
     </MudTabPanel>
 </MudTabs>
@@ -104,7 +98,6 @@
     private string? _rootName;
     private bool? _cleanCertificateStore;
     private int? _bufferTimeMs;
-    private int? _retryTimeSeconds;
 
     private string _originalName = string.Empty;
     private string _originalPath = string.Empty;
@@ -115,7 +108,6 @@
     private string? _originalRootName;
     private bool? _originalCleanCertificateStore;
     private int? _originalBufferTimeMs;
-    private int? _originalRetryTimeSeconds;
 
     public bool IsValid => !string.IsNullOrWhiteSpace(_name) && !string.IsNullOrWhiteSpace(_path);
 
@@ -127,8 +119,7 @@
                            _namespaceUri != _originalNamespaceUri ||
                            _rootName != _originalRootName ||
                            _cleanCertificateStore != _originalCleanCertificateStore ||
-                           _bufferTimeMs != _originalBufferTimeMs ||
-                           _retryTimeSeconds != _originalRetryTimeSeconds;
+                           _bufferTimeMs != _originalBufferTimeMs;
 
     public string PreferredDialogSize => "Medium";
 
@@ -148,7 +139,6 @@
             _rootName = ServerSubject.RootName;
             _cleanCertificateStore = ServerSubject.CleanCertificateStore;
             _bufferTimeMs = ServerSubject.BufferTimeMs;
-            _retryTimeSeconds = ServerSubject.RetryTimeSeconds;
 
             _originalName = _name;
             _originalPath = _path;
@@ -159,7 +149,6 @@
             _originalRootName = _rootName;
             _originalCleanCertificateStore = _cleanCertificateStore;
             _originalBufferTimeMs = _bufferTimeMs;
-            _originalRetryTimeSeconds = _retryTimeSeconds;
         }
     }
 
@@ -188,7 +177,6 @@
             ServerSubject.RootName = _rootName;
             ServerSubject.CleanCertificateStore = _cleanCertificateStore;
             ServerSubject.BufferTimeMs = _bufferTimeMs;
-            ServerSubject.RetryTimeSeconds = _retryTimeSeconds;
 
             _originalName = _name;
             _originalPath = _path;
@@ -199,7 +187,6 @@
             _originalRootName = _rootName;
             _originalCleanCertificateStore = _cleanCertificateStore;
             _originalBufferTimeMs = _bufferTimeMs;
-            _originalRetryTimeSeconds = _retryTimeSeconds;
 
             IsDirtyChanged?.Invoke(false);
         }

@@ -1,26 +1,16 @@
 # Dynamic
 
-The `Namotion.Interceptor.Dynamic` package enables creating interceptor subjects from interfaces at runtime without requiring compile-time code generation. This is particularly useful for scenarios where you need to create trackable objects from external interfaces, plugin architectures, or when working with dynamically loaded assemblies.
+The `Namotion.Interceptor.Dynamic` package enables creating interceptor subjects from interfaces at runtime without requiring compile-time code generation. This is useful for:
 
-Unlike the main interceptor approach that uses source generation with `[InterceptorSubject]` classes, the Namotion.Interceptor.Dynamic package uses Castle DynamicProxy to create runtime implementations of interfaces that fully participate in the interceptor ecosystem.
+- Creating trackable objects from external interfaces
+- Plugin architectures with runtime-defined types
+- Extending existing subjects with additional interfaces at runtime
 
-## Setup
+Unlike the main interceptor approach that uses source generation with `[InterceptorSubject]` classes, the Dynamic package uses Castle DynamicProxy to create runtime implementations.
 
-The Dynamic package works with existing interceptor contexts without additional setup:
+## Creating Dynamic Subjects from Interfaces
 
-```csharp
-var context = InterceptorSubjectContext
-    .Create()
-    .WithRegistry()
-    .WithFullPropertyTracking();
-
-// Create dynamic subjects from interfaces
-var subject = DynamicSubjectFactory.CreateDynamicSubject(context, typeof(IMotor), typeof(ISensor));
-```
-
-## Creating dynamic subjects from interfaces
-
-Define your interfaces with the properties you need:
+Define interfaces with the properties you need:
 
 ```csharp
 public interface IMotor
@@ -37,8 +27,8 @@ public interface ISensor
 Create a dynamic subject that implements multiple interfaces:
 
 ```csharp
-// Create a subject that implements both interfaces
-var subject = DynamicSubjectFactory.CreateDynamicSubject(context, typeof(IMotor), typeof(ISensor));
+// Create a subject implementing both interfaces
+var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotor), typeof(ISensor));
 
 // Cast to specific interfaces and use normally
 var motor = (IMotor)subject;
@@ -47,11 +37,59 @@ var sensor = (ISensor)subject;
 motor.Speed = 100;
 sensor.Temperature = 25;
 
-Console.WriteLine($"Speed: {motor.Speed}"); // Output: Speed: 100
+Console.WriteLine($"Speed: {motor.Speed}");           // Output: Speed: 100
 Console.WriteLine($"Temperature: {sensor.Temperature}"); // Output: Temperature: 25
 ```
 
-## Registry integration
+## Adding Context for Tracking and Interceptors
+
+Dynamic subjects work standalone, but to enable tracking, registry, or interceptors, attach a context:
+
+```csharp
+var context = InterceptorSubjectContext
+    .Create()
+    .WithRegistry()
+    .WithFullPropertyTracking();
+
+var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotor), typeof(ISensor));
+subject.Context.AddFallbackContext(context);
+
+// Now the subject participates in tracking and registry
+var motor = (IMotor)subject;
+motor.Speed = 100;  // Tracked, intercepted, etc.
+```
+
+## Extending Classes with Additional Interfaces
+
+Use `CreateSubject<TSubject>()` to create a subject based on an existing class while adding runtime interfaces:
+
+```csharp
+[InterceptorSubject]
+public partial class Motor : IMotor
+{
+    public Motor()
+    {
+        Speed = 100;  // Default value
+    }
+
+    public partial int Speed { get; set; }
+}
+
+// Create Motor with additional ISensor interface
+var motor = DynamicSubjectFactory.CreateSubject<Motor>(typeof(ISensor));
+var sensor = (ISensor)motor;
+
+// Class properties work normally
+Console.WriteLine(motor.Speed);  // Output: 100 (from class)
+
+// Interface properties use dynamic storage
+sensor.Temperature = 25;
+Console.WriteLine(sensor.Temperature);  // Output: 25 (from dynamic store)
+```
+
+This is useful when you have a compile-time subject but need to add interfaces discovered at runtime.
+
+## Registry Integration
 
 Dynamic subjects automatically register their properties with the registry system:
 
@@ -60,7 +98,8 @@ var context = InterceptorSubjectContext
     .Create()
     .WithRegistry();
 
-var subject = DynamicSubjectFactory.CreateDynamicSubject(context, typeof(IMotor), typeof(ISensor));
+var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotor), typeof(ISensor));
+subject.Context.AddFallbackContext(context);
 
 // Access registry information
 var registeredSubject = subject.TryGetRegisteredSubject()!;
@@ -71,29 +110,26 @@ Assert.Contains(properties, p => p.Name == "Speed");
 Assert.Contains(properties, p => p.Name == "Temperature");
 ```
 
-This enables the same registry features as compile-time subjects, including property metadata, attributes, and dynamic property addition.
+## Full Interceptor Support
 
-## Full interceptor support
-
-Dynamic subjects participate fully in the interceptor pipeline, supporting all interceptor types:
+Dynamic subjects participate fully in the interceptor pipeline:
 
 ```csharp
-var logs = new List<string>();
-
 var context = InterceptorSubjectContext
     .Create()
-    .WithService(() => new TestInterceptor("logger", logs), _ => false);
+    .WithService(() => new LoggingInterceptor());
 
-var subject = DynamicSubjectFactory.CreateDynamicSubject(context, typeof(IMotor));
+var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotor));
+subject.Context.AddFallbackContext(context);
+
 var motor = (IMotor)subject;
-
-motor.Speed = 100; // Triggers write interceptors
-var speed = motor.Speed; // Triggers read interceptors
+motor.Speed = 100;  // Triggers write interceptors
+var speed = motor.Speed;  // Triggers read interceptors
 ```
 
-## Property initialization and defaults
+## Property Initialization
 
-Dynamic subjects automatically handle property initialization:
+Dynamic subjects handle property initialization automatically:
 
 - **Value types** get their default values (0, false, etc.)
 - **Reference types** get null as initial values
@@ -107,21 +143,20 @@ public interface IConfiguration
     bool IsEnabled { get; set; }
 }
 
-var config = (IConfiguration)DynamicSubjectFactory.CreateDynamicSubject(null, typeof(IConfiguration));
+var config = (IConfiguration)DynamicSubjectFactory.CreateDynamicSubject(typeof(IConfiguration));
 
-// Default values are automatically provided
-Console.WriteLine(config.Name);      // Output: null
-Console.WriteLine(config.Port);      // Output: 0  
-Console.WriteLine(config.IsEnabled); // Output: false
+Console.WriteLine(config.Name);      // Output: (null)
+Console.WriteLine(config.Port);      // Output: 0
+Console.WriteLine(config.IsEnabled); // Output: False
 ```
 
-## Performance considerations
+## Performance Considerations
 
 Dynamic subjects use Castle DynamicProxy for runtime implementation:
 
 - **Property access** has additional overhead compared to compile-time subjects
 - **Property metadata** is cached and reused across instances
 - **Interface discovery** happens once during subject creation
-- **Memory usage** is higher due to proxy generation and property value boxing
+- **Memory usage** is higher due to proxy generation and property value storage
 
 For performance-critical scenarios, prefer compile-time subjects with `[InterceptorSubject]` when possible.
