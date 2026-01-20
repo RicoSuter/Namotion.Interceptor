@@ -48,6 +48,12 @@ public class WebSocketServerConfiguration
     public int MaxConnections { get; set; } = 1000;
 
     /// <summary>
+    /// Timeout for receiving Hello message from client. Default: 10 seconds.
+    /// Clients that don't send Hello within this time will be disconnected.
+    /// </summary>
+    public TimeSpan HelloTimeout { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
     /// Path provider for property filtering/mapping.
     /// </summary>
     public PathProviderBase? PathProvider { get; set; }

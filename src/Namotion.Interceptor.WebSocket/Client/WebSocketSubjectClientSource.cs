@@ -149,7 +149,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                     messageStream.Write(buffer, 0, result.Count);
                 } while (!result.EndOfMessage);
 
-                var messageBytes = messageStream.ToArray();
+                var messageBytes = new ReadOnlySpan<byte>(messageStream.GetBuffer(), 0, (int)messageStream.Length);
                 var (messageType, _, payloadBytes) = _serializer.DeserializeMessageEnvelope(messageBytes);
 
                 if (messageType != MessageType.Welcome)
@@ -282,13 +282,13 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
         try
         {
-            using var messageStream = new MemoryStream();
-
             while (!cancellationToken.IsCancellationRequested && _webSocket?.State == WebSocketState.Open)
             {
                 try
                 {
-                    messageStream.SetLength(0);
+                    // Create a new MemoryStream per message to avoid unbounded buffer growth
+                    // (MemoryStream never shrinks its internal buffer, so reusing causes memory leaks)
+                    using var messageStream = new MemoryStream();
 
                     // Create timeout CTS outside the loop so CancelAfter isn't reset per fragment
                     using var messageTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -314,7 +314,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                         messageStream.Write(buffer, 0, result.Count);
                     } while (!result.EndOfMessage);
 
-                    var messageBytes = messageStream.ToArray();
+                    var messageBytes = new ReadOnlySpan<byte>(messageStream.GetBuffer(), 0, (int)messageStream.Length);
                     var (messageType, _, payloadBytes) = _serializer.DeserializeMessageEnvelope(messageBytes);
 
                     switch (messageType)
@@ -496,8 +496,9 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                     // Close timed out, abort
                     _webSocket.Abort();
                 }
-                catch
+                catch (Exception ex)
                 {
+                    _logger.LogDebug(ex, "Error during WebSocket close in disposal");
                 }
             }
 
@@ -507,8 +508,28 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         Dispose();
     }
 
-    private sealed class ConnectionLifetime(Func<Task> onDispose) : IDisposable
+    private sealed class ConnectionLifetime(Func<Task> onDispose) : IDisposable, IAsyncDisposable
     {
-        public void Dispose() => onDispose().GetAwaiter().GetResult();
+        public void Dispose()
+        {
+            // Use Task.Run to avoid deadlocks when called from synchronization contexts
+            // that would block on the async close operation
+            Task.Run(async () =>
+            {
+                try
+                {
+                    await onDispose();
+                }
+                catch
+                {
+                    // Best effort - disposal should not throw
+                }
+            }).Wait(TimeSpan.FromSeconds(5));
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            await onDispose();
+        }
     }
 }

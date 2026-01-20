@@ -39,6 +39,8 @@ public class WebSocketSubjectHandler
         _processors = configuration.Processors ?? [];
     }
 
+    private const int SupportedProtocolVersion = 1;
+
     public async Task HandleClientAsync(System.Net.WebSockets.WebSocket webSocket, CancellationToken stoppingToken)
     {
         // Atomically check and increment connection count
@@ -51,7 +53,11 @@ public class WebSocketSubjectHandler
             return;
         }
 
-        var connection = new WebSocketClientConnection(webSocket, _logger, _configuration.MaxMessageSize);
+        var connection = new WebSocketClientConnection(
+            webSocket,
+            _logger,
+            _configuration.MaxMessageSize,
+            _configuration.HelloTimeout);
 
         try
         {
@@ -64,7 +70,22 @@ public class WebSocketSubjectHandler
                 return;
             }
 
-            _logger.LogInformation("Client {ConnectionId} connected, sending Welcome...", connection.ConnectionId);
+            // Validate protocol version
+            if (hello.Version != SupportedProtocolVersion)
+            {
+                _logger.LogWarning("Client {ConnectionId}: Protocol version mismatch (client: {ClientVersion}, server: {ServerVersion})",
+                    connection.ConnectionId, hello.Version, SupportedProtocolVersion);
+                await connection.SendErrorAsync(new Protocol.ErrorPayload
+                {
+                    Code = Protocol.ErrorCode.VersionMismatch,
+                    Message = $"Unsupported protocol version {hello.Version}. Server supports version {SupportedProtocolVersion}."
+                }, stoppingToken);
+                await connection.CloseAsync("Protocol version mismatch");
+                return;
+            }
+
+            _logger.LogInformation("Client {ConnectionId} connected (protocol v{Version}), sending Welcome...",
+                connection.ConnectionId, hello.Version);
 
             // Send Welcome with initial state
             var initialState = SubjectUpdate.CreateCompleteUpdate(_subject, _processors);
@@ -119,10 +140,11 @@ public class WebSocketSubjectHandler
             {
                 _logger.LogError(ex, "Error applying update from client {ConnectionId}", connection.ConnectionId);
 
+                // Don't expose internal exception details to clients
                 await connection.SendErrorAsync(new Protocol.ErrorPayload
                 {
                     Code = Protocol.ErrorCode.InternalError,
-                    Message = ex.Message
+                    Message = "An internal error occurred while processing the update."
                 }, stoppingToken);
             }
         }
@@ -140,8 +162,7 @@ public class WebSocketSubjectHandler
         {
             // Single batch
             var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, changes.Span, _processors);
-            var tasks = _connections.Values.Select(c => c.SendUpdateAsync(update, cancellationToken));
-            await Task.WhenAll(tasks);
+            await BroadcastUpdateAsync(update, cancellationToken);
         }
         else
         {
@@ -151,8 +172,39 @@ public class WebSocketSubjectHandler
                 var currentBatchSize = Math.Min(batchSize, changes.Length - i);
                 var batch = changes.Slice(i, currentBatchSize);
                 var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, batch.Span, _processors);
-                var tasks = _connections.Values.Select(c => c.SendUpdateAsync(update, cancellationToken));
-                await Task.WhenAll(tasks);
+                await BroadcastUpdateAsync(update, cancellationToken);
+            }
+        }
+    }
+
+    private async Task BroadcastUpdateAsync(SubjectUpdate update, CancellationToken cancellationToken)
+    {
+        var tasks = _connections.Values.Select(c => c.SendUpdateAsync(update, cancellationToken));
+        await Task.WhenAll(tasks);
+
+        // Remove zombie connections (repeated send failures)
+        foreach (var (connectionId, connection) in _connections)
+        {
+            if (connection.HasRepeatedSendFailures)
+            {
+                if (_connections.TryRemove(connectionId, out var removed))
+                {
+                    _logger.LogWarning("Removing zombie connection {ConnectionId} due to repeated send failures", connectionId);
+                    Interlocked.Decrement(ref _connectionCount);
+
+                    // Fire and forget disposal with error logging
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await removed.DisposeAsync();
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Error disposing zombie connection {ConnectionId}", connectionId);
+                        }
+                    });
+                }
             }
         }
     }

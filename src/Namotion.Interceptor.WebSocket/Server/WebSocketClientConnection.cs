@@ -22,43 +22,85 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
     private readonly IWebSocketSerializer _serializer = new JsonWebSocketSerializer();
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly long _maxMessageSize;
+    private readonly TimeSpan _helloTimeout;
 
     private int _disposed;
+    private int _consecutiveSendFailures;
 
     public string ConnectionId { get; } = Guid.NewGuid().ToString("N")[..8];
     public bool IsConnected => _webSocket.State == WebSocketState.Open;
+    public bool HasRepeatedSendFailures => Volatile.Read(ref _consecutiveSendFailures) >= 3;
 
-    public WebSocketClientConnection(System.Net.WebSockets.WebSocket webSocket, ILogger logger, long maxMessageSize = 10 * 1024 * 1024)
+    public WebSocketClientConnection(
+        System.Net.WebSockets.WebSocket webSocket,
+        ILogger logger,
+        long maxMessageSize = 10 * 1024 * 1024,
+        TimeSpan? helloTimeout = null)
     {
         _webSocket = webSocket;
         _logger = logger;
         _maxMessageSize = maxMessageSize;
+        _helloTimeout = helloTimeout ?? TimeSpan.FromSeconds(10);
     }
 
     public async Task<HelloPayload?> ReceiveHelloAsync(CancellationToken cancellationToken)
     {
-        var buffer = new byte[4096];
-        var result = await _webSocket.ReceiveAsync(buffer, cancellationToken);
+        // Apply timeout for Hello message to prevent clients from holding connection slots
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(_helloTimeout);
 
-        if (result.MessageType == WebSocketMessageType.Close)
-        {
-            return null;
-        }
-
+        var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
         try
         {
-            var (messageType, _, payloadBytes) = _serializer.DeserializeMessageEnvelope(buffer.AsSpan(0, result.Count));
+            using var messageStream = new MemoryStream();
+
+            // Handle fragmented Hello messages (same as ReceiveUpdateAsync)
+            WebSocketReceiveResult result;
+            do
+            {
+                result = await _webSocket.ReceiveAsync(buffer, timeoutCts.Token);
+
+                if (result.MessageType == WebSocketMessageType.Close)
+                {
+                    return null;
+                }
+
+                if (messageStream.Length + result.Count > _maxMessageSize)
+                {
+                    _logger.LogWarning("Client {ConnectionId}: Hello message exceeds maximum size", ConnectionId);
+                    return null;
+                }
+
+                messageStream.Write(buffer, 0, result.Count);
+            }
+            while (!result.EndOfMessage);
+
+            // Use GetBuffer() to avoid allocation from ToArray()
+            var messageBytes = new ReadOnlySpan<byte>(messageStream.GetBuffer(), 0, (int)messageStream.Length);
+            var (messageType, _, payloadBytes) = _serializer.DeserializeMessageEnvelope(messageBytes);
+
             if (messageType == MessageType.Hello)
             {
                 return _serializer.Deserialize<HelloPayload>(payloadBytes.Span);
             }
+
+            _logger.LogWarning("Client {ConnectionId}: Expected Hello, received {MessageType}", ConnectionId, messageType);
+            return null;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning("Client {ConnectionId}: Hello timeout exceeded ({Timeout})", ConnectionId, _helloTimeout);
+            return null;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to parse Hello message from client {ConnectionId}", ConnectionId);
+            return null;
         }
-
-        return null;
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
     }
 
     public async Task SendWelcomeAsync(SubjectUpdate initialState, CancellationToken cancellationToken)
@@ -93,10 +135,14 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
 
             var bytes = _serializer.SerializeMessage(MessageType.Update, null, update);
             await _webSocket.SendAsync(bytes, WebSocketMessageType.Text, true, cancellationToken);
+
+            Interlocked.Exchange(ref _consecutiveSendFailures, 0);
         }
         catch (WebSocketException ex)
         {
-            _logger.LogWarning(ex, "Failed to send update to client {ConnectionId}", ConnectionId);
+            Interlocked.Increment(ref _consecutiveSendFailures);
+            _logger.LogWarning(ex, "Failed to send update to client {ConnectionId} (failure count: {FailureCount})",
+                ConnectionId, Volatile.Read(ref _consecutiveSendFailures));
         }
         finally
         {
@@ -155,8 +201,9 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
             }
             while (!result.EndOfMessage);
 
-            var messageBytes = messageStream.ToArray();
-            _logger.LogDebug("Client {ConnectionId}: Received {ByteCount} bytes", ConnectionId, messageBytes.Length);
+            var messageLength = (int)messageStream.Length;
+            var messageBytes = new ReadOnlySpan<byte>(messageStream.GetBuffer(), 0, messageLength);
+            _logger.LogDebug("Client {ConnectionId}: Received {ByteCount} bytes", ConnectionId, messageLength);
 
             var (messageType, _, payloadBytes) = _serializer.DeserializeMessageEnvelope(messageBytes);
 
