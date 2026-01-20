@@ -10,7 +10,6 @@ The `Namotion.Interceptor.WebSocket` package provides bidirectional WebSocket co
 - Automatic reconnection with exponential backoff
 - Write retry queue for resilience during disconnection
 - Multiple client support with broadcast updates
-- TypeScript client compatibility (native JSON parsing)
 
 ## Choosing a Server Mode
 
@@ -270,94 +269,7 @@ Client                                 Server
 
 ### SubjectUpdate Wire Format
 
-Uses the standard `SubjectUpdate` JSON serialization:
-
-```json
-{
-  "id": "device-123",
-  "properties": {
-    "Temperature": {
-      "kind": "Value",
-      "value": 23.5,
-      "timestamp": "2024-01-08T10:30:00Z"
-    },
-    "Motor": {
-      "kind": "Item",
-      "item": {
-        "properties": {
-          "Speed": {
-            "kind": "Value",
-            "value": 1500
-          }
-        }
-      }
-    }
-  }
-}
-```
-
 See [Subject Updates](subject-updates.md) for details on the update format.
-
-## TypeScript Client
-
-TypeScript clients can use native WebSocket and JSON APIs:
-
-```typescript
-const ws = new WebSocket('ws://localhost:8080/ws');
-
-// Message types
-enum MessageType { Hello = 0, Welcome = 1, Update = 2, Error = 3 }
-
-// Message envelope
-type WsMessage = [MessageType, number | null, unknown];
-
-ws.onopen = () => {
-  // Send Hello
-  const hello: WsMessage = [MessageType.Hello, null, { version: 1, format: 'json' }];
-  ws.send(JSON.stringify(hello));
-};
-
-ws.onmessage = (event) => {
-  const [type, correlationId, payload] = JSON.parse(event.data) as WsMessage;
-
-  switch (type) {
-    case MessageType.Welcome:
-      const { state } = payload as { version: number; format: string; state: SubjectUpdate };
-      applyInitialState(state);
-      break;
-
-    case MessageType.Update:
-      applyUpdate(payload as SubjectUpdate);
-      break;
-
-    case MessageType.Error:
-      const error = payload as { code: number; message: string };
-      console.error(`Error ${error.code}: ${error.message}`);
-      break;
-  }
-};
-
-// Send updates to server
-function sendUpdate(update: SubjectUpdate) {
-  const message: WsMessage = [MessageType.Update, null, update];
-  ws.send(JSON.stringify(message));
-}
-
-// SubjectUpdate types
-interface SubjectUpdate {
-  id?: string;
-  reference?: string;
-  properties: Record<string, SubjectPropertyUpdate>;
-}
-
-interface SubjectPropertyUpdate {
-  kind: 'Value' | 'Item' | 'Collection';
-  value?: unknown;
-  timestamp?: string;
-  item?: SubjectUpdate;
-  collection?: SubjectPropertyCollectionUpdate[];
-}
-```
 
 ## Resilience
 
