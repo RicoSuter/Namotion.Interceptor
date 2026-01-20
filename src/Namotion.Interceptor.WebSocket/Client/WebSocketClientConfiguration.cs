@@ -31,6 +31,11 @@ public class WebSocketClientConfiguration
     public TimeSpan ConnectTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
+    /// Receive timeout. If no data is received within this time, the connection is considered lost. Default: 60 seconds
+    /// </summary>
+    public TimeSpan ReceiveTimeout { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
     /// Buffer time for batching outbound updates. Default: 8ms
     /// </summary>
     public TimeSpan BufferTime { get; set; } = TimeSpan.FromMilliseconds(8);
@@ -44,6 +49,11 @@ public class WebSocketClientConfiguration
     /// Write retry queue size. Default: 1000
     /// </summary>
     public int WriteRetryQueueSize { get; set; } = 1000;
+
+    /// <summary>
+    /// Maximum message size in bytes. Messages larger than this will be rejected. Default: 10MB
+    /// </summary>
+    public long MaxMessageSize { get; set; } = 10 * 1024 * 1024;
 
     /// <summary>
     /// Maximum number of property changes per WebSocket message. Default: 1000.

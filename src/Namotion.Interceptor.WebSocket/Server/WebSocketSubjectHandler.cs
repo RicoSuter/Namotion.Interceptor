@@ -22,9 +22,10 @@ public class WebSocketSubjectHandler
     private readonly ILogger _logger;
     private readonly ISubjectUpdateProcessor[] _processors;
     private readonly ConcurrentDictionary<string, WebSocketClientConnection> _connections = new();
+    private int _connectionCount;
 
     public IInterceptorSubjectContext Context { get; }
-    public int ConnectionCount => _connections.Count;
+    public int ConnectionCount => Volatile.Read(ref _connectionCount);
 
     public WebSocketSubjectHandler(
         IInterceptorSubject subject,
@@ -40,7 +41,17 @@ public class WebSocketSubjectHandler
 
     public async Task HandleClientAsync(System.Net.WebSockets.WebSocket webSocket, CancellationToken stoppingToken)
     {
-        var connection = new WebSocketClientConnection(webSocket, _logger);
+        // Atomically check and increment connection count
+        var newCount = Interlocked.Increment(ref _connectionCount);
+        if (newCount > _configuration.MaxConnections)
+        {
+            Interlocked.Decrement(ref _connectionCount);
+            _logger.LogWarning("Maximum connections ({MaxConnections}) reached, rejecting client", _configuration.MaxConnections);
+            await webSocket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.PolicyViolation, "Server at capacity", CancellationToken.None);
+            return;
+        }
+
+        var connection = new WebSocketClientConnection(webSocket, _logger, _configuration.MaxMessageSize);
 
         try
         {
@@ -76,6 +87,7 @@ public class WebSocketSubjectHandler
         finally
         {
             _connections.TryRemove(connection.ConnectionId, out _);
+            Interlocked.Decrement(ref _connectionCount);
             await connection.DisposeAsync();
             _logger.LogInformation("Client {ConnectionId} disconnected", connection.ConnectionId);
         }
@@ -154,10 +166,30 @@ public class WebSocketSubjectHandler
 
     public async ValueTask CloseAllConnectionsAsync()
     {
-        foreach (var connection in _connections.Values)
+        // Drain all connections atomically
+        var connectionsToClose = new System.Collections.Generic.List<WebSocketClientConnection>();
+        while (!_connections.IsEmpty)
         {
-            await connection.DisposeAsync();
+            foreach (var key in _connections.Keys.ToList())
+            {
+                if (_connections.TryRemove(key, out var connection))
+                {
+                    connectionsToClose.Add(connection);
+                }
+            }
         }
-        _connections.Clear();
+
+        // Close all in parallel
+        await Task.WhenAll(connectionsToClose.Select(async connection =>
+        {
+            try
+            {
+                await connection.DisposeAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error closing connection {ConnectionId}", connection.ConnectionId);
+            }
+        }));
     }
 }

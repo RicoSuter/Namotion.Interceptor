@@ -47,7 +47,13 @@ public class JsonWebSocketSerializer : IWebSocketSerializer
             throw new InvalidOperationException("Message envelope must have at least 3 elements");
         }
 
-        var messageType = (MessageType)array[0]!.GetValue<int>();
+        var messageTypeNode = array[0];
+        if (messageTypeNode is null)
+        {
+            throw new InvalidOperationException("Message envelope element [0] (messageType) is null");
+        }
+
+        var messageType = (MessageType)messageTypeNode.GetValue<int>();
         var correlationId = array[1]?.GetValue<int>();
 
         // Re-serialize payload element to bytes for later deserialization

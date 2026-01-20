@@ -38,6 +38,16 @@ public class WebSocketServerConfiguration
     public int WriteBatchSize { get; set; } = 1000;
 
     /// <summary>
+    /// Maximum message size in bytes. Messages larger than this will be rejected. Default: 10MB
+    /// </summary>
+    public long MaxMessageSize { get; set; } = 10 * 1024 * 1024;
+
+    /// <summary>
+    /// Maximum number of concurrent connections. Default: 1000
+    /// </summary>
+    public int MaxConnections { get; set; } = 1000;
+
+    /// <summary>
     /// Path provider for property filtering/mapping.
     /// </summary>
     public PathProviderBase? PathProvider { get; set; }
