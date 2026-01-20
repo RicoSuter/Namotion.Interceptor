@@ -28,8 +28,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
 
     // Fields for deferred async work (handled by health check loop)
-    private Session? _pendingOldSession; // Old session needing disposal after reconnection
-    private bool _needsInitialization;   // Flag for health check to complete initialization
+    private volatile Session? _pendingOldSession; // Old session needing disposal after reconnection
+    private volatile bool _needsInitialization;   // Flag for health check to complete initialization
 
     /// <summary>
     /// Gets the current session. WARNING: Can change at any time due to reconnection. Never cache - read immediately before use.
