@@ -231,6 +231,15 @@ public class OpcUaClientConfiguration
     public TimeSpan ReconnectInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
+    /// Gets or sets whether to use security (signing and encryption) when connecting to the OPC UA server.
+    /// When true, the client will prefer secure endpoints with message signing and encryption.
+    /// When false, the client will prefer unsecured endpoints (faster, but no protection).
+    /// Default is false for development convenience. Set to true for production deployments
+    /// that require secure communication.
+    /// </summary>
+    public bool UseSecurity { get; init; } = false;
+
+    /// <summary>
     /// Gets or sets the telemetry context for OPC UA operations.
     /// Defaults to NullTelemetryContext for minimal overhead.
     /// For DI integration, use DefaultTelemetry.Create(builder => builder.Services.AddSingleton(loggerFactory)).
