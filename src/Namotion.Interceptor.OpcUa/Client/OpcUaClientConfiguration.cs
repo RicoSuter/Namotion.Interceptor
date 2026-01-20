@@ -1,4 +1,4 @@
-﻿using System.Threading;
+﻿using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -326,6 +326,28 @@ public class OpcUaClientConfiguration
 
         application.ApplicationConfiguration = config;
         return application;
+    }
+
+    /// <summary>
+    /// Creates a MonitoredItem for the given property and node ID using this configuration's defaults.
+    /// Attribute-level overrides (SamplingInterval, QueueSize, DiscardOldest) are applied if present on the property.
+    /// </summary>
+    /// <param name="nodeId">The OPC UA node ID to monitor.</param>
+    /// <param name="property">The property to associate with the monitored item.</param>
+    /// <returns>A configured MonitoredItem ready to be added to a subscription.</returns>
+    internal MonitoredItem CreateMonitoredItem(NodeId nodeId, RegisteredSubjectProperty property)
+    {
+        var opcUaNodeAttribute = property.TryGetOpcUaNodeAttribute();
+        return new MonitoredItem(TelemetryContext)
+        {
+            StartNodeId = nodeId,
+            AttributeId = Opc.Ua.Attributes.Value,
+            MonitoringMode = MonitoringMode.Reporting,
+            SamplingInterval = opcUaNodeAttribute?.SamplingInterval ?? DefaultSamplingInterval,
+            QueueSize = opcUaNodeAttribute?.QueueSize ?? DefaultQueueSize,
+            DiscardOldest = opcUaNodeAttribute?.DiscardOldest ?? DefaultDiscardOldest,
+            Handle = property
+        };
     }
 
     /// <summary>
