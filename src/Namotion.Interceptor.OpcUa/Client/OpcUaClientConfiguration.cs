@@ -1,4 +1,4 @@
-﻿using System.Threading;
+﻿using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -46,11 +46,19 @@ public class OpcUaClientConfiguration
     public int WriteRetryQueueSize { get; init; } = 1000;
 
     /// <summary>
-    /// Gets the interval for subscription health checks and auto-healing attempts. Default is 10 seconds.
+    /// Gets or sets the interval for subscription health checks and auto-healing attempts. Default is 5 seconds.
     /// Failed monitored items (excluding design-time errors like BadNodeIdUnknown) are retried at this interval.
+    /// This also determines how quickly the health check loop picks up work deferred from SDK reconnection.
     /// </summary>
-    public TimeSpan SubscriptionHealthCheckInterval { get; init; } = TimeSpan.FromSeconds(10);
-    
+    public TimeSpan SubscriptionHealthCheckInterval { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Gets or sets the number of health check iterations to wait before forcing a stall reset when SDK reconnection
+    /// appears stuck. Total stall detection time = StallDetectionIterations × SubscriptionHealthCheckInterval.
+    /// Default is 10 iterations. Use lower values (e.g., 3) for faster recovery in tests.
+    /// </summary>
+    public int StallDetectionIterations { get; set; } = 10;
+
     /// <summary>
     /// Gets or sets an async predicate that is called when an unknown (not statically typed) OPC UA node or variable is found during browsing.
     /// If the function returns true, the node is added as a dynamic property to the given subject.
@@ -133,6 +141,23 @@ public class OpcUaClientConfiguration
     public uint SubscriptionMaximumNotificationsPerPublish { get; init; } = 0;
 
     /// <summary>
+    /// Gets or sets whether to process subscription messages sequentially (in order).
+    /// When true, callbacks are invoked one at a time in sequence order, reducing throughput but guaranteeing order.
+    /// When false (default), messages may be processed in parallel for higher throughput.
+    /// Only enable this if your application requires strict ordering of property updates.
+    /// Default is false for optimal performance.
+    /// </summary>
+    public bool SubscriptionSequentialPublishing { get; init; } = false;
+
+    /// <summary>
+    /// Gets or sets the minimum number of publish requests the client keeps outstanding at all times.
+    /// Higher values improve reliability during traffic spikes and brief network issues by ensuring
+    /// multiple requests are always in flight. The OPC Foundation's reference client uses 3.
+    /// Default is 3 for optimal reliability.
+    /// </summary>
+    public int MinPublishRequestCount { get; init; } = 3;
+
+    /// <summary>
     /// Gets or sets the maximum references per node to read per browse request. 0 uses server default.
     /// </summary>
     public uint MaximumReferencesPerNode { get; init; } = 0;
@@ -143,6 +168,12 @@ public class OpcUaClientConfiguration
     /// Default is true.
     /// </summary>
     public bool EnablePollingFallback { get; init; } = true;
+
+    /// <summary>
+    /// Gets or sets the base path for certificate stores.
+    /// Default is "pki". Change this to isolate certificate stores for parallel test execution.
+    /// </summary>
+    public string CertificateStoreBasePath { get; init; } = "pki";
 
     /// <summary>
     /// Gets or sets the polling interval for items that don't support subscriptions.
@@ -189,6 +220,22 @@ public class OpcUaClientConfiguration
     public TimeSpan SessionTimeout { get; init; } = TimeSpan.FromSeconds(60);
 
     /// <summary>
+    /// Gets or sets the keep-alive interval for the OPC UA session.
+    /// This determines how often the client sends keep-alive messages to detect disconnection.
+    /// Shorter intervals allow faster disconnection detection but increase network traffic.
+    /// Default is 5 seconds.
+    /// </summary>
+    public TimeSpan KeepAliveInterval { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Gets or sets the operation timeout for OPC UA requests.
+    /// This determines how long to wait for a response before timing out.
+    /// Shorter timeouts allow faster disconnection detection but may cause false positives on slow networks.
+    /// Default is 60 seconds.
+    /// </summary>
+    public TimeSpan OperationTimeout { get; init; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
     /// Gets or sets the maximum time the reconnect handler will attempt to reconnect before giving up.
     /// Default is 60 seconds.
     /// </summary>
@@ -198,7 +245,16 @@ public class OpcUaClientConfiguration
     /// Gets or sets the interval between reconnection attempts when connection is lost.
     /// Default is 5 seconds.
     /// </summary>
-    public TimeSpan ReconnectInterval { get; init; } = TimeSpan.FromSeconds(5);
+    public TimeSpan ReconnectInterval { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// Gets or sets whether to use security (signing and encryption) when connecting to the OPC UA server.
+    /// When true, the client will prefer secure endpoints with message signing and encryption.
+    /// When false, the client will prefer unsecured endpoints (faster, but no protection).
+    /// Default is false for development convenience. Set to true for production deployments
+    /// that require secure communication.
+    /// </summary>
+    public bool UseSecurity { get; init; } = false;
 
     /// <summary>
     /// Gets or sets the telemetry context for OPC UA operations.
@@ -254,25 +310,25 @@ public class OpcUaClientConfiguration
                 ApplicationCertificate = new CertificateIdentifier
                 {
                     StoreType = "Directory",
-                    StorePath = "pki/own",
+                    StorePath = $"{CertificateStoreBasePath}/own",
                     SubjectName = $"CN={ApplicationName}, O=Namotion"
                 },
                 TrustedPeerCertificates = new CertificateTrustList
                 {
                     StoreType = "Directory",
-                    StorePath = "pki/trusted"
+                    StorePath = $"{CertificateStoreBasePath}/trusted"
                 },
                 RejectedCertificateStore = new CertificateTrustList
                 {
                     StoreType = "Directory",
-                    StorePath = "pki/rejected"
+                    StorePath = $"{CertificateStoreBasePath}/rejected"
                 },
                 AutoAcceptUntrustedCertificates = true,
                 AddAppCertToTrustedStore = true,
             },
             TransportQuotas = new TransportQuotas
             {
-                OperationTimeout = 60000,
+                OperationTimeout = (int)OperationTimeout.TotalMilliseconds,
                 MaxStringLength = 4_194_304,
                 MaxByteStringLength = 16_777_216,
                 MaxMessageSize = 16_777_216,
@@ -299,6 +355,28 @@ public class OpcUaClientConfiguration
     }
 
     /// <summary>
+    /// Creates a MonitoredItem for the given property and node ID using this configuration's defaults.
+    /// Attribute-level overrides (SamplingInterval, QueueSize, DiscardOldest) are applied if present on the property.
+    /// </summary>
+    /// <param name="nodeId">The OPC UA node ID to monitor.</param>
+    /// <param name="property">The property to associate with the monitored item.</param>
+    /// <returns>A configured MonitoredItem ready to be added to a subscription.</returns>
+    internal MonitoredItem CreateMonitoredItem(NodeId nodeId, RegisteredSubjectProperty property)
+    {
+        var opcUaNodeAttribute = property.TryGetOpcUaNodeAttribute();
+        return new MonitoredItem(TelemetryContext)
+        {
+            StartNodeId = nodeId,
+            AttributeId = Opc.Ua.Attributes.Value,
+            MonitoringMode = MonitoringMode.Reporting,
+            SamplingInterval = opcUaNodeAttribute?.SamplingInterval ?? DefaultSamplingInterval,
+            QueueSize = opcUaNodeAttribute?.QueueSize ?? DefaultQueueSize,
+            DiscardOldest = opcUaNodeAttribute?.DiscardOldest ?? DefaultDiscardOldest,
+            Handle = property
+        };
+    }
+
+    /// <summary>
     /// Validates configuration values and throws ArgumentException if invalid.
     /// Call this method during initialization to fail fast with clear error messages.
     /// </summary>
@@ -317,10 +395,10 @@ public class OpcUaClientConfiguration
                 nameof(WriteRetryQueueSize));
         }
 
-        if (SubscriptionHealthCheckInterval < TimeSpan.FromSeconds(5))
+        if (SubscriptionHealthCheckInterval < TimeSpan.FromSeconds(1))
         {
             throw new ArgumentException(
-                $"SubscriptionHealthCheckInterval must be at least {TimeSpan.FromSeconds(5).TotalSeconds}s (got: {SubscriptionHealthCheckInterval.TotalSeconds}s)",
+                $"SubscriptionHealthCheckInterval must be at least {TimeSpan.FromSeconds(1).TotalSeconds}s (got: {SubscriptionHealthCheckInterval.TotalSeconds}s)",
                 nameof(SubscriptionHealthCheckInterval));
         }
 
@@ -381,6 +459,20 @@ public class OpcUaClientConfiguration
             throw new ArgumentException(
                 $"ReconnectInterval must be at least 100ms, got: {ReconnectInterval}",
                 nameof(ReconnectInterval));
+        }
+
+        if (StallDetectionIterations < 1)
+        {
+            throw new ArgumentException(
+                $"StallDetectionIterations must be at least 1, got: {StallDetectionIterations}",
+                nameof(StallDetectionIterations));
+        }
+
+        if (MinPublishRequestCount < 1)
+        {
+            throw new ArgumentException(
+                $"MinPublishRequestCount must be at least 1, got: {MinPublishRequestCount}",
+                nameof(MinPublishRequestCount));
         }
     }
 }

@@ -22,7 +22,7 @@ internal static class SubjectUpdateFactory
     /// </summary>
     public static SubjectUpdate CreateCompleteUpdate(
         IInterceptorSubject subject,
-        ReadOnlySpan<ISubjectUpdateProcessor> processors)
+        ISubjectUpdateProcessor[] processors)
     {
         var builder = BuilderPool.Rent();
         try
@@ -44,7 +44,7 @@ internal static class SubjectUpdateFactory
     public static SubjectUpdate CreatePartialUpdateFromChanges(
         IInterceptorSubject rootSubject,
         ReadOnlySpan<SubjectPropertyChange> propertyChanges,
-        ReadOnlySpan<ISubjectUpdateProcessor> processors)
+        ISubjectUpdateProcessor[] processors)
     {
         var builder = BuilderPool.Rent();
         try
@@ -118,8 +118,15 @@ internal static class SubjectUpdateFactory
         }
         else
         {
-            var propertyUpdate = CreatePropertyUpdateFromChange(registeredProperty, change, builder);
-            properties[registeredProperty.Name] = propertyUpdate;
+            // Try to get existing update (may have been created by earlier attribute changes)
+            if (!properties.TryGetValue(registeredProperty.Name, out var propertyUpdate))
+            {
+                propertyUpdate = new SubjectPropertyUpdate();
+                properties[registeredProperty.Name] = propertyUpdate;
+            }
+
+            // Update the property value in place (preserves any existing attributes)
+            ApplyPropertyChangeToUpdate(propertyUpdate, registeredProperty, change, builder);
             builder.TrackPropertyUpdate(propertyUpdate, registeredProperty, properties);
         }
 
@@ -137,15 +144,15 @@ internal static class SubjectUpdateFactory
 
         if (property.IsSubjectDictionary)
         {
-            SubjectCollectionUpdateFactory.BuildDictionaryComplete(update, value as IDictionary, builder);
+            SubjectItemsUpdateFactory.BuildDictionaryComplete(update, value as IDictionary, builder);
         }
         else if (property.IsSubjectCollection)
         {
-            SubjectCollectionUpdateFactory.BuildCollectionComplete(update, value as IEnumerable<IInterceptorSubject>, builder);
+            SubjectItemsUpdateFactory.BuildCollectionComplete(update, value as IEnumerable<IInterceptorSubject>, builder);
         }
         else if (property.IsSubjectReference)
         {
-            BuildItemReference(update, value as IInterceptorSubject, builder);
+            BuildObjectReference(update, value as IInterceptorSubject, builder);
         }
         else
         {
@@ -158,49 +165,62 @@ internal static class SubjectUpdateFactory
         return update;
     }
 
-    private static SubjectPropertyUpdate CreatePropertyUpdateFromChange(
+    /// <summary>
+    /// Applies a property change to an existing update in place.
+    /// This preserves any existing attributes on the update.
+    /// </summary>
+    private static void ApplyPropertyChangeToUpdate(
+        SubjectPropertyUpdate update,
         RegisteredSubjectProperty property,
         SubjectPropertyChange change,
         SubjectUpdateBuilder builder)
     {
-        var update = new SubjectPropertyUpdate { Timestamp = change.ChangedTimestamp };
+        update.Timestamp = change.ChangedTimestamp;
 
         if (property.IsSubjectDictionary)
         {
-            SubjectCollectionUpdateFactory.BuildDictionaryDiff(update, change.GetOldValue<IDictionary?>(),
+            SubjectItemsUpdateFactory.BuildDictionaryDiff(update, change.GetOldValue<IDictionary?>(),
                 change.GetNewValue<IDictionary?>(), builder);
         }
         else if (property.IsSubjectCollection)
         {
-            SubjectCollectionUpdateFactory.BuildCollectionDiff(update,
+            SubjectItemsUpdateFactory.BuildCollectionDiff(update,
                 change.GetOldValue<IEnumerable<IInterceptorSubject>?>(),
                 change.GetNewValue<IEnumerable<IInterceptorSubject>?>(), builder);
         }
         else if (property.IsSubjectReference)
         {
-            BuildItemReference(update, change.GetNewValue<IInterceptorSubject?>(), builder);
+            BuildObjectReference(update, change.GetNewValue<IInterceptorSubject?>(), builder);
         }
         else
         {
             update.Kind = SubjectPropertyUpdateKind.Value;
             update.Value = change.GetNewValue<object?>();
         }
-
-        return update;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void BuildItemReference(
+    private static void BuildObjectReference(
         SubjectPropertyUpdate update,
         IInterceptorSubject? item,
         SubjectUpdateBuilder builder)
     {
-        update.Kind = SubjectPropertyUpdateKind.Item;
+        update.Kind = SubjectPropertyUpdateKind.Object;
 
         if (item is not null)
         {
-            update.Id = builder.GetOrCreateId(item);
-            ProcessSubjectComplete(item, builder);
+            var (id, isNew) = builder.GetOrCreateIdWithStatus(item);
+            update.Id = id;
+
+            // Only process the complete subject if it's newly encountered.
+            // If the subject already had an ID, it's part of the existing tree
+            // and we should only add a reference to it, not all its properties.
+            // This prevents circular references from causing the entire tree
+            // to be included in partial updates.
+            if (isNew)
+            {
+                ProcessSubjectComplete(item, builder);
+            }
         }
     }
 
@@ -231,7 +251,7 @@ internal static class SubjectUpdateFactory
 
             if (parentInfo.Index is not null)
             {
-                AddCollectionItemToParent(parentProperties, parentProperty.Name, parentInfo.Index, childId);
+                AddCollectionOrDictionaryItemToParent(parentProperties, parentProperty.Name, parentInfo.Index, childId);
             }
             else
             {
@@ -246,7 +266,7 @@ internal static class SubjectUpdateFactory
     /// Adds a collection item reference to the parent's property update.
     /// Appends to existing collection update or creates a new one.
     /// </summary>
-    private static void AddCollectionItemToParent(
+    private static void AddCollectionOrDictionaryItemToParent(
         Dictionary<string, SubjectPropertyUpdate> parentProperties,
         string propertyName,
         object index,
@@ -254,8 +274,8 @@ internal static class SubjectUpdateFactory
     {
         if (parentProperties.TryGetValue(propertyName, out var existingUpdate))
         {
-            existingUpdate.Collection ??= [];
-            existingUpdate.Collection.Add(new SubjectPropertyCollectionUpdate
+            existingUpdate.Items ??= [];
+            existingUpdate.Items.Add(new SubjectPropertyItemUpdate
             {
                 Index = index,
                 Id = childId
@@ -266,7 +286,7 @@ internal static class SubjectUpdateFactory
             parentProperties[propertyName] = new SubjectPropertyUpdate
             {
                 Kind = SubjectPropertyUpdateKind.Collection,
-                Collection = [new SubjectPropertyCollectionUpdate { Index = index, Id = childId }]
+                Items = [new SubjectPropertyItemUpdate { Index = index, Id = childId }]
             };
         }
     }
@@ -284,7 +304,7 @@ internal static class SubjectUpdateFactory
         {
             parentProperties[propertyName] = new SubjectPropertyUpdate
             {
-                Kind = SubjectPropertyUpdateKind.Item,
+                Kind = SubjectPropertyUpdateKind.Object,
                 Id = childId
             };
         }
@@ -358,20 +378,26 @@ internal static class SubjectUpdateFactory
             currentUpdate = nestedAttributeUpdate;
         }
 
-        // Create the final attribute update using the same logic as properties
+        // Get or create the final attribute update
         var finalAttribute = attributeChain[^1];
         currentUpdate.Attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
         var finalAttributeName = finalAttribute.AttributeMetadata.AttributeName;
-        var attributeUpdate = CreatePropertyUpdateFromChange(attributeProperty, change, builder);
-        currentUpdate.Attributes[finalAttributeName] = attributeUpdate;
 
+        if (!currentUpdate.Attributes.TryGetValue(finalAttributeName, out var attributeUpdate))
+        {
+            attributeUpdate = new SubjectPropertyUpdate();
+            currentUpdate.Attributes[finalAttributeName] = attributeUpdate;
+        }
+
+        // Apply the change in place (preserves any existing nested attributes)
+        ApplyPropertyChangeToUpdate(attributeUpdate, attributeProperty, change, builder);
         builder.TrackPropertyUpdate(attributeUpdate, attributeProperty, currentUpdate.Attributes);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static bool IsPropertyIncluded(
         RegisteredSubjectProperty property,
-        ReadOnlySpan<ISubjectUpdateProcessor> processors)
+        ISubjectUpdateProcessor[] processors)
     {
         for (var i = 0; i < processors.Length; i++)
         {

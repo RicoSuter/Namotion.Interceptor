@@ -19,10 +19,10 @@ Connect to an MQTT broker as a subscriber with `AddMqttSubjectClient`. The clien
 [InterceptorSubject]
 public partial class Sensor
 {
-    [SourcePath("mqtt", "Temperature")]
+    [Path("mqtt", "Temperature")]
     public partial decimal Temperature { get; set; }
 
-    [SourcePath("mqtt", "Humidity")]
+    [Path("mqtt", "Humidity")]
     public partial decimal Humidity { get; set; }
 }
 
@@ -47,7 +47,7 @@ Host an embedded MQTT broker that publishes property changes with `AddMqttSubjec
 [InterceptorSubject]
 public partial class Device
 {
-    [SourcePath("mqtt", "Status")]
+    [Path("mqtt", "Status")]
     public partial string Status { get; set; }
 }
 
@@ -75,7 +75,7 @@ builder.Services.AddMqttSubjectClient(
     {
         BrokerHost = "mqtt.example.com",
         BrokerPort = 1883,
-        PathProvider = new AttributeBasedSourcePathProvider("mqtt", "/"),
+        PathProvider = new AttributeBasedPathProvider("mqtt", "/"),
 
         // Authentication
         Username = "user",
@@ -126,7 +126,7 @@ builder.Services.AddMqttSubjectServer(
     {
         BrokerHost = "127.0.0.1", // Optional: bind to specific interface (default: all interfaces)
         BrokerPort = 1883,
-        PathProvider = new AttributeBasedSourcePathProvider("mqtt", "/"),
+        PathProvider = new AttributeBasedPathProvider("mqtt", "/"),
 
         // Connection settings
         ClientId = "my-server-id",
@@ -152,7 +152,7 @@ builder.Services.AddMqttSubjectServer(
 
 ## Topic Mapping
 
-Properties are mapped to MQTT topics using the `[SourcePath]` attribute. The topic is constructed by combining the optional `TopicPrefix` with the path specified in the attribute.
+Properties are mapped to MQTT topics using the `[Path]` attribute. The topic is constructed by combining the optional `TopicPrefix` with the path specified in the attribute.
 
 ```csharp
 [InterceptorSubject]
@@ -160,12 +160,12 @@ public partial class Sensor
 {
     // With TopicPrefix = "home/living-room":
     // Topic: home/living-room/Temperature
-    [SourcePath("mqtt", "Temperature")]
+    [Path("mqtt", "Temperature")]
     public partial decimal Temperature { get; set; }
 
     // Nested paths supported:
     // Topic: home/living-room/metrics/Humidity
-    [SourcePath("mqtt", "metrics/Humidity")]
+    [Path("mqtt", "metrics/Humidity")]
     public partial decimal Humidity { get; set; }
 }
 ```

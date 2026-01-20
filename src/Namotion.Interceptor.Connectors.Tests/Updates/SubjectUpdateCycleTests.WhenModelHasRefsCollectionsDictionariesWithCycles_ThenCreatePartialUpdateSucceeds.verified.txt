@@ -3,7 +3,7 @@
   Subjects: {
     1: {
       child: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: {Scrubbed},
         Id: 2
       },
@@ -14,20 +14,10 @@
           {
             Action: Insert,
             Index: 1,
-            Id: 4
-          }
-        ],
-        Collection: [
-          {
-            Index: 0,
             Id: 3
           }
         ],
         Count: 2
-      },
-      lookup: {
-        Kind: Collection,
-        Count: 0
       },
       name: {
         Kind: Value,
@@ -40,26 +30,18 @@
             Timestamp: {Scrubbed}
           }
         }
-      },
-      parent: {
-        Kind: Item
-      },
-      self: {
-        Kind: Item,
-        Timestamp: {Scrubbed},
-        Id: 1
       }
     },
     2: {
       child: {
-        Kind: Item
+        Kind: Object
       },
       items: {
         Kind: Collection,
         Count: 0
       },
       lookup: {
-        Kind: Collection,
+        Kind: Dictionary,
         Count: 0
       },
       name: {
@@ -73,54 +55,23 @@
         }
       },
       parent: {
-        Kind: Item,
+        Kind: Object,
         Id: 1
       },
       self: {
-        Kind: Item
+        Kind: Object
       }
     },
     3: {
       child: {
-        Kind: Item
+        Kind: Object
       },
       items: {
         Kind: Collection,
         Count: 0
       },
       lookup: {
-        Kind: Collection,
-        Count: 0
-      },
-      name: {
-        Kind: Value,
-        Value: Child2,
-        Attributes: {
-          status: {
-            Kind: Value,
-            Value: active
-          }
-        }
-      },
-      parent: {
-        Kind: Item,
-        Timestamp: {Scrubbed},
-        Id: 1
-      },
-      self: {
-        Kind: Item
-      }
-    },
-    4: {
-      child: {
-        Kind: Item
-      },
-      items: {
-        Kind: Collection,
-        Count: 0
-      },
-      lookup: {
-        Kind: Collection,
+        Kind: Dictionary,
         Count: 0
       },
       name: {
@@ -134,11 +85,11 @@
         }
       },
       parent: {
-        Kind: Item,
+        Kind: Object,
         Id: 1
       },
       self: {
-        Kind: Item
+        Kind: Object
       }
     }
   }

@@ -286,6 +286,222 @@ public class SubjectUpdateTests
     }
 
     [Fact]
+    public async Task WhenGeneratingPartialSubjectWithAttributeAndValue_ThenBothAreIncluded()
+    {
+        // Arrange
+        // This test verifies that when BOTH an attribute change AND a value change
+        // are included for the same property, BOTH should appear in the update.
+        // Order: Attribute first, then value.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var mother = new Person { FirstName = "Mother" };
+        var person = new Person(context)
+        {
+            FirstName = "Child",
+            Mother = mother,
+            Children = []
+        };
+
+        var firstNameProperty = mother.TryGetRegisteredSubject()!
+            .TryGetProperty("FirstName")!;
+
+        var attribute = firstNameProperty
+            .AddAttribute("Unit", typeof(string), _ => "meters", null);
+
+        var timestamp = DateTimeOffset.UtcNow;
+        var changes = new[]
+        {
+            // Attribute change comes first
+            SubjectPropertyChange.Create(attribute, null, timestamp, null, "feet", "meters"),
+            // Value change comes second - should NOT overwrite attribute
+            SubjectPropertyChange.Create(new PropertyReference(mother, "FirstName"), null, timestamp, null, "Mother", "Jane"),
+        };
+
+        // Act
+        var partialSubjectUpdate = SubjectUpdate
+            .CreatePartialUpdateFromChanges(person, changes, [JsonCamelCasePathProcessor.Instance]);
+
+        // Assert
+        // The firstName property should have BOTH:
+        // - kind: Value, value: "Jane"
+        // - attributes: { unit: { kind: Value, value: "meters" } }
+        await Verify(partialSubjectUpdate).DisableDateCounting();
+    }
+
+    [Fact]
+    public async Task WhenGeneratingPartialSubjectWithValueThenAttribute_ThenBothAreIncluded()
+    {
+        // Arrange
+        // Same as above but with REVERSE ORDER: value first, then attribute.
+        // This tests that attribute changes are correctly added to existing value updates.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var mother = new Person { FirstName = "Mother" };
+        var person = new Person(context)
+        {
+            FirstName = "Child",
+            Mother = mother,
+            Children = []
+        };
+
+        var firstNameProperty = mother.TryGetRegisteredSubject()!
+            .TryGetProperty("FirstName")!;
+
+        var attribute = firstNameProperty
+            .AddAttribute("Unit", typeof(string), _ => "meters", null);
+
+        var timestamp = DateTimeOffset.UtcNow;
+        var changes = new[]
+        {
+            // Value change comes FIRST
+            SubjectPropertyChange.Create(new PropertyReference(mother, "FirstName"), null, timestamp, null, "Mother", "Jane"),
+            // Attribute change comes SECOND - should be added to existing update
+            SubjectPropertyChange.Create(attribute, null, timestamp, null, "feet", "meters"),
+        };
+
+        // Act
+        var partialSubjectUpdate = SubjectUpdate
+            .CreatePartialUpdateFromChanges(person, changes, [JsonCamelCasePathProcessor.Instance]);
+
+        // Assert
+        // The firstName property should have BOTH (same as attribute-first test):
+        // - kind: Value, value: "Jane"
+        // - attributes: { unit: { kind: Value, value: "meters" } }
+        await Verify(partialSubjectUpdate).DisableDateCounting();
+    }
+
+    [Fact]
+    public async Task WhenGeneratingPartialSubjectWithOnlyValueChange_ThenAttributesNotIncluded()
+    {
+        // Arrange
+        // When ONLY a value changes (no attribute changes), unchanged attributes
+        // should NOT be included in the partial update.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var mother = new Person { FirstName = "Mother" };
+        var person = new Person(context)
+        {
+            FirstName = "Child",
+            Mother = mother,
+            Children = []
+        };
+
+        // Add an attribute but DON'T include it in the changes
+        var firstNameProperty = mother.TryGetRegisteredSubject()!
+            .TryGetProperty("FirstName")!;
+        firstNameProperty.AddAttribute("Unit", typeof(string), _ => "meters", null);
+
+        var timestamp = DateTimeOffset.UtcNow;
+        var changes = new[]
+        {
+            // Only value change - no attribute change
+            SubjectPropertyChange.Create(new PropertyReference(mother, "FirstName"), null, timestamp, null, "Mother", "Jane"),
+        };
+
+        // Act
+        var partialSubjectUpdate = SubjectUpdate
+            .CreatePartialUpdateFromChanges(person, changes, [JsonCamelCasePathProcessor.Instance]);
+
+        // Assert
+        // The firstName property should have:
+        // - kind: Value, value: "Jane"
+        // - NO attributes (because they didn't change)
+        await Verify(partialSubjectUpdate).DisableDateCounting();
+    }
+
+    [Fact]
+    public async Task WhenAssigningNewSubjectToNestedProperty_ThenPartialUpdateContainsOnlyPathAndNewSubject()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var mother = new Person { FirstName = "Mother" };
+        var root = new Person(context)
+        {
+            FirstName = "Root",
+            Mother = mother
+        };
+
+        var changes = new List<SubjectPropertyChange>();
+        using var _ = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change => changes.Add(change));
+
+        // Act: Assign a new Person to mother.Father (nested property)
+        mother.Father = new Person { FirstName = "NewFather" };
+
+        // Log what changes we received for debugging
+        var changesSummary = changes.Select(c => $"{c.Property.Subject.GetType().Name}.{c.Property.Name}").ToList();
+
+        var partialUpdate = SubjectUpdate
+            .CreatePartialUpdateFromChanges(root, changes.ToArray(), [JsonCamelCasePathProcessor.Instance]);
+
+        // The partial update should contain:
+        // 1. root: only the path reference to mother (mother property)
+        // 2. mother: only the father property (the actual change)
+        // 3. newFather: all properties of the new subject
+        //
+        // It should NOT contain other properties like root.firstName, root.children, etc.
+        await Verify(new { Changes = changesSummary, Update = partialUpdate }).DisableDateCounting();
+    }
+
+    [Fact]
+    public async Task WhenAssigningNewSubjectWithRootReference_ThenPartialUpdateShouldNotIncludeFullAncestorProperties()
+    {
+        // Arrange
+        // This test reproduces a bug where assigning a new subject that has a Root property
+        // (which navigates back up the tree) causes the partial update to include
+        // ALL properties of ALL ancestors, not just the path references.
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var person = new PersonWithRoot { FirstName = "Person" };
+        var root = new PersonRoot(context)
+        {
+            Name = "Root",
+            Person = person
+        };
+
+        var changes = new List<SubjectPropertyChange>();
+        using var _ = context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change => changes.Add(change));
+
+        // Act: Assign a new PersonWithRoot to person.Father
+        // The new father has a Root property that references back to PersonRoot
+        // This creates a circular reference: root -> person -> father -> root
+        person.Father = new PersonWithRoot { FirstName = "NewFather", Root = root };
+
+        var changesSummary = changes.Select(c => $"{c.Property.Subject.GetType().Name}.{c.Property.Name}").ToList();
+
+        var partialUpdate = SubjectUpdate
+            .CreatePartialUpdateFromChanges(root, changes.ToArray(), [JsonCamelCasePathProcessor.Instance]);
+
+        // Expected behavior:
+        // - root (PersonRoot): only path reference to person (person property)
+        // - person (PersonWithRoot): only the father property (the actual change)
+        // - newFather (PersonWithRoot): all properties INCLUDING the Root reference
+        //
+        // Bug: The Root property on newFather causes ProcessSubjectComplete to traverse
+        // back up to PersonRoot, which then includes ALL properties of PersonRoot and
+        // the full tree, not just the minimal path references.
+
+        await Verify(new { Changes = changesSummary, Update = partialUpdate }).DisableDateCounting();
+    }
+
+    [Fact]
     public async Task WhenUpdateContainsIncrementalChanges_ThenAllOfThemAreApplied()
     {
         // Arrange

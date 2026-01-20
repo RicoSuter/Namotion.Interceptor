@@ -242,4 +242,32 @@ public class SubjectUpdateDictionaryTests
         // Assert - Collection should have all items with full data
         await Verify(update);
     }
+
+    [Fact]
+    public async Task WhenValueReplacedAtSameKey_ThenInsertAndRemoveOperationsAreCreated()
+    {
+        // Arrange
+        // This tests replacing the VALUE at an existing key with a DIFFERENT object.
+        // This should be treated as a Remove + Insert, not ignored.
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var item1 = new CycleTestNode { Name = "Item1" };
+        var node = new CycleTestNode(context)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = item1 }
+        };
+
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
+
+        // Act - replace value at same key with a DIFFERENT object
+        var item2 = new CycleTestNode { Name = "ReplacementItem" };
+        node.Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = item2 };
+
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
+
+        // Assert - the new item should be included in the update
+        // Either as an Insert operation or as a sparse update with full data
+        await Verify(update);
+    }
 }

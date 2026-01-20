@@ -7,7 +7,7 @@
         Count: 0
       },
       Father: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: DateTimeOffset_1,
         Id: 2
       },
@@ -36,7 +36,7 @@
         Kind: Value
       },
       Mother: {
-        Kind: Item
+        Kind: Object
       }
     },
     2: {
@@ -45,7 +45,7 @@
         Count: 0
       },
       Father: {
-        Kind: Item
+        Kind: Object
       },
       FirstName: {
         Kind: Value,
@@ -72,7 +72,7 @@
         Kind: Value
       },
       Mother: {
-        Kind: Item
+        Kind: Object
       }
     }
   }

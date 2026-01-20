@@ -1,0 +1,59 @@
+﻿{
+  Changes: [
+    Person.Father
+  ],
+  Update: {
+    Root: 1,
+    Subjects: {
+      1: {
+        mother: {
+          Kind: Object,
+          Id: 2
+        }
+      },
+      2: {
+        father: {
+          Kind: Object,
+          Timestamp: {Scrubbed},
+          Id: 3
+        }
+      },
+      3: {
+        children: {
+          Kind: Collection,
+          Count: 0
+        },
+        father: {
+          Kind: Object
+        },
+        firstName: {
+          Kind: Value,
+          Value: NewFather,
+          Attributes: {
+            maxLength: {
+              Kind: Value,
+              Value: 123,
+              Attributes: {
+                unit: {
+                  Kind: Value,
+                  Value: Count
+                }
+              }
+            }
+          }
+        },
+        fullName: {
+          Kind: Value,
+          Value: NewFather ,
+          Timestamp: {Scrubbed}
+        },
+        lastName: {
+          Kind: Value
+        },
+        mother: {
+          Kind: Object
+        }
+      }
+    }
+  }
+}

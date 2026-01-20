@@ -2,41 +2,10 @@
   Root: 1,
   Subjects: {
     1: {
-      children: {
-        Kind: Collection,
-        Count: 0
-      },
       father: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: {Scrubbed},
         Id: 2
-      },
-      firstName: {
-        Kind: Value,
-        Value: Child,
-        Timestamp: {Scrubbed},
-        Attributes: {
-          maxLength: {
-            Kind: Value,
-            Value: 123,
-            Attributes: {
-              unit: {
-                Kind: Value,
-                Value: Count
-              }
-            }
-          }
-        }
-      },
-      fullName: {
-        Kind: Value,
-        Value: Child 
-      },
-      lastName: {
-        Kind: Value
-      },
-      mother: {
-        Kind: Item
       }
     },
     2: {
@@ -45,7 +14,7 @@
         Count: 0
       },
       father: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: {Scrubbed},
         Id: 1
       },
@@ -73,7 +42,7 @@
         Kind: Value
       },
       mother: {
-        Kind: Item
+        Kind: Object
       }
     }
   }

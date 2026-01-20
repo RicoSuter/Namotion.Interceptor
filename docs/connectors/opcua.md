@@ -18,10 +18,10 @@ Connect to an OPC UA server by configuring a client with `AddOpcUaSubjectClient`
 [InterceptorSubject]
 public partial class Machine
 {
-    [SourcePath("opc", "Temperature")]
+    [Path("opc", "Temperature")]
     public partial decimal Temperature { get; set; }
 
-    [SourcePath("opc", "Speed")]
+    [Path("opc", "Speed")]
     public partial decimal Speed { get; set; }
 }
 
@@ -46,7 +46,7 @@ Expose your C# objects as an OPC UA server by configuring with `AddOpcUaSubjectS
 [InterceptorSubject]
 public partial class Sensor
 {
-    [SourcePath("opc", "Value")]
+    [Path("opc", "Value")]
     public partial decimal Value { get; set; }
 }
 
@@ -72,7 +72,7 @@ builder.Services.AddOpcUaSubjectClient(
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://localhost:4840",
-        PathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        PathProvider = new AttributeBasedPathProvider("opc", ".", null),
         TypeResolver = new OpcUaTypeResolver(logger),
         ValueConverter = new OpcUaValueConverter(),
         SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -113,7 +113,7 @@ builder.Services.AddOpcUaSubjectServer(
     subjectSelector: sp => sp.GetRequiredService<MyRoot>(),
     configurationProvider: sp => new OpcUaServerConfiguration
     {
-        PathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        PathProvider = new AttributeBasedPathProvider("opc", ".", null),
         ValueConverter = new OpcUaValueConverter(),
 
         // Optional
@@ -168,7 +168,7 @@ Control how properties are linked in the OPC UA address space by specifying the 
 
 ```csharp
 [OpcUaNodeReferenceType("Organizes")]
-[SourcePath("opc", "Machines")]
+[Path("opc", "Machines")]
 public partial Machine[] Machines { get; set; }
 ```
 
@@ -180,7 +180,7 @@ For collection properties, specify how individual items are referenced in the OP
 
 ```csharp
 [OpcUaNodeItemReferenceType("HasComponent")]
-[SourcePath("opc", "Parameters")]
+[Path("opc", "Parameters")]
 public partial Parameter[] Parameters { get; set; }
 ```
 
@@ -269,14 +269,14 @@ The library automatically handles nested object hierarchies, traversing through 
 [InterceptorSubject]
 public partial class Factory
 {
-    [SourcePath("opc", "Lines")]
+    [Path("opc", "Lines")]
     public partial ProductionLine[] Lines { get; set; }
 }
 
 [InterceptorSubject]
 public partial class ProductionLine
 {
-    [SourcePath("opc", "Machines")]
+    [Path("opc", "Machines")]
     public partial Machine[] Machines { get; set; }
 }
 ```
@@ -328,7 +328,7 @@ builder.Services.AddOpcUaSubjectClient(
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        PathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        PathProvider = new AttributeBasedPathProvider("opc", ".", null),
         WriteRetryQueueSize = 1000 // Buffer up to 1000 writes (default)
     });
 
@@ -351,7 +351,7 @@ builder.Services.AddOpcUaSubjectClient(
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        PathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
+        PathProvider = new AttributeBasedPathProvider("opc", ".", null),
         EnablePollingFallback = true, // Default
         PollingInterval = TimeSpan.FromSeconds(1), // Default: 1 second
         PollingBatchSize = 100 // Default: 100 items per batch
@@ -374,8 +374,8 @@ builder.Services.AddOpcUaSubjectClient(
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        PathProvider = new AttributeBasedSourcePathProvider("opc", ".", null),
-        SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(10) // Default: 10 seconds
+        PathProvider = new AttributeBasedPathProvider("opc", ".", null),
+        SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(5) // Default: 5 seconds
     });
 ```
 
@@ -390,11 +390,28 @@ builder.Services.AddOpcUaSubjectClient(
 - `PollingInterval` minimum of 100 milliseconds enforced
 - Fail-fast with clear error messages on invalid configuration
 
+### Stall Detection
+
+When the SDK's reconnection handler gets stuck (e.g., server never responds), the client automatically detects the stall and forces a reconnection reset. Configure via `StallDetectionIterations` (default: 10) and `SubscriptionHealthCheckInterval` (default: 5s). Total stall timeout = iterations × interval (default: 50 seconds).
+
+## Diagnostics
+
+Monitor client and server health in production via the `Diagnostics` property on `OpcUaSubjectClientSource` and `OpcUaSubjectServerBackgroundService`.
+
+**Client diagnostics** (`OpcUaClientDiagnostics`): Connection state, session ID, subscription/monitored item counts, reconnection metrics, polling statistics.
+
+**Server diagnostics** (`OpcUaServerDiagnostics`): Running state, active session count, start time, consecutive failures, last error.
+
 ## Thread Safety
 
 The library ensures thread-safe operations across all OPC UA interactions. Property operations are synchronized via `SyncRoot` when interceptors are present, subscription callbacks use thread-safe concurrent queues, and multiple OPC UA clients can connect concurrently.
 
 Write queue operations use `Interlocked` operations for thread-safe counter updates and flush operations are protected by semaphores to prevent concurrent flush issues.
+
+**Update ordering:**
+By default (`SubscriptionSequentialPublishing = false`), subscription callbacks may be processed in parallel for higher throughput. This means that for the same property, if two rapid updates arrive in different publish responses, they could theoretically be applied out of order. Each update carries a `SourceTimestamp` from the server, but the library does not enforce timestamp-based ordering.
+
+For most use cases (sensor values, status updates), this is acceptable since you typically want the latest value. If your application requires strict ordering guarantees, set `SubscriptionSequentialPublishing = true` to process all subscription messages sequentially at the cost of reduced throughput.
 
 To prevent feedback loops when external sources update properties, use `SubjectChangeContext.WithSource()` to mark the change source:
 
@@ -404,6 +421,41 @@ using (SubjectChangeContext.WithSource(opcUaSource))
     subject.Temperature = newValue;
 }
 ```
+
+## Security Considerations
+
+**Client security:**
+```csharp
+var config = new OpcUaClientConfiguration
+{
+    ServerUrl = "opc.tcp://plc.factory.com:4840",
+    UseSecurity = true,  // Enable signing and encryption (recommended for production)
+    // ... other settings
+};
+```
+
+When `UseSecurity = true`, the client prefers secure endpoints with message signing and encryption. The default is `false` for development convenience.
+
+**Server security:**
+By default, the server accepts anonymous connections without encryption. For production deployments requiring authentication:
+- Configure custom `UserTokenPolicies` in a derived `OpcUaServerConfiguration`
+- Use certificate-based authentication
+- Enable message signing and encryption
+
+## Resilience Configuration
+
+For 24/7 production use, the default configuration provides robust resilience:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `KeepAliveInterval` | 5s | How quickly disconnections are detected |
+| `ReconnectInterval` | 5s | Time between reconnection attempts |
+| `StallDetectionIterations` | 10 | Health checks before forcing stall reset |
+| `WriteRetryQueueSize` | 1000 | Updates buffered during disconnection |
+| `SessionDisposalTimeout` | 5s | Max wait for graceful session close |
+| `SubscriptionSequentialPublishing` | false | Process subscription messages in order (see Thread Safety) |
+
+Total stall recovery time = `StallDetectionIterations` × `SubscriptionHealthCheckInterval` (default: 50s).
 
 ## Lifecycle Management
 

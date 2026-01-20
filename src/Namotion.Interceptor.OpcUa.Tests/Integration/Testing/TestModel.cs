@@ -1,7 +1,7 @@
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
 
-namespace Namotion.Interceptor.OpcUa.Tests.Integration;
+namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 
 [InterceptorSubject]
 public partial class TestRoot

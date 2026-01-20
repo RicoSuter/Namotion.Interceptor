@@ -3,7 +3,7 @@
   Subjects: {
     1: {
       mother: {
-        Kind: Item,
+        Kind: Object,
         Id: 2
       }
     },

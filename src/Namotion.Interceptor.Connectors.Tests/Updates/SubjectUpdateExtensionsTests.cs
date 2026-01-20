@@ -649,7 +649,7 @@ public class SubjectUpdateExtensionsTests
                 {
                     ["Father"] = new SubjectPropertyUpdate
                     {
-                        Kind = SubjectPropertyUpdateKind.Item,
+                        Kind = SubjectPropertyUpdateKind.Object,
                         Id = "nonexistent" // References a subject that doesn't exist
                     }
                 }
@@ -685,9 +685,9 @@ public class SubjectUpdateExtensionsTests
                     ["Children"] = new SubjectPropertyUpdate
                     {
                         Kind = SubjectPropertyUpdateKind.Collection,
-                        Collection =
+                        Items =
                         [
-                            new SubjectPropertyCollectionUpdate
+                            new SubjectPropertyItemUpdate
                             {
                                 Index = 5, // Invalid: index >= count
                                 Id = "2"
@@ -735,9 +735,9 @@ public class SubjectUpdateExtensionsTests
                     ["Children"] = new SubjectPropertyUpdate
                     {
                         Kind = SubjectPropertyUpdateKind.Collection,
-                        Collection =
+                        Items =
                         [
-                            new SubjectPropertyCollectionUpdate
+                            new SubjectPropertyItemUpdate
                             {
                                 Index = 1, // Append position - valid
                                 Id = "2"

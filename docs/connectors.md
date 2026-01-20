@@ -2,8 +2,6 @@
 
 The `Namotion.Interceptor.Connectors` package provides infrastructure for connecting subject graphs to external systems. It includes **sources** (for synchronizing FROM external systems) and shared components used by both sources and servers.
 
-## Connector Documentation
-
 - [WebSocket](connectors/websocket.md) - Bidirectional WebSocket protocol for real-time synchronization
 - [MQTT](connectors/mqtt.md) - MQTT client/server integration for IoT scenarios
 - [OPC UA](connectors/opcua.md) - OPC UA client/server integration for industrial automation
