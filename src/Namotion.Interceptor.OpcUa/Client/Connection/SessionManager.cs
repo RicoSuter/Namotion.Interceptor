@@ -29,7 +29,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
     // Fields for deferred async work (handled by health check loop)
     private Session? _pendingOldSession; // Old session needing disposal after reconnection (accessed via Interlocked)
-    private volatile bool _needsInitialization;   // Flag for health check to complete initialization
+    private int _needsInitialization;   // 0 = false, 1 = true (thread-safe via Interlocked)
 
     /// <summary>
     /// Gets the current session. WARNING: Can change at any time due to reconnection. Never cache - read immediately before use.
@@ -53,7 +53,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// Gets a value indicating whether initialization needs to be completed by the health check loop.
     /// Set when SDK reconnection succeeds with subscription transfer.
     /// </summary>
-    public bool NeedsInitialization => _needsInitialization;
+    public bool NeedsInitialization => Volatile.Read(ref _needsInitialization) == 1;
 
     /// <summary>
     /// Gets the pending old session that needs async disposal by the health check loop.
@@ -290,7 +290,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                     _logger.LogInformation(
                         "OPC UA session reconnected: Transferred {Count} subscriptions. Health check will complete initialization.",
                         transferredSubscriptions.Count);
-                    _needsInitialization = true;
+                    Interlocked.Exchange(ref _needsInitialization, 1);
                 }
                 else
                 {
@@ -371,7 +371,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// </summary>
     public void ClearInitializationFlag()
     {
-        _needsInitialization = false;
+        Interlocked.Exchange(ref _needsInitialization, 0);
     }
 
     /// <summary>
@@ -449,7 +449,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             try { await PollingManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing polling manager."); }
         }
 
-        var sessionToDispose = _session;
+        var sessionToDispose = Volatile.Read(ref _session);
         if (sessionToDispose is not null)
         {
             var timeout = _configuration.SessionDisposalTimeout;

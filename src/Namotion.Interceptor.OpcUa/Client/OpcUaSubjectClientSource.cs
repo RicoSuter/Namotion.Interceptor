@@ -31,11 +31,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private int _reconnectingIterations; // Tracks health check iterations while reconnecting (for stall detection)
 
     // Diagnostics tracking - accessed from multiple threads via Diagnostics property
-    // Note: DateTimeOffset? cannot be volatile, but reads are atomic on 64-bit systems
-    // and visibility is ensured by the memory barriers in Interlocked operations
     private long _totalReconnectionAttempts;
     private long _successfulReconnections;
     private long _failedReconnections;
+    private long _lastConnectedAtTicks; // 0 = never connected, otherwise UTC ticks (thread-safe via Interlocked)
     private OpcUaClientDiagnostics? _diagnostics;
 
     internal string OpcUaNodeIdKey { get; } = "OpcUaNodeId:" + Guid.NewGuid();
@@ -56,7 +55,14 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     internal long TotalReconnectionAttempts => Interlocked.Read(ref _totalReconnectionAttempts);
     internal long SuccessfulReconnections => Interlocked.Read(ref _successfulReconnections);
     internal long FailedReconnections => Interlocked.Read(ref _failedReconnections);
-    internal DateTimeOffset? LastConnectedAt { get; private set; }
+    internal DateTimeOffset? LastConnectedAt
+    {
+        get
+        {
+            var ticks = Interlocked.Read(ref _lastConnectedAtTicks);
+            return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
+        }
+    }
 
     /// <summary>
     /// Called by SessionManager when a reconnection attempt starts (via SDK's SessionReconnectHandler).
@@ -75,7 +81,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private void RecordReconnectionSuccess()
     {
         Interlocked.Increment(ref _successfulReconnections);
-        LastConnectedAt = DateTimeOffset.UtcNow;
+        Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
     }
 
     private bool IsReconnecting => _sessionManager?.IsReconnecting == true;
@@ -132,7 +138,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
         var session = await _sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
 
-        LastConnectedAt = DateTimeOffset.UtcNow;
+        Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
         _logger.LogInformation("Connected to OPC UA server successfully.");
 
         var rootNode = await TryGetRootNodeAsync(session, cancellationToken).ConfigureAwait(false);
@@ -411,7 +417,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             await propertyWriter.CompleteInitializationAsync(cancellationToken).ConfigureAwait(false);
 
             Interlocked.Increment(ref _successfulReconnections);
-            LastConnectedAt = DateTimeOffset.UtcNow;
+            Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
             _logger.LogInformation("Session restart complete.");
         }
         catch (Exception ex)
