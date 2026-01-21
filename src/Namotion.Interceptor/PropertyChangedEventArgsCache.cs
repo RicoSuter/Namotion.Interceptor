@@ -7,7 +7,7 @@ namespace Namotion.Interceptor;
 /// Caches <see cref="PropertyChangedEventArgs"/> instances to avoid repeated allocations
 /// when raising PropertyChanged events for the same property name.
 /// </summary>
-internal static class PropertyChangedEventArgsCache
+public static class PropertyChangedEventArgsCache
 {
     private static readonly ConcurrentDictionary<string, PropertyChangedEventArgs> _cache = new();
 
