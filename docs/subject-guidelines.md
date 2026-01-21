@@ -250,56 +250,107 @@ public partial class Sensor
 }
 ```
 
-## OnSet* and OnGet* Partial Methods
+## Property Change Hooks
 
-The source generator creates optional partial method hooks for each partial property, allowing you to execute custom logic before or after interceptors run.
+The source generator creates optional partial method hooks for each partial property, allowing you to execute custom logic before or after property changes.
 
 ### Generated Methods
 
-For each partial property, the generator creates:
-- `partial void OnSetPropertyName(ref TProperty value)` - Called before setter runs (before interceptors)
-- `partial void OnGetPropertyName(ref TProperty value)` - Called after getter runs (after interceptors, before return)
+For each partial property `PropertyName`, the generator creates:
+- `partial void OnPropertyNameChanging(ref TProperty newValue, ref bool cancel)` - Called before setter runs
+- `partial void OnPropertyNameChanged(TProperty newValue)` - Called after successful write
 
 ### Execution Order
 
 ```
-Setter: OnSet* → Interceptors → Field Update
-Getter: Field Read → Interceptors → OnGet* → Return
+Setter: OnChanging → (if not cancelled) Interceptors → Field Update → OnChanged → PropertyChanged event
+Getter: Field Read → Interceptors → Return
 ```
 
 See [Interceptor Pipeline](interceptor.md#interceptor-pipeline) for how interceptors work.
 
-### Example
+### Cancellation Example
 
 ```csharp
 [InterceptorSubject]
-public partial class GpioPin
+public partial class Person
 {
-    internal GpioController? Controller { get; init; }
-    public partial GpioPinMode Mode { get; set; }
-    
-    partial void OnSetMode(ref GpioPinMode value)
+    public partial string FirstName { get; set; }
+
+    partial void OnFirstNameChanging(ref string newValue, ref bool cancel)
     {
-        if (Controller == null) return;
-        Controller.SetPinMode(PinNumber, value switch
+        if (string.IsNullOrWhiteSpace(newValue))
         {
-            GpioPinMode.Input => PinMode.Input,
-            GpioPinMode.Output => PinMode.Output,
-            _ => PinMode.Input
-        });
+            cancel = true;  // Reject empty names
+            return;
+        }
+        newValue = newValue.Trim();  // Or coerce the value
     }
 }
 ```
 
-**Use OnSet*/OnGet* when:**
+### Post-Change Side Effects
+
+```csharp
+[InterceptorSubject]
+public partial class Sensor
+{
+    public partial double Temperature { get; set; }
+
+    partial void OnTemperatureChanged(double newValue)
+    {
+        if (newValue > 100)
+        {
+            Logger.LogWarning("High temperature: {Temp}", newValue);
+        }
+    }
+}
+```
+
+### When Hooks Are Called
+
+- `OnChanging` is always called when the setter is invoked
+- `OnChanged` is only called if:
+  - The change was not cancelled (`cancel` remained `false`)
+  - The interceptor chain performed the write (interceptors can skip writes)
+
+**Use property hooks when:**
 - Logic is specific to a single property
 - You need access to instance members
-- You want to transform values before/after interceptors
+- You want to validate, transform, or cancel changes
+- You need to react to successful property changes
 
 **Use Interceptors when:**
 - Logic applies to many properties/classes
 - You need cross-cutting concerns (logging, validation)
 - Logic should be configurable at runtime
+
+## INotifyPropertyChanged Support
+
+All generated classes automatically implement `INotifyPropertyChanged` for data binding compatibility with WPF, MAUI, Blazor, and other UI frameworks.
+
+```csharp
+[InterceptorSubject]
+public partial class Person
+{
+    public partial string FirstName { get; set; }
+}
+
+// Usage - no extra code needed
+var person = new Person(context);
+person.PropertyChanged += (s, e) => Console.WriteLine($"{e.PropertyName} changed");
+person.FirstName = "Rico";  // Fires PropertyChanged event
+```
+
+### Performance
+
+The `PropertyChanged?.Invoke(...)` pattern ensures zero overhead when no handlers are subscribed - only a null check occurs. The `PropertyChangedEventArgs` is not allocated unless the event has subscribers.
+
+### When PropertyChanged Fires
+
+The event fires only when a property actually changes:
+- Not fired if `OnChanging` cancels the change
+- Not fired if an interceptor skips the write
 
 ## Summary
 

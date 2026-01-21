@@ -170,6 +170,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.Frozen;
+using System.ComponentModel;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -177,11 +178,17 @@ using System.Text.Json.Serialization;
 
 #pragma warning disable CS8669
 #pragma warning disable CS0649
+#pragma warning disable CS0067
 
-namespace {namespaceName} 
+namespace {namespaceName}
 {{
-    public partial class {className} : IInterceptorSubject
+    public partial class {className} : IInterceptorSubject{(baseClass is null ? ", INotifyPropertyChanged" : "")}
     {{
+        {(baseClass is null ? @"public event PropertyChangedEventHandler? PropertyChanged;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));" : "")}
+
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
@@ -291,9 +298,7 @@ namespace {namespaceName}
     $@"
             {modifiers} get
             {{
-                var value = GetPropertyValue<{fullyQualifiedName}>(nameof({propertyName}), static (o) => (({className})o)._{propertyName});
-                OnGet{propertyName}(ref value);
-                return value;
+                return GetPropertyValue<{fullyQualifiedName}>(nameof({propertyName}), static (o) => (({className})o)._{propertyName});
             }}";
 
                         }
@@ -307,13 +312,18 @@ namespace {namespaceName}
                             var accessorText = accessor.IsKind(SyntaxKind.InitAccessorDeclaration) ? "init" : "set";
                             var modifiers = string.Join(" ", accessor.Modifiers.Select(m => m.Value) ?? []);
 
-                            generatedCode +=
+                                            generatedCode +=
     $@"
             {modifiers} {accessorText}
             {{
                 var newValue = value;
-                OnSet{propertyName}(ref newValue);
-                SetPropertyValue(nameof({propertyName}), newValue, static (o) => (({className})o)._{propertyName}, static (o, v) => (({className})o)._{propertyName} = v);
+                var cancel = false;
+                On{propertyName}Changing(ref newValue, ref cancel);
+                if (!cancel && SetPropertyValue(nameof({propertyName}), newValue, static (o) => (({className})o)._{propertyName}, static (o, v) => (({className})o)._{propertyName} = v))
+                {{
+                    On{propertyName}Changed(_{propertyName});
+                    RaisePropertyChanged(nameof({propertyName}));
+                }}
             }}";
                         }
 
@@ -322,19 +332,13 @@ namespace {namespaceName}
         }}
 ";
                         // Generate partial method hooks for property
-                        if (property.HasGetter)
-                        {
-                            generatedCode +=
-    $@"
-        partial void OnGet{propertyName}(ref {fullyQualifiedName} value);
-";
-                        }
-
                         if (property.HasSetter || property.HasInit)
                         {
                             generatedCode +=
     $@"
-        partial void OnSet{propertyName}(ref {fullyQualifiedName} value);
+        partial void On{propertyName}Changing(ref {fullyQualifiedName} newValue, ref bool cancel);
+
+        partial void On{propertyName}Changed({fullyQualifiedName} newValue);
 ";
                         }
                     }
@@ -384,15 +388,16 @@ namespace {namespaceName}
         }}
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
+        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
         {{
             if (_context is null)
             {{
                 setValue(this, newValue);
+                return true;
             }}
             else
             {{
-                _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
+                return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
             }}
         }}
 
