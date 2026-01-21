@@ -108,7 +108,9 @@ internal static class WebSocketMessageReader
 
                 if (messageStream.Length + result.Count > maxMessageSize)
                 {
-                    return ReadResult.MaxSizeExceeded(messageStream, buffer);
+                    // Dispose stream immediately since data is unusable (exceeds max size)
+                    await messageStream.DisposeAsync();
+                    return ReadResult.MaxSizeExceeded(null, buffer);
                 }
 
                 messageStream.Write(buffer, 0, result.Count);
@@ -121,7 +123,7 @@ internal static class WebSocketMessageReader
         catch
         {
             // On exception, clean up resources
-            messageStream.Dispose();
+            await messageStream.DisposeAsync();
             ArrayPool<byte>.Shared.Return(buffer);
             throw;
         }

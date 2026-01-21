@@ -458,8 +458,8 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                 {
                     _logger.LogError(ex, "Failed to reconnect to WebSocket server");
 
-                    // Exponential backoff with jitter
-                    var jitter = Random.Shared.NextDouble() * 0.1 + 0.95; // 0.95 to 1.05
+                    // Exponential backoff with equal jitter (0.5 to 1.0) to decorrelate reconnection attempts
+                    var jitter = Random.Shared.NextDouble() * 0.5 + 0.5;
                     reconnectDelay = TimeSpan.FromMilliseconds(
                         Math.Min(reconnectDelay.TotalMilliseconds * 2 * jitter, maxDelay.TotalMilliseconds));
                 }
