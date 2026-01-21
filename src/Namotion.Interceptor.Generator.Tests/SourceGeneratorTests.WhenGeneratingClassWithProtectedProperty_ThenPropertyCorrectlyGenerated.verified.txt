@@ -21,14 +21,9 @@ using System.Text.Json.Serialization;
 
 namespace YourDefaultNamespace
 {
-    public partial class SampleSubject : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+    public partial class SampleSubject : IInterceptorSubject
     {
-        public event PropertyChangedEventHandler? PropertyChanged;
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-
-        void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);
+        
 
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
@@ -111,7 +106,6 @@ namespace YourDefaultNamespace
                 if (!cancel && SetPropertyValue(nameof(Value), newValue, static (o) => ((SampleSubject)o)._Value, static (o, v) => ((SampleSubject)o)._Value = v))
                 {
                     OnValueChanged(_Value);
-                    RaisePropertyChanged(nameof(Value));
                 }
             }
         }
@@ -136,7 +130,6 @@ namespace YourDefaultNamespace
                 if (!cancel && SetPropertyValue(nameof(Name), newValue, static (o) => ((SampleSubject)o)._Name, static (o, v) => ((SampleSubject)o)._Name = v))
                 {
                     OnNameChanged(_Name);
-                    RaisePropertyChanged(nameof(Name));
                 }
             }
         }

@@ -156,6 +156,14 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                     
                     var baseClassTypeName = baseClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
+                    // Check if class implements INotifyPropertyChanged (directly or via inheritance)
+                    var implementsInpc = ImplementsInterface(cls.TypeSymbol, "System.ComponentModel.INotifyPropertyChanged");
+
+                    // Check if THIS class declares INotifyPropertyChanged (not inherited)
+                    var isInpcDeclaringClass = implementsInpc &&
+                        cls.ClassNode.BaseList?.Types
+                            .Any(t => semanticModel.GetTypeInfo(t.Type).Type?
+                                .ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == "System.ComponentModel.INotifyPropertyChanged") == true;
 
                     var defaultPropertiesNewModifier = baseClass is not null ? "new " : string.Empty;
 
@@ -182,9 +190,9 @@ using System.Text.Json.Serialization;
 
 namespace {namespaceName}
 {{
-    public partial class {className} : IInterceptorSubject{(baseClass is null ? ", INotifyPropertyChanged, IRaisePropertyChanged" : "")}
+    public partial class {className} : IInterceptorSubject{(isInpcDeclaringClass ? ", IRaisePropertyChanged" : "")}
     {{
-        {(baseClass is null ? @"public event PropertyChangedEventHandler? PropertyChanged;
+        {(isInpcDeclaringClass ? @"public event PropertyChangedEventHandler? PropertyChanged;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
@@ -323,8 +331,8 @@ namespace {namespaceName}
                 On{propertyName}Changing(ref newValue, ref cancel);
                 if (!cancel && SetPropertyValue(nameof({propertyName}), newValue, static (o) => (({className})o)._{propertyName}, static (o, v) => (({className})o)._{propertyName} = v))
                 {{
-                    On{propertyName}Changed(_{propertyName});
-                    RaisePropertyChanged(nameof({propertyName}));
+                    On{propertyName}Changed(_{propertyName});{(implementsInpc ? $@"
+                    RaisePropertyChanged(nameof({propertyName}));" : "")}
                 }}
             }}";
                         }

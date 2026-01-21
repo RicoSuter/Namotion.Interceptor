@@ -21,14 +21,9 @@ using System.Text.Json.Serialization;
 
 namespace YourDefaultNamespace
 {
-    public partial class DerivedClass : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+    public partial class DerivedClass : IInterceptorSubject
     {
-        public event PropertyChangedEventHandler? PropertyChanged;
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-
-        void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);
+        
 
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
@@ -93,7 +88,6 @@ namespace YourDefaultNamespace
                 if (!cancel && SetPropertyValue(nameof(VirtualProp), newValue, static (o) => ((DerivedClass)o)._VirtualProp, static (o, v) => ((DerivedClass)o)._VirtualProp = v))
                 {
                     OnVirtualPropChanged(_VirtualProp);
-                    RaisePropertyChanged(nameof(VirtualProp));
                 }
             }
         }

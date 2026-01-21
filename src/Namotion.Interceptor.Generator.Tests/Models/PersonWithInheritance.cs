@@ -1,9 +1,10 @@
+using System.ComponentModel;
 using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Interceptor.Generator.Tests.Models;
 
 [InterceptorSubject]
-public partial class PersonBase
+public partial class PersonBase : INotifyPropertyChanged
 {
     public partial string? FirstName { get; set; }
 }

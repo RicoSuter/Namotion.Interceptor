@@ -21,14 +21,9 @@ using System.Text.Json.Serialization;
 
 namespace YourDefaultNamespace
 {
-    public partial class BaseEntity : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+    public partial class BaseEntity : IInterceptorSubject
     {
-        public event PropertyChangedEventHandler? PropertyChanged;
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-
-        void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);
+        
 
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
@@ -93,7 +88,6 @@ namespace YourDefaultNamespace
                 if (!cancel && SetPropertyValue(nameof(Name), newValue, static (o) => ((BaseEntity)o)._Name, static (o, v) => ((BaseEntity)o)._Name = v))
                 {
                     OnNameChanged(_Name);
-                    RaisePropertyChanged(nameof(Name));
                 }
             }
         }
@@ -230,7 +224,6 @@ namespace YourDefaultNamespace
                 if (!cancel && SetPropertyValue(nameof(Name), newValue, static (o) => ((Person)o)._Name, static (o, v) => ((Person)o)._Name = v))
                 {
                     OnNameChanged(_Name);
-                    RaisePropertyChanged(nameof(Name));
                 }
             }
         }
@@ -255,7 +248,6 @@ namespace YourDefaultNamespace
                 if (!cancel && SetPropertyValue(nameof(Age), newValue, static (o) => ((Person)o)._Age, static (o, v) => ((Person)o)._Age = v))
                 {
                     OnAgeChanged(_Age);
-                    RaisePropertyChanged(nameof(Age));
                 }
             }
         }
@@ -383,7 +375,6 @@ namespace YourDefaultNamespace
                 if (!cancel && SetPropertyValue(nameof(Age), newValue, static (o) => ((Employee)o)._Age, static (o, v) => ((Employee)o)._Age = v))
                 {
                     OnAgeChanged(_Age);
-                    RaisePropertyChanged(nameof(Age));
                 }
             }
         }
