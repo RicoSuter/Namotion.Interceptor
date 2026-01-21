@@ -1,12 +1,12 @@
 using System;
 using System.Buffers;
-using System.IO;
 using System.Linq;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.IO;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
@@ -21,6 +21,8 @@ namespace Namotion.Interceptor.WebSocket.Client;
 /// </summary>
 public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSource, IAsyncDisposable
 {
+    private static readonly RecyclableMemoryStreamManager MemoryStreamManager = new();
+
     private readonly IInterceptorSubject _subject;
     private readonly WebSocketClientConfiguration _configuration;
     private readonly ILogger _logger;
@@ -33,7 +35,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     private CancellationTokenSource? _receiveCts;
     private TaskCompletionSource? _receiveLoopCompleted;
     private readonly SourceOwnershipManager _ownership;
-    private readonly SemaphoreSlim _sendLock = new(1, 1);
+    private readonly SemaphoreSlim _connectionLock = new(1, 1);
 
     private volatile bool _isStarted;
     private int _disposed;
@@ -87,6 +89,19 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
     private async Task ConnectAsync(CancellationToken cancellationToken)
     {
+        await _connectionLock.WaitAsync(cancellationToken);
+        try
+        {
+            await ConnectCoreAsync(cancellationToken);
+        }
+        finally
+        {
+            _connectionLock.Release();
+        }
+    }
+
+    private async Task ConnectCoreAsync(CancellationToken cancellationToken)
+    {
         // Clean up any previous connection
         if (_receiveCts is not null)
         {
@@ -136,7 +151,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
             try
             {
-                using var messageStream = new MemoryStream();
+                using var messageStream = MemoryStreamManager.GetStream();
 
                 WebSocketReceiveResult result;
                 do
@@ -240,21 +255,12 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     {
         _logger.LogDebug("WriteChangesAsync called with {Count} changes", changes.Length);
 
-        var webSocket = Volatile.Read(ref _webSocket);
-        if (webSocket?.State != WebSocketState.Open)
-        {
-            _logger.LogWarning("WebSocket not open, cannot send {Count} changes", changes.Length);
-            return WriteResult.Failure(changes, new InvalidOperationException("WebSocket is not connected"));
-        }
-
-        await _sendLock.WaitAsync(cancellationToken);
+        await _connectionLock.WaitAsync(cancellationToken);
         try
         {
-            // Re-check AFTER acquiring lock - socket may have changed
-            webSocket = Volatile.Read(ref _webSocket);
+            var webSocket = _webSocket;
             if (webSocket?.State != WebSocketState.Open)
             {
-                _logger.LogWarning("WebSocket closed while waiting for lock, cannot send {Count} changes", changes.Length);
                 return WriteResult.Failure(changes, new InvalidOperationException("WebSocket is not connected"));
             }
 
@@ -273,7 +279,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         }
         finally
         {
-            _sendLock.Release();
+            _connectionLock.Release();
         }
     }
 
@@ -286,9 +292,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             {
                 try
                 {
-                    // Create a new MemoryStream per message to avoid unbounded buffer growth
-                    // (MemoryStream never shrinks its internal buffer, so reusing causes memory leaks)
-                    using var messageStream = new MemoryStream();
+                    await using var messageStream = MemoryStreamManager.GetStream();
 
                     // Create timeout CTS outside the loop so CancelAfter isn't reset per fragment
                     using var messageTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -474,7 +478,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         await _stoppingTokenRegistration.DisposeAsync();
 
         _ownership.Dispose();
-        _sendLock.Dispose();
+        _connectionLock.Dispose();
 
         if (_receiveCts is not null)
         {
@@ -510,26 +514,26 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
     private sealed class ConnectionLifetime(Func<Task> onDispose) : IDisposable, IAsyncDisposable
     {
+        private int _disposed;
+
         public void Dispose()
         {
-            // Use Task.Run to avoid deadlocks when called from synchronization contexts
-            // that would block on the async close operation
-            Task.Run(async () =>
+            if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
+
+            // Fire and forget - synchronous disposal is best-effort
+            _ = Task.Run(async () =>
             {
-                try
-                {
-                    await onDispose();
-                }
-                catch
-                {
-                    // Best effort - disposal should not throw
-                }
-            }).Wait(TimeSpan.FromSeconds(5));
+                try { await onDispose(); }
+                catch { /* Best effort */ }
+            });
         }
 
         public async ValueTask DisposeAsync()
         {
-            await onDispose();
+            if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
+
+            try { await onDispose(); }
+            catch { /* Best effort */ }
         }
     }
 }
