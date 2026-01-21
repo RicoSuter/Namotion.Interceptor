@@ -12,9 +12,8 @@ internal static class WriteInterceptorFactory<TProperty>
             return static (ref interception, innerWriteValue) => innerWriteValue(interception.Property.Subject, interception.NewValue);
         }
 
-        var chain = new WriteInterceptorChain<IWriteInterceptor, TProperty>(
+        var chain = new WriteInterceptorChain<TProperty>(
             interceptors,
-            static (interceptor, ref context, next) => interceptor.WriteProperty(ref context, next),
             static (ref context, innerWriteValue) =>
             {
                 lock (context.Property.Subject.SyncRoot)
