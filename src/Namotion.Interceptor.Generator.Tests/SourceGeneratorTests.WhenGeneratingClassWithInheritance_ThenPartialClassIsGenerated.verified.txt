@@ -21,14 +21,9 @@ using System.Text.Json.Serialization;
 
 namespace YourDefaultNamespace
 {
-    public partial class Person : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+    public partial class Person : IInterceptorSubject
     {
-        public event PropertyChangedEventHandler? PropertyChanged;
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
-
-        void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);
+        
 
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
@@ -102,7 +97,6 @@ namespace YourDefaultNamespace
                 if (!cancel && SetPropertyValue(nameof(FirstName), newValue, static (o) => ((Person)o)._FirstName, static (o, v) => ((Person)o)._FirstName = v))
                 {
                     OnFirstNameChanged(_FirstName);
-                    RaisePropertyChanged(nameof(FirstName));
                 }
             }
         }
@@ -127,7 +121,6 @@ namespace YourDefaultNamespace
                 if (!cancel && SetPropertyValue(nameof(LastName), newValue, static (o) => ((Person)o)._LastName, static (o, v) => ((Person)o)._LastName = v))
                 {
                     OnLastNameChanged(_LastName);
-                    RaisePropertyChanged(nameof(LastName));
                 }
             }
         }
@@ -255,7 +248,6 @@ namespace YourDefaultNamespace
                 if (!cancel && SetPropertyValue(nameof(MainCourse), newValue, static (o) => ((Teacher)o)._MainCourse, static (o, v) => ((Teacher)o)._MainCourse = v))
                 {
                     OnMainCourseChanged(_MainCourse);
-                    RaisePropertyChanged(nameof(MainCourse));
                 }
             }
         }

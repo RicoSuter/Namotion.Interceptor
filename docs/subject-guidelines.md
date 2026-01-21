@@ -327,24 +327,68 @@ public partial class Sensor
 
 ## INotifyPropertyChanged Support
 
-All generated classes automatically implement `INotifyPropertyChanged` for data binding compatibility with WPF, MAUI, Blazor, and other UI frameworks.
+INPC is **opt-in** for data binding compatibility with WPF, MAUI, Blazor, and other UI frameworks. Declare `: INotifyPropertyChanged` on your class to enable it.
 
 ```csharp
 [InterceptorSubject]
-public partial class Person
+public partial class Person : INotifyPropertyChanged  // Opt-in
 {
     public partial string FirstName { get; set; }
 }
 
-// Usage - no extra code needed
+// Usage
 var person = new Person(context);
 person.PropertyChanged += (s, e) => Console.WriteLine($"{e.PropertyName} changed");
 person.FirstName = "Rico";  // Fires PropertyChanged event
 ```
 
+### Inheritance
+
+INPC works across inheritance hierarchies:
+
+```csharp
+[InterceptorSubject]
+public partial class PersonBase : INotifyPropertyChanged  // Declares INPC
+{
+    public partial string FirstName { get; set; }
+}
+
+[InterceptorSubject]
+public partial class Employee : PersonBase  // Inherits INPC
+{
+    public partial string Department { get; set; }  // Also fires PropertyChanged
+}
+```
+
+| Class | Event generated | `RaisePropertyChanged` in setters |
+|-------|-----------------|-----------------------------------|
+| Declares `: INotifyPropertyChanged` | Yes | Yes |
+| Inherits from INPC class | No (inherited) | Yes (calls inherited) |
+| Neither | No | No |
+
+### Derived Properties
+
+When a `[Derived]` property's computed value changes (because a dependency changed), `PropertyChanged` is also fired:
+
+```csharp
+[InterceptorSubject]
+public partial class Person : INotifyPropertyChanged
+{
+    public partial string FirstName { get; set; }
+    public partial string LastName { get; set; }
+
+    [Derived]
+    public string FullName => $"{FirstName} {LastName}";
+}
+
+person.PropertyChanged += (s, e) => Console.WriteLine(e.PropertyName);
+person.FirstName = "Rico";  // Fires: "FirstName", then "FullName"
+```
+
 ### Performance
 
-The `PropertyChanged?.Invoke(...)` pattern ensures zero overhead when no handlers are subscribed - only a null check occurs. The `PropertyChangedEventArgs` is not allocated unless the event has subscribers.
+- **Without INPC**: Zero overhead - no event field, no `RaisePropertyChanged` calls
+- **With INPC**: The `PropertyChanged?.Invoke(...)` pattern ensures minimal overhead when no handlers are subscribed - only a null check occurs
 
 ### When PropertyChanged Fires
 
