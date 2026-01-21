@@ -187,7 +187,7 @@ namespace {namespaceName}
         {(baseClass is null ? @"public event PropertyChangedEventHandler? PropertyChanged;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));
 
         void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);" : "")}
 
