@@ -156,10 +156,11 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
 
                     var baseClassTypeName = baseClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
-                    // Check if base class will have INotifyPropertyChanged + IRaisePropertyChanged:
+                    // Check if base class has INotifyPropertyChanged + IRaisePropertyChanged:
                     // 1. Base class has [InterceptorSubject] attribute (will get both generated), OR
-                    // 2. Any base class already implements IRaisePropertyChanged (which provides the RaisePropertyChanged method we call)
-                    // Note: We check for IRaisePropertyChanged, not just INotifyPropertyChanged, because we need the RaisePropertyChanged method
+                    // 2. Any base class implements IRaisePropertyChanged
+                    // When true, we use ((IRaisePropertyChanged)this).RaisePropertyChanged() to call the interface method,
+                    // which works whether the base implements it explicitly or implicitly.
                     var baseClassHasInpc = HasInterceptorSubjectAttribute(baseClass) ||
                         (cls.ClassNode.BaseList?.Types
                             .Select(t => semanticModel.GetTypeInfo(t.Type).Type as INamedTypeSymbol)
@@ -323,7 +324,17 @@ namespace {namespaceName}
                             var accessorText = accessor.IsKind(SyntaxKind.InitAccessorDeclaration) ? "init" : "set";
                             var modifiers = string.Join(" ", accessor.Modifiers.Select(m => m.Value) ?? []);
 
-                                            generatedCode +=
+                            // Optimize RaisePropertyChanged call:
+                            // - [InterceptorSubject] base: direct call to inherited protected method (fastest)
+                            // - Manual IRaisePropertyChanged base: interface cast (rare case)
+                            // - Own implementation: direct call to own method (fastest)
+                            var raisePropertyChangedCall = HasInterceptorSubjectAttribute(baseClass)
+                                ? $"RaisePropertyChanged(nameof({propertyName}))"
+                                : baseClassHasInpc
+                                    ? $"((IRaisePropertyChanged)this).RaisePropertyChanged(nameof({propertyName}))"
+                                    : $"RaisePropertyChanged(nameof({propertyName}))";
+
+                            generatedCode +=
     $@"
             {modifiers} {accessorText}
             {{
@@ -333,7 +344,7 @@ namespace {namespaceName}
                 if (!cancel && SetPropertyValue(nameof({propertyName}), newValue, static (o) => (({className})o)._{propertyName}, static (o, v) => (({className})o)._{propertyName} = v))
                 {{
                     On{propertyName}Changed(_{propertyName});
-                    RaisePropertyChanged(nameof({propertyName}));
+                    {raisePropertyChangedCall};
                 }}
             }}";
                         }
