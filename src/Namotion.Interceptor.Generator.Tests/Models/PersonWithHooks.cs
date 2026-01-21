@@ -13,11 +13,18 @@ public partial class PersonWithHooks
     public string? LastChangedValue { get; private set; }
     public bool ShouldCancel { get; set; }
     public string? ValueToCoerce { get; set; }
+    public bool ShouldThrowInChanging { get; set; }
+    public bool ShouldThrowInChanged { get; set; }
 
     partial void OnFirstNameChanging(ref string? newValue, ref bool cancel)
     {
         HookCalls.Add($"Changing:{newValue}");
         LastChangingValue = newValue;
+
+        if (ShouldThrowInChanging)
+        {
+            throw new InvalidOperationException("Exception in OnChanging");
+        }
 
         if (ShouldCancel)
         {
@@ -35,5 +42,10 @@ public partial class PersonWithHooks
     {
         HookCalls.Add($"Changed:{newValue}");
         LastChangedValue = newValue;
+
+        if (ShouldThrowInChanged)
+        {
+            throw new InvalidOperationException("Exception in OnChanged");
+        }
     }
 }
