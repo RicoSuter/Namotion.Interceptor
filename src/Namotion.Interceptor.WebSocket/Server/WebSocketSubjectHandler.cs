@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -107,8 +108,12 @@ public class WebSocketSubjectHandler
         }
         finally
         {
-            _connections.TryRemove(connection.ConnectionId, out _);
-            Interlocked.Decrement(ref _connectionCount);
+            // Only decrement if we successfully removed (prevents double-decrement with zombie cleanup)
+            if (_connections.TryRemove(connection.ConnectionId, out _))
+            {
+                Interlocked.Decrement(ref _connectionCount);
+            }
+
             await connection.DisposeAsync();
             _logger.LogInformation("Client {ConnectionId} disconnected", connection.ConnectionId);
         }
@@ -179,31 +184,66 @@ public class WebSocketSubjectHandler
 
     private async Task BroadcastUpdateAsync(SubjectUpdate update, CancellationToken cancellationToken)
     {
-        var tasks = _connections.Values.Select(c => c.SendUpdateAsync(update, cancellationToken));
-        await Task.WhenAll(tasks);
+        // Avoid LINQ allocations by using array-based iteration
+        var connectionCount = _connections.Count;
+        if (connectionCount == 0)
+        {
+            return;
+        }
+
+        var tasks = new Task[connectionCount];
+        var index = 0;
+
+        foreach (var connection in _connections.Values)
+        {
+            if (index < tasks.Length)
+            {
+                tasks[index++] = connection.SendUpdateAsync(update, cancellationToken);
+            }
+        }
+
+        // Handle case where connections changed during iteration
+        if (index > 0)
+        {
+            if (index == tasks.Length)
+            {
+                await Task.WhenAll(tasks);
+            }
+            else
+            {
+                // Create a properly sized array for WhenAll to avoid ambiguity
+                var actualTasks = new Task[index];
+                Array.Copy(tasks, actualTasks, index);
+                await Task.WhenAll(actualTasks);
+            }
+        }
 
         // Remove zombie connections (repeated send failures)
+        List<WebSocketClientConnection>? zombiesToDispose = null;
         foreach (var (connectionId, connection) in _connections)
         {
-            if (connection.HasRepeatedSendFailures)
+            if (connection.HasRepeatedSendFailures && _connections.TryRemove(connectionId, out var removed))
             {
-                if (_connections.TryRemove(connectionId, out var removed))
-                {
-                    _logger.LogWarning("Removing zombie connection {ConnectionId} due to repeated send failures", connectionId);
-                    Interlocked.Decrement(ref _connectionCount);
+                _logger.LogWarning("Removing zombie connection {ConnectionId} due to repeated send failures", connectionId);
+                Interlocked.Decrement(ref _connectionCount);
 
-                    // Fire and forget disposal
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            await removed.DisposeAsync();
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogWarning(ex, "Error disposing zombie connection {ConnectionId}", connectionId);
-                        }
-                    });
+                zombiesToDispose ??= new List<WebSocketClientConnection>();
+                zombiesToDispose.Add(removed);
+            }
+        }
+
+        // Dispose zombies outside the enumeration
+        if (zombiesToDispose is not null)
+        {
+            foreach (var zombie in zombiesToDispose)
+            {
+                try
+                {
+                    await zombie.DisposeAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error disposing zombie connection {ConnectionId}", zombie.ConnectionId);
                 }
             }
         }

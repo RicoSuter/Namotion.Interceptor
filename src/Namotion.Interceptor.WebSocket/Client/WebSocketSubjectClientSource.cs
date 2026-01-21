@@ -11,6 +11,7 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.WebSocket.Internal;
 using Namotion.Interceptor.WebSocket.Protocol;
 using Namotion.Interceptor.WebSocket.Serialization;
 
@@ -66,18 +67,19 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
         _isStarted = true;
 
+        var capturedSocket = _webSocket;
         return new ConnectionLifetime(async () =>
         {
-            if (_webSocket?.State == WebSocketState.Open)
+            if (capturedSocket?.State == WebSocketState.Open)
             {
                 try
                 {
                     using var closeCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                    await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Client closing", closeCts.Token);
+                    await capturedSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Client closing", closeCts.Token);
                 }
                 catch (OperationCanceledException)
                 {
-                    _webSocket.Abort();
+                    capturedSocket.Abort();
                 }
                 catch (Exception ex)
                 {
@@ -147,44 +149,40 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             var helloBytes = _serializer.SerializeMessage(MessageType.Hello, null, hello);
             await _webSocket.SendAsync(helloBytes, WebSocketMessageType.Text, true, cancellationToken);
 
-            // Receive Welcome (handling fragmentation for large state)
-            var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
-            try
+            // Receive Welcome using shared utility
+            var readResult = await WebSocketMessageReader.ReadMessageAsync(
+                _webSocket, _configuration.MaxMessageSize, cancellationToken);
+
+            if (readResult.IsCloseMessage)
             {
-                using var messageStream = MemoryStreamManager.GetStream();
-
-                WebSocketReceiveResult result;
-                do
-                {
-                    result = await _webSocket.ReceiveAsync(buffer, cancellationToken);
-                    if (messageStream.Length + result.Count > _configuration.MaxMessageSize)
-                    {
-                        throw new InvalidOperationException($"Message exceeds maximum size of {_configuration.MaxMessageSize} bytes");
-                    }
-                    messageStream.Write(buffer, 0, result.Count);
-                } while (!result.EndOfMessage);
-
-                var messageBytes = new ReadOnlySpan<byte>(messageStream.GetBuffer(), 0, (int)messageStream.Length);
-                var (messageType, _, payloadBytes) = _serializer.DeserializeMessageEnvelope(messageBytes);
-
-                if (messageType != MessageType.Welcome)
-                {
-                    throw new InvalidOperationException($"Expected Welcome message, got {messageType}");
-                }
-
-                var welcome = _serializer.Deserialize<WelcomePayload>(payloadBytes.Span);
-                _initialState = welcome.State;
-
-                _logger.LogInformation("Connected to WebSocket server");
-
-                // Start receive loop (signals _receiveLoopCompleted when done)
-                _ = ReceiveLoopAsync(_receiveCts.Token);
-                receiveLoopStarted = true;
+                throw new InvalidOperationException("Server closed connection during handshake");
             }
-            finally
+
+            if (readResult.ExceededMaxSize)
             {
-                ArrayPool<byte>.Shared.Return(buffer);
+                throw new InvalidOperationException($"Message exceeds maximum size of {_configuration.MaxMessageSize} bytes");
             }
+
+            if (!readResult.Success)
+            {
+                throw new InvalidOperationException("Failed to receive Welcome message");
+            }
+
+            var (messageType, _, payloadBytes) = _serializer.DeserializeMessageEnvelope(readResult.MessageBytes.Span);
+
+            if (messageType != MessageType.Welcome)
+            {
+                throw new InvalidOperationException($"Expected Welcome message, got {messageType}");
+            }
+
+            var welcome = _serializer.Deserialize<WelcomePayload>(payloadBytes.Span);
+            _initialState = welcome.State;
+
+            _logger.LogInformation("Connected to WebSocket server");
+
+            // Start receive loop (signals _receiveLoopCompleted when done)
+            _ = ReceiveLoopAsync(_receiveCts.Token);
+            receiveLoopStarted = true;
         }
         finally
         {
@@ -286,6 +284,11 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
+
+        // Reusable CTS to reduce allocations (reset instead of recreate when possible)
+        var timeoutCts = new CancellationTokenSource();
+        CancellationTokenSource? linkedCts = null;
+
         try
         {
             while (!cancellationToken.IsCancellationRequested && _webSocket?.State == WebSocketState.Open)
@@ -294,29 +297,34 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                 {
                     await using var messageStream = MemoryStreamManager.GetStream();
 
-                    // Create timeout CTS outside the loop so CancelAfter isn't reset per fragment
-                    using var messageTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                    messageTimeoutCts.CancelAfter(_configuration.ReceiveTimeout);
-
-                    WebSocketReceiveResult result;
-                    do
+                    // Reset or recreate the timeout CTS for each message
+                    if (!timeoutCts.TryReset())
                     {
-                        result = await _webSocket.ReceiveAsync(buffer, messageTimeoutCts.Token);
+                        timeoutCts.Dispose();
+                        timeoutCts = new CancellationTokenSource();
+                    }
 
-                        if (result.MessageType == WebSocketMessageType.Close)
-                        {
-                            _logger.LogInformation("Server closed connection");
-                            return;
-                        }
+                    timeoutCts.CancelAfter(_configuration.ReceiveTimeout);
 
-                        if (messageStream.Length + result.Count > _configuration.MaxMessageSize)
-                        {
-                            _logger.LogWarning("Message exceeds maximum size of {MaxSize} bytes", _configuration.MaxMessageSize);
-                            throw new InvalidOperationException($"Message exceeds maximum size of {_configuration.MaxMessageSize} bytes");
-                        }
+                    // Create linked token for this message
+                    linkedCts?.Dispose();
+                    linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
 
-                        messageStream.Write(buffer, 0, result.Count);
-                    } while (!result.EndOfMessage);
+                    // Use shared utility for fragmented message receive
+                    var readResult = await WebSocketMessageReader.ReadMessageIntoStreamAsync(
+                        _webSocket, buffer, messageStream, _configuration.MaxMessageSize, linkedCts.Token);
+
+                    if (readResult.IsCloseMessage)
+                    {
+                        _logger.LogInformation("Server closed connection");
+                        return;
+                    }
+
+                    if (readResult.ExceededMaxSize)
+                    {
+                        _logger.LogWarning("Message exceeds maximum size of {MaxSize} bytes", _configuration.MaxMessageSize);
+                        throw new InvalidOperationException($"Message exceeds maximum size of {_configuration.MaxMessageSize} bytes");
+                    }
 
                     var messageBytes = new ReadOnlySpan<byte>(messageStream.GetBuffer(), 0, (int)messageStream.Length);
                     var (messageType, _, payloadBytes) = _serializer.DeserializeMessageEnvelope(messageBytes);
@@ -359,6 +367,8 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         finally
         {
             ArrayPool<byte>.Shared.Return(buffer);
+            timeoutCts.Dispose();
+            linkedCts?.Dispose();
 
             // Signal that receive loop has completed (for reconnection handling)
             _receiveLoopCompleted?.TrySetResult();
@@ -471,20 +481,40 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
 
-        // Signal receive loop completion to unblock ExecuteAsync
         _receiveLoopCompleted?.TrySetResult();
-
-        // Dispose the stopping token registration to prevent memory leaks
         await _stoppingTokenRegistration.DisposeAsync();
-
-        _ownership.Dispose();
-        _connectionLock.Dispose();
 
         if (_receiveCts is not null)
         {
             await _receiveCts.CancelAsync();
-            _receiveCts.Dispose();
         }
+
+        var lockAcquired = false;
+        try
+        {
+            lockAcquired = await _connectionLock.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        catch (ObjectDisposedException)
+        {
+            // Lock already disposed, continue
+        }
+
+        _ownership.Dispose();
+
+        try
+        {
+            if (lockAcquired)
+            {
+                _connectionLock.Release();
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            // Ignore
+        }
+
+        _connectionLock.Dispose();
+        _receiveCts?.Dispose();
 
         if (_webSocket is not null)
         {
