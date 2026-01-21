@@ -1,6 +1,5 @@
 using System;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.WebSocket.Protocol;
 
@@ -39,26 +38,39 @@ public class JsonWebSocketSerializer : IWebSocketSerializer
 
     public (MessageType Type, int? CorrelationId, ReadOnlyMemory<byte> PayloadBytes) DeserializeMessageEnvelope(ReadOnlySpan<byte> bytes)
     {
-        var array = JsonSerializer.Deserialize<JsonArray>(bytes, Options)
-            ?? throw new InvalidOperationException("Invalid message envelope");
-
-        if (array.Count < 3)
+        var reader = new Utf8JsonReader(bytes);
+        if (!reader.Read() || reader.TokenType != JsonTokenType.StartArray)
         {
-            throw new InvalidOperationException("Message envelope must have at least 3 elements");
+            throw new InvalidOperationException("Invalid message envelope: expected array");
         }
 
-        var messageTypeNode = array[0];
-        if (messageTypeNode is null)
+        if (!reader.Read())
         {
-            throw new InvalidOperationException("Message envelope element [0] (messageType) is null");
+            throw new InvalidOperationException("Invalid message envelope: missing messageType");
         }
 
-        var messageType = (MessageType)messageTypeNode.GetValue<int>();
-        var correlationId = array[1]?.GetValue<int>();
+        if (reader.TokenType != JsonTokenType.Number)
+        {
+            throw new InvalidOperationException("Invalid message envelope: messageType must be a number");
+        }
+        var messageType = (MessageType)reader.GetInt32();
+        
+        if (!reader.Read())
+        {
+            throw new InvalidOperationException("Invalid message envelope: missing correlationId");
+        }
+        int? correlationId = reader.TokenType == JsonTokenType.Null ? null : reader.GetInt32();
+      
+        if (!reader.Read())
+        {
+            throw new InvalidOperationException("Invalid message envelope: missing payload");
+        }
 
-        // Re-serialize payload element to bytes for later deserialization
-        var payloadBytes = JsonSerializer.SerializeToUtf8Bytes(array[2], Options);
+        var payloadStart = (int)reader.TokenStartIndex;
+        reader.Skip();
 
+        var payloadEnd = (int)reader.BytesConsumed;
+        var payloadBytes = bytes.Slice(payloadStart, payloadEnd - payloadStart).ToArray();
         return (messageType, correlationId, payloadBytes);
     }
 }
