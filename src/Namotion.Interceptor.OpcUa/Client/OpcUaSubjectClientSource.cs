@@ -333,26 +333,46 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                         // SDK reconnection in progress - check for stall using time-based detection
                         // Note: We check stall regardless of session.Connected state because the old
                         // session's Connected property can return stale values during SDK reconnection.
-                        var startedAt = Volatile.Read(ref _reconnectStartedAtTicks);
-                        if (startedAt == 0)
+                        
+                        // Skip stall detection during disposal
+                        if (Volatile.Read(ref _disposed) == 1)
+                        {
+                            continue;
+                        }
+
+                        var startedAtTicks = Volatile.Read(ref _reconnectStartedAtTicks);
+                        if (startedAtTicks == 0)
                         {
                             // First detection of reconnecting state - record start time
-                            Interlocked.CompareExchange(ref _reconnectStartedAtTicks, DateTime.UtcNow.Ticks, 0);
+                            var nowTicks = DateTime.UtcNow.Ticks;
+                            Interlocked.CompareExchange(ref _reconnectStartedAtTicks, nowTicks, 0);
                         }
                         else
                         {
-                            var elapsed = DateTime.UtcNow - new DateTime(startedAt, DateTimeKind.Utc);
+                            // Validate ticks to prevent arithmetic exceptions from corrupted values
+                            if (startedAtTicks < DateTime.MinValue.Ticks || startedAtTicks > DateTime.MaxValue.Ticks)
+                            {
+                                _logger.LogError("Invalid reconnect start timestamp detected: {Ticks}. Resetting stall detection.", startedAtTicks);
+                                Volatile.Write(ref _reconnectStartedAtTicks, 0);
+                                continue;
+                            }
+
+                            var elapsed = DateTime.UtcNow - new DateTime(startedAtTicks, DateTimeKind.Utc);
                             if (elapsed > _configuration.MaxReconnectDuration)
                             {
-                                // SDK handler likely timed out or is stuck - force reset and trigger manual reconnection
-                                if (sessionManager.TryForceResetIfStalled())
+                                // Re-capture sessionManager to ensure it's still valid before calling TryForceResetIfStalled
+                                var sm = _sessionManager;
+                                if (sm != null && sm.TryForceResetIfStalled())
                                 {
                                     _logger.LogWarning(
-                                        "SDK reconnection stalled (session={HasSession}, connected={IsConnected}, elapsed={Elapsed}s). " +
-                                        "Starting manual reconnection...",
-                                        currentSession is not null,
+                                        "SDK reconnection stalled for {ElapsedSeconds}s (max: {MaxSeconds}s). " +
+                                        "Session state: Connected={IsConnected}, HasSession={HasSession}. " +
+                                        "Reconnect attempts: {Attempts}. Forcing reset and starting manual reconnection...",
+                                        elapsed.TotalSeconds,
+                                        _configuration.MaxReconnectDuration.TotalSeconds,
                                         sessionIsConnected,
-                                        elapsed.TotalSeconds);
+                                        currentSession is not null,
+                                        TotalReconnectionAttempts);
 
                                     Volatile.Write(ref _reconnectStartedAtTicks, 0);
                                     await ReconnectSessionAsync(stoppingToken).ConfigureAwait(false);

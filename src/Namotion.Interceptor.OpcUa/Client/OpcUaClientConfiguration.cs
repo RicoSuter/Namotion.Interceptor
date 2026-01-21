@@ -56,7 +56,14 @@ public class OpcUaClientConfiguration
     /// Gets or sets the maximum time to wait for SDK reconnection before forcing a manual reconnection.
     /// If the SDK's reconnect handler hasn't succeeded within this duration, stall detection triggers
     /// a full session reset and manual reconnection attempt.
-    /// Default is 30 seconds. Use lower values (e.g., 15s) for faster recovery in tests.
+    /// 
+    /// Default is 30 seconds, which allows for:
+    /// - SDK reconnect handler attempts (up to ReconnectHandlerTimeout)
+    /// - Network timeouts and retries
+    /// - Server restart time in production environments
+    /// 
+    /// Use lower values (e.g., 15 seconds) for faster recovery in controlled test environments
+    /// or scenarios where server availability is more predictable.
     /// </summary>
     public TimeSpan MaxReconnectDuration { get; set; } = TimeSpan.FromSeconds(30);
 
