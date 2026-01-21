@@ -28,7 +28,8 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     private readonly WebSocketClientConfiguration _configuration;
     private readonly ILogger _logger;
     private readonly ISubjectUpdateProcessor[] _processors;
-    private readonly IWebSocketSerializer _serializer = new JsonWebSocketSerializer();
+    private readonly IWebSocketSerializer _serializer = JsonWebSocketSerializer.Instance;
+    private readonly ArrayBufferWriter<byte> _sendBuffer = new(4096);
 
     private ClientWebSocket? _webSocket;
     private SubjectPropertyWriter? _propertyWriter;
@@ -144,13 +145,14 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             _logger.LogInformation("Connecting to WebSocket server at {Uri}", _configuration.ServerUri);
             await _webSocket.ConnectAsync(_configuration.ServerUri!, connectCts.Token);
 
-            // Send Hello
+            // Send Hello using reusable buffer
             var hello = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
-            var helloBytes = _serializer.SerializeMessage(MessageType.Hello, null, hello);
-            await _webSocket.SendAsync(helloBytes, WebSocketMessageType.Text, true, cancellationToken);
+            _sendBuffer.Clear();
+            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Hello, null, hello);
+            await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken);
 
             // Receive Welcome using shared utility
-            var readResult = await WebSocketMessageReader.ReadMessageAsync(
+            using var readResult = await WebSocketMessageReader.ReadMessageAsync(
                 _webSocket, _configuration.MaxMessageSize, cancellationToken);
 
             if (readResult.IsCloseMessage)
@@ -168,14 +170,14 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                 throw new InvalidOperationException("Failed to receive Welcome message");
             }
 
-            var (messageType, _, payloadBytes) = _serializer.DeserializeMessageEnvelope(readResult.MessageBytes.Span);
+            var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(readResult.MessageBytes.Span);
 
             if (messageType != MessageType.Welcome)
             {
                 throw new InvalidOperationException($"Expected Welcome message, got {messageType}");
             }
 
-            var welcome = _serializer.Deserialize<WelcomePayload>(payloadBytes.Span);
+            var welcome = _serializer.Deserialize<WelcomePayload>(readResult.MessageBytes.Span.Slice(payloadStart, payloadLength));
             _initialState = welcome.State;
 
             _logger.LogInformation("Connected to WebSocket server");
@@ -263,10 +265,11 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             }
 
             var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, changes.Span, _processors);
-            var bytes = _serializer.SerializeMessage(MessageType.Update, null, update);
+            _sendBuffer.Clear();
+            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, null, update);
             _logger.LogDebug("Sending {ByteCount} bytes ({SubjectCount} subjects) to server",
-                bytes.Length, update.Subjects.Count);
-            await webSocket.SendAsync(bytes, WebSocketMessageType.Text, true, cancellationToken);
+                _sendBuffer.WrittenCount, update.Subjects.Count);
+            await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken);
             _logger.LogDebug("Sent update successfully");
             return WriteResult.Success;
         }
@@ -327,17 +330,18 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                     }
 
                     var messageBytes = new ReadOnlySpan<byte>(messageStream.GetBuffer(), 0, (int)messageStream.Length);
-                    var (messageType, _, payloadBytes) = _serializer.DeserializeMessageEnvelope(messageBytes);
+                    var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(messageBytes);
+                    var payloadBytes = messageBytes.Slice(payloadStart, payloadLength);
 
                     switch (messageType)
                     {
                         case MessageType.Update:
-                            var update = _serializer.Deserialize<SubjectUpdate>(payloadBytes.Span);
+                            var update = _serializer.Deserialize<SubjectUpdate>(payloadBytes);
                             HandleUpdate(update);
                             break;
 
                         case MessageType.Error:
-                            var error = _serializer.Deserialize<ErrorPayload>(payloadBytes.Span);
+                            var error = _serializer.Deserialize<ErrorPayload>(payloadBytes);
                             _logger.LogWarning("Received error from server: {Code} - {Message}", error.Code, error.Message);
                             break;
                     }
@@ -481,63 +485,21 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
 
-        _receiveLoopCompleted?.TrySetResult();
+        // Cancel all operations
         await _stoppingTokenRegistration.DisposeAsync();
+        _receiveLoopCompleted?.TrySetResult();
 
         if (_receiveCts is not null)
         {
             await _receiveCts.CancelAsync();
+            _receiveCts.Dispose();
         }
 
-        var lockAcquired = false;
-        try
-        {
-            lockAcquired = await _connectionLock.WaitAsync(TimeSpan.FromSeconds(5));
-        }
-        catch (ObjectDisposedException)
-        {
-            // Lock already disposed, continue
-        }
-
+        // Clean up resources
         _ownership.Dispose();
-
-        try
-        {
-            if (lockAcquired)
-            {
-                _connectionLock.Release();
-            }
-        }
-        catch (ObjectDisposedException)
-        {
-            // Ignore
-        }
-
+        _webSocket?.Abort();
+        _webSocket?.Dispose();
         _connectionLock.Dispose();
-        _receiveCts?.Dispose();
-
-        if (_webSocket is not null)
-        {
-            if (_webSocket.State == WebSocketState.Open)
-            {
-                try
-                {
-                    using var closeCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                    await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Disposing", closeCts.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                    // Close timed out, abort
-                    _webSocket.Abort();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Error during WebSocket close in disposal");
-                }
-            }
-
-            _webSocket.Dispose();
-        }
 
         Dispose();
     }
@@ -548,20 +510,13 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
         public void Dispose()
         {
+            // Prefer DisposeAsync for proper cleanup
             if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
-
-            // Fire and forget - synchronous disposal is best-effort
-            _ = Task.Run(async () =>
-            {
-                try { await onDispose(); }
-                catch { /* Best effort */ }
-            });
         }
 
         public async ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
-
             try { await onDispose(); }
             catch { /* Best effort */ }
         }

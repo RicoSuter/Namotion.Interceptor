@@ -184,67 +184,25 @@ public class WebSocketSubjectHandler
 
     private async Task BroadcastUpdateAsync(SubjectUpdate update, CancellationToken cancellationToken)
     {
-        // Avoid LINQ allocations by using array-based iteration
-        var connectionCount = _connections.Count;
-        if (connectionCount == 0)
-        {
-            return;
-        }
+        if (_connections.IsEmpty) return;
 
-        var tasks = new Task[connectionCount];
-        var index = 0;
-
+        // Send to all connections
+        var tasks = new List<Task>(_connections.Count);
         foreach (var connection in _connections.Values)
         {
-            if (index < tasks.Length)
-            {
-                tasks[index++] = connection.SendUpdateAsync(update, cancellationToken);
-            }
+            tasks.Add(connection.SendUpdateAsync(update, cancellationToken));
         }
 
-        // Handle case where connections changed during iteration
-        if (index > 0)
-        {
-            if (index == tasks.Length)
-            {
-                await Task.WhenAll(tasks);
-            }
-            else
-            {
-                // Create a properly sized array for WhenAll to avoid ambiguity
-                var actualTasks = new Task[index];
-                Array.Copy(tasks, actualTasks, index);
-                await Task.WhenAll(actualTasks);
-            }
-        }
+        await Task.WhenAll(tasks);
 
         // Remove zombie connections (repeated send failures)
-        List<WebSocketClientConnection>? zombiesToDispose = null;
         foreach (var (connectionId, connection) in _connections)
         {
-            if (connection.HasRepeatedSendFailures && _connections.TryRemove(connectionId, out var removed))
+            if (connection.HasRepeatedSendFailures && _connections.TryRemove(connectionId, out _))
             {
                 _logger.LogWarning("Removing zombie connection {ConnectionId} due to repeated send failures", connectionId);
                 Interlocked.Decrement(ref _connectionCount);
-
-                zombiesToDispose ??= new List<WebSocketClientConnection>();
-                zombiesToDispose.Add(removed);
-            }
-        }
-
-        // Dispose zombies outside the enumeration
-        if (zombiesToDispose is not null)
-        {
-            foreach (var zombie in zombiesToDispose)
-            {
-                try
-                {
-                    await zombie.DisposeAsync();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Error disposing zombie connection {ConnectionId}", zombie.ConnectionId);
-                }
+                await connection.DisposeAsync();
             }
         }
     }
@@ -258,30 +216,42 @@ public class WebSocketSubjectHandler
 
     public async ValueTask CloseAllConnectionsAsync()
     {
-        // Drain all connections atomically
-        var connectionsToClose = new System.Collections.Generic.List<WebSocketClientConnection>();
-        while (!_connections.IsEmpty)
+        // Snapshot current keys and drain connections
+        var connectionsToClose = new List<WebSocketClientConnection>();
+        foreach (var key in _connections.Keys.ToArray())
         {
-            foreach (var key in _connections.Keys.ToList())
+            if (_connections.TryRemove(key, out var connection))
             {
-                if (_connections.TryRemove(key, out var connection))
-                {
-                    connectionsToClose.Add(connection);
-                }
+                Interlocked.Decrement(ref _connectionCount);
+                connectionsToClose.Add(connection);
             }
         }
 
-        // Close all in parallel
-        await Task.WhenAll(connectionsToClose.Select(async connection =>
+        if (connectionsToClose.Count == 0)
         {
-            try
-            {
-                await connection.DisposeAsync();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Error closing connection {ConnectionId}", connection.ConnectionId);
-            }
-        }));
+            return;
+        }
+
+        // Close all in parallel
+        var closeTasks = new Task[connectionsToClose.Count];
+        for (var i = 0; i < connectionsToClose.Count; i++)
+        {
+            var connection = connectionsToClose[i];
+            closeTasks[i] = CloseConnectionAsync(connection);
+        }
+
+        await Task.WhenAll(closeTasks);
+    }
+
+    private async Task CloseConnectionAsync(WebSocketClientConnection connection)
+    {
+        try
+        {
+            await connection.DisposeAsync();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error closing connection {ConnectionId}", connection.ConnectionId);
+        }
     }
 }

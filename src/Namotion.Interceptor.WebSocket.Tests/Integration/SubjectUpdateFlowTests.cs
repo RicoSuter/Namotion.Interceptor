@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Updates;
@@ -136,8 +137,8 @@ public class SubjectUpdateFlowTests
 
         var welcome = new WelcomePayload { Version = 1, Format = WebSocketFormat.Json, State = update };
         var bytes = serializer.SerializeMessage(MessageType.Welcome, null, welcome);
-        var (_, _, payloadBytes) = serializer.DeserializeMessageEnvelope(bytes);
-        var deserializedWelcome = serializer.Deserialize<WelcomePayload>(payloadBytes.Span);
+        var (_, _, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
+        var deserializedWelcome = serializer.Deserialize<WelcomePayload>(bytes.AsSpan(payloadStart, payloadLength));
 
         // This should not throw an InvalidCastException for JsonElement -> int conversion
         clientRoot.ApplySubjectUpdate(deserializedWelcome.State!, DefaultSubjectFactory.Instance);
@@ -189,8 +190,8 @@ public class SubjectUpdateFlowTests
         var update = SubjectUpdate.CreateCompleteUpdate(serverRoot, []);
         var welcome = new WelcomePayload { Version = 1, Format = WebSocketFormat.Json, State = update };
         var bytes = serializer.SerializeMessage(MessageType.Welcome, null, welcome);
-        var (_, _, payloadBytes) = serializer.DeserializeMessageEnvelope(bytes);
-        var deserializedWelcome = serializer.Deserialize<WelcomePayload>(payloadBytes.Span);
+        var (_, _, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
+        var deserializedWelcome = serializer.Deserialize<WelcomePayload>(bytes.AsSpan(payloadStart, payloadLength));
 
         clientRoot.ApplySubjectUpdate(deserializedWelcome.State!, DefaultSubjectFactory.Instance);
 
@@ -251,8 +252,8 @@ public class SubjectUpdateFlowTests
         var json = System.Text.Encoding.UTF8.GetString(bytes);
         Assert.Contains("Initial", json); // Verify JSON contains the value
 
-        var (_, _, payloadBytes) = serializer.DeserializeMessageEnvelope(bytes);
-        var deserializedWelcome = serializer.Deserialize<WelcomePayload>(payloadBytes.Span);
+        var (_, _, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
+        var deserializedWelcome = serializer.Deserialize<WelcomePayload>(bytes.AsSpan(payloadStart, payloadLength));
 
         // Verify deserialized update has the property
         Assert.NotNull(deserializedWelcome.State);

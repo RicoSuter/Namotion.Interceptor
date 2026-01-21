@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.WebSocket.Protocol;
@@ -6,10 +7,15 @@ using Namotion.Interceptor.WebSocket.Protocol;
 namespace Namotion.Interceptor.WebSocket.Serialization;
 
 /// <summary>
-/// JSON serializer for WebSocket messages.
+/// JSON serializer for WebSocket messages. This class is stateless and thread-safe.
 /// </summary>
 public class JsonWebSocketSerializer : IWebSocketSerializer
 {
+    /// <summary>
+    /// Shared singleton instance. Use this to avoid allocating a new serializer per connection.
+    /// </summary>
+    public static JsonWebSocketSerializer Instance { get; } = new();
+
     private static readonly JsonSerializerOptions Options = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -36,7 +42,27 @@ public class JsonWebSocketSerializer : IWebSocketSerializer
         return JsonSerializer.SerializeToUtf8Bytes(envelope, Options);
     }
 
-    public (MessageType Type, int? CorrelationId, ReadOnlyMemory<byte> PayloadBytes) DeserializeMessageEnvelope(ReadOnlySpan<byte> bytes)
+    public void SerializeMessageTo<T>(IBufferWriter<byte> bufferWriter, MessageType messageType, int? correlationId, T payload)
+    {
+        using var writer = new Utf8JsonWriter(bufferWriter);
+        writer.WriteStartArray();
+        writer.WriteNumberValue((int)messageType);
+
+        if (correlationId.HasValue)
+        {
+            writer.WriteNumberValue(correlationId.Value);
+        }
+        else
+        {
+            writer.WriteNullValue();
+        }
+
+        JsonSerializer.Serialize(writer, payload, Options);
+        writer.WriteEndArray();
+        writer.Flush();
+    }
+
+    public (MessageType Type, int? CorrelationId, int PayloadStart, int PayloadLength) DeserializeMessageEnvelope(ReadOnlySpan<byte> bytes)
     {
         var reader = new Utf8JsonReader(bytes);
         if (!reader.Read() || reader.TokenType != JsonTokenType.StartArray)
@@ -54,13 +80,13 @@ public class JsonWebSocketSerializer : IWebSocketSerializer
             throw new InvalidOperationException("Invalid message envelope: messageType must be a number");
         }
         var messageType = (MessageType)reader.GetInt32();
-        
+
         if (!reader.Read())
         {
             throw new InvalidOperationException("Invalid message envelope: missing correlationId");
         }
         int? correlationId = reader.TokenType == JsonTokenType.Null ? null : reader.GetInt32();
-      
+
         if (!reader.Read())
         {
             throw new InvalidOperationException("Invalid message envelope: missing payload");
@@ -68,9 +94,8 @@ public class JsonWebSocketSerializer : IWebSocketSerializer
 
         var payloadStart = (int)reader.TokenStartIndex;
         reader.Skip();
+        var payloadLength = (int)reader.BytesConsumed - payloadStart;
 
-        var payloadEnd = (int)reader.BytesConsumed;
-        var payloadBytes = bytes.Slice(payloadStart, payloadEnd - payloadStart).ToArray();
-        return (messageType, correlationId, payloadBytes);
+        return (messageType, correlationId, payloadStart, payloadLength);
     }
 }

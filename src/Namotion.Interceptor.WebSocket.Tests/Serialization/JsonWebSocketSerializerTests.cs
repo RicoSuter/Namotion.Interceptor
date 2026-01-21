@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.WebSocket.Protocol;
@@ -62,12 +63,12 @@ public class JsonWebSocketSerializerTests
         var payload = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
         var bytes = _serializer.SerializeMessage(MessageType.Hello, 42, payload);
 
-        var (messageType, correlationId, payloadBytes) = _serializer.DeserializeMessageEnvelope(bytes);
+        var (messageType, correlationId, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
 
         Assert.Equal(MessageType.Hello, messageType);
         Assert.Equal(42, correlationId);
 
-        var deserializedPayload = _serializer.Deserialize<HelloPayload>(payloadBytes.Span);
+        var deserializedPayload = _serializer.Deserialize<HelloPayload>(bytes.AsSpan(payloadStart, payloadLength));
         Assert.Equal(1, deserializedPayload.Version);
     }
 
@@ -95,11 +96,11 @@ public class JsonWebSocketSerializerTests
         };
 
         var bytes = _serializer.SerializeMessage(MessageType.Welcome, null, welcome);
-        var (messageType, _, payloadBytes) = _serializer.DeserializeMessageEnvelope(bytes);
+        var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
 
         Assert.Equal(MessageType.Welcome, messageType);
 
-        var deserializedWelcome = _serializer.Deserialize<WelcomePayload>(payloadBytes.Span);
+        var deserializedWelcome = _serializer.Deserialize<WelcomePayload>(bytes.AsSpan(payloadStart, payloadLength));
         Assert.NotNull(deserializedWelcome.State);
         Assert.True(deserializedWelcome.State.Subjects.ContainsKey("1"));
         Assert.True(deserializedWelcome.State.Subjects["1"].ContainsKey("Name"));
