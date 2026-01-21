@@ -53,11 +53,12 @@ public class OpcUaClientConfiguration
     public TimeSpan SubscriptionHealthCheckInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
-    /// Gets or sets the number of health check iterations to wait before forcing a stall reset when SDK reconnection
-    /// appears stuck. Total stall detection time = StallDetectionIterations × SubscriptionHealthCheckInterval.
-    /// Default is 10 iterations. Use lower values (e.g., 3) for faster recovery in tests.
+    /// Gets or sets the maximum time to wait for SDK reconnection before forcing a manual reconnection.
+    /// If the SDK's reconnect handler hasn't succeeded within this duration, stall detection triggers
+    /// a full session reset and manual reconnection attempt.
+    /// Default is 30 seconds. Use lower values (e.g., 15s) for faster recovery in tests.
     /// </summary>
-    public int StallDetectionIterations { get; set; } = 10;
+    public TimeSpan MaxReconnectDuration { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Gets or sets an async predicate that is called when an unknown (not statically typed) OPC UA node or variable is found during browsing.
@@ -461,11 +462,11 @@ public class OpcUaClientConfiguration
                 nameof(ReconnectInterval));
         }
 
-        if (StallDetectionIterations < 1)
+        if (MaxReconnectDuration < TimeSpan.FromSeconds(5))
         {
             throw new ArgumentException(
-                $"StallDetectionIterations must be at least 1, got: {StallDetectionIterations}",
-                nameof(StallDetectionIterations));
+                $"MaxReconnectDuration must be at least 5 seconds, got: {MaxReconnectDuration.TotalSeconds}s",
+                nameof(MaxReconnectDuration));
         }
 
         if (MinPublishRequestCount < 1)
