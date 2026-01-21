@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using Namotion.Interceptor.WebSocket.Protocol;
 
 namespace Namotion.Interceptor.WebSocket.Serialization;
@@ -30,7 +31,14 @@ public interface IWebSocketSerializer
     byte[] SerializeMessage<T>(MessageType messageType, int? correlationId, T payload);
 
     /// <summary>
-    /// Deserializes a message envelope and returns the message type, correlation ID, and raw payload bytes.
+    /// Serializes a complete message envelope [MessageType, CorrelationId, Payload] to a buffer writer.
+    /// This avoids allocating a new byte array for each message.
     /// </summary>
-    (MessageType Type, int? CorrelationId, ReadOnlyMemory<byte> PayloadBytes) DeserializeMessageEnvelope(ReadOnlySpan<byte> bytes);
+    void SerializeMessageTo<T>(IBufferWriter<byte> bufferWriter, MessageType messageType, int? correlationId, T payload);
+
+    /// <summary>
+    /// Deserializes a message envelope and returns the message type, correlation ID, and payload byte range.
+    /// The payload bytes reference the original input buffer and must be processed before the buffer is reused.
+    /// </summary>
+    (MessageType Type, int? CorrelationId, int PayloadStart, int PayloadLength) DeserializeMessageEnvelope(ReadOnlySpan<byte> bytes);
 }

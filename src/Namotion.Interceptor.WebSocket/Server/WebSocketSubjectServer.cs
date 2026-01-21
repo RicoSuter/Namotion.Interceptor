@@ -124,15 +124,6 @@ public class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
 
         if (_app is not null)
         {
-            using var stopCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            try
-            {
-                await _app.StopAsync(stopCts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                // Stop timed out
-            }
             await _app.DisposeAsync();
         }
 

@@ -17,10 +17,14 @@ internal static class WebSocketMessageReader
     private static readonly RecyclableMemoryStreamManager MemoryStreamManager = new();
 
     /// <summary>
-    /// Result of a WebSocket message read operation.
+    /// Result of a WebSocket message read operation. Must be disposed after use to return pooled resources.
     /// </summary>
-    public readonly struct ReadResult
+    public readonly struct ReadResult : IDisposable
     {
+        private readonly RecyclableMemoryStream? _stream;
+        private readonly byte[]? _rentedBuffer;
+        private readonly int _length;
+
         /// <summary>
         /// True if the operation completed successfully with message data.
         /// </summary>
@@ -38,16 +42,44 @@ internal static class WebSocketMessageReader
 
         /// <summary>
         /// The complete message bytes. Only valid when Success is true.
+        /// The memory is only valid until this ReadResult is disposed.
         /// </summary>
-        public ReadOnlyMemory<byte> MessageBytes { get; init; }
+        public ReadOnlyMemory<byte> MessageBytes => _stream is not null
+            ? new ReadOnlyMemory<byte>(_stream.GetBuffer(), 0, _length)
+            : ReadOnlyMemory<byte>.Empty;
 
-        public static ReadResult Closed => new() { IsCloseMessage = true };
-        public static ReadResult MaxSizeExceeded => new() { ExceededMaxSize = true };
-        public static ReadResult SuccessResult(ReadOnlyMemory<byte> bytes) => new() { Success = true, MessageBytes = bytes };
+        private ReadResult(RecyclableMemoryStream? stream, byte[]? rentedBuffer, int length, bool success, bool isCloseMessage, bool exceededMaxSize)
+        {
+            _stream = stream;
+            _rentedBuffer = rentedBuffer;
+            _length = length;
+            Success = success;
+            IsCloseMessage = isCloseMessage;
+            ExceededMaxSize = exceededMaxSize;
+        }
+
+        public static ReadResult Closed(byte[]? rentedBuffer) => new(null, rentedBuffer, 0, false, true, false);
+        public static ReadResult MaxSizeExceeded(RecyclableMemoryStream? stream, byte[]? rentedBuffer) => new(stream, rentedBuffer, 0, false, false, true);
+        public static ReadResult SuccessResult(RecyclableMemoryStream stream, byte[]? rentedBuffer, int length) => new(stream, rentedBuffer, length, true, false, false);
+
+        // Factory methods for ReadMessageIntoStreamAsync where caller owns resources
+        public static ReadResult ClosedNoResources => new(null, null, 0, false, true, false);
+        public static ReadResult MaxSizeExceededNoResources => new(null, null, 0, false, false, true);
+        public static ReadResult SuccessNoResources => new(null, null, 0, true, false, false);
+
+        public void Dispose()
+        {
+            _stream?.Dispose();
+            if (_rentedBuffer is not null)
+            {
+                ArrayPool<byte>.Shared.Return(_rentedBuffer);
+            }
+        }
     }
 
     /// <summary>
     /// Reads a complete WebSocket message, handling fragmentation and enforcing size limits.
+    /// The returned ReadResult must be disposed after use.
     /// </summary>
     /// <param name="webSocket">The WebSocket to read from.</param>
     /// <param name="maxMessageSize">Maximum allowed message size in bytes.</param>
@@ -59,10 +91,10 @@ internal static class WebSocketMessageReader
         CancellationToken cancellationToken)
     {
         var buffer = ArrayPool<byte>.Shared.Rent(DefaultBufferSize);
+        var messageStream = MemoryStreamManager.GetStream();
+
         try
         {
-            await using var messageStream = MemoryStreamManager.GetStream();
-
             WebSocketReceiveResult result;
             do
             {
@@ -70,25 +102,28 @@ internal static class WebSocketMessageReader
 
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
-                    return ReadResult.Closed;
+                    messageStream.Dispose();
+                    return ReadResult.Closed(buffer);
                 }
 
                 if (messageStream.Length + result.Count > maxMessageSize)
                 {
-                    return ReadResult.MaxSizeExceeded;
+                    return ReadResult.MaxSizeExceeded(messageStream, buffer);
                 }
 
                 messageStream.Write(buffer, 0, result.Count);
             }
             while (!result.EndOfMessage);
 
-            // Copy to array since the stream buffer will be returned to the pool
-            var messageBytes = messageStream.ToArray();
-            return ReadResult.SuccessResult(messageBytes);
+            // Return the stream directly - caller will dispose to return to pool
+            return ReadResult.SuccessResult(messageStream, buffer, (int)messageStream.Length);
         }
-        finally
+        catch
         {
+            // On exception, clean up resources
+            messageStream.Dispose();
             ArrayPool<byte>.Shared.Return(buffer);
+            throw;
         }
     }
 
@@ -135,18 +170,18 @@ internal static class WebSocketMessageReader
 
             if (result.MessageType == WebSocketMessageType.Close)
             {
-                return ReadResult.Closed;
+                return ReadResult.ClosedNoResources;
             }
 
             if (stream.Length + result.Count > maxMessageSize)
             {
-                return ReadResult.MaxSizeExceeded;
+                return ReadResult.MaxSizeExceededNoResources;
             }
 
             await stream.WriteAsync(buffer, 0, result.Count, cancellationToken);
         }
         while (!result.EndOfMessage);
 
-        return ReadResult.SuccessResult(ReadOnlyMemory<byte>.Empty); // Caller uses stream directly
+        return ReadResult.SuccessNoResources; // Caller uses stream directly
     }
 }
