@@ -198,4 +198,73 @@ public class PropertyHooksTests
         // Assert
         Assert.Empty(firedEvents);
     }
+
+    [Fact]
+    public void WhenOnChangingThrows_ThenValueIsNotWritten()
+    {
+        // Arrange
+        var person = new PersonWithHooks();
+        person.FirstName = "Initial";
+        person.HookCalls.Clear();
+        person.ShouldThrowInChanging = true;
+
+        var firedEvents = new List<string>();
+        person.PropertyChanged += (s, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() => person.FirstName = "NewValue");
+        Assert.Equal("Exception in OnChanging", exception.Message);
+        Assert.Equal("Initial", person.FirstName);
+        Assert.Empty(firedEvents);
+    }
+
+    [Fact]
+    public void WhenOnChangedThrows_ThenValueIsWrittenButPropertyChangedNotFired()
+    {
+        // Arrange
+        var person = new PersonWithHooks();
+        person.ShouldThrowInChanged = true;
+
+        var firedEvents = new List<string>();
+        person.PropertyChanged += (s, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act & Assert
+        var exception = Assert.Throws<InvalidOperationException>(() => person.FirstName = "Rico");
+        Assert.Equal("Exception in OnChanged", exception.Message);
+        Assert.Equal("Rico", person.FirstName); // Value IS written
+        Assert.Empty(firedEvents); // PropertyChanged NOT fired
+    }
+
+    [Fact]
+    public void WhenOnChangingCoercesValue_ThenCoercedValuePassedToOnChangedAndPropertyChanged()
+    {
+        // Arrange
+        var person = new PersonWithHooks();
+        person.ValueToCoerce = "Coerced";
+
+        var firedEvents = new List<string>();
+        person.PropertyChanged += (s, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act
+        person.FirstName = "Original";
+
+        // Assert
+        Assert.Equal("Coerced", person.FirstName);
+        Assert.Equal("Coerced", person.LastChangedValue); // OnChanged receives coerced value
+        Assert.Single(firedEvents);
+        Assert.Equal("FirstName", firedEvents[0]); // PropertyChanged fires for the property
+    }
+
+    [Fact]
+    public void WhenInitPropertySet_ThenHooksAreFired()
+    {
+        // Arrange & Act
+        var person = new PersonWithInit { Id = "123" };
+
+        // Assert
+        Assert.Equal(2, person.HookCalls.Count);
+        Assert.Equal("Changing:123", person.HookCalls[0]);
+        Assert.Equal("Changed:123", person.HookCalls[1]);
+        Assert.Equal("123", person.Id);
+    }
 }

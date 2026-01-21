@@ -313,6 +313,7 @@ public partial class Sensor
 - `OnChanged` is only called if:
   - The change was not cancelled (`cancel` remained `false`)
   - The interceptor chain performed the write (interceptors can skip writes)
+- If `OnChanged` throws, the property value is already written but `PropertyChanged` won't fire
 
 **Use property hooks when:**
 - Logic is specific to a single property
