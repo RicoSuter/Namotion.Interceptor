@@ -24,6 +24,14 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
     private readonly object _reconnectingLock = new();
 
+    /// <summary>
+    /// Lock ordering rules for thread-safety:
+    /// - _reconnectingLock is the ONLY lock in this class
+    /// - NEVER call external code (callbacks, logger with complex formatters, async operations) while holding this lock
+    /// - Keep lock-protected sections minimal to reduce contention
+    /// - All lock acquisitions use lock(_reconnectingLock) or Monitor.TryEnter(_reconnectingLock)
+    /// </summary>
+
     private int _isReconnecting; // 0 = false, 1 = true (thread-safe via Interlocked)
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
 
