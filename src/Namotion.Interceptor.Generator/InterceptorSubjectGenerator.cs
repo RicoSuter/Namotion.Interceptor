@@ -182,12 +182,14 @@ using System.Text.Json.Serialization;
 
 namespace {namespaceName}
 {{
-    public partial class {className} : IInterceptorSubject{(baseClass is null ? ", INotifyPropertyChanged" : "")}
+    public partial class {className} : IInterceptorSubject{(baseClass is null ? ", INotifyPropertyChanged, IRaisePropertyChanged" : "")}
     {{
         {(baseClass is null ? @"public event PropertyChangedEventHandler? PropertyChanged;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));" : "")}
+        protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+        void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);" : "")}
 
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;

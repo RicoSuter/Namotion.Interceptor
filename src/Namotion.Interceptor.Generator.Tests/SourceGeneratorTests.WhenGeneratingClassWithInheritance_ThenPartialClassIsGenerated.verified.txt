@@ -21,12 +21,14 @@ using System.Text.Json.Serialization;
 
 namespace YourDefaultNamespace
 {
-    public partial class Person : IInterceptorSubject, INotifyPropertyChanged
+    public partial class Person : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
     {
         public event PropertyChangedEventHandler? PropertyChanged;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+
+        void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);
 
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
