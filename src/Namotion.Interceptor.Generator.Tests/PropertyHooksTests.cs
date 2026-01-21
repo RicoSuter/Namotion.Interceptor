@@ -1,5 +1,6 @@
 using Namotion.Interceptor.Generator.Tests.Models;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Generator.Tests;
 
@@ -266,5 +267,129 @@ public class PropertyHooksTests
         Assert.Equal("Changing:123", person.HookCalls[0]);
         Assert.Equal("Changed:123", person.HookCalls[1]);
         Assert.Equal("123", person.Id);
+    }
+
+    [Fact]
+    public void WhenMultiplePropertyChangedSubscribers_ThenAllReceiveNotifications()
+    {
+        // Arrange
+        var person = new PersonWithHooks();
+        var subscriber1Events = new List<string>();
+        var subscriber2Events = new List<string>();
+        var subscriber3Events = new List<string>();
+
+        person.PropertyChanged += (s, e) => subscriber1Events.Add(e.PropertyName!);
+        person.PropertyChanged += (s, e) => subscriber2Events.Add(e.PropertyName!);
+        person.PropertyChanged += (s, e) => subscriber3Events.Add(e.PropertyName!);
+
+        // Act
+        person.FirstName = "Rico";
+
+        // Assert
+        Assert.Single(subscriber1Events);
+        Assert.Single(subscriber2Events);
+        Assert.Single(subscriber3Events);
+        Assert.Equal("FirstName", subscriber1Events[0]);
+        Assert.Equal("FirstName", subscriber2Events[0]);
+        Assert.Equal("FirstName", subscriber3Events[0]);
+    }
+
+    [Fact]
+    public void WhenSameValueSetTwice_WithEqualityCheck_ThenPropertyChangedFiresOnlyOnce()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithEqualityCheck();
+
+        var person = new PersonWithHooks(context);
+        var firedEvents = new List<string>();
+        person.PropertyChanged += (s, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act
+        person.FirstName = "Rico";
+        person.FirstName = "Rico"; // Same value again
+
+        // Assert
+        Assert.Single(firedEvents); // Should only fire once
+        Assert.Equal("FirstName", firedEvents[0]);
+    }
+
+    [Fact]
+    public void WhenSameValueSetTwice_WithoutEqualityCheck_ThenPropertyChangedFiresTwice()
+    {
+        // Arrange - no equality check configured
+        var person = new PersonWithHooks();
+        var firedEvents = new List<string>();
+        person.PropertyChanged += (s, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act
+        person.FirstName = "Rico";
+        person.FirstName = "Rico"; // Same value again
+
+        // Assert
+        Assert.Equal(2, firedEvents.Count); // Fires twice without equality check
+    }
+
+    [Fact]
+    public void WhenOverridePropertySet_ThenDerivedHooksAreCalled()
+    {
+        // Arrange
+        var employee = new EmployeeWithVirtualHooks();
+
+        // Act
+        employee.Name = "Rico";
+
+        // Assert - Only derived hooks are called (override replaces base)
+        Assert.Equal(2, employee.OverrideHookCalls.Count);
+        Assert.Equal("Derived.Changing:Rico", employee.OverrideHookCalls[0]);
+        Assert.Equal("Derived.Changed:Rico", employee.OverrideHookCalls[1]);
+        Assert.Empty(employee.HookCalls); // Base hooks not called for override
+    }
+
+    [Fact]
+    public void WhenOverridePropertySet_ThenPropertyChangedIsFired()
+    {
+        // Arrange
+        var employee = new EmployeeWithVirtualHooks();
+        var firedEvents = new List<string>();
+        employee.PropertyChanged += (s, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act
+        employee.Name = "Rico";
+
+        // Assert
+        Assert.Single(firedEvents);
+        Assert.Equal("Name", firedEvents[0]);
+    }
+
+    [Fact]
+    public void WhenVirtualPropertySetOnBaseType_ThenBaseHooksAreCalled()
+    {
+        // Arrange
+        var person = new PersonWithVirtualHooks();
+
+        // Act
+        person.Name = "Rico";
+
+        // Assert
+        Assert.Equal(2, person.HookCalls.Count);
+        Assert.Equal("Base.Changing:Rico", person.HookCalls[0]);
+        Assert.Equal("Base.Changed:Rico", person.HookCalls[1]);
+    }
+
+    [Fact]
+    public void WhenDerivedClassAdditionalProperty_ThenHooksAreCalled()
+    {
+        // Arrange
+        var employee = new EmployeeWithVirtualHooks();
+
+        // Act
+        employee.Department = "Engineering";
+
+        // Assert
+        Assert.Equal(2, employee.OverrideHookCalls.Count);
+        Assert.Equal("Department.Changing:Engineering", employee.OverrideHookCalls[0]);
+        Assert.Equal("Department.Changed:Engineering", employee.OverrideHookCalls[1]);
     }
 }
