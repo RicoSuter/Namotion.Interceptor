@@ -1,10 +1,10 @@
 using System;
 using System.Buffers;
-using System.IO;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Microsoft.IO;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.WebSocket.Protocol;
 using Namotion.Interceptor.WebSocket.Serialization;
@@ -16,6 +16,8 @@ namespace Namotion.Interceptor.WebSocket.Server;
 /// </summary>
 internal sealed class WebSocketClientConnection : IAsyncDisposable
 {
+    private static readonly RecyclableMemoryStreamManager MemoryStreamManager = new();
+
     private readonly System.Net.WebSockets.WebSocket _webSocket;
     private readonly ILogger _logger;
     private readonly CancellationTokenSource _cts = new();
@@ -52,9 +54,9 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
         try
         {
-            using var messageStream = new MemoryStream();
+            await using var messageStream = MemoryStreamManager.GetStream();
 
-            // Handle fragmented Hello messages (same as ReceiveUpdateAsync)
+            // Handle fragmented Hello messages
             WebSocketReceiveResult result;
             do
             {
@@ -126,17 +128,29 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
 
     public async Task SendUpdateAsync(SubjectUpdate update, CancellationToken cancellationToken)
     {
-        if (!IsConnected) return;
+        if (!IsConnected || Volatile.Read(ref _disposed) == 1) return;
 
-        await _sendLock.WaitAsync(cancellationToken);
         try
         {
-            if (!IsConnected) return;  // Re-check after acquiring lock
+            await _sendLock.WaitAsync(cancellationToken);
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!IsConnected) return;
 
             var bytes = _serializer.SerializeMessage(MessageType.Update, null, update);
             await _webSocket.SendAsync(bytes, WebSocketMessageType.Text, true, cancellationToken);
 
             Interlocked.Exchange(ref _consecutiveSendFailures, 0);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Connection disposed during send
         }
         catch (WebSocketException ex)
         {
@@ -146,21 +160,34 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         }
         finally
         {
-            _sendLock.Release();
+            try { _sendLock.Release(); }
+            catch (ObjectDisposedException) { }
         }
     }
 
     public async Task SendErrorAsync(ErrorPayload error, CancellationToken cancellationToken)
     {
-        if (!IsConnected) return;
+        if (!IsConnected || Volatile.Read(ref _disposed) == 1) return;
 
-        await _sendLock.WaitAsync(cancellationToken);
         try
         {
-            if (!IsConnected) return;  // Re-check after acquiring lock
+            await _sendLock.WaitAsync(cancellationToken);
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!IsConnected) return;
 
             var bytes = _serializer.SerializeMessage(MessageType.Error, null, error);
             await _webSocket.SendAsync(bytes, WebSocketMessageType.Text, true, cancellationToken);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Connection disposed during send
         }
         catch (WebSocketException ex)
         {
@@ -168,7 +195,8 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         }
         finally
         {
-            _sendLock.Release();
+            try { _sendLock.Release(); }
+            catch (ObjectDisposedException) { }
         }
     }
 
@@ -177,7 +205,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
         try
         {
-            using var messageStream = new MemoryStream();
+            using var messageStream = MemoryStreamManager.GetStream();
 
             // Receive complete message (handling fragmentation)
             WebSocketReceiveResult result;

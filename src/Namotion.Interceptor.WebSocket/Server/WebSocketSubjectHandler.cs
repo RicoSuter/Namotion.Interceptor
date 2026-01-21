@@ -192,7 +192,7 @@ public class WebSocketSubjectHandler
                     _logger.LogWarning("Removing zombie connection {ConnectionId} due to repeated send failures", connectionId);
                     Interlocked.Decrement(ref _connectionCount);
 
-                    // Fire and forget disposal with error logging
+                    // Fire and forget disposal
                     _ = Task.Run(async () =>
                     {
                         try
@@ -201,7 +201,7 @@ public class WebSocketSubjectHandler
                         }
                         catch (Exception ex)
                         {
-                            _logger.LogDebug(ex, "Error disposing zombie connection {ConnectionId}", connectionId);
+                            _logger.LogWarning(ex, "Error disposing zombie connection {ConnectionId}", connectionId);
                         }
                     });
                 }
