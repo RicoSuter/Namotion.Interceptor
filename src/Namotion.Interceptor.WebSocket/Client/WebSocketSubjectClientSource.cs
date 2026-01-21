@@ -32,7 +32,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     private readonly ArrayBufferWriter<byte> _sendBuffer = new(4096);
 
     private ClientWebSocket? _webSocket;
-    private SubjectPropertyWriter? _propertyWriter;
+    private volatile SubjectPropertyWriter? _propertyWriter;
     private SubjectUpdate? _initialState;
     private CancellationTokenSource? _receiveCts;
     private TaskCompletionSource? _receiveLoopCompleted;
@@ -255,9 +255,27 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     {
         _logger.LogDebug("WriteChangesAsync called with {Count} changes", changes.Length);
 
-        await _connectionLock.WaitAsync(cancellationToken);
+        if (Volatile.Read(ref _disposed) == 1)
+        {
+            return WriteResult.Failure(changes, new ObjectDisposedException(nameof(WebSocketSubjectClientSource)));
+        }
+
         try
         {
+            await _connectionLock.WaitAsync(cancellationToken);
+        }
+        catch (ObjectDisposedException)
+        {
+            return WriteResult.Failure(changes, new ObjectDisposedException(nameof(WebSocketSubjectClientSource)));
+        }
+
+        try
+        {
+            if (Volatile.Read(ref _disposed) == 1)
+            {
+                return WriteResult.Failure(changes, new ObjectDisposedException(nameof(WebSocketSubjectClientSource)));
+            }
+
             var webSocket = _webSocket;
             if (webSocket?.State != WebSocketState.Open)
             {
@@ -280,7 +298,14 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         }
         finally
         {
-            _connectionLock.Release();
+            try
+            {
+                _connectionLock.Release();
+            }
+            catch (ObjectDisposedException)
+            {
+                // Lock was disposed during operation
+            }
         }
     }
 
@@ -381,9 +406,10 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
     private void HandleUpdate(SubjectUpdate update)
     {
-        if (_propertyWriter is null) return;
+        var propertyWriter = _propertyWriter;
+        if (propertyWriter is null) return;
 
-        _propertyWriter.Write(
+        propertyWriter.Write(
             (update, _subject, this, _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance),
             static state =>
             {
@@ -493,6 +519,23 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         {
             await _receiveCts.CancelAsync();
             _receiveCts.Dispose();
+        }
+
+        // Wait for any pending connection operations to complete before disposing the lock
+        try
+        {
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await _connectionLock.WaitAsync(timeoutCts.Token);
+            _connectionLock.Release();
+        }
+        catch (OperationCanceledException)
+        {
+            // Timeout waiting for lock - proceed with disposal anyway
+            _logger.LogWarning("Timeout waiting for connection lock during disposal");
+        }
+        catch (ObjectDisposedException)
+        {
+            // Already disposed
         }
 
         // Clean up resources
