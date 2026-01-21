@@ -106,5 +106,25 @@ public class WebSocketClientConfiguration
         {
             throw new ArgumentException($"WriteRetryQueueSize must be non-negative, got: {WriteRetryQueueSize}", nameof(WriteRetryQueueSize));
         }
+
+        if (ReceiveTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentException($"ReceiveTimeout must be positive, got: {ReceiveTimeout}", nameof(ReceiveTimeout));
+        }
+
+        if (BufferTime < TimeSpan.Zero)
+        {
+            throw new ArgumentException($"BufferTime must be non-negative, got: {BufferTime}", nameof(BufferTime));
+        }
+
+        if (MaxMessageSize <= 0)
+        {
+            throw new ArgumentException($"MaxMessageSize must be positive, got: {MaxMessageSize}", nameof(MaxMessageSize));
+        }
+
+        if (WriteBatchSize < 0)
+        {
+            throw new ArgumentException($"WriteBatchSize must be non-negative, got: {WriteBatchSize}", nameof(WriteBatchSize));
+        }
     }
 }

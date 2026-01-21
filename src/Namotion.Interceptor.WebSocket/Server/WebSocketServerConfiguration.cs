@@ -87,5 +87,25 @@ public class WebSocketServerConfiguration
         {
             throw new ArgumentException($"BufferTime must be non-negative, got: {BufferTime}", nameof(BufferTime));
         }
+
+        if (MaxMessageSize <= 0)
+        {
+            throw new ArgumentException($"MaxMessageSize must be positive, got: {MaxMessageSize}", nameof(MaxMessageSize));
+        }
+
+        if (MaxConnections <= 0)
+        {
+            throw new ArgumentException($"MaxConnections must be positive, got: {MaxConnections}", nameof(MaxConnections));
+        }
+
+        if (HelloTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentException($"HelloTimeout must be positive, got: {HelloTimeout}", nameof(HelloTimeout));
+        }
+
+        if (WriteBatchSize < 0)
+        {
+            throw new ArgumentException($"WriteBatchSize must be non-negative, got: {WriteBatchSize}", nameof(WriteBatchSize));
+        }
     }
 }
