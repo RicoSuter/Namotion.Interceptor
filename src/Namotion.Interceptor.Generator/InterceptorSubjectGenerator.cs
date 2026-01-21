@@ -147,14 +147,23 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
             try
             {
                 var semanticModel = cls.Model;
-                    
+
                     var baseClass = cls.ClassNode.BaseList?.Types
                         .Select(t => semanticModel.GetTypeInfo(t.Type).Type as INamedTypeSymbol)
-                        .FirstOrDefault(t => t != null && 
+                        .FirstOrDefault(t => t != null &&
                             (HasInterceptorSubjectAttribute(t) || // <= needed when partial class with IInterceptorSubject is not yet generated
                              ImplementsInterface(t, "Namotion.Interceptor.IInterceptorSubject")));
-                    
+
                     var baseClassTypeName = baseClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+                    // Check if base class will have INotifyPropertyChanged + IRaisePropertyChanged:
+                    // 1. Base class has [InterceptorSubject] attribute (will get both generated), OR
+                    // 2. Any base class already implements IRaisePropertyChanged (which provides the RaisePropertyChanged method we call)
+                    // Note: We check for IRaisePropertyChanged, not just INotifyPropertyChanged, because we need the RaisePropertyChanged method
+                    var baseClassHasInpc = HasInterceptorSubjectAttribute(baseClass) ||
+                        (cls.ClassNode.BaseList?.Types
+                            .Select(t => semanticModel.GetTypeInfo(t.Type).Type as INamedTypeSymbol)
+                            .Any(t => t != null && ImplementsInterface(t, "Namotion.Interceptor.IRaisePropertyChanged")) ?? false);
 
 
                     var defaultPropertiesNewModifier = baseClass is not null ? "new " : string.Empty;
@@ -182,14 +191,14 @@ using System.Text.Json.Serialization;
 
 namespace {namespaceName}
 {{
-    public partial class {className} : IInterceptorSubject{(baseClass is null ? ", INotifyPropertyChanged, IRaisePropertyChanged" : "")}
+    public partial class {className} : IInterceptorSubject{(baseClassHasInpc ? "" : ", INotifyPropertyChanged, IRaisePropertyChanged")}
     {{
-        {(baseClass is null ? @"public event PropertyChangedEventHandler? PropertyChanged;
+        {(baseClassHasInpc ? "" : @"public event PropertyChangedEventHandler? PropertyChanged;
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));
 
-        void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);" : "")}
+        void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);")}
 
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
