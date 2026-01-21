@@ -28,7 +28,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private volatile bool _isStarted;
-    private int _reconnectingIterations; // Tracks health check iterations while reconnecting (for stall detection)
+    private long _reconnectStartedAtTicks; // 0 = not reconnecting, otherwise UTC ticks when reconnection started (for stall detection)
 
     // Diagnostics tracking - accessed from multiple threads via Diagnostics property
     private long _totalReconnectionAttempts;
@@ -310,8 +310,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
                     if (currentSession is not null && sessionIsConnected && !isReconnecting)
                     {
-                        // Session healthy - validate subscriptions
-                        Interlocked.Exchange(ref _reconnectingIterations, 0);
+                        // Session healthy - validate subscriptions and reset stall detection timestamp
+                        Volatile.Write(ref _reconnectStartedAtTicks, 0);
                         await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(
                             sessionManager.Subscriptions,
                             stoppingToken).ConfigureAwait(false);
@@ -319,7 +319,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                     else if (!isReconnecting && (currentSession is null || !sessionIsConnected))
                     {
                         // Session is dead and no reconnection in progress
-                        Interlocked.Exchange(ref _reconnectingIterations, 0);
+                        Volatile.Write(ref _reconnectStartedAtTicks, 0);
                         _logger.LogWarning(
                             "OPC UA session is dead (session={HasSession}, connected={IsConnected}). " +
                             "Starting manual reconnection...",
@@ -330,24 +330,33 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                     }
                     else if (isReconnecting)
                     {
-                        // SDK reconnection in progress - check for stall
+                        // SDK reconnection in progress - check for stall using time-based detection
                         // Note: We check stall regardless of session.Connected state because the old
                         // session's Connected property can return stale values during SDK reconnection.
-                        var iterations = Interlocked.Increment(ref _reconnectingIterations);
-                        if (iterations >= _configuration.StallDetectionIterations)
+                        var startedAt = Volatile.Read(ref _reconnectStartedAtTicks);
+                        if (startedAt == 0)
                         {
-                            // SDK handler likely timed out or is stuck - force reset and trigger manual reconnection
-                            if (sessionManager.TryForceResetIfStalled())
+                            // First detection of reconnecting state - record start time
+                            Interlocked.CompareExchange(ref _reconnectStartedAtTicks, DateTime.UtcNow.Ticks, 0);
+                        }
+                        else
+                        {
+                            var elapsed = DateTime.UtcNow - new DateTime(startedAt, DateTimeKind.Utc);
+                            if (elapsed > _configuration.MaxReconnectDuration)
                             {
-                                _logger.LogWarning(
-                                    "SDK reconnection stalled (session={HasSession}, connected={IsConnected}, iterations={Iterations}). " +
-                                    "Starting manual reconnection...",
-                                    currentSession is not null,
-                                    sessionIsConnected,
-                                    iterations);
+                                // SDK handler likely timed out or is stuck - force reset and trigger manual reconnection
+                                if (sessionManager.TryForceResetIfStalled())
+                                {
+                                    _logger.LogWarning(
+                                        "SDK reconnection stalled (session={HasSession}, connected={IsConnected}, elapsed={Elapsed}s). " +
+                                        "Starting manual reconnection...",
+                                        currentSession is not null,
+                                        sessionIsConnected,
+                                        elapsed.TotalSeconds);
 
-                                Interlocked.Exchange(ref _reconnectingIterations, 0);
-                                await ReconnectSessionAsync(stoppingToken).ConfigureAwait(false);
+                                    Volatile.Write(ref _reconnectStartedAtTicks, 0);
+                                    await ReconnectSessionAsync(stoppingToken).ConfigureAwait(false);
+                                }
                             }
                         }
                     }
