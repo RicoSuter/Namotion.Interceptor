@@ -18,6 +18,10 @@ public class WebSocketTestServer<TRoot> : IAsyncDisposable
     private readonly ITestOutputHelper _output;
     private IHost? _host;
 
+    private Func<IInterceptorSubjectContext, TRoot>? _createRoot;
+    private Action<IInterceptorSubjectContext, TRoot>? _initializeDefaults;
+    private int _port;
+
     public TRoot? Root { get; private set; }
     public WebSocketSubjectServer? Server { get; private set; }
 
@@ -30,6 +34,15 @@ public class WebSocketTestServer<TRoot> : IAsyncDisposable
         Func<IInterceptorSubjectContext, TRoot> createRoot,
         Action<IInterceptorSubjectContext, TRoot>? initializeDefaults = null,
         int port = 18080)
+    {
+        _createRoot = createRoot;
+        _initializeDefaults = initializeDefaults;
+        _port = port;
+
+        await StartCoreAsync();
+    }
+
+    private async Task StartCoreAsync()
     {
         var builder = Host.CreateApplicationBuilder();
         builder.Services.AddLogging(logging =>
@@ -45,13 +58,13 @@ public class WebSocketTestServer<TRoot> : IAsyncDisposable
             .WithLifecycle()
             .WithHostedServices(builder.Services);
 
-        Root = createRoot(context);
-        initializeDefaults?.Invoke(context, Root);
+        Root = _createRoot!(context);
+        _initializeDefaults?.Invoke(context, Root);
 
         builder.Services.AddSingleton(Root);
         builder.Services.AddWebSocketSubjectServer<TRoot>(configuration =>
         {
-            configuration.Port = port;
+            configuration.Port = _port;
         });
 
         _host = builder.Build();
@@ -74,6 +87,12 @@ public class WebSocketTestServer<TRoot> : IAsyncDisposable
             _host.Dispose();
             _host = null;
         }
+    }
+
+    public async Task RestartAsync()
+    {
+        await StopAsync();
+        await StartCoreAsync();
     }
 
     public async ValueTask DisposeAsync()
