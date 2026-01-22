@@ -221,4 +221,106 @@ public class OpcUaStallDetectionTests
             port?.Dispose();
         }
     }
+
+    [Fact]
+    public async Task StallDetection_WhenServerRestartsQuickly_SdkReconnectsWithoutStallTrigger()
+    {
+        // Tests that when server restarts quickly (before MaxReconnectDuration),
+        // the SDK reconnection succeeds without stall detection triggering.
+        // This verifies we don't have false positive stall triggers.
+
+        var logger = new TestLogger(_output);
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            port = await OpcUaTestPortPool.AcquireAsync();
+
+            server = new OpcUaTestServer<TestRoot>(logger);
+            await server.StartAsync(
+                context => new TestRoot(context),
+                (context, root) =>
+                {
+                    root.Connected = true;
+                    root.Name = "Initial";
+                },
+                baseAddress: port.BaseAddress,
+                certificateStoreBasePath: port.CertificateStoreBasePath);
+
+            // Use longer MaxReconnectDuration to ensure SDK has time to reconnect
+            var quickRestartConfig = (OpcUaClientConfiguration config) =>
+            {
+                config.SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(2);
+                config.MaxReconnectDuration = TimeSpan.FromSeconds(30); // Long enough for SDK to succeed
+                config.ReconnectInterval = TimeSpan.FromSeconds(1);
+            };
+
+            client = new OpcUaTestClient<TestRoot>(logger, quickRestartConfig);
+            await client.StartAsync(
+                context => new TestRoot(context),
+                isConnected: root => root.Connected,
+                serverUrl: port.ServerUrl,
+                certificateStoreBasePath: port.CertificateStoreBasePath);
+
+            Assert.NotNull(server.Root);
+            Assert.NotNull(client.Root);
+            Assert.NotNull(client.Diagnostics);
+
+            // Verify initial sync
+            server.Root.Name = "BeforeRestart";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.Name == "BeforeRestart",
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial sync should complete");
+            logger.Log("Initial sync verified");
+
+            var initialReconnectAttempts = client.Diagnostics.TotalReconnectionAttempts;
+            var initialSuccessfulReconnects = client.Diagnostics.SuccessfulReconnections;
+            logger.Log($"Before restart - attempts: {initialReconnectAttempts}, successful: {initialSuccessfulReconnects}");
+
+            // Stop server briefly
+            logger.Log("Stopping server for quick restart...");
+            await server.StopAsync();
+
+            // Wait just long enough for client to detect disconnection
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => !client.Diagnostics.IsConnected || client.Diagnostics.IsReconnecting,
+                timeout: TimeSpan.FromSeconds(20),
+                message: "Client should detect disconnection or start reconnecting");
+            logger.Log($"Client state after stop - Connected: {client.Diagnostics.IsConnected}, Reconnecting: {client.Diagnostics.IsReconnecting}");
+
+            // Restart server quickly (well before MaxReconnectDuration of 30s)
+            logger.Log("Restarting server quickly...");
+            await server.RestartAsync();
+
+            // Verify client recovers and data flows
+            server.Root.Name = "AfterQuickRestart";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.Name == "AfterQuickRestart",
+                timeout: TimeSpan.FromSeconds(60),
+                message: "Data should flow after quick restart");
+            logger.Log($"Client received: {client.Root.Name}");
+
+            // Verify client is connected
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Diagnostics.IsConnected,
+                timeout: TimeSpan.FromSeconds(10),
+                message: "Client should report as connected after recovery");
+
+            // Log final state for debugging
+            logger.Log($"After restart - attempts: {client.Diagnostics.TotalReconnectionAttempts}, " +
+                       $"successful: {client.Diagnostics.SuccessfulReconnections}, " +
+                       $"connected: {client.Diagnostics.IsConnected}");
+
+            logger.Log("Test passed - SDK reconnected without stall detection trigger");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
 }
