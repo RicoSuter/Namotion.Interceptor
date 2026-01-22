@@ -4,14 +4,11 @@ using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Cache;
 
-internal sealed class WriteInterceptorChain<TInterceptor, TProperty>
+internal sealed class WriteInterceptorChain<TProperty>
 {
     public delegate TProperty ExecuteTerminalFunc(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> terminal);
 
-    public delegate void ExecuteInterceptorAction(TInterceptor interceptor, ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> @delegate);
-
-    private readonly ImmutableArray<TInterceptor> _interceptors;
-    private readonly ExecuteInterceptorAction _executeInterceptor;
+    private readonly ImmutableArray<IWriteInterceptor> _interceptors;
     private readonly ExecuteTerminalFunc _executeTerminal;
     private readonly WriteContinuationNode[] _continuations;
 
@@ -22,12 +19,10 @@ internal sealed class WriteInterceptorChain<TInterceptor, TProperty>
     private static Action<IInterceptorSubject, TProperty>? _threadLocalTerminal;
 
     public WriteInterceptorChain(
-        ImmutableArray<TInterceptor> interceptors,
-        ExecuteInterceptorAction executeInterceptor,
+        ImmutableArray<IWriteInterceptor> interceptors,
         ExecuteTerminalFunc executeTerminal)
     {
         _interceptors = interceptors;
-        _executeInterceptor = executeInterceptor;
         _executeTerminal = executeTerminal;
 
         _continuations = new WriteContinuationNode[interceptors.Length];
@@ -56,17 +51,17 @@ internal sealed class WriteInterceptorChain<TInterceptor, TProperty>
         var interceptor = _interceptors[index];
         var continuation = _continuations[index];
 
-        _executeInterceptor(interceptor, ref context, continuation.ContinuationDelegate);
+        interceptor.WriteProperty(ref context, continuation.ContinuationDelegate);
     }
 
     private sealed class WriteContinuationNode
     {
-        private readonly WriteInterceptorChain<TInterceptor, TProperty> _chain;
+        private readonly WriteInterceptorChain<TProperty> _chain;
         private readonly int _nextIndex;
 
         public readonly WriteInterceptionDelegate<TProperty> ContinuationDelegate;
 
-        public WriteContinuationNode(WriteInterceptorChain<TInterceptor, TProperty> chain, int nextIndex)
+        public WriteContinuationNode(WriteInterceptorChain<TProperty> chain, int nextIndex)
         {
             _chain = chain;
             _nextIndex = nextIndex;

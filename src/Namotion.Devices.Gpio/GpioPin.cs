@@ -127,7 +127,7 @@ public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider, IS
     /// <summary>
     /// Called before the Mode property is set. Handles hardware pin mode changes.
     /// </summary>
-    partial void OnSetMode(ref GpioPinMode value)
+    partial void OnModeChanging(ref GpioPinMode newValue, ref bool cancel)
     {
         lock (_lock)
         {
@@ -135,7 +135,7 @@ public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider, IS
                 return;
 
             var oldMode = Mode;
-            var newMode = value;
+            var newMode = newValue;
 
             if (oldMode == newMode)
                 return;
@@ -190,7 +190,7 @@ public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider, IS
     /// <summary>
     /// Called before the Value property is set. Writes to hardware in output mode.
     /// </summary>
-    partial void OnSetValue(ref bool value)
+    partial void OnValueChanging(ref bool newValue, ref bool cancel)
     {
         lock (_lock)
         {
@@ -204,12 +204,12 @@ public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider, IS
             try
             {
                 // Write to hardware
-                var pinValue = value ? PinValue.High : PinValue.Low;
+                var pinValue = newValue ? PinValue.High : PinValue.Low;
                 Controller.Write(PinNumber, pinValue);
 
                 // Read-back verification
                 var actualValue = Controller.Read(PinNumber) == PinValue.High;
-                if (actualValue != value)
+                if (actualValue != newValue)
                 {
                     // Set status first to prevent recursion (status check above will exit early)
                     Status = ServiceStatus.Error;
