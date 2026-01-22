@@ -147,14 +147,24 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
             try
             {
                 var semanticModel = cls.Model;
-                    
+
                     var baseClass = cls.ClassNode.BaseList?.Types
                         .Select(t => semanticModel.GetTypeInfo(t.Type).Type as INamedTypeSymbol)
-                        .FirstOrDefault(t => t != null && 
+                        .FirstOrDefault(t => t != null &&
                             (HasInterceptorSubjectAttribute(t) || // <= needed when partial class with IInterceptorSubject is not yet generated
                              ImplementsInterface(t, "Namotion.Interceptor.IInterceptorSubject")));
-                    
+
                     var baseClassTypeName = baseClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+
+                    // Check if base class has INotifyPropertyChanged + IRaisePropertyChanged:
+                    // 1. Base class has [InterceptorSubject] attribute (will get both generated), OR
+                    // 2. Any base class implements IRaisePropertyChanged
+                    // When true, we use ((IRaisePropertyChanged)this).RaisePropertyChanged() to call the interface method,
+                    // which works whether the base implements it explicitly or implicitly.
+                    var baseClassHasInpc = HasInterceptorSubjectAttribute(baseClass) ||
+                        (cls.ClassNode.BaseList?.Types
+                            .Select(t => semanticModel.GetTypeInfo(t.Type).Type as INamedTypeSymbol)
+                            .Any(t => t != null && ImplementsInterface(t, "Namotion.Interceptor.IRaisePropertyChanged")) ?? false);
 
 
                     var defaultPropertiesNewModifier = baseClass is not null ? "new " : string.Empty;
@@ -170,6 +180,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.Frozen;
+using System.ComponentModel;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -177,11 +188,19 @@ using System.Text.Json.Serialization;
 
 #pragma warning disable CS8669
 #pragma warning disable CS0649
+#pragma warning disable CS0067
 
-namespace {namespaceName} 
+namespace {namespaceName}
 {{
-    public partial class {className} : IInterceptorSubject
+    public partial class {className} : IInterceptorSubject{(baseClassHasInpc ? "" : ", INotifyPropertyChanged, IRaisePropertyChanged")}
     {{
+        {(baseClassHasInpc ? "" : @"public event PropertyChangedEventHandler? PropertyChanged;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));
+
+        void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);")}
+
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
@@ -291,9 +310,7 @@ namespace {namespaceName}
     $@"
             {modifiers} get
             {{
-                var value = GetPropertyValue<{fullyQualifiedName}>(nameof({propertyName}), static (o) => (({className})o)._{propertyName});
-                OnGet{propertyName}(ref value);
-                return value;
+                return GetPropertyValue<{fullyQualifiedName}>(nameof({propertyName}), static (o) => (({className})o)._{propertyName});
             }}";
 
                         }
@@ -307,13 +324,28 @@ namespace {namespaceName}
                             var accessorText = accessor.IsKind(SyntaxKind.InitAccessorDeclaration) ? "init" : "set";
                             var modifiers = string.Join(" ", accessor.Modifiers.Select(m => m.Value) ?? []);
 
+                            // Optimize RaisePropertyChanged call:
+                            // - [InterceptorSubject] base: direct call to inherited protected method (fastest)
+                            // - Manual IRaisePropertyChanged base: interface cast (rare case)
+                            // - Own implementation: direct call to own method (fastest)
+                            var raisePropertyChangedCall = HasInterceptorSubjectAttribute(baseClass)
+                                ? $"RaisePropertyChanged(nameof({propertyName}))"
+                                : baseClassHasInpc
+                                    ? $"((IRaisePropertyChanged)this).RaisePropertyChanged(nameof({propertyName}))"
+                                    : $"RaisePropertyChanged(nameof({propertyName}))";
+
                             generatedCode +=
     $@"
             {modifiers} {accessorText}
             {{
                 var newValue = value;
-                OnSet{propertyName}(ref newValue);
-                SetPropertyValue(nameof({propertyName}), newValue, static (o) => (({className})o)._{propertyName}, static (o, v) => (({className})o)._{propertyName} = v);
+                var cancel = false;
+                On{propertyName}Changing(ref newValue, ref cancel);
+                if (!cancel && SetPropertyValue(nameof({propertyName}), newValue, static (o) => (({className})o)._{propertyName}, static (o, v) => (({className})o)._{propertyName} = v))
+                {{
+                    On{propertyName}Changed(_{propertyName});
+                    {raisePropertyChangedCall};
+                }}
             }}";
                         }
 
@@ -322,19 +354,13 @@ namespace {namespaceName}
         }}
 ";
                         // Generate partial method hooks for property
-                        if (property.HasGetter)
-                        {
-                            generatedCode +=
-    $@"
-        partial void OnGet{propertyName}(ref {fullyQualifiedName} value);
-";
-                        }
-
                         if (property.HasSetter || property.HasInit)
                         {
                             generatedCode +=
     $@"
-        partial void OnSet{propertyName}(ref {fullyQualifiedName} value);
+        partial void On{propertyName}Changing(ref {fullyQualifiedName} newValue, ref bool cancel);
+
+        partial void On{propertyName}Changed({fullyQualifiedName} newValue);
 ";
                         }
                     }
@@ -384,15 +410,16 @@ namespace {namespaceName}
         }}
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
+        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
         {{
             if (_context is null)
             {{
                 setValue(this, newValue);
+                return true;
             }}
             else
             {{
-                _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
+                return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
             }}
         }}
 

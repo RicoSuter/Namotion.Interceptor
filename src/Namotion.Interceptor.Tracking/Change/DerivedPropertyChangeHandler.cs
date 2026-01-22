@@ -135,6 +135,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         {
             derivedProperty.SetPropertyValueWithInterception(newValue, GetOldValueDelegate, NoOpWriteDelegate);
         }
+
+        if (derivedProperty.Subject is IRaisePropertyChanged raiser)
+        {
+            raiser.RaisePropertyChanged(derivedProperty.Metadata.Name);
+        }
     }
 
     /// <summary>
