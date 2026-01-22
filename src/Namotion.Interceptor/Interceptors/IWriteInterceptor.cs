@@ -34,11 +34,18 @@ public struct PropertyWriteContext<TProperty>
     /// </summary>
     public TProperty NewValue { get; set; }
 
+    /// <summary>
+    /// Gets or sets whether the write was performed.
+    /// Set to true by the write action when the value is actually written.
+    /// </summary>
+    public bool IsWritten { get; set; }
+
     public PropertyWriteContext(PropertyReference property, TProperty currentValue, TProperty newValue)
     {
         Property = property;
         CurrentValue = currentValue;
         NewValue = newValue;
+        IsWritten = false;
     }
     
     /// <summary>

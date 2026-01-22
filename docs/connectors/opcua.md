@@ -392,7 +392,7 @@ builder.Services.AddOpcUaSubjectClient(
 
 ### Stall Detection
 
-When the SDK's reconnection handler gets stuck (e.g., server never responds), the client automatically detects the stall and forces a reconnection reset. Configure via `StallDetectionIterations` (default: 10) and `SubscriptionHealthCheckInterval` (default: 5s). Total stall timeout = iterations × interval (default: 50 seconds).
+When the SDK's reconnection handler gets stuck (e.g., server never responds), the client automatically detects the stall and forces a reconnection reset. Configure via `MaxReconnectDuration` (default: 30 seconds). If the SDK reconnection hasn't succeeded within this duration, a full session reset and manual reconnection is triggered.
 
 ## Diagnostics
 
@@ -450,12 +450,12 @@ For 24/7 production use, the default configuration provides robust resilience:
 |---------|---------|-------------|
 | `KeepAliveInterval` | 5s | How quickly disconnections are detected |
 | `ReconnectInterval` | 5s | Time between reconnection attempts |
-| `StallDetectionIterations` | 10 | Health checks before forcing stall reset |
+| `MaxReconnectDuration` | 30s | Max time to wait for SDK reconnection before forcing reset |
 | `WriteRetryQueueSize` | 1000 | Updates buffered during disconnection |
 | `SessionDisposalTimeout` | 5s | Max wait for graceful session close |
 | `SubscriptionSequentialPublishing` | false | Process subscription messages in order (see Thread Safety) |
 
-Total stall recovery time = `StallDetectionIterations` × `SubscriptionHealthCheckInterval` (default: 50s).
+Stall recovery is triggered after `MaxReconnectDuration` (default: 30s) if SDK reconnection hasn't succeeded.
 
 ## Lifecycle Management
 
