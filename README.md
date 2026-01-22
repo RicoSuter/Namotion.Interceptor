@@ -18,6 +18,7 @@ The library supports **bidirectional synchronization** with external systems. Wh
 - **Zero runtime reflection** - All interception logic is generated at compile-time for maximum performance
 - **Bidirectional synchronization** - Connect your object model to MQTT brokers, OPC UA servers, or databases with minimal code
 - **Clean domain models** - Your classes stay as POCOs with simple attributes
+- **INotifyPropertyChanged built-in** - Generated classes implement it automatically, including derived properties, for seamless UI data binding
 
 ## Core Concepts
 
