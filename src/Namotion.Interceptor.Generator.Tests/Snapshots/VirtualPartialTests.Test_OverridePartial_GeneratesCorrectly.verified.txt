@@ -9,6 +9,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.Frozen;
+using System.ComponentModel;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -16,11 +17,19 @@ using System.Text.Json.Serialization;
 
 #pragma warning disable CS8669
 #pragma warning disable CS0649
+#pragma warning disable CS0067
 
-namespace YourDefaultNamespace 
+namespace YourDefaultNamespace
 {
-    public partial class DerivedClass : IInterceptorSubject
+    public partial class DerivedClass : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
     {
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));
+
+        void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);
+
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
@@ -74,21 +83,24 @@ namespace YourDefaultNamespace
         {
              get
             {
-                var value = GetPropertyValue<string>(nameof(VirtualProp), static (o) => ((DerivedClass)o)._VirtualProp);
-                OnGetVirtualProp(ref value);
-                return value;
+                return GetPropertyValue<string>(nameof(VirtualProp), static (o) => ((DerivedClass)o)._VirtualProp);
             }
              set
             {
                 var newValue = value;
-                OnSetVirtualProp(ref newValue);
-                SetPropertyValue(nameof(VirtualProp), newValue, static (o) => ((DerivedClass)o)._VirtualProp, static (o, v) => ((DerivedClass)o)._VirtualProp = v);
+                var cancel = false;
+                OnVirtualPropChanging(ref newValue, ref cancel);
+                if (!cancel && SetPropertyValue(nameof(VirtualProp), newValue, static (o) => ((DerivedClass)o)._VirtualProp, static (o, v) => ((DerivedClass)o)._VirtualProp = v))
+                {
+                    OnVirtualPropChanged(_VirtualProp);
+                    RaisePropertyChanged(nameof(VirtualProp));
+                }
             }
         }
 
-        partial void OnGetVirtualProp(ref string value);
+        partial void OnVirtualPropChanging(ref string newValue, ref bool cancel);
 
-        partial void OnSetVirtualProp(ref string value);
+        partial void OnVirtualPropChanged(string newValue);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
@@ -97,15 +109,16 @@ namespace YourDefaultNamespace
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
+        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
         {
             if (_context is null)
             {
                 setValue(this, newValue);
+                return true;
             }
             else
             {
-                _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
+                return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
             }
         }
 
