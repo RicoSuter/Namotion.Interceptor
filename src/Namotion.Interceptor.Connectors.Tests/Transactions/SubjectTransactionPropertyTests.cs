@@ -313,4 +313,72 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
             Assert.Equal("John Doe", afterCommit);
         }
     }
+
+    [Fact]
+    public async Task WhenTransactionActive_ThenPropertyChangedNotFired()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+        var firedEvents = new List<string>();
+        person.PropertyChanged += (s, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "John";
+
+            // Assert - PropertyChanged should NOT fire during transaction
+            Assert.Empty(firedEvents);
+        }
+    }
+
+    [Fact]
+    public async Task WhenTransactionCommits_ThenPropertyChangedFired()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+        var firedEvents = new List<string>();
+        person.PropertyChanged += (s, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "John";
+
+            Assert.Empty(firedEvents); // Not fired yet
+
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Assert - PropertyChanged should fire after commit
+        Assert.Contains("FirstName", firedEvents);
+    }
+
+    [Fact]
+    public async Task WhenTransactionCommits_ThenDerivedPropertyChangedFired()
+    {
+        // Arrange
+        var context = CreateContext();
+        var person = new Person(context);
+        var firedEvents = new List<string>();
+        person.PropertyChanged += (s, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act
+        using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            person.FirstName = "John";
+            person.LastName = "Doe";
+
+            Assert.Empty(firedEvents); // Not fired yet
+
+            await transaction.CommitAsync(CancellationToken.None);
+        }
+
+        // Assert - PropertyChanged should fire for normal AND derived properties
+        Assert.Contains("FirstName", firedEvents);
+        Assert.Contains("LastName", firedEvents);
+        Assert.Contains("FullName", firedEvents);
+    }
 }
