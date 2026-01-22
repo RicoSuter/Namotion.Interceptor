@@ -9,6 +9,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.Frozen;
+using System.ComponentModel;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -16,11 +17,19 @@ using System.Text.Json.Serialization;
 
 #pragma warning disable CS8669
 #pragma warning disable CS0649
+#pragma warning disable CS0067
 
-namespace YourDefaultNamespace 
+namespace YourDefaultNamespace
 {
-    public partial class SampleSubject : IInterceptorSubject
+    public partial class SampleSubject : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
     {
+        public event PropertyChangedEventHandler? PropertyChanged;
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));
+
+        void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);
+
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
@@ -83,21 +92,24 @@ namespace YourDefaultNamespace
         {
              get
             {
-                var value = GetPropertyValue<int>(nameof(Value), static (o) => ((SampleSubject)o)._Value);
-                OnGetValue(ref value);
-                return value;
+                return GetPropertyValue<int>(nameof(Value), static (o) => ((SampleSubject)o)._Value);
             }
              set
             {
                 var newValue = value;
-                OnSetValue(ref newValue);
-                SetPropertyValue(nameof(Value), newValue, static (o) => ((SampleSubject)o)._Value, static (o, v) => ((SampleSubject)o)._Value = v);
+                var cancel = false;
+                OnValueChanging(ref newValue, ref cancel);
+                if (!cancel && SetPropertyValue(nameof(Value), newValue, static (o) => ((SampleSubject)o)._Value, static (o, v) => ((SampleSubject)o)._Value = v))
+                {
+                    OnValueChanged(_Value);
+                    RaisePropertyChanged(nameof(Value));
+                }
             }
         }
 
-        partial void OnGetValue(ref int value);
+        partial void OnValueChanging(ref int newValue, ref bool cancel);
 
-        partial void OnSetValue(ref int value);
+        partial void OnValueChanged(int newValue);
 
         private string _Name;
 
@@ -105,21 +117,24 @@ namespace YourDefaultNamespace
         {
              get
             {
-                var value = GetPropertyValue<string>(nameof(Name), static (o) => ((SampleSubject)o)._Name);
-                OnGetName(ref value);
-                return value;
+                return GetPropertyValue<string>(nameof(Name), static (o) => ((SampleSubject)o)._Name);
             }
              set
             {
                 var newValue = value;
-                OnSetName(ref newValue);
-                SetPropertyValue(nameof(Name), newValue, static (o) => ((SampleSubject)o)._Name, static (o, v) => ((SampleSubject)o)._Name = v);
+                var cancel = false;
+                OnNameChanging(ref newValue, ref cancel);
+                if (!cancel && SetPropertyValue(nameof(Name), newValue, static (o) => ((SampleSubject)o)._Name, static (o, v) => ((SampleSubject)o)._Name = v))
+                {
+                    OnNameChanged(_Name);
+                    RaisePropertyChanged(nameof(Name));
+                }
             }
         }
 
-        partial void OnGetName(ref string value);
+        partial void OnNameChanging(ref string newValue, ref bool cancel);
 
-        partial void OnSetName(ref string value);
+        partial void OnNameChanged(string newValue);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
@@ -128,15 +143,16 @@ namespace YourDefaultNamespace
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
+        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
         {
             if (_context is null)
             {
                 setValue(this, newValue);
+                return true;
             }
             else
             {
-                _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
+                return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
             }
         }
 

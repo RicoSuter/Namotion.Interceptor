@@ -9,7 +9,11 @@ internal static class WriteInterceptorFactory<TProperty>
     {
         if (interceptors.Length == 0)
         {
-            return static (ref interception, innerWriteValue) => innerWriteValue(interception.Property.Subject, interception.NewValue);
+            return static (ref interception, innerWriteValue) =>
+            {
+                innerWriteValue(interception.Property.Subject, interception.NewValue);
+                interception.IsWritten = true;
+            };
         }
 
         var chain = new WriteInterceptorChain<TProperty>(
@@ -19,6 +23,7 @@ internal static class WriteInterceptorFactory<TProperty>
                 lock (context.Property.Subject.SyncRoot)
                 {
                     innerWriteValue(context.Property.Subject, context.NewValue);
+                    context.IsWritten = true;
                 }
                 return context.NewValue;
             }

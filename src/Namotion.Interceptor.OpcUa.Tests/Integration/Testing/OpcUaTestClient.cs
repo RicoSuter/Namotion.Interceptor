@@ -96,7 +96,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
                     SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(5),
                     KeepAliveInterval = TimeSpan.FromSeconds(5),
                     OperationTimeout = TimeSpan.FromSeconds(5),
-                    StallDetectionIterations = 10,
+                    MaxReconnectDuration = TimeSpan.FromSeconds(15),
                     CertificateStoreBasePath = certificateStoreBasePath ?? "pki"
                 };
 

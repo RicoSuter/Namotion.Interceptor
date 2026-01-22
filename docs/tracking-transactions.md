@@ -220,7 +220,7 @@ When `CommitAsync()` is called, changes are processed in stages. The exact flow 
 
 When only `WithTransactions()` is configured (no external sources):
 
-1. **Apply all changes** to the in-process model (calls property setters, triggers `OnSet*` methods)
+1. **Apply all changes** to the in-process model (calls property setters, triggers `OnChanging/OnChanged` methods)
 2. If any apply fails and `Rollback` mode: revert successful applies
 3. Fire change notifications
 
@@ -229,19 +229,19 @@ When only `WithTransactions()` is configured (no external sources):
 When `WithSourceTransactions()` is configured, commits execute in three stages:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  Stage 1: External Sources (parallel)                       │
-│  Write to OPC UA, MQTT, databases, etc.                     │
-│  Properties with SetSource() are processed here             │
-├─────────────────────────────────────────────────────────────┤
-│  Stage 2: Source-Bound Properties                           │
-│  Apply source-bound values to in-process model              │
-│  (After external writes succeed, triggers OnSet* methods)   │
-├─────────────────────────────────────────────────────────────┤
-│  Stage 3: Local Properties                                  │
-│  Apply changes to properties WITHOUT sources                │
-│  (Calls to OnSet* partial methods can throw exceptions)     │
-└─────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────┐
+│  Stage 1: External Sources (parallel)                                     │
+│  Write to OPC UA, MQTT, databases, etc.                                   │
+│  Properties with SetSource() are processed here                           │
+├───────────────────────────────────────────────────────────────────────────┤
+│  Stage 2: Source-Bound Properties                                         │
+│  Apply source-bound values to in-process model                            │
+│  (After external writes succeed, triggers OnChanging/OnChanged hooks)     │
+├───────────────────────────────────────────────────────────────────────────┤
+│  Stage 3: Local Properties                                                │
+│  Apply changes to properties WITHOUT sources                              │
+│  (Calls to OnChanging/OnChanged partial methods can throw exceptions)     │
+└───────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Rollback behavior on failure:**
@@ -254,7 +254,7 @@ When `WithSourceTransactions()` is configured, commits execute in three stages:
 
 Both modes ensure **per-property consistency**: if a property's local apply fails, its source write is reverted. The difference is whether successful properties are kept (BestEffort) or also reverted (Rollback).
 
-Revert operations call setters with old values, which also trigger `OnSet*` methods.
+Revert operations call setters with old values, which also trigger `OnChanging/OnChanged` methods.
 
 ### Source Association
 
@@ -318,7 +318,7 @@ catch (TransactionConflictException ex)
 
 ### Local Property Failures
 
-Properties can fail during commit if their `OnSet*` partial methods throw exceptions. This is useful for hardware integrations like GPIO.
+Properties can fail during commit if their `OnChanging/OnChanged` partial methods throw exceptions. This is useful for hardware integrations like GPIO.
 
 ```csharp
 [InterceptorSubject]
@@ -327,12 +327,12 @@ public partial class GpioDevice
     public partial bool LedA { get; set; }
     public partial bool LedB { get; set; }
 
-    partial void OnSetLedA(bool value) => _gpio.Write(pinA, value); // can throw!
-    partial void OnSetLedB(bool value) => _gpio.Write(pinB, value); // can throw!
+    partial void OnLedAChanged(bool newValue) => _gpio.Write(pinA, newValue); // can throw!
+    partial void OnLedBChanged(bool newValue) => _gpio.Write(pinB, newValue); // can throw!
 }
 ```
 
-When `OnSet*` throws:
+When `OnChanging/OnChanged` throws:
 - **BestEffort mode**: Other successful changes are applied, failure reported
 - **Rollback mode**: All previous stages are reverted (sources + successful local changes)
 
