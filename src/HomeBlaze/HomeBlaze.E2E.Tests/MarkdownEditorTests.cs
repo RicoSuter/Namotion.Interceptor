@@ -8,6 +8,7 @@ namespace HomeBlaze.E2E.Tests;
 /// Tests Monaco decorations, subject block editing, and expression editing.
 /// </summary>
 [Collection(nameof(PlaywrightCollection))]
+[Trait("Category", "Integration")]
 public class MarkdownEditorTests
 {
     private readonly PlaywrightFixture _fixture;
