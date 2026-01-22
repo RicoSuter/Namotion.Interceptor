@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Registry.Abstractions;
+﻿using Namotion.Interceptor.OpcUa.Attributes;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -100,19 +101,43 @@ public class OpcUaClientConfiguration
     public TimeSpan? RetryTime { get; init; } = TimeSpan.FromSeconds(1);
 
     /// <summary>
-    /// Gets or sets the default sampling interval in milliseconds for monitored items when not specified on the [OpcUaNode] attribute (default: 0).
+    /// Gets or sets the default sampling interval in milliseconds for monitored items when not specified on the [OpcUaNode] attribute.
+    /// When null (default), uses the OPC UA library default (-1 = server decides).
+    /// Set to 0 for exception-based monitoring (immediate reporting on every change).
     /// </summary>
-    public int DefaultSamplingInterval { get; init; }
+    public int? DefaultSamplingInterval { get; init; }
 
     /// <summary>
-    /// Gets or sets the default queue size for monitored items when not specified on the [OpcUaNode] attribute (default: 10).
+    /// Gets or sets the default queue size for monitored items when not specified on the [OpcUaNode] attribute.
+    /// When null (default), uses the OPC UA library default (1).
     /// </summary>
-    public uint DefaultQueueSize { get; init; } = 10;
+    public uint? DefaultQueueSize { get; init; }
 
     /// <summary>
-    /// Gets or sets whether the server should discard the oldest value in the queue when the queue is full for monitored items (default: true).
+    /// Gets or sets whether the server should discard the oldest value in the queue when the queue is full for monitored items.
+    /// When null (default), uses the OPC UA library default (true).
     /// </summary>
-    public bool DefaultDiscardOldest { get; init; } = true;
+    public bool? DefaultDiscardOldest { get; init; }
+
+    /// <summary>
+    /// Gets or sets the default data change trigger for monitored items when not specified on the [OpcUaNode] attribute.
+    /// When null (default), uses the OPC UA library default (StatusValue).
+    /// </summary>
+    public DataChangeTrigger? DefaultDataChangeTrigger { get; init; }
+
+    /// <summary>
+    /// Gets or sets the default deadband type for monitored items when not specified on the [OpcUaNode] attribute.
+    /// When null (default), uses the OPC UA library default (None).
+    /// Use Absolute or Percent for analog values to filter small changes.
+    /// </summary>
+    public DeadbandType? DefaultDeadbandType { get; init; }
+
+    /// <summary>
+    /// Gets or sets the default deadband value for monitored items when not specified on the [OpcUaNode] attribute.
+    /// When null (default), uses the OPC UA library default (0.0).
+    /// The interpretation depends on DeadbandType: absolute units for Absolute, percentage for Percent.
+    /// </summary>
+    public double? DefaultDeadbandValue { get; init; }
 
     /// <summary>
     /// Gets or sets the default publishing interval for subscriptions in milliseconds (default: 0).
@@ -356,7 +381,8 @@ public class OpcUaClientConfiguration
 
     /// <summary>
     /// Creates a MonitoredItem for the given property and node ID using this configuration's defaults.
-    /// Attribute-level overrides (SamplingInterval, QueueSize, DiscardOldest) are applied if present on the property.
+    /// Attribute-level overrides (SamplingInterval, QueueSize, DiscardOldest, DataChangeTrigger, DeadbandType, DeadbandValue)
+    /// are applied if present on the property.
     /// </summary>
     /// <param name="nodeId">The OPC UA node ID to monitor.</param>
     /// <param name="property">The property to associate with the monitored item.</param>
@@ -364,15 +390,64 @@ public class OpcUaClientConfiguration
     internal MonitoredItem CreateMonitoredItem(NodeId nodeId, RegisteredSubjectProperty property)
     {
         var opcUaNodeAttribute = property.TryGetOpcUaNodeAttribute();
-        return new MonitoredItem(TelemetryContext)
+        var item = new MonitoredItem(TelemetryContext)
         {
             StartNodeId = nodeId,
             AttributeId = Opc.Ua.Attributes.Value,
             MonitoringMode = MonitoringMode.Reporting,
-            SamplingInterval = opcUaNodeAttribute?.SamplingInterval ?? DefaultSamplingInterval,
-            QueueSize = opcUaNodeAttribute?.QueueSize ?? DefaultQueueSize,
-            DiscardOldest = opcUaNodeAttribute?.DiscardOldest ?? DefaultDiscardOldest,
             Handle = property
+        };
+
+        // Apply sampling/queue settings (only if specified)
+        var samplingInterval = opcUaNodeAttribute?.SamplingInterval ?? DefaultSamplingInterval;
+        if (samplingInterval.HasValue)
+        {
+            item.SamplingInterval = samplingInterval.Value;
+        }
+
+        var queueSize = opcUaNodeAttribute?.QueueSize ?? DefaultQueueSize;
+        if (queueSize.HasValue)
+        {
+            item.QueueSize = queueSize.Value;
+        }
+
+        var discardOldest = opcUaNodeAttribute?.DiscardOldest ?? DefaultDiscardOldest;
+        if (discardOldest.HasValue)
+        {
+            item.DiscardOldest = discardOldest.Value;
+        }
+
+        // Apply filter (only if any filter option is specified)
+        var filter = CreateDataChangeFilter(opcUaNodeAttribute);
+        if (filter != null)
+        {
+            item.Filter = filter;
+        }
+
+        return item;
+    }
+
+    /// <summary>
+    /// Creates a DataChangeFilter based on the attribute and configuration defaults.
+    /// Returns null if no filter options are specified (uses OPC UA library defaults).
+    /// </summary>
+    private DataChangeFilter? CreateDataChangeFilter(OpcUaNodeAttribute? attribute)
+    {
+        var trigger = attribute?.DataChangeTrigger ?? DefaultDataChangeTrigger;
+        var deadbandType = attribute?.DeadbandType ?? DefaultDeadbandType;
+        var deadbandValue = attribute?.DeadbandValue ?? DefaultDeadbandValue;
+
+        // Only create filter if at least one option is specified
+        if (!trigger.HasValue && !deadbandType.HasValue && !deadbandValue.HasValue)
+        {
+            return null;
+        }
+
+        return new DataChangeFilter
+        {
+            Trigger = trigger ?? DataChangeTrigger.StatusValue,
+            DeadbandType = (uint)(deadbandType ?? DeadbandType.None),
+            DeadbandValue = deadbandValue ?? 0.0
         };
     }
 
