@@ -486,3 +486,36 @@ When subjects are detached from the object graph (removed from collections, set 
 - New subjects added after startup require a restart to appear in OPC UA
 
 This minimal lifecycle integration prevents memory leaks in long-running services with dynamic object graphs.
+
+## Benchmark Results
+
+```
+Server Benchmark - 1 minute - [2026-01-20 22:29:45.260]
+
+Total received changes:          1189867
+Total published changes:         1196800
+Process memory:                  628.24 MB (419.63 MB in .NET heap)
+Avg allocations over last 60s:   502.47 MB/s
+
+Metric                               Avg        P50        P90        P95        P99      P99.9        Max        Min     StdDev      Count
+-------------------------------------------------------------------------------------------------------------------------------------------
+Received (changes/s)            19817.96   19967.97   20763.99   21555.02   22729.66   22729.66   22729.66   14266.49    1099.08          -
+Processing latency (ms)             0.06       0.00       0.02       0.09       0.65      10.08      19.22       0.00       0.61    1189867
+End-to-end latency (ms)            57.24      28.27     172.11     230.22     322.76     378.85     392.92       0.46      70.20    1189867
+
+```
+
+```
+Client Benchmark - 1 minute - [2026-01-20 22:29:52.755]
+
+Total received changes:          1195948
+Total published changes:         1189174
+Process memory:                  506.01 MB (255.02 MB in .NET heap)
+Avg allocations over last 60s:   27.98 MB/s
+
+Metric                               Avg        P50        P90        P95        P99      P99.9        Max        Min     StdDev      Count
+-------------------------------------------------------------------------------------------------------------------------------------------
+Received (changes/s)            19938.96   20008.40   20726.40   21121.12   23081.15   23081.15   23081.15   14879.78    1027.90          -
+Processing latency (ms)             1.89       1.00       2.21       2.80      27.21      43.55     136.39       0.00       5.15    1195948
+End-to-end latency (ms)            68.39      56.34     114.76     163.69     255.27     423.46     449.37       2.08      47.60    1195948
+```

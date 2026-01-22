@@ -13,10 +13,12 @@ public partial class Person
 
     [Path("opc", "FirstName")]
     [Path("mqtt", "FirstName")]
+    [Path("ws", "FirstName")]
     public partial string? FirstName { get; set; }
 
     [Path("opc", "LastName")]
     [Path("mqtt", "LastName")]
+    [Path("ws", "LastName")]
     public partial string? LastName { get; set; }
 
     [Derived]
