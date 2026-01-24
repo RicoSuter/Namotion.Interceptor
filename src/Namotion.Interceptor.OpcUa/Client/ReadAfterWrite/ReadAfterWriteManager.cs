@@ -21,6 +21,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     private readonly CircuitBreaker _circuitBreaker;
     private readonly Lock _lock = new();
     private readonly Timer _timer;
+    private readonly CancellationTokenSource _cts = new();
 
     // NodeId -> Property (for O(1) lookup during reads)
     private readonly Dictionary<NodeId, RegisteredSubjectProperty> _propertyIndex = new();
@@ -313,7 +314,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                 maxAge: 0,
                 timestampsToReturn: TimestampsToReturn.Source,
                 readValues,
-                CancellationToken.None).ConfigureAwait(false);
+                _cts.Token).ConfigureAwait(false);
 
             var successCount = 0;
             var receivedTimestamp = DateTimeOffset.UtcNow;
@@ -417,12 +418,15 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
 
         _logger.LogDebug("Disposing ReadAfterWriteManager. Metrics: {Metrics}", Metrics);
 
+        await _cts.CancelAsync().ConfigureAwait(false);
+
         lock (_lock)
         {
             _timer.Change(Timeout.Infinite, Timeout.Infinite);
         }
 
         await _timer.DisposeAsync().ConfigureAwait(false);
+        _cts.Dispose();
 
         lock (_lock)
         {
