@@ -1,9 +1,9 @@
-namespace Namotion.Interceptor.OpcUa.Client.Consistency;
+namespace Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 
 /// <summary>
-/// Thread-safe metrics for consistency read operations.
+/// Thread-safe metrics for read-after-write operations.
 /// </summary>
-internal sealed class ConsistencyReadMetrics
+internal sealed class ReadAfterWriteMetrics
 {
     private long _scheduled;
     private long _executed;
@@ -11,12 +11,12 @@ internal sealed class ConsistencyReadMetrics
     private long _failed;
 
     /// <summary>
-    /// Gets the total number of consistency reads scheduled.
+    /// Gets the total number of read-after-writes scheduled.
     /// </summary>
     public long Scheduled => Volatile.Read(ref _scheduled);
 
     /// <summary>
-    /// Gets the total number of consistency reads successfully executed.
+    /// Gets the total number of read-after-writes successfully executed.
     /// </summary>
     public long Executed => Volatile.Read(ref _executed);
 
@@ -26,12 +26,12 @@ internal sealed class ConsistencyReadMetrics
     public long Coalesced => Volatile.Read(ref _coalesced);
 
     /// <summary>
-    /// Gets the number of failed consistency read operations.
+    /// Gets the number of failed read-after-write operations.
     /// </summary>
     public long Failed => Volatile.Read(ref _failed);
 
     /// <summary>
-    /// Records a new scheduled consistency read.
+    /// Records a new scheduled read-after-write.
     /// </summary>
     public void RecordScheduled() => Interlocked.Increment(ref _scheduled);
 
@@ -41,13 +41,13 @@ internal sealed class ConsistencyReadMetrics
     public void RecordCoalesced() => Interlocked.Increment(ref _coalesced);
 
     /// <summary>
-    /// Records successful execution of consistency reads.
+    /// Records successful execution of read-after-writes.
     /// </summary>
     /// <param name="count">Number of reads successfully executed.</param>
     public void RecordExecuted(int count) => Interlocked.Add(ref _executed, count);
 
     /// <summary>
-    /// Records a failed consistency read operation.
+    /// Records a failed read-after-write operation.
     /// </summary>
     public void RecordFailed() => Interlocked.Increment(ref _failed);
 

@@ -461,7 +461,7 @@ builder.Services.AddOpcUaSubjectClient(
 - `PollingInterval` minimum of 100 milliseconds enforced
 - Fail-fast with clear error messages on invalid configuration
 
-### Consistency Reads After Write
+### Read After Write
 
 **Problem:** When you request exception-based monitoring (`SamplingInterval = 0`) but the server revises it to a non-zero interval, rapid value changes after a write may be missed. For example: client writes `1`, PLC immediately acknowledges by writing `0` - but sampling compares sample-to-sample, so if both samples see `0`, the acknowledgment is never reported to the client.
 
@@ -472,7 +472,7 @@ builder.Services.AddOpcUaSubjectClient(
 var config = new OpcUaClientConfiguration
 {
     // Buffer added to revised interval before reading back (default: 50ms)
-    ConsistencyReadBuffer = TimeSpan.FromMilliseconds(50)
+    ReadAfterWriteBuffer = TimeSpan.FromMilliseconds(50)
 };
 ```
 

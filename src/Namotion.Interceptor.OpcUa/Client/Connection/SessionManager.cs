@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.OpcUa.Client.Consistency;
+using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Client.Polling;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -77,9 +77,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     internal PollingManager? PollingManager { get; }
 
     /// <summary>
-    /// Gets the consistency read manager for scheduling reads after writes.
+    /// Gets the read-after-write manager for scheduling reads after writes.
     /// </summary>
-    internal ConsistencyReadManager? ConsistencyReadManager { get; private set; }
+    internal ReadAfterWriteManager? ReadAfterWriteManager { get; private set; }
 
     public SessionManager(OpcUaSubjectClientSource source, SubjectPropertyWriter propertyWriter, OpcUaClientConfiguration configuration, ILogger logger)
     {
@@ -98,13 +98,16 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             PollingManager.Start();
         }
 
-        ConsistencyReadManager = new ConsistencyReadManager(
-            sessionProvider: () => CurrentSession,
-            source,
-            configuration,
-            logger);
+        if (_configuration.EnableReadAfterWrite)
+        {
+            ReadAfterWriteManager = new ReadAfterWriteManager(
+                sessionProvider: () => CurrentSession,
+                source,
+                configuration,
+                logger);
+        }
 
-        SubscriptionManager = new SubscriptionManager(source, propertyWriter, PollingManager, ConsistencyReadManager, configuration, logger);
+        SubscriptionManager = new SubscriptionManager(source, propertyWriter, PollingManager, ReadAfterWriteManager, configuration, logger);
     }
 
     /// <summary>
@@ -315,7 +318,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                         "OPC UA session reconnected but subscription transfer failed (server restart). " +
                         "Clearing session to trigger full reconnection via health check.");
                     Volatile.Write(ref _session, null);
-                    ConsistencyReadManager?.ClearPendingReads();
+                    ReadAfterWriteManager?.ClearPendingReads();
                 }
             }
             else
@@ -460,9 +463,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
 
         try { _reconnectHandler.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing reconnect handler."); }
-        if (ConsistencyReadManager is not null)
+        if (ReadAfterWriteManager is not null)
         {
-            try { await ConsistencyReadManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing consistency read manager."); }
+            try { await ReadAfterWriteManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing read-after-write manager."); }
         }
         try { await SubscriptionManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing subscription manager."); }
         if (PollingManager is not null)

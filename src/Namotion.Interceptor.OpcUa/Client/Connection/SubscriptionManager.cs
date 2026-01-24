@@ -1,7 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.OpcUa.Client.Consistency;
+using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Client.Polling;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -20,7 +20,7 @@ internal class SubscriptionManager : IAsyncDisposable
     private readonly OpcUaSubjectClientSource _source;
     private readonly SubjectPropertyWriter? _propertyWriter;
     private readonly PollingManager? _pollingManager;
-    private readonly ConsistencyReadManager? _consistencyReadManager;
+    private readonly ReadAfterWriteManager? _readAfterWriteManager;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
 
@@ -43,14 +43,14 @@ internal class SubscriptionManager : IAsyncDisposable
         OpcUaSubjectClientSource source,
         SubjectPropertyWriter propertyWriter,
         PollingManager? pollingManager,
-        ConsistencyReadManager? consistencyReadManager,
+        ReadAfterWriteManager? readAfterWriteManager,
         OpcUaClientConfiguration configuration,
         ILogger logger)
     {
         _source = source;
         _propertyWriter = propertyWriter;
         _pollingManager = pollingManager;
-        _consistencyReadManager = consistencyReadManager;
+        _readAfterWriteManager = readAfterWriteManager;
         _configuration = configuration;
         _logger = logger;
     }
@@ -121,8 +121,8 @@ internal class SubscriptionManager : IAsyncDisposable
 
             await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
 
-            // Register properties with ConsistencyReadManager now that we know revised sampling intervals
-            RegisterPropertiesWithConsistencyReadManager(subscription);
+            // Register properties with ReadAfterWriteManager now that we know revised sampling intervals
+            RegisterPropertiesWithReadAfterWriteManager(subscription);
 
             // Add to collection AFTER initialization (temporal separation - health monitor never sees partial state)
             _subscriptions.TryAdd(subscription, 0);
@@ -323,12 +323,12 @@ internal class SubscriptionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Registers all successfully created monitored items with ConsistencyReadManager.
+    /// Registers all successfully created monitored items with ReadAfterWriteManager.
     /// Called after ApplyChangesAsync when we know the revised sampling intervals.
     /// </summary>
-    private void RegisterPropertiesWithConsistencyReadManager(Subscription subscription)
+    private void RegisterPropertiesWithReadAfterWriteManager(Subscription subscription)
     {
-        if (_consistencyReadManager is null)
+        if (_readAfterWriteManager is null)
         {
             return;
         }
@@ -339,7 +339,7 @@ internal class SubscriptionManager : IAsyncDisposable
             {
                 var requestedInterval = GetRequestedSamplingInterval(property);
                 var revisedInterval = TimeSpan.FromMilliseconds(item.Status.SamplingInterval);
-                _consistencyReadManager.RegisterProperty(item.StartNodeId, property, requestedInterval, revisedInterval);
+                _readAfterWriteManager.RegisterProperty(item.StartNodeId, property, requestedInterval, revisedInterval);
             }
         }
     }
