@@ -155,7 +155,7 @@ public partial class Device
         DeadbandValue = 0.1)]
     public partial double Pressure { get; set; }
 
-    // Signal/flag - use exception-based monitoring (SamplingInterval = 0)
+    // Discrete variable - use exception-based monitoring (SamplingInterval = 0)
     // to catch rapid true→false transitions
     [OpcUaNode("StartCommand", "http://factory.com",
         SamplingInterval = 0)]
@@ -165,8 +165,8 @@ public partial class Device
 
 **Sampling interval values:**
 - `null` (default): Use configuration default or OPC UA library default (-1 = server decides)
-- `0`: Exception-based monitoring (immediate reporting on every change) - ideal for signals/flags
-- `> 0`: Sample at specified interval in milliseconds
+- `0`: Exception-based monitoring (immediate reporting on every change) - ideal for discrete variables
+- `> 0`: Sample at specified interval in milliseconds - suitable for analog variables
 
 **Data change filter options:**
 - `DataChangeTrigger`: `Status`, `StatusValue` (default), or `StatusValueTimestamp`
@@ -219,12 +219,12 @@ OPC UA supports two monitoring modes for value changes:
 **Exception-based** (`SamplingInterval = 0`): The server reports immediately whenever the value changes. This requires the server to support exception-based monitoring (indicated by `MinimumSamplingInterval = 0` on the node).
 
 **When to use exception-based monitoring:**
-- Boolean signals/flags where you need to catch every transition
+- Discrete variables (boolean flags, state indicators) where you need to catch every transition
 - Handshake patterns (client writes `true`, PLC sets back to `false`)
-- Event-like values that change rapidly
+- Any value where missing a transition would cause system failures
 
 ```csharp
-// Request exception-based monitoring for a signal
+// Request exception-based monitoring for a discrete variable
 [OpcUaNode("StartCommand", SamplingInterval = 0)]
 public partial bool StartCommand { get; set; }
 ```
@@ -461,16 +461,55 @@ builder.Services.AddOpcUaSubjectClient(
 - `PollingInterval` minimum of 100 milliseconds enforced
 - Fail-fast with clear error messages on invalid configuration
 
-### Read After Write
+### Read After Write for Discrete Variables
 
-**Problem:** When you request exception-based monitoring (`SamplingInterval = 0`) but the server revises it to a non-zero interval, rapid value changes after a write may be missed. For example: client writes `1`, PLC immediately acknowledges by writing `0` - but sampling compares sample-to-sample, so if both samples see `0`, the acknowledgment is never reported to the client.
+#### Understanding Discrete vs Analog Variables
 
-**How it works:** The library automatically detects when `SamplingInterval = 0` was revised to a non-zero value. For these properties, after a successful write, it schedules a read-back after the revised sampling interval plus a small buffer. This catches server-side changes that sampling would miss.
+Industrial automation distinguishes between two types of variables:
+
+| Type | Characteristics | Examples | OPC UA Monitoring |
+|------|-----------------|----------|-------------------|
+| **Analog** | Continuous values, gradual changes, sampling is fine | Temperature, pressure, speed | Sampling-based (`SamplingInterval > 0`) with optional deadband |
+| **Discrete** | Binary on/off, every transition matters | Handshake flags, command triggers, state indicators | Exception-based (`SamplingInterval = 0`) |
+
+For **discrete variables**, missing a transition can cause system failures. A classic example is the handshake pattern: client writes `1`, PLC acknowledges by writing `0`. If sampling misses the `1→0` transition (because both samples see `0`), the client never knows the PLC acknowledged.
+
+#### The Problem with Sampling-Based Monitoring
+
+OPC UA's sampling-based monitoring compares each sample against the *previous sample*, not against what the client knows. When a value changes faster than the sampling rate (e.g., `0→1→0` between samples), the server sees `0` at both sample points and reports no change.
+
+```
+Sampling-based (SamplingInterval = 100ms):
+t=0ms:   Sample value=0, baseline=0 → no change reported
+t=50ms:  Client writes 1 → value=1 (no sample happens)
+t=60ms:  PLC writes 0 → value=0 (no sample happens)
+t=100ms: Sample value=0, baseline=0 → no change reported ❌
+```
+
+This is spec-compliant behavior per [OPC UA Part 4](https://reference.opcfoundation.org/Core/Part4/v104/docs/5.12.1.2), not a bug.
+
+#### Solution Hierarchy
+
+1. **Best: Exception-based monitoring** (`SamplingInterval = 0`) - Server reports every change immediately
+2. **Fallback: Read-after-write** - When the server revises `SamplingInterval = 0` to non-zero, automatically read values after writes
+
+#### How Read-After-Write Works
+
+The library automatically detects when `SamplingInterval = 0` was revised to a non-zero value (common with legacy PLCs or servers that don't support exception-based monitoring). For these properties, after a successful write, it schedules a read-back to catch server-side changes that sampling would miss.
+
+```csharp
+// Mark as discrete variable - request exception-based monitoring
+[OpcUaNode("CommandTrigger", SamplingInterval = 0)]
+public partial bool CommandTrigger { get; set; }
+```
 
 **Configuration:**
 ```csharp
 var config = new OpcUaClientConfiguration
 {
+    // Enable/disable read-after-write fallback (default: true)
+    EnableReadAfterWrite = true,
+
     // Buffer added to revised interval before reading back (default: 50ms)
     ReadAfterWriteBuffer = TimeSpan.FromMilliseconds(50)
 };
@@ -481,6 +520,14 @@ var config = new OpcUaClientConfiguration
 - Multiple rapid writes are coalesced into a single read
 - Reads are batched for efficiency
 - Circuit breaker prevents repeated failures from overwhelming the server
+- Logged when activated so you can verify which properties need this fallback
+
+#### Limitations
+
+If the server's minimum sampling rate is slower than the value changes, no client-side workaround can help. In that case, consider:
+- Configuring the OPC UA server to support faster sampling or exception-based monitoring
+- Changing the PLC code to use a counter-based pattern instead of boolean handshakes
+- Using OPC UA Methods for command/response patterns (requires PLC support)
 
 ### Stall Detection
 
