@@ -157,9 +157,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             var currentSession = _sessionProvider();
             if (!ReferenceEquals(_lastKnownSession, currentSession))
             {
-                _pendingReads.Clear();
-                _earliestReadTime = DateTime.MaxValue;
-                _timer.Change(Timeout.Infinite, Timeout.Infinite);
+                ClearPendingReadsLocked();
                 _lastKnownSession = currentSession;
                 _circuitBreaker.Reset();
 
@@ -202,9 +200,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     {
         lock (_lock)
         {
-            _pendingReads.Clear();
-            _earliestReadTime = DateTime.MaxValue;
-            _timer.Change(Timeout.Infinite, Timeout.Infinite);
+            ClearPendingReadsLocked();
         }
     }
 
@@ -217,11 +213,19 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         {
             _propertyIndex.Clear();
             _revisedIntervals.Clear();
-            _pendingReads.Clear();
-            _earliestReadTime = DateTime.MaxValue;
-            _timer.Change(Timeout.Infinite, Timeout.Infinite);
+            ClearPendingReadsLocked();
             _lastKnownSession = null;
         }
+    }
+
+    /// <summary>
+    /// Clears pending reads and stops the timer. Must be called while holding _lock.
+    /// </summary>
+    private void ClearPendingReadsLocked()
+    {
+        _pendingReads.Clear();
+        _earliestReadTime = DateTime.MaxValue;
+        _timer.Change(Timeout.Infinite, Timeout.Infinite);
     }
 
     /// <summary>
@@ -391,21 +395,9 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
 
     private void RecalculateEarliestLocked()
     {
-        if (_pendingReads.Count == 0)
-        {
-            _earliestReadTime = DateTime.MaxValue;
-        }
-        else
-        {
-            _earliestReadTime = DateTime.MaxValue;
-            foreach (var readAt in _pendingReads.Values)
-            {
-                if (readAt < _earliestReadTime)
-                {
-                    _earliestReadTime = readAt;
-                }
-            }
-        }
+        _earliestReadTime = _pendingReads.Count == 0
+            ? DateTime.MaxValue
+            : _pendingReads.Values.Min();
     }
 
     /// <inheritdoc/>
@@ -433,6 +425,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             _propertyIndex.Clear();
             _revisedIntervals.Clear();
             _pendingReads.Clear();
+            _earliestReadTime = DateTime.MaxValue;
         }
     }
 }
