@@ -9,7 +9,7 @@ using Opc.Ua;
 namespace Namotion.Interceptor.OpcUa.Tests.Client.ReadAfterWrite;
 
 /// <summary>
-/// Tests for ReadAfterWriteManager - the consolidated manager for read-after-writes.
+/// Tests for ReadAfterWriteManager - verifies behavior through observable outcomes (metrics).
 /// </summary>
 public class ReadAfterWriteManagerTests : IAsyncDisposable
 {
@@ -50,24 +50,12 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
     }
 
     [Fact]
-    public void InitialState_HasZeroCounts()
+    public void InitialState_HasZeroMetrics()
     {
-        Assert.Equal(0, _manager.RegisteredPropertyCount);
-        Assert.Equal(0, _manager.PendingReadCount);
         Assert.Equal(0, _manager.Metrics.Scheduled);
-    }
-
-    [Fact]
-    public void RegisterProperty_IncrementsCount()
-    {
-        // Arrange
-        var nodeId = new NodeId("TestNode", 2);
-
-        // Act
-        _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 100, TimeSpan.FromMilliseconds(500));
-
-        // Assert
-        Assert.Equal(1, _manager.RegisteredPropertyCount);
+        Assert.Equal(0, _manager.Metrics.Executed);
+        Assert.Equal(0, _manager.Metrics.Coalesced);
+        Assert.Equal(0, _manager.Metrics.Failed);
     }
 
     [Fact]
@@ -78,12 +66,9 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
 
         // Act - requested 0 (exception-based), but server revised to 500ms
         _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(500));
-
-        // Now simulate a write
         _manager.OnPropertyWritten(nodeId);
 
         // Assert - should have scheduled a read-after-write
-        Assert.Equal(1, _manager.PendingReadCount);
         Assert.Equal(1, _manager.Metrics.Scheduled);
     }
 
@@ -93,28 +78,29 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         // Arrange
         var nodeId = new NodeId("TestNode", 2);
 
-        // Act - requested 100ms (not exception-based)
+        // Act - requested 100ms (not exception-based), so not tracked
         _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 100, TimeSpan.FromMilliseconds(500));
         _manager.OnPropertyWritten(nodeId);
 
         // Assert - should NOT have scheduled (sampling interval wasn't 0)
-        Assert.Equal(0, _manager.PendingReadCount);
+        Assert.Equal(0, _manager.Metrics.Scheduled);
     }
 
     [Fact]
-    public void UnregisterProperty_RemovesFromAllDictionaries()
+    public void UnregisterProperty_PreventsSubsequentScheduling()
     {
         // Arrange
         var nodeId = new NodeId("TestNode", 2);
         _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(500));
         _manager.OnPropertyWritten(nodeId);
+        Assert.Equal(1, _manager.Metrics.Scheduled);
 
         // Act
         _manager.UnregisterProperty(nodeId);
+        _manager.OnPropertyWritten(nodeId); // Should not schedule after unregister
 
-        // Assert
-        Assert.Equal(0, _manager.RegisteredPropertyCount);
-        Assert.Equal(0, _manager.PendingReadCount);
+        // Assert - still only 1 scheduled (second write ignored)
+        Assert.Equal(1, _manager.Metrics.Scheduled);
     }
 
     [Fact]
@@ -128,80 +114,57 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         _manager.OnPropertyWritten(nodeId);
         _manager.OnPropertyWritten(nodeId);
 
-        // Assert - only one pending read, one coalesced
-        Assert.Equal(1, _manager.PendingReadCount);
+        // Assert - one scheduled, one coalesced
         Assert.Equal(1, _manager.Metrics.Scheduled);
         Assert.Equal(1, _manager.Metrics.Coalesced);
     }
 
     [Fact]
-    public void TryGetProperty_ReturnsRegisteredProperty()
-    {
-        // Arrange
-        var nodeId = new NodeId("TestNode", 2);
-        _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 100, TimeSpan.FromMilliseconds(500));
-
-        // Act
-        var found = _manager.TryGetProperty(nodeId, out _);
-
-        // Assert
-        Assert.True(found);
-    }
-
-    [Fact]
-    public void TryGetProperty_ReturnsFalseForUnknownNode()
-    {
-        // Arrange
-        var nodeId = new NodeId("UnknownNode", 2);
-
-        // Act
-        var found = _manager.TryGetProperty(nodeId, out var property);
-
-        // Assert
-        Assert.False(found);
-        Assert.Null(property);
-    }
-
-    [Fact]
-    public void ClearPendingReads_ClearsPendingButKeepsRegistrations()
+    public void ClearPendingReads_KeepsTrackedProperties()
     {
         // Arrange
         var nodeId = new NodeId("TestNode", 2);
         _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(500));
         _manager.OnPropertyWritten(nodeId);
+        Assert.Equal(1, _manager.Metrics.Scheduled);
 
         // Act
         _manager.ClearPendingReads();
 
-        // Assert - pending cleared, but registration remains
-        Assert.Equal(0, _manager.PendingReadCount);
-        Assert.Equal(1, _manager.RegisteredPropertyCount);
+        // Write again - should still be able to schedule (property still tracked)
+        _manager.OnPropertyWritten(nodeId);
+
+        // Assert - second write should schedule
+        Assert.Equal(2, _manager.Metrics.Scheduled);
     }
 
     [Fact]
-    public void ClearAll_ClearsEverything()
+    public void ClearAll_RemovesTrackedProperties()
     {
         // Arrange
         var nodeId = new NodeId("TestNode", 2);
         _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(500));
         _manager.OnPropertyWritten(nodeId);
+        Assert.Equal(1, _manager.Metrics.Scheduled);
 
         // Act
         _manager.ClearAll();
 
-        // Assert
-        Assert.Equal(0, _manager.PendingReadCount);
-        Assert.Equal(0, _manager.RegisteredPropertyCount);
+        // Write again - should NOT schedule (property no longer tracked)
+        _manager.OnPropertyWritten(nodeId);
+
+        // Assert - still only 1 scheduled (property removed)
+        Assert.Equal(1, _manager.Metrics.Scheduled);
     }
 
     [Fact]
-    public async Task ConcurrentRegistrationAndUnregistration_IsThreadSafe()
+    public async Task ConcurrentOperations_AreThreadSafe()
     {
         // Arrange
         const int operationsPerThread = 100;
         const int threadCount = 4;
 
-        // Act
+        // Act - concurrent register/write/unregister operations should not throw
         var tasks = Enumerable.Range(0, threadCount)
             .Select(threadIndex => Task.Run(() =>
             {
@@ -217,28 +180,24 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
 
         await Task.WhenAll(tasks);
 
-        // Assert - all should be cleaned up
-        Assert.Equal(0, _manager.RegisteredPropertyCount);
-        Assert.Equal(0, _manager.PendingReadCount);
+        // Assert - should have scheduled one per operation
+        Assert.Equal(threadCount * operationsPerThread, _manager.Metrics.Scheduled);
     }
 
     [Fact]
-    public async Task DisposeAsync_CancelsInFlightOperations()
+    public async Task DisposeAsync_CompletesGracefully()
     {
         // Arrange
         var nodeId = new NodeId("TestNode", 2);
         _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(500));
         _manager.OnPropertyWritten(nodeId);
+        Assert.Equal(1, _manager.Metrics.Scheduled);
 
-        // Verify pending read was scheduled
-        Assert.Equal(1, _manager.PendingReadCount);
-
-        // Act - Dispose should cancel any pending operations
+        // Act - Dispose should complete without throwing
         await _manager.DisposeAsync();
 
-        // Assert - Manager is disposed, accessing properties after disposal
-        // should not throw (graceful shutdown)
-        Assert.Equal(0, _manager.PendingReadCount);
+        // Assert - metrics remain stable after disposal
+        Assert.Equal(1, _manager.Metrics.Scheduled);
     }
 
     [Fact]
@@ -251,10 +210,12 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         // Dispose the manager
         await _manager.DisposeAsync();
 
+        var scheduledBefore = _manager.Metrics.Scheduled;
+
         // Act - Write after disposal should be ignored, not throw
         _manager.OnPropertyWritten(nodeId);
 
-        // Assert - No pending reads (manager is disposed)
-        Assert.Equal(0, _manager.PendingReadCount);
+        // Assert - metrics unchanged
+        Assert.Equal(scheduledBefore, _manager.Metrics.Scheduled);
     }
 }
