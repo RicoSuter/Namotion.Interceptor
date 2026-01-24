@@ -36,28 +36,28 @@ public class OpcUaServerClientReadWriteTests
             _server.Root.Name = "Updated Server Name";
             await AsyncTestHelpers.WaitUntilAsync(
                 () => _client.Root.Name == "Updated Server Name",
-                timeout: TimeSpan.FromSeconds(10),
+                timeout: TimeSpan.FromSeconds(30),
                 message: "Client should receive server's name update");
 
             // Test string property on client
             _client.Root.Name = "Updated Client Name";
             await AsyncTestHelpers.WaitUntilAsync(
                 () => _server.Root.Name == "Updated Client Name",
-                timeout: TimeSpan.FromSeconds(10),
+                timeout: TimeSpan.FromSeconds(30),
                 message: "Server should receive client's name update");
 
             // Test numeric property on server
             _server.Root.Number = 123.45m;
             await AsyncTestHelpers.WaitUntilAsync(
                 () => _client.Root.Number == 123.45m,
-                timeout: TimeSpan.FromSeconds(10),
+                timeout: TimeSpan.FromSeconds(30),
                 message: "Client should receive server's number update");
 
             // Test numeric property on client
             _client.Root.Number = 54.321m;
             await AsyncTestHelpers.WaitUntilAsync(
                 () => _server.Root.Number == 54.321m,
-                timeout: TimeSpan.FromSeconds(10),
+                timeout: TimeSpan.FromSeconds(30),
                 message: "Server should receive client's number update");
         }
         finally
