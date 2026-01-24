@@ -5,14 +5,14 @@ using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
 using Opc.Ua.Client;
 
-namespace Namotion.Interceptor.OpcUa.Client.Consistency;
+namespace Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 
 /// <summary>
-/// Manages consistency reads for properties where the server revised SamplingInterval=0 to non-zero.
+/// Manages read-after-writes for properties where the server revised SamplingInterval=0 to non-zero.
 /// Maintains a NodeId-to-property index for O(1) lookups and handles automatic cleanup.
 /// Thread-safe. All state is protected by a single lock for simplicity.
 /// </summary>
-internal sealed class ConsistencyReadManager : IAsyncDisposable
+internal sealed class ReadAfterWriteManager : IAsyncDisposable
 {
     private readonly Func<ISession?> _sessionProvider;
     private readonly ISubjectSource _source;
@@ -25,7 +25,7 @@ internal sealed class ConsistencyReadManager : IAsyncDisposable
     // NodeId -> Property (for O(1) lookup during reads)
     private readonly Dictionary<NodeId, RegisteredSubjectProperty> _propertyIndex = new();
 
-    // NodeId -> RevisedInterval (only properties that need consistency reads)
+    // NodeId -> RevisedInterval (only properties that need read-after-writes)
     private readonly Dictionary<NodeId, TimeSpan> _revisedIntervals = new();
 
     // NodeId -> ReadAt time (pending scheduled reads)
@@ -36,9 +36,9 @@ internal sealed class ConsistencyReadManager : IAsyncDisposable
     private int _disposed;
 
     /// <summary>
-    /// Gets metrics for consistency read operations.
+    /// Gets metrics for read-after-write operations.
     /// </summary>
-    public ConsistencyReadMetrics Metrics { get; } = new();
+    public ReadAfterWriteMetrics Metrics { get; } = new();
 
     /// <summary>
     /// Gets the number of registered properties.
@@ -49,7 +49,7 @@ internal sealed class ConsistencyReadManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Gets the number of pending consistency reads.
+    /// Gets the number of pending read-after-writes.
     /// </summary>
     public int PendingReadCount
     {
@@ -57,13 +57,13 @@ internal sealed class ConsistencyReadManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Creates a new consistency read manager.
+    /// Creates a new read-after-write manager.
     /// </summary>
     /// <param name="sessionProvider">Function to get current session.</param>
     /// <param name="source">The subject source for applying read values.</param>
     /// <param name="configuration">OPC UA client configuration.</param>
     /// <param name="logger">Logger instance.</param>
-    public ConsistencyReadManager(
+    public ReadAfterWriteManager(
         Func<ISession?> sessionProvider,
         ISubjectSource source,
         OpcUaClientConfiguration configuration,
@@ -101,13 +101,13 @@ internal sealed class ConsistencyReadManager : IAsyncDisposable
         {
             _propertyIndex[nodeId] = property;
 
-            // Track for consistency reads if: requested 0 (exception-based) but server revised to > 0
+            // Track for read-after-writes if: requested 0 (exception-based) but server revised to > 0
             if (requestedSamplingInterval == 0 && revisedSamplingInterval > TimeSpan.Zero)
             {
                 _revisedIntervals[nodeId] = revisedSamplingInterval;
 
                 _logger.LogDebug(
-                    "Property {PropertyName} registered for consistency reads: " +
+                    "Property {PropertyName} registered for read-after-writes: " +
                     "requested SamplingInterval=0, revised to {RevisedInterval}ms.",
                     property?.Name ?? nodeId.ToString(), revisedSamplingInterval.TotalMilliseconds);
             }
@@ -135,7 +135,7 @@ internal sealed class ConsistencyReadManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Notifies that a property was successfully written. Schedules a consistency read if needed.
+    /// Notifies that a property was successfully written. Schedules a read-after-write if needed.
     /// </summary>
     /// <param name="nodeId">The OPC UA node ID that was written.</param>
     public void OnPropertyWritten(NodeId nodeId)
@@ -162,16 +162,16 @@ internal sealed class ConsistencyReadManager : IAsyncDisposable
                 _lastKnownSession = currentSession;
                 _circuitBreaker.Reset();
 
-                _logger.LogDebug("Session changed. Cleared pending consistency reads.");
+                _logger.LogDebug("Session changed. Cleared pending read-after-writes.");
             }
 
-            // Only schedule if this property needs consistency reads
+            // Only schedule if this property needs read-after-writes
             if (!_revisedIntervals.TryGetValue(nodeId, out var revisedInterval))
             {
                 return;
             }
 
-            var readAt = DateTime.UtcNow + revisedInterval + _configuration.ConsistencyReadBuffer;
+            var readAt = DateTime.UtcNow + revisedInterval + _configuration.ReadAfterWriteBuffer;
 
             if (_pendingReads.ContainsKey(nodeId))
             {
@@ -254,7 +254,7 @@ internal sealed class ConsistencyReadManager : IAsyncDisposable
     {
         if (!_circuitBreaker.ShouldAttempt())
         {
-            _logger.LogDebug("Consistency read circuit breaker open, skipping.");
+            _logger.LogDebug("Read-after-write circuit breaker open, skipping.");
             RescheduleTimer();
             return;
         }
@@ -291,7 +291,7 @@ internal sealed class ConsistencyReadManager : IAsyncDisposable
         var session = _sessionProvider();
         if (session is null || !session.Connected)
         {
-            _logger.LogDebug("Skipping consistency reads - session not connected.");
+            _logger.LogDebug("Skipping read-after-writes - session not connected.");
             RescheduleTimer();
             return;
         }
@@ -337,7 +337,7 @@ internal sealed class ConsistencyReadManager : IAsyncDisposable
             _circuitBreaker.RecordSuccess();
 
             _logger.LogDebug(
-                "Completed {SuccessCount}/{TotalCount} consistency reads.",
+                "Completed {SuccessCount}/{TotalCount} read-after-writes.",
                 successCount, dueReads.Count);
         }
         catch (Exception ex)
@@ -345,11 +345,11 @@ internal sealed class ConsistencyReadManager : IAsyncDisposable
             Metrics.RecordFailed();
             if (_circuitBreaker.RecordFailure())
             {
-                _logger.LogError(ex, "Consistency read circuit breaker opened after failures.");
+                _logger.LogError(ex, "Read-after-write circuit breaker opened after failures.");
             }
             else
             {
-                _logger.LogWarning(ex, "Failed to execute consistency reads.");
+                _logger.LogWarning(ex, "Failed to execute read-after-writes.");
             }
         }
         finally
@@ -415,7 +415,7 @@ internal sealed class ConsistencyReadManager : IAsyncDisposable
             return;
         }
 
-        _logger.LogDebug("Disposing ConsistencyReadManager. Metrics: {Metrics}", Metrics);
+        _logger.LogDebug("Disposing ReadAfterWriteManager. Metrics: {Metrics}", Metrics);
 
         lock (_lock)
         {

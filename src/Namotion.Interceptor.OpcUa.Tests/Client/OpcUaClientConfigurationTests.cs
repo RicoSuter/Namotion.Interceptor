@@ -93,7 +93,7 @@ public class OpcUaClientConfigurationTests
     }
 
     [Fact]
-    public void Validate_WithNegativeConsistencyReadBuffer_ThrowsArgumentException()
+    public void Validate_WithNegativeReadAfterWriteBuffer_ThrowsArgumentException()
     {
         // Arrange
         var config = new OpcUaClientConfiguration
@@ -103,16 +103,16 @@ public class OpcUaClientConfigurationTests
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
-            ConsistencyReadBuffer = TimeSpan.FromMilliseconds(-1)
+            ReadAfterWriteBuffer = TimeSpan.FromMilliseconds(-1)
         };
 
         // Act & Assert
         var exception = Assert.Throws<ArgumentException>(() => config.Validate());
-        Assert.Contains("ConsistencyReadBuffer", exception.Message);
+        Assert.Contains("ReadAfterWriteBuffer", exception.Message);
     }
 
     [Fact]
-    public void Validate_WithZeroConsistencyReadBuffer_Succeeds()
+    public void Validate_WithZeroReadAfterWriteBuffer_Succeeds()
     {
         // Arrange - Zero is valid (no buffer)
         var config = new OpcUaClientConfiguration
@@ -122,7 +122,7 @@ public class OpcUaClientConfigurationTests
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
-            ConsistencyReadBuffer = TimeSpan.Zero
+            ReadAfterWriteBuffer = TimeSpan.Zero
         };
 
         // Act & Assert - Should not throw
@@ -130,7 +130,7 @@ public class OpcUaClientConfigurationTests
     }
 
     [Fact]
-    public void Validate_WithValidConsistencyReadSettings_Succeeds()
+    public void Validate_WithValidReadAfterWriteSettings_Succeeds()
     {
         // Arrange
         var config = new OpcUaClientConfiguration
@@ -140,7 +140,7 @@ public class OpcUaClientConfigurationTests
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
-            ConsistencyReadBuffer = TimeSpan.FromMilliseconds(100)
+            ReadAfterWriteBuffer = TimeSpan.FromMilliseconds(100)
         };
 
         // Act & Assert - Should not throw

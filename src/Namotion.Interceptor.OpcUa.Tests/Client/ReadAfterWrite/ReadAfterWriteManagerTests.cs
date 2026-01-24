@@ -1,19 +1,19 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.OpcUa.Client;
-using Namotion.Interceptor.OpcUa.Client.Consistency;
+using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 
-namespace Namotion.Interceptor.OpcUa.Tests.Client.Consistency;
+namespace Namotion.Interceptor.OpcUa.Tests.Client.ReadAfterWrite;
 
 /// <summary>
-/// Tests for ConsistencyReadManager - the consolidated manager for consistency reads.
+/// Tests for ReadAfterWriteManager - the consolidated manager for read-after-writes.
 /// </summary>
-public class ConsistencyReadManagerTests : IAsyncDisposable
+public class ReadAfterWriteManagerTests : IAsyncDisposable
 {
-    private readonly ConsistencyReadManager _manager;
+    private readonly ReadAfterWriteManager _manager;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly TestPerson _testSubject;
 
@@ -23,7 +23,7 @@ public class ConsistencyReadManagerTests : IAsyncDisposable
         return registeredSubject.TryGetProperty(name)!;
     }
 
-    public ConsistencyReadManagerTests()
+    public ReadAfterWriteManagerTests()
     {
         _testSubject = new TestPerson(new InterceptorSubjectContext());
         _configuration = new OpcUaClientConfiguration
@@ -33,11 +33,11 @@ public class ConsistencyReadManagerTests : IAsyncDisposable
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(Namotion.Interceptor.Connectors.DefaultSubjectFactory.Instance),
-            ConsistencyReadBuffer = TimeSpan.FromMilliseconds(50)
+            ReadAfterWriteBuffer = TimeSpan.FromMilliseconds(50)
         };
 
         // Create manager with null session provider (for unit tests)
-        _manager = new ConsistencyReadManager(
+        _manager = new ReadAfterWriteManager(
             sessionProvider: () => null,
             source: null!, // Not used in these unit tests
             _configuration,
@@ -71,7 +71,7 @@ public class ConsistencyReadManagerTests : IAsyncDisposable
     }
 
     [Fact]
-    public void RegisterProperty_WithSamplingIntervalZeroRevised_TracksForConsistencyReads()
+    public void RegisterProperty_WithSamplingIntervalZeroRevised_TracksForReadAfterWrites()
     {
         // Arrange
         var nodeId = new NodeId("TestNode", 2);
@@ -82,13 +82,13 @@ public class ConsistencyReadManagerTests : IAsyncDisposable
         // Now simulate a write
         _manager.OnPropertyWritten(nodeId);
 
-        // Assert - should have scheduled a consistency read
+        // Assert - should have scheduled a read-after-write
         Assert.Equal(1, _manager.PendingReadCount);
         Assert.Equal(1, _manager.Metrics.Scheduled);
     }
 
     [Fact]
-    public void RegisterProperty_WithNonZeroSamplingInterval_DoesNotTrackForConsistencyReads()
+    public void RegisterProperty_WithNonZeroSamplingInterval_DoesNotTrackForReadAfterWrites()
     {
         // Arrange
         var nodeId = new NodeId("TestNode", 2);

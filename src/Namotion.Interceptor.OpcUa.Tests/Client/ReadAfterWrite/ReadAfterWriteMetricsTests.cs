@@ -1,17 +1,17 @@
-using Namotion.Interceptor.OpcUa.Client.Consistency;
+using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 
-namespace Namotion.Interceptor.OpcUa.Tests.Client.Consistency;
+namespace Namotion.Interceptor.OpcUa.Tests.Client.ReadAfterWrite;
 
 /// <summary>
-/// Tests for ConsistencyReadMetrics thread-safe metrics collection.
+/// Tests for ReadAfterWriteMetrics thread-safe metrics collection.
 /// </summary>
-public class ConsistencyReadMetricsTests
+public class ReadAfterWriteMetricsTests
 {
     [Fact]
     public void InitialState_AllMetricsAreZero()
     {
         // Arrange & Act
-        var metrics = new ConsistencyReadMetrics();
+        var metrics = new ReadAfterWriteMetrics();
 
         // Assert
         Assert.Equal(0, metrics.Scheduled);
@@ -24,7 +24,7 @@ public class ConsistencyReadMetricsTests
     public void RecordScheduled_IncrementsCounter()
     {
         // Arrange
-        var metrics = new ConsistencyReadMetrics();
+        var metrics = new ReadAfterWriteMetrics();
 
         // Act
         metrics.RecordScheduled();
@@ -38,7 +38,7 @@ public class ConsistencyReadMetricsTests
     public void RecordExecuted_IncrementsCounterByAmount()
     {
         // Arrange
-        var metrics = new ConsistencyReadMetrics();
+        var metrics = new ReadAfterWriteMetrics();
 
         // Act
         metrics.RecordExecuted(3);
@@ -52,7 +52,7 @@ public class ConsistencyReadMetricsTests
     public void RecordCoalesced_IncrementsCounter()
     {
         // Arrange
-        var metrics = new ConsistencyReadMetrics();
+        var metrics = new ReadAfterWriteMetrics();
 
         // Act
         metrics.RecordCoalesced();
@@ -67,7 +67,7 @@ public class ConsistencyReadMetricsTests
     public void RecordFailed_IncrementsCounter()
     {
         // Arrange
-        var metrics = new ConsistencyReadMetrics();
+        var metrics = new ReadAfterWriteMetrics();
 
         // Act
         metrics.RecordFailed();
@@ -80,7 +80,7 @@ public class ConsistencyReadMetricsTests
     public void ToString_ReturnsFormattedString()
     {
         // Arrange
-        var metrics = new ConsistencyReadMetrics();
+        var metrics = new ReadAfterWriteMetrics();
         metrics.RecordScheduled();
         metrics.RecordScheduled();
         metrics.RecordExecuted(1);
@@ -98,7 +98,7 @@ public class ConsistencyReadMetricsTests
     public async Task ConcurrentOperations_IsThreadSafe()
     {
         // Arrange
-        var metrics = new ConsistencyReadMetrics();
+        var metrics = new ReadAfterWriteMetrics();
         const int operationsPerThread = 250;
         const int threadCount = 4;
 

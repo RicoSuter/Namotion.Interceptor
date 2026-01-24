@@ -110,11 +110,11 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             this,
             onReleasing: property =>
             {
-                // Unregister from ConsistencyReadManager FIRST (uses NodeId)
+                // Unregister from ReadAfterWriteManager FIRST (uses NodeId)
                 if (property.TryGetPropertyData(OpcUaNodeIdKey, out var nodeIdObj) &&
                     nodeIdObj is NodeId nodeId)
                 {
-                    _sessionManager?.ConsistencyReadManager?.UnregisterProperty(nodeId);
+                    _sessionManager?.ReadAfterWriteManager?.UnregisterProperty(nodeId);
                 }
                 property.RemovePropertyData(OpcUaNodeIdKey);
             },
@@ -417,8 +417,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
             var session = await sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
 
-            // Clear all consistency read state - new session means old pending reads and registrations are invalid
-            sessionManager.ConsistencyReadManager?.ClearAll();
+            // Clear all read-after-write state - new session means old pending reads and registrations are invalid
+            sessionManager.ReadAfterWriteManager?.ClearAll();
 
             _logger.LogInformation("New OPC UA session created successfully.");
 
@@ -610,12 +610,12 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     }
 
     /// <summary>
-    /// Notifies ConsistencyReadManager that properties were written.
-    /// Schedules consistency reads for properties where SamplingInterval=0 was revised to non-zero.
+    /// Notifies ReadAfterWriteManager that properties were written.
+    /// Schedules read-after-writes for properties where SamplingInterval=0 was revised to non-zero.
     /// </summary>
     private void NotifyPropertiesWritten(ReadOnlyMemory<SubjectPropertyChange> changes)
     {
-        var manager = _sessionManager?.ConsistencyReadManager;
+        var manager = _sessionManager?.ReadAfterWriteManager;
         if (manager is null)
         {
             return;
