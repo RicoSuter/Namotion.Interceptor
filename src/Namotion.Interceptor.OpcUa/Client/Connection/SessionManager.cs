@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.OpcUa.Client.Consistency;
 using Namotion.Interceptor.OpcUa.Client.Polling;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -75,6 +76,11 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// </summary>
     internal PollingManager? PollingManager { get; }
 
+    /// <summary>
+    /// Gets the consistency read manager for scheduling reads after writes.
+    /// </summary>
+    internal ConsistencyReadManager? ConsistencyReadManager { get; private set; }
+
     public SessionManager(OpcUaSubjectClientSource source, SubjectPropertyWriter propertyWriter, OpcUaClientConfiguration configuration, ILogger logger)
     {
         _source = source;
@@ -92,7 +98,13 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             PollingManager.Start();
         }
 
-        SubscriptionManager = new SubscriptionManager(source, propertyWriter, PollingManager, configuration, logger);
+        ConsistencyReadManager = new ConsistencyReadManager(
+            sessionProvider: () => CurrentSession,
+            source,
+            configuration,
+            logger);
+
+        SubscriptionManager = new SubscriptionManager(source, propertyWriter, PollingManager, ConsistencyReadManager, configuration, logger);
     }
 
     /// <summary>
@@ -145,7 +157,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             updateBeforeConnect: false,
             sessionName: application.ApplicationName,
             sessionTimeout: (uint)configuration.SessionTimeout.TotalMilliseconds,
-            identity: new UserIdentity(),
+            identity: new UserIdentity(), // TODO: configuration.GetIdentity() default implementation: new UserIdentity()
             preferredLocales: null,
             cancellationToken).ConfigureAwait(false);
 
@@ -303,6 +315,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                         "OPC UA session reconnected but subscription transfer failed (server restart). " +
                         "Clearing session to trigger full reconnection via health check.");
                     Volatile.Write(ref _session, null);
+                    ConsistencyReadManager?.ClearPendingReads();
                 }
             }
             else
@@ -447,6 +460,10 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
 
         try { _reconnectHandler.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing reconnect handler."); }
+        if (ConsistencyReadManager is not null)
+        {
+            try { await ConsistencyReadManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing consistency read manager."); }
+        }
         try { await SubscriptionManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing subscription manager."); }
         if (PollingManager is not null)
         {

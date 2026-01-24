@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.OpcUa.Client.Consistency;
 using Namotion.Interceptor.OpcUa.Client.Polling;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -19,6 +20,7 @@ internal class SubscriptionManager : IAsyncDisposable
     private readonly OpcUaSubjectClientSource _source;
     private readonly SubjectPropertyWriter? _propertyWriter;
     private readonly PollingManager? _pollingManager;
+    private readonly ConsistencyReadManager? _consistencyReadManager;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
 
@@ -37,11 +39,18 @@ internal class SubscriptionManager : IAsyncDisposable
     /// </summary>
     public IReadOnlyDictionary<uint, RegisteredSubjectProperty> MonitoredItems => _monitoredItems;
 
-    public SubscriptionManager(OpcUaSubjectClientSource source, SubjectPropertyWriter propertyWriter, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
+    public SubscriptionManager(
+        OpcUaSubjectClientSource source,
+        SubjectPropertyWriter propertyWriter,
+        PollingManager? pollingManager,
+        ConsistencyReadManager? consistencyReadManager,
+        OpcUaClientConfiguration configuration,
+        ILogger logger)
     {
         _source = source;
         _propertyWriter = propertyWriter;
         _pollingManager = pollingManager;
+        _consistencyReadManager = consistencyReadManager;
         _configuration = configuration;
         _logger = logger;
     }
@@ -111,6 +120,9 @@ internal class SubscriptionManager : IAsyncDisposable
             }
 
             await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
+
+            // Register properties with ConsistencyReadManager now that we know revised sampling intervals
+            RegisterPropertiesWithConsistencyReadManager(subscription);
 
             // Add to collection AFTER initialization (temporal separation - health monitor never sees partial state)
             _subscriptions.TryAdd(subscription, 0);
@@ -198,10 +210,11 @@ internal class SubscriptionManager : IAsyncDisposable
             oldSubscription.FastDataChangeCallback -= OnFastDataChange;
         }
 
+
         _logger.LogInformation("Updated subscription manager with {Count} transferred subscriptions (removed {OldCount} old)",
             transferredSubscriptions.Count, oldSubscriptions.Length);
     }
-    
+
     private async Task FilterOutFailedMonitoredItemsAsync(Subscription subscription, CancellationToken cancellationToken)
     {
         List<MonitoredItem>? failedItems = null;
@@ -307,6 +320,37 @@ internal class SubscriptionManager : IAsyncDisposable
                 _monitoredItems.TryRemove(kvp.Key, out _);
             }
         }
+    }
+
+    /// <summary>
+    /// Registers all successfully created monitored items with ConsistencyReadManager.
+    /// Called after ApplyChangesAsync when we know the revised sampling intervals.
+    /// </summary>
+    private void RegisterPropertiesWithConsistencyReadManager(Subscription subscription)
+    {
+        if (_consistencyReadManager is null)
+        {
+            return;
+        }
+
+        foreach (var item in subscription.MonitoredItems)
+        {
+            if (item.Handle is RegisteredSubjectProperty property && item.Status?.Created == true)
+            {
+                var requestedInterval = GetRequestedSamplingInterval(property);
+                var revisedInterval = TimeSpan.FromMilliseconds(item.Status.SamplingInterval);
+                _consistencyReadManager.RegisterProperty(item.StartNodeId, property, requestedInterval, revisedInterval);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the requested sampling interval for a property from its OPC UA attribute or configuration default.
+    /// </summary>
+    private int? GetRequestedSamplingInterval(RegisteredSubjectProperty property)
+    {
+        var attribute = property.TryGetOpcUaNodeAttribute();
+        return attribute?.SamplingInterval ?? _configuration.DefaultSamplingInterval;
     }
 
     public async ValueTask DisposeAsync()

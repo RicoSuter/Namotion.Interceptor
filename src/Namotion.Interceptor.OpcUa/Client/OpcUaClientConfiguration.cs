@@ -141,6 +141,15 @@ public class OpcUaClientConfiguration
     public double? DefaultDeadbandValue { get; init; }
 
     /// <summary>
+    /// Gets or sets the buffer time added to the revised sampling interval when scheduling
+    /// consistency reads after writes. This ensures the PLC has time to respond before
+    /// the read occurs. Only applies when SamplingInterval = 0 was requested but the
+    /// server revised it to a non-zero value.
+    /// Default: 50 milliseconds.
+    /// </summary>
+    public TimeSpan ConsistencyReadBuffer { get; init; } = TimeSpan.FromMilliseconds(50);
+
+    /// <summary>
     /// Gets or sets the default publishing interval for subscriptions in milliseconds (default: 0).
     /// Larger values reduce overhead by batching more notifications per publish.
     /// </summary>
@@ -223,17 +232,16 @@ public class OpcUaClientConfiguration
     public TimeSpan PollingDisposalTimeout { get; init; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
-    /// Gets or sets the number of consecutive polling failures before the circuit breaker opens.
-    /// When the circuit breaker opens, polling is suspended temporarily to prevent resource exhaustion.
-    /// Only used when EnablePollingFallback is true.
+    /// Gets or sets the number of consecutive failures before the circuit breaker opens
+    /// for background read operations (polling fallback and consistency reads).
+    /// When the circuit breaker opens, reads are suspended temporarily to prevent resource exhaustion.
     /// Default is 5 failures.
     /// </summary>
     public int PollingCircuitBreakerThreshold { get; init; } = 5;
 
     /// <summary>
-    /// Gets or sets the cooldown period after the circuit breaker opens before attempting to resume polling.
-    /// After this period, polling automatically resumes and the circuit breaker resets.
-    /// Only used when EnablePollingFallback is true.
+    /// Gets or sets the cooldown period after the circuit breaker opens before attempting
+    /// to resume background read operations (polling fallback and consistency reads).
     /// Default is 30 seconds.
     /// </summary>
     public TimeSpan PollingCircuitBreakerCooldown { get; init; } = TimeSpan.FromSeconds(30);
@@ -550,5 +558,13 @@ public class OpcUaClientConfiguration
                 $"MinPublishRequestCount must be at least 1, got: {MinPublishRequestCount}",
                 nameof(MinPublishRequestCount));
         }
+
+        if (ConsistencyReadBuffer < TimeSpan.Zero)
+        {
+            throw new ArgumentException(
+                $"ConsistencyReadBuffer must be non-negative, got: {ConsistencyReadBuffer}",
+                nameof(ConsistencyReadBuffer));
+        }
+
     }
 }

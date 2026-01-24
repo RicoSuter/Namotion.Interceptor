@@ -91,4 +91,59 @@ public class OpcUaClientConfigurationTests
         // Act & Assert - should not throw
         config.Validate();
     }
+
+    [Fact]
+    public void Validate_WithNegativeConsistencyReadBuffer_ThrowsArgumentException()
+    {
+        // Arrange
+        var config = new OpcUaClientConfiguration
+        {
+            ServerUrl = "opc.tcp://localhost:4840",
+            PathProvider = new AttributeBasedPathProvider("opc"),
+            TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
+            ValueConverter = new OpcUaValueConverter(),
+            SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
+            ConsistencyReadBuffer = TimeSpan.FromMilliseconds(-1)
+        };
+
+        // Act & Assert
+        var exception = Assert.Throws<ArgumentException>(() => config.Validate());
+        Assert.Contains("ConsistencyReadBuffer", exception.Message);
+    }
+
+    [Fact]
+    public void Validate_WithZeroConsistencyReadBuffer_Succeeds()
+    {
+        // Arrange - Zero is valid (no buffer)
+        var config = new OpcUaClientConfiguration
+        {
+            ServerUrl = "opc.tcp://localhost:4840",
+            PathProvider = new AttributeBasedPathProvider("opc"),
+            TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
+            ValueConverter = new OpcUaValueConverter(),
+            SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
+            ConsistencyReadBuffer = TimeSpan.Zero
+        };
+
+        // Act & Assert - Should not throw
+        config.Validate();
+    }
+
+    [Fact]
+    public void Validate_WithValidConsistencyReadSettings_Succeeds()
+    {
+        // Arrange
+        var config = new OpcUaClientConfiguration
+        {
+            ServerUrl = "opc.tcp://localhost:4840",
+            PathProvider = new AttributeBasedPathProvider("opc"),
+            TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
+            ValueConverter = new OpcUaValueConverter(),
+            SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
+            ConsistencyReadBuffer = TimeSpan.FromMilliseconds(100)
+        };
+
+        // Act & Assert - Should not throw
+        config.Validate();
+    }
 }
