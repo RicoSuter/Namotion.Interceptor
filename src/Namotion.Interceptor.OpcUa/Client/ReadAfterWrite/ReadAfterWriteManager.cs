@@ -245,14 +245,21 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         }
     }
 
-    private void OnTimerCallback(object? state)
+    private async void OnTimerCallback(object? state)
     {
         if (Volatile.Read(ref _disposed) == 1)
         {
             return;
         }
 
-        _ = ProcessDueReadsAsync();
+        try
+        {
+            await ProcessDueReadsAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Unexpected error in read-after-write timer callback.");
+        }
     }
 
     private async Task ProcessDueReadsAsync()
