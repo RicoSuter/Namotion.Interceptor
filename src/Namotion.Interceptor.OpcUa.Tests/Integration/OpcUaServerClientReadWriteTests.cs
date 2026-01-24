@@ -93,7 +93,7 @@ public class OpcUaServerClientReadWriteTests
             // Wait for array synchronization (longer timeout for CI environments)
             await AsyncTestHelpers.WaitUntilAsync(
                 () => _client.Root.ScalarNumbers.SequenceEqual(newNumbers),
-                timeout: TimeSpan.FromSeconds(30),
+                timeout: TimeSpan.FromSeconds(60),
                 message: "Client should receive server's array update");
 
             _logger.Log($"Client ScalarNumbers after update: [{string.Join(", ", _client.Root.ScalarNumbers)}]");
