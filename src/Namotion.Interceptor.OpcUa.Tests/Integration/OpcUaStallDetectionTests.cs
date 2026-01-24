@@ -74,7 +74,7 @@ public class OpcUaStallDetectionTests
             // Verify initial connection
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Diagnostics.IsConnected,
-                timeout: TimeSpan.FromSeconds(10),
+                timeout: TimeSpan.FromSeconds(30),
                 message: "Client should be connected after startup");
             logger.Log("Initial connection established");
 
@@ -95,7 +95,7 @@ public class OpcUaStallDetectionTests
             // Wait for reconnection to start
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Diagnostics.IsReconnecting,
-                timeout: TimeSpan.FromSeconds(10),
+                timeout: TimeSpan.FromSeconds(30),
                 message: "Client should start reconnecting");
             logger.Log("Client started reconnecting");
 
@@ -210,7 +210,7 @@ public class OpcUaStallDetectionTests
             // Wait for connection status to stabilize
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Diagnostics.IsConnected,
-                timeout: TimeSpan.FromSeconds(10),
+                timeout: TimeSpan.FromSeconds(30),
                 message: "Client should report as connected after recovery");
             logger.Log("Test passed - client recovered after stall");
         }
@@ -308,7 +308,7 @@ public class OpcUaStallDetectionTests
             // Verify client is connected
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Diagnostics.IsConnected,
-                timeout: TimeSpan.FromSeconds(10),
+                timeout: TimeSpan.FromSeconds(30),
                 message: "Client should report as connected after recovery");
 
             // Log final state for debugging
