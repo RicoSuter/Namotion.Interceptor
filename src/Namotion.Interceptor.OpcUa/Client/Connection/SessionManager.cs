@@ -250,17 +250,26 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             // Set flag before BeginReconnect to avoid window where external observers see IsReconnecting=false
             Interlocked.Exchange(ref _isReconnecting, 1);
 
-            var newState = _reconnectHandler.BeginReconnect(session, (int)_configuration.ReconnectInterval.TotalMilliseconds, OnReconnectComplete);
-            if (newState is SessionReconnectHandler.ReconnectState.Triggered or SessionReconnectHandler.ReconnectState.Reconnecting)
+            try
             {
-                e.CancelKeepAlive = true;
-                _source.RecordReconnectionAttemptStart();
+                var newState = _reconnectHandler.BeginReconnect(session, (int)_configuration.ReconnectInterval.TotalMilliseconds, OnReconnectComplete);
+                if (newState is SessionReconnectHandler.ReconnectState.Triggered or SessionReconnectHandler.ReconnectState.Reconnecting)
+                {
+                    e.CancelKeepAlive = true;
+                    _source.RecordReconnectionAttemptStart();
+                }
+                else
+                {
+                    // BeginReconnect failed - reset flag
+                    Interlocked.Exchange(ref _isReconnecting, 0);
+                    _logger.LogError("Failed to begin OPC UA reconnect. Handler state: {State}.", newState);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                // BeginReconnect failed - reset flag
+                // BeginReconnect threw - reset flag for immediate recovery instead of waiting 30s for stall detection
                 Interlocked.Exchange(ref _isReconnecting, 0);
-                _logger.LogError("Failed to begin OPC UA reconnect. Handler state: {State}.", newState);
+                _logger.LogError(ex, "BeginReconnect threw unexpected exception.");
             }
         }
         finally

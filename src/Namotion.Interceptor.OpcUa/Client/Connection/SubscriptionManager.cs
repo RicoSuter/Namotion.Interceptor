@@ -60,9 +60,6 @@ internal class SubscriptionManager : IAsyncDisposable
         Session session,
         CancellationToken cancellationToken)
     {
-        // Temporal separation: subscriptions added to _subscriptions AFTER initialization prevents health monitor races.
-        _shuttingDown = false;
-
         // Clear any existing subscriptions and monitored items from previous session (reconnection scenario).
         // Old subscriptions are orphaned (belong to dead session), so we just need to remove our references.
         foreach (var oldSubscription in _subscriptions.Keys)
@@ -71,6 +68,10 @@ internal class SubscriptionManager : IAsyncDisposable
         }
         _subscriptions.Clear();
         _monitoredItems.Clear();
+
+        // Reset shutdown flag AFTER clearing collections - prevents old callbacks from processing
+        // during the window between flag reset and collection clearing (defense-in-depth).
+        _shuttingDown = false;
 
         var itemCount = monitoredItems.Count;
         var maximumItemsPerSubscription = _configuration.MaximumItemsPerSubscription;
@@ -146,18 +147,28 @@ internal class SubscriptionManager : IAsyncDisposable
         var receivedTimestamp = DateTimeOffset.UtcNow;
         var changes = ChangesPool.Rent();
 
-        for (var i = 0; i < monitoredItemsCount; i++)
+        try
         {
-            var item = notification.MonitoredItems[i];
-            if (_monitoredItems.TryGetValue(item.ClientHandle, out var property))
+            for (var i = 0; i < monitoredItemsCount; i++)
             {
-                changes.Add(new PropertyUpdate
+                var item = notification.MonitoredItems[i];
+                if (_monitoredItems.TryGetValue(item.ClientHandle, out var property))
                 {
-                    Property = property,
-                    Value = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, property),
-                    Timestamp = item.Value.SourceTimestamp
-                });
+                    changes.Add(new PropertyUpdate
+                    {
+                        Property = property,
+                        Value = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, property),
+                        Timestamp = item.Value.SourceTimestamp
+                    });
+                }
             }
+        }
+        catch
+        {
+            // Return pooled list on exception to prevent pool exhaustion
+            changes.Clear();
+            ChangesPool.Return(changes);
+            throw;
         }
 
         if (changes.Count > 0)
