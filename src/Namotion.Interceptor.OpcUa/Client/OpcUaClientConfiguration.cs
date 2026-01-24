@@ -268,7 +268,7 @@ public class OpcUaClientConfiguration
     /// Shorter intervals allow faster disconnection detection but increase network traffic.
     /// Default is 5 seconds.
     /// </summary>
-    public TimeSpan KeepAliveInterval { get; init; } = TimeSpan.FromSeconds(5);
+    public TimeSpan KeepAliveInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Gets or sets the operation timeout for OPC UA requests.
