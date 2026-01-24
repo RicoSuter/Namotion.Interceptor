@@ -1,5 +1,7 @@
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
+using Opc.Ua;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 
@@ -57,4 +59,32 @@ public partial class TestPerson
 
     [Path("opc", "Scores")]
     public partial double[] Scores { get; set; }
+}
+
+/// <summary>
+/// Test model for data change filter testing via configuration defaults and attributes.
+/// Uses -1 as sentinel for enums and NaN for double when "not set" in attributes.
+/// </summary>
+[InterceptorSubject]
+public partial class TestSensorData
+{
+    /// <summary>Temperature with absolute deadband of 0.5 via attribute.</summary>
+    [OpcUaNode("Temperature", null, DeadbandType = DeadbandType.Absolute, DeadbandValue = 0.5)]
+    public partial double Temperature { get; set; }
+
+    /// <summary>Pressure with percent deadband of 2.5 via attribute.</summary>
+    [OpcUaNode("Pressure", null, DeadbandType = DeadbandType.Percent, DeadbandValue = 2.5)]
+    public partial double Pressure { get; set; }
+
+    /// <summary>Status with StatusValueTimestamp trigger via attribute.</summary>
+    [OpcUaNode("Status", null, DataChangeTrigger = DataChangeTrigger.StatusValueTimestamp)]
+    public partial int Status { get; set; }
+
+    /// <summary>Signal with exception-based monitoring (sampling interval 0).</summary>
+    [OpcUaNode("Signal", null, SamplingInterval = 0)]
+    public partial bool Signal { get; set; }
+
+    /// <summary>Counter with no filter settings (uses defaults).</summary>
+    [Path("opc", "Counter")]
+    public partial int Counter { get; set; }
 }

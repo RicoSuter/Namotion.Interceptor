@@ -221,4 +221,40 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         Assert.Equal(0, _manager.RegisteredPropertyCount);
         Assert.Equal(0, _manager.PendingReadCount);
     }
+
+    [Fact]
+    public async Task DisposeAsync_CancelsInFlightOperations()
+    {
+        // Arrange
+        var nodeId = new NodeId("TestNode", 2);
+        _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(500));
+        _manager.OnPropertyWritten(nodeId);
+
+        // Verify pending read was scheduled
+        Assert.Equal(1, _manager.PendingReadCount);
+
+        // Act - Dispose should cancel any pending operations
+        await _manager.DisposeAsync();
+
+        // Assert - Manager is disposed, accessing properties after disposal
+        // should not throw (graceful shutdown)
+        Assert.Equal(0, _manager.PendingReadCount);
+    }
+
+    [Fact]
+    public async Task OnPropertyWritten_AfterDispose_IsIgnored()
+    {
+        // Arrange
+        var nodeId = new NodeId("TestNode", 2);
+        _manager.RegisterProperty(nodeId, CreateTestProperty(_testSubject), requestedSamplingInterval: 0, TimeSpan.FromMilliseconds(500));
+
+        // Dispose the manager
+        await _manager.DisposeAsync();
+
+        // Act - Write after disposal should be ignored, not throw
+        _manager.OnPropertyWritten(nodeId);
+
+        // Assert - No pending reads (manager is disposed)
+        Assert.Equal(0, _manager.PendingReadCount);
+    }
 }
