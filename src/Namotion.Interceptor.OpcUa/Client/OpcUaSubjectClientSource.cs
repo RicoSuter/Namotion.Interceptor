@@ -2,6 +2,7 @@ using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry;
@@ -107,7 +108,16 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
         _ownership = new SourceOwnershipManager(
             this,
-            onReleasing: property => property.RemovePropertyData(OpcUaNodeIdKey),
+            onReleasing: property =>
+            {
+                // Unregister from ConsistencyReadManager FIRST (uses NodeId)
+                if (property.TryGetPropertyData(OpcUaNodeIdKey, out var nodeIdObj) &&
+                    nodeIdObj is NodeId nodeId)
+                {
+                    _sessionManager?.ConsistencyReadManager?.UnregisterProperty(nodeId);
+                }
+                property.RemovePropertyData(OpcUaNodeIdKey);
+            },
             onSubjectDetaching: OnSubjectDetaching);
         _subjectLoader = new OpcUaSubjectLoader(configuration, _ownership, this, logger);
         _subscriptionHealthMonitor = new SubscriptionHealthMonitor(logger);
@@ -115,12 +125,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     private void OnSubjectDetaching(IInterceptorSubject subject)
     {
-        // Skip cleanup during reconnection (subscriptions being transferred)
-        if (IsReconnecting)
-        {
-            return;
-        }
-
         RemoveItemsForSubject(subject);
     }
 
@@ -412,6 +416,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             // Create new session (CreateSessionAsync disposes old session internally)
             var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
             var session = await sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
+
+            // Clear all consistency read state - new session means old pending reads and registrations are invalid
+            sessionManager.ConsistencyReadManager?.ClearAll();
+
             _logger.LogInformation("New OPC UA session created successfully.");
 
             // Recreate MonitoredItems from owned properties (avoids memory leak from holding SDK objects)
@@ -480,7 +488,13 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             }
 
             var writeResponse = await session.WriteAsync(requestHeader: null, writeValues, cancellationToken).ConfigureAwait(false);
-            return ProcessWriteResults(writeResponse.Results, changes);
+            var result = ProcessWriteResults(writeResponse.Results, changes);
+            if (result.IsFullySuccessful || result.IsPartialFailure)
+            {
+                NotifyPropertiesWritten(changes);
+            }
+
+            return result;
         }
         catch (Exception ex)
         {
@@ -593,6 +607,29 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }
 
         return writeValues;
+    }
+
+    /// <summary>
+    /// Notifies ConsistencyReadManager that properties were written.
+    /// Schedules consistency reads for properties where SamplingInterval=0 was revised to non-zero.
+    /// </summary>
+    private void NotifyPropertiesWritten(ReadOnlyMemory<SubjectPropertyChange> changes)
+    {
+        var manager = _sessionManager?.ConsistencyReadManager;
+        if (manager is null)
+        {
+            return;
+        }
+
+        var span = changes.Span;
+        for (var i = 0; i < span.Length; i++)
+        {
+            if (span[i].Property.TryGetPropertyData(OpcUaNodeIdKey, out var nodeIdObj) &&
+                nodeIdObj is NodeId nodeId)
+            {
+                manager.OnPropertyWritten(nodeId);
+            }
+        }
     }
 
     /// <summary>

@@ -461,6 +461,27 @@ builder.Services.AddOpcUaSubjectClient(
 - `PollingInterval` minimum of 100 milliseconds enforced
 - Fail-fast with clear error messages on invalid configuration
 
+### Consistency Reads After Write
+
+**Problem:** When you request exception-based monitoring (`SamplingInterval = 0`) but the server revises it to a non-zero interval, rapid value changes after a write may be missed. For example: client writes `1`, PLC immediately acknowledges by writing `0` - but sampling compares sample-to-sample, so if both samples see `0`, the acknowledgment is never reported to the client.
+
+**How it works:** The library automatically detects when `SamplingInterval = 0` was revised to a non-zero value. For these properties, after a successful write, it schedules a read-back after the revised sampling interval plus a small buffer. This catches server-side changes that sampling would miss.
+
+**Configuration:**
+```csharp
+var config = new OpcUaClientConfiguration
+{
+    // Buffer added to revised interval before reading back (default: 50ms)
+    ConsistencyReadBuffer = TimeSpan.FromMilliseconds(50)
+};
+```
+
+**Behavior:**
+- Only triggers for properties where `SamplingInterval = 0` was revised to > 0
+- Multiple rapid writes are coalesced into a single read
+- Reads are batched for efficiency
+- Circuit breaker prevents repeated failures from overwhelming the server
+
 ### Stall Detection
 
 When the SDK's reconnection handler gets stuck (e.g., server never responds), the client automatically detects the stall and forces a reconnection reset. Configure via `MaxReconnectDuration` (default: 30 seconds). If the SDK reconnection hasn't succeeded within this duration, a full session reset and manual reconnection is triggered.
