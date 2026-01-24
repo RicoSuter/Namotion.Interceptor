@@ -18,7 +18,7 @@ internal class SubscriptionManager : IAsyncDisposable
         = new(() => new List<PropertyUpdate>(16));
 
     private readonly OpcUaSubjectClientSource _source;
-    private readonly SubjectPropertyWriter? _propertyWriter;
+    private readonly SubjectPropertyWriter _propertyWriter;
     private readonly PollingManager? _pollingManager;
     private readonly ReadAfterWriteManager? _readAfterWriteManager;
     private readonly OpcUaClientConfiguration _configuration;
@@ -132,8 +132,7 @@ internal class SubscriptionManager : IAsyncDisposable
 
     private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
     {
-        var propertyWriter = _propertyWriter;
-        if (_shuttingDown || propertyWriter is null)
+        if (_shuttingDown)
         {
             return;
         }
@@ -176,7 +175,7 @@ internal class SubscriptionManager : IAsyncDisposable
             // Pool item returned inside callback. Safe because ApplyUpdate never throws:
             // It wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
             var state = (source: _source, subscription, receivedTimestamp, changes, logger: _logger);
-            propertyWriter.Write(state, static s =>
+            _propertyWriter.Write(state, static s =>
             {
                 for (var i = 0; i < s.changes.Count; i++)
                 {

@@ -13,22 +13,22 @@ internal sealed class ReadAfterWriteMetrics
     /// <summary>
     /// Gets the total number of read-after-writes scheduled.
     /// </summary>
-    public long Scheduled => Volatile.Read(ref _scheduled);
+    public long Scheduled => Interlocked.Read(ref _scheduled);
 
     /// <summary>
     /// Gets the total number of read-after-writes successfully executed.
     /// </summary>
-    public long Executed => Volatile.Read(ref _executed);
+    public long Executed => Interlocked.Read(ref _executed);
 
     /// <summary>
     /// Gets the number of scheduled reads that were coalesced (replaced by subsequent writes).
     /// </summary>
-    public long Coalesced => Volatile.Read(ref _coalesced);
+    public long Coalesced => Interlocked.Read(ref _coalesced);
 
     /// <summary>
     /// Gets the number of failed read-after-write operations.
     /// </summary>
-    public long Failed => Volatile.Read(ref _failed);
+    public long Failed => Interlocked.Read(ref _failed);
 
     /// <summary>
     /// Records a new scheduled read-after-write.
@@ -41,12 +41,6 @@ internal sealed class ReadAfterWriteMetrics
     public void RecordCoalesced() => Interlocked.Increment(ref _coalesced);
 
     /// <summary>
-    /// Records successful execution of read-after-writes.
-    /// </summary>
-    /// <param name="count">Number of reads successfully executed.</param>
-    public void RecordExecuted(int count) => Interlocked.Add(ref _executed, count);
-
-    /// <summary>
     /// Records a failed read-after-write operation.
     /// </summary>
     public void RecordFailed() => Interlocked.Increment(ref _failed);
@@ -54,4 +48,16 @@ internal sealed class ReadAfterWriteMetrics
     /// <inheritdoc/>
     public override string ToString() =>
         $"Scheduled={Scheduled}, Executed={Executed}, Coalesced={Coalesced}, Failed={Failed}";
+
+    /// <summary>
+    /// Records successful execution of read-after-writes.
+    /// </summary>
+    /// <param name="count">Number of reads successfully executed (must be non-negative).</param>
+    internal void RecordExecuted(int count)
+    {
+        if (count > 0)
+        {
+            Interlocked.Add(ref _executed, count);
+        }
+    }
 }

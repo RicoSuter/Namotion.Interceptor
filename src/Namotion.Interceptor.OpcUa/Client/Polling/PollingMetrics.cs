@@ -62,15 +62,4 @@ internal sealed class PollingMetrics
     {
         Interlocked.Increment(ref _slowPolls);
     }
-
-    /// <summary>
-    /// Resets all metrics to zero.
-    /// </summary>
-    public void Reset()
-    {
-        Interlocked.Exchange(ref _totalReads, 0);
-        Interlocked.Exchange(ref _failedReads, 0);
-        Interlocked.Exchange(ref _valueChanges, 0);
-        Interlocked.Exchange(ref _slowPolls, 0);
-    }
 }

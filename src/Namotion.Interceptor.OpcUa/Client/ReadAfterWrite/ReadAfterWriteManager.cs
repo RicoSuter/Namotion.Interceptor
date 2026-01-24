@@ -2,6 +2,7 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Resilience;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -23,39 +24,21 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     private readonly Timer _timer;
     private readonly CancellationTokenSource _cts = new();
 
-    // NodeId -> Property (for O(1) lookup during reads)
-    private readonly Dictionary<NodeId, RegisteredSubjectProperty> _propertyIndex = new();
+    // NodeId -> (RevisedInterval, Property) for properties that need read-after-writes
+    private readonly Dictionary<NodeId, (TimeSpan RevisedInterval, RegisteredSubjectProperty Property)> _trackedProperties = new();
 
-    // NodeId -> RevisedInterval (only properties that need read-after-writes)
-    private readonly Dictionary<NodeId, TimeSpan> _revisedIntervals = new();
+    // NodeId -> (ReadAt, Property) for pending scheduled reads
+    private readonly Dictionary<NodeId, (DateTime ReadAt, RegisteredSubjectProperty Property)> _pendingReads = new();
 
-    // NodeId -> ReadAt time (pending scheduled reads)
-    private readonly Dictionary<NodeId, DateTime> _pendingReads = new();
+    // Reusable list for due reads (avoids allocation per timer tick)
+    private readonly List<(NodeId NodeId, RegisteredSubjectProperty Property)> _dueReadsList = new();
 
     private DateTime _earliestReadTime = DateTime.MaxValue;
     private ISession? _lastKnownSession;
     private int _disposed;
+    private int _isProcessing; // 0 = not processing, 1 = processing (for timer callback serialization)
 
-    /// <summary>
-    /// Gets metrics for read-after-write operations.
-    /// </summary>
-    public ReadAfterWriteMetrics Metrics { get; } = new();
-
-    /// <summary>
-    /// Gets the number of registered properties.
-    /// </summary>
-    public int RegisteredPropertyCount
-    {
-        get { lock (_lock) { return _propertyIndex.Count; } }
-    }
-
-    /// <summary>
-    /// Gets the number of pending read-after-writes.
-    /// </summary>
-    public int PendingReadCount
-    {
-        get { lock (_lock) { return _pendingReads.Count; } }
-    }
+    internal ReadAfterWriteMetrics Metrics { get; } = new();
 
     /// <summary>
     /// Creates a new read-after-write manager.
@@ -81,7 +64,8 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Registers a property with its NodeId. Call when a property is set up with OPC UA monitoring.
+    /// Registers a property for read-after-writes if needed.
+    /// Only tracks properties where requested SamplingInterval=0 but server revised to non-zero.
     /// </summary>
     /// <param name="nodeId">The OPC UA node ID.</param>
     /// <param name="property">The property.</param>
@@ -93,6 +77,12 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         int? requestedSamplingInterval,
         TimeSpan revisedSamplingInterval)
     {
+        // Only track if: requested 0 (exception-based) but server revised to > 0
+        if (requestedSamplingInterval != 0 || revisedSamplingInterval <= TimeSpan.Zero)
+        {
+            return;
+        }
+
         if (Volatile.Read(ref _disposed) == 1)
         {
             return;
@@ -100,36 +90,28 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
 
         lock (_lock)
         {
-            _propertyIndex[nodeId] = property;
+            _trackedProperties[nodeId] = (revisedSamplingInterval, property);
 
-            // Track for read-after-writes if: requested 0 (exception-based) but server revised to > 0
-            if (requestedSamplingInterval == 0 && revisedSamplingInterval > TimeSpan.Zero)
-            {
-                _revisedIntervals[nodeId] = revisedSamplingInterval;
-
-                _logger.LogDebug(
-                    "Property {PropertyName} registered for read-after-writes: " +
-                    "requested SamplingInterval=0, revised to {RevisedInterval}ms.",
-                    property?.Name ?? nodeId.ToString(), revisedSamplingInterval.TotalMilliseconds);
-            }
+            _logger.LogDebug(
+                "Property {PropertyName} registered for read-after-writes: " +
+                "requested SamplingInterval=0, revised to {RevisedInterval}ms.",
+                property?.Name ?? nodeId.ToString(), revisedSamplingInterval.TotalMilliseconds);
         }
     }
 
     /// <summary>
     /// Unregisters a property. Call when a property is released or subject detaches.
-    /// Removes from index and cancels any pending reads.
+    /// Removes from tracking and cancels any pending reads.
     /// </summary>
     /// <param name="nodeId">The OPC UA node ID.</param>
     public void UnregisterProperty(NodeId nodeId)
     {
         lock (_lock)
         {
-            _propertyIndex.Remove(nodeId);
-            _revisedIntervals.Remove(nodeId);
+            _trackedProperties.Remove(nodeId);
 
             if (_pendingReads.Remove(nodeId))
             {
-                // Recalculate earliest if we removed a pending read
                 RecalculateEarliestLocked();
             }
         }
@@ -165,12 +147,12 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             }
 
             // Only schedule if this property needs read-after-writes
-            if (!_revisedIntervals.TryGetValue(nodeId, out var revisedInterval))
+            if (!_trackedProperties.TryGetValue(nodeId, out var tracked))
             {
                 return;
             }
 
-            var readAt = DateTime.UtcNow + revisedInterval + _configuration.ReadAfterWriteBuffer;
+            var readAt = DateTime.UtcNow + tracked.RevisedInterval + _configuration.ReadAfterWriteBuffer;
 
             if (_pendingReads.ContainsKey(nodeId))
             {
@@ -181,7 +163,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                 Metrics.RecordScheduled();
             }
 
-            _pendingReads[nodeId] = readAt;
+            _pendingReads[nodeId] = (readAt, tracked.Property);
 
             // Only reschedule timer if this is earlier than current earliest
             if (readAt < _earliestReadTime)
@@ -205,14 +187,13 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Clears all state including registered properties. Call on full reconnection.
+    /// Clears all state including tracked properties. Call on full reconnection.
     /// </summary>
     public void ClearAll()
     {
         lock (_lock)
         {
-            _propertyIndex.Clear();
-            _revisedIntervals.Clear();
+            _trackedProperties.Clear();
             ClearPendingReadsLocked();
             _lastKnownSession = null;
         }
@@ -228,26 +209,16 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         _timer.Change(Timeout.Infinite, Timeout.Infinite);
     }
 
-    /// <summary>
-    /// Tries to get a property by its NodeId. O(1) lookup.
-    /// </summary>
-    public bool TryGetProperty(NodeId nodeId, out RegisteredSubjectProperty? property)
-    {
-        lock (_lock)
-        {
-            if (_propertyIndex.TryGetValue(nodeId, out var prop))
-            {
-                property = prop;
-                return true;
-            }
-            property = null;
-            return false;
-        }
-    }
-
     private async void OnTimerCallback(object? state)
     {
         if (Volatile.Read(ref _disposed) == 1)
+        {
+            return;
+        }
+
+        // Serialize timer callbacks - if already processing, skip this callback
+        // The timer will be rescheduled when processing completes
+        if (Interlocked.CompareExchange(ref _isProcessing, 1, 0) == 1)
         {
             return;
         }
@@ -260,6 +231,10 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
         {
             _logger.LogError(ex, "Unexpected error in read-after-write timer callback.");
         }
+        finally
+        {
+            Volatile.Write(ref _isProcessing, 0);
+        }
     }
 
     private async Task ProcessDueReadsAsync()
@@ -271,30 +246,30 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             return;
         }
 
-        List<(NodeId NodeId, RegisteredSubjectProperty Property)> dueReads;
-
+        int dueCount;
         lock (_lock)
         {
             var now = DateTime.UtcNow;
-            dueReads = new List<(NodeId, RegisteredSubjectProperty)>();
+            _dueReadsList.Clear();
 
             foreach (var kvp in _pendingReads)
             {
-                if (kvp.Value <= now && _propertyIndex.TryGetValue(kvp.Key, out var property))
+                if (kvp.Value.ReadAt <= now)
                 {
-                    dueReads.Add((kvp.Key, property));
+                    _dueReadsList.Add((kvp.Key, kvp.Value.Property));
                 }
             }
 
-            foreach (var (nodeId, _) in dueReads)
+            foreach (var (nodeId, _) in _dueReadsList)
             {
                 _pendingReads.Remove(nodeId);
             }
 
             RecalculateEarliestLocked();
+            dueCount = _dueReadsList.Count;
         }
 
-        if (dueReads.Count == 0)
+        if (dueCount == 0)
         {
             RescheduleTimer();
             return;
@@ -310,12 +285,12 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
 
         try
         {
-            var readValues = new ReadValueIdCollection(dueReads.Count);
-            foreach (var (nodeId, _) in dueReads)
+            var readValues = new ReadValueIdCollection(dueCount);
+            for (var i = 0; i < dueCount; i++)
             {
                 readValues.Add(new ReadValueId
                 {
-                    NodeId = nodeId,
+                    NodeId = _dueReadsList[i].NodeId,
                     AttributeId = Opc.Ua.Attributes.Value
                 });
             }
@@ -328,9 +303,10 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                 _cts.Token).ConfigureAwait(false);
 
             var successCount = 0;
+            var skippedCount = 0;
             var receivedTimestamp = DateTimeOffset.UtcNow;
 
-            for (var i = 0; i < response.Results.Count && i < dueReads.Count; i++)
+            for (var i = 0; i < response.Results.Count && i < dueCount; i++)
             {
                 var result = response.Results[i];
                 if (!StatusCode.IsGood(result.StatusCode))
@@ -338,10 +314,19 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                     continue;
                 }
 
-                var (_, property) = dueReads[i];
-                var value = _configuration.ValueConverter.ConvertToPropertyValue(result.Value, property);
+                var (_, property) = _dueReadsList[i];
+                var sourceTimestamp = (DateTimeOffset)result.SourceTimestamp;
 
-                property.SetValueFromSource(_source, result.SourceTimestamp, receivedTimestamp, value);
+                // Skip if property already has a newer value from subscription notification
+                var currentWriteTimestamp = property.Reference.TryGetWriteTimestamp();
+                if (currentWriteTimestamp.HasValue && currentWriteTimestamp.Value >= sourceTimestamp)
+                {
+                    skippedCount++;
+                    continue;
+                }
+
+                var value = _configuration.ValueConverter.ConvertToPropertyValue(result.Value, property);
+                property.SetValueFromSource(_source, sourceTimestamp, receivedTimestamp, value);
                 successCount++;
             }
 
@@ -349,8 +334,8 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             _circuitBreaker.RecordSuccess();
 
             _logger.LogDebug(
-                "Completed {SuccessCount}/{TotalCount} read-after-writes.",
-                successCount, dueReads.Count);
+                "Completed {SuccessCount}/{TotalCount} read-after-writes ({SkippedCount} skipped as stale).",
+                successCount, dueCount, skippedCount);
         }
         catch (Exception ex)
         {
@@ -402,9 +387,21 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
 
     private void RecalculateEarliestLocked()
     {
-        _earliestReadTime = _pendingReads.Count == 0
-            ? DateTime.MaxValue
-            : _pendingReads.Values.Min();
+        if (_pendingReads.Count == 0)
+        {
+            _earliestReadTime = DateTime.MaxValue;
+            return;
+        }
+
+        var earliest = DateTime.MaxValue;
+        foreach (var pending in _pendingReads.Values)
+        {
+            if (pending.ReadAt < earliest)
+            {
+                earliest = pending.ReadAt;
+            }
+        }
+        _earliestReadTime = earliest;
     }
 
     /// <inheritdoc/>
@@ -429,8 +426,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
 
         lock (_lock)
         {
-            _propertyIndex.Clear();
-            _revisedIntervals.Clear();
+            _trackedProperties.Clear();
             _pendingReads.Clear();
             _earliestReadTime = DateTime.MaxValue;
         }

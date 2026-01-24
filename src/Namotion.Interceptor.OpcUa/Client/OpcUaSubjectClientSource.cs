@@ -2,7 +2,6 @@ using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry;
@@ -25,7 +24,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private readonly OpcUaSubjectLoader _subjectLoader;
     private readonly SubscriptionHealthMonitor _subscriptionHealthMonitor;
 
-    private SessionManager? _sessionManager;
+    private volatile SessionManager? _sessionManager;
     private SubjectPropertyWriter? _propertyWriter;
 
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
@@ -85,8 +84,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         Interlocked.Increment(ref _successfulReconnections);
         Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
     }
-
-    private bool IsReconnecting => _sessionManager?.IsReconnecting == true;
 
     private void RemoveItemsForSubject(IInterceptorSubject subject)
     {
