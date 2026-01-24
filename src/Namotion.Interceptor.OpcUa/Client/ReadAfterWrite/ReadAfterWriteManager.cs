@@ -128,6 +128,8 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             return;
         }
 
+        // Get session outside lock to avoid calling external code while holding lock
+        var currentSession = _sessionProvider();
         lock (_lock)
         {
             if (Volatile.Read(ref _disposed) == 1)
@@ -136,7 +138,6 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
             }
 
             // Check for session change
-            var currentSession = _sessionProvider();
             if (!ReferenceEquals(_lastKnownSession, currentSession))
             {
                 ClearPendingReadsLocked();
