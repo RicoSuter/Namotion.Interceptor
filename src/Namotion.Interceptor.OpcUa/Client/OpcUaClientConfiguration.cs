@@ -416,37 +416,20 @@ public class OpcUaClientConfiguration
             Handle = property
         };
 
-        // Apply sampling/queue settings (check for sentinel values indicating "not set")
-        // Sentinel values used because C# attributes don't support nullable value types:
-        // - SamplingInterval: int.MinValue = not set
-        // - QueueSize: uint.MaxValue = not set
-        // - DiscardOldest: DiscardOldestMode.Unset = not set
-
-        var samplingIntervalFromAttribute = opcUaNodeAttribute != null && opcUaNodeAttribute.SamplingInterval != int.MinValue
-            ? opcUaNodeAttribute.SamplingInterval
-            : (int?)null;
-        var samplingInterval = samplingIntervalFromAttribute ?? DefaultSamplingInterval;
+        // Apply sampling/queue settings using extension methods for sentinel value handling
+        var samplingInterval = opcUaNodeAttribute.GetSamplingIntervalOrNull() ?? DefaultSamplingInterval;
         if (samplingInterval.HasValue)
         {
             item.SamplingInterval = samplingInterval.Value;
         }
 
-        var queueSizeFromAttribute = opcUaNodeAttribute != null && opcUaNodeAttribute.QueueSize != uint.MaxValue
-            ? opcUaNodeAttribute.QueueSize
-            : (uint?)null;
-        var queueSize = queueSizeFromAttribute ?? DefaultQueueSize;
+        var queueSize = opcUaNodeAttribute.GetQueueSizeOrNull() ?? DefaultQueueSize;
         if (queueSize.HasValue)
         {
             item.QueueSize = queueSize.Value;
         }
 
-        var discardOldestFromAttribute = opcUaNodeAttribute?.DiscardOldest switch
-        {
-            Attributes.DiscardOldestMode.True => true,
-            Attributes.DiscardOldestMode.False => false,
-            _ => (bool?)null
-        };
-        var discardOldest = discardOldestFromAttribute ?? DefaultDiscardOldest;
+        var discardOldest = opcUaNodeAttribute.GetDiscardOldestOrNull() ?? DefaultDiscardOldest;
         if (discardOldest.HasValue)
         {
             item.DiscardOldest = discardOldest.Value;
@@ -466,28 +449,12 @@ public class OpcUaClientConfiguration
     /// Creates a DataChangeFilter based on the attribute and configuration defaults.
     /// Returns null if no filter options are specified (uses OPC UA library defaults).
     /// </summary>
-    /// <remarks>
-    /// Attribute properties use sentinel values because C# attributes don't support nullable value types:
-    /// - DataChangeTrigger/DeadbandType: -1 means "not set"
-    /// - DeadbandValue: NaN means "not set"
-    /// </remarks>
     private DataChangeFilter? CreateDataChangeFilter(OpcUaNodeAttribute? attribute)
     {
-        // Check for sentinel values: -1 for enums, NaN for double
-        var triggerFromAttribute = attribute != null && (int)attribute.DataChangeTrigger != -1
-            ? attribute.DataChangeTrigger
-            : (DataChangeTrigger?)null;
-        var deadbandTypeFromAttribute = attribute != null && (int)attribute.DeadbandType != -1
-            ? attribute.DeadbandType
-            : (DeadbandType?)null;
-        var deadbandValueFromAttribute = attribute != null && !double.IsNaN(attribute.DeadbandValue)
-            ? attribute.DeadbandValue
-            : (double?)null;
-
-        // Apply attribute overrides, then configuration defaults
-        var trigger = triggerFromAttribute ?? DefaultDataChangeTrigger;
-        var deadbandType = deadbandTypeFromAttribute ?? DefaultDeadbandType;
-        var deadbandValue = deadbandValueFromAttribute ?? DefaultDeadbandValue;
+        // Apply attribute overrides (using extension methods for sentinel value handling), then configuration defaults
+        var trigger = attribute.GetDataChangeTriggerOrNull() ?? DefaultDataChangeTrigger;
+        var deadbandType = attribute.GetDeadbandTypeOrNull() ?? DefaultDeadbandType;
+        var deadbandValue = attribute.GetDeadbandValueOrNull() ?? DefaultDeadbandValue;
 
         // Only create filter if at least one option is specified
         if (!trigger.HasValue && !deadbandType.HasValue && !deadbandValue.HasValue)
