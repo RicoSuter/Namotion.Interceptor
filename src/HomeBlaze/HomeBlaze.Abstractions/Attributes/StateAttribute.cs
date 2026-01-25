@@ -28,9 +28,10 @@ public class StateAttribute : Attribute
     public bool IsCumulative { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether this state is a signal (not an imprecise sensor value).
+    /// Gets or sets a value indicating whether this is a discrete variable (binary on/off, every transition matters)
+    /// as opposed to an analog variable (continuous values like sensor readings where sampling is acceptable).
     /// </summary>
-    public bool IsSignal { get; set; }
+    public bool IsDiscrete { get; set; }
 
     /// <summary>
     /// Gets or sets a value indicating whether the value is estimated (based on other values).

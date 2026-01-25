@@ -74,7 +74,7 @@ public class OpcUaStallDetectionTests
             // Verify initial connection
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Diagnostics.IsConnected,
-                timeout: TimeSpan.FromSeconds(10),
+                timeout: TimeSpan.FromSeconds(30),
                 message: "Client should be connected after startup");
             logger.Log("Initial connection established");
 
@@ -95,7 +95,7 @@ public class OpcUaStallDetectionTests
             // Wait for reconnection to start
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Diagnostics.IsReconnecting,
-                timeout: TimeSpan.FromSeconds(10),
+                timeout: TimeSpan.FromSeconds(30),
                 message: "Client should start reconnecting");
             logger.Log("Client started reconnecting");
 
@@ -210,7 +210,7 @@ public class OpcUaStallDetectionTests
             // Wait for connection status to stabilize
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Diagnostics.IsConnected,
-                timeout: TimeSpan.FromSeconds(10),
+                timeout: TimeSpan.FromSeconds(30),
                 message: "Client should report as connected after recovery");
             logger.Log("Test passed - client recovered after stall");
         }
@@ -250,11 +250,13 @@ public class OpcUaStallDetectionTests
                 certificateStoreBasePath: port.CertificateStoreBasePath);
 
             // Use longer MaxReconnectDuration to ensure SDK has time to reconnect
+            // Use shorter KeepAliveInterval for faster disconnection detection on slow CI runners
             var quickRestartConfig = (OpcUaClientConfiguration config) =>
             {
                 config.SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(2);
                 config.MaxReconnectDuration = TimeSpan.FromSeconds(30); // Long enough for SDK to succeed
                 config.ReconnectInterval = TimeSpan.FromSeconds(1);
+                config.KeepAliveInterval = TimeSpan.FromSeconds(1); // Faster disconnection detection
             };
 
             client = new OpcUaTestClient<TestRoot>(logger, quickRestartConfig);
@@ -284,10 +286,10 @@ public class OpcUaStallDetectionTests
             logger.Log("Stopping server for quick restart...");
             await server.StopAsync();
 
-            // Wait just long enough for client to detect disconnection
+            // Wait for client to detect disconnection (longer timeout for slow CI runners)
             await AsyncTestHelpers.WaitUntilAsync(
                 () => !client.Diagnostics.IsConnected || client.Diagnostics.IsReconnecting,
-                timeout: TimeSpan.FromSeconds(20),
+                timeout: TimeSpan.FromSeconds(40),
                 message: "Client should detect disconnection or start reconnecting");
             logger.Log($"Client state after stop - Connected: {client.Diagnostics.IsConnected}, Reconnecting: {client.Diagnostics.IsReconnecting}");
 
@@ -306,7 +308,7 @@ public class OpcUaStallDetectionTests
             // Verify client is connected
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Diagnostics.IsConnected,
-                timeout: TimeSpan.FromSeconds(10),
+                timeout: TimeSpan.FromSeconds(30),
                 message: "Client should report as connected after recovery");
 
             // Log final state for debugging

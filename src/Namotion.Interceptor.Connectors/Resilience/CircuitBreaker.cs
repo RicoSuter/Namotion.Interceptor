@@ -86,13 +86,14 @@ public sealed class CircuitBreaker
     }
 
     /// <summary>
-    /// Records a successful operation, closing the circuit and resetting the failure count atomically.
+    /// Records a successful operation, closing the circuit and resetting the failure count.
     /// Call this after a successful connection/operation attempt.
     /// </summary>
     public void RecordSuccess()
     {
-        // Close circuit and reset failures atomically
-        // Order matters: close circuit first to prevent new failures from reopening it
+        // Close circuit and reset failures. Not strictly atomic - a concurrent failure
+        // could be lost in the race window, but this is harmless (circuit still trips
+        // after threshold failures, just might take one extra).
         Volatile.Write(ref _circuitOpen, 0);
         Interlocked.Exchange(ref _consecutiveFailures, 0);
     }

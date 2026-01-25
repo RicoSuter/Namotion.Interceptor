@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Client.Polling;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -75,6 +76,11 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// </summary>
     internal PollingManager? PollingManager { get; }
 
+    /// <summary>
+    /// Gets the read-after-write manager for scheduling reads after writes.
+    /// </summary>
+    internal ReadAfterWriteManager? ReadAfterWriteManager { get; private set; }
+
     public SessionManager(OpcUaSubjectClientSource source, SubjectPropertyWriter propertyWriter, OpcUaClientConfiguration configuration, ILogger logger)
     {
         _source = source;
@@ -92,7 +98,16 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             PollingManager.Start();
         }
 
-        SubscriptionManager = new SubscriptionManager(source, propertyWriter, PollingManager, configuration, logger);
+        if (_configuration.EnableReadAfterWrite)
+        {
+            ReadAfterWriteManager = new ReadAfterWriteManager(
+                sessionProvider: () => CurrentSession,
+                source,
+                configuration,
+                logger);
+        }
+
+        SubscriptionManager = new SubscriptionManager(source, propertyWriter, PollingManager, ReadAfterWriteManager, configuration, logger);
     }
 
     /// <summary>
@@ -145,7 +160,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             updateBeforeConnect: false,
             sessionName: application.ApplicationName,
             sessionTimeout: (uint)configuration.SessionTimeout.TotalMilliseconds,
-            identity: new UserIdentity(),
+            identity: new UserIdentity(), // TODO: configuration.GetIdentity() default implementation: new UserIdentity()
             preferredLocales: null,
             cancellationToken).ConfigureAwait(false);
 
@@ -235,17 +250,26 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             // Set flag before BeginReconnect to avoid window where external observers see IsReconnecting=false
             Interlocked.Exchange(ref _isReconnecting, 1);
 
-            var newState = _reconnectHandler.BeginReconnect(session, (int)_configuration.ReconnectInterval.TotalMilliseconds, OnReconnectComplete);
-            if (newState is SessionReconnectHandler.ReconnectState.Triggered or SessionReconnectHandler.ReconnectState.Reconnecting)
+            try
             {
-                e.CancelKeepAlive = true;
-                _source.RecordReconnectionAttemptStart();
+                var newState = _reconnectHandler.BeginReconnect(session, (int)_configuration.ReconnectInterval.TotalMilliseconds, OnReconnectComplete);
+                if (newState is SessionReconnectHandler.ReconnectState.Triggered or SessionReconnectHandler.ReconnectState.Reconnecting)
+                {
+                    e.CancelKeepAlive = true;
+                    _source.RecordReconnectionAttemptStart();
+                }
+                else
+                {
+                    // BeginReconnect failed - reset flag
+                    Interlocked.Exchange(ref _isReconnecting, 0);
+                    _logger.LogError("Failed to begin OPC UA reconnect. Handler state: {State}.", newState);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                // BeginReconnect failed - reset flag
+                // BeginReconnect threw - reset flag for immediate recovery instead of waiting 30s for stall detection
                 Interlocked.Exchange(ref _isReconnecting, 0);
-                _logger.LogError("Failed to begin OPC UA reconnect. Handler state: {State}.", newState);
+                _logger.LogError(ex, "BeginReconnect threw unexpected exception.");
             }
         }
         finally
@@ -303,6 +327,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                         "OPC UA session reconnected but subscription transfer failed (server restart). " +
                         "Clearing session to trigger full reconnection via health check.");
                     Volatile.Write(ref _session, null);
+                    ReadAfterWriteManager?.ClearPendingReads();
                 }
             }
             else
@@ -447,6 +472,10 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
 
         try { _reconnectHandler.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing reconnect handler."); }
+        if (ReadAfterWriteManager is not null)
+        {
+            try { await ReadAfterWriteManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing read-after-write manager."); }
+        }
         try { await SubscriptionManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing subscription manager."); }
         if (PollingManager is not null)
         {
