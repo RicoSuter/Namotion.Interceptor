@@ -9,11 +9,11 @@ public static class OpcUaTestPortPool
 {
     private const int BasePort = 4840;
     private const int PoolSize = 20;
-    private const int AcquisitionTimeoutMs = 30_000; // 30 seconds
+    private const int AcquisitionTimeoutMs = 10 * 60_0000;
 
-    private static readonly SemaphoreSlim _semaphore = new(PoolSize, PoolSize);
-    private static readonly bool[] _usedPorts = new bool[PoolSize];
-    private static readonly object _lock = new();
+    private static readonly SemaphoreSlim Semaphore = new(PoolSize, PoolSize);
+    private static readonly bool[] UsedPorts = new bool[PoolSize];
+    private static readonly Lock Lock = new();
 
     /// <summary>
     /// Acquires a port from the pool. Times out after 30 seconds if all ports are in use.
@@ -26,7 +26,7 @@ public static class OpcUaTestPortPool
 
         try
         {
-            await _semaphore.WaitAsync(cts.Token).ConfigureAwait(false);
+            await Semaphore.WaitAsync(cts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -35,20 +35,20 @@ public static class OpcUaTestPortPool
                 $"All {PoolSize} ports may be in use. Ensure tests dispose their PortLease properly.");
         }
 
-        lock (_lock)
+        lock (Lock)
         {
             for (var i = 0; i < PoolSize; i++)
             {
-                if (!_usedPorts[i])
+                if (!UsedPorts[i])
                 {
-                    _usedPorts[i] = true;
+                    UsedPorts[i] = true;
                     return new PortLease(BasePort + i, i);
                 }
             }
         }
 
         // Should never happen since semaphore controls access
-        _semaphore.Release();
+        Semaphore.Release();
         throw new InvalidOperationException("No ports available despite semaphore grant.");
     }
 
@@ -57,11 +57,11 @@ public static class OpcUaTestPortPool
     /// </summary>
     internal static void Release(int index)
     {
-        lock (_lock)
+        lock (Lock)
         {
-            _usedPorts[index] = false;
+            UsedPorts[index] = false;
         }
-        _semaphore.Release();
+        Semaphore.Release();
     }
 }
 

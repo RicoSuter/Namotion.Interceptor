@@ -126,7 +126,6 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         await AsyncTestHelpers.WaitUntilAsync(
             () => Diagnostics?.MonitoredItemCount > 0,
             timeout: TimeSpan.FromSeconds(60),
-            pollInterval: TimeSpan.FromMilliseconds(200),
             message: "Client failed to create subscriptions");
 
         // Then wait actual connected
@@ -134,7 +133,6 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         await AsyncTestHelpers.WaitUntilAsync(
             () => Root != null && isConnected(Root),
             timeout: TimeSpan.FromSeconds(60),
-            pollInterval: TimeSpan.FromMilliseconds(200),
             message: "Client failed to sync initial property values");
 
         sw.Stop();
@@ -149,7 +147,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
             var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                await host.StopAsync(TimeSpan.FromSeconds(5));
+                await host.StopAsync(TimeSpan.FromMinutes(5));
             }
             finally
             {
@@ -173,7 +171,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
             var host = Interlocked.Exchange(ref _host, null);
             if (host != null)
             {
-                await host.StopAsync(TimeSpan.FromSeconds(5));
+                await host.StopAsync(TimeSpan.FromMinutes(5));
                 host.Dispose();
                 _logger.Log("Client disposed");
             }

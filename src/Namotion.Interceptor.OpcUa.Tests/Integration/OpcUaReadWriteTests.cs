@@ -5,7 +5,7 @@ using Xunit.Abstractions;
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 
 [Trait("Category", "Integration")]
-public class OpcUaServerClientReadWriteTests
+public class OpcUaReadWriteTests
 {
     private readonly ITestOutputHelper _output;
     private TestLogger? _logger;
@@ -14,7 +14,7 @@ public class OpcUaServerClientReadWriteTests
     private OpcUaTestClient<TestRoot>? _client;
     private PortLease? _port;
 
-    public OpcUaServerClientReadWriteTests(ITestOutputHelper output)
+    public OpcUaReadWriteTests(ITestOutputHelper output)
     {
         _output = output;
     }
@@ -177,7 +177,7 @@ public class OpcUaServerClientReadWriteTests
             // Test 8: OpcUaValue child property (Sensor.MinValue)
             _server.Root.Sensor.MinValue = -50.0;
             await AsyncTestHelpers.WaitUntilAsync(
-                () => _client.Root.Sensor!.MinValue == -50.0,
+                () => _client.Root.Sensor?.MinValue == -50.0,
                 timeout: TimeSpan.FromSeconds(30),
                 message: "Client should receive Sensor.MinValue update");
 
