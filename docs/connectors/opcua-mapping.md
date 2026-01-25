@@ -19,6 +19,19 @@ Some configuration applies only to one side:
 - `SamplingInterval`, `QueueSize`, `DataChangeTrigger` - Client monitoring
 - `EventNotifier`, `ModellingRule` - Server node structure
 
+## Scope and Limitations
+
+This mapping system is designed for **instance mapping** - creating Object and Variable nodes in an OPC UA address space from C# object models. It supports:
+
+- **Object Nodes**: From C# classes decorated with `[InterceptorSubject]`
+- **Variable Nodes**: From C# properties (primitives, arrays, or `[OpcUaValue]` classes)
+
+It does **not** support creating new type definitions (ObjectTypes, VariableTypes, DataTypes). Type definitions are referenced via the `TypeDefinition` configuration property but must either:
+- Exist as built-in OPC UA types (e.g., `FolderType`, `BaseDataVariableType`)
+- Be loaded from NodeSet XML files via `OpcUaServerConfiguration.LoadPredefinedNodes()`
+
+For scenarios requiring custom type definitions, create them in companion specification NodeSet files and load them at server startup.
+
 ## Core Concepts
 
 ### OPC UA Address Space Basics
