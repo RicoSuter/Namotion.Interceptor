@@ -113,6 +113,85 @@ public class OpcUaServerClientReadWriteTests
         }
     }
 
+    [Fact]
+    public async Task WriteAndReadNestedStructures_ShouldUpdateClient()
+    {
+        try
+        {
+            // Arrange
+            await StartServerAsync();
+            await StartClientAsync();
+
+            Assert.NotNull(_server?.Root);
+            Assert.NotNull(_client?.Root);
+
+            // Test 1: Variable on object reference (Person.FirstName)
+            _server.Root.Person.FirstName = "UpdatedFirst";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => _client.Root.Person.FirstName == "UpdatedFirst",
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should receive Person.FirstName update");
+
+            // Test 2: Variable on collection item (People[0].LastName)
+            _server.Root.People[0].LastName = "UpdatedLast";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => _client.Root.People[0].LastName == "UpdatedLast",
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should receive People[0].LastName update");
+
+            // Test 3: Variable on dictionary item (PeopleByName["john"].FirstName)
+            _server.Root.PeopleByName!["john"].FirstName = "Johnny";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => _client.Root.PeopleByName!["john"].FirstName == "Johnny",
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should receive PeopleByName[john].FirstName update");
+
+            // Test 4: Deep nesting (Person.Address.City)
+            _server.Root.Person.Address!.City = "New York";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => _client.Root.Person.Address!.City == "New York",
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should receive Person.Address.City update");
+
+            // Test 5: Collection + nesting (People[0].Address.ZipCode)
+            _server.Root.People[0].Address!.ZipCode = "12345";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => _client.Root.People[0].Address!.ZipCode == "12345",
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should receive People[0].Address.ZipCode update");
+
+            // Test 6: OpcUaValue pattern - VariableNode value (Sensor.Value)
+            _server.Root.Sensor!.Value = 42.5;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => Math.Abs(_client.Root.Sensor!.Value - 42.5) < 0.01,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should receive Sensor.Value update");
+
+            // Test 7: OpcUaValue child property (Sensor.Unit)
+            _server.Root.Sensor.Unit = "°F";
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => _client.Root.Sensor!.Unit == "°F",
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should receive Sensor.Unit update");
+
+            // Test 8: OpcUaValue child property (Sensor.MinValue)
+            _server.Root.Sensor.MinValue = -50.0;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => _client.Root.Sensor!.MinValue == -50.0,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should receive Sensor.MinValue update");
+
+            _logger!.Log("All nested structure tests passed!");
+        }
+        finally
+        {
+            await (_client?.StopAsync() ?? Task.CompletedTask);
+            await (_server?.StopAsync() ?? Task.CompletedTask);
+            _port?.Dispose();
+            _port = null;
+        }
+    }
+
     private async Task StartServerAsync()
     {
         _logger = new TestLogger(_output);
@@ -127,12 +206,52 @@ public class OpcUaServerClientReadWriteTests
                 root.Name = "Foo bar";
                 root.ScalarNumbers = [10, 20, 30, 40, 50];
                 root.ScalarStrings = ["Server", "Test", "Array"];
-                root.Person = new TestPerson { FirstName = "John", LastName = "Smith", Scores = [1, 2] };
+                root.Person = new TestPerson
+                {
+                    FirstName = "John",
+                    LastName = "Smith",
+                    Scores = [1, 2],
+                    Address = new TestAddress { City = "Seattle", ZipCode = "98101" }
+                };
                 root.People =
                 [
-                    new TestPerson { FirstName = "John", LastName = "Doe", Scores = [85.5, 92.3] },
-                    new TestPerson { FirstName = "Jane", LastName = "Doe", Scores = [88.1, 95.7] }
+                    new TestPerson
+                    {
+                        FirstName = "John",
+                        LastName = "Doe",
+                        Scores = [85.5, 92.3],
+                        Address = new TestAddress { City = "Portland", ZipCode = "97201" }
+                    },
+                    new TestPerson
+                    {
+                        FirstName = "Jane",
+                        LastName = "Doe",
+                        Scores = [88.1, 95.7],
+                        Address = new TestAddress { City = "Vancouver", ZipCode = "98660" }
+                    }
                 ];
+                root.PeopleByName = new Dictionary<string, TestPerson>
+                {
+                    ["john"] = new TestPerson
+                    {
+                        FirstName = "John",
+                        LastName = "Dict",
+                        Address = new TestAddress { City = "Boston", ZipCode = "02101" }
+                    },
+                    ["jane"] = new TestPerson
+                    {
+                        FirstName = "Jane",
+                        LastName = "Dict",
+                        Address = new TestAddress { City = "Chicago", ZipCode = "60601" }
+                    }
+                };
+                root.Sensor = new TestSensor
+                {
+                    Value = 25.5,
+                    Unit = "°C",
+                    MinValue = -40.0,
+                    MaxValue = 85.0
+                };
             },
             baseAddress: _port.BaseAddress,
             certificateStoreBasePath: _port.CertificateStoreBasePath);

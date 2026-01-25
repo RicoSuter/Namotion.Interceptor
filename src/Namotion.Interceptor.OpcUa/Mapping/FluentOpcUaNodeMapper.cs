@@ -9,6 +9,12 @@ namespace Namotion.Interceptor.OpcUa.Mapping;
 /// Maps properties using code-based fluent configuration.
 /// Supports instance-based configuration (different config for Motor1.Speed vs Motor2.Speed).
 /// </summary>
+/// <remarks>
+/// <para><b>Thread Safety:</b> The <see cref="Map{TProperty}"/> method should only be called
+/// during application startup/configuration. After configuration is complete, the mapper
+/// is safe to use from multiple threads for read operations (TryGetNodeConfiguration,
+/// TryGetPropertyAsync). Do not call Map() concurrently with read operations.</para>
+/// </remarks>
 /// <typeparam name="T">The root type to configure.</typeparam>
 public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
 {
