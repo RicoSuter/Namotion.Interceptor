@@ -29,6 +29,10 @@ public static class AsyncTestHelpers
 
         while (DateTime.UtcNow < deadline)
         {
+            // Memory barrier ensures we see updates from other threads (e.g., OPC UA callbacks)
+            // This prevents stale reads that can cause tests to timeout on CI under load
+            Thread.MemoryBarrier();
+
             if (condition())
             {
                 return;

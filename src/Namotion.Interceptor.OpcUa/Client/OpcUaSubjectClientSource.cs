@@ -24,7 +24,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private readonly OpcUaSubjectLoader _subjectLoader;
     private readonly SubscriptionHealthMonitor _subscriptionHealthMonitor;
 
-    private SessionManager? _sessionManager;
+    private volatile SessionManager? _sessionManager;
     private SubjectPropertyWriter? _propertyWriter;
 
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
@@ -85,8 +85,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
     }
 
-    private bool IsReconnecting => _sessionManager?.IsReconnecting == true;
-
     private void RemoveItemsForSubject(IInterceptorSubject subject)
     {
         _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
@@ -107,7 +105,16 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
         _ownership = new SourceOwnershipManager(
             this,
-            onReleasing: property => property.RemovePropertyData(OpcUaNodeIdKey),
+            onReleasing: property =>
+            {
+                // Unregister from ReadAfterWriteManager FIRST (uses NodeId)
+                if (property.TryGetPropertyData(OpcUaNodeIdKey, out var nodeIdObj) &&
+                    nodeIdObj is NodeId nodeId)
+                {
+                    _sessionManager?.ReadAfterWriteManager?.UnregisterProperty(nodeId);
+                }
+                property.RemovePropertyData(OpcUaNodeIdKey);
+            },
             onSubjectDetaching: OnSubjectDetaching);
         _subjectLoader = new OpcUaSubjectLoader(configuration, _ownership, this, logger);
         _subscriptionHealthMonitor = new SubscriptionHealthMonitor(logger);
@@ -115,12 +122,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     private void OnSubjectDetaching(IInterceptorSubject subject)
     {
-        // Skip cleanup during reconnection (subscriptions being transferred)
-        if (IsReconnecting)
-        {
-            return;
-        }
-
         RemoveItemsForSubject(subject);
     }
 
@@ -412,6 +413,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             // Create new session (CreateSessionAsync disposes old session internally)
             var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
             var session = await sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
+
+            // Clear all read-after-write state - new session means old pending reads and registrations are invalid
+            sessionManager.ReadAfterWriteManager?.ClearAll();
+
             _logger.LogInformation("New OPC UA session created successfully.");
 
             // Recreate MonitoredItems from owned properties (avoids memory leak from holding SDK objects)
@@ -480,7 +485,13 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             }
 
             var writeResponse = await session.WriteAsync(requestHeader: null, writeValues, cancellationToken).ConfigureAwait(false);
-            return ProcessWriteResults(writeResponse.Results, changes);
+            var result = ProcessWriteResults(writeResponse.Results, changes);
+            if (result.IsFullySuccessful || result.IsPartialFailure)
+            {
+                NotifyPropertiesWritten(changes);
+            }
+
+            return result;
         }
         catch (Exception ex)
         {
@@ -593,6 +604,29 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }
 
         return writeValues;
+    }
+
+    /// <summary>
+    /// Notifies ReadAfterWriteManager that properties were written.
+    /// Schedules read-after-writes for properties where SamplingInterval=0 was revised to non-zero.
+    /// </summary>
+    private void NotifyPropertiesWritten(ReadOnlyMemory<SubjectPropertyChange> changes)
+    {
+        var manager = _sessionManager?.ReadAfterWriteManager;
+        if (manager is null)
+        {
+            return;
+        }
+
+        var span = changes.Span;
+        for (var i = 0; i < span.Length; i++)
+        {
+            if (span[i].Property.TryGetPropertyData(OpcUaNodeIdKey, out var nodeIdObj) &&
+                nodeIdObj is NodeId nodeId)
+            {
+                manager.OnPropertyWritten(nodeId);
+            }
+        }
     }
 
     /// <summary>

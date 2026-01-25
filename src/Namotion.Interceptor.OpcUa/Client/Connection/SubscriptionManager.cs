@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Client.Polling;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -17,8 +18,9 @@ internal class SubscriptionManager : IAsyncDisposable
         = new(() => new List<PropertyUpdate>(16));
 
     private readonly OpcUaSubjectClientSource _source;
-    private readonly SubjectPropertyWriter? _propertyWriter;
+    private readonly SubjectPropertyWriter _propertyWriter;
     private readonly PollingManager? _pollingManager;
+    private readonly ReadAfterWriteManager? _readAfterWriteManager;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
 
@@ -37,11 +39,18 @@ internal class SubscriptionManager : IAsyncDisposable
     /// </summary>
     public IReadOnlyDictionary<uint, RegisteredSubjectProperty> MonitoredItems => _monitoredItems;
 
-    public SubscriptionManager(OpcUaSubjectClientSource source, SubjectPropertyWriter propertyWriter, PollingManager? pollingManager, OpcUaClientConfiguration configuration, ILogger logger)
+    public SubscriptionManager(
+        OpcUaSubjectClientSource source,
+        SubjectPropertyWriter propertyWriter,
+        PollingManager? pollingManager,
+        ReadAfterWriteManager? readAfterWriteManager,
+        OpcUaClientConfiguration configuration,
+        ILogger logger)
     {
         _source = source;
         _propertyWriter = propertyWriter;
         _pollingManager = pollingManager;
+        _readAfterWriteManager = readAfterWriteManager;
         _configuration = configuration;
         _logger = logger;
     }
@@ -51,9 +60,6 @@ internal class SubscriptionManager : IAsyncDisposable
         Session session,
         CancellationToken cancellationToken)
     {
-        // Temporal separation: subscriptions added to _subscriptions AFTER initialization prevents health monitor races.
-        _shuttingDown = false;
-
         // Clear any existing subscriptions and monitored items from previous session (reconnection scenario).
         // Old subscriptions are orphaned (belong to dead session), so we just need to remove our references.
         foreach (var oldSubscription in _subscriptions.Keys)
@@ -62,6 +68,10 @@ internal class SubscriptionManager : IAsyncDisposable
         }
         _subscriptions.Clear();
         _monitoredItems.Clear();
+
+        // Reset shutdown flag AFTER clearing collections - prevents old callbacks from processing
+        // during the window between flag reset and collection clearing (defense-in-depth).
+        _shuttingDown = false;
 
         var itemCount = monitoredItems.Count;
         var maximumItemsPerSubscription = _configuration.MaximumItemsPerSubscription;
@@ -112,6 +122,9 @@ internal class SubscriptionManager : IAsyncDisposable
 
             await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
 
+            // Register properties with ReadAfterWriteManager now that we know revised sampling intervals
+            RegisterPropertiesWithReadAfterWriteManager(subscription);
+
             // Add to collection AFTER initialization (temporal separation - health monitor never sees partial state)
             _subscriptions.TryAdd(subscription, 0);
         }
@@ -119,8 +132,7 @@ internal class SubscriptionManager : IAsyncDisposable
 
     private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
     {
-        var propertyWriter = _propertyWriter;
-        if (_shuttingDown || propertyWriter is null)
+        if (_shuttingDown)
         {
             return;
         }
@@ -134,18 +146,28 @@ internal class SubscriptionManager : IAsyncDisposable
         var receivedTimestamp = DateTimeOffset.UtcNow;
         var changes = ChangesPool.Rent();
 
-        for (var i = 0; i < monitoredItemsCount; i++)
+        try
         {
-            var item = notification.MonitoredItems[i];
-            if (_monitoredItems.TryGetValue(item.ClientHandle, out var property))
+            for (var i = 0; i < monitoredItemsCount; i++)
             {
-                changes.Add(new PropertyUpdate
+                var item = notification.MonitoredItems[i];
+                if (_monitoredItems.TryGetValue(item.ClientHandle, out var property))
                 {
-                    Property = property,
-                    Value = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, property),
-                    Timestamp = item.Value.SourceTimestamp
-                });
+                    changes.Add(new PropertyUpdate
+                    {
+                        Property = property,
+                        Value = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, property),
+                        Timestamp = item.Value.SourceTimestamp
+                    });
+                }
             }
+        }
+        catch
+        {
+            // Return pooled list on exception to prevent pool exhaustion
+            changes.Clear();
+            ChangesPool.Return(changes);
+            throw;
         }
 
         if (changes.Count > 0)
@@ -153,7 +175,7 @@ internal class SubscriptionManager : IAsyncDisposable
             // Pool item returned inside callback. Safe because ApplyUpdate never throws:
             // It wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
             var state = (source: _source, subscription, receivedTimestamp, changes, logger: _logger);
-            propertyWriter.Write(state, static s =>
+            _propertyWriter.Write(state, static s =>
             {
                 for (var i = 0; i < s.changes.Count; i++)
                 {
@@ -198,10 +220,11 @@ internal class SubscriptionManager : IAsyncDisposable
             oldSubscription.FastDataChangeCallback -= OnFastDataChange;
         }
 
+
         _logger.LogInformation("Updated subscription manager with {Count} transferred subscriptions (removed {OldCount} old)",
             transferredSubscriptions.Count, oldSubscriptions.Length);
     }
-    
+
     private async Task FilterOutFailedMonitoredItemsAsync(Subscription subscription, CancellationToken cancellationToken)
     {
         List<MonitoredItem>? failedItems = null;
@@ -307,6 +330,37 @@ internal class SubscriptionManager : IAsyncDisposable
                 _monitoredItems.TryRemove(kvp.Key, out _);
             }
         }
+    }
+
+    /// <summary>
+    /// Registers all successfully created monitored items with ReadAfterWriteManager.
+    /// Called after ApplyChangesAsync when we know the revised sampling intervals.
+    /// </summary>
+    private void RegisterPropertiesWithReadAfterWriteManager(Subscription subscription)
+    {
+        if (_readAfterWriteManager is null)
+        {
+            return;
+        }
+
+        foreach (var item in subscription.MonitoredItems)
+        {
+            if (item.Handle is RegisteredSubjectProperty property && item.Status?.Created == true)
+            {
+                var requestedInterval = GetRequestedSamplingInterval(property);
+                var revisedInterval = TimeSpan.FromMilliseconds(item.Status.SamplingInterval);
+                _readAfterWriteManager.RegisterProperty(item.StartNodeId, property, requestedInterval, revisedInterval);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the requested sampling interval for a property from its OPC UA attribute or configuration default.
+    /// </summary>
+    private int? GetRequestedSamplingInterval(RegisteredSubjectProperty property)
+    {
+        return property.TryGetOpcUaNodeAttribute().GetSamplingIntervalOrNull()
+            ?? _configuration.DefaultSamplingInterval;
     }
 
     public async ValueTask DisposeAsync()

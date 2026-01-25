@@ -72,15 +72,32 @@ internal class CustomNodeManager : CustomNodeManager2
 
     /// <summary>
     /// Removes nodes for a detached subject. Idempotent - safe to call multiple times.
-    /// Note: Node stays in address space until server restart.
-    /// We just clean up local tracking to avoid memory leaks.
+    /// Uses DeleteNode to properly cleanup nodes and event handlers, preventing memory leaks.
     /// </summary>
     public void RemoveSubjectNodes(IInterceptorSubject subject)
     {
+        var registeredSubject = subject.TryGetRegisteredSubject();
+
+        // Remove variable nodes for this subject's properties
+        if (registeredSubject != null)
+        {
+            foreach (var property in registeredSubject.Properties)
+            {
+                if (property.Reference.TryGetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, out var node)
+                    && node is BaseDataVariableState variableNode)
+                {
+                    DeleteNode(SystemContext, variableNode.NodeId);
+                    property.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
+                }
+            }
+        }
+
+        // Remove object nodes
         foreach (var kvp in _subjects)
         {
             if (kvp.Key.Subject == subject)
             {
+                DeleteNode(SystemContext, kvp.Value.NodeId);
                 _subjects.TryRemove(kvp.Key, out _);
             }
         }
