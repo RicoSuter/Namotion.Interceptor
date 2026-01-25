@@ -499,7 +499,7 @@ public enum OpcUaNodeClass
 
 ## CompositeNodeMapper
 
-Combines multiple mappers with merge semantics. Earlier mappers in the list take priority for conflicting values.
+Combines multiple mappers with "last wins" merge semantics. Later mappers in the list override earlier mappers for conflicting values. This matches typical configuration layering patterns (base config → overrides).
 
 ```csharp
 namespace Namotion.Interceptor.OpcUa;
@@ -522,7 +522,8 @@ public class CompositeNodeMapper : IOpcUaNodeMapper
             var config = mapper.TryGetConfiguration(property);
             if (config is not null)
             {
-                result = result?.MergeWith(config) ?? config;
+                // Later mappers override earlier ones ("last wins")
+                result = config.MergeWith(result);
             }
         }
 
@@ -548,14 +549,14 @@ public class CompositeNodeMapper : IOpcUaNodeMapper
 }
 ```
 
-**Merge example:**
+**Merge example (last wins):**
 ```
-Fluent:       { SamplingInterval: 50 }
-Attribute:    { BrowseName: "Speed", SamplingInterval: 100 }
-PathProvider: { BrowseName: "speed" }
+PathProvider: { BrowseName: "speed" }          // Base
+Attribute:    { BrowseName: "Speed", SamplingInterval: 100 }  // Override
+Fluent:       { SamplingInterval: 50 }          // Final override
 
 Result: { BrowseName: "Speed", SamplingInterval: 50 }
-         ↑ Attribute wins      ↑ Fluent wins
+         ↑ Attribute wins (later)  ↑ Fluent wins (latest)
 ```
 
 ---

@@ -132,6 +132,32 @@ builder.Services.AddOpcUaSubjectServer(
 
 The server automatically configures security policies, authentication, operation limits (MaxNodesPerRead/Write=4000), and companion specification namespaces.
 
+## Property Mapping
+
+Map C# properties to OPC UA nodes using attributes. For simple cases, use `[Path]`. For advanced OPC UA-specific configuration, use `[OpcUaNode]` and related attributes.
+
+```csharp
+[InterceptorSubject]
+[OpcUaNode(TypeDefinition = "MachineType")]  // Class-level type definition
+public partial class Machine
+{
+    // Simple property mapping
+    [Path("opc", "Status")]
+    public partial int Status { get; set; }
+
+    // OPC UA-specific mapping with monitoring config
+    [OpcUaNode("Temperature", SamplingInterval = 100, DeadbandType = DeadbandType.Absolute, DeadbandValue = 0.5)]
+    public partial double Temperature { get; set; }
+
+    // Child object with HasComponent reference
+    [OpcUaReference("HasComponent")]
+    [OpcUaNode(BrowseName = "MainMotor")]
+    public partial Motor? Motor { get; set; }
+}
+```
+
+For comprehensive mapping documentation including companion spec support, VariableTypes, and fluent configuration, see [OPC UA Mapping Guide](../opcua-mapping.md).
+
 ## Attributes
 
 ### OpcUaNodeAttribute
