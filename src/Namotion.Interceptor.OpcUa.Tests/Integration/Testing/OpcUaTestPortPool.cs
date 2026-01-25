@@ -8,8 +8,8 @@ namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 public static class OpcUaTestPortPool
 {
     private const int BasePort = 4840;
-    private const int PoolSize = 2;
-    private const int AcquisitionTimeoutMs = 10 * 60_0000;
+    private const int PoolSize = 20;
+    private const int AcquisitionTimeoutMs = 10 * 60 * 1000; // 10 minutes
 
     private static readonly SemaphoreSlim Semaphore = new(PoolSize, PoolSize);
     private static readonly bool[] UsedPorts = new bool[PoolSize];
