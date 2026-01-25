@@ -154,6 +154,10 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
                 host.Dispose();
                 Diagnostics = null;
             }
+
+            // Wait for OPC UA session to fully close
+            await Task.Delay(250);
+
             sw.Stop();
             _logger.Log($"Client stopped in {sw.ElapsedMilliseconds}ms");
         }
@@ -173,6 +177,10 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
             {
                 await host.StopAsync(TimeSpan.FromMinutes(5));
                 host.Dispose();
+
+                // Wait for OPC UA session to fully close
+                await Task.Delay(250);
+
                 _logger.Log("Client disposed");
             }
         }

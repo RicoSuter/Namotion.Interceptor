@@ -130,6 +130,10 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
                 host.Dispose();
                 Diagnostics = null;
             }
+
+            // Wait for TCP sockets to fully close before port can be reused
+            await Task.Delay(500);
+
             sw.Stop();
             _logger.Log($"Server stopped in {sw.ElapsedMilliseconds}ms");
         }
@@ -157,6 +161,10 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
             {
                 await host.StopAsync(TimeSpan.FromMinutes(5));
                 host.Dispose();
+
+                // Wait for TCP sockets to fully close before port can be reused
+                await Task.Delay(500);
+
                 _logger.Log("Server disposed");
             }
         }
