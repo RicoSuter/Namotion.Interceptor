@@ -145,7 +145,6 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
             finally
             {
                 host.Dispose();
-                Diagnostics = null;
             }
             sw.Stop();
             _logger.Log($"Server stopped in {sw.ElapsedMilliseconds}ms");
