@@ -152,7 +152,6 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
             finally
             {
                 host.Dispose();
-                Diagnostics = null;
             }
 
             // Wait for OPC UA session to fully close
