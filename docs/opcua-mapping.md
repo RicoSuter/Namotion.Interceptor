@@ -434,23 +434,23 @@ var mapper = new FluentOpcUaNodeMapper<Machine>()
 
 ## Composite Mappers
 
-Multiple mappers can be combined with merge semantics. Earlier mappers in the list take priority:
+Multiple mappers can be combined with "last wins" merge semantics. Later mappers override earlier ones:
 
 ```csharp
 var mapper = new CompositeNodeMapper(
-    fluentMapper,           // Highest priority - runtime overrides
-    new AttributeOpcUaNodeMapper(),  // Attributes from code
-    new PathProviderOpcUaNodeMapper(pathProvider));  // Fallback
+    new PathProviderOpcUaNodeMapper(pathProvider),  // Base - fallback names
+    new AttributeOpcUaNodeMapper(),                  // Override - attributes
+    fluentMapper);                                   // Final - runtime overrides
 ```
 
-**Merge example:**
+**Merge example (last wins):**
 ```
-Fluent:       { SamplingInterval: 50 }
-Attribute:    { BrowseName: "Speed", SamplingInterval: 100 }
 PathProvider: { BrowseName: "speed" }
+Attribute:    { BrowseName: "Speed", SamplingInterval: 100 }
+Fluent:       { SamplingInterval: 50 }
 
 Result: { BrowseName: "Speed", SamplingInterval: 50 }
-         ↑ Attribute wins      ↑ Fluent wins
+         ↑ Attribute wins (later)  ↑ Fluent wins (latest)
 ```
 
 ## Standard Reference Types
