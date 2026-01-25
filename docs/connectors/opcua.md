@@ -83,11 +83,16 @@ builder.Services.AddOpcUaSubjectClient(
         ApplicationName = "MyOpcUaClient",
         ReconnectInterval = TimeSpan.FromSeconds(5),
 
-        // Subscription settings
-        DefaultSamplingInterval = 100,
+        // Subscription settings (null = use OPC UA library defaults)
+        DefaultSamplingInterval = 0,      // 0 = exception-based (immediate), null = server decides
         DefaultPublishingInterval = 100,
         DefaultQueueSize = 10,
         MaximumItemsPerSubscription = 1000,
+
+        // Data change filter (null = use OPC UA library defaults)
+        DefaultDataChangeTrigger = null,  // StatusValue (report on value change)
+        DefaultDeadbandType = null,       // None (report all changes)
+        DefaultDeadbandValue = null,      // 0.0
 
         // Performance tuning
         BufferTime = TimeSpan.FromMilliseconds(10),
@@ -131,7 +136,7 @@ The server automatically configures security policies, authentication, operation
 
 ### OpcUaNodeAttribute
 
-Use `[OpcUaNode]` to map properties to specific OPC UA nodes with precise control over browse names, node identifiers, and subscription behavior. This attribute allows you to specify exact node IDs, custom sampling intervals, and queue settings per property.
+Use `[OpcUaNode]` to map properties to specific OPC UA nodes with precise control over browse names, node identifiers, and subscription behavior. This attribute allows you to specify exact node IDs, custom sampling intervals, queue settings, and data change filters per property.
 
 ```csharp
 [InterceptorSubject]
@@ -140,14 +145,33 @@ public partial class Device
     [OpcUaNode("Temperature")]
     public partial double Temperature { get; set; }
 
+    // Analog sensor with deadband filtering to reduce noise
     [OpcUaNode("Pressure", "http://factory.com",
         NodeIdentifier = "ns=2;s=Sensor.Pressure",
         NodeNamespaceUri = "http://factory.com",
         SamplingInterval = 50,
-        QueueSize = 5)]
+        QueueSize = 5,
+        DeadbandType = DeadbandType.Absolute,
+        DeadbandValue = 0.1)]
     public partial double Pressure { get; set; }
+
+    // Discrete variable - use exception-based monitoring (SamplingInterval = 0)
+    // to catch rapid true→false transitions
+    [OpcUaNode("StartCommand", "http://factory.com",
+        SamplingInterval = 0)]
+    public partial bool StartCommand { get; set; }
 }
 ```
+
+**Sampling interval values:**
+- `null` (default): Use configuration default or OPC UA library default (-1 = server decides)
+- `0`: Exception-based monitoring (immediate reporting on every change) - ideal for discrete variables
+- `> 0`: Sample at specified interval in milliseconds - suitable for analog variables
+
+**Data change filter options:**
+- `DataChangeTrigger`: `Status`, `StatusValue` (default), or `StatusValueTimestamp`
+- `DeadbandType`: `None` (default), `Absolute`, or `Percent`
+- `DeadbandValue`: Threshold value (absolute units or percentage depending on type)
 
 ### OpcUaTypeDefinitionAttribute
 
@@ -182,6 +206,53 @@ For collection properties, specify how individual items are referenced in the OP
 [OpcUaNodeItemReferenceType("HasComponent")]
 [Path("opc", "Parameters")]
 public partial Parameter[] Parameters { get; set; }
+```
+
+## Monitoring Modes
+
+### Sampling vs Exception-Based Monitoring
+
+OPC UA supports two monitoring modes for value changes:
+
+**Sampling-based** (`SamplingInterval > 0`): The server checks the value at fixed intervals and reports if it changed since the last sample. Fast changes that occur between samples may be missed.
+
+**Exception-based** (`SamplingInterval = 0`): The server reports immediately whenever the value changes. This requires the server to support exception-based monitoring (indicated by `MinimumSamplingInterval = 0` on the node).
+
+**When to use exception-based monitoring:**
+- Discrete variables (boolean flags, state indicators) where you need to catch every transition
+- Handshake patterns (client writes `true`, PLC sets back to `false`)
+- Any value where missing a transition would cause system failures
+
+```csharp
+// Request exception-based monitoring for a discrete variable
+[OpcUaNode("StartCommand", SamplingInterval = 0)]
+public partial bool StartCommand { get; set; }
+```
+
+**Note:** Even with `SamplingInterval = 0`, the server may revise this based on its capabilities. Check the server's `RevisedSamplingInterval` to verify exception-based monitoring is active.
+
+### Data Change Filters
+
+Control which value changes generate notifications:
+
+| Trigger | Reports when... |
+|---------|-----------------|
+| `Status` | Status code changes |
+| `StatusValue` | Status or value changes (default) |
+| `StatusValueTimestamp` | Status, value, or timestamp changes |
+
+| Deadband Type | Filters out... |
+|---------------|----------------|
+| `None` | Nothing - reports all changes (default) |
+| `Absolute` | Changes smaller than the absolute threshold |
+| `Percent` | Changes smaller than the percentage of range |
+
+```csharp
+// Analog sensor - only report changes > 0.5 units
+[OpcUaNode("Temperature",
+    DeadbandType = DeadbandType.Absolute,
+    DeadbandValue = 0.5)]
+public partial double Temperature { get; set; }
 ```
 
 ## Type Conversions
@@ -390,6 +461,74 @@ builder.Services.AddOpcUaSubjectClient(
 - `PollingInterval` minimum of 100 milliseconds enforced
 - Fail-fast with clear error messages on invalid configuration
 
+### Read After Write for Discrete Variables
+
+#### Understanding Discrete vs Analog Variables
+
+Industrial automation distinguishes between two types of variables:
+
+| Type | Characteristics | Examples | OPC UA Monitoring |
+|------|-----------------|----------|-------------------|
+| **Analog** | Continuous values, gradual changes, sampling is fine | Temperature, pressure, speed | Sampling-based (`SamplingInterval > 0`) with optional deadband |
+| **Discrete** | Binary on/off, every transition matters | Handshake flags, command triggers, state indicators | Exception-based (`SamplingInterval = 0`) |
+
+For **discrete variables**, missing a transition can cause system failures. A classic example is the handshake pattern: client writes `1`, PLC acknowledges by writing `0`. If sampling misses the `1→0` transition (because both samples see `0`), the client never knows the PLC acknowledged.
+
+#### The Problem with Sampling-Based Monitoring
+
+OPC UA's sampling-based monitoring compares each sample against the *previous sample*, not against what the client knows. When a value changes faster than the sampling rate (e.g., `0→1→0` between samples), the server sees `0` at both sample points and reports no change.
+
+```
+Sampling-based (SamplingInterval = 100ms):
+t=0ms:   Sample value=0, baseline=0 → no change reported
+t=50ms:  Client writes 1 → value=1 (no sample happens)
+t=60ms:  PLC writes 0 → value=0 (no sample happens)
+t=100ms: Sample value=0, baseline=0 → no change reported ❌
+```
+
+This is spec-compliant behavior per [OPC UA Part 4](https://reference.opcfoundation.org/Core/Part4/v104/docs/5.12.1.2), not a bug.
+
+#### Solution Hierarchy
+
+1. **Best: Exception-based monitoring** (`SamplingInterval = 0`) - Server reports every change immediately
+2. **Fallback: Read-after-write** - When the server revises `SamplingInterval = 0` to non-zero, automatically read values after writes
+
+#### How Read-After-Write Works
+
+The library automatically detects when `SamplingInterval = 0` was revised to a non-zero value (common with legacy PLCs or servers that don't support exception-based monitoring). For these properties, after a successful write, it schedules a read-back to catch server-side changes that sampling would miss.
+
+```csharp
+// Mark as discrete variable - request exception-based monitoring
+[OpcUaNode("CommandTrigger", SamplingInterval = 0)]
+public partial bool CommandTrigger { get; set; }
+```
+
+**Configuration:**
+```csharp
+var config = new OpcUaClientConfiguration
+{
+    // Enable/disable read-after-write fallback (default: true)
+    EnableReadAfterWrite = true,
+
+    // Buffer added to revised interval before reading back (default: 50ms)
+    ReadAfterWriteBuffer = TimeSpan.FromMilliseconds(50)
+};
+```
+
+**Behavior:**
+- Only triggers for properties where `SamplingInterval = 0` was revised to > 0
+- Multiple rapid writes are coalesced into a single read
+- Reads are batched for efficiency
+- Circuit breaker prevents repeated failures from overwhelming the server
+- Logged when activated so you can verify which properties need this fallback
+
+#### Limitations
+
+If the server's minimum sampling rate is slower than the value changes, no client-side workaround can help. In that case, consider:
+- Configuring the OPC UA server to support faster sampling or exception-based monitoring
+- Changing the PLC code to use a counter-based pattern instead of boolean handshakes
+- Using OPC UA Methods for command/response patterns (requires PLC support)
+
 ### Stall Detection
 
 When the SDK's reconnection handler gets stuck (e.g., server never responds), the client automatically detects the stall and forces a reconnection reset. Configure via `MaxReconnectDuration` (default: 30 seconds). If the SDK reconnection hasn't succeeded within this duration, a full session reset and manual reconnection is triggered.
@@ -456,6 +595,21 @@ For 24/7 production use, the default configuration provides robust resilience:
 | `SubscriptionSequentialPublishing` | false | Process subscription messages in order (see Thread Safety) |
 
 Stall recovery is triggered after `MaxReconnectDuration` (default: 30s) if SDK reconnection hasn't succeeded.
+
+## Subscription Configuration
+
+Configure monitored item behavior at global or per-property level:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `DefaultSamplingInterval` | null | Sampling interval in ms (null = server decides, 0 = exception-based) |
+| `DefaultQueueSize` | null | Values to buffer (null = library default of 1) |
+| `DefaultDiscardOldest` | null | Discard oldest when queue full (null = library default of true) |
+| `DefaultDataChangeTrigger` | null | When to report changes (null = StatusValue) |
+| `DefaultDeadbandType` | null | Deadband filter type (null = None) |
+| `DefaultDeadbandValue` | null | Deadband threshold (null = 0.0) |
+
+All settings can be overridden per-property using `[OpcUaNode]` attribute.
 
 ## Lifecycle Management
 

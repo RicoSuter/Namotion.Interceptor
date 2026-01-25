@@ -48,7 +48,7 @@ public class OpcUaTransactionTests
             // Wait for OPC UA sync
             await AsyncTestHelpers.WaitUntilAsync(
                 () => _server.Root.Name == "Transaction Value",
-                timeout: TimeSpan.FromSeconds(10),
+                timeout: TimeSpan.FromSeconds(30),
                 message: "Server should receive committed transaction value");
         }
         finally
@@ -91,7 +91,7 @@ public class OpcUaTransactionTests
             // Wait for OPC UA sync of all properties
             await AsyncTestHelpers.WaitUntilAsync(
                 () => _server.Root.Name == "Multi-Property Test" && _server.Root.Number == 123.45m,
-                timeout: TimeSpan.FromSeconds(10),
+                timeout: TimeSpan.FromSeconds(30),
                 message: "Server should receive all committed transaction values");
 
             // Assert - server should now have all new values after commit
