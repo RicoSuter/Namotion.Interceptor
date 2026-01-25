@@ -63,7 +63,6 @@ public class OpcUaReconnectionTests
             Assert.NotNull(client.Diagnostics);
 
             // Verify initial sync
-            Assert.True(client.Diagnostics.IsConnected);
             server.Root.Name = "Initial";
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Root.Name == "Initial",

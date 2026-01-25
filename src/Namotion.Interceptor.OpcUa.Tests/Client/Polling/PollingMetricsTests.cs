@@ -77,26 +77,6 @@ public class PollingMetricsTests
     }
 
     [Fact]
-    public void Reset_ClearsAllMetrics()
-    {
-        // Arrange
-        var metrics = new PollingMetrics();
-        metrics.RecordRead();
-        metrics.RecordFailedRead();
-        metrics.RecordValueChange();
-        metrics.RecordSlowPoll();
-
-        // Act
-        metrics.Reset();
-
-        // Assert
-        Assert.Equal(0, metrics.TotalReads);
-        Assert.Equal(0, metrics.FailedReads);
-        Assert.Equal(0, metrics.ValueChanges);
-        Assert.Equal(0, metrics.SlowPolls);
-    }
-
-    [Fact]
     public async Task ConcurrentRecordRead_IsThreadSafe()
     {
         // Arrange
@@ -151,47 +131,5 @@ public class PollingMetricsTests
         Assert.Equal(expected, metrics.FailedReads);
         Assert.Equal(expected, metrics.ValueChanges);
         Assert.Equal(expected, metrics.SlowPolls);
-    }
-
-    [Fact]
-    public async Task ConcurrentReadAndReset_IsThreadSafe()
-    {
-        // Arrange
-        var metrics = new PollingMetrics();
-        var cts = new CancellationTokenSource();
-
-        // Act - One thread continuously reads, another resets
-        var readTask = Task.Run(() =>
-        {
-            while (!cts.Token.IsCancellationRequested)
-            {
-                metrics.RecordRead();
-            }
-        });
-
-        var resetTask = Task.Run(async () =>
-        {
-            for (int i = 0; i < 10; i++)
-            {
-                await Task.Delay(10);
-                metrics.Reset();
-            }
-        });
-
-        await resetTask;
-        cts.Cancel();
-
-        try
-        {
-            await readTask.WaitAsync(TimeSpan.FromMilliseconds(100));
-        }
-        catch (TimeoutException)
-        {
-            // Expected if task didn't complete quickly
-        }
-
-        // Assert - No exceptions, metrics are consistent
-        var reads = metrics.TotalReads;
-        Assert.True(reads >= 0); // Should be valid value after reset
     }
 }

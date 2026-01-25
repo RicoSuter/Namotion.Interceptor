@@ -122,13 +122,21 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         await _host.StartAsync();
         _logger.Log($"Client host started in {sw.ElapsedMilliseconds}ms");
 
-        // Wait for client to connect using active waiting
-        // Use 60s timeout to allow for resource contention during parallel test execution
+        // First wait for OPC UA infrastructure (subscriptions set up) - this is reliable
+        // because it's based on actual OPC UA state, not property propagation
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Diagnostics?.MonitoredItemCount > 0,
+            timeout: TimeSpan.FromSeconds(60),
+            pollInterval: TimeSpan.FromMilliseconds(200),
+            message: "Client failed to create subscriptions");
+
+        // Then wait actual connected
+        // WaitUntilAsync includes memory barrier to ensure visibility across threads
         await AsyncTestHelpers.WaitUntilAsync(
             () => Root != null && isConnected(Root),
             timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(200),
-            message: "Client failed to connect to server");
+            message: "Client failed to sync initial property values");
 
         sw.Stop();
         _logger.Log($"Client connected in {sw.ElapsedMilliseconds}ms total");

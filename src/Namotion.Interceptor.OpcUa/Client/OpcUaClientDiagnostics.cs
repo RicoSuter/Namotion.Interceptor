@@ -74,6 +74,18 @@ public class OpcUaClientDiagnostics
             return pollingManager is not null ? new PollingDiagnostics(pollingManager) : null;
         }
     }
+
+    /// <summary>
+    /// Gets read-after-write diagnostics, or null if disabled.
+    /// </summary>
+    public ReadAfterWriteDiagnostics? ReadAfterWrite
+    {
+        get
+        {
+            var manager = _source.SessionManager?.ReadAfterWriteManager;
+            return manager is not null ? new ReadAfterWriteDiagnostics(manager) : null;
+        }
+    }
 }
 
 /// <summary>
@@ -127,4 +139,37 @@ public class PollingDiagnostics
     /// Gets whether the polling loop is currently running.
     /// </summary>
     public bool IsRunning => _pollingManager.IsRunning;
+}
+
+/// <summary>
+/// Provides diagnostic information about the read-after-write mechanism for discrete properties.
+/// </summary>
+public class ReadAfterWriteDiagnostics
+{
+    private readonly ReadAfterWrite.ReadAfterWriteManager _manager;
+
+    internal ReadAfterWriteDiagnostics(ReadAfterWrite.ReadAfterWriteManager manager)
+    {
+        _manager = manager;
+    }
+
+    /// <summary>
+    /// Gets the total number of read-after-writes scheduled.
+    /// </summary>
+    public long Scheduled => _manager.Metrics.Scheduled;
+
+    /// <summary>
+    /// Gets the total number of read-after-writes successfully executed.
+    /// </summary>
+    public long Executed => _manager.Metrics.Executed;
+
+    /// <summary>
+    /// Gets the number of scheduled reads that were coalesced (replaced by subsequent writes).
+    /// </summary>
+    public long Coalesced => _manager.Metrics.Coalesced;
+
+    /// <summary>
+    /// Gets the number of failed read-after-write operations.
+    /// </summary>
+    public long Failed => _manager.Metrics.Failed;
 }
