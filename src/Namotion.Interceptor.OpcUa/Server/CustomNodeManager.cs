@@ -1,6 +1,7 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Reflection;
 using Namotion.Interceptor.OpcUa.Attributes;
+using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
@@ -15,6 +16,7 @@ internal class CustomNodeManager : CustomNodeManager2
     private readonly IInterceptorSubject _subject;
     private readonly OpcUaSubjectServerBackgroundService _source;
     private readonly OpcUaServerConfiguration _configuration;
+    private readonly IOpcUaNodeMapper _nodeMapper;
 
     private readonly ConcurrentDictionary<RegisteredSubject, NodeState> _subjects = new();
 
@@ -29,6 +31,7 @@ internal class CustomNodeManager : CustomNodeManager2
         _subject = subject;
         _source = source;
         _configuration = configuration;
+        _nodeMapper = configuration.GetActualNodeMapper();
     }
 
     protected override NodeStateCollection LoadPredefinedNodes(ISystemContext context)
@@ -240,12 +243,12 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private NodeId GetNodeId(RegisteredSubjectProperty property, string fullPath)
     {
-        var opcUaNodeAttribute = property.TryGetOpcUaNodeAttribute();
-        if (opcUaNodeAttribute is { NodeIdentifier: not null })
+        var nodeConfig = _nodeMapper.TryGetConfiguration(property);
+        if (nodeConfig is { NodeIdentifier: not null })
         {
-            return opcUaNodeAttribute.NodeNamespaceUri is not null ? 
-                NodeId.Create(opcUaNodeAttribute.NodeIdentifier, opcUaNodeAttribute.NodeNamespaceUri, SystemContext.NamespaceUris) : 
-                new NodeId(opcUaNodeAttribute.NodeIdentifier, NamespaceIndex);
+            return nodeConfig.NodeNamespaceUri is not null ?
+                NodeId.Create(nodeConfig.NodeIdentifier, nodeConfig.NodeNamespaceUri, SystemContext.NamespaceUris) :
+                new NodeId(nodeConfig.NodeIdentifier, NamespaceIndex);
         }
 
         return new NodeId(fullPath, NamespaceIndex);
@@ -281,76 +284,83 @@ internal class CustomNodeManager : CustomNodeManager2
         }
     }
 
-    private static NodeId? GetReferenceTypeId(RegisteredSubjectProperty property)
+    private NodeId? GetReferenceTypeId(RegisteredSubjectProperty property)
     {
-        var referenceTypeAttribute = property.ReflectionAttributes
-            .OfType<OpcUaNodeReferenceTypeAttribute>()
-            .FirstOrDefault();
+        var nodeConfig = _nodeMapper.TryGetConfiguration(property);
+        if (nodeConfig?.ReferenceType is not null)
+        {
+            return typeof(ReferenceTypeIds).GetField(nodeConfig.ReferenceType)?.GetValue(null) as NodeId;
+        }
 
-        return referenceTypeAttribute is not null ? typeof(ReferenceTypeIds).GetField(referenceTypeAttribute.Type)?.GetValue(null) as NodeId : null;
+        return null;
     }
 
-    private static NodeId? GetChildReferenceTypeId(RegisteredSubjectProperty property)
+    private NodeId? GetChildReferenceTypeId(RegisteredSubjectProperty property)
     {
-        var referenceTypeAttribute = property.ReflectionAttributes
-            .OfType<OpcUaNodeItemReferenceTypeAttribute>()
-            .FirstOrDefault();
+        var nodeConfig = _nodeMapper.TryGetConfiguration(property);
+        if (nodeConfig?.ItemReferenceType is not null)
+        {
+            return typeof(ReferenceTypeIds).GetField(nodeConfig.ItemReferenceType)?.GetValue(null) as NodeId;
+        }
 
-        return referenceTypeAttribute is not null ? typeof(ReferenceTypeIds).GetField(referenceTypeAttribute.Type)?.GetValue(null) as NodeId : null;
+        return null;
     }
 
     private NodeId? GetTypeDefinitionId(RegisteredSubjectProperty property)
     {
-        var typeDefinitionAttribute = property.ReflectionAttributes
-            .OfType<OpcUaTypeDefinitionAttribute>()
-            .FirstOrDefault();
-
-        return GetTypeDefinitionId(typeDefinitionAttribute);
+        var nodeConfig = _nodeMapper.TryGetConfiguration(property);
+        return GetTypeDefinitionId(nodeConfig?.TypeDefinition, nodeConfig?.TypeDefinitionNamespace);
     }
 
     private NodeId? GetTypeDefinitionId(IInterceptorSubject subject)
     {
-        var typeDefinitionAttribute = subject.GetType().GetCustomAttribute<OpcUaTypeDefinitionAttribute>();
-        return GetTypeDefinitionId(typeDefinitionAttribute);
+        // For subjects, check if type has OpcUaNode attribute at class level
+        var typeAttribute = subject.GetType().GetCustomAttribute<OpcUaNodeAttribute>();
+        if (typeAttribute is not null)
+        {
+            return GetTypeDefinitionId(typeAttribute.TypeDefinition, typeAttribute.TypeDefinitionNamespace);
+        }
+
+        return null;
     }
 
-    private NodeId? GetTypeDefinitionId(OpcUaTypeDefinitionAttribute? typeDefinitionAttribute)
+    private NodeId? GetTypeDefinitionId(string? typeDefinition, string? typeDefinitionNamespace)
     {
-        if (typeDefinitionAttribute is null)
+        if (typeDefinition is null)
         {
             return null;
         }
 
-        if (typeDefinitionAttribute.Namespace is not null)
+        if (typeDefinitionNamespace is not null)
         {
-            var typeDefinition = NodeId.Create(
-                typeDefinitionAttribute.Type,
-                typeDefinitionAttribute.Namespace,
+            var nodeId = NodeId.Create(
+                typeDefinition,
+                typeDefinitionNamespace,
                 SystemContext.NamespaceUris);
 
             return PredefinedNodes.Values.SingleOrDefault(n =>
-                    n.BrowseName.Name == typeDefinition.Identifier.ToString() &&
-                    n.BrowseName.NamespaceIndex == typeDefinition.NamespaceIndex)?
+                    n.BrowseName.Name == nodeId.Identifier.ToString() &&
+                    n.BrowseName.NamespaceIndex == nodeId.NamespaceIndex)?
                 .NodeId;
         }
 
-        return typeof(ObjectTypeIds).GetField(typeDefinitionAttribute.Type)?.GetValue(null) as NodeId;
+        return typeof(ObjectTypeIds).GetField(typeDefinition)?.GetValue(null) as NodeId;
     }
 
     private QualifiedName GetBrowseName(string propertyName, RegisteredSubjectProperty property, object? index)
     {
-        var browseNameProvider = property.TryGetOpcUaNodeAttribute();
-        if (browseNameProvider is null)
+        var nodeConfig = _nodeMapper.TryGetConfiguration(property);
+        if (nodeConfig?.BrowseName is null)
         {
             return new QualifiedName(propertyName + (index is not null ? $"[{index}]" : string.Empty), NamespaceIndex);
         }
 
-        if (browseNameProvider.BrowseNamespaceUri is not null)
+        if (nodeConfig.BrowseNamespaceUri is not null)
         {
-            return new QualifiedName(browseNameProvider.BrowseName, (ushort)SystemContext.NamespaceUris.GetIndex(browseNameProvider.BrowseNamespaceUri));
+            return new QualifiedName(nodeConfig.BrowseName, (ushort)SystemContext.NamespaceUris.GetIndex(nodeConfig.BrowseNamespaceUri));
         }
 
-        return new QualifiedName(browseNameProvider.BrowseName, NamespaceIndex);
+        return new QualifiedName(nodeConfig.BrowseName, NamespaceIndex);
     }
 
     private FolderState CreateFolderNode(

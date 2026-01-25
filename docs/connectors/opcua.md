@@ -156,7 +156,7 @@ public partial class Machine
 }
 ```
 
-For comprehensive mapping documentation including companion spec support, VariableTypes, and fluent configuration, see [OPC UA Mapping Guide](../opcua-mapping.md).
+For comprehensive mapping documentation including companion spec support, VariableTypes, and fluent configuration, see [OPC UA Mapping Guide](opcua-mapping.md).
 
 ## Attributes
 
@@ -199,40 +199,42 @@ public partial class Device
 - `DeadbandType`: `None` (default), `Absolute`, or `Percent`
 - `DeadbandValue`: Threshold value (absolute units or percentage depending on type)
 
-### OpcUaTypeDefinitionAttribute
-
-Apply `[OpcUaTypeDefinition]` to classes to use standard OPC UA companion specification types like Device Integration (DI) or Machinery types. This ensures your objects conform to industry-standard OPC UA information models.
-
-```csharp
-[InterceptorSubject]
-[OpcUaTypeDefinition("FunctionalGroupType", "http://opcfoundation.org/UA/DI/")]
-public partial class DeviceGroup
-{
-    public partial string Name { get; set; }
-}
-```
-
-### OpcUaNodeReferenceTypeAttribute
+### OpcUaReferenceAttribute
 
 Control how properties are linked in the OPC UA address space by specifying the reference type. This determines the semantic relationship between parent and child nodes.
 
 ```csharp
-[OpcUaNodeReferenceType("Organizes")]
+[OpcUaReference("Organizes")]
 [Path("opc", "Machines")]
 public partial Machine[] Machines { get; set; }
 ```
 
-Common types: `HasComponent`, `Organizes`, `HasProperty`
+Common types: `HasComponent`, `Organizes`, `HasProperty` (default)
 
-### OpcUaNodeItemReferenceTypeAttribute
-
-For collection properties, specify how individual items are referenced in the OPC UA address space. This controls the reference type used for each element in arrays or collections.
+For collection properties, specify how individual items are referenced using `ItemReferenceType`:
 
 ```csharp
-[OpcUaNodeItemReferenceType("HasComponent")]
+[OpcUaReference("Organizes", ItemReferenceType = "HasComponent")]
 [Path("opc", "Parameters")]
 public partial Parameter[] Parameters { get; set; }
 ```
+
+### OpcUaValueAttribute
+
+Mark a property as the primary value for a VariableNode class. Use this when a class represents a complex VariableType (like AnalogSignalVariableType) where the class has child properties but also needs a main value.
+
+```csharp
+[InterceptorSubject]
+[OpcUaNode("Temperature", null, NodeClass = OpcUaNodeClass.Variable,
+    TypeDefinition = "AnalogSignalVariableType",
+    TypeDefinitionNamespace = "http://opcfoundation.org/UA/PADIM/")]
+public partial class AnalogSignalVariable
+{
+    [OpcUaValue]  // This property becomes the Variable's value
+    public partial double ActualValue { get; set; }
+
+    public partial Range? EURange { get; set; }
+}
 
 ## Monitoring Modes
 
@@ -411,7 +413,9 @@ The server automatically loads embedded NodeSets:
 - Opc.Ua.Machinery.NodeSet2.xml (Machinery)
 - Opc.Ua.Machinery.ProcessValues.NodeSet2.xml (Process values)
 
-Reference these types with `[OpcUaTypeDefinition]`.
+Reference these types with `[OpcUaNode(TypeDefinition = "...", TypeDefinitionNamespace = "...")]`.
+
+For comprehensive mapping documentation including companion spec support, VariableTypes, and fluent configuration, see [OPC UA Mapping Guide](opcua-mapping.md).
 
 ## Resilience Features
 

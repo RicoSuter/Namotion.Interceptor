@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.OpcUa.Attributes;
+using Namotion.Interceptor.OpcUa.Attributes;
+using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
@@ -10,6 +11,7 @@ namespace Namotion.Interceptor.OpcUa.Client;
 public class OpcUaClientConfiguration
 {
     private ISessionFactory? _resolvedSessionFactory;
+    private IOpcUaNodeMapper? _resolvedNodeMapper;
 
     /// <summary>
     /// Gets the OPC UA server endpoint URL to connect to (e.g., "opc.tcp://localhost:4840").
@@ -313,6 +315,22 @@ public class OpcUaClientConfiguration
     public ISessionFactory? SessionFactory { get; set; }
 
     /// <summary>
+    /// Maps C# properties to OPC UA nodes.
+    /// If not set, a default composite mapper is created using AttributeOpcUaNodeMapper
+    /// and PathProviderOpcUaNodeMapper.
+    /// </summary>
+    public IOpcUaNodeMapper? NodeMapper { get; init; }
+
+    /// <summary>
+    /// Gets the actual node mapper, creating a default if not configured.
+    /// </summary>
+    internal IOpcUaNodeMapper ActualNodeMapper => NodeMapper ?? LazyInitializer.EnsureInitialized(
+        ref _resolvedNodeMapper,
+        () => new CompositeNodeMapper(
+            new PathProviderOpcUaNodeMapper(PathProvider),
+            new AttributeOpcUaNodeMapper(DefaultNamespaceUri)))!;
+
+    /// <summary>
     /// Gets or sets the timeout for session disposal during shutdown.
     /// If the session doesn't close gracefully within this timeout, it will be forcefully disposed.
     /// Default is 5 seconds.
@@ -399,7 +417,7 @@ public class OpcUaClientConfiguration
 
     /// <summary>
     /// Creates a MonitoredItem for the given property and node ID using this configuration's defaults.
-    /// Attribute-level overrides (SamplingInterval, QueueSize, DiscardOldest, DataChangeTrigger, DeadbandType, DeadbandValue)
+    /// NodeMapper configuration overrides (SamplingInterval, QueueSize, DiscardOldest, DataChangeTrigger, DeadbandType, DeadbandValue)
     /// are applied if present on the property.
     /// </summary>
     /// <param name="nodeId">The OPC UA node ID to monitor.</param>
@@ -407,7 +425,7 @@ public class OpcUaClientConfiguration
     /// <returns>A configured MonitoredItem ready to be added to a subscription.</returns>
     internal MonitoredItem CreateMonitoredItem(NodeId nodeId, RegisteredSubjectProperty property)
     {
-        var opcUaNodeAttribute = property.TryGetOpcUaNodeAttribute();
+        var nodeConfig = ActualNodeMapper.TryGetConfiguration(property);
         var item = new MonitoredItem(TelemetryContext)
         {
             StartNodeId = nodeId,
@@ -416,27 +434,27 @@ public class OpcUaClientConfiguration
             Handle = property
         };
 
-        // Apply sampling/queue settings using extension methods for sentinel value handling
-        var samplingInterval = opcUaNodeAttribute.GetSamplingIntervalOrNull() ?? DefaultSamplingInterval;
+        // Apply sampling/queue settings from NodeMapper configuration
+        var samplingInterval = nodeConfig?.SamplingInterval ?? DefaultSamplingInterval;
         if (samplingInterval.HasValue)
         {
             item.SamplingInterval = samplingInterval.Value;
         }
 
-        var queueSize = opcUaNodeAttribute.GetQueueSizeOrNull() ?? DefaultQueueSize;
+        var queueSize = nodeConfig?.QueueSize ?? DefaultQueueSize;
         if (queueSize.HasValue)
         {
             item.QueueSize = queueSize.Value;
         }
 
-        var discardOldest = opcUaNodeAttribute.GetDiscardOldestOrNull() ?? DefaultDiscardOldest;
+        var discardOldest = nodeConfig?.DiscardOldest ?? DefaultDiscardOldest;
         if (discardOldest.HasValue)
         {
             item.DiscardOldest = discardOldest.Value;
         }
 
         // Apply filter (only if any filter option is specified)
-        var filter = CreateDataChangeFilter(opcUaNodeAttribute);
+        var filter = CreateDataChangeFilter(nodeConfig);
         if (filter != null)
         {
             item.Filter = filter;
@@ -446,15 +464,15 @@ public class OpcUaClientConfiguration
     }
 
     /// <summary>
-    /// Creates a DataChangeFilter based on the attribute and configuration defaults.
+    /// Creates a DataChangeFilter based on the node configuration and configuration defaults.
     /// Returns null if no filter options are specified (uses OPC UA library defaults).
     /// </summary>
-    private DataChangeFilter? CreateDataChangeFilter(OpcUaNodeAttribute? attribute)
+    private DataChangeFilter? CreateDataChangeFilter(OpcUaNodeConfiguration? nodeConfig)
     {
-        // Apply attribute overrides (using extension methods for sentinel value handling), then configuration defaults
-        var trigger = attribute.GetDataChangeTriggerOrNull() ?? DefaultDataChangeTrigger;
-        var deadbandType = attribute.GetDeadbandTypeOrNull() ?? DefaultDeadbandType;
-        var deadbandValue = attribute.GetDeadbandValueOrNull() ?? DefaultDeadbandValue;
+        // Apply NodeMapper configuration overrides, then configuration defaults
+        var trigger = nodeConfig?.DataChangeTrigger ?? DefaultDataChangeTrigger;
+        var deadbandType = nodeConfig?.DeadbandType ?? DefaultDeadbandType;
+        var deadbandValue = nodeConfig?.DeadbandValue ?? DefaultDeadbandValue;
 
         // Only create filter if at least one option is specified
         if (!trigger.HasValue && !deadbandType.HasValue && !deadbandValue.HasValue)

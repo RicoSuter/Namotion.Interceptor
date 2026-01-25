@@ -10,8 +10,7 @@ namespace Namotion.Interceptor.SampleMachine
     public partial class Root
     {
         [OpcUaNode("Machines", "http://opcfoundation.org/UA/Machinery/")]
-        [OpcUaNodeReferenceType("Organizes")]
-        [OpcUaNodeItemReferenceType("Organizes")]
+        [OpcUaReference("Organizes", ItemReferenceType = "Organizes")]
         public partial IReadOnlyDictionary<string, Machine> Machines { get; set; }
 
         public Root()
@@ -21,20 +20,19 @@ namespace Namotion.Interceptor.SampleMachine
     }
 
     [InterceptorSubject]
-    [OpcUaTypeDefinition("BaseObjectType")]
+    [OpcUaNode("Machine", null, TypeDefinition = "BaseObjectType")]
     public partial class Machine
     {
         [OpcUaNode("Identification", "http://opcfoundation.org/UA/DI/")]
-        [OpcUaNodeReferenceType("HasAddIn")]
+        [OpcUaReference("HasAddIn")]
         public partial Identification Identification { get; private set; }
 
         [OpcUaNode("MachineryBuildingBlocks", "http://opcfoundation.org/UA/")]
-        [OpcUaNodeReferenceType("HasComponent")]
+        [OpcUaReference("HasComponent")]
         public partial MachineryBuildingBlocks MachineryBuildingBlocks { get; private set; }
 
         [OpcUaNode("Monitoring", "http://opcfoundation.org/UA/")]
-        [OpcUaNodeReferenceType("HasComponent")]
-        [OpcUaNodeItemReferenceType("HasComponent")]
+        [OpcUaReference("HasComponent", ItemReferenceType = "HasComponent")]
         public partial IReadOnlyDictionary<string, ProcessValueType> Monitoring { get; set; }
 
         public Machine()
@@ -46,7 +44,7 @@ namespace Namotion.Interceptor.SampleMachine
     }
 
     [InterceptorSubject]
-    [OpcUaTypeDefinition("ProcessValueType", "http://opcfoundation.org/UA/Machinery/ProcessValues/")]
+    [OpcUaNode("ProcessValueType", null, TypeDefinition = "ProcessValueType", TypeDefinitionNamespace = "http://opcfoundation.org/UA/Machinery/ProcessValues/")]
     public partial class ProcessValueType
     {
         [GraphQLIgnore]
@@ -63,7 +61,7 @@ namespace Namotion.Interceptor.SampleMachine
     }
 
     [InterceptorSubject]
-    [OpcUaTypeDefinition("AnalogSignalVariableType", "http://opcfoundation.org/UA/PADIM/")]
+    [OpcUaNode("AnalogSignalVariable", null, TypeDefinition = "AnalogSignalVariableType", TypeDefinitionNamespace = "http://opcfoundation.org/UA/PADIM/")]
     public partial class AnalogSignalVariable
     {
         [OpcUaNode("ActualValue", "http://opcfoundation.org/UA/")]
@@ -84,11 +82,11 @@ namespace Namotion.Interceptor.SampleMachine
     }
 
     [InterceptorSubject]
-    [OpcUaTypeDefinition("FolderType")]
+    [OpcUaNode("MachineryBuildingBlocks", null, TypeDefinition = "FolderType")]
     public partial class MachineryBuildingBlocks
     {
         [OpcUaNode("Identification", "http://opcfoundation.org/UA/DI/")]
-        [OpcUaNodeReferenceType("HasAddIn")]
+        [OpcUaReference("HasAddIn")]
         public partial Identification Identification { get; private set; }
 
         public MachineryBuildingBlocks(Identification identification)
@@ -98,7 +96,7 @@ namespace Namotion.Interceptor.SampleMachine
     }
 
     [InterceptorSubject]
-    [OpcUaTypeDefinition("MachineIdentificationType", "http://opcfoundation.org/UA/Machinery/")]
+    [OpcUaNode("Identification", null, TypeDefinition = "MachineIdentificationType", TypeDefinitionNamespace = "http://opcfoundation.org/UA/Machinery/")]
     public partial class Identification
     {
         [OpcUaNode("Manufacturer", "http://opcfoundation.org/UA/DI/")]
