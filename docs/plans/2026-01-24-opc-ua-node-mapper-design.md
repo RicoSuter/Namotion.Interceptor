@@ -816,7 +816,7 @@ private void ValidatePropertyMappings(RegisteredSubject subject, HashSet<Registe
 
     foreach (var property in subject.Properties)
     {
-        var config = _configuration.NodeMapper.TryGetConfiguration(property);
+        var config = _configuration.ActualNodeMapper.TryGetConfiguration(property);
         if (config is not null && !matchedProperties.Contains(property))
         {
             unmatchedProperties.Add(property.Name);
@@ -867,11 +867,11 @@ public partial class TemperatureSensor
 
     // Property attribute = child node on Value
     [PropertyAttribute(nameof(Value), "EURange")]
-    [OpcUaNode(ReferenceType = "HasProperty")]
+    [OpcUaNodeReferenceType("HasProperty")]  // Optional - HasProperty is default for attributes
     public partial Range Value_EURange { get; set; }
 
     [PropertyAttribute(nameof(Value), "EngineeringUnits")]
-    [OpcUaNode(ReferenceType = "HasProperty")]
+    [OpcUaNodeReferenceType("HasProperty")]  // Optional - HasProperty is default for attributes
     public partial EUInformation Value_EngineeringUnits { get; set; }
 }
 ```
@@ -908,10 +908,10 @@ The `PathProviderOpcUaNodeMapper` should use `property.BrowseName` as the defaul
 
 ### Configuration Options
 
-**Option A: Via [OpcUaNode] attribute (explicit config):**
+**Option A: Via [OpcUaNodeReferenceType] attribute (explicit config):**
 ```csharp
 [PropertyAttribute(nameof(Value), "EURange")]
-[OpcUaNode(ReferenceType = "HasProperty")]  // Optional - HasProperty is the default for attributes
+[OpcUaNodeReferenceType("HasProperty")]  // Optional - HasProperty is the default for attributes
 public partial Range Value_EURange { get; set; }
 ```
 
