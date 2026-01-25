@@ -11,18 +11,22 @@ public static class PropertyReferenceTimestampExtensions
     /// <returns>The timestamp.</returns>
     public static DateTimeOffset? TryGetWriteTimestamp(this PropertyReference property)
     {
-        return property.GetOrAddPropertyData(WriteTimestampKey, () => new DateTimeOffsetWrapper()).Value;
+        var holder = property.GetOrAddPropertyData(WriteTimestampKey, static () => new TimestampHolder());
+        var ticks = Interlocked.Read(ref holder.Ticks);
+        return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
     }
 
     internal static void SetWriteTimestamp(this PropertyReference property, DateTimeOffset timestamp)
     {
-        property.AddOrUpdatePropertyData<DateTimeOffsetWrapper, DateTimeOffset>(
-            WriteTimestampKey, static (wrapper, ts) => wrapper.Value = ts, timestamp);
+        var holder = property.GetOrAddPropertyData(WriteTimestampKey, static () => new TimestampHolder());
+        Interlocked.Exchange(ref holder.Ticks, timestamp.UtcTicks);
     }
-    
-    // Wrapper used to avoid boxing of DateTimeOffset and ensure allocation free timestamp tracking
-    private class DateTimeOffsetWrapper
+
+    // Holder for UTC ticks to avoid boxing and ensure thread-safe, allocation-free timestamp tracking.
+    // Uses long (8 bytes) which is atomic on 64-bit platforms when accessed via Interlocked.
+    // Value of 0 represents null (ticks=0 is year 0001, never a valid timestamp).
+    private class TimestampHolder
     {
-        public DateTimeOffset? Value { get; set; }
+        public long Ticks;
     }
 }
