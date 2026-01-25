@@ -80,14 +80,15 @@ public record OpcUaNodeConfiguration
     public IReadOnlyList<OpcUaAdditionalReference>? AdditionalReferences { get; init; }
 
     /// <summary>
-    /// Merges this configuration with another, where this configuration takes priority.
-    /// Null fields in this are filled from other.
+    /// Returns a new configuration using <paramref name="other"/> as fallback for null fields.
+    /// This configuration takes priority; null fields are filled from the fallback.
     /// </summary>
-    public OpcUaNodeConfiguration MergeWith(OpcUaNodeConfiguration? other)
+    /// <param name="other">Fallback configuration to use when this has null fields.</param>
+    public OpcUaNodeConfiguration WithFallback(OpcUaNodeConfiguration? other)
     {
         if (other is null) return this;
 
-        return this with
+        return new OpcUaNodeConfiguration
         {
             BrowseName = BrowseName ?? other.BrowseName,
             BrowseNamespaceUri = BrowseNamespaceUri ?? other.BrowseNamespaceUri,
@@ -110,7 +111,7 @@ public record OpcUaNodeConfiguration
             DeadbandValue = DeadbandValue ?? other.DeadbandValue,
             ModellingRule = ModellingRule ?? other.ModellingRule,
             EventNotifier = EventNotifier ?? other.EventNotifier,
-            AdditionalReferences = AdditionalReferences ?? other.AdditionalReferences,
+            AdditionalReferences = AdditionalReferences ?? other.AdditionalReferences
         };
     }
 }

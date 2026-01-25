@@ -1,7 +1,10 @@
+using Moq;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
+using Opc.Ua;
+using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Mapping;
 
@@ -134,4 +137,70 @@ public class CompositeNodeMapperTests
         Assert.Equal(500, result.SamplingInterval);
         Assert.Equal(10u, result.QueueSize);
     }
+
+    #region TryGetPropertyAsync Tests
+
+    [Fact]
+    public async Task TryGetPropertyAsync_LastMapperWins()
+    {
+        // Arrange - Create two mappers that both match the same property
+        var pathProvider = new AttributeBasedPathProvider("opc");
+        var pathMapper = new PathProviderOpcUaNodeMapper(pathProvider);
+        var attributeMapper = new AttributeOpcUaNodeMapper();
+
+        // AttributeMapper is last, so it wins
+        var composite = new CompositeNodeMapper(pathMapper, attributeMapper);
+        var subject = new TestRoot(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+
+        var namespaceUris = new NamespaceTable();
+        var mockSession = new Mock<ISession>();
+        mockSession.Setup(s => s.NamespaceUris).Returns(namespaceUris);
+
+        // Name property has [Path("opc", "Name")] so PathMapper matches
+        // But also likely matches by AttributeMapper browse name
+        var nodeReference = new ReferenceDescription
+        {
+            NodeId = new ExpandedNodeId("Name", 0),
+            BrowseName = new QualifiedName("Name", 0)
+        };
+
+        // Act
+        var result = await composite.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+
+        // Assert - Should find the property (last mapper that matches wins)
+        Assert.NotNull(result);
+        Assert.Equal("Name", result.Name);
+    }
+
+    [Fact]
+    public async Task TryGetPropertyAsync_WithNoMatch_ReturnsNull()
+    {
+        // Arrange
+        var pathProvider = new AttributeBasedPathProvider("opc");
+        var pathMapper = new PathProviderOpcUaNodeMapper(pathProvider);
+        var attributeMapper = new AttributeOpcUaNodeMapper();
+
+        var composite = new CompositeNodeMapper(pathMapper, attributeMapper);
+        var subject = new TestRoot(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+
+        var namespaceUris = new NamespaceTable();
+        var mockSession = new Mock<ISession>();
+        mockSession.Setup(s => s.NamespaceUris).Returns(namespaceUris);
+
+        var nodeReference = new ReferenceDescription
+        {
+            NodeId = new ExpandedNodeId("NonExistent", 0),
+            BrowseName = new QualifiedName("NonExistent", 0)
+        };
+
+        // Act
+        var result = await composite.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    #endregion
 }

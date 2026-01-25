@@ -6,14 +6,14 @@ namespace Namotion.Interceptor.OpcUa.Tests.Mapping;
 public class OpcUaNodeConfigurationTests
 {
     [Fact]
-    public void MergeWith_WhenThisHasValue_KeepsThisValue()
+    public void WithFallback_WhenThisHasValue_KeepsThisValue()
     {
         // Arrange
         var config1 = new OpcUaNodeConfiguration { BrowseName = "First", SamplingInterval = 100 };
         var config2 = new OpcUaNodeConfiguration { BrowseName = "Second", SamplingInterval = 200 };
 
         // Act
-        var result = config1.MergeWith(config2);
+        var result = config1.WithFallback(config2);
 
         // Assert
         Assert.Equal("First", result.BrowseName);
@@ -21,14 +21,14 @@ public class OpcUaNodeConfigurationTests
     }
 
     [Fact]
-    public void MergeWith_WhenThisHasNull_TakesOtherValue()
+    public void WithFallback_WhenThisHasNull_TakesOtherValue()
     {
         // Arrange
         var config1 = new OpcUaNodeConfiguration { BrowseName = "First" };
         var config2 = new OpcUaNodeConfiguration { SamplingInterval = 200, QueueSize = 10 };
 
         // Act
-        var result = config1.MergeWith(config2);
+        var result = config1.WithFallback(config2);
 
         // Assert
         Assert.Equal("First", result.BrowseName);
@@ -37,20 +37,20 @@ public class OpcUaNodeConfigurationTests
     }
 
     [Fact]
-    public void MergeWith_WhenOtherIsNull_ReturnsThis()
+    public void WithFallback_WhenOtherIsNull_ReturnsThis()
     {
         // Arrange
         var config = new OpcUaNodeConfiguration { BrowseName = "Test" };
 
         // Act
-        var result = config.MergeWith(null);
+        var result = config.WithFallback(null);
 
         // Assert
         Assert.Same(config, result);
     }
 
     [Fact]
-    public void MergeWith_MergesAllFields()
+    public void WithFallback_MergesAllFields()
     {
         // Arrange
         var config1 = new OpcUaNodeConfiguration
@@ -69,7 +69,7 @@ public class OpcUaNodeConfigurationTests
         };
 
         // Act
-        var result = config1.MergeWith(config2);
+        var result = config1.WithFallback(config2);
 
         // Assert
         Assert.Equal("Name1", result.BrowseName); // config1 wins
@@ -82,7 +82,7 @@ public class OpcUaNodeConfigurationTests
     }
 
     [Fact]
-    public void MergeWith_MergesMonitoringFields()
+    public void WithFallback_MergesMonitoringFields()
     {
         // Arrange
         var config1 = new OpcUaNodeConfiguration
@@ -98,7 +98,7 @@ public class OpcUaNodeConfigurationTests
         };
 
         // Act
-        var result = config1.MergeWith(config2);
+        var result = config1.WithFallback(config2);
 
         // Assert
         Assert.Equal(100, result.SamplingInterval);
@@ -106,5 +106,51 @@ public class OpcUaNodeConfigurationTests
         Assert.False(result.DiscardOldest);
         Assert.Equal(DeadbandType.Absolute, result.DeadbandType);
         Assert.Equal(0.5, result.DeadbandValue);
+    }
+
+    [Fact]
+    public void WithFallback_MergesAdditionalReferences()
+    {
+        // Arrange
+        var refs1 = new List<OpcUaAdditionalReference>
+        {
+            new() { ReferenceType = "HasInterface", TargetNodeId = "i=17602" }
+        };
+        var refs2 = new List<OpcUaAdditionalReference>
+        {
+            new() { ReferenceType = "GeneratesEvent", TargetNodeId = "ns=2;s=Event" }
+        };
+
+        var config1 = new OpcUaNodeConfiguration { AdditionalReferences = refs1 };
+        var config2 = new OpcUaNodeConfiguration { AdditionalReferences = refs2 };
+
+        // Act
+        var result = config1.WithFallback(config2);
+
+        // Assert - config1's AdditionalReferences wins (not merged together)
+        Assert.NotNull(result.AdditionalReferences);
+        Assert.Single(result.AdditionalReferences);
+        Assert.Equal("HasInterface", result.AdditionalReferences[0].ReferenceType);
+    }
+
+    [Fact]
+    public void WithFallback_WhenThisHasNoAdditionalReferences_TakesOther()
+    {
+        // Arrange
+        var refs = new List<OpcUaAdditionalReference>
+        {
+            new() { ReferenceType = "HasInterface", TargetNodeId = "i=17602" }
+        };
+
+        var config1 = new OpcUaNodeConfiguration { BrowseName = "Test" };
+        var config2 = new OpcUaNodeConfiguration { AdditionalReferences = refs };
+
+        // Act
+        var result = config1.WithFallback(config2);
+
+        // Assert
+        Assert.NotNull(result.AdditionalReferences);
+        Assert.Single(result.AdditionalReferences);
+        Assert.Equal("HasInterface", result.AdditionalReferences[0].ReferenceType);
     }
 }

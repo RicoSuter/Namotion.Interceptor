@@ -39,6 +39,19 @@ public interface IPropertyBuilder<T>
     IPropertyBuilder<T> ModellingRule(ModellingRule value);
     IPropertyBuilder<T> EventNotifier(byte value);
 
+    /// <summary>
+    /// Adds an additional non-hierarchical reference to the node.
+    /// </summary>
+    /// <param name="referenceType">Reference type name (e.g., "HasInterface", "GeneratesEvent").</param>
+    /// <param name="targetNodeId">Target node identifier.</param>
+    /// <param name="targetNamespaceUri">Target namespace URI. If null, uses the default namespace.</param>
+    /// <param name="isForward">Whether this is a forward reference. Default is true.</param>
+    IPropertyBuilder<T> AdditionalReference(
+        string referenceType,
+        string targetNodeId,
+        string? targetNamespaceUri = null,
+        bool isForward = true);
+
     // Nested property mapping
     IPropertyBuilder<T> Map<TProperty>(
         Expression<Func<T, TProperty>> propertySelector,

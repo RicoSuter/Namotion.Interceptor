@@ -1,7 +1,10 @@
+using Moq;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
+using Opc.Ua;
+using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Mapping;
 
@@ -135,4 +138,61 @@ public class PathProviderOpcUaNodeMapperTests
         Assert.Null(config.SamplingInterval);
         Assert.Null(config.QueueSize);
     }
+
+    #region TryGetPropertyAsync Tests
+
+    [Fact]
+    public async Task TryGetPropertyAsync_WithMatchingPathSegment_ReturnsProperty()
+    {
+        // Arrange - TestRoot.Name has [Path("opc", "Name")]
+        var pathProvider = new AttributeBasedPathProvider("opc");
+        var mapper = new PathProviderOpcUaNodeMapper(pathProvider);
+        var subject = new TestRoot(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+
+        var namespaceUris = new NamespaceTable();
+        var mockSession = new Mock<ISession>();
+        mockSession.Setup(s => s.NamespaceUris).Returns(namespaceUris);
+
+        var nodeReference = new ReferenceDescription
+        {
+            NodeId = new ExpandedNodeId("Name", 0),
+            BrowseName = new QualifiedName("Name", 0)
+        };
+
+        // Act
+        var result = await mapper.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal("Name", result.Name);
+    }
+
+    [Fact]
+    public async Task TryGetPropertyAsync_WithExcludedProperty_ReturnsNull()
+    {
+        // Arrange - PlainProp has no [Path] attribute, so is excluded
+        var pathProvider = new AttributeBasedPathProvider("opc");
+        var mapper = new PathProviderOpcUaNodeMapper(pathProvider);
+        var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+
+        var namespaceUris = new NamespaceTable();
+        var mockSession = new Mock<ISession>();
+        mockSession.Setup(s => s.NamespaceUris).Returns(namespaceUris);
+
+        var nodeReference = new ReferenceDescription
+        {
+            NodeId = new ExpandedNodeId("PlainProp", 0),
+            BrowseName = new QualifiedName("PlainProp", 0)
+        };
+
+        // Act
+        var result = await mapper.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    #endregion
 }

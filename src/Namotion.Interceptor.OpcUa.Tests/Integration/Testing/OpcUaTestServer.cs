@@ -4,7 +4,6 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
 using Opc.Ua;
@@ -117,6 +116,24 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
 
     public async Task StopAsync()
     {
+        await StopInternalAsync();
+
+        // Wait for TCP sockets to fully close before port can be reused
+        await Task.Delay(500);
+    }
+
+    public async Task RestartAsync()
+    {
+        Interlocked.Exchange(ref _disposed, 0);
+        _logger.Log("Restarting server...");
+     
+        // No delay needed for restart - same port will be reused immediately
+        await StopInternalAsync();
+        await StartInternalAsync();
+    }
+
+    private async Task StopInternalAsync()
+    {
         var host = Interlocked.Exchange(ref _host, null);
         if (host != null)
         {
@@ -130,21 +147,9 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
                 host.Dispose();
                 Diagnostics = null;
             }
-
-            // Wait for TCP sockets to fully close before port can be reused
-            await Task.Delay(500);
-
             sw.Stop();
             _logger.Log($"Server stopped in {sw.ElapsedMilliseconds}ms");
         }
-    }
-
-    public async Task RestartAsync()
-    {
-        Interlocked.Exchange(ref _disposed, 0);
-        _logger.Log("Restarting server...");
-        await StopAsync();
-        await StartInternalAsync();
     }
 
     public async ValueTask DisposeAsync()
@@ -156,17 +161,12 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
 
         try
         {
-            var host = Interlocked.Exchange(ref _host, null);
-            if (host != null)
-            {
-                await host.StopAsync(TimeSpan.FromMinutes(5));
-                host.Dispose();
+            await StopInternalAsync();
 
-                // Wait for TCP sockets to fully close before port can be reused
-                await Task.Delay(500);
+            // Wait for TCP sockets to fully close before port can be reused
+            await Task.Delay(500);
 
-                _logger.Log("Server disposed");
-            }
+            _logger.Log("Server disposed");
         }
         catch (Exception ex)
         {
