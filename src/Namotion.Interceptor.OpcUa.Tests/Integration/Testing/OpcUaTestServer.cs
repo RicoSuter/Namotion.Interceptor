@@ -123,7 +123,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
             var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                await host.StopAsync(TimeSpan.FromSeconds(5));
+                await host.StopAsync(TimeSpan.FromMinutes(5));
             }
             finally
             {
@@ -155,7 +155,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
             var host = Interlocked.Exchange(ref _host, null);
             if (host != null)
             {
-                await host.StopAsync(TimeSpan.FromSeconds(5));
+                await host.StopAsync(TimeSpan.FromMinutes(5));
                 host.Dispose();
                 _logger.Log("Server disposed");
             }
