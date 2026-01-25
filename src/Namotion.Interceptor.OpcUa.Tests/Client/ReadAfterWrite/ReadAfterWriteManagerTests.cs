@@ -29,7 +29,6 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         _configuration = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            PathProvider = new AttributeBasedPathProvider("opc"),
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(Namotion.Interceptor.Connectors.DefaultSubjectFactory.Instance),

@@ -28,7 +28,7 @@ public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
     }
 
     /// <inheritdoc />
-    public OpcUaNodeConfiguration? TryGetConfiguration(RegisteredSubjectProperty property)
+    public OpcUaNodeConfiguration? TryGetNodeConfiguration(RegisteredSubjectProperty property)
     {
         var path = GetPropertyPath(property);
         return _mappings.TryGetValue(path, out var config) ? config : null;

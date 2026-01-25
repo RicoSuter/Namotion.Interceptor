@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.OpcUa.Tests.Mapping;
 public class CompositeNodeMapperTests
 {
     [Fact]
-    public void TryGetConfiguration_WithNoMappers_ReturnsNull()
+    public void TryGetNodeConfiguration_WithNoMappers_ReturnsNull()
     {
         // Arrange
         var composite = new CompositeNodeMapper();
@@ -17,14 +17,14 @@ public class CompositeNodeMapperTests
         var property = registeredSubject.TryGetProperty("SimpleProp")!;
 
         // Act
-        var result = composite.TryGetConfiguration(property);
+        var result = composite.TryGetNodeConfiguration(property);
 
         // Assert
         Assert.Null(result);
     }
 
     [Fact]
-    public void TryGetConfiguration_WithSingleMapper_ReturnsMapperConfig()
+    public void TryGetNodeConfiguration_WithSingleMapper_ReturnsMapperConfig()
     {
         // Arrange
         var attributeMapper = new AttributeOpcUaNodeMapper();
@@ -34,7 +34,7 @@ public class CompositeNodeMapperTests
         var property = registeredSubject.TryGetProperty("SimpleProp")!;
 
         // Act
-        var result = composite.TryGetConfiguration(property);
+        var result = composite.TryGetNodeConfiguration(property);
 
         // Assert
         Assert.NotNull(result);
@@ -42,7 +42,7 @@ public class CompositeNodeMapperTests
     }
 
     [Fact]
-    public void TryGetConfiguration_LastMapperWins()
+    public void TryGetNodeConfiguration_LastMapperWins()
     {
         // Arrange - PathProvider gives BrowseName from Path attribute, Attribute mapper gives from OpcUaNode
         // Using MonitoredProp which has [OpcUaNode("MonitoredProp", null, SamplingInterval = 500, QueueSize = 10)]
@@ -57,7 +57,7 @@ public class CompositeNodeMapperTests
         var property = registeredSubject.TryGetProperty("MonitoredProp")!;
 
         // Act
-        var result = composite.TryGetConfiguration(property);
+        var result = composite.TryGetNodeConfiguration(property);
 
         // Assert
         Assert.NotNull(result);
@@ -66,7 +66,7 @@ public class CompositeNodeMapperTests
     }
 
     [Fact]
-    public void TryGetConfiguration_MergesFieldsFromMultipleMappers()
+    public void TryGetNodeConfiguration_MergesFieldsFromMultipleMappers()
     {
         // Arrange - Using property with both path and OpcUa attributes
         // SimpleProp: [OpcUaNode("SimpleProp", "http://test/")]
@@ -80,7 +80,7 @@ public class CompositeNodeMapperTests
         var property = registeredSubject.TryGetProperty("SimpleProp")!;
 
         // Act
-        var result = composite.TryGetConfiguration(property);
+        var result = composite.TryGetNodeConfiguration(property);
 
         // Assert
         Assert.NotNull(result);
@@ -89,7 +89,7 @@ public class CompositeNodeMapperTests
     }
 
     [Fact]
-    public void TryGetConfiguration_SkipsNullResults()
+    public void TryGetNodeConfiguration_SkipsNullResults()
     {
         // Arrange - PlainProp has no OpcUaNode attribute, so AttributeMapper returns null
         // but PathProvider should still work if we had a Path attribute
@@ -104,14 +104,14 @@ public class CompositeNodeMapperTests
         var property = registeredSubject.TryGetProperty("PlainProp")!;
 
         // Act
-        var result = composite.TryGetConfiguration(property);
+        var result = composite.TryGetNodeConfiguration(property);
 
         // Assert - Both mappers return null for this property
         Assert.Null(result);
     }
 
     [Fact]
-    public void TryGetConfiguration_AttributeMapperWithPathMapper_CombinesConfiguration()
+    public void TryGetNodeConfiguration_AttributeMapperWithPathMapper_CombinesConfiguration()
     {
         // Arrange
         var pathProvider = new AttributeBasedPathProvider("opc");
@@ -126,7 +126,7 @@ public class CompositeNodeMapperTests
         var property = registeredSubject.TryGetProperty("MonitoredProp")!;
 
         // Act
-        var result = composite.TryGetConfiguration(property);
+        var result = composite.TryGetNodeConfiguration(property);
 
         // Assert
         Assert.NotNull(result);

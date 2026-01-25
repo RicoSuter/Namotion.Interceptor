@@ -23,7 +23,7 @@ public class PathProviderOpcUaNodeMapper : IOpcUaNodeMapper
     }
 
     /// <inheritdoc />
-    public OpcUaNodeConfiguration? TryGetConfiguration(RegisteredSubjectProperty property)
+    public OpcUaNodeConfiguration? TryGetNodeConfiguration(RegisteredSubjectProperty property)
     {
         if (!_pathProvider.IsPropertyIncluded(property))
         {

@@ -121,9 +121,8 @@ public partial class TestNodeMapperModel
     [OpcUaReference("HasComponent")]
     public partial TestRefChild RefProp { get; set; }
 
-    /// <summary>Property with OpcUaValue attribute.</summary>
+    /// <summary>Simple double property for value testing (OpcUaValue moved to TestVariableChild).</summary>
     [OpcUaNode("ValueProp", null)]
-    [OpcUaValue]
     public partial double ValueProp { get; set; }
 
     /// <summary>Property with modelling rule.</summary>
@@ -137,6 +136,10 @@ public partial class TestNodeMapperModel
     /// <summary>Property with no OPC UA attributes (for negative testing).</summary>
     public partial string PlainProp { get; set; }
 
+    /// <summary>Property with EventNotifier explicitly set to 0 (no events).</summary>
+    [OpcUaNode("EventNotifierZeroProp", null, EventNotifier = 0)]
+    public partial int EventNotifierZeroProp { get; set; }
+
     public TestNodeMapperModel()
     {
         SimpleProp = "";
@@ -149,6 +152,7 @@ public partial class TestNodeMapperModel
         MandatoryProp = "";
         VariableClassProp = new TestVariableChild();
         PlainProp = "";
+        EventNotifierZeroProp = 0;
     }
 }
 
@@ -175,5 +179,80 @@ public partial class TestVariableChild
     public TestVariableChild()
     {
         Value = 0;
+    }
+}
+
+/// <summary>Invalid model: has [OpcUaValue] without NodeClass = Variable on containing class.</summary>
+[InterceptorSubject]
+public partial class TestInvalidOpcUaValueModel
+{
+    [OpcUaValue] // Invalid - class doesn't have NodeClass = Variable
+    public partial double InvalidValue { get; set; }
+
+    public TestInvalidOpcUaValueModel()
+    {
+        InvalidValue = 0;
+    }
+}
+
+/// <summary>Child item for collection/dictionary tests with class-level OpcUaNode attribute.</summary>
+[InterceptorSubject]
+[OpcUaNode("TestCollectionChild", null, TypeDefinition = "CollectionItemType")]
+public partial class TestCollectionChild
+{
+    public partial double Value { get; set; }
+
+    public TestCollectionChild()
+    {
+        Value = 0;
+    }
+}
+
+/// <summary>Parent model with collection and dictionary properties for class-level config tests.</summary>
+[InterceptorSubject]
+public partial class TestCollectionParent
+{
+    public partial List<TestCollectionChild>? Items { get; set; }
+    public partial Dictionary<string, TestCollectionChild>? ItemsByKey { get; set; }
+
+    public TestCollectionParent()
+    {
+        Items = [];
+        ItemsByKey = [];
+    }
+}
+
+/// <summary>Analog signal model demonstrating VariableType pattern with [OpcUaValue].</summary>
+[InterceptorSubject]
+[OpcUaNode("TestAnalogSignal", null, TypeDefinition = "AnalogSignalVariableType", NodeClass = OpcUaNodeClass.Variable)]
+public partial class TestAnalogSignal
+{
+    [OpcUaNode("ActualValue", null)]
+    [OpcUaValue]
+    public partial double ActualValue { get; set; }
+
+    [OpcUaNode("MinValue", null)]
+    public partial double? MinValue { get; set; }
+
+    [OpcUaNode("MaxValue", null)]
+    public partial double? MaxValue { get; set; }
+
+    public TestAnalogSignal()
+    {
+        ActualValue = 0;
+    }
+}
+
+/// <summary>Sensor model with analog signal for e2e OpcUaValue testing.</summary>
+[InterceptorSubject]
+public partial class TestSensorWithAnalog
+{
+    [OpcUaNode("Temperature", null)]
+    [OpcUaReference("HasComponent")]
+    public partial TestAnalogSignal? Temperature { get; set; }
+
+    public TestSensorWithAnalog()
+    {
+        Temperature = new TestAnalogSignal();
     }
 }

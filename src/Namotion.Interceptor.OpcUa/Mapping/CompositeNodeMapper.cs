@@ -22,13 +22,13 @@ public class CompositeNodeMapper : IOpcUaNodeMapper
     }
 
     /// <inheritdoc />
-    public OpcUaNodeConfiguration? TryGetConfiguration(RegisteredSubjectProperty property)
+    public OpcUaNodeConfiguration? TryGetNodeConfiguration(RegisteredSubjectProperty property)
     {
         OpcUaNodeConfiguration? result = null;
 
         foreach (var mapper in _mappers)
         {
-            var config = mapper.TryGetConfiguration(property);
+            var config = mapper.TryGetNodeConfiguration(property);
             if (config is not null)
             {
                 // Later mappers override earlier ones ("last wins")

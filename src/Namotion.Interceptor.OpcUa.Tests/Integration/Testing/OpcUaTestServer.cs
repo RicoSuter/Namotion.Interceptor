@@ -90,7 +90,6 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
                 {
                     RootName = "Root",
                     BaseAddress = _baseAddress,
-                    PathProvider = new AttributeBasedPathProvider("opc"),
                     ValueConverter = new OpcUaValueConverter(),
                     TelemetryContext = telemetryContext,
                     CleanCertificateStore = false,

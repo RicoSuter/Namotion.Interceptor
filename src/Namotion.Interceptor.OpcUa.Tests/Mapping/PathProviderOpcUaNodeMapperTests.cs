@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.OpcUa.Tests.Mapping;
 public class PathProviderOpcUaNodeMapperTests
 {
     [Fact]
-    public void TryGetConfiguration_WithIncludedProperty_ReturnsBrowseName()
+    public void TryGetNodeConfiguration_WithIncludedProperty_ReturnsBrowseName()
     {
         // Arrange - TestRoot.Name has [Path("opc", "Name")]
         var pathProvider = new AttributeBasedPathProvider("opc");
@@ -18,7 +18,7 @@ public class PathProviderOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        var config = mapper.TryGetConfiguration(property);
+        var config = mapper.TryGetNodeConfiguration(property);
 
         // Assert
         Assert.NotNull(config);
@@ -26,7 +26,7 @@ public class PathProviderOpcUaNodeMapperTests
     }
 
     [Fact]
-    public void TryGetConfiguration_WithExcludedProperty_ReturnsNull()
+    public void TryGetNodeConfiguration_WithExcludedProperty_ReturnsNull()
     {
         // Arrange - TestNodeMapperModel.PlainProp has no [Path] attribute
         var pathProvider = new AttributeBasedPathProvider("opc");
@@ -36,14 +36,14 @@ public class PathProviderOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("PlainProp")!;
 
         // Act
-        var config = mapper.TryGetConfiguration(property);
+        var config = mapper.TryGetNodeConfiguration(property);
 
         // Assert
         Assert.Null(config);
     }
 
     [Fact]
-    public void TryGetConfiguration_WithDifferentConnectorName_ReturnsNull()
+    public void TryGetNodeConfiguration_WithDifferentConnectorName_ReturnsNull()
     {
         // Arrange - TestRoot.Name has [Path("opc", "Name")] but we use "mqtt" provider
         var pathProvider = new AttributeBasedPathProvider("mqtt");
@@ -53,14 +53,14 @@ public class PathProviderOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        var config = mapper.TryGetConfiguration(property);
+        var config = mapper.TryGetNodeConfiguration(property);
 
         // Assert
         Assert.Null(config);
     }
 
     [Fact]
-    public void TryGetConfiguration_UsesPathSegmentAsBrowseName()
+    public void TryGetNodeConfiguration_UsesPathSegmentAsBrowseName()
     {
         // Arrange - TestRoot.Connected has [Path("opc", "Connected")]
         var pathProvider = new AttributeBasedPathProvider("opc");
@@ -70,7 +70,7 @@ public class PathProviderOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("Connected")!;
 
         // Act
-        var config = mapper.TryGetConfiguration(property);
+        var config = mapper.TryGetNodeConfiguration(property);
 
         // Assert
         Assert.NotNull(config);
@@ -78,7 +78,7 @@ public class PathProviderOpcUaNodeMapperTests
     }
 
     [Fact]
-    public void TryGetConfiguration_WithNestedProperty_ReturnsBrowseName()
+    public void TryGetNodeConfiguration_WithNestedProperty_ReturnsBrowseName()
     {
         // Arrange - TestRoot.Person has [Path("opc", "Person")]
         var pathProvider = new AttributeBasedPathProvider("opc");
@@ -88,7 +88,7 @@ public class PathProviderOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("Person")!;
 
         // Act
-        var config = mapper.TryGetConfiguration(property);
+        var config = mapper.TryGetNodeConfiguration(property);
 
         // Assert
         Assert.NotNull(config);
@@ -96,7 +96,7 @@ public class PathProviderOpcUaNodeMapperTests
     }
 
     [Fact]
-    public void TryGetConfiguration_WithArrayProperty_ReturnsBrowseName()
+    public void TryGetNodeConfiguration_WithArrayProperty_ReturnsBrowseName()
     {
         // Arrange - TestRoot.ScalarNumbers has [Path("opc", "ScalarNumbers")]
         var pathProvider = new AttributeBasedPathProvider("opc");
@@ -106,7 +106,7 @@ public class PathProviderOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("ScalarNumbers")!;
 
         // Act
-        var config = mapper.TryGetConfiguration(property);
+        var config = mapper.TryGetNodeConfiguration(property);
 
         // Assert
         Assert.NotNull(config);
@@ -114,7 +114,7 @@ public class PathProviderOpcUaNodeMapperTests
     }
 
     [Fact]
-    public void TryGetConfiguration_DoesNotSetOtherFields()
+    public void TryGetNodeConfiguration_DoesNotSetOtherFields()
     {
         // Arrange - PathProvider only sets BrowseName, nothing else
         var pathProvider = new AttributeBasedPathProvider("opc");
@@ -124,7 +124,7 @@ public class PathProviderOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        var config = mapper.TryGetConfiguration(property);
+        var config = mapper.TryGetNodeConfiguration(property);
 
         // Assert
         Assert.NotNull(config);

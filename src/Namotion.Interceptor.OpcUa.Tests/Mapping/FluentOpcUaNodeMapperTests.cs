@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.OpcUa.Tests.Mapping;
 public class FluentOpcUaNodeMapperTests
 {
     [Fact]
-    public void TryGetConfiguration_WithMappedProperty_ReturnsConfiguration()
+    public void TryGetNodeConfiguration_WithMappedProperty_ReturnsConfiguration()
     {
         // Arrange
         var mapper = new FluentOpcUaNodeMapper<TestRoot>()
@@ -19,7 +19,7 @@ public class FluentOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        var config = mapper.TryGetConfiguration(property);
+        var config = mapper.TryGetNodeConfiguration(property);
 
         // Assert
         Assert.NotNull(config);
@@ -27,7 +27,7 @@ public class FluentOpcUaNodeMapperTests
     }
 
     [Fact]
-    public void TryGetConfiguration_WithUnmappedProperty_ReturnsNull()
+    public void TryGetNodeConfiguration_WithUnmappedProperty_ReturnsNull()
     {
         // Arrange
         var mapper = new FluentOpcUaNodeMapper<TestRoot>()
@@ -38,14 +38,14 @@ public class FluentOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("Number")!; // Not mapped
 
         // Act
-        var config = mapper.TryGetConfiguration(property);
+        var config = mapper.TryGetNodeConfiguration(property);
 
         // Assert
         Assert.Null(config);
     }
 
     [Fact]
-    public void TryGetConfiguration_WithMultipleProperties_ReturnsCorrectConfiguration()
+    public void TryGetNodeConfiguration_WithMultipleProperties_ReturnsCorrectConfiguration()
     {
         // Arrange
         var mapper = new FluentOpcUaNodeMapper<TestRoot>()
@@ -58,8 +58,8 @@ public class FluentOpcUaNodeMapperTests
         var numberProperty = registeredSubject.TryGetProperty("Number")!;
 
         // Act
-        var nameConfig = mapper.TryGetConfiguration(nameProperty);
-        var numberConfig = mapper.TryGetConfiguration(numberProperty);
+        var nameConfig = mapper.TryGetNodeConfiguration(nameProperty);
+        var numberConfig = mapper.TryGetNodeConfiguration(numberProperty);
 
         // Assert
         Assert.NotNull(nameConfig);
@@ -72,7 +72,7 @@ public class FluentOpcUaNodeMapperTests
     }
 
     [Fact]
-    public void TryGetConfiguration_WithAllFluentMethods_ReturnsFullConfiguration()
+    public void TryGetNodeConfiguration_WithAllFluentMethods_ReturnsFullConfiguration()
     {
         // Arrange
         var mapper = new FluentOpcUaNodeMapper<TestRoot>()
@@ -103,7 +103,7 @@ public class FluentOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        var config = mapper.TryGetConfiguration(property);
+        var config = mapper.TryGetNodeConfiguration(property);
 
         // Assert
         Assert.NotNull(config);
@@ -130,7 +130,7 @@ public class FluentOpcUaNodeMapperTests
     }
 
     [Fact]
-    public void TryGetConfiguration_WithChainedCalls_UpdatesConfiguration()
+    public void TryGetNodeConfiguration_WithChainedCalls_UpdatesConfiguration()
     {
         // Arrange - Multiple fluent calls should update the same config
         var mapper = new FluentOpcUaNodeMapper<TestRoot>()
@@ -145,7 +145,7 @@ public class FluentOpcUaNodeMapperTests
         var property = registeredSubject.TryGetProperty("Name")!;
 
         // Act
-        var config = mapper.TryGetConfiguration(property);
+        var config = mapper.TryGetNodeConfiguration(property);
 
         // Assert
         Assert.NotNull(config);
@@ -167,8 +167,8 @@ public class FluentOpcUaNodeMapperTests
         var registeredSubject = new RegisteredSubject(subject);
 
         // Assert - All properties should be mapped
-        Assert.NotNull(mapper.TryGetConfiguration(registeredSubject.TryGetProperty("Name")!));
-        Assert.NotNull(mapper.TryGetConfiguration(registeredSubject.TryGetProperty("Number")!));
-        Assert.NotNull(mapper.TryGetConfiguration(registeredSubject.TryGetProperty("Connected")!));
+        Assert.NotNull(mapper.TryGetNodeConfiguration(registeredSubject.TryGetProperty("Name")!));
+        Assert.NotNull(mapper.TryGetNodeConfiguration(registeredSubject.TryGetProperty("Number")!));
+        Assert.NotNull(mapper.TryGetNodeConfiguration(registeredSubject.TryGetProperty("Connected")!));
     }
 }

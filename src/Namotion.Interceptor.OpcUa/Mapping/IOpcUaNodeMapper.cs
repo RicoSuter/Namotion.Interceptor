@@ -16,7 +16,7 @@ public interface IOpcUaNodeMapper
     /// </summary>
     /// <param name="property">The registered property to get configuration for.</param>
     /// <returns>The configuration, or null if this mapper doesn't handle the property.</returns>
-    OpcUaNodeConfiguration? TryGetConfiguration(RegisteredSubjectProperty property);
+    OpcUaNodeConfiguration? TryGetNodeConfiguration(RegisteredSubjectProperty property);
 
     /// <summary>
     /// Client only: Finds property matching an OPC UA node (reverse lookup for discovery).
