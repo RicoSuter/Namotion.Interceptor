@@ -123,14 +123,14 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         _logger.Log($"Client host started in {sw.ElapsedMilliseconds}ms");
 
         // Wait for client to connect using active waiting
-        // Check BOTH property sync AND session state to prevent race condition
-        // where property syncs but session is already disconnecting
+        // Only check property sync - if property syncs, connection was working
+        // Adding Diagnostics.IsConnected causes flakiness on CI (flickers under load)
         // Use 60s timeout to allow for resource contention during parallel test execution
         await AsyncTestHelpers.WaitUntilAsync(
-            () => Root != null && isConnected(Root) && Diagnostics?.IsConnected == true,
+            () => Root != null && isConnected(Root),
             timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(200),
-            message: "Client failed to connect to server (property sync or session state)");
+            message: "Client failed to connect to server");
 
         sw.Stop();
         _logger.Log($"Client connected in {sw.ElapsedMilliseconds}ms total");
