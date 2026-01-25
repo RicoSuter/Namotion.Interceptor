@@ -40,9 +40,14 @@ Defines node metadata. Can be applied to classes (type-level defaults) or proper
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Property)]
 public class OpcUaNodeAttribute : Attribute
 {
-    // Node identification
-    public string? BrowseName { get; init; }
-    public string? BrowseNamespaceUri { get; init; }
+    // Constructor - BrowseName is required
+    public OpcUaNodeAttribute(string browseName, string? browseNamespaceUri);
+
+    // Node identification (from constructor)
+    public string BrowseName { get; }
+    public string? BrowseNamespaceUri { get; }
+
+    // Node identification (optional overrides)
     public string? NodeIdentifier { get; init; }      // Property-level only
     public string? NodeNamespaceUri { get; init; }
 
@@ -62,12 +67,12 @@ public class OpcUaNodeAttribute : Attribute
     public string? DataType { get; init; }
 
     // Client monitoring
-    public int SamplingInterval { get; init; }
-    public uint QueueSize { get; init; }
+    public int SamplingInterval { get; init; }        // int.MinValue = not set
+    public uint QueueSize { get; init; }              // uint.MaxValue = not set
     public DiscardOldestMode DiscardOldest { get; init; }
     public DataChangeTrigger DataChangeTrigger { get; init; }
     public DeadbandType DeadbandType { get; init; }
-    public double DeadbandValue { get; init; }
+    public double DeadbandValue { get; init; }        // NaN = not set
 
     // Server
     public ModellingRule ModellingRule { get; init; }

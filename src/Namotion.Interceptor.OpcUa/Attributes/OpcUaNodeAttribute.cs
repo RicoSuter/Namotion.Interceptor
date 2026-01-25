@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.OpcUa.Mapping;
+using Namotion.Interceptor.Registry.Attributes;
 using Opc.Ua;
 
 namespace Namotion.Interceptor.OpcUa.Attributes;
@@ -18,6 +19,11 @@ public enum DiscardOldestMode
     True = 1
 }
 
+/// <summary>
+/// Configures OPC UA node mapping for a property or class.
+/// When applied to a class, provides default configuration for all properties of that type.
+/// </summary>
+[AttributeUsage(AttributeTargets.Property | AttributeTargets.Class, AllowMultiple = false)]
 public class OpcUaNodeAttribute : PathAttribute
 {
     public OpcUaNodeAttribute(string browseName, string? browseNamespaceUri, string? connectorName = null)
@@ -46,6 +52,40 @@ public class OpcUaNodeAttribute : PathAttribute
     /// Gets the node namespace URI (uses default namespace from client configuration when null).
     /// </summary>
     public string? NodeNamespaceUri { get; init; }
+
+    /// <summary>
+    /// Gets or sets the localized display name (if different from BrowseName).
+    /// </summary>
+    public string? DisplayName { get; init; }
+
+    /// <summary>
+    /// Gets or sets the human-readable description for the node.
+    /// </summary>
+    public string? Description { get; init; }
+
+    /// <summary>
+    /// Gets or sets the type definition (e.g., "FolderType", "AnalogItemType").
+    /// Consolidates OpcUaTypeDefinitionAttribute functionality.
+    /// </summary>
+    public string? TypeDefinition { get; init; }
+
+    /// <summary>
+    /// Gets or sets the namespace URI for the type definition.
+    /// </summary>
+    public string? TypeDefinitionNamespace { get; init; }
+
+    /// <summary>
+    /// Gets or sets the NodeClass override.
+    /// Default is Auto (auto-detect from C# type).
+    /// Use Variable for classes representing VariableTypes (e.g., AnalogSignalVariableType).
+    /// </summary>
+    public OpcUaNodeClass NodeClass { get; init; } = OpcUaNodeClass.Auto;
+
+    /// <summary>
+    /// Gets or sets the DataType override (e.g., "Double", "NodeId").
+    /// Default is null (infer from C# type).
+    /// </summary>
+    public string? DataType { get; init; }
 
     /// <summary>
     /// Gets or sets the sampling interval in milliseconds to be used in monitored item.
@@ -91,4 +131,16 @@ public class OpcUaNodeAttribute : PathAttribute
     /// Note: Uses NaN as sentinel because C# attributes don't support nullable value types.
     /// </summary>
     public double DeadbandValue { get; init; } = double.NaN;
+
+    /// <summary>
+    /// Server only: Gets or sets the modelling rule (Mandatory, Optional, etc.).
+    /// Default is Unset (not specified).
+    /// </summary>
+    public ModellingRule ModellingRule { get; init; } = ModellingRule.Unset;
+
+    /// <summary>
+    /// Server only: Gets or sets the event notifier flags for objects that emit events.
+    /// Default is 0 (no events).
+    /// </summary>
+    public byte EventNotifier { get; init; } = 0;
 }

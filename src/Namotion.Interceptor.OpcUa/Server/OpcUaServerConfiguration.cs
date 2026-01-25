@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Registry.Paths;
+using Namotion.Interceptor.OpcUa.Mapping;
+using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 using Opc.Ua.Configuration;
 using Opc.Ua.Export;
@@ -36,6 +37,22 @@ public class OpcUaServerConfiguration
     /// Handles type conversions such as decimal to double for OPC UA compatibility.
     /// </summary>
     public required OpcUaValueConverter ValueConverter { get; set; }
+
+    /// <summary>
+    /// Maps C# properties to OPC UA nodes.
+    /// Defaults to composite of PathProviderOpcUaNodeMapper and AttributeOpcUaNodeMapper.
+    /// </summary>
+    public IOpcUaNodeMapper NodeMapper { get; init; } = null!;
+
+    /// <summary>
+    /// Gets the actual node mapper, creating a default if not configured.
+    /// </summary>
+    internal IOpcUaNodeMapper GetActualNodeMapper()
+    {
+        return NodeMapper ?? new CompositeNodeMapper(
+            new PathProviderOpcUaNodeMapper(PathProvider),
+            new AttributeOpcUaNodeMapper());
+    }
 
     /// <summary>
     /// Gets or sets a value indicating whether to clean up old certificates from the

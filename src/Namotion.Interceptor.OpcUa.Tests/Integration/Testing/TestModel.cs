@@ -1,5 +1,6 @@
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.OpcUa.Attributes;
+using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry.Attributes;
 using Opc.Ua;
 
@@ -87,4 +88,92 @@ public partial class TestSensorData
     /// <summary>Counter with no filter settings (uses defaults).</summary>
     [Path("opc", "Counter")]
     public partial int Counter { get; set; }
+}
+
+/// <summary>
+/// Test model for node mapper testing with various attribute configurations.
+/// </summary>
+[InterceptorSubject]
+public partial class TestNodeMapperModel
+{
+    /// <summary>Simple property with just OpcUaNode attribute.</summary>
+    [OpcUaNode("SimpleProp", "http://test/")]
+    public partial string SimpleProp { get; set; }
+
+    /// <summary>Property with sampling/queue settings.</summary>
+    [OpcUaNode("MonitoredProp", null, SamplingInterval = 500, QueueSize = 10)]
+    public partial double MonitoredProp { get; set; }
+
+    /// <summary>Property with data change filter settings.</summary>
+    [OpcUaNode("FilteredProp", null, DataChangeTrigger = DataChangeTrigger.StatusValueTimestamp, DeadbandType = DeadbandType.Absolute, DeadbandValue = 0.5)]
+    public partial double FilteredProp { get; set; }
+
+    /// <summary>Property with discard oldest false.</summary>
+    [OpcUaNode("QueueProp", null, DiscardOldest = DiscardOldestMode.False)]
+    public partial int QueueProp { get; set; }
+
+    /// <summary>Property with type definition.</summary>
+    [OpcUaNode("TypedProp", null, TypeDefinition = "AnalogItemType", TypeDefinitionNamespace = "http://opcfoundation.org/UA/")]
+    public partial double TypedProp { get; set; }
+
+    /// <summary>Property with OpcUaReference attribute.</summary>
+    [OpcUaNode("RefProp", null)]
+    [OpcUaReference("HasComponent")]
+    public partial TestRefChild RefProp { get; set; }
+
+    /// <summary>Property with OpcUaValue attribute.</summary>
+    [OpcUaNode("ValueProp", null)]
+    [OpcUaValue]
+    public partial double ValueProp { get; set; }
+
+    /// <summary>Property with modelling rule.</summary>
+    [OpcUaNode("MandatoryProp", null, ModellingRule = ModellingRule.Mandatory)]
+    public partial string MandatoryProp { get; set; }
+
+    /// <summary>Property with NodeClass override.</summary>
+    [OpcUaNode("VariableClassProp", null, NodeClass = OpcUaNodeClass.Variable)]
+    public partial TestVariableChild VariableClassProp { get; set; }
+
+    /// <summary>Property with no OPC UA attributes (for negative testing).</summary>
+    public partial string PlainProp { get; set; }
+
+    public TestNodeMapperModel()
+    {
+        SimpleProp = "";
+        MonitoredProp = 0;
+        FilteredProp = 0;
+        QueueProp = 0;
+        TypedProp = 0;
+        RefProp = new TestRefChild();
+        ValueProp = 0;
+        MandatoryProp = "";
+        VariableClassProp = new TestVariableChild();
+        PlainProp = "";
+    }
+}
+
+[InterceptorSubject]
+public partial class TestRefChild
+{
+    [OpcUaNode("Value", null)]
+    public partial double Value { get; set; }
+
+    public TestRefChild()
+    {
+        Value = 0;
+    }
+}
+
+[InterceptorSubject]
+[OpcUaNode("TestVariableChild", null, NodeClass = OpcUaNodeClass.Variable)]
+public partial class TestVariableChild
+{
+    [OpcUaNode("Value", null)]
+    [OpcUaValue]
+    public partial double Value { get; set; }
+
+    public TestVariableChild()
+    {
+        Value = 0;
+    }
 }

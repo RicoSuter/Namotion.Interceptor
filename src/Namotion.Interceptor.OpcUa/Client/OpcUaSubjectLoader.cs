@@ -65,7 +65,7 @@ internal class OpcUaSubjectLoader
         for (var index = 0; index < nodeRefs.Count; index++)
         {
             var nodeRef = nodeRefs[index];
-            var property = FindSubjectProperty(registeredSubject, nodeRef, session);
+            var property = await FindSubjectPropertyAsync(registeredSubject, nodeRef, session, cancellationToken).ConfigureAwait(false);
             if (property is null)
             {
                 var dynamicPropertyName = nodeRef.BrowseName.Name;
@@ -205,28 +205,22 @@ internal class OpcUaSubjectLoader
         }
     }
 
-    private RegisteredSubjectProperty? FindSubjectProperty(RegisteredSubject registeredSubject, ReferenceDescription nodeRef, ISession session)
+    private async Task<RegisteredSubjectProperty?> FindSubjectPropertyAsync(
+        RegisteredSubject registeredSubject,
+        ReferenceDescription nodeRef,
+        ISession session,
+        CancellationToken cancellationToken)
     {
-        var nodeIdString = nodeRef.NodeId.Identifier.ToString();
-        var nodeNamespaceUri = nodeRef.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(nodeRef.NodeId.NamespaceIndex);
-        
-        var properties = registeredSubject.Properties;
-        foreach (var property in properties)
-        {
-            var opcUaNodeAttribute = property.TryGetOpcUaNodeAttribute();
-            if (opcUaNodeAttribute is not null && opcUaNodeAttribute.NodeIdentifier == nodeIdString)
-            {
-                var propertyNodeNamespaceUri = opcUaNodeAttribute.NodeNamespaceUri
-                    ?? _configuration.DefaultNamespaceUri
-                    ?? throw new InvalidOperationException("No default namespace URI configured.");
+        // Use NodeMapper for property lookup (supports attributes, path provider, and fluent config)
+        var property = await _configuration.ActualNodeMapper.TryGetPropertyAsync(
+            registeredSubject, nodeRef, session, cancellationToken).ConfigureAwait(false);
 
-                if (propertyNodeNamespaceUri == nodeNamespaceUri)
-                {
-                    return property;
-                }
-            }
+        if (property is not null)
+        {
+            return property;
         }
 
+        // Fallback to PathProvider for properties not explicitly mapped
         return _configuration.PathProvider.TryGetPropertyFromSegment(registeredSubject, nodeRef.BrowseName.Name);
     }
 
