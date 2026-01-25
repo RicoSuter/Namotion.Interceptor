@@ -144,7 +144,7 @@ internal class OpcUaSubjectLoader
                 }
                 else if (property.IsSubjectDictionary)
                 {
-                    // TODO: Implement dictionary support
+                    await LoadSubjectDictionaryAsync(property, childNodeId, monitoredItems, session, loadedSubjects, cancellationToken).ConfigureAwait(false);
                 }
                 else
                 {
@@ -166,7 +166,7 @@ internal class OpcUaSubjectLoader
         var existingSubject = property.Children.SingleOrDefault();
         if (existingSubject.Subject is not null)
         {
-            await LoadSubjectAsync(existingSubject.Subject, node, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
+            await LoadSubjectAsync(existingSubject.Subject, nodeReference, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -211,6 +211,38 @@ internal class OpcUaSubjectLoader
         foreach (var child in children)
         {
             await LoadSubjectAsync(child.Subject, child.Node, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task LoadSubjectDictionaryAsync(
+        RegisteredSubjectProperty property,
+        NodeId childNodeId,
+        List<MonitoredItem> monitoredItems,
+        ISession session,
+        HashSet<IInterceptorSubject> loadedSubjects,
+        CancellationToken cancellationToken)
+    {
+        var childNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken).ConfigureAwait(false);
+        var existingChildren = property.Children.ToDictionary(c => c.Index!, c => c.Subject);
+        var entries = new Dictionary<object, IInterceptorSubject>();
+        var nodesByKey = new Dictionary<object, ReferenceDescription>();
+
+        foreach (var childNode in childNodes)
+        {
+            var key = childNode.BrowseName.Name; // Use BrowseName as dictionary key
+            var childSubject = existingChildren.GetValueOrDefault(key)
+                ?? DefaultSubjectFactory.Instance.CreateCollectionSubject(property, key);
+            entries[key] = childSubject;
+            nodesByKey[key] = childNode;
+        }
+
+        var dictionary = DefaultSubjectFactory.Instance.CreateSubjectDictionary(property.Type, entries);
+        property.SetValueFromSource(_source, null, null, dictionary);
+
+        foreach (var entry in entries)
+        {
+            var childNode = nodesByKey[entry.Key];
+            await LoadSubjectAsync(entry.Value, childNode, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
         }
     }
 

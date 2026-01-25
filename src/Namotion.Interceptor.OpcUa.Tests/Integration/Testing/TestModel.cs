@@ -14,6 +14,8 @@ public partial class TestRoot
         ScalarNumbers = [1, 2, 3, 4, 5];
         ScalarStrings = ["Hello", "World", "OPC", "UA"];
         People = [];
+        PeopleByName = new Dictionary<string, TestPerson>();
+        Sensor = new TestSensor();
     }
 
     [Path("opc", "Connected")]
@@ -36,6 +38,13 @@ public partial class TestRoot
 
     [Path("opc", "People")]
     public partial TestPerson[] People { get; set; }
+
+    [Path("opc", "PeopleByName")]
+    public partial Dictionary<string, TestPerson>? PeopleByName { get; set; }
+
+    [OpcUaNode("Sensor", null)]
+    [OpcUaReference("HasComponent")]
+    public partial TestSensor? Sensor { get; set; }
 }
 
 [InterceptorSubject]
@@ -46,6 +55,7 @@ public partial class TestPerson
         FirstName = "";
         LastName = "";
         Scores = [];
+        Address = new TestAddress();
     }
 
     [Path("opc", "FirstName")]
@@ -60,6 +70,56 @@ public partial class TestPerson
 
     [Path("opc", "Scores")]
     public partial double[] Scores { get; set; }
+
+    [Path("opc", "Address")]
+    public partial TestAddress? Address { get; set; }
+}
+
+[InterceptorSubject]
+public partial class TestAddress
+{
+    public TestAddress()
+    {
+        City = "";
+        ZipCode = "";
+    }
+
+    [Path("opc", "City")]
+    public partial string City { get; set; }
+
+    [Path("opc", "ZipCode")]
+    public partial string ZipCode { get; set; }
+}
+
+/// <summary>
+/// Test model demonstrating OpcUaValue pattern - a VariableNode with child properties.
+/// </summary>
+[InterceptorSubject]
+[OpcUaNode("TestSensor", null, NodeClass = OpcUaNodeClass.Variable)]
+public partial class TestSensor
+{
+    public TestSensor()
+    {
+        Value = 0;
+        Unit = "";
+    }
+
+    /// <summary>The OPC UA Value attribute - this is the VariableNode's value.</summary>
+    [OpcUaNode("Value", null)]
+    [OpcUaValue]
+    public partial double Value { get; set; }
+
+    /// <summary>Child property of the VariableNode.</summary>
+    [OpcUaNode("Unit", null)]
+    public partial string? Unit { get; set; }
+
+    /// <summary>Child property of the VariableNode.</summary>
+    [OpcUaNode("MinValue", null)]
+    public partial double? MinValue { get; set; }
+
+    /// <summary>Child property of the VariableNode.</summary>
+    [OpcUaNode("MaxValue", null)]
+    public partial double? MaxValue { get; set; }
 }
 
 /// <summary>

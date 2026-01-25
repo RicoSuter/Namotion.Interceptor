@@ -28,5 +28,11 @@ public enum ModellingRule
     /// <summary>
     /// Placeholder for optional instances in a collection.
     /// </summary>
-    OptionalPlaceholder = 3
+    OptionalPlaceholder = 3,
+
+    /// <summary>
+    /// Exposes array elements as individually addressable items.
+    /// Used when a Variable exposes its array elements as child nodes.
+    /// </summary>
+    ExposesItsArray = 4
 }

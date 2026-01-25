@@ -70,12 +70,46 @@ public class OpcUaDynamicServerClientTests
                 root.Name = "Foo bar";
                 root.ScalarNumbers = [10, 20, 30, 40, 50];
                 root.ScalarStrings = ["Server", "Test", "Array"];
-                root.Person = new TestPerson { FirstName = "John", LastName = "Smith", Scores = [1, 2] };
+                root.Person = new TestPerson
+                {
+                    FirstName = "John",
+                    LastName = "Smith",
+                    Scores = [1, 2],
+                    Address = new TestAddress { City = "Seattle", ZipCode = "98101" }
+                };
                 root.People =
                 [
-                    new TestPerson { FirstName = "John", LastName = "Doe", Scores = [85.5, 92.3] },
-                    new TestPerson { FirstName = "Jane", LastName = "Doe", Scores = [88.1, 95.7] }
+                    new TestPerson
+                    {
+                        FirstName = "John",
+                        LastName = "Doe",
+                        Scores = [85.5, 92.3],
+                        Address = new TestAddress { City = "Portland", ZipCode = "97201" }
+                    },
+                    new TestPerson
+                    {
+                        FirstName = "Jane",
+                        LastName = "Doe",
+                        Scores = [88.1, 95.7],
+                        Address = new TestAddress { City = "Vancouver", ZipCode = "98660" }
+                    }
                 ];
+                root.PeopleByName = new Dictionary<string, TestPerson>
+                {
+                    ["john"] = new TestPerson
+                    {
+                        FirstName = "John",
+                        LastName = "Dict",
+                        Address = new TestAddress { City = "Boston", ZipCode = "02101" }
+                    }
+                };
+                root.Sensor = new TestSensor
+                {
+                    Value = 25.5,
+                    Unit = "°C",
+                    MinValue = -40.0,
+                    MaxValue = 85.0
+                };
             },
             baseAddress: _port!.BaseAddress,
             certificateStoreBasePath: _port.CertificateStoreBasePath);
