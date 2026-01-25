@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Linq.Expressions;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
@@ -9,16 +10,10 @@ namespace Namotion.Interceptor.OpcUa.Mapping;
 /// Maps properties using code-based fluent configuration.
 /// Supports instance-based configuration (different config for Motor1.Speed vs Motor2.Speed).
 /// </summary>
-/// <remarks>
-/// <para><b>Thread Safety:</b> The <see cref="Map{TProperty}"/> method should only be called
-/// during application startup/configuration. After configuration is complete, the mapper
-/// is safe to use from multiple threads for read operations (TryGetNodeConfiguration,
-/// TryGetPropertyAsync). Do not call Map() concurrently with read operations.</para>
-/// </remarks>
 /// <typeparam name="T">The root type to configure.</typeparam>
 public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
 {
-    private readonly Dictionary<string, OpcUaNodeConfiguration> _mappings = new();
+    private readonly ConcurrentDictionary<string, OpcUaNodeConfiguration> _mappings = new();
 
     /// <summary>
     /// Maps a property with fluent configuration.
@@ -37,7 +32,7 @@ public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
     public OpcUaNodeConfiguration? TryGetNodeConfiguration(RegisteredSubjectProperty property)
     {
         var path = GetPropertyPath(property);
-        return _mappings.TryGetValue(path, out var config) ? config : null;
+        return _mappings.GetValueOrDefault(path);
     }
 
     /// <inheritdoc />
@@ -93,10 +88,10 @@ public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
     private class PropertyBuilder<TProp> : IPropertyBuilder<TProp>
     {
         private readonly string _basePath;
-        private readonly Dictionary<string, OpcUaNodeConfiguration> _mappings;
+        private readonly ConcurrentDictionary<string, OpcUaNodeConfiguration> _mappings;
         private OpcUaNodeConfiguration _config = new();
 
-        public PropertyBuilder(string basePath, Dictionary<string, OpcUaNodeConfiguration> mappings)
+        public PropertyBuilder(string basePath, ConcurrentDictionary<string, OpcUaNodeConfiguration> mappings)
         {
             _basePath = basePath;
             _mappings = mappings;
@@ -169,6 +164,25 @@ public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
 
         public IPropertyBuilder<TProp> EventNotifier(byte value) =>
             UpdateConfig(c => c with { EventNotifier = value });
+
+        public IPropertyBuilder<TProp> AdditionalReference(
+            string referenceType,
+            string targetNodeId,
+            string? targetNamespaceUri = null,
+            bool isForward = true)
+        {
+            var newRef = new OpcUaAdditionalReference
+            {
+                ReferenceType = referenceType,
+                TargetNodeId = targetNodeId,
+                TargetNamespaceUri = targetNamespaceUri,
+                IsForward = isForward
+            };
+            return UpdateConfig(c => c with
+            {
+                AdditionalReferences = [.. (c.AdditionalReferences ?? []), newRef]
+            });
+        }
 
         public IPropertyBuilder<TProp> Map<TProperty>(
             Expression<Func<TProp, TProperty>> propertySelector,

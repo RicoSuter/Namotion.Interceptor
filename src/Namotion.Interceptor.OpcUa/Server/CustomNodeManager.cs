@@ -1,5 +1,5 @@
-using System.Collections.Concurrent;
 using System.Reflection;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry;
@@ -17,21 +17,37 @@ internal class CustomNodeManager : CustomNodeManager2
     private readonly OpcUaSubjectServerBackgroundService _source;
     private readonly OpcUaServerConfiguration _configuration;
     private readonly IOpcUaNodeMapper _nodeMapper;
+    private readonly ILogger _logger;
 
-    private readonly ConcurrentDictionary<RegisteredSubject, NodeState> _subjects = new();
+    private readonly SemaphoreSlim _structureLock = new(1, 1);
+    private readonly Dictionary<RegisteredSubject, NodeState> _subjects = new();
+
+    private static readonly Lazy<Dictionary<string, NodeId>> ReferenceTypeIdLookup =
+        new(() => BuildNodeIdLookup(typeof(ReferenceTypeIds)));
+    private static readonly Lazy<Dictionary<string, NodeId>> DataTypeIdLookup =
+        new(() => BuildNodeIdLookup(typeof(DataTypeIds)));
+    private static readonly Lazy<Dictionary<string, NodeId>> ObjectTypeIdLookup =
+        new(() => BuildNodeIdLookup(typeof(ObjectTypeIds)));
+
+    private static Dictionary<string, NodeId> BuildNodeIdLookup(Type type) =>
+        type.GetFields(BindingFlags.Public | BindingFlags.Static)
+            .Where(f => f.FieldType == typeof(NodeId))
+            .ToDictionary(f => f.Name, f => (NodeId)f.GetValue(null)!);
 
     public CustomNodeManager(
         IInterceptorSubject subject,
         OpcUaSubjectServerBackgroundService source,
         IServerInternal server,
         ApplicationConfiguration applicationConfiguration,
-        OpcUaServerConfiguration configuration) :
+        OpcUaServerConfiguration configuration,
+        ILogger logger) :
         base(server, applicationConfiguration, configuration.GetNamespaceUris())
     {
         _subject = subject;
         _source = source;
         _configuration = configuration;
         _nodeMapper = configuration.NodeMapper;
+        _logger = logger;
     }
 
     protected override NodeStateCollection LoadPredefinedNodes(ISystemContext context)
@@ -56,20 +72,28 @@ internal class CustomNodeManager : CustomNodeManager2
     {
         base.CreateAddressSpace(externalReferences);
 
-        var registeredSubject = _subject.TryGetRegisteredSubject();
-        if (registeredSubject is not null)
+        _structureLock.Wait();
+        try
         {
-            if (_configuration.RootName is not null)
+            var registeredSubject = _subject.TryGetRegisteredSubject();
+            if (registeredSubject is not null)
             {
-                var node = CreateFolderNode(ObjectIds.ObjectsFolder, 
-                    new NodeId(_configuration.RootName, NamespaceIndex), _configuration.RootName, null, null);
+                if (_configuration.RootName is not null)
+                {
+                    var node = CreateFolderNode(ObjectIds.ObjectsFolder,
+                        new NodeId(_configuration.RootName, NamespaceIndex), _configuration.RootName, null, null);
 
-                CreateObjectNode(node.NodeId, registeredSubject, _configuration.RootName + PathDelimiter);
+                    CreateObjectNode(node.NodeId, registeredSubject, _configuration.RootName + PathDelimiter);
+                }
+                else
+                {
+                    CreateObjectNode(ObjectIds.ObjectsFolder, registeredSubject, string.Empty);
+                }
             }
-            else
-            {
-                CreateObjectNode(ObjectIds.ObjectsFolder, registeredSubject, string.Empty);
-            }
+        }
+        finally
+        {
+            _structureLock.Release();
         }
     }
 
@@ -79,30 +103,39 @@ internal class CustomNodeManager : CustomNodeManager2
     /// </summary>
     public void RemoveSubjectNodes(IInterceptorSubject subject)
     {
-        var registeredSubject = subject.TryGetRegisteredSubject();
-
-        // Remove variable nodes for this subject's properties
-        if (registeredSubject != null)
+        _structureLock.Wait();
+        try
         {
-            foreach (var property in registeredSubject.Properties)
+            var registeredSubject = subject.TryGetRegisteredSubject();
+
+            // Remove variable nodes for this subject's properties
+            if (registeredSubject != null)
             {
-                if (property.Reference.TryGetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, out var node)
-                    && node is BaseDataVariableState variableNode)
+                foreach (var property in registeredSubject.Properties)
                 {
-                    DeleteNode(SystemContext, variableNode.NodeId);
-                    property.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
+                    if (property.Reference.TryGetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, out var node)
+                        && node is BaseDataVariableState variableNode)
+                    {
+                        DeleteNode(SystemContext, variableNode.NodeId);
+                        property.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
+                    }
+                }
+            }
+
+            // Remove object nodes
+            var keysToRemove = _subjects.Where(kvp => kvp.Key.Subject == subject).Select(kvp => kvp.Key).ToList();
+            foreach (var key in keysToRemove)
+            {
+                if (_subjects.TryGetValue(key, out var nodeState))
+                {
+                    DeleteNode(SystemContext, nodeState.NodeId);
+                    _subjects.Remove(key);
                 }
             }
         }
-
-        // Remove object nodes
-        foreach (var kvp in _subjects)
+        finally
         {
-            if (kvp.Key.Subject == subject)
-            {
-                DeleteNode(SystemContext, kvp.Value.NodeId);
-                _subjects.TryRemove(kvp.Key, out _);
-            }
+            _structureLock.Release();
         }
     }
 
@@ -215,6 +248,7 @@ internal class CustomNodeManager : CustomNodeManager2
         var dataTypeOverride = GetDataTypeOverride(property);
         var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(actualConfigurationProperty);
         var variableNode = CreateVariableNode(parentNodeId, nodeId, browseName, typeInfo, referenceTypeId, dataTypeOverride, nodeConfiguration);
+        AddAdditionalReferences(variableNode, nodeConfiguration);
         variableNode.Handle = property.Reference;
 
         // Adjust access according to property setter
@@ -336,26 +370,31 @@ internal class CustomNodeManager : CustomNodeManager2
         }
         else
         {
-            // Create new node and add to dictionary (thread-safe)
-            _subjects.GetOrAdd(registeredSubject, _ =>
-            {
-                var nodeId = GetNodeId(property, path);
-                var typeDefinitionId = GetTypeDefinitionId(subject);
+            // Create new node and add to dictionary (protected by _structureLock)
+            var nodeId = GetNodeId(property, path);
+            var typeDefinitionId = GetTypeDefinitionId(subject);
 
-                var node = CreateObjectNode(parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId);
-                CreateObjectNode(node.NodeId, registeredSubject, path + PathDelimiter);
-
-                return node;
-            });
+            var node = CreateObjectNode(parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId);
+            var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
+            AddAdditionalReferences(node, nodeConfiguration);
+            _subjects[registeredSubject] = node;
+            CreateObjectNode(node.NodeId, registeredSubject, path + PathDelimiter);
         }
     }
 
     private NodeId? GetReferenceTypeId(RegisteredSubjectProperty property)
     {
         var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
-        if (nodeConfiguration?.ReferenceType is not null)
+        if (nodeConfiguration?.ReferenceType is { } name)
         {
-            return typeof(ReferenceTypeIds).GetField(nodeConfiguration.ReferenceType)?.GetValue(null) as NodeId;
+            if (ReferenceTypeIdLookup.Value.TryGetValue(name, out var nodeId))
+            {
+                return nodeId;
+            }
+
+            _logger.LogWarning(
+                "Unknown ReferenceType '{ReferenceType}' on property '{Property}'. Using default.",
+                name, property.Name);
         }
 
         return null;
@@ -364,9 +403,16 @@ internal class CustomNodeManager : CustomNodeManager2
     private NodeId? GetChildReferenceTypeId(RegisteredSubjectProperty property)
     {
         var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
-        if (nodeConfiguration?.ItemReferenceType is not null)
+        if (nodeConfiguration?.ItemReferenceType is { } name)
         {
-            return typeof(ReferenceTypeIds).GetField(nodeConfiguration.ItemReferenceType)?.GetValue(null) as NodeId;
+            if (ReferenceTypeIdLookup.Value.TryGetValue(name, out var nodeId))
+            {
+                return nodeId;
+            }
+
+            _logger.LogWarning(
+                "Unknown ItemReferenceType '{ItemReferenceType}' on property '{Property}'. Using default.",
+                name, property.Name);
         }
 
         return null;
@@ -410,7 +456,16 @@ internal class CustomNodeManager : CustomNodeManager2
                 .NodeId;
         }
 
-        return typeof(ObjectTypeIds).GetField(typeDefinition)?.GetValue(null) as NodeId;
+        if (ObjectTypeIdLookup.Value.TryGetValue(typeDefinition, out var objectTypeId))
+        {
+            return objectTypeId;
+        }
+
+        _logger.LogWarning(
+            "Unknown TypeDefinition '{TypeDefinition}'. Using default.",
+            typeDefinition);
+
+        return null;
     }
 
     private QualifiedName GetBrowseName(string propertyName, RegisteredSubjectProperty property, object? index)
@@ -529,10 +584,40 @@ internal class CustomNodeManager : CustomNodeManager2
         var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
         if (nodeConfiguration?.DataType is { } dataTypeName)
         {
-            // Try to resolve from DataTypeIds
-            var field = typeof(DataTypeIds).GetField(dataTypeName);
-            return field?.GetValue(null) as NodeId;
+            if (DataTypeIdLookup.Value.TryGetValue(dataTypeName, out var nodeId))
+            {
+                return nodeId;
+            }
+
+            _logger.LogWarning(
+                "Unknown DataType '{DataType}' on property '{Property}'. Using default.",
+                dataTypeName, property.Name);
         }
         return null;
+    }
+
+    private void AddAdditionalReferences(NodeState node, OpcUaNodeConfiguration? config)
+    {
+        if (config?.AdditionalReferences is null)
+        {
+            return;
+        }
+
+        foreach (var reference in config.AdditionalReferences)
+        {
+            if (!ReferenceTypeIdLookup.Value.TryGetValue(reference.ReferenceType, out var referenceTypeId))
+            {
+                _logger.LogWarning(
+                    "Unknown additional reference type '{ReferenceType}'. Skipping reference.",
+                    reference.ReferenceType);
+                continue;
+            }
+
+            var targetNodeId = reference.TargetNamespaceUri is not null
+                ? NodeId.Create(reference.TargetNodeId, reference.TargetNamespaceUri, SystemContext.NamespaceUris)
+                : new NodeId(reference.TargetNodeId, NamespaceIndex);
+
+            node.AddReference(referenceTypeId, reference.IsForward, targetNodeId);
+        }
     }
 }

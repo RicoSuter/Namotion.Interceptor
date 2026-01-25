@@ -90,15 +90,21 @@ public class OpcUaNodeAttribute : PathAttribute
     /// Gets or sets the sampling interval in milliseconds to be used in monitored item.
     /// Default is int.MinValue (not set), which uses the configuration default or OPC UA library default (-1 = server decides).
     /// Set to 0 for exception-based monitoring (immediate reporting on every change).
-    /// Note: Uses int.MinValue as sentinel because C# attributes don't support nullable value types.
     /// </summary>
+    /// <remarks>
+    /// Uses int.MinValue as sentinel because C# attributes don't support nullable value types.
+    /// Do not use int.MinValue as an actual sampling interval value.
+    /// </remarks>
     public int SamplingInterval { get; init; } = int.MinValue;
 
     /// <summary>
     /// Gets or sets the queue size to be used in monitored item.
     /// Default is uint.MaxValue (not set), which uses the configuration default or OPC UA library default (1).
-    /// Note: Uses uint.MaxValue as sentinel because C# attributes don't support nullable value types.
     /// </summary>
+    /// <remarks>
+    /// Uses uint.MaxValue as sentinel because C# attributes don't support nullable value types.
+    /// Do not use uint.MaxValue as an actual queue size value.
+    /// </remarks>
     public uint QueueSize { get; init; } = uint.MaxValue;
 
     /// <summary>
@@ -141,7 +147,10 @@ public class OpcUaNodeAttribute : PathAttribute
     /// Server only: Gets or sets the event notifier flags for objects that emit events.
     /// Default is 255 (not set - uses server default).
     /// Set to 0 for "no events", or use EventNotifiers flags (1=SubscribeToEvents, 4=HistoryRead, 8=HistoryWrite).
-    /// Note: Uses 255 as sentinel because C# attributes don't support nullable value types.
     /// </summary>
+    /// <remarks>
+    /// Uses 255 (byte.MaxValue) as sentinel because C# attributes don't support nullable value types.
+    /// Do not use 255 as an actual event notifier value.
+    /// </remarks>
     public byte EventNotifier { get; init; } = byte.MaxValue;
 }

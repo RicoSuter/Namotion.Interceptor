@@ -32,7 +32,7 @@ public class CompositeNodeMapper : IOpcUaNodeMapper
             if (config is not null)
             {
                 // Later mappers override earlier ones ("last wins")
-                result = config.MergeWith(result);
+                result = config.WithFallback(result);
             }
         }
 
@@ -46,9 +46,10 @@ public class CompositeNodeMapper : IOpcUaNodeMapper
         ISession session,
         CancellationToken cancellationToken)
     {
-        foreach (var mapper in _mappers)
+        // Later mappers override earlier ones ("last wins") - reverse iterate for early return
+        for (var i = _mappers.Length - 1; i >= 0; i--)
         {
-            var property = await mapper.TryGetPropertyAsync(
+            var property = await _mappers[i].TryGetPropertyAsync(
                 subject, nodeReference, session, cancellationToken);
             if (property is not null)
             {

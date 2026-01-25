@@ -49,7 +49,7 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
         var propertyConfig = propertyAttribute is not null ? BuildConfigFromNodeAttribute(propertyAttribute) : null;
 
         // Start with property config, merge class config as fallback
-        var config = propertyConfig?.MergeWith(classConfig) ?? classConfig ?? new OpcUaNodeConfiguration();
+        var config = propertyConfig?.WithFallback(classConfig) ?? classConfig ?? new OpcUaNodeConfiguration();
 
         // Apply reference attribute
         if (referenceAttribute is not null)

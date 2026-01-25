@@ -1,7 +1,9 @@
+using Moq;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
+using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Mapping;
 
@@ -263,4 +265,115 @@ public class AttributeOpcUaNodeMapperTests
         Assert.NotNull(config);
         Assert.Equal("CollectionItemType", config.TypeDefinition);
     }
+
+    #region TryGetPropertyAsync Tests
+
+    [Fact]
+    public async Task TryGetPropertyAsync_WithMatchingBrowseName_ReturnsProperty()
+    {
+        // Arrange
+        var mapper = new AttributeOpcUaNodeMapper();
+        var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+
+        var namespaceUris = new NamespaceTable();
+        namespaceUris.Append("http://test/");
+        var mockSession = new Mock<ISession>();
+        mockSession.Setup(s => s.NamespaceUris).Returns(namespaceUris);
+
+        var nodeReference = new ReferenceDescription
+        {
+            NodeId = new ExpandedNodeId("TestNodeId", 1),
+            BrowseName = new QualifiedName("SimpleProp", 1) // Matches [OpcUaNode("SimpleProp", "http://test/")]
+        };
+
+        // Act
+        var result = await mapper.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal("SimpleProp", result.Name);
+    }
+
+    [Fact]
+    public async Task TryGetPropertyAsync_WithNonMatchingNamespace_ReturnsNull()
+    {
+        // Arrange
+        var mapper = new AttributeOpcUaNodeMapper();
+        var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+
+        var namespaceUris = new NamespaceTable();
+        namespaceUris.Append("http://test/");
+        namespaceUris.Append("http://other/");
+        var mockSession = new Mock<ISession>();
+        mockSession.Setup(s => s.NamespaceUris).Returns(namespaceUris);
+
+        var nodeReference = new ReferenceDescription
+        {
+            NodeId = new ExpandedNodeId("TestNodeId", 2),
+            BrowseName = new QualifiedName("SimpleProp", 2) // Wrong namespace index
+        };
+
+        // Act
+        var result = await mapper.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task TryGetPropertyAsync_WithNoMatch_ReturnsNull()
+    {
+        // Arrange
+        var mapper = new AttributeOpcUaNodeMapper();
+        var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+
+        var namespaceUris = new NamespaceTable();
+        var mockSession = new Mock<ISession>();
+        mockSession.Setup(s => s.NamespaceUris).Returns(namespaceUris);
+
+        var nodeReference = new ReferenceDescription
+        {
+            NodeId = new ExpandedNodeId("UnknownNode", 0),
+            BrowseName = new QualifiedName("NonExistentProperty", 0)
+        };
+
+        // Act
+        var result = await mapper.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task TryGetPropertyAsync_WithDefaultNamespaceUri_UsesDefault()
+    {
+        // Arrange - use default namespace that matches the node
+        var mapper = new AttributeOpcUaNodeMapper(defaultNamespaceUri: "http://default/");
+        var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+
+        var namespaceUris = new NamespaceTable();
+        namespaceUris.Append("http://default/");
+        var mockSession = new Mock<ISession>();
+        mockSession.Setup(s => s.NamespaceUris).Returns(namespaceUris);
+
+        // MonitoredProp has no explicit namespace in attribute, so defaultNamespaceUri should be used
+        var nodeReference = new ReferenceDescription
+        {
+            NodeId = new ExpandedNodeId("MonitoredProp", 1),
+            BrowseName = new QualifiedName("MonitoredProp", 0)
+        };
+
+        // Act
+        var result = await mapper.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal("MonitoredProp", result.Name);
+    }
+
+    #endregion
 }
