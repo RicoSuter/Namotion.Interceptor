@@ -23,7 +23,7 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
     }
 
     /// <inheritdoc />
-    public OpcUaNodeConfiguration? TryGetConfiguration(RegisteredSubjectProperty property)
+    public OpcUaNodeConfiguration? TryGetNodeConfiguration(RegisteredSubjectProperty property)
     {
         // Get class-level OpcUaNode from the property's type (for object references)
         var classAttribute = GetClassLevelOpcUaNodeAttribute(property);
@@ -45,16 +45,13 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
             return null;
         }
 
-        // Build configuration from class-level first
         var classConfig = classAttribute is not null ? BuildConfigFromNodeAttribute(classAttribute) : null;
-
-        // Then property-level
         var propertyConfig = propertyAttribute is not null ? BuildConfigFromNodeAttribute(propertyAttribute) : null;
 
         // Start with property config, merge class config as fallback
         var config = propertyConfig?.MergeWith(classConfig) ?? classConfig ?? new OpcUaNodeConfiguration();
 
-        // Apply reference attribute (new style)
+        // Apply reference attribute
         if (referenceAttribute is not null)
         {
             config = config with
@@ -64,9 +61,18 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
             };
         }
 
-        // Apply value attribute
         if (valueAttribute is not null)
         {
+            // Validate: OpcUaValue requires the containing class to have NodeClass = Variable
+            var containingClassAttribute = property.Parent.Subject.GetType().GetCustomAttribute<OpcUaNodeAttribute>();
+            if (containingClassAttribute?.NodeClass != OpcUaNodeClass.Variable)
+            {
+                throw new InvalidOperationException(
+                    $"[OpcUaValue] attribute on property '{property.Name}' requires the containing class " +
+                    $"'{property.Parent.Subject.GetType().Name}' to have [OpcUaNode(NodeClass = OpcUaNodeClass.Variable)]. " +
+                    $"In OPC UA, only Variable nodes have a Value attribute.");
+            }
+
             config = config with { IsValue = true };
         }
 
@@ -103,6 +109,8 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
 
         // Priority 2: BrowseName match via attribute
         var browseName = nodeReference.BrowseName.Name;
+        var browseNamespaceIndex = nodeReference.BrowseName.NamespaceIndex;
+
         foreach (var property in subject.Properties)
         {
             var attribute = property.ReflectionAttributes
@@ -111,6 +119,16 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
 
             if (attribute?.BrowseName == browseName)
             {
+                // Also check namespace if specified
+                if (attribute.BrowseNamespaceUri is not null)
+                {
+                    var expectedNamespaceIndex = (ushort)session.NamespaceUris.GetIndex(attribute.BrowseNamespaceUri);
+                    if (browseNamespaceIndex != expectedNamespaceIndex)
+                    {
+                        continue; // Namespace doesn't match, try next property
+                    }
+                }
+
                 return Task.FromResult<RegisteredSubjectProperty?>(property);
             }
         }
@@ -168,7 +186,7 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
             DeadbandType = (int)attribute.DeadbandType != -1 ? attribute.DeadbandType : null,
             DeadbandValue = !double.IsNaN(attribute.DeadbandValue) ? attribute.DeadbandValue : null,
             ModellingRule = attribute.ModellingRule != Mapping.ModellingRule.Unset ? attribute.ModellingRule : null,
-            EventNotifier = attribute.EventNotifier != 0 ? attribute.EventNotifier : null,
+            EventNotifier = attribute.GetEventNotifierOrNull(),
         };
     }
 }

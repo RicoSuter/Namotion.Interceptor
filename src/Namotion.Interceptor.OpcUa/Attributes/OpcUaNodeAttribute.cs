@@ -65,7 +65,6 @@ public class OpcUaNodeAttribute : PathAttribute
 
     /// <summary>
     /// Gets or sets the type definition (e.g., "FolderType", "AnalogItemType").
-    /// Consolidates OpcUaTypeDefinitionAttribute functionality.
     /// </summary>
     public string? TypeDefinition { get; init; }
 
@@ -140,7 +139,9 @@ public class OpcUaNodeAttribute : PathAttribute
 
     /// <summary>
     /// Server only: Gets or sets the event notifier flags for objects that emit events.
-    /// Default is 0 (no events).
+    /// Default is 255 (not set - uses server default).
+    /// Set to 0 for "no events", or use EventNotifiers flags (1=SubscribeToEvents, 4=HistoryRead, 8=HistoryWrite).
+    /// Note: Uses 255 as sentinel because C# attributes don't support nullable value types.
     /// </summary>
-    public byte EventNotifier { get; init; } = 0;
+    public byte EventNotifier { get; init; } = byte.MaxValue;
 }

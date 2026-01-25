@@ -1,4 +1,5 @@
 using Namotion.Interceptor.OpcUa.Attributes;
+using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
@@ -62,6 +63,14 @@ internal static class OpcUaNodeAttributeExtensions
         => attribute != null && !double.IsNaN(attribute.DeadbandValue)
             ? attribute.DeadbandValue
             : null;
+
+    /// <summary>
+    /// Gets the event notifier if explicitly set, or null if using the sentinel value (255).
+    /// </summary>
+    public static byte? GetEventNotifierOrNull(this OpcUaNodeAttribute? attribute)
+        => attribute != null && attribute.EventNotifier != byte.MaxValue
+            ? attribute.EventNotifier
+            : null;
 }
 
 internal static class OpcUaPropertyExtensions
@@ -80,6 +89,32 @@ internal static class OpcUaPropertyExtensions
         }
 
         return pathProvider.TryGetPropertySegment(property);
+    }
+
+    public static string? ResolvePropertyName(this RegisteredSubjectProperty property, IOpcUaNodeMapper nodeMapper)
+    {
+        var nodeConfiguration = nodeMapper.TryGetNodeConfiguration(property);
+        if (nodeConfiguration == null)
+        {
+            return null; // Property not mapped
+        }
+
+        if (property.IsAttribute)
+        {
+            var attributedProperty = property.GetAttributedProperty();
+            var parentName = attributedProperty.ResolvePropertyName(nodeMapper);
+            if (parentName is null)
+                return null;
+
+            return parentName + "__" + (nodeConfiguration.BrowseName ?? property.Name);
+        }
+
+        return nodeConfiguration.BrowseName ?? property.Name;
+    }
+
+    public static bool IsPropertyIncluded(this RegisteredSubjectProperty property, IOpcUaNodeMapper nodeMapper)
+    {
+        return nodeMapper.TryGetNodeConfiguration(property) != null;
     }
 
     public static OpcUaNodeAttribute? TryGetOpcUaNodeAttribute(this RegisteredSubjectProperty property)

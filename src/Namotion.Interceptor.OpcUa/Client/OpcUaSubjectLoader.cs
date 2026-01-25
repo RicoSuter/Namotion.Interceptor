@@ -120,14 +120,23 @@ internal class OpcUaSubjectLoader
                     });
             }
 
-            var propertyName = property.ResolvePropertyName(_configuration.PathProvider);
-            if (propertyName is not null && _configuration.PathProvider.IsPropertyIncluded(property))
+            var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
+            if (propertyName is not null)
             {
                 var childNodeId = ExpandedNodeId.ToNodeId(nodeRef.NodeId, session.NamespaceUris);
 
                 if (property.IsSubjectReference)
                 {
-                    await LoadSubjectReferenceAsync(property, node, nodeRef, subject, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
+                    // Check if this should be treated as a VariableNode
+                    var nodeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(property);
+                    if (nodeConfiguration?.NodeClass == Mapping.OpcUaNodeClass.Variable)
+                    {
+                        await LoadVariableNodeForSubjectAsync(property, childNodeId, session, monitoredItems, cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await LoadSubjectReferenceAsync(property, node, nodeRef, subject, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
+                    }
                 }
                 else if (property.IsSubjectCollection)
                 {
@@ -212,16 +221,8 @@ internal class OpcUaSubjectLoader
         CancellationToken cancellationToken)
     {
         // Use NodeMapper for property lookup (supports attributes, path provider, and fluent config)
-        var property = await _configuration.ActualNodeMapper.TryGetPropertyAsync(
+        return await _configuration.NodeMapper.TryGetPropertyAsync(
             registeredSubject, nodeRef, session, cancellationToken).ConfigureAwait(false);
-
-        if (property is not null)
-        {
-            return property;
-        }
-
-        // Fallback to PathProvider for properties not explicitly mapped
-        return _configuration.PathProvider.TryGetPropertyFromSegment(registeredSubject, nodeRef.BrowseName.Name);
     }
 
     private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)
@@ -238,6 +239,55 @@ internal class OpcUaSubjectLoader
         }
 
         monitoredItems.Add(monitoredItem);
+    }
+
+    private async Task LoadVariableNodeForSubjectAsync(
+        RegisteredSubjectProperty property,
+        NodeId nodeId,
+        ISession session,
+        List<MonitoredItem> monitoredItems,
+        CancellationToken cancellationToken)
+    {
+        var childSubject = property.Children.SingleOrDefault().Subject?.TryGetRegisteredSubject();
+        if (childSubject == null)
+        {
+            return;
+        }
+
+        // Find [OpcUaValue] property and monitor the node for it
+        foreach (var childProperty in childSubject.Properties)
+        {
+            var childConfig = _configuration.NodeMapper.TryGetNodeConfiguration(childProperty);
+            if (childConfig?.IsValue == true)
+            {
+                // Monitor the value node with the value property
+                MonitorValueNode(nodeId, childProperty, monitoredItems);
+                break;
+            }
+        }
+
+        // Also load HasProperty children as regular variable nodes
+        var childNodes = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
+        foreach (var childNode in childNodes)
+        {
+            // Find matching property in child subject (excluding the value property)
+            foreach (var childProperty in childSubject.Properties)
+            {
+                var childConfig = _configuration.NodeMapper.TryGetNodeConfiguration(childProperty);
+                if (childConfig?.IsValue == true)
+                {
+                    continue; // Skip the value property
+                }
+
+                var childPropertyName = childProperty.ResolvePropertyName(_configuration.NodeMapper);
+                if (childPropertyName == childNode.BrowseName.Name)
+                {
+                    var childNodeId = ExpandedNodeId.ToNodeId(childNode.NodeId, session.NamespaceUris);
+                    MonitorValueNode(childNodeId, childProperty, monitoredItems);
+                    break;
+                }
+            }
+        }
     }
 
     private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(

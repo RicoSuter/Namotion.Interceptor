@@ -10,8 +10,11 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 public class OpcUaClientConfiguration
 {
+    private static readonly IOpcUaNodeMapper DefaultNodeMapper = new CompositeNodeMapper(
+        new PathProviderOpcUaNodeMapper(new AttributeBasedPathProvider("opc")),
+        new AttributeOpcUaNodeMapper());
+
     private ISessionFactory? _resolvedSessionFactory;
-    private IOpcUaNodeMapper? _resolvedNodeMapper;
 
     /// <summary>
     /// Gets the OPC UA server endpoint URL to connect to (e.g., "opc.tcp://localhost:4840").
@@ -71,12 +74,6 @@ public class OpcUaClientConfiguration
     public Func<ReferenceDescription, CancellationToken, Task<bool>>? ShouldAddDynamicProperty { get; set; } = 
         static (_, _) => Task.FromResult(true);
     
-    /// <summary>
-    /// Gets the path provider used to map between OPC UA node browse names and C# property names.
-    /// This provider determines which properties are included and how their names are translated.
-    /// </summary>
-    public required PathProviderBase PathProvider { get; set; }
-
     /// <summary>
     /// Gets the type resolver used to infer C# types from OPC UA nodes during dynamic property discovery.
     /// </summary>
@@ -316,19 +313,9 @@ public class OpcUaClientConfiguration
 
     /// <summary>
     /// Maps C# properties to OPC UA nodes.
-    /// If not set, a default composite mapper is created using AttributeOpcUaNodeMapper
-    /// and PathProviderOpcUaNodeMapper.
+    /// Defaults to composite of PathProviderOpcUaNodeMapper (with "opc" source) and AttributeOpcUaNodeMapper.
     /// </summary>
-    public IOpcUaNodeMapper? NodeMapper { get; init; }
-
-    /// <summary>
-    /// Gets the actual node mapper, creating a default if not configured.
-    /// </summary>
-    internal IOpcUaNodeMapper ActualNodeMapper => NodeMapper ?? LazyInitializer.EnsureInitialized(
-        ref _resolvedNodeMapper,
-        () => new CompositeNodeMapper(
-            new PathProviderOpcUaNodeMapper(PathProvider),
-            new AttributeOpcUaNodeMapper(DefaultNamespaceUri)))!;
+    public IOpcUaNodeMapper NodeMapper { get; init; } = DefaultNodeMapper;
 
     /// <summary>
     /// Gets or sets the timeout for session disposal during shutdown.
@@ -425,7 +412,7 @@ public class OpcUaClientConfiguration
     /// <returns>A configured MonitoredItem ready to be added to a subscription.</returns>
     internal MonitoredItem CreateMonitoredItem(NodeId nodeId, RegisteredSubjectProperty property)
     {
-        var nodeConfig = ActualNodeMapper.TryGetConfiguration(property);
+        var nodeConfiguration = NodeMapper.TryGetNodeConfiguration(property);
         var item = new MonitoredItem(TelemetryContext)
         {
             StartNodeId = nodeId,
@@ -435,26 +422,26 @@ public class OpcUaClientConfiguration
         };
 
         // Apply sampling/queue settings from NodeMapper configuration
-        var samplingInterval = nodeConfig?.SamplingInterval ?? DefaultSamplingInterval;
+        var samplingInterval = nodeConfiguration?.SamplingInterval ?? DefaultSamplingInterval;
         if (samplingInterval.HasValue)
         {
             item.SamplingInterval = samplingInterval.Value;
         }
 
-        var queueSize = nodeConfig?.QueueSize ?? DefaultQueueSize;
+        var queueSize = nodeConfiguration?.QueueSize ?? DefaultQueueSize;
         if (queueSize.HasValue)
         {
             item.QueueSize = queueSize.Value;
         }
 
-        var discardOldest = nodeConfig?.DiscardOldest ?? DefaultDiscardOldest;
+        var discardOldest = nodeConfiguration?.DiscardOldest ?? DefaultDiscardOldest;
         if (discardOldest.HasValue)
         {
             item.DiscardOldest = discardOldest.Value;
         }
 
         // Apply filter (only if any filter option is specified)
-        var filter = CreateDataChangeFilter(nodeConfig);
+        var filter = CreateDataChangeFilter(nodeConfiguration);
         if (filter != null)
         {
             item.Filter = filter;
@@ -467,12 +454,12 @@ public class OpcUaClientConfiguration
     /// Creates a DataChangeFilter based on the node configuration and configuration defaults.
     /// Returns null if no filter options are specified (uses OPC UA library defaults).
     /// </summary>
-    private DataChangeFilter? CreateDataChangeFilter(OpcUaNodeConfiguration? nodeConfig)
+    private DataChangeFilter? CreateDataChangeFilter(OpcUaNodeConfiguration? nodeConfiguration)
     {
         // Apply NodeMapper configuration overrides, then configuration defaults
-        var trigger = nodeConfig?.DataChangeTrigger ?? DefaultDataChangeTrigger;
-        var deadbandType = nodeConfig?.DeadbandType ?? DefaultDeadbandType;
-        var deadbandValue = nodeConfig?.DeadbandValue ?? DefaultDeadbandValue;
+        var trigger = nodeConfiguration?.DataChangeTrigger ?? DefaultDataChangeTrigger;
+        var deadbandType = nodeConfiguration?.DeadbandType ?? DefaultDeadbandType;
+        var deadbandValue = nodeConfiguration?.DeadbandValue ?? DefaultDeadbandValue;
 
         // Only create filter if at least one option is specified
         if (!trigger.HasValue && !deadbandType.HasValue && !deadbandValue.HasValue)
@@ -495,7 +482,6 @@ public class OpcUaClientConfiguration
     public void Validate()
     {
         ArgumentNullException.ThrowIfNull(ServerUrl);
-        ArgumentNullException.ThrowIfNull(PathProvider);
         ArgumentNullException.ThrowIfNull(TypeResolver);
         ArgumentNullException.ThrowIfNull(ValueConverter);
         ArgumentNullException.ThrowIfNull(SubjectFactory);
@@ -593,6 +579,5 @@ public class OpcUaClientConfiguration
                 $"ReadAfterWriteBuffer must be non-negative, got: {ReadAfterWriteBuffer}",
                 nameof(ReadAfterWriteBuffer));
         }
-
     }
 }

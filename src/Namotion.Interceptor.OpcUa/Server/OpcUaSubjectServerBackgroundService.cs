@@ -69,7 +69,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
 
     private bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
-        return _configuration.PathProvider.IsPropertyIncluded(property);
+        return property.IsPropertyIncluded(_configuration.NodeMapper);
     }
 
     private ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)

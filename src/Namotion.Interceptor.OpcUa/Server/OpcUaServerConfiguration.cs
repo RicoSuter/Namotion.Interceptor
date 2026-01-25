@@ -8,12 +8,16 @@ namespace Namotion.Interceptor.OpcUa.Server;
 
 public class OpcUaServerConfiguration
 {
+    private static readonly IOpcUaNodeMapper DefaultNodeMapper = new CompositeNodeMapper(
+        new PathProviderOpcUaNodeMapper(new AttributeBasedPathProvider("opc")),
+        new AttributeOpcUaNodeMapper());
+
     /// <summary>
     /// Gets the optional root folder name to create under the Objects folder for organizing server nodes.
     /// If not specified, nodes are created directly under the ObjectsFolder.
     /// </summary>
     public string? RootName { get; set; }
-    
+
     /// <summary>
     /// Gets the OPC UA server application name used for identification and certificate generation.
     /// Default is "Namotion.Interceptor.Server".
@@ -25,12 +29,6 @@ public class OpcUaServerConfiguration
     /// Default is "http://namotion.com/Interceptor/".
     /// </summary>
     public string NamespaceUri { get; set; } = "http://namotion.com/Interceptor/";
-    
-    /// <summary>
-    /// Gets the path provider used to map between OPC UA node browse names and C# property names.
-    /// This provider determines which properties are included and how their names are translated.
-    /// </summary>
-    public required PathProviderBase PathProvider { get; set; }
 
     /// <summary>
     /// Gets the value converter used to convert between OPC UA node values and C# property values.
@@ -40,19 +38,9 @@ public class OpcUaServerConfiguration
 
     /// <summary>
     /// Maps C# properties to OPC UA nodes.
-    /// Defaults to composite of PathProviderOpcUaNodeMapper and AttributeOpcUaNodeMapper.
+    /// Defaults to composite of PathProviderOpcUaNodeMapper (with "opc" source) and AttributeOpcUaNodeMapper.
     /// </summary>
-    public IOpcUaNodeMapper NodeMapper { get; init; } = null!;
-
-    /// <summary>
-    /// Gets the actual node mapper, creating a default if not configured.
-    /// </summary>
-    internal IOpcUaNodeMapper GetActualNodeMapper()
-    {
-        return NodeMapper ?? new CompositeNodeMapper(
-            new PathProviderOpcUaNodeMapper(PathProvider),
-            new AttributeOpcUaNodeMapper());
-    }
+    public IOpcUaNodeMapper NodeMapper { get; init; } = DefaultNodeMapper;
 
     /// <summary>
     /// Gets or sets a value indicating whether to clean up old certificates from the

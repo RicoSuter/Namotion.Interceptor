@@ -85,7 +85,6 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
                 {
                     ServerUrl = serverUrl,
                     RootName = "Root",
-                    PathProvider = new AttributeBasedPathProvider("opc"),
                     TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
                     ValueConverter = new OpcUaValueConverter(),
                     SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),

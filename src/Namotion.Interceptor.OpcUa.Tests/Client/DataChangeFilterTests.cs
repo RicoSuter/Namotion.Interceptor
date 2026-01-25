@@ -24,7 +24,6 @@ public class DataChangeFilterTests
         return new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            PathProvider = new AttributeBasedPathProvider("opc"),
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance)
@@ -134,7 +133,6 @@ public class DataChangeFilterTests
         var config = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            PathProvider = new AttributeBasedPathProvider("opc"),
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -165,7 +163,6 @@ public class DataChangeFilterTests
         var config = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            PathProvider = new AttributeBasedPathProvider("opc"),
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -195,7 +192,6 @@ public class DataChangeFilterTests
         var config = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            PathProvider = new AttributeBasedPathProvider("opc"),
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -220,7 +216,6 @@ public class DataChangeFilterTests
         var config = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            PathProvider = new AttributeBasedPathProvider("opc"),
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -245,7 +240,6 @@ public class DataChangeFilterTests
         var config = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            PathProvider = new AttributeBasedPathProvider("opc"),
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -273,7 +267,6 @@ public class DataChangeFilterTests
         var config = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            PathProvider = new AttributeBasedPathProvider("opc"),
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -302,7 +295,6 @@ public class DataChangeFilterTests
         var config = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            PathProvider = new AttributeBasedPathProvider("opc"),
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),

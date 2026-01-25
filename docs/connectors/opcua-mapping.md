@@ -7,7 +7,17 @@ This document describes how to map C# object models to OPC UA address spaces usi
 The OPC UA mapping system translates between:
 - **C# classes** → OPC UA Object/Variable Nodes
 - **C# properties** → OPC UA Variable Nodes (Properties or DataVariables)
-- **C# property types** → OPC UA References (edges between nodes)
+
+## Server vs Client
+
+The same mapping attributes work for both server and client:
+
+- **Server**: Creates OPC UA nodes in the address space based on C# model
+- **Client**: Discovers OPC UA nodes and maps them to C# properties
+
+Some configuration applies only to one side:
+- `SamplingInterval`, `QueueSize`, `DataChangeTrigger` - Client monitoring
+- `EventNotifier`, `ModellingRule` - Server node structure
 
 ## Core Concepts
 
@@ -67,8 +77,8 @@ public class OpcUaNodeAttribute : Attribute
     public string? DataType { get; init; }
 
     // Client monitoring
-    public int SamplingInterval { get; init; }        // int.MinValue = not set
-    public uint QueueSize { get; init; }              // uint.MaxValue = not set
+    public int SamplingInterval { get; init; }        // int.MinValue = not set; 0 = exception-based
+    public uint QueueSize { get; init; }              // uint.MaxValue = not set; set explicitly with SamplingInterval=0
     public DiscardOldestMode DiscardOldest { get; init; }
     public DataChangeTrigger DataChangeTrigger { get; init; }
     public DeadbandType DeadbandType { get; init; }
@@ -319,6 +329,8 @@ public partial class MachineryBuildingBlocks
 }
 ```
 
+> **Note:** Processing order is non-deterministic when multiple properties reference the same object. Duplicate node metadata on all properties to ensure consistent behavior.
+
 ### Different NodeIds for Same Type
 
 Different instances of the same type get different NodeIds:
@@ -336,24 +348,6 @@ public partial class Machine
     public partial Motor Motor2 { get; set; }
 }
 ```
-
-## Property vs DataVariable
-
-OPC UA distinguishes between two types of Variables:
-
-| Aspect | Property | DataVariable |
-|--------|----------|--------------|
-| **Children** | Cannot have children (leaf node) | Can have children via HasComponent |
-| **Reference from parent** | HasProperty | HasComponent |
-| **TypeDefinition** | PropertyType | Any VariableType |
-| **Use case** | Simple metadata, characteristics | Structured data, measurements |
-
-**Guidelines:**
-- Use default `HasProperty` for simple scalar properties
-- Use `[OpcUaReference("HasComponent")]` for:
-  - Object references (other `[InterceptorSubject]` classes)
-  - Complex VariableTypes with children (NodeClass.Variable)
-  - Structural containment relationships
 
 ## Fluent Configuration
 
@@ -508,17 +502,6 @@ public partial class AnalogSignalVariable
 }
 ```
 
-## Server vs Client
-
-The same mapping attributes work for both server and client:
-
-- **Server**: Creates OPC UA nodes in the address space based on C# model
-- **Client**: Discovers OPC UA nodes and maps them to C# properties
-
-Some configuration applies only to one side:
-- `SamplingInterval`, `QueueSize`, `DataChangeTrigger` - Client monitoring
-- `EventNotifier`, `ModellingRule` - Server node structure
-
 ## Limitations
 
 The following OPC UA features are not yet supported but can be added in future versions without structural changes to the mapping model:
@@ -605,9 +588,3 @@ Explicit HasInterface references:
 public partial class MachineIdentification { ... }
 ```
 
-### Code Generation from NodeSet XML
-
-A separate tool could generate C# classes from companion spec NodeSet XML files:
-- Generated classes use `[OpcUaNode]` attributes
-- Users extend generated types with custom logic
-- Works with the existing mapping infrastructure

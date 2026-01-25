@@ -5,7 +5,6 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Server;
-using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 
 // ReSharper disable once CheckNamespace
@@ -79,7 +78,6 @@ public static class OpcUaSubjectExtensions
             {
                 ServerUrl = serverUrl,
                 RootName = rootName,
-                PathProvider = new AttributeBasedPathProvider(sourceName),
                 TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
                 ValueConverter = new OpcUaValueConverter(),
                 SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -150,7 +148,6 @@ public static class OpcUaSubjectExtensions
             return new OpcUaServerConfiguration
             {
                 RootName = rootName,
-                PathProvider = new AttributeBasedPathProvider(sourceName),
                 ValueConverter = new OpcUaValueConverter(),
                 TelemetryContext = telemetryContext
             };
