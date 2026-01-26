@@ -103,7 +103,10 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
         var nodeNamespaceUri = nodeReference.NodeId.NamespaceUri
             ?? session.NamespaceUris.GetString(nodeReference.NodeId.NamespaceIndex);
 
-        // Priority 1: Explicit NodeIdentifier match
+        var browseName = nodeReference.BrowseName.Name;
+        var browseNamespaceIndex = nodeReference.BrowseName.NamespaceIndex;
+
+        RegisteredSubjectProperty? browseNameMatch = null;
         foreach (var property in subject.Properties)
         {
             if (property.IsAttribute)
@@ -113,7 +116,11 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
                 .OfType<OpcUaNodeAttribute>()
                 .FirstOrDefault();
 
-            if (attribute is not null && attribute.NodeIdentifier == nodeIdString)
+            if (attribute is null)
+                continue;
+
+            // Priority 1: Explicit NodeIdentifier match - return immediately
+            if (attribute.NodeIdentifier == nodeIdString)
             {
                 var propertyNamespaceUri = attribute.NodeNamespaceUri ?? _defaultNamespaceUri;
                 if (propertyNamespaceUri is null || propertyNamespaceUri == nodeNamespaceUri)
@@ -121,24 +128,10 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
                     return Task.FromResult<RegisteredSubjectProperty?>(property);
                 }
             }
-        }
 
-        // Priority 2: BrowseName match via attribute
-        var browseName = nodeReference.BrowseName.Name;
-        var browseNamespaceIndex = nodeReference.BrowseName.NamespaceIndex;
-
-        foreach (var property in subject.Properties)
-        {
-            if (property.IsAttribute)
-                continue;
-
-            var attribute = property.ReflectionAttributes
-                .OfType<OpcUaNodeAttribute>()
-                .FirstOrDefault();
-
-            if (attribute?.BrowseName == browseName)
+            // Priority 2: BrowseName match - track first candidate
+            if (browseNameMatch is null && attribute.BrowseName == browseName)
             {
-                // Also check namespace if specified
                 if (attribute.BrowseNamespaceUri is not null)
                 {
                     var expectedNamespaceIndex = (ushort)session.NamespaceUris.GetIndex(attribute.BrowseNamespaceUri);
@@ -148,11 +141,11 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
                     }
                 }
 
-                return Task.FromResult<RegisteredSubjectProperty?>(property);
+                browseNameMatch = property;
             }
         }
 
-        return Task.FromResult<RegisteredSubjectProperty?>(null);
+        return Task.FromResult(browseNameMatch);
     }
 
     private static OpcUaNodeAttribute? GetClassLevelOpcUaNodeAttribute(RegisteredSubjectProperty property)

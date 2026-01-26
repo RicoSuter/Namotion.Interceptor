@@ -59,12 +59,32 @@ internal class CustomNodeManager : CustomNodeManager2
 
     public void ClearPropertyData()
     {
-        foreach (var node in PredefinedNodes.Values)
+        var rootSubject = _subject.TryGetRegisteredSubject();
+        if (rootSubject != null)
         {
-            if (node is BaseDataVariableState { Handle: PropertyReference property })
+            foreach (var property in rootSubject.Properties)
             {
-                property.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
+                property.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
+                ClearAttributePropertyData(property);
             }
+        }
+
+        foreach (var subject in _subjects.Keys)
+        {
+            foreach (var property in subject.Properties)
+            {
+                property.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
+                ClearAttributePropertyData(property);
+            }
+        }
+    }
+
+    private void ClearAttributePropertyData(RegisteredSubjectProperty property)
+    {
+        foreach (var attribute in property.Attributes)
+        {
+            attribute.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
+            ClearAttributePropertyData(attribute);
         }
     }
 
