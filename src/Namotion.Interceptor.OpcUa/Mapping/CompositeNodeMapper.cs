@@ -18,7 +18,7 @@ public class CompositeNodeMapper : IOpcUaNodeMapper
     /// <param name="mappers">Mappers in order (later mappers override earlier ones).</param>
     public CompositeNodeMapper(params IOpcUaNodeMapper[] mappers)
     {
-        _mappers = mappers;
+        _mappers = mappers.ToArray();
     }
 
     /// <inheritdoc />
