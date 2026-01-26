@@ -125,61 +125,28 @@ public class OpcUaReadWriteTests
             Assert.NotNull(_server?.Root);
             Assert.NotNull(_client?.Root);
 
-            // Test 1: Variable on object reference (Person.FirstName)
-            _server.Root.Person.FirstName = "UpdatedFirst";
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => _client.Root.Person.FirstName == "UpdatedFirst",
-                timeout: TimeSpan.FromSeconds(30),
-                message: "Client should receive Person.FirstName update");
+            // Act: Write all properties at once (no waiting between writes)
+            _server.Root.Person.FirstName = "UpdatedFirst";           // Test 1: Variable on object reference
+            _server.Root.People[0].LastName = "UpdatedLast";          // Test 2: Variable on collection item
+            _server.Root.PeopleByName!["john"].FirstName = "Johnny";  // Test 3: Variable on dictionary item
+            _server.Root.Person.Address!.City = "New York";           // Test 4: Deep nesting
+            _server.Root.People[0].Address!.ZipCode = "12345";        // Test 5: Collection + nesting
+            _server.Root.Sensor!.Value = 42.5;                        // Test 6: OpcUaValue pattern
+            _server.Root.Sensor.Unit = "°F";                          // Test 7: OpcUaValue child property
+            _server.Root.Sensor.MinValue = -50.0;                     // Test 8: OpcUaValue child property
 
-            // Test 2: Variable on collection item (People[0].LastName)
-            _server.Root.People[0].LastName = "UpdatedLast";
+            // Assert: Wait for all properties to sync in single check
             await AsyncTestHelpers.WaitUntilAsync(
-                () => _client.Root.People[0].LastName == "UpdatedLast",
-                timeout: TimeSpan.FromSeconds(30),
-                message: "Client should receive People[0].LastName update");
-
-            // Test 3: Variable on dictionary item (PeopleByName["john"].FirstName)
-            _server.Root.PeopleByName!["john"].FirstName = "Johnny";
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => _client.Root.PeopleByName!["john"].FirstName == "Johnny",
-                timeout: TimeSpan.FromSeconds(30),
-                message: "Client should receive PeopleByName[john].FirstName update");
-
-            // Test 4: Deep nesting (Person.Address.City)
-            _server.Root.Person.Address!.City = "New York";
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => _client.Root.Person.Address!.City == "New York",
-                timeout: TimeSpan.FromSeconds(30),
-                message: "Client should receive Person.Address.City update");
-
-            // Test 5: Collection + nesting (People[0].Address.ZipCode)
-            _server.Root.People[0].Address!.ZipCode = "12345";
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => _client.Root.People[0].Address!.ZipCode == "12345",
-                timeout: TimeSpan.FromSeconds(30),
-                message: "Client should receive People[0].Address.ZipCode update");
-
-            // Test 6: OpcUaValue pattern - VariableNode value (Sensor.Value)
-            _server.Root.Sensor!.Value = 42.5;
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => Math.Abs(_client.Root.Sensor!.Value - 42.5) < 0.01,
-                timeout: TimeSpan.FromSeconds(30),
-                message: "Client should receive Sensor.Value update");
-
-            // Test 7: OpcUaValue child property (Sensor.Unit)
-            _server.Root.Sensor.Unit = "°F";
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => _client.Root.Sensor!.Unit == "°F",
-                timeout: TimeSpan.FromSeconds(30),
-                message: "Client should receive Sensor.Unit update");
-
-            // Test 8: OpcUaValue child property (Sensor.MinValue)
-            _server.Root.Sensor.MinValue = -50.0;
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => _client.Root.Sensor?.MinValue == -50.0,
-                timeout: TimeSpan.FromSeconds(30),
-                message: "Client should receive Sensor.MinValue update");
+                () => _client.Root.Person.FirstName == "UpdatedFirst" &&
+                      _client.Root.People[0].LastName == "UpdatedLast" &&
+                      _client.Root.PeopleByName!["john"].FirstName == "Johnny" &&
+                      _client.Root.Person.Address!.City == "New York" &&
+                      _client.Root.People[0].Address!.ZipCode == "12345" &&
+                      Math.Abs(_client.Root.Sensor!.Value - 42.5) < 0.01 &&
+                      _client.Root.Sensor!.Unit == "°F" &&
+                      _client.Root.Sensor?.MinValue == -50.0,
+                timeout: TimeSpan.FromSeconds(60),
+                message: "Client should receive all nested structure updates");
 
             _logger!.Log("All nested structure tests passed!");
         }
