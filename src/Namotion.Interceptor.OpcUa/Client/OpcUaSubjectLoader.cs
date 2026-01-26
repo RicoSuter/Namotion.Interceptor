@@ -142,7 +142,8 @@ internal class OpcUaSubjectLoader
                 else
                 {
                     MonitorValueNode(childNodeId, property, monitoredItems);
-                    await LoadAttributeNodesAsync(property, childNodeId, session, monitoredItems, cancellationToken).ConfigureAwait(false);
+                    var visitedNodes = new HashSet<NodeId>();
+                    await LoadAttributeNodesAsync(property, childNodeId, session, monitoredItems, visitedNodes, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -153,8 +154,13 @@ internal class OpcUaSubjectLoader
         NodeId parentNodeId,
         ISession session,
         List<MonitoredItem> monitoredItems,
+        HashSet<NodeId> visitedNodes,
         CancellationToken cancellationToken)
     {
+        // Guard against cycles in OPC UA hierarchy
+        if (!visitedNodes.Add(parentNodeId))
+            return;
+
         // Browse children of the variable node
         var childNodes = await BrowseNodeAsync(parentNodeId, session, cancellationToken).ConfigureAwait(false);
         var matchedNames = new HashSet<string>();
@@ -185,7 +191,7 @@ internal class OpcUaSubjectLoader
             MonitorValueNode(attributeNodeId, attribute, monitoredItems);
 
             // Recursive: attributes can have attributes
-            await LoadAttributeNodesAsync(attribute, attributeNodeId, session, monitoredItems, cancellationToken).ConfigureAwait(false);
+            await LoadAttributeNodesAsync(attribute, attributeNodeId, session, monitoredItems, visitedNodes, cancellationToken).ConfigureAwait(false);
         }
 
         // Second pass: add dynamic attributes (same pattern as ShouldAddDynamicProperty)
@@ -224,8 +230,8 @@ internal class OpcUaSubjectLoader
             var attributeNodeId = ExpandedNodeId.ToNodeId(childNode.NodeId, session.NamespaceUris);
             MonitorValueNode(attributeNodeId, dynamicAttribute, monitoredItems);
 
-            // Recursive
-            await LoadAttributeNodesAsync(dynamicAttribute, attributeNodeId, session, monitoredItems, cancellationToken).ConfigureAwait(false);
+            // Recursive with cycle detection
+            await LoadAttributeNodesAsync(dynamicAttribute, attributeNodeId, session, monitoredItems, visitedNodes, cancellationToken).ConfigureAwait(false);
         }
     }
 
