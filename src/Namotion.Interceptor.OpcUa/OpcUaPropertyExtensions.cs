@@ -34,4 +34,22 @@ internal static class OpcUaPropertyExtensions
 
         return null;
     }
+
+    /// <summary>
+    /// Finds the property marked with [OpcUaValue] (IsValue = true) in the given subject.
+    /// Returns null if no value property is found.
+    /// </summary>
+    public static RegisteredSubjectProperty? TryGetValueProperty(this RegisteredSubject subject, IOpcUaNodeMapper nodeMapper)
+    {
+        foreach (var property in subject.Properties)
+        {
+            var config = nodeMapper.TryGetNodeConfiguration(property);
+            if (config?.IsValue == true)
+            {
+                return property;
+            }
+        }
+
+        return null;
+    }
 }

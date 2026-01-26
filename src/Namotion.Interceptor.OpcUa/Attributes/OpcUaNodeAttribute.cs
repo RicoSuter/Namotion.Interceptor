@@ -23,10 +23,10 @@ public enum DiscardOldestMode
 /// Configures OPC UA node mapping for a property or class.
 /// When applied to a class, provides default configuration for all properties of that type.
 /// </summary>
-[AttributeUsage(AttributeTargets.Property | AttributeTargets.Class, AllowMultiple = false)]
+[AttributeUsage(AttributeTargets.Property | AttributeTargets.Class)]
 public class OpcUaNodeAttribute : PathAttribute
 {
-    public OpcUaNodeAttribute(string browseName, string? browseNamespaceUri, string? connectorName = null)
+    public OpcUaNodeAttribute(string browseName, string? browseNamespaceUri = null, string? connectorName = null)
         : base(connectorName ?? OpcUaConstants.DefaultConnectorName, browseName)
     {
         BrowseName = browseName;

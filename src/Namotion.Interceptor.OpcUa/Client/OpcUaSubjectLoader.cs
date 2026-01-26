@@ -377,15 +377,10 @@ internal class OpcUaSubjectLoader
         }
 
         // Find [OpcUaValue] property and monitor the node for it
-        foreach (var childProperty in childSubject.Properties)
+        var valueProperty = childSubject.TryGetValueProperty(_configuration.NodeMapper);
+        if (valueProperty != null)
         {
-            var childConfig = _configuration.NodeMapper.TryGetNodeConfiguration(childProperty);
-            if (childConfig?.IsValue == true)
-            {
-                // Monitor the value node with the value property
-                MonitorValueNode(nodeId, childProperty, monitoredItems);
-                break;
-            }
+            MonitorValueNode(nodeId, valueProperty, monitoredItems);
         }
 
         // Also load HasProperty children as regular variable nodes
@@ -395,8 +390,7 @@ internal class OpcUaSubjectLoader
             // Find matching property in child subject (excluding the value property)
             foreach (var childProperty in childSubject.Properties)
             {
-                var childConfig = _configuration.NodeMapper.TryGetNodeConfiguration(childProperty);
-                if (childConfig?.IsValue == true)
+                if (childProperty == valueProperty)
                 {
                     continue; // Skip the value property
                 }

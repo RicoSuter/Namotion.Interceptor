@@ -23,6 +23,12 @@ public interface IPropertyBuilder<T>
     IPropertyBuilder<T> NodeClass(OpcUaNodeClass value);
     IPropertyBuilder<T> DataType(string value);
 
+    /// <summary>
+    /// Marks this property as the primary value for a VariableNode class (equivalent to [OpcUaValue] attribute).
+    /// Use this when mapping a class to a VariableType where the class has a primary value property.
+    /// </summary>
+    IPropertyBuilder<T> IsValue(bool value = true);
+
     // Reference configuration
     IPropertyBuilder<T> ReferenceType(string value);
     IPropertyBuilder<T> ItemReferenceType(string value);

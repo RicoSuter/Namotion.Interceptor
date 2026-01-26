@@ -63,8 +63,8 @@ Defines node metadata. Can be applied to classes (type-level defaults) or proper
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Property)]
 public class OpcUaNodeAttribute : Attribute
 {
-    // Constructor - BrowseName is required
-    public OpcUaNodeAttribute(string browseName, string? browseNamespaceUri);
+    // Constructor - BrowseName is required, namespace defaults to null
+    public OpcUaNodeAttribute(string browseName, string? browseNamespaceUri = null);
 
     // Node identification (from constructor)
     public string BrowseName { get; }
@@ -142,8 +142,9 @@ Used when a class represents a complex VariableType (like AnalogSignalVariableTy
 
 ```csharp
 [InterceptorSubject]
-[OpcUaNode(TypeDefinition = "MachineIdentificationType",
-           TypeDefinitionNamespace = "http://opcfoundation.org/UA/Machinery/")]
+[OpcUaNode("Identification",
+    TypeDefinition = "MachineIdentificationType",
+    TypeDefinitionNamespace = "http://opcfoundation.org/UA/Machinery/")]
 public partial class Identification
 {
     // Default reference is HasProperty - no attribute needed
@@ -167,7 +168,7 @@ For structural composition (parent "contains" child), use `HasComponent`:
 
 ```csharp
 [InterceptorSubject]
-[OpcUaNode(TypeDefinition = "MachineType")]
+[OpcUaNode("Machine", TypeDefinition = "MachineType")]
 public partial class Machine
 {
     // Child object - use HasComponent for structural containment
@@ -179,7 +180,7 @@ public partial class Machine
 }
 
 [InterceptorSubject]
-[OpcUaNode(TypeDefinition = "MotorType")]
+[OpcUaNode("Motor", TypeDefinition = "MotorType")]
 public partial class Motor
 {
     public partial double Speed { get; set; }
@@ -205,8 +206,7 @@ Machinery and other companion specs use `HasAddIn` for optional add-in component
 public partial class Machine
 {
     [OpcUaReference("HasAddIn")]
-    [OpcUaNode(BrowseName = "Identification",
-               BrowseNamespaceUri = "http://opcfoundation.org/UA/DI/")]
+    [OpcUaNode("Identification", "http://opcfoundation.org/UA/DI/")]
     public partial Identification Identification { get; set; }
 
     [OpcUaReference("HasComponent")]
@@ -224,7 +224,7 @@ public partial class Machine
 {
     // Folder organizing process values
     [OpcUaReference("Organizes", ItemReferenceType = "HasComponent")]
-    [OpcUaNode(TypeDefinition = "FolderType")]
+    [OpcUaNode("Monitoring", TypeDefinition = "FolderType")]
     public partial IReadOnlyDictionary<string, ProcessValueType> Monitoring { get; set; }
 }
 ```
@@ -244,18 +244,22 @@ When a class represents a VariableType (not ObjectType), the node is a Variable 
 
 ```csharp
 [InterceptorSubject]
-[OpcUaNode(
+[OpcUaNode("AnalogSignalVariable",
     TypeDefinition = "AnalogSignalVariableType",
     TypeDefinitionNamespace = "http://opcfoundation.org/UA/PADIM/",
     NodeClass = OpcUaNodeClass.Variable)]  // Force VariableNode
 public partial class AnalogSignalVariable
 {
     // The primary value of this VariableNode
+    [OpcUaNode("ActualValue")]
     [OpcUaValue]
     public partial double ActualValue { get; set; }
 
     // Child properties (standard OPC UA metadata)
+    [OpcUaNode("EURange")]
     public partial Range? EURange { get; set; }
+
+    [OpcUaNode("EngineeringUnits")]
     public partial EUInformation? EngineeringUnits { get; set; }
 }
 
@@ -286,16 +290,16 @@ For adding standard OPC UA metadata (EURange, EngineeringUnits) to simple proper
 [InterceptorSubject]
 public partial class TemperatureSensor
 {
-    [OpcUaNode(TypeDefinition = "AnalogItemType")]
+    [OpcUaNode("Value", TypeDefinition = "AnalogItemType")]
     public partial double Value { get; set; }
 
     // Property attributes become HasProperty children of Value
     [PropertyAttribute(nameof(Value), "EURange")]
-    [Path("opc", "EURange")]
+    [OpcUaNode("EURange")]
     public partial Range? Value_EURange { get; set; }
 
     [PropertyAttribute(nameof(Value), "EngineeringUnits")]
-    [Path("opc", "EngineeringUnits")]
+    [OpcUaNode("EngineeringUnits")]
     public partial EUInformation? Value_EngineeringUnits { get; set; }
 }
 ```
@@ -334,14 +338,14 @@ var machine = new Machine
 public partial class Machine
 {
     [OpcUaReference("HasAddIn")]
-    [OpcUaNode(NodeIdentifier = "Identification")]  // Explicit NodeId
+    [OpcUaNode("Identification", NodeIdentifier = "Identification")]  // Explicit NodeId
     public partial Identification Identification { get; set; }
 }
 
 public partial class MachineryBuildingBlocks
 {
     [OpcUaReference("HasAddIn")]
-    // No NodeIdentifier - references existing node
+    [OpcUaNode("Identification")]  // No NodeIdentifier - references existing node
     public partial Identification Identification { get; set; }
 }
 ```
@@ -357,11 +361,11 @@ Different instances of the same type get different NodeIds:
 public partial class Machine
 {
     [OpcUaReference("HasComponent")]
-    [OpcUaNode(NodeIdentifier = "MainMotor", BrowseName = "MainMotor")]
+    [OpcUaNode("MainMotor", NodeIdentifier = "MainMotor")]
     public partial Motor Motor1 { get; set; }
 
     [OpcUaReference("HasComponent")]
-    [OpcUaNode(NodeIdentifier = "AuxMotor", BrowseName = "AuxMotor")]
+    [OpcUaNode("AuxMotor", NodeIdentifier = "AuxMotor")]
     public partial Motor Motor2 { get; set; }
 }
 ```
@@ -378,7 +382,7 @@ For **class-level configuration** (TypeDefinition, NodeClass that applies to all
 
 ```csharp
 // Class-level: Use attributes (applies to ALL Motor instances)
-[OpcUaNode(TypeDefinition = "MotorType")]
+[OpcUaNode("Motor", TypeDefinition = "MotorType")]
 public partial class Motor { ... }
 
 // Instance-level: Use fluent (different config per instance)
@@ -516,17 +520,17 @@ Result: { BrowseName: "Speed", SamplingInterval: 50 }
 
 ```csharp
 [InterceptorSubject]
-[OpcUaNode(TypeDefinition = "MachineType",
-           TypeDefinitionNamespace = "http://opcfoundation.org/UA/Machinery/")]
+[OpcUaNode("Machine",
+    TypeDefinition = "MachineType",
+    TypeDefinitionNamespace = "http://opcfoundation.org/UA/Machinery/")]
 public partial class Machine
 {
     [OpcUaReference("HasAddIn")]
-    [OpcUaNode(BrowseName = "Identification",
-               BrowseNamespaceUri = "http://opcfoundation.org/UA/DI/")]
+    [OpcUaNode("Identification", "http://opcfoundation.org/UA/DI/")]
     public partial MachineIdentification Identification { get; set; }
 
     [OpcUaReference("HasComponent")]
-    [OpcUaNode(BrowseName = "MachineryBuildingBlocks")]
+    [OpcUaNode("MachineryBuildingBlocks")]
     public partial MachineryBuildingBlocks MachineryBuildingBlocks { get; set; }
 }
 ```

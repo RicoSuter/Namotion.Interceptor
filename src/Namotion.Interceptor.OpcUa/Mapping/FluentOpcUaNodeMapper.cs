@@ -151,6 +151,9 @@ public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
         public IPropertyBuilder<TProp> DataType(string value) =>
             UpdateConfig(c => c with { DataType = value });
 
+        public IPropertyBuilder<TProp> IsValue(bool value = true) =>
+            UpdateConfig(c => c with { IsValue = value });
+
         public IPropertyBuilder<TProp> ReferenceType(string value) =>
             UpdateConfig(c => c with { ReferenceType = value });
 
