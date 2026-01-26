@@ -280,7 +280,7 @@ Sensor (ObjectNode)
 
 ### Property Attributes (Metadata on Variables)
 
-For adding standard OPC UA metadata (EURange, EngineeringUnits) to simple properties:
+For adding standard OPC UA metadata (EURange, EngineeringUnits) to simple properties, use `[PropertyAttribute]`. Properties marked with this attribute are created as HasProperty subnodes of their parent variable node, matching OPC UA semantics where attributes belong to the variable they describe.
 
 ```csharp
 [InterceptorSubject]
@@ -291,9 +291,11 @@ public partial class TemperatureSensor
 
     // Property attributes become HasProperty children of Value
     [PropertyAttribute(nameof(Value), "EURange")]
+    [Path("opc", "EURange")]
     public partial Range? Value_EURange { get; set; }
 
     [PropertyAttribute(nameof(Value), "EngineeringUnits")]
+    [Path("opc", "EngineeringUnits")]
     public partial EUInformation? Value_EngineeringUnits { get; set; }
 }
 ```
@@ -305,6 +307,8 @@ TemperatureSensor (ObjectNode)
     ├── EURange (VariableNode via HasProperty)
     └── EngineeringUnits (VariableNode via HasProperty)
 ```
+
+Note: The C# property names (e.g., `Value_EURange`) are just convention - the OPC UA browse names come from the `[Path]` or `[OpcUaNode]` attributes. Attributes can be nested (attributes on attributes) for complex metadata hierarchies.
 
 ### Same Instance, Multiple References
 

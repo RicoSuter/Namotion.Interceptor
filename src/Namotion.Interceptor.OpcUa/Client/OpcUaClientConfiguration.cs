@@ -71,9 +71,17 @@ public class OpcUaClientConfiguration
     /// If the function returns true, the node is added as a dynamic property to the given subject.
     /// Default is add all missing as dynamic properties.
     /// </summary>
-    public Func<ReferenceDescription, CancellationToken, Task<bool>>? ShouldAddDynamicProperty { get; set; } = 
+    public Func<ReferenceDescription, CancellationToken, Task<bool>>? ShouldAddDynamicProperty { get; set; } =
         static (_, _) => Task.FromResult(true);
-    
+
+    /// <summary>
+    /// Gets or sets an async predicate called when an unknown attribute is found on a variable node.
+    /// If returns true, the attribute is added as a dynamic attribute to the parent property.
+    /// Default is add all missing as dynamic attributes.
+    /// </summary>
+    public Func<ReferenceDescription, CancellationToken, Task<bool>>? ShouldAddDynamicAttribute { get; set; } =
+        static (_, _) => Task.FromResult(true);
+
     /// <summary>
     /// Gets the type resolver used to infer C# types from OPC UA nodes during dynamic property discovery.
     /// </summary>
