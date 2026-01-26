@@ -14,7 +14,6 @@ public class OpcUaClientConfiguration
         new PathProviderOpcUaNodeMapper(new AttributeBasedPathProvider(OpcUaConstants.DefaultConnectorName)),
         new AttributeOpcUaNodeMapper());
 
-    private MonitoredItemFactory? _monitoredItemFactory;
     private ISessionFactory? _resolvedSessionFactory;
 
     /// <summary>
@@ -410,19 +409,6 @@ public class OpcUaClientConfiguration
         application.ApplicationConfiguration = config;
         return application;
     }
-
-    private MonitoredItemFactory MonitoredItemFactory => _monitoredItemFactory ??= new MonitoredItemFactory(this);
-
-    /// <summary>
-    /// Creates a MonitoredItem for the given property and node ID using this configuration's defaults.
-    /// NodeMapper configuration overrides (SamplingInterval, QueueSize, DiscardOldest, DataChangeTrigger, DeadbandType, DeadbandValue)
-    /// are applied if present on the property.
-    /// </summary>
-    /// <param name="nodeId">The OPC UA node ID to monitor.</param>
-    /// <param name="property">The property to associate with the monitored item.</param>
-    /// <returns>A configured MonitoredItem ready to be added to a subscription.</returns>
-    internal MonitoredItem CreateMonitoredItem(NodeId nodeId, RegisteredSubjectProperty property) =>
-        MonitoredItemFactory.Create(nodeId, property);
 
     /// <summary>
     /// Validates configuration values and throws ArgumentException if invalid.

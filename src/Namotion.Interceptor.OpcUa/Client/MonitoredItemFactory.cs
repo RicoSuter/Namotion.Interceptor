@@ -9,27 +9,21 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// Factory for creating MonitoredItem instances from configuration.
 /// Extracted from OpcUaClientConfiguration for single responsibility.
 /// </summary>
-internal class MonitoredItemFactory
+internal static class MonitoredItemFactory
 {
-    private readonly OpcUaClientConfiguration _configuration;
-
-    public MonitoredItemFactory(OpcUaClientConfiguration configuration)
-    {
-        _configuration = configuration;
-    }
-
     /// <summary>
     /// Creates a MonitoredItem for the given property and node ID using the configuration defaults.
     /// NodeMapper configuration overrides (SamplingInterval, QueueSize, DiscardOldest, DataChangeTrigger, DeadbandType, DeadbandValue)
     /// are applied if present on the property.
     /// </summary>
+    /// <param name="configuration">The configuration.</param>
     /// <param name="nodeId">The OPC UA node ID to monitor.</param>
     /// <param name="property">The property to associate with the monitored item.</param>
     /// <returns>A configured MonitoredItem ready to be added to a subscription.</returns>
-    public MonitoredItem Create(NodeId nodeId, RegisteredSubjectProperty property)
+    public static MonitoredItem Create(OpcUaClientConfiguration configuration, NodeId nodeId, RegisteredSubjectProperty property)
     {
-        var nodeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(property);
-        var item = new MonitoredItem(_configuration.TelemetryContext)
+        var nodeConfiguration = configuration.NodeMapper.TryGetNodeConfiguration(property);
+        var item = new MonitoredItem(configuration.TelemetryContext)
         {
             StartNodeId = nodeId,
             AttributeId = Opc.Ua.Attributes.Value,
@@ -38,26 +32,26 @@ internal class MonitoredItemFactory
         };
 
         // Apply sampling/queue settings from NodeMapper configuration
-        var samplingInterval = nodeConfiguration?.SamplingInterval ?? _configuration.DefaultSamplingInterval;
+        var samplingInterval = nodeConfiguration?.SamplingInterval ?? configuration.DefaultSamplingInterval;
         if (samplingInterval.HasValue)
         {
             item.SamplingInterval = samplingInterval.Value;
         }
 
-        var queueSize = nodeConfiguration?.QueueSize ?? _configuration.DefaultQueueSize;
+        var queueSize = nodeConfiguration?.QueueSize ?? configuration.DefaultQueueSize;
         if (queueSize.HasValue)
         {
             item.QueueSize = queueSize.Value;
         }
 
-        var discardOldest = nodeConfiguration?.DiscardOldest ?? _configuration.DefaultDiscardOldest;
+        var discardOldest = nodeConfiguration?.DiscardOldest ?? configuration.DefaultDiscardOldest;
         if (discardOldest.HasValue)
         {
             item.DiscardOldest = discardOldest.Value;
         }
 
         // Apply filter (only if any filter option is specified)
-        var filter = CreateDataChangeFilter(nodeConfiguration);
+        var filter = CreateDataChangeFilter(configuration, nodeConfiguration);
         if (filter != null)
         {
             item.Filter = filter;
@@ -70,12 +64,12 @@ internal class MonitoredItemFactory
     /// Creates a DataChangeFilter based on the node configuration and configuration defaults.
     /// Returns null if no filter options are specified (uses OPC UA library defaults).
     /// </summary>
-    private DataChangeFilter? CreateDataChangeFilter(OpcUaNodeConfiguration? nodeConfiguration)
+    private static DataChangeFilter? CreateDataChangeFilter(OpcUaClientConfiguration configuration, OpcUaNodeConfiguration? nodeConfiguration)
     {
         // Apply NodeMapper configuration overrides, then configuration defaults
-        var trigger = nodeConfiguration?.DataChangeTrigger ?? _configuration.DefaultDataChangeTrigger;
-        var deadbandType = nodeConfiguration?.DeadbandType ?? _configuration.DefaultDeadbandType;
-        var deadbandValue = nodeConfiguration?.DeadbandValue ?? _configuration.DefaultDeadbandValue;
+        var trigger = nodeConfiguration?.DataChangeTrigger ?? configuration.DefaultDataChangeTrigger;
+        var deadbandType = nodeConfiguration?.DeadbandType ?? configuration.DefaultDeadbandType;
+        var deadbandValue = nodeConfiguration?.DeadbandValue ?? configuration.DefaultDeadbandValue;
 
         // Only create filter if at least one option is specified
         if (!trigger.HasValue && !deadbandType.HasValue && !deadbandValue.HasValue)

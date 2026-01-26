@@ -279,7 +279,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
         foreach (var (property, nodeId) in ownedProperties)
         {
-            var monitoredItem = _configuration.CreateMonitoredItem(nodeId, property);
+            var monitoredItem = MonitoredItemFactory.Create(_configuration, nodeId, property);
             monitoredItems.Add(monitoredItem);
         }
 

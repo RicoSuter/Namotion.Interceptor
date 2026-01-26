@@ -349,7 +349,7 @@ internal class OpcUaSubjectLoader
 
     private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)
     {
-        var monitoredItem = _configuration.CreateMonitoredItem(nodeId, property);
+        var monitoredItem = MonitoredItemFactory.Create(_configuration, nodeId, property);
         property.Reference.SetPropertyData(_source.OpcUaNodeIdKey, nodeId);
 
         if (!_ownership.ClaimSource(property.Reference))
