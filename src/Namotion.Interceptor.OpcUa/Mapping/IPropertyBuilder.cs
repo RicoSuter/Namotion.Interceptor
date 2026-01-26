@@ -27,7 +27,7 @@ public interface IPropertyBuilder<T>
     IPropertyBuilder<T> ReferenceType(string value);
     IPropertyBuilder<T> ItemReferenceType(string value);
 
-    // Client only - monitoring
+    // Client-only - monitoring
     IPropertyBuilder<T> SamplingInterval(int value);
     IPropertyBuilder<T> QueueSize(uint value);
     IPropertyBuilder<T> DiscardOldest(bool value);
@@ -35,12 +35,12 @@ public interface IPropertyBuilder<T>
     IPropertyBuilder<T> DeadbandType(DeadbandType value);
     IPropertyBuilder<T> DeadbandValue(double value);
 
-    // Server only
+    // Server-only
     IPropertyBuilder<T> ModellingRule(ModellingRule value);
     IPropertyBuilder<T> EventNotifier(byte value);
 
     /// <summary>
-    /// Adds an additional non-hierarchical reference to the node.
+    /// Adds a non-hierarchical reference to the node.
     /// </summary>
     /// <param name="referenceType">Reference type name (e.g., "HasInterface", "GeneratesEvent").</param>
     /// <param name="targetNodeId">Target node identifier.</param>

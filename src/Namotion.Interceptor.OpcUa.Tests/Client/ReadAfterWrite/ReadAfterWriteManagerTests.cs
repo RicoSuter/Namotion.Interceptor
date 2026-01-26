@@ -3,7 +3,6 @@ using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Client.ReadAfterWrite;
@@ -14,7 +13,6 @@ namespace Namotion.Interceptor.OpcUa.Tests.Client.ReadAfterWrite;
 public class ReadAfterWriteManagerTests : IAsyncDisposable
 {
     private readonly ReadAfterWriteManager _manager;
-    private readonly OpcUaClientConfiguration _configuration;
     private readonly TestPerson _testSubject;
 
     private static RegisteredSubjectProperty CreateTestProperty(TestPerson subject, string name = "FirstName")
@@ -26,12 +24,12 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
     public ReadAfterWriteManagerTests()
     {
         _testSubject = new TestPerson(new InterceptorSubjectContext());
-        _configuration = new OpcUaClientConfiguration
+        var configuration = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
-            SubjectFactory = new OpcUaSubjectFactory(Namotion.Interceptor.Connectors.DefaultSubjectFactory.Instance),
+            SubjectFactory = new OpcUaSubjectFactory(Connectors.DefaultSubjectFactory.Instance),
             ReadAfterWriteBuffer = TimeSpan.FromMilliseconds(50)
         };
 
@@ -39,7 +37,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         _manager = new ReadAfterWriteManager(
             sessionProvider: () => null,
             source: null!, // Not used in these unit tests
-            _configuration,
+            configuration,
             NullLogger.Instance);
     }
 
