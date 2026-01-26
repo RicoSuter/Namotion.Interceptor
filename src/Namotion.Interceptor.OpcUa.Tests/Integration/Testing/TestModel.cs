@@ -166,6 +166,10 @@ public partial class TestNodeMapperModel
     [OpcUaNode("SimpleProp", "http://test/")]
     public partial string SimpleProp { get; set; }
 
+    /// <summary>Property with explicit NodeIdentifier for Priority 1 matching.</summary>
+    [OpcUaNode("NodeIdProp", null, NodeIdentifier = "ns=2;s=MyExplicitNodeId", NodeNamespaceUri = "http://myserver/")]
+    public partial double NodeIdProp { get; set; }
+
     /// <summary>Property with sampling/queue settings.</summary>
     [OpcUaNode("MonitoredProp", null, SamplingInterval = 500, QueueSize = 10)]
     public partial double MonitoredProp { get; set; }
@@ -209,6 +213,7 @@ public partial class TestNodeMapperModel
     public TestNodeMapperModel()
     {
         SimpleProp = "";
+        NodeIdProp = 0;
         MonitoredProp = 0;
         FilteredProp = 0;
         QueueProp = 0;

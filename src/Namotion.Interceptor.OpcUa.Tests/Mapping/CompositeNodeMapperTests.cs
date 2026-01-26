@@ -138,6 +138,71 @@ public class CompositeNodeMapperTests
         Assert.Equal(10u, result.QueueSize);
     }
 
+    [Fact]
+    public void TryGetNodeConfiguration_WithThreePlusMappers_LastMapperWins()
+    {
+        // Arrange - Create three mappers to verify 3+ mapper behavior
+        var pathProvider1 = new AttributeBasedPathProvider("opc");
+        var pathMapper1 = new PathProviderOpcUaNodeMapper(pathProvider1);
+
+        var pathProvider2 = new AttributeBasedPathProvider("opc");
+        var pathMapper2 = new PathProviderOpcUaNodeMapper(pathProvider2);
+
+        var attributeMapper = new AttributeOpcUaNodeMapper();
+
+        // Three mappers: pathMapper1, pathMapper2, attributeMapper (last wins)
+        var composite = new CompositeNodeMapper(pathMapper1, pathMapper2, attributeMapper);
+        var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+        // FilteredProp has OpcUaNode with filter settings
+        var property = registeredSubject.TryGetProperty("FilteredProp")!;
+
+        // Act
+        var result = composite.TryGetNodeConfiguration(property);
+
+        // Assert - Verifies that all three mappers are processed correctly
+        Assert.NotNull(result);
+        Assert.Equal("FilteredProp", result.BrowseName);
+        // These come from attributeMapper (last mapper)
+        Assert.Equal(DataChangeTrigger.StatusValueTimestamp, result.DataChangeTrigger);
+        Assert.Equal(DeadbandType.Absolute, result.DeadbandType);
+        Assert.Equal(0.5, result.DeadbandValue);
+    }
+
+    [Fact]
+    public async Task TryGetPropertyAsync_WithThreePlusMappers_LastMatchingMapperWins()
+    {
+        // Arrange - Create three mappers
+        var pathProvider1 = new AttributeBasedPathProvider("opc");
+        var pathMapper1 = new PathProviderOpcUaNodeMapper(pathProvider1);
+
+        var pathProvider2 = new AttributeBasedPathProvider("opc");
+        var pathMapper2 = new PathProviderOpcUaNodeMapper(pathProvider2);
+
+        var attributeMapper = new AttributeOpcUaNodeMapper();
+
+        var composite = new CompositeNodeMapper(pathMapper1, pathMapper2, attributeMapper);
+        var subject = new TestRoot(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+
+        var namespaceUris = new NamespaceTable();
+        var mockSession = new Mock<ISession>();
+        mockSession.Setup(s => s.NamespaceUris).Returns(namespaceUris);
+
+        var nodeReference = new ReferenceDescription
+        {
+            NodeId = new ExpandedNodeId("Name", 0),
+            BrowseName = new QualifiedName("Name", 0)
+        };
+
+        // Act
+        var result = await composite.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+
+        // Assert - Should find the property through the composite (last matching mapper wins)
+        Assert.NotNull(result);
+        Assert.Equal("Name", result.Name);
+    }
+
     #region TryGetPropertyAsync Tests
 
     [Fact]

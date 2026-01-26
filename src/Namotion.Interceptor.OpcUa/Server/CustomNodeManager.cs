@@ -193,16 +193,19 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private void CreateArrayObjectNode(string propertyName, RegisteredSubjectProperty property, ICollection<SubjectPropertyChild> children, NodeId parentNodeId, string parentPath)
     {
-        var nodeId = GetNodeId(property, parentPath + propertyName);
-        var browseName = GetBrowseName(propertyName, property, null);
+        // Cache node configuration to avoid repeated lookups
+        var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
 
-        var typeDefinitionId = GetTypeDefinitionId(property);
-        var referenceTypeId = GetReferenceTypeId(property);
+        var nodeId = GetNodeId(nodeConfiguration, parentPath + propertyName);
+        var browseName = GetBrowseName(propertyName, nodeConfiguration, null);
+
+        var typeDefinitionId = GetTypeDefinitionId(nodeConfiguration);
+        var referenceTypeId = GetReferenceTypeId(nodeConfiguration);
 
         var propertyNode = CreateFolderNode(parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId);
 
         // Child objects below the array folder use path: parentPath + propertyName + "[index]"
-        var childReferenceTypeId = GetChildReferenceTypeId(property);
+        var childReferenceTypeId = GetChildReferenceTypeId(nodeConfiguration);
         foreach (var child in children)
         {
             var childBrowseName = new QualifiedName($"{propertyName}[{child.Index}]", NamespaceIndex);
@@ -214,14 +217,17 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private void CreateDictionaryObjectNode(string propertyName, RegisteredSubjectProperty property, ICollection<SubjectPropertyChild> children, NodeId parentNodeId, string parentPath)
     {
-        var nodeId = GetNodeId(property, parentPath + propertyName);
-        var browseName = GetBrowseName(propertyName, property, null);
+        // Cache node configuration to avoid repeated lookups
+        var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
 
-        var typeDefinitionId = GetTypeDefinitionId(property);
-        var referenceTypeId = GetReferenceTypeId(property);
+        var nodeId = GetNodeId(nodeConfiguration, parentPath + propertyName);
+        var browseName = GetBrowseName(propertyName, nodeConfiguration, null);
+
+        var typeDefinitionId = GetTypeDefinitionId(nodeConfiguration);
+        var referenceTypeId = GetReferenceTypeId(nodeConfiguration);
 
         var propertyNode = CreateFolderNode(parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId);
-        var childReferenceTypeId = GetChildReferenceTypeId(property);
+        var childReferenceTypeId = GetChildReferenceTypeId(nodeConfiguration);
         foreach (var child in children)
         {
             var childBrowseName = new QualifiedName(child.Index?.ToString(), NamespaceIndex);
@@ -241,58 +247,13 @@ internal class CustomNodeManager : CustomNodeManager2
         // Use configurationProperty for node identity, property for value/type
         var actualConfigurationProperty = configurationProperty ?? property;
 
-        var value = _configuration.ValueConverter.ConvertToNodeValue(property.GetValue(), property);
-        var typeInfo = _configuration.ValueConverter.GetNodeTypeInfo(property.Type);
-
         var nodeId = GetNodeId(actualConfigurationProperty, parentPath + propertyName);
         var browseName = GetBrowseName(propertyName, actualConfigurationProperty, null);
-
         var referenceTypeId = GetReferenceTypeId(actualConfigurationProperty);
         var dataTypeOverride = GetDataTypeOverride(property);
         var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(actualConfigurationProperty);
-        var variableNode = CreateVariableNode(parentNodeId, nodeId, browseName, typeInfo, referenceTypeId, dataTypeOverride, nodeConfiguration);
-        AddAdditionalReferences(variableNode, nodeConfiguration);
-        variableNode.Handle = property.Reference;
 
-        // Adjust access according to property setter
-        if (!property.HasSetter)
-        {
-            variableNode.AccessLevel = AccessLevels.CurrentRead;
-            variableNode.UserAccessLevel = AccessLevels.CurrentRead;
-        }
-        else
-        {
-            variableNode.AccessLevel = AccessLevels.CurrentReadOrWrite;
-            variableNode.UserAccessLevel = AccessLevels.CurrentReadOrWrite;
-        }
-
-        // Set array dimensions (works for 1D and multi-D)
-        if (value is Array arrayValue)
-        {
-            variableNode.ArrayDimensions = new ReadOnlyList<uint>(
-                Enumerable.Range(0, arrayValue.Rank)
-                    .Select(i => (uint)arrayValue.GetLength(i))
-                    .ToArray());
-        }
-
-        variableNode.Value = value;
-        variableNode.StateChanged += (_, _, changes) =>
-        {
-            if (changes.HasFlag(NodeStateChangeMasks.Value))
-            {
-                // Lock on node to prevent race conditions with WriteToSourceAsync
-
-                DateTimeOffset timestamp;
-                object? nodeValue;
-                lock (variableNode)
-                {
-                    timestamp = variableNode.Timestamp;
-                    nodeValue = variableNode.Value;
-                }
-
-                _source.UpdateProperty(property.Reference, timestamp, nodeValue);
-            }
-        };
+        var variableNode = ConfigureVariableNode(property, parentNodeId, nodeId, browseName, referenceTypeId, dataTypeOverride, nodeConfiguration);
 
         property.Reference.SetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, variableNode);
 
@@ -332,20 +293,39 @@ internal class CustomNodeManager : CustomNodeManager2
         string path,
         NodeId referenceTypeId)
     {
-        var value = _configuration.ValueConverter.ConvertToNodeValue(attribute.GetValue(), attribute);
-        var typeInfo = _configuration.ValueConverter.GetNodeTypeInfo(attribute.Type);
-
         var nodeId = GetNodeId(attribute, path);
         var browseName = GetBrowseName(attributeName, attribute, null);
         var dataTypeOverride = GetDataTypeOverride(attribute);
         var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(attribute);
 
+        var variableNode = ConfigureVariableNode(attribute, parentNodeId, nodeId, browseName, referenceTypeId, dataTypeOverride, nodeConfiguration);
+
+        attribute.Reference.SetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, variableNode);
+
+        return variableNode;
+    }
+
+    /// <summary>
+    /// Shared helper that configures a variable node with value, access levels, array dimensions, and state change handler.
+    /// </summary>
+    private BaseDataVariableState ConfigureVariableNode(
+        RegisteredSubjectProperty property,
+        NodeId parentNodeId,
+        NodeId nodeId,
+        QualifiedName browseName,
+        NodeId? referenceTypeId,
+        NodeId? dataTypeOverride,
+        OpcUaNodeConfiguration? nodeConfiguration)
+    {
+        var value = _configuration.ValueConverter.ConvertToNodeValue(property.GetValue(), property);
+        var typeInfo = _configuration.ValueConverter.GetNodeTypeInfo(property.Type);
+
         var variableNode = CreateVariableNode(parentNodeId, nodeId, browseName, typeInfo, referenceTypeId, dataTypeOverride, nodeConfiguration);
         AddAdditionalReferences(variableNode, nodeConfiguration);
-        variableNode.Handle = attribute.Reference;
+        variableNode.Handle = property.Reference;
 
         // Adjust access according to property setter
-        if (!attribute.HasSetter)
+        if (!property.HasSetter)
         {
             variableNode.AccessLevel = AccessLevels.CurrentRead;
             variableNode.UserAccessLevel = AccessLevels.CurrentRead;
@@ -378,11 +358,9 @@ internal class CustomNodeManager : CustomNodeManager2
                     nodeValue = variableNode.Value;
                 }
 
-                _source.UpdateProperty(attribute.Reference, timestamp, nodeValue);
+                _source.UpdateProperty(property.Reference, timestamp, nodeValue);
             }
         };
-
-        attribute.Reference.SetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, variableNode);
 
         return variableNode;
     }
@@ -432,9 +410,11 @@ internal class CustomNodeManager : CustomNodeManager2
         }
     }
 
-    private NodeId GetNodeId(RegisteredSubjectProperty property, string fullPath)
+    private NodeId GetNodeId(RegisteredSubjectProperty property, string fullPath) =>
+        GetNodeId(_nodeMapper.TryGetNodeConfiguration(property), fullPath);
+
+    private NodeId GetNodeId(OpcUaNodeConfiguration? nodeConfiguration, string fullPath)
     {
-        var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
         if (nodeConfiguration is { NodeIdentifier: not null })
         {
             return nodeConfiguration.NodeNamespaceUri is not null ?
@@ -473,9 +453,11 @@ internal class CustomNodeManager : CustomNodeManager2
         }
     }
 
-    private NodeId? GetReferenceTypeId(RegisteredSubjectProperty property)
+    private NodeId? GetReferenceTypeId(RegisteredSubjectProperty property) =>
+        GetReferenceTypeId(_nodeMapper.TryGetNodeConfiguration(property));
+
+    private NodeId? GetReferenceTypeId(OpcUaNodeConfiguration? nodeConfiguration)
     {
-        var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
         if (nodeConfiguration?.ReferenceType is { } name)
         {
             if (ReferenceTypeIdLookup.Value.TryGetValue(name, out var nodeId))
@@ -484,16 +466,15 @@ internal class CustomNodeManager : CustomNodeManager2
             }
 
             _logger.LogWarning(
-                "Unknown ReferenceType '{ReferenceType}' on property '{Property}'. Using default.",
-                name, property.Name);
+                "Unknown ReferenceType '{ReferenceType}'. Using default.",
+                name);
         }
 
         return null;
     }
 
-    private NodeId? GetChildReferenceTypeId(RegisteredSubjectProperty property)
+    private NodeId? GetChildReferenceTypeId(OpcUaNodeConfiguration? nodeConfiguration)
     {
-        var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
         if (nodeConfiguration?.ItemReferenceType is { } name)
         {
             if (ReferenceTypeIdLookup.Value.TryGetValue(name, out var nodeId))
@@ -502,18 +483,15 @@ internal class CustomNodeManager : CustomNodeManager2
             }
 
             _logger.LogWarning(
-                "Unknown ItemReferenceType '{ItemReferenceType}' on property '{Property}'. Using default.",
-                name, property.Name);
+                "Unknown ItemReferenceType '{ItemReferenceType}'. Using default.",
+                name);
         }
 
         return null;
     }
 
-    private NodeId? GetTypeDefinitionId(RegisteredSubjectProperty property)
-    {
-        var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
-        return GetTypeDefinitionId(nodeConfiguration?.TypeDefinition, nodeConfiguration?.TypeDefinitionNamespace);
-    }
+    private NodeId? GetTypeDefinitionId(OpcUaNodeConfiguration? nodeConfiguration) =>
+        GetTypeDefinitionId(nodeConfiguration?.TypeDefinition, nodeConfiguration?.TypeDefinitionNamespace);
 
     private NodeId? GetTypeDefinitionId(IInterceptorSubject subject)
     {
@@ -541,6 +519,8 @@ internal class CustomNodeManager : CustomNodeManager2
                 typeDefinitionNamespace,
                 SystemContext.NamespaceUris);
 
+            // TODO(perf): Consider caching TypeDefinitionId lookups - this O(n) search
+            // on PredefinedNodes.Values could become expensive with large nodeset imports.
             return PredefinedNodes.Values.SingleOrDefault(n =>
                     n.BrowseName.Name == nodeId.Identifier.ToString() &&
                     n.BrowseName.NamespaceIndex == nodeId.NamespaceIndex)?
@@ -559,9 +539,11 @@ internal class CustomNodeManager : CustomNodeManager2
         return null;
     }
 
-    private QualifiedName GetBrowseName(string propertyName, RegisteredSubjectProperty property, object? index)
+    private QualifiedName GetBrowseName(string propertyName, RegisteredSubjectProperty property, object? index) =>
+        GetBrowseName(propertyName, _nodeMapper.TryGetNodeConfiguration(property), index);
+
+    private QualifiedName GetBrowseName(string propertyName, OpcUaNodeConfiguration? nodeConfiguration, object? index)
     {
-        var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
         if (nodeConfiguration?.BrowseName is null)
         {
             return new QualifiedName(propertyName + (index is not null ? $"[{index}]" : string.Empty), NamespaceIndex);
