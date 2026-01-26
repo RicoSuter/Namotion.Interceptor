@@ -280,11 +280,13 @@ public partial class TestCollectionParent
 {
     public partial List<TestCollectionChild>? Items { get; set; }
     public partial Dictionary<string, TestCollectionChild>? ItemsByKey { get; set; }
+    public partial TestCollectionChild[]? ItemsArray { get; set; }
 
     public TestCollectionParent()
     {
         Items = [];
         ItemsByKey = [];
+        ItemsArray = [];
     }
 }
 

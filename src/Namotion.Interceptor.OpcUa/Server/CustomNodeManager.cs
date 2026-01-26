@@ -602,9 +602,10 @@ internal class CustomNodeManager : CustomNodeManager2
         parentNode?.AddChild(folderNode);
 
         AddPredefinedNode(SystemContext, folderNode);
+        AddModellingRuleReference(folderNode, nodeConfiguration);
         return folderNode;
     }
-    
+
     private BaseObjectState CreateObjectNode(
         NodeId parentNodeId,
         NodeId nodeId,
@@ -632,6 +633,7 @@ internal class CustomNodeManager : CustomNodeManager2
         parentNode?.AddChild(objectNode);
 
         AddPredefinedNode(SystemContext, objectNode);
+        AddModellingRuleReference(objectNode, nodeConfiguration);
         return objectNode;
     }
 
@@ -667,6 +669,7 @@ internal class CustomNodeManager : CustomNodeManager2
         parentNode?.AddChild(variable);
 
         AddPredefinedNode(SystemContext, variable);
+        AddModellingRuleReference(variable, nodeConfiguration);
         return variable;
     }
 
@@ -710,5 +713,32 @@ internal class CustomNodeManager : CustomNodeManager2
 
             node.AddReference(referenceTypeId, reference.IsForward, targetNodeId);
         }
+    }
+
+    private void AddModellingRuleReference(NodeState node, OpcUaNodeConfiguration? config)
+    {
+        if (config?.ModellingRule is null or ModellingRule.Unset)
+        {
+            return;
+        }
+
+        var modellingRuleNodeId = GetModellingRuleNodeId(config.ModellingRule.Value);
+        if (modellingRuleNodeId is not null)
+        {
+            node.AddReference(ReferenceTypeIds.HasModellingRule, false, modellingRuleNodeId);
+        }
+    }
+
+    private static NodeId? GetModellingRuleNodeId(ModellingRule modellingRule)
+    {
+        return modellingRule switch
+        {
+            ModellingRule.Mandatory => ObjectIds.ModellingRule_Mandatory,
+            ModellingRule.Optional => ObjectIds.ModellingRule_Optional,
+            ModellingRule.MandatoryPlaceholder => ObjectIds.ModellingRule_MandatoryPlaceholder,
+            ModellingRule.OptionalPlaceholder => ObjectIds.ModellingRule_OptionalPlaceholder,
+            ModellingRule.ExposesItsArray => ObjectIds.ModellingRule_ExposesItsArray,
+            _ => null
+        };
     }
 }

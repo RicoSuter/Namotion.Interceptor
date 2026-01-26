@@ -146,7 +146,7 @@ public class OpcUaReadWriteTests
                       Math.Abs(_client.Root.Sensor!.Value - 42.5) < 0.01 &&
                       _client.Root.Sensor!.Unit == "°F" &&
                       _client.Root.Sensor?.MinValue == -50.0 &&
-                      _client.Root.Number_Unit == "items",            // Test 9: PropertyAttribute subnode
+                      _client.Root.Number_Unit == "items",
                 timeout: TimeSpan.FromSeconds(60),
                 message: "Client should receive all nested structure updates");
 

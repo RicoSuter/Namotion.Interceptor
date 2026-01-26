@@ -266,6 +266,23 @@ public class AttributeOpcUaNodeMapperTests
         Assert.Equal("CollectionItemType", config.TypeDefinition);
     }
 
+    [Fact]
+    public void TryGetNodeConfiguration_ArrayWithClassLevelAttribute_ReturnsTypeDefinition()
+    {
+        // Arrange
+        var mapper = new AttributeOpcUaNodeMapper();
+        var subject = new TestCollectionParent(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+        var property = registeredSubject.TryGetProperty("ItemsArray")!;
+
+        // Act
+        var config = mapper.TryGetNodeConfiguration(property);
+
+        // Assert
+        Assert.NotNull(config);
+        Assert.Equal("CollectionItemType", config.TypeDefinition);
+    }
+
     #region TryGetPropertyAsync Tests
 
     [Fact]

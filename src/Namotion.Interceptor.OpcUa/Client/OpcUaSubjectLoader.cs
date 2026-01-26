@@ -60,15 +60,15 @@ internal class OpcUaSubjectLoader
         }
 
         var nodeId = ExpandedNodeId.ToNodeId(node.NodeId, session.NamespaceUris);
-        var nodeRefs = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
+        var nodeReferences = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
         
-        for (var index = 0; index < nodeRefs.Count; index++)
+        for (var index = 0; index < nodeReferences.Count; index++)
         {
-            var nodeRef = nodeRefs[index];
-            var property = await FindSubjectPropertyAsync(registeredSubject, nodeRef, session, cancellationToken).ConfigureAwait(false);
+            var nodeReference = nodeReferences[index];
+            var property = await FindSubjectPropertyAsync(registeredSubject, nodeReference, session, cancellationToken).ConfigureAwait(false);
             if (property is null)
             {
-                var dynamicPropertyName = nodeRef.BrowseName.Name;
+                var dynamicPropertyName = nodeReference.BrowseName.Name;
 
                 var propertyExists = false;
                 foreach (var childProperty in registeredSubject.Properties)
@@ -86,7 +86,7 @@ internal class OpcUaSubjectLoader
                 }
 
                 var addAsDynamic = _configuration.ShouldAddDynamicProperty is not null &&
-                    await _configuration.ShouldAddDynamicProperty(nodeRef, cancellationToken).ConfigureAwait(false);
+                    await _configuration.ShouldAddDynamicProperty(nodeReference, cancellationToken).ConfigureAwait(false);
 
                 if (!addAsDynamic)
                 {
@@ -94,12 +94,12 @@ internal class OpcUaSubjectLoader
                 }
 
                 // Infer CLR type from OPC UA variable metadata if possible
-                var inferredType = await _configuration.TypeResolver.TryGetTypeForNodeAsync(session, nodeRef, cancellationToken).ConfigureAwait(false);
+                var inferredType = await _configuration.TypeResolver.TryGetTypeForNodeAsync(session, nodeReference, cancellationToken).ConfigureAwait(false);
                 if (inferredType is null)
                 {
                     _logger.LogWarning(
                         "Could not infer type for dynamic property '{PropertyName}' (NodeId: {NodeId}). Skipping property.",
-                        dynamicPropertyName, nodeRef.NodeId);
+                        dynamicPropertyName, nodeReference.NodeId);
 
                     continue;
                 }
@@ -110,13 +110,13 @@ internal class OpcUaSubjectLoader
                     inferredType,
                     _ => value,
                     (_, o) => value = o,
-                    CreateDynamicNodeAttribute(nodeRef, session));
+                    CreateDynamicNodeAttribute(nodeReference, session));
             }
 
             var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
             if (propertyName is not null)
             {
-                var childNodeId = ExpandedNodeId.ToNodeId(nodeRef.NodeId, session.NamespaceUris);
+                var childNodeId = ExpandedNodeId.ToNodeId(nodeReference.NodeId, session.NamespaceUris);
 
                 if (property.IsSubjectReference)
                 {
@@ -128,7 +128,7 @@ internal class OpcUaSubjectLoader
                     }
                     else
                     {
-                        await LoadSubjectReferenceAsync(property, nodeRef, subject, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
+                        await LoadSubjectReferenceAsync(property, nodeReference, subject, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
                     }
                 }
                 else if (property.IsSubjectCollection)
@@ -338,13 +338,13 @@ internal class OpcUaSubjectLoader
 
     private async Task<RegisteredSubjectProperty?> FindSubjectPropertyAsync(
         RegisteredSubject registeredSubject,
-        ReferenceDescription nodeRef,
+        ReferenceDescription nodeReference,
         ISession session,
         CancellationToken cancellationToken)
     {
         // Use NodeMapper for property lookup (supports attributes, path provider, and fluent config)
         return await _configuration.NodeMapper.TryGetPropertyAsync(
-            registeredSubject, nodeRef, session, cancellationToken).ConfigureAwait(false);
+            registeredSubject, nodeReference, session, cancellationToken).ConfigureAwait(false);
     }
 
     private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)
