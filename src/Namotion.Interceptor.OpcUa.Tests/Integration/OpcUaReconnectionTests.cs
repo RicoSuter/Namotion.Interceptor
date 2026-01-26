@@ -1,3 +1,4 @@
+using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Testing;
 using Xunit.Abstractions;
@@ -12,12 +13,31 @@ public class OpcUaReconnectionTests
 {
     private readonly ITestOutputHelper _output;
 
+    // Reconnection tests need fast disconnection detection
+    // SessionTimeout determines when connection is considered lost (min 10s due to server MinSessionTimeout)
+    // KeepAliveInterval determines how often to check (1s for rapid detection)
+    private static readonly Action<OpcUaClientConfiguration> FastDisconnectionConfig = config =>
+    {
+        config.SessionTimeout = TimeSpan.FromSeconds(10); // Minimum allowed by server
+        config.KeepAliveInterval = TimeSpan.FromSeconds(1); // Fast disconnection detection
+    };
+
+    // Config for instant restart tests - longer session timeout gives SDK more time to reconnect
+    // when server comes back quickly (before client fully detects disconnection)
+    private static readonly Action<OpcUaClientConfiguration> InstantRestartConfig = config =>
+    {
+        config.SessionTimeout = TimeSpan.FromSeconds(30); // Standard timeout for graceful recovery
+        config.KeepAliveInterval = TimeSpan.FromSeconds(2); // Moderate detection speed
+        config.ReconnectInterval = TimeSpan.FromSeconds(2); // Try reconnecting frequently
+    };
+
     public OpcUaReconnectionTests(ITestOutputHelper output)
     {
         _output = output;
     }
 
-    private async Task<(OpcUaTestServer<TestRoot> Server, OpcUaTestClient<TestRoot> Client, PortLease Port, TestLogger Logger)> StartServerAndClientAsync()
+    private async Task<(OpcUaTestServer<TestRoot> Server, OpcUaTestClient<TestRoot> Client, PortLease Port, TestLogger Logger)> StartServerAndClientAsync(
+        Action<OpcUaClientConfiguration>? configureClient = null)
     {
         var logger = new TestLogger(_output);
         var port = await OpcUaTestPortPool.AcquireAsync();
@@ -34,7 +54,7 @@ public class OpcUaReconnectionTests
             baseAddress: port.BaseAddress,
             certificateStoreBasePath: port.CertificateStoreBasePath);
 
-        var client = new OpcUaTestClient<TestRoot>(logger);
+        var client = new OpcUaTestClient<TestRoot>(logger, configureClient ?? FastDisconnectionConfig);
         await client.StartAsync(
             context => new TestRoot(context),
             isConnected: root => root.Connected,
@@ -119,6 +139,7 @@ public class OpcUaReconnectionTests
     public async Task ServerRestart_Instant_ClientRecovers()
     {
         // Tests reconnection when server restarts immediately (no time for client to detect disconnection).
+        // Uses InstantRestartConfig with longer session timeout to give SDK more time to recover.
 
         OpcUaTestServer<TestRoot>? server = null;
         OpcUaTestClient<TestRoot>? client = null;
@@ -127,7 +148,7 @@ public class OpcUaReconnectionTests
 
         try
         {
-            (server, client, port, logger) = await StartServerAndClientAsync();
+            (server, client, port, logger) = await StartServerAndClientAsync(InstantRestartConfig);
 
             Assert.NotNull(server.Root);
             Assert.NotNull(client.Root);
@@ -202,7 +223,7 @@ public class OpcUaReconnectionTests
                 baseAddress: port.BaseAddress,
                 certificateStoreBasePath: port.CertificateStoreBasePath);
 
-            client = new OpcUaTestClient<TestRoot>(logger);
+            client = new OpcUaTestClient<TestRoot>(logger, FastDisconnectionConfig);
             await client.StartAsync(
                 context => new TestRoot(context),
                 isConnected: root => root.Connected,
