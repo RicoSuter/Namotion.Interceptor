@@ -28,16 +28,29 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
         // Get class-level OpcUaNode from the property's type (for object references)
         var classAttribute = GetClassLevelOpcUaNodeAttribute(property);
 
-        // Get property-level attributes
-        var propertyAttribute = property.ReflectionAttributes
-            .OfType<OpcUaNodeAttribute>()
-            .FirstOrDefault();
-        var referenceAttribute = property.ReflectionAttributes
-            .OfType<OpcUaReferenceAttribute>()
-            .FirstOrDefault();
-        var valueAttribute = property.ReflectionAttributes
-            .OfType<OpcUaValueAttribute>()
-            .FirstOrDefault();
+        // Get property-level attributes (single pass to avoid LINQ allocations)
+        OpcUaNodeAttribute? propertyAttribute = null;
+        OpcUaReferenceAttribute? referenceAttribute = null;
+        OpcUaValueAttribute? valueAttribute = null;
+
+        foreach (var attribute in property.ReflectionAttributes)
+        {
+            switch (attribute)
+            {
+                case OpcUaNodeAttribute node when propertyAttribute is null:
+                    propertyAttribute = node;
+                    break;
+                case OpcUaReferenceAttribute reference when referenceAttribute is null:
+                    referenceAttribute = reference;
+                    break;
+                case OpcUaValueAttribute value when valueAttribute is null:
+                    valueAttribute = value;
+                    break;
+            }
+
+            if (propertyAttribute is not null && referenceAttribute is not null && valueAttribute is not null)
+                break;
+        }
 
         // No OPC UA configuration at all
         if (classAttribute is null && propertyAttribute is null && referenceAttribute is null && valueAttribute is null)

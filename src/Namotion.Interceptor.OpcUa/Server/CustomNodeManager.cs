@@ -230,7 +230,17 @@ internal class CustomNodeManager : CustomNodeManager2
         var childReferenceTypeId = GetChildReferenceTypeId(nodeConfiguration);
         foreach (var child in children)
         {
-            var childBrowseName = new QualifiedName(child.Index?.ToString(), NamespaceIndex);
+            var indexString = child.Index?.ToString();
+            if (string.IsNullOrEmpty(indexString))
+            {
+                _logger.LogWarning(
+                    "Dictionary property '{PropertyName}' contains a child with null or empty key. Skipping OPC UA node creation.",
+                    propertyName);
+
+                continue;
+            }
+
+            var childBrowseName = new QualifiedName(indexString, NamespaceIndex);
             var childPath = parentPath + propertyName + PathDelimiter + child.Index;
 
             CreateChildObject(property, childBrowseName, child.Subject, childPath, propertyNode.NodeId, childReferenceTypeId);

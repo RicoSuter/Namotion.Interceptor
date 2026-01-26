@@ -116,8 +116,10 @@ public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
 
         private IPropertyBuilder<TProp> UpdateConfig(Func<OpcUaNodeConfiguration, OpcUaNodeConfiguration> update)
         {
-            _config = update(_config);
-            _mappings[_basePath] = _config;
+            _config = _mappings.AddOrUpdate(
+                _basePath,
+                _ => update(new OpcUaNodeConfiguration()),
+                (_, existing) => update(existing));
             return this;
         }
 

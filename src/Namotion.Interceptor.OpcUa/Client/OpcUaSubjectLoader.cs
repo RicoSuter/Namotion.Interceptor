@@ -433,7 +433,7 @@ internal class OpcUaSubjectLoader
             browseDescriptions,
             cancellationToken).ConfigureAwait(false);
 
-        if (response.Results.Count > 0)
+        if (response.Results.Count > 0 && StatusCode.IsGood(response.Results[0].StatusCode))
         {
             results.AddRange(response.Results[0].References);
 
@@ -444,7 +444,7 @@ internal class OpcUaSubjectLoader
                     null, false,
                     [continuationPoint], cancellationToken).ConfigureAwait(false);
 
-                if (nextResponse.Results.Count > 0)
+                if (nextResponse.Results.Count > 0 && StatusCode.IsGood(nextResponse.Results[0].StatusCode))
                 {
                     var r0 = nextResponse.Results[0];
                     if (r0.References is { Count: > 0 } nextReferences)
