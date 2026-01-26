@@ -70,7 +70,9 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
             config = config with
             {
                 ReferenceType = config.ReferenceType ?? referenceAttribute.ReferenceType,
-                ItemReferenceType = config.ItemReferenceType ?? referenceAttribute.ItemReferenceType
+                ReferenceTypeNamespace = config.ReferenceTypeNamespace ?? referenceAttribute.ReferenceTypeNamespace,
+                ItemReferenceType = config.ItemReferenceType ?? referenceAttribute.ItemReferenceType,
+                ItemReferenceTypeNamespace = config.ItemReferenceTypeNamespace ?? referenceAttribute.ItemReferenceTypeNamespace
             };
         }
 
@@ -193,6 +195,9 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
             TypeDefinitionNamespace = attribute.TypeDefinitionNamespace,
             NodeClass = attribute.NodeClass != OpcUaNodeClass.Auto ? attribute.NodeClass : null,
             DataType = attribute.DataType,
+            DataTypeNamespace = attribute.DataTypeNamespace,
+            ReferenceType = attribute.ReferenceType,
+            ReferenceTypeNamespace = attribute.ReferenceTypeNamespace,
             SamplingInterval = attribute.SamplingInterval != int.MinValue ? attribute.SamplingInterval : null,
             QueueSize = attribute.QueueSize != uint.MaxValue ? attribute.QueueSize : null,
             DiscardOldest = attribute.DiscardOldest switch

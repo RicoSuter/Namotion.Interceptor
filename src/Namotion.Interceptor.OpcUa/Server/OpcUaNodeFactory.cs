@@ -1,4 +1,3 @@
-using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Mapping;
@@ -10,28 +9,18 @@ namespace Namotion.Interceptor.OpcUa.Server;
 /// <summary>
 /// Factory for creating OPC UA SDK nodes with no knowledge of the domain model.
 /// Handles OPC UA SDK primitives: node creation, ID resolution, and reference management.
+/// Uses <see cref="OpcUaNodeIdResolver"/> internally to resolve string identifiers to NodeIds
+/// with caching for performance.
 /// </summary>
 internal class OpcUaNodeFactory
 {
     private readonly ILogger _logger;
-
-    private static readonly Lazy<Dictionary<string, NodeId>> ReferenceTypeIdLookup =
-        new(() => BuildNodeIdLookup(typeof(ReferenceTypeIds)));
-
-    private static readonly Lazy<Dictionary<string, NodeId>> DataTypeIdLookup =
-        new(() => BuildNodeIdLookup(typeof(DataTypeIds)));
-
-    private static readonly Lazy<Dictionary<string, NodeId>> ObjectTypeIdLookup =
-        new(() => BuildNodeIdLookup(typeof(ObjectTypeIds)));
-
-    private static Dictionary<string, NodeId> BuildNodeIdLookup(Type type) =>
-        type.GetFields(BindingFlags.Public | BindingFlags.Static)
-            .Where(f => f.FieldType == typeof(NodeId))
-            .ToDictionary(f => f.Name, f => (NodeId)f.GetValue(null)!);
+    private readonly OpcUaNodeIdResolver _resolver;
 
     public OpcUaNodeFactory(ILogger logger)
     {
         _logger = logger;
+        _resolver = new OpcUaNodeIdResolver(logger);
     }
 
     public NodeId GetNodeId(CustomNodeManager manager, OpcUaNodeConfiguration? nodeConfiguration, string fullPath)
@@ -65,38 +54,34 @@ internal class OpcUaNodeFactory
         return new QualifiedName(nodeConfiguration.BrowseName, namespaceIndex);
     }
 
-    public NodeId? GetReferenceTypeId(OpcUaNodeConfiguration? nodeConfiguration)
+    public NodeId? GetReferenceTypeId(CustomNodeManager manager, OpcUaNodeConfiguration? nodeConfiguration)
     {
-        if (nodeConfiguration?.ReferenceType is { } name)
+        if (nodeConfiguration?.ReferenceType is null)
         {
-            if (ReferenceTypeIdLookup.Value.TryGetValue(name, out var nodeId))
-            {
-                return nodeId;
-            }
-
-            _logger.LogWarning(
-                "Unknown ReferenceType '{ReferenceType}'. Using default.",
-                name);
+            return null;
         }
 
-        return null;
+        return _resolver.Resolve(
+            nodeConfiguration.ReferenceType,
+            nodeConfiguration.ReferenceTypeNamespace,
+            NodeIdCategory.ReferenceType,
+            manager.GetSystemContext(),
+            manager.GetPredefinedNodes());
     }
 
-    public NodeId? GetChildReferenceTypeId(OpcUaNodeConfiguration? nodeConfiguration)
+    public NodeId? GetChildReferenceTypeId(CustomNodeManager manager, OpcUaNodeConfiguration? nodeConfiguration)
     {
-        if (nodeConfiguration?.ItemReferenceType is { } name)
+        if (nodeConfiguration?.ItemReferenceType is null)
         {
-            if (ReferenceTypeIdLookup.Value.TryGetValue(name, out var nodeId))
-            {
-                return nodeId;
-            }
-
-            _logger.LogWarning(
-                "Unknown ItemReferenceType '{ItemReferenceType}'. Using default.",
-                name);
+            return null;
         }
 
-        return null;
+        return _resolver.Resolve(
+            nodeConfiguration.ItemReferenceType,
+            nodeConfiguration.ItemReferenceTypeNamespace,
+            NodeIdCategory.ReferenceType,
+            manager.GetSystemContext(),
+            manager.GetPredefinedNodes());
     }
 
     public NodeId? GetTypeDefinitionId(CustomNodeManager manager, OpcUaNodeConfiguration? nodeConfiguration) =>
@@ -112,47 +97,27 @@ internal class OpcUaNodeFactory
             return null;
         }
 
-        if (typeDefinitionNamespace is not null)
-        {
-            var nodeId = NodeId.Create(
-                typeDefinition,
-                typeDefinitionNamespace,
-                manager.GetSystemContext().NamespaceUris);
-
-            // TODO(perf): Consider caching TypeDefinitionId lookups - this O(n) search
-            // on PredefinedNodes.Values could become expensive with large nodeset imports.
-            return manager.GetPredefinedNodes().Values.SingleOrDefault(n =>
-                    n.BrowseName.Name == nodeId.Identifier.ToString() &&
-                    n.BrowseName.NamespaceIndex == nodeId.NamespaceIndex)?
-                .NodeId;
-        }
-
-        if (ObjectTypeIdLookup.Value.TryGetValue(typeDefinition, out var objectTypeId))
-        {
-            return objectTypeId;
-        }
-
-        _logger.LogWarning(
-            "Unknown TypeDefinition '{TypeDefinition}'. Using default.",
-            typeDefinition);
-
-        return null;
+        return _resolver.Resolve(
+            typeDefinition,
+            typeDefinitionNamespace,
+            NodeIdCategory.ObjectType,
+            manager.GetSystemContext(),
+            manager.GetPredefinedNodes());
     }
 
-    public NodeId? GetDataTypeOverride(OpcUaNodeConfiguration? nodeConfiguration)
+    public NodeId? GetDataTypeOverride(CustomNodeManager manager, OpcUaNodeConfiguration? nodeConfiguration)
     {
-        if (nodeConfiguration?.DataType is { } dataTypeName)
+        if (nodeConfiguration?.DataType is null)
         {
-            if (DataTypeIdLookup.Value.TryGetValue(dataTypeName, out var nodeId))
-            {
-                return nodeId;
-            }
-
-            _logger.LogWarning(
-                "Unknown DataType '{DataType}'. Using default.",
-                dataTypeName);
+            return null;
         }
-        return null;
+
+        return _resolver.Resolve(
+            nodeConfiguration.DataType,
+            nodeConfiguration.DataTypeNamespace,
+            NodeIdCategory.DataType,
+            manager.GetSystemContext(),
+            manager.GetPredefinedNodes());
     }
 
     public FolderState CreateFolderNode(
@@ -269,7 +234,14 @@ internal class OpcUaNodeFactory
 
         foreach (var reference in nodeConfiguration.AdditionalReferences)
         {
-            if (!ReferenceTypeIdLookup.Value.TryGetValue(reference.ReferenceType, out var referenceTypeId))
+            var referenceTypeId = _resolver.Resolve(
+                reference.ReferenceType,
+                reference.ReferenceTypeNamespace,
+                NodeIdCategory.ReferenceType,
+                manager.GetSystemContext(),
+                manager.GetPredefinedNodes());
+
+            if (referenceTypeId is null)
             {
                 _logger.LogWarning(
                     "Unknown additional reference type '{ReferenceType}'. Skipping reference.",
