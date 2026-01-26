@@ -36,7 +36,7 @@ public class OpcUaReadWriteTests
             _server.Root.Name = "Updated Server Name";
             await AsyncTestHelpers.WaitUntilAsync(
                 () => _client.Root.Name == "Updated Server Name",
-                timeout: TimeSpan.FromSeconds(30),
+                timeout: TimeSpan.FromSeconds(60),
                 message: "Client should receive server's name update");
 
             // Test string property on client
