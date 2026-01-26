@@ -448,6 +448,34 @@ var mapper = new FluentOpcUaNodeMapper<Machine>()
         .ConfigureMotor());
 ```
 
+### Additional References
+
+Add non-hierarchical references (e.g., `HasInterface`) using `.AdditionalReference()`:
+
+```csharp
+var mapper = new FluentOpcUaNodeMapper<Machine>()
+    .Map(m => m.Motor1, motor => motor
+        .BrowseName("MainMotor")
+        .ReferenceType("HasComponent")
+        // Add HasInterface reference to IVendorNameplateType
+        .AdditionalReference(
+            referenceType: "HasInterface",
+            targetNodeId: "IVendorNameplateType",
+            targetNamespaceUri: "http://opcfoundation.org/UA/DI/",
+            isForward: true)
+        // Multiple additional references can be added
+        .AdditionalReference(
+            referenceType: "HasTypeDefinition",
+            targetNodeId: "MotorType",
+            targetNamespaceUri: "http://example.org/Machinery/"));
+```
+
+The `AdditionalReference` method parameters:
+- `referenceType`: The reference type name (e.g., "HasInterface", "Organizes")
+- `targetNodeId`: The identifier of the target node
+- `targetNamespaceUri`: Optional namespace URI for the target node (uses default namespace if null)
+- `isForward`: Direction of the reference (default: `true`)
+
 ## Composite Mappers
 
 Multiple mappers can be combined with "last wins" merge semantics. Later mappers override earlier ones:

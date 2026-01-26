@@ -11,9 +11,10 @@ namespace Namotion.Interceptor.OpcUa.Client;
 public class OpcUaClientConfiguration
 {
     private static readonly IOpcUaNodeMapper DefaultNodeMapper = new CompositeNodeMapper(
-        new PathProviderOpcUaNodeMapper(new AttributeBasedPathProvider("opc")),
+        new PathProviderOpcUaNodeMapper(new AttributeBasedPathProvider(OpcUaConstants.DefaultConnectorName)),
         new AttributeOpcUaNodeMapper());
 
+    private MonitoredItemFactory? _monitoredItemFactory;
     private ISessionFactory? _resolvedSessionFactory;
 
     /// <summary>
@@ -410,6 +411,8 @@ public class OpcUaClientConfiguration
         return application;
     }
 
+    private MonitoredItemFactory MonitoredItemFactory => _monitoredItemFactory ??= new MonitoredItemFactory(this);
+
     /// <summary>
     /// Creates a MonitoredItem for the given property and node ID using this configuration's defaults.
     /// NodeMapper configuration overrides (SamplingInterval, QueueSize, DiscardOldest, DataChangeTrigger, DeadbandType, DeadbandValue)
@@ -418,70 +421,8 @@ public class OpcUaClientConfiguration
     /// <param name="nodeId">The OPC UA node ID to monitor.</param>
     /// <param name="property">The property to associate with the monitored item.</param>
     /// <returns>A configured MonitoredItem ready to be added to a subscription.</returns>
-    internal MonitoredItem CreateMonitoredItem(NodeId nodeId, RegisteredSubjectProperty property)
-    {
-        var nodeConfiguration = NodeMapper.TryGetNodeConfiguration(property);
-        var item = new MonitoredItem(TelemetryContext)
-        {
-            StartNodeId = nodeId,
-            AttributeId = Opc.Ua.Attributes.Value,
-            MonitoringMode = MonitoringMode.Reporting,
-            Handle = property
-        };
-
-        // Apply sampling/queue settings from NodeMapper configuration
-        var samplingInterval = nodeConfiguration?.SamplingInterval ?? DefaultSamplingInterval;
-        if (samplingInterval.HasValue)
-        {
-            item.SamplingInterval = samplingInterval.Value;
-        }
-
-        var queueSize = nodeConfiguration?.QueueSize ?? DefaultQueueSize;
-        if (queueSize.HasValue)
-        {
-            item.QueueSize = queueSize.Value;
-        }
-
-        var discardOldest = nodeConfiguration?.DiscardOldest ?? DefaultDiscardOldest;
-        if (discardOldest.HasValue)
-        {
-            item.DiscardOldest = discardOldest.Value;
-        }
-
-        // Apply filter (only if any filter option is specified)
-        var filter = CreateDataChangeFilter(nodeConfiguration);
-        if (filter != null)
-        {
-            item.Filter = filter;
-        }
-
-        return item;
-    }
-
-    /// <summary>
-    /// Creates a DataChangeFilter based on the node configuration and configuration defaults.
-    /// Returns null if no filter options are specified (uses OPC UA library defaults).
-    /// </summary>
-    private DataChangeFilter? CreateDataChangeFilter(OpcUaNodeConfiguration? nodeConfiguration)
-    {
-        // Apply NodeMapper configuration overrides, then configuration defaults
-        var trigger = nodeConfiguration?.DataChangeTrigger ?? DefaultDataChangeTrigger;
-        var deadbandType = nodeConfiguration?.DeadbandType ?? DefaultDeadbandType;
-        var deadbandValue = nodeConfiguration?.DeadbandValue ?? DefaultDeadbandValue;
-
-        // Only create filter if at least one option is specified
-        if (!trigger.HasValue && !deadbandType.HasValue && !deadbandValue.HasValue)
-        {
-            return null;
-        }
-
-        return new DataChangeFilter
-        {
-            Trigger = trigger ?? DataChangeTrigger.StatusValue,
-            DeadbandType = (uint)(deadbandType ?? DeadbandType.None),
-            DeadbandValue = deadbandValue ?? 0.0
-        };
-    }
+    internal MonitoredItem CreateMonitoredItem(NodeId nodeId, RegisteredSubjectProperty property) =>
+        MonitoredItemFactory.Create(nodeId, property);
 
     /// <summary>
     /// Validates configuration values and throws ArgumentException if invalid.

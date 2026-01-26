@@ -59,10 +59,16 @@ public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
         return Task.FromResult<RegisteredSubjectProperty?>(null);
     }
 
-    private static string GetPropertyPath<TProperty>(Expression<Func<T, TProperty>> expression)
+    private static string GetPropertyPath<TProperty>(Expression<Func<T, TProperty>> expression) =>
+        GetPropertyPathFromExpression(expression.Body);
+
+    /// <summary>
+    /// Extracts property path from an expression body by traversing member access chain.
+    /// </summary>
+    private static string GetPropertyPathFromExpression(Expression expression)
     {
         var parts = new List<string>();
-        var current = expression.Body;
+        var current = expression;
 
         while (current is MemberExpression member)
         {
@@ -198,25 +204,11 @@ public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
             Expression<Func<TProp, TProperty>> propertySelector,
             Action<IPropertyBuilder<TProperty>> configure)
         {
-            var relativePath = GetPropertyPath(propertySelector);
+            var relativePath = GetPropertyPathFromExpression(propertySelector.Body);
             var fullPath = $"{_basePath}.{relativePath}";
             var builder = new PropertyBuilder<TProperty>(fullPath, _mappings);
             configure(builder);
             return this;
-        }
-
-        private static string GetPropertyPath<TProperty>(Expression<Func<TProp, TProperty>> expression)
-        {
-            var parts = new List<string>();
-            var current = expression.Body;
-
-            while (current is MemberExpression member)
-            {
-                parts.Insert(0, member.Member.Name);
-                current = member.Expression;
-            }
-
-            return string.Join(".", parts);
         }
     }
 }

@@ -111,7 +111,23 @@ public record OpcUaNodeConfiguration
             DeadbandValue = DeadbandValue ?? other.DeadbandValue,
             ModellingRule = ModellingRule ?? other.ModellingRule,
             EventNotifier = EventNotifier ?? other.EventNotifier,
-            AdditionalReferences = AdditionalReferences ?? other.AdditionalReferences
+            AdditionalReferences = MergeAdditionalReferences(AdditionalReferences, other.AdditionalReferences)
         };
+    }
+
+    /// <summary>
+    /// Merges two AdditionalReferences lists. When both are non-null, combines them.
+    /// </summary>
+    private static IReadOnlyList<OpcUaAdditionalReference>? MergeAdditionalReferences(
+        IReadOnlyList<OpcUaAdditionalReference>? primary,
+        IReadOnlyList<OpcUaAdditionalReference>? fallback)
+    {
+        if (primary is null)
+            return fallback;
+        if (fallback is null)
+            return primary;
+
+        // Both are non-null, merge them
+        return [.. primary, .. fallback];
     }
 }

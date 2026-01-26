@@ -27,7 +27,7 @@ public enum DiscardOldestMode
 public class OpcUaNodeAttribute : PathAttribute
 {
     public OpcUaNodeAttribute(string browseName, string? browseNamespaceUri, string? connectorName = null)
-        : base(connectorName ?? "opc", browseName)
+        : base(connectorName ?? OpcUaConstants.DefaultConnectorName, browseName)
     {
         BrowseName = browseName;
         BrowseNamespaceUri = browseNamespaceUri;

@@ -139,7 +139,76 @@ public class PathProviderOpcUaNodeMapperTests
         Assert.Null(config.QueueSize);
     }
 
+    [Fact]
+    public void TryGetNodeConfiguration_WithIsAttribute_SetsReferenceTypeHasProperty()
+    {
+        // Arrange - Number_Unit is a PropertyAttribute (IsAttribute = true)
+        var pathProvider = new AttributeBasedPathProvider("opc");
+        var mapper = new PathProviderOpcUaNodeMapper(pathProvider);
+        var subject = new TestRoot(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+
+        // Get the Number property and then its attribute
+        var numberProperty = registeredSubject.TryGetProperty("Number")!;
+        var attributeProperty = numberProperty.Attributes.FirstOrDefault(a => a.Name == "Number_Unit");
+        Assert.NotNull(attributeProperty);
+
+        // Act
+        var config = mapper.TryGetNodeConfiguration(attributeProperty);
+
+        // Assert - Attributes get ReferenceType = "HasProperty"
+        Assert.NotNull(config);
+        Assert.Equal("Unit", config.BrowseName);
+        Assert.Equal("HasProperty", config.ReferenceType);
+    }
+
+    [Fact]
+    public void TryGetNodeConfiguration_WithNonAttribute_DoesNotSetReferenceType()
+    {
+        // Arrange - Name is a regular property (IsAttribute = false)
+        var pathProvider = new AttributeBasedPathProvider("opc");
+        var mapper = new PathProviderOpcUaNodeMapper(pathProvider);
+        var subject = new TestRoot(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+        var property = registeredSubject.TryGetProperty("Name")!;
+
+        // Act
+        var config = mapper.TryGetNodeConfiguration(property);
+
+        // Assert - Non-attributes don't get a ReferenceType set
+        Assert.NotNull(config);
+        Assert.Null(config.ReferenceType);
+    }
+
     #region TryGetPropertyAsync Tests
+
+    [Fact]
+    public async Task TryGetPropertyAsync_WithIsAttribute_SkipsAttributes()
+    {
+        // Arrange - TryGetPropertyAsync should skip properties that are attributes
+        var pathProvider = new AttributeBasedPathProvider("opc");
+        var mapper = new PathProviderOpcUaNodeMapper(pathProvider);
+        var subject = new TestRoot(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+
+        var namespaceUris = new NamespaceTable();
+        var mockSession = new Mock<ISession>();
+        mockSession.Setup(s => s.NamespaceUris).Returns(namespaceUris);
+
+        // Try to match the attribute's path segment (Unit)
+        // TryGetPropertyAsync skips attributes, so it should return null
+        var nodeReference = new ReferenceDescription
+        {
+            NodeId = new ExpandedNodeId("Unit", 0),
+            BrowseName = new QualifiedName("Unit", 0)
+        };
+
+        // Act
+        var result = await mapper.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+
+        // Assert - Should be null because attributes are skipped in TryGetPropertyAsync
+        Assert.Null(result);
+    }
 
     [Fact]
     public async Task TryGetPropertyAsync_WithMatchingPathSegment_ReturnsProperty()

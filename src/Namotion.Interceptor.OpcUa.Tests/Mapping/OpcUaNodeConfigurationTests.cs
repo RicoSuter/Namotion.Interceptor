@@ -127,10 +127,11 @@ public class OpcUaNodeConfigurationTests
         // Act
         var result = config1.WithFallback(config2);
 
-        // Assert - config1's AdditionalReferences wins (not merged together)
+        // Assert - AdditionalReferences are merged (primary first, then fallback)
         Assert.NotNull(result.AdditionalReferences);
-        Assert.Single(result.AdditionalReferences);
+        Assert.Equal(2, result.AdditionalReferences.Count);
         Assert.Equal("HasInterface", result.AdditionalReferences[0].ReferenceType);
+        Assert.Equal("GeneratesEvent", result.AdditionalReferences[1].ReferenceType);
     }
 
     [Fact]

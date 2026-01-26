@@ -286,6 +286,35 @@ public class AttributeOpcUaNodeMapperTests
     #region TryGetPropertyAsync Tests
 
     [Fact]
+    public async Task TryGetPropertyAsync_WithMatchingNodeIdentifier_ReturnsProperty()
+    {
+        // Arrange
+        var mapper = new AttributeOpcUaNodeMapper();
+        var subject = new TestNodeMapperModel(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+
+        var namespaceUris = new NamespaceTable();
+        namespaceUris.Append("http://myserver/");
+        var mockSession = new Mock<ISession>();
+        mockSession.Setup(s => s.NamespaceUris).Returns(namespaceUris);
+
+        // NodeIdProp has [OpcUaNode("NodeIdProp", null, NodeIdentifier = "ns=2;s=MyExplicitNodeId", NodeNamespaceUri = "http://myserver/")]
+        var nodeReference = new ReferenceDescription
+        {
+            // Node ID matches the NodeIdentifier (Priority 1 matching)
+            NodeId = new ExpandedNodeId("ns=2;s=MyExplicitNodeId", "http://myserver/"),
+            BrowseName = new QualifiedName("SomeOtherBrowseName", 0) // BrowseName doesn't match
+        };
+
+        // Act
+        var result = await mapper.TryGetPropertyAsync(registeredSubject, nodeReference, mockSession.Object, CancellationToken.None);
+
+        // Assert - Should match via NodeIdentifier (Priority 1), not BrowseName (Priority 2)
+        Assert.NotNull(result);
+        Assert.Equal("NodeIdProp", result.Name);
+    }
+
+    [Fact]
     public async Task TryGetPropertyAsync_WithMatchingBrowseName_ReturnsProperty()
     {
         // Arrange
