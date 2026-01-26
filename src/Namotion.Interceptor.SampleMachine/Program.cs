@@ -1,8 +1,10 @@
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.OpcUa.Attributes;
+using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
+using Opc.Ua;
 
 namespace Namotion.Interceptor.SampleMachine
 {
@@ -20,7 +22,7 @@ namespace Namotion.Interceptor.SampleMachine
     }
 
     [InterceptorSubject]
-    [OpcUaNode("Machine", null, TypeDefinition = "BaseObjectType")]
+    [OpcUaNode("Machine", TypeDefinition = "BaseObjectType")]
     public partial class Machine
     {
         [OpcUaNode("Identification", "http://opcfoundation.org/UA/DI/")]
@@ -44,11 +46,12 @@ namespace Namotion.Interceptor.SampleMachine
     }
 
     [InterceptorSubject]
-    [OpcUaNode("ProcessValueType", null, TypeDefinition = "ProcessValueType", TypeDefinitionNamespace = "http://opcfoundation.org/UA/Machinery/ProcessValues/")]
+    [OpcUaNode("ProcessValueType", TypeDefinition = "ProcessValueType", TypeDefinitionNamespace = "http://opcfoundation.org/UA/Machinery/ProcessValues/")]
     public partial class ProcessValueType
     {
         [GraphQLIgnore]
         [OpcUaNode("AnalogSignal", "http://opcfoundation.org/UA/PADIM/")]
+        [OpcUaReference("HasComponent")]
         public partial AnalogSignalVariable AnalogSignal { get; private set; }
 
         [OpcUaNode("SignalTag", "http://opcfoundation.org/UA/PADIM/")]
@@ -61,28 +64,28 @@ namespace Namotion.Interceptor.SampleMachine
     }
 
     [InterceptorSubject]
-    [OpcUaNode("AnalogSignalVariable", null, TypeDefinition = "AnalogSignalVariableType", TypeDefinitionNamespace = "http://opcfoundation.org/UA/PADIM/")]
+    [OpcUaNode("AnalogSignalVariable", NodeClass = OpcUaNodeClass.Variable, TypeDefinition = "AnalogSignalVariableType", TypeDefinitionNamespace = "http://opcfoundation.org/UA/PADIM/")]
     public partial class AnalogSignalVariable
     {
-        [OpcUaNode("ActualValue", "http://opcfoundation.org/UA/")]
-        public partial object? ActualValue { get; set; }
+        [OpcUaValue]
+        public partial double Value { get; set; }
 
         [OpcUaNode("EURange", "http://opcfoundation.org/UA/")]
-        public partial object? EURange { get; set; }
+        public partial Opc.Ua.Range? EURange { get; set; }
 
         [OpcUaNode("EngineeringUnits", "http://opcfoundation.org/UA/")]
-        public partial object? EngineeringUnits { get; set; }
+        public partial EUInformation? EngineeringUnits { get; set; }
 
         public AnalogSignalVariable()
         {
-            ActualValue = "My value";
-            EURange = "My range";
-            EngineeringUnits = "My units";
+            Value = 0.0;
+            EURange = new Opc.Ua.Range(0, 100);
+            EngineeringUnits = new EUInformation("°C", "Celsius", "http://www.opcfoundation.org/UA/units/un/cefact");
         }
     }
 
     [InterceptorSubject]
-    [OpcUaNode("MachineryBuildingBlocks", null, TypeDefinition = "FolderType")]
+    [OpcUaNode("MachineryBuildingBlocks", TypeDefinition = "FolderType")]
     public partial class MachineryBuildingBlocks
     {
         [OpcUaNode("Identification", "http://opcfoundation.org/UA/DI/")]
@@ -96,7 +99,7 @@ namespace Namotion.Interceptor.SampleMachine
     }
 
     [InterceptorSubject]
-    [OpcUaNode("Identification", null, TypeDefinition = "MachineIdentificationType", TypeDefinitionNamespace = "http://opcfoundation.org/UA/Machinery/")]
+    [OpcUaNode("Identification", TypeDefinition = "MachineIdentificationType", TypeDefinitionNamespace = "http://opcfoundation.org/UA/Machinery/")]
     public partial class Identification
     {
         [OpcUaNode("Manufacturer", "http://opcfoundation.org/UA/DI/")]
@@ -145,7 +148,7 @@ namespace Namotion.Interceptor.SampleMachine
                                         SignalTag = "MySignal",
                                         AnalogSignal =
                                         {
-                                            ActualValue = 42,
+                                            Value = 42,
                                         }
                                     }
                                 }
@@ -204,7 +207,7 @@ namespace Namotion.Interceptor.SampleMachine
                 while (!stoppingToken.IsCancellationRequested)
                 {
                     var signal = _root.Machines.Single().Value.Monitoring.Single().Value.AnalogSignal;
-                    signal.ActualValue = ((int)signal.ActualValue!) + 1;
+                    signal.Value += 1;
 
                     await Task.Delay(1000, stoppingToken);
                 }
