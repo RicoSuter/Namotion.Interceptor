@@ -4,7 +4,6 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
 using Opc.Ua;
@@ -90,7 +89,6 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
                 {
                     RootName = "Root",
                     BaseAddress = _baseAddress,
-                    PathProvider = new AttributeBasedPathProvider("opc"),
                     ValueConverter = new OpcUaValueConverter(),
                     TelemetryContext = telemetryContext,
                     CleanCertificateStore = false,
@@ -118,30 +116,39 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
 
     public async Task StopAsync()
     {
-        var host = Interlocked.Exchange(ref _host, null);
-        if (host != null)
-        {
-            var sw = System.Diagnostics.Stopwatch.StartNew();
-            try
-            {
-                await host.StopAsync(TimeSpan.FromSeconds(5));
-            }
-            finally
-            {
-                host.Dispose();
-                Diagnostics = null;
-            }
-            sw.Stop();
-            _logger.Log($"Server stopped in {sw.ElapsedMilliseconds}ms");
-        }
+        await StopInternalAsync();
+
+        // Wait for TCP sockets to fully close before port can be reused
+        await Task.Delay(500);
     }
 
     public async Task RestartAsync()
     {
         Interlocked.Exchange(ref _disposed, 0);
         _logger.Log("Restarting server...");
-        await StopAsync();
+     
+        // No delay needed for restart - same port will be reused immediately
+        await StopInternalAsync();
         await StartInternalAsync();
+    }
+
+    private async Task StopInternalAsync()
+    {
+        var host = Interlocked.Exchange(ref _host, null);
+        if (host != null)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            try
+            {
+                await host.StopAsync(TimeSpan.FromMinutes(5));
+            }
+            finally
+            {
+                host.Dispose();
+            }
+            sw.Stop();
+            _logger.Log($"Server stopped in {sw.ElapsedMilliseconds}ms");
+        }
     }
 
     public async ValueTask DisposeAsync()
@@ -153,13 +160,12 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
 
         try
         {
-            var host = Interlocked.Exchange(ref _host, null);
-            if (host != null)
-            {
-                await host.StopAsync(TimeSpan.FromSeconds(5));
-                host.Dispose();
-                _logger.Log("Server disposed");
-            }
+            await StopInternalAsync();
+
+            // Wait for TCP sockets to fully close before port can be reused
+            await Task.Delay(500);
+
+            _logger.Log("Server disposed");
         }
         catch (Exception ex)
         {

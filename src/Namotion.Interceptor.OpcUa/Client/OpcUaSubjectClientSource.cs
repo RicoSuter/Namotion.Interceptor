@@ -27,6 +27,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private volatile SessionManager? _sessionManager;
     private SubjectPropertyWriter? _propertyWriter;
 
+    private readonly SemaphoreSlim _structureLock = new(1, 1);
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private volatile bool _isStarted;
     private long _reconnectStartedTimestamp; // 0 = not reconnecting, otherwise Stopwatch timestamp when reconnection started (for stall detection)
@@ -87,8 +88,16 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     private void RemoveItemsForSubject(IInterceptorSubject subject)
     {
-        _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
-        _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
+        _structureLock.Wait();
+        try
+        {
+            _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
+            _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
+        }
+        finally
+        {
+            _structureLock.Release();
+        }
     }
 
     public OpcUaSubjectClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger logger)
@@ -143,22 +152,30 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
         _logger.LogInformation("Connected to OPC UA server successfully.");
 
-        var rootNode = await TryGetRootNodeAsync(session, cancellationToken).ConfigureAwait(false);
-        if (rootNode is not null)
+        await _structureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            var monitoredItems = await _subjectLoader.LoadSubjectAsync(_subject, rootNode, session, cancellationToken).ConfigureAwait(false);
-            if (monitoredItems.Count > 0)
+            var rootNode = await TryGetRootNodeAsync(session, cancellationToken).ConfigureAwait(false);
+            if (rootNode is not null)
             {
-                await _sessionManager.CreateSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
+                var monitoredItems = await _subjectLoader.LoadSubjectAsync(_subject, rootNode, session, cancellationToken).ConfigureAwait(false);
+                if (monitoredItems.Count > 0)
+                {
+                    await _sessionManager.CreateSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    _logger.LogWarning("No OPC UA monitored items found.");
+                }
             }
             else
             {
-                _logger.LogWarning("No OPC UA monitored items found.");
+                _logger.LogWarning("Connected to OPC UA server successfully but could not find root node.");
             }
         }
-        else
+        finally
         {
-            _logger.LogWarning("Connected to OPC UA server successfully but could not find root node.");
+            _structureLock.Release();
         }
 
         _isStarted = true;
@@ -262,7 +279,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
         foreach (var (property, nodeId) in ownedProperties)
         {
-            var monitoredItem = _configuration.CreateMonitoredItem(nodeId, property);
+            var monitoredItem = MonitoredItemFactory.Create(_configuration, nodeId, property);
             monitoredItems.Add(monitoredItem);
         }
 
@@ -419,15 +436,23 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
             _logger.LogInformation("New OPC UA session created successfully.");
 
-            // Recreate MonitoredItems from owned properties (avoids memory leak from holding SDK objects)
-            var monitoredItems = CreateMonitoredItemsForReconnection();
-            if (monitoredItems.Count > 0)
+            await _structureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                await sessionManager.CreateSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
+                // Recreate MonitoredItems from owned properties (avoids memory leak from holding SDK objects)
+                var monitoredItems = CreateMonitoredItemsForReconnection();
+                if (monitoredItems.Count > 0)
+                {
+                    await sessionManager.CreateSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
 
-                _logger.LogInformation(
-                    "Subscriptions recreated successfully with {Count} monitored items.",
-                    monitoredItems.Count);
+                    _logger.LogInformation(
+                        "Subscriptions recreated successfully with {Count} monitored items.",
+                        monitoredItems.Count);
+                }
+            }
+            finally
+            {
+                _structureLock.Release();
             }
 
             await propertyWriter.CompleteInitializationAsync(cancellationToken).ConfigureAwait(false);

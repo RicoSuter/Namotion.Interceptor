@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.OpcUa.Attributes;
+using Namotion.Interceptor.OpcUa.Attributes;
+using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
@@ -9,6 +10,10 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 public class OpcUaClientConfiguration
 {
+    private static readonly IOpcUaNodeMapper DefaultNodeMapper = new CompositeNodeMapper(
+        new PathProviderOpcUaNodeMapper(new AttributeBasedPathProvider(OpcUaConstants.DefaultConnectorName)),
+        new AttributeOpcUaNodeMapper());
+
     private ISessionFactory? _resolvedSessionFactory;
 
     /// <summary>
@@ -66,14 +71,16 @@ public class OpcUaClientConfiguration
     /// If the function returns true, the node is added as a dynamic property to the given subject.
     /// Default is add all missing as dynamic properties.
     /// </summary>
-    public Func<ReferenceDescription, CancellationToken, Task<bool>>? ShouldAddDynamicProperty { get; set; } = 
+    public Func<ReferenceDescription, CancellationToken, Task<bool>>? ShouldAddDynamicProperty { get; set; } =
         static (_, _) => Task.FromResult(true);
-    
+
     /// <summary>
-    /// Gets the path provider used to map between OPC UA node browse names and C# property names.
-    /// This provider determines which properties are included and how their names are translated.
+    /// Gets or sets an async predicate called when an unknown attribute is found on a variable node.
+    /// If returns true, the attribute is added as a dynamic attribute to the parent property.
+    /// Default is add all missing as dynamic attributes.
     /// </summary>
-    public required PathProviderBase PathProvider { get; set; }
+    public Func<ReferenceDescription, CancellationToken, Task<bool>>? ShouldAddDynamicAttribute { get; set; } =
+        static (_, _) => Task.FromResult(true);
 
     /// <summary>
     /// Gets the type resolver used to infer C# types from OPC UA nodes during dynamic property discovery.
@@ -313,6 +320,12 @@ public class OpcUaClientConfiguration
     public ISessionFactory? SessionFactory { get; set; }
 
     /// <summary>
+    /// Maps C# properties to OPC UA nodes.
+    /// Defaults to composite of PathProviderOpcUaNodeMapper (with "opc" source) and AttributeOpcUaNodeMapper.
+    /// </summary>
+    public IOpcUaNodeMapper NodeMapper { get; init; } = DefaultNodeMapper;
+
+    /// <summary>
     /// Gets or sets the timeout for session disposal during shutdown.
     /// If the session doesn't close gracefully within this timeout, it will be forcefully disposed.
     /// Default is 5 seconds.
@@ -398,86 +411,12 @@ public class OpcUaClientConfiguration
     }
 
     /// <summary>
-    /// Creates a MonitoredItem for the given property and node ID using this configuration's defaults.
-    /// Attribute-level overrides (SamplingInterval, QueueSize, DiscardOldest, DataChangeTrigger, DeadbandType, DeadbandValue)
-    /// are applied if present on the property.
-    /// </summary>
-    /// <param name="nodeId">The OPC UA node ID to monitor.</param>
-    /// <param name="property">The property to associate with the monitored item.</param>
-    /// <returns>A configured MonitoredItem ready to be added to a subscription.</returns>
-    internal MonitoredItem CreateMonitoredItem(NodeId nodeId, RegisteredSubjectProperty property)
-    {
-        var opcUaNodeAttribute = property.TryGetOpcUaNodeAttribute();
-        var item = new MonitoredItem(TelemetryContext)
-        {
-            StartNodeId = nodeId,
-            AttributeId = Opc.Ua.Attributes.Value,
-            MonitoringMode = MonitoringMode.Reporting,
-            Handle = property
-        };
-
-        // Apply sampling/queue settings using extension methods for sentinel value handling
-        var samplingInterval = opcUaNodeAttribute.GetSamplingIntervalOrNull() ?? DefaultSamplingInterval;
-        if (samplingInterval.HasValue)
-        {
-            item.SamplingInterval = samplingInterval.Value;
-        }
-
-        var queueSize = opcUaNodeAttribute.GetQueueSizeOrNull() ?? DefaultQueueSize;
-        if (queueSize.HasValue)
-        {
-            item.QueueSize = queueSize.Value;
-        }
-
-        var discardOldest = opcUaNodeAttribute.GetDiscardOldestOrNull() ?? DefaultDiscardOldest;
-        if (discardOldest.HasValue)
-        {
-            item.DiscardOldest = discardOldest.Value;
-        }
-
-        // Apply filter (only if any filter option is specified)
-        var filter = CreateDataChangeFilter(opcUaNodeAttribute);
-        if (filter != null)
-        {
-            item.Filter = filter;
-        }
-
-        return item;
-    }
-
-    /// <summary>
-    /// Creates a DataChangeFilter based on the attribute and configuration defaults.
-    /// Returns null if no filter options are specified (uses OPC UA library defaults).
-    /// </summary>
-    private DataChangeFilter? CreateDataChangeFilter(OpcUaNodeAttribute? attribute)
-    {
-        // Apply attribute overrides (using extension methods for sentinel value handling), then configuration defaults
-        var trigger = attribute.GetDataChangeTriggerOrNull() ?? DefaultDataChangeTrigger;
-        var deadbandType = attribute.GetDeadbandTypeOrNull() ?? DefaultDeadbandType;
-        var deadbandValue = attribute.GetDeadbandValueOrNull() ?? DefaultDeadbandValue;
-
-        // Only create filter if at least one option is specified
-        if (!trigger.HasValue && !deadbandType.HasValue && !deadbandValue.HasValue)
-        {
-            return null;
-        }
-
-        return new DataChangeFilter
-        {
-            Trigger = trigger ?? DataChangeTrigger.StatusValue,
-            DeadbandType = (uint)(deadbandType ?? DeadbandType.None),
-            DeadbandValue = deadbandValue ?? 0.0
-        };
-    }
-
-    /// <summary>
     /// Validates configuration values and throws ArgumentException if invalid.
     /// Call this method during initialization to fail fast with clear error messages.
     /// </summary>
     public void Validate()
     {
         ArgumentNullException.ThrowIfNull(ServerUrl);
-        ArgumentNullException.ThrowIfNull(PathProvider);
         ArgumentNullException.ThrowIfNull(TypeResolver);
         ArgumentNullException.ThrowIfNull(ValueConverter);
         ArgumentNullException.ThrowIfNull(SubjectFactory);
@@ -575,6 +514,5 @@ public class OpcUaClientConfiguration
                 $"ReadAfterWriteBuffer must be non-negative, got: {ReadAfterWriteBuffer}",
                 nameof(ReadAfterWriteBuffer));
         }
-
     }
 }

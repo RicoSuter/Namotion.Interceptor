@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.OpcUa.Mapping;
+using Namotion.Interceptor.Registry.Attributes;
 using Opc.Ua;
 
 namespace Namotion.Interceptor.OpcUa.Attributes;
@@ -18,10 +19,15 @@ public enum DiscardOldestMode
     True = 1
 }
 
+/// <summary>
+/// Configures OPC UA node mapping for a property or class.
+/// When applied to a class, provides default configuration for all properties of that type.
+/// </summary>
+[AttributeUsage(AttributeTargets.Property | AttributeTargets.Class)]
 public class OpcUaNodeAttribute : PathAttribute
 {
-    public OpcUaNodeAttribute(string browseName, string? browseNamespaceUri, string? connectorName = null)
-        : base(connectorName ?? "opc", browseName)
+    public OpcUaNodeAttribute(string browseName, string? browseNamespaceUri = null, string? connectorName = null)
+        : base(connectorName ?? OpcUaConstants.DefaultConnectorName, browseName)
     {
         BrowseName = browseName;
         BrowseNamespaceUri = browseNamespaceUri;
@@ -48,18 +54,57 @@ public class OpcUaNodeAttribute : PathAttribute
     public string? NodeNamespaceUri { get; init; }
 
     /// <summary>
+    /// Gets or sets the localized display name (if different from BrowseName).
+    /// </summary>
+    public string? DisplayName { get; init; }
+
+    /// <summary>
+    /// Gets or sets the human-readable description for the node.
+    /// </summary>
+    public string? Description { get; init; }
+
+    /// <summary>
+    /// Gets or sets the type definition (e.g., "FolderType", "AnalogItemType").
+    /// </summary>
+    public string? TypeDefinition { get; init; }
+
+    /// <summary>
+    /// Gets or sets the namespace URI for the type definition.
+    /// </summary>
+    public string? TypeDefinitionNamespace { get; init; }
+
+    /// <summary>
+    /// Gets or sets the NodeClass override.
+    /// Default is Auto (auto-detect from C# type).
+    /// Use Variable for classes representing VariableTypes (e.g., AnalogSignalVariableType).
+    /// </summary>
+    public OpcUaNodeClass NodeClass { get; init; } = OpcUaNodeClass.Auto;
+
+    /// <summary>
+    /// Gets or sets the DataType override (e.g., "Double", "NodeId").
+    /// Default is null (infer from C# type).
+    /// </summary>
+    public string? DataType { get; init; }
+
+    /// <summary>
     /// Gets or sets the sampling interval in milliseconds to be used in monitored item.
     /// Default is int.MinValue (not set), which uses the configuration default or OPC UA library default (-1 = server decides).
     /// Set to 0 for exception-based monitoring (immediate reporting on every change).
-    /// Note: Uses int.MinValue as sentinel because C# attributes don't support nullable value types.
     /// </summary>
+    /// <remarks>
+    /// Uses int.MinValue as sentinel because C# attributes don't support nullable value types.
+    /// Do not use int.MinValue as an actual sampling interval value.
+    /// </remarks>
     public int SamplingInterval { get; init; } = int.MinValue;
 
     /// <summary>
     /// Gets or sets the queue size to be used in monitored item.
     /// Default is uint.MaxValue (not set), which uses the configuration default or OPC UA library default (1).
-    /// Note: Uses uint.MaxValue as sentinel because C# attributes don't support nullable value types.
     /// </summary>
+    /// <remarks>
+    /// Uses uint.MaxValue as sentinel because C# attributes don't support nullable value types.
+    /// Do not use uint.MaxValue as an actual queue size value.
+    /// </remarks>
     public uint QueueSize { get; init; } = uint.MaxValue;
 
     /// <summary>
@@ -91,4 +136,21 @@ public class OpcUaNodeAttribute : PathAttribute
     /// Note: Uses NaN as sentinel because C# attributes don't support nullable value types.
     /// </summary>
     public double DeadbandValue { get; init; } = double.NaN;
+
+    /// <summary>
+    /// Server only: Gets or sets the modelling rule (Mandatory, Optional, etc.).
+    /// Default is Unset (not specified).
+    /// </summary>
+    public ModellingRule ModellingRule { get; init; } = ModellingRule.Unset;
+
+    /// <summary>
+    /// Server only: Gets or sets the event notifier flags for objects that emit events.
+    /// Default is 255 (not set - uses server default).
+    /// Set to 0 for "no events", or use EventNotifiers flags (1=SubscribeToEvents, 4=HistoryRead, 8=HistoryWrite).
+    /// </summary>
+    /// <remarks>
+    /// Uses 255 (byte.MaxValue) as sentinel because C# attributes don't support nullable value types.
+    /// Do not use 255 as an actual event notifier value.
+    /// </remarks>
+    public byte EventNotifier { get; init; } = byte.MaxValue;
 }

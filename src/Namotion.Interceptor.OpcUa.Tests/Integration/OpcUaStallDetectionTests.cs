@@ -241,7 +241,7 @@ public class OpcUaStallDetectionTests
             server = new OpcUaTestServer<TestRoot>(logger);
             await server.StartAsync(
                 context => new TestRoot(context),
-                (context, root) =>
+                (_, root) =>
                 {
                     root.Connected = true;
                     root.Name = "Initial";
@@ -251,15 +251,15 @@ public class OpcUaStallDetectionTests
 
             // Use longer MaxReconnectDuration to ensure SDK has time to reconnect
             // Use shorter KeepAliveInterval for faster disconnection detection on slow CI runners
-            var quickRestartConfig = (OpcUaClientConfiguration config) =>
+            void QuickRestartConfig(OpcUaClientConfiguration config)
             {
                 config.SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(2);
                 config.MaxReconnectDuration = TimeSpan.FromSeconds(30); // Long enough for SDK to succeed
                 config.ReconnectInterval = TimeSpan.FromSeconds(1);
                 config.KeepAliveInterval = TimeSpan.FromSeconds(1); // Faster disconnection detection
-            };
+            }
 
-            client = new OpcUaTestClient<TestRoot>(logger, quickRestartConfig);
+            client = new OpcUaTestClient<TestRoot>(logger, QuickRestartConfig);
             await client.StartAsync(
                 context => new TestRoot(context),
                 isConnected: root => root.Connected,
