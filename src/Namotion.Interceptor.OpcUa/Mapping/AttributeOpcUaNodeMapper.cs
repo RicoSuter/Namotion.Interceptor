@@ -154,6 +154,11 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
 
     private static Type GetElementType(Type type)
     {
+        if (type.IsArray)
+        {
+            return type.GetElementType()!;
+        }
+
         if (type.IsGenericType)
         {
             var args = type.GetGenericArguments();

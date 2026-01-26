@@ -360,10 +360,9 @@ internal class SubscriptionManager : IAsyncDisposable
     private int? GetRequestedSamplingInterval(RegisteredSubjectProperty property)
     {
         var attribute = property.TryGetOpcUaNodeAttribute();
-        var samplingInterval = attribute != null && attribute.SamplingInterval != int.MinValue
+        return attribute != null && attribute.SamplingInterval != int.MinValue
             ? attribute.SamplingInterval
-            : (int?)null;
-        return samplingInterval ?? _configuration.DefaultSamplingInterval;
+            : _configuration.DefaultSamplingInterval;
     }
 
     public async ValueTask DisposeAsync()

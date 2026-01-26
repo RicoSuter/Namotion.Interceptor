@@ -469,6 +469,8 @@ Result: { BrowseName: "Speed", SamplingInterval: 50 }
          ↑ Attribute wins (later)  ↑ Fluent wins (latest)
 ```
 
+**Note on ReferenceType defaults:** `PathProviderOpcUaNodeMapper` returns `null` for `ReferenceType` on non-attribute properties, allowing later mappers to specify it. `AttributeOpcUaNodeMapper` uses `"HasProperty"` as the default when `[OpcUaReference]` is not specified. This design allows the composite chain to resolve defaults correctly.
+
 ## Standard Reference Types
 
 | Reference Type | Use Case |
@@ -558,6 +560,14 @@ public partial class MachineAlarm
 [OpcUaGeneratesEvent(typeof(MachineAlarm))]
 public partial class Machine { ... }
 ```
+
+### AccessLevel Configuration
+
+`AccessLevel` and `UserAccessLevel` are auto-detected from C# property definitions:
+- Read-only properties (`get` only) → `CurrentRead`
+- Read-write properties (`get`/`set`) → `CurrentReadOrWrite`
+
+Explicit AccessLevel configuration (e.g., making a writable C# property read-only in OPC UA, or adding `HistoryRead` flag) is not yet supported.
 
 ### Security Attributes
 
