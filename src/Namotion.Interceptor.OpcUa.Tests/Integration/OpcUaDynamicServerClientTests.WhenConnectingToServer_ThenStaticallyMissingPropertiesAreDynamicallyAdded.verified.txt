@@ -2,6 +2,7 @@
   "Connected": true,
   "Name": "Foo bar",
   "Number": 0,
+  "Number@Unit": "count",
   "ScalarNumbers": [
     10,
     20,
@@ -67,5 +68,8 @@
       }
     }
   ],
-  "Sensor": 25.5
+  "Sensor": 25.5,
+  "Sensor@Unit": "\u00B0C",
+  "Sensor@MinValue": -40,
+  "Sensor@MaxValue": 85
 }

@@ -157,8 +157,13 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
         if (type.IsGenericType)
         {
             var args = type.GetGenericArguments();
-            if (args.Length == 2) return args[1];
-            if (args.Length == 1) return args[0];
+            switch (args.Length)
+            {
+                case 2:
+                    return args[1];
+                case 1:
+                    return args[0];
+            }
         }
         return type;
     }
