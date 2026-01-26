@@ -203,7 +203,7 @@ internal class CustomNodeManager : CustomNodeManager2
         var path = parentPath + propertyName;
         var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
         var browseName = _nodeFactory.GetBrowseName(this, propertyName, nodeConfiguration, child.Index);
-        var referenceTypeId = _nodeFactory.GetReferenceTypeId(nodeConfiguration);
+        var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, nodeConfiguration);
 
         CreateChildObject(property, browseName, child.Subject, path, parentNodeId, referenceTypeId);
     }
@@ -217,12 +217,12 @@ internal class CustomNodeManager : CustomNodeManager2
         var browseName = _nodeFactory.GetBrowseName(this, propertyName, nodeConfiguration, null);
 
         var typeDefinitionId = _nodeFactory.GetTypeDefinitionId(this, nodeConfiguration);
-        var referenceTypeId = _nodeFactory.GetReferenceTypeId(nodeConfiguration);
+        var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, nodeConfiguration);
 
         var propertyNode = _nodeFactory.CreateFolderNode(this, parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId, nodeConfiguration);
 
         // Child objects below the array folder use path: parentPath + propertyName + "[index]"
-        var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(nodeConfiguration);
+        var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(this, nodeConfiguration);
         foreach (var child in children)
         {
             var childBrowseName = new QualifiedName($"{propertyName}[{child.Index}]", NamespaceIndex);
@@ -241,10 +241,10 @@ internal class CustomNodeManager : CustomNodeManager2
         var browseName = _nodeFactory.GetBrowseName(this, propertyName, nodeConfiguration, null);
 
         var typeDefinitionId = _nodeFactory.GetTypeDefinitionId(this, nodeConfiguration);
-        var referenceTypeId = _nodeFactory.GetReferenceTypeId(nodeConfiguration);
+        var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, nodeConfiguration);
 
         var propertyNode = _nodeFactory.CreateFolderNode(this, parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId, nodeConfiguration);
-        var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(nodeConfiguration);
+        var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(this, nodeConfiguration);
         foreach (var child in children)
         {
             var indexString = child.Index?.ToString();
@@ -277,8 +277,8 @@ internal class CustomNodeManager : CustomNodeManager2
         var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(actualConfigurationProperty);
         var nodeId = _nodeFactory.GetNodeId(this, nodeConfiguration, parentPath + propertyName);
         var browseName = _nodeFactory.GetBrowseName(this, propertyName, nodeConfiguration, null);
-        var referenceTypeId = _nodeFactory.GetReferenceTypeId(nodeConfiguration);
-        var dataTypeOverride = _nodeFactory.GetDataTypeOverride(_nodeMapper.TryGetNodeConfiguration(property));
+        var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, nodeConfiguration);
+        var dataTypeOverride = _nodeFactory.GetDataTypeOverride(this, _nodeMapper.TryGetNodeConfiguration(property));
 
         var variableNode = ConfigureVariableNode(property, parentNodeId, nodeId, browseName, referenceTypeId, dataTypeOverride, nodeConfiguration);
 
@@ -298,7 +298,7 @@ internal class CustomNodeManager : CustomNodeManager2
 
             var attributeName = attributeConfiguration.BrowseName ?? attribute.BrowseName;
             var attributePath = parentPath + PathDelimiter + attributeName;
-            var referenceTypeId = _nodeFactory.GetReferenceTypeId(attributeConfiguration) ?? ReferenceTypeIds.HasProperty;
+            var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, attributeConfiguration) ?? ReferenceTypeIds.HasProperty;
 
             // Create variable node for attribute
             var attributeNode = CreateVariableNodeForAttribute(
@@ -323,7 +323,7 @@ internal class CustomNodeManager : CustomNodeManager2
         var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(attribute);
         var nodeId = _nodeFactory.GetNodeId(this, nodeConfiguration, path);
         var browseName = _nodeFactory.GetBrowseName(this, attributeName, nodeConfiguration, null);
-        var dataTypeOverride = _nodeFactory.GetDataTypeOverride(nodeConfiguration);
+        var dataTypeOverride = _nodeFactory.GetDataTypeOverride(this, nodeConfiguration);
 
         var variableNode = ConfigureVariableNode(attribute, parentNodeId, nodeId, browseName, referenceTypeId, dataTypeOverride, nodeConfiguration);
 

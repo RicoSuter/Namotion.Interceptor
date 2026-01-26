@@ -141,26 +141,23 @@ public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
         public IPropertyBuilder<TProp> Description(string value) =>
             UpdateConfig(c => c with { Description = value });
 
-        public IPropertyBuilder<TProp> TypeDefinition(string value) =>
-            UpdateConfig(c => c with { TypeDefinition = value });
-
-        public IPropertyBuilder<TProp> TypeDefinitionNamespace(string value) =>
-            UpdateConfig(c => c with { TypeDefinitionNamespace = value });
+        public IPropertyBuilder<TProp> TypeDefinition(string identifier, string? namespaceUri = null) =>
+            UpdateConfig(c => c with { TypeDefinition = identifier, TypeDefinitionNamespace = namespaceUri });
 
         public IPropertyBuilder<TProp> NodeClass(OpcUaNodeClass value) =>
             UpdateConfig(c => c with { NodeClass = value });
 
-        public IPropertyBuilder<TProp> DataType(string value) =>
-            UpdateConfig(c => c with { DataType = value });
+        public IPropertyBuilder<TProp> DataType(string identifier, string? namespaceUri = null) =>
+            UpdateConfig(c => c with { DataType = identifier, DataTypeNamespace = namespaceUri });
 
         public IPropertyBuilder<TProp> IsValue(bool value = true) =>
             UpdateConfig(c => c with { IsValue = value });
 
-        public IPropertyBuilder<TProp> ReferenceType(string value) =>
-            UpdateConfig(c => c with { ReferenceType = value });
+        public IPropertyBuilder<TProp> ReferenceType(string identifier, string? namespaceUri = null) =>
+            UpdateConfig(c => c with { ReferenceType = identifier, ReferenceTypeNamespace = namespaceUri });
 
-        public IPropertyBuilder<TProp> ItemReferenceType(string value) =>
-            UpdateConfig(c => c with { ItemReferenceType = value });
+        public IPropertyBuilder<TProp> ItemReferenceType(string identifier, string? namespaceUri = null) =>
+            UpdateConfig(c => c with { ItemReferenceType = identifier, ItemReferenceTypeNamespace = namespaceUri });
 
         public IPropertyBuilder<TProp> SamplingInterval(int value) =>
             UpdateConfig(c => c with { SamplingInterval = value });
@@ -188,6 +185,7 @@ public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
 
         public IPropertyBuilder<TProp> AdditionalReference(
             string referenceType,
+            string? referenceTypeNamespace,
             string targetNodeId,
             string? targetNamespaceUri = null,
             bool isForward = true)
@@ -195,6 +193,7 @@ public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
             var newRef = new OpcUaAdditionalReference
             {
                 ReferenceType = referenceType,
+                ReferenceTypeNamespace = referenceTypeNamespace,
                 TargetNodeId = targetNodeId,
                 TargetNamespaceUri = targetNamespaceUri,
                 IsForward = isForward

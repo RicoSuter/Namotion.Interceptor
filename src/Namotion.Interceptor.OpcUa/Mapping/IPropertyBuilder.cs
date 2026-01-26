@@ -18,10 +18,21 @@ public interface IPropertyBuilder<T>
     IPropertyBuilder<T> Description(string value);
 
     // Type definition
-    IPropertyBuilder<T> TypeDefinition(string value);
-    IPropertyBuilder<T> TypeDefinitionNamespace(string value);
+    /// <summary>
+    /// Sets the type definition for the node.
+    /// </summary>
+    /// <param name="identifier">Type definition identifier (standard type name, NodeId string, or BrowseName).</param>
+    /// <param name="namespaceUri">Optional namespace URI for custom types from imported nodesets.</param>
+    IPropertyBuilder<T> TypeDefinition(string identifier, string? namespaceUri = null);
+
     IPropertyBuilder<T> NodeClass(OpcUaNodeClass value);
-    IPropertyBuilder<T> DataType(string value);
+
+    /// <summary>
+    /// Sets the data type override.
+    /// </summary>
+    /// <param name="identifier">Data type identifier (standard type name, NodeId string, or BrowseName).</param>
+    /// <param name="namespaceUri">Optional namespace URI for custom data types.</param>
+    IPropertyBuilder<T> DataType(string identifier, string? namespaceUri = null);
 
     /// <summary>
     /// Marks this property as the primary value for a VariableNode class (equivalent to [OpcUaValue] attribute).
@@ -30,8 +41,19 @@ public interface IPropertyBuilder<T>
     IPropertyBuilder<T> IsValue(bool value = true);
 
     // Reference configuration
-    IPropertyBuilder<T> ReferenceType(string value);
-    IPropertyBuilder<T> ItemReferenceType(string value);
+    /// <summary>
+    /// Sets the reference type from parent node.
+    /// </summary>
+    /// <param name="identifier">Reference type identifier (standard type name, NodeId string, or BrowseName).</param>
+    /// <param name="namespaceUri">Optional namespace URI for custom reference types.</param>
+    IPropertyBuilder<T> ReferenceType(string identifier, string? namespaceUri = null);
+
+    /// <summary>
+    /// Sets the reference type for collection/dictionary items.
+    /// </summary>
+    /// <param name="identifier">Reference type identifier for items.</param>
+    /// <param name="namespaceUri">Optional namespace URI for custom reference types.</param>
+    IPropertyBuilder<T> ItemReferenceType(string identifier, string? namespaceUri = null);
 
     // Client-only - monitoring
     IPropertyBuilder<T> SamplingInterval(int value);
@@ -48,12 +70,14 @@ public interface IPropertyBuilder<T>
     /// <summary>
     /// Adds a non-hierarchical reference to the node.
     /// </summary>
-    /// <param name="referenceType">Reference type name (e.g., "HasInterface", "GeneratesEvent").</param>
+    /// <param name="referenceType">Reference type identifier (standard type name, NodeId string, or BrowseName).</param>
+    /// <param name="referenceTypeNamespace">Namespace URI for custom reference types. Pass null for standard types.</param>
     /// <param name="targetNodeId">Target node identifier.</param>
     /// <param name="targetNamespaceUri">Target namespace URI. If null, uses the default namespace.</param>
     /// <param name="isForward">Whether this is a forward reference. Default is true.</param>
     IPropertyBuilder<T> AdditionalReference(
         string referenceType,
+        string? referenceTypeNamespace,
         string targetNodeId,
         string? targetNamespaceUri = null,
         bool isForward = true);

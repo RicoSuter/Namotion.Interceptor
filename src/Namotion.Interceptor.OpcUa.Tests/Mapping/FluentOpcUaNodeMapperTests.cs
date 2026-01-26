@@ -87,8 +87,7 @@ public class FluentOpcUaNodeMapperTests
                 .NodeNamespaceUri("http://test/")
                 .DisplayName("Test Display Name")
                 .Description("Test Description")
-                .TypeDefinition("BaseDataVariableType")
-                .TypeDefinitionNamespace("http://opcfoundation.org/UA/")
+                .TypeDefinition("BaseDataVariableType", "http://opcfoundation.org/UA/")
                 .NodeClass(OpcUaNodeClass.Variable)
                 .DataType("String")
                 .ReferenceType("HasComponent")
@@ -183,7 +182,7 @@ public class FluentOpcUaNodeMapperTests
         var mapper = new FluentOpcUaNodeMapper<TestRoot>()
             .Map(r => r.Name, p => p
                 .BrowseName("TestNode")
-                .AdditionalReference("HasInterface", "i=17602"));
+                .AdditionalReference("HasInterface", null, "i=17602"));
 
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
@@ -209,8 +208,8 @@ public class FluentOpcUaNodeMapperTests
         var mapper = new FluentOpcUaNodeMapper<TestRoot>()
             .Map(r => r.Name, p => p
                 .BrowseName("TestNode")
-                .AdditionalReference("HasInterface", "i=17602")
-                .AdditionalReference("GeneratesEvent", "ns=2;s=EventType", "http://test/", false));
+                .AdditionalReference("HasInterface", null, "i=17602")
+                .AdditionalReference("GeneratesEvent", null, "ns=2;s=EventType", "http://test/", false));
 
         var subject = new TestRoot(new InterceptorSubjectContext());
         var registeredSubject = new RegisteredSubject(subject);
@@ -279,6 +278,120 @@ public class FluentOpcUaNodeMapperTests
         Assert.NotNull(cityConfig);
         Assert.Equal("CityNode", cityConfig.BrowseName);
     }
+
+    #region Namespace Parameter Tests
+
+    [Fact]
+    public void TypeDefinition_WithNamespace_SetsConfiguration()
+    {
+        // Arrange
+        var mapper = new FluentOpcUaNodeMapper<TestRoot>()
+            .Map(r => r.Name, p => p
+                .BrowseName("Device")
+                .TypeDefinition("DeviceType", "http://opcfoundation.org/UA/DI/"));
+
+        var subject = new TestRoot(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+        var property = registeredSubject.TryGetProperty("Name")!;
+
+        // Act
+        var config = mapper.TryGetNodeConfiguration(property);
+
+        // Assert
+        Assert.NotNull(config);
+        Assert.Equal("DeviceType", config.TypeDefinition);
+        Assert.Equal("http://opcfoundation.org/UA/DI/", config.TypeDefinitionNamespace);
+    }
+
+    [Fact]
+    public void TypeDefinition_WithoutNamespace_SetsOnlyIdentifier()
+    {
+        // Arrange
+        var mapper = new FluentOpcUaNodeMapper<TestRoot>()
+            .Map(r => r.Name, p => p
+                .BrowseName("Folder")
+                .TypeDefinition("FolderType"));
+
+        var subject = new TestRoot(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+        var property = registeredSubject.TryGetProperty("Name")!;
+
+        // Act
+        var config = mapper.TryGetNodeConfiguration(property);
+
+        // Assert
+        Assert.NotNull(config);
+        Assert.Equal("FolderType", config.TypeDefinition);
+        Assert.Null(config.TypeDefinitionNamespace);
+    }
+
+    [Fact]
+    public void ReferenceType_WithNamespace_SetsConfiguration()
+    {
+        // Arrange
+        var mapper = new FluentOpcUaNodeMapper<TestRoot>()
+            .Map(r => r.Name, p => p
+                .BrowseName("Device")
+                .ReferenceType("HasDevice", "http://opcfoundation.org/UA/DI/"));
+
+        var subject = new TestRoot(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+        var property = registeredSubject.TryGetProperty("Name")!;
+
+        // Act
+        var config = mapper.TryGetNodeConfiguration(property);
+
+        // Assert
+        Assert.NotNull(config);
+        Assert.Equal("HasDevice", config.ReferenceType);
+        Assert.Equal("http://opcfoundation.org/UA/DI/", config.ReferenceTypeNamespace);
+    }
+
+    [Fact]
+    public void DataType_WithNamespace_SetsConfiguration()
+    {
+        // Arrange
+        var mapper = new FluentOpcUaNodeMapper<TestRoot>()
+            .Map(r => r.Name, p => p
+                .BrowseName("Temperature")
+                .DataType("TemperatureType", "http://example.com/types/"));
+
+        var subject = new TestRoot(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+        var property = registeredSubject.TryGetProperty("Name")!;
+
+        // Act
+        var config = mapper.TryGetNodeConfiguration(property);
+
+        // Assert
+        Assert.NotNull(config);
+        Assert.Equal("TemperatureType", config.DataType);
+        Assert.Equal("http://example.com/types/", config.DataTypeNamespace);
+    }
+
+    [Fact]
+    public void ItemReferenceType_WithNamespace_SetsConfiguration()
+    {
+        // Arrange
+        var mapper = new FluentOpcUaNodeMapper<TestRoot>()
+            .Map(r => r.Name, p => p
+                .BrowseName("Devices")
+                .ItemReferenceType("ContainsDevice", "http://example.com/types/"));
+
+        var subject = new TestRoot(new InterceptorSubjectContext());
+        var registeredSubject = new RegisteredSubject(subject);
+        var property = registeredSubject.TryGetProperty("Name")!;
+
+        // Act
+        var config = mapper.TryGetNodeConfiguration(property);
+
+        // Assert
+        Assert.NotNull(config);
+        Assert.Equal("ContainsDevice", config.ItemReferenceType);
+        Assert.Equal("http://example.com/types/", config.ItemReferenceTypeNamespace);
+    }
+
+    #endregion
 
     #region TryGetPropertyAsync Tests
 

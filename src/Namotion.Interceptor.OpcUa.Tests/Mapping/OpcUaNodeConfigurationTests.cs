@@ -154,4 +154,88 @@ public class OpcUaNodeConfigurationTests
         Assert.Single(result.AdditionalReferences);
         Assert.Equal("HasInterface", result.AdditionalReferences[0].ReferenceType);
     }
+
+    [Fact]
+    public void WithFallback_ReferenceTypeNamespace_PrimaryTakesPriority()
+    {
+        // Arrange
+        var primary = new OpcUaNodeConfiguration { ReferenceTypeNamespace = "http://primary.com/" };
+        var fallback = new OpcUaNodeConfiguration { ReferenceTypeNamespace = "http://fallback.com/" };
+
+        // Act
+        var result = primary.WithFallback(fallback);
+
+        // Assert
+        Assert.Equal("http://primary.com/", result.ReferenceTypeNamespace);
+    }
+
+    [Fact]
+    public void WithFallback_ReferenceTypeNamespace_FallsBackWhenNull()
+    {
+        // Arrange
+        var primary = new OpcUaNodeConfiguration { ReferenceTypeNamespace = null };
+        var fallback = new OpcUaNodeConfiguration { ReferenceTypeNamespace = "http://fallback.com/" };
+
+        // Act
+        var result = primary.WithFallback(fallback);
+
+        // Assert
+        Assert.Equal("http://fallback.com/", result.ReferenceTypeNamespace);
+    }
+
+    [Fact]
+    public void WithFallback_DataTypeNamespace_PrimaryTakesPriority()
+    {
+        // Arrange
+        var primary = new OpcUaNodeConfiguration { DataTypeNamespace = "http://primary.com/" };
+        var fallback = new OpcUaNodeConfiguration { DataTypeNamespace = "http://fallback.com/" };
+
+        // Act
+        var result = primary.WithFallback(fallback);
+
+        // Assert
+        Assert.Equal("http://primary.com/", result.DataTypeNamespace);
+    }
+
+    [Fact]
+    public void WithFallback_DataTypeNamespace_FallsBackWhenNull()
+    {
+        // Arrange
+        var primary = new OpcUaNodeConfiguration { DataTypeNamespace = null };
+        var fallback = new OpcUaNodeConfiguration { DataTypeNamespace = "http://fallback.com/" };
+
+        // Act
+        var result = primary.WithFallback(fallback);
+
+        // Assert
+        Assert.Equal("http://fallback.com/", result.DataTypeNamespace);
+    }
+
+    [Fact]
+    public void WithFallback_ItemReferenceTypeNamespace_PrimaryTakesPriority()
+    {
+        // Arrange
+        var primary = new OpcUaNodeConfiguration { ItemReferenceTypeNamespace = "http://primary.com/" };
+        var fallback = new OpcUaNodeConfiguration { ItemReferenceTypeNamespace = "http://fallback.com/" };
+
+        // Act
+        var result = primary.WithFallback(fallback);
+
+        // Assert
+        Assert.Equal("http://primary.com/", result.ItemReferenceTypeNamespace);
+    }
+
+    [Fact]
+    public void WithFallback_ItemReferenceTypeNamespace_FallsBackWhenNull()
+    {
+        // Arrange
+        var primary = new OpcUaNodeConfiguration { ItemReferenceTypeNamespace = null };
+        var fallback = new OpcUaNodeConfiguration { ItemReferenceTypeNamespace = "http://fallback.com/" };
+
+        // Act
+        var result = primary.WithFallback(fallback);
+
+        // Assert
+        Assert.Equal("http://fallback.com/", result.ItemReferenceTypeNamespace);
+    }
 }
