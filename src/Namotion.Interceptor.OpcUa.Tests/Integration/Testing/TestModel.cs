@@ -16,6 +16,7 @@ public partial class TestRoot
         People = [];
         PeopleByName = new Dictionary<string, TestPerson>();
         Sensor = new TestSensor();
+        Number_Unit = "count";
     }
 
     [Path("opc", "Connected")]
@@ -26,6 +27,11 @@ public partial class TestRoot
 
     [Path("opc", "Number")]
     public partial decimal Number { get; set; }
+
+    /// <summary>Property attribute - becomes HasProperty subnode of Number.</summary>
+    [PropertyAttribute(nameof(Number), "Unit")]
+    [Path("opc", "Unit")]
+    public partial string Number_Unit { get; set; }
 
     [Path("opc", "ScalarNumbers")]
     public partial int[] ScalarNumbers { get; set; }

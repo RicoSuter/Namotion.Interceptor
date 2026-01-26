@@ -109,6 +109,20 @@ ShouldAddDynamicProperty = async (node, ct) =>
 }
 ```
 
+**Dynamic Attribute Discovery:**
+
+When loading variable nodes, any child properties (HasProperty references) not found in the C# model can be added as dynamic attributes:
+
+```csharp
+ShouldAddDynamicAttribute = async (node, ct) =>
+{
+    // Add standard OPC UA metadata attributes dynamically
+    return node.BrowseName.Name is "EURange" or "EngineeringUnits";
+}
+```
+
+By default, all unknown attributes are added. Set to `null` to disable dynamic attribute discovery.
+
 ### Server Configuration
 
 The server configuration requires minimal setup with source path provider and value converter. Additional options control the application name, namespace URI, certificate management, and performance tuning.

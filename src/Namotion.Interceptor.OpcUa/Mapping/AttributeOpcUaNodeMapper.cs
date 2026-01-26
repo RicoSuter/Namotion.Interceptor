@@ -93,6 +93,9 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
         // Priority 1: Explicit NodeIdentifier match
         foreach (var property in subject.Properties)
         {
+            if (property.IsAttribute)
+                continue;
+
             var attribute = property.ReflectionAttributes
                 .OfType<OpcUaNodeAttribute>()
                 .FirstOrDefault();
@@ -113,6 +116,9 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
 
         foreach (var property in subject.Properties)
         {
+            if (property.IsAttribute)
+                continue;
+
             var attribute = property.ReflectionAttributes
                 .OfType<OpcUaNodeAttribute>()
                 .FirstOrDefault();
@@ -138,7 +144,6 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
 
     private static OpcUaNodeAttribute? GetClassLevelOpcUaNodeAttribute(RegisteredSubjectProperty property)
     {
-        // For object references, get the OpcUaNode attribute from the referenced type
         if (property.IsSubjectReference || property.IsSubjectCollection || property.IsSubjectDictionary)
         {
             var elementType = GetElementType(property.Type);
@@ -147,14 +152,12 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
         return null;
     }
 
-    private static Type? GetElementType(Type type)
+    private static Type GetElementType(Type type)
     {
         if (type.IsGenericType)
         {
             var args = type.GetGenericArguments();
-            // For Dictionary<K,V>, return V
             if (args.Length == 2) return args[1];
-            // For IEnumerable<T>, return T
             if (args.Length == 1) return args[0];
         }
         return type;
@@ -185,8 +188,8 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
             DataChangeTrigger = (int)attribute.DataChangeTrigger != -1 ? attribute.DataChangeTrigger : null,
             DeadbandType = (int)attribute.DeadbandType != -1 ? attribute.DeadbandType : null,
             DeadbandValue = !double.IsNaN(attribute.DeadbandValue) ? attribute.DeadbandValue : null,
-            ModellingRule = attribute.ModellingRule != Mapping.ModellingRule.Unset ? attribute.ModellingRule : null,
-            EventNotifier = attribute.GetEventNotifierOrNull(),
+            ModellingRule = attribute.ModellingRule != ModellingRule.Unset ? attribute.ModellingRule : null,
+            EventNotifier = attribute.EventNotifier != byte.MaxValue ? attribute.EventNotifier : null,
         };
     }
 }

@@ -134,6 +134,7 @@ public class OpcUaReadWriteTests
             _server.Root.Sensor!.Value = 42.5;                        // Test 6: OpcUaValue pattern
             _server.Root.Sensor.Unit = "°F";                          // Test 7: OpcUaValue child property
             _server.Root.Sensor.MinValue = -50.0;                     // Test 8: OpcUaValue child property
+            _server.Root.Number_Unit = "items";                       // Test 9: PropertyAttribute subnode
 
             // Assert: Wait for all properties to sync in single check
             await AsyncTestHelpers.WaitUntilAsync(
@@ -144,7 +145,8 @@ public class OpcUaReadWriteTests
                       _client.Root.People[0].Address!.ZipCode == "12345" &&
                       Math.Abs(_client.Root.Sensor!.Value - 42.5) < 0.01 &&
                       _client.Root.Sensor!.Unit == "°F" &&
-                      _client.Root.Sensor?.MinValue == -50.0,
+                      _client.Root.Sensor?.MinValue == -50.0 &&
+                      _client.Root.Number_Unit == "items",            // Test 9: PropertyAttribute subnode
                 timeout: TimeSpan.FromSeconds(60),
                 message: "Client should receive all nested structure updates");
 
@@ -219,6 +221,8 @@ public class OpcUaReadWriteTests
                     MinValue = -40.0,
                     MaxValue = 85.0
                 };
+                root.Number = 42;
+                root.Number_Unit = "count";  // PropertyAttribute subnode test
             },
             baseAddress: _port.BaseAddress,
             certificateStoreBasePath: _port.CertificateStoreBasePath);

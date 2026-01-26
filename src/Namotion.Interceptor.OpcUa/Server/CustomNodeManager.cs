@@ -143,6 +143,9 @@ internal class CustomNodeManager : CustomNodeManager2
     {
         foreach (var property in subject.Properties)
         {
+            if (property.IsAttribute)
+                continue;
+
             var propertyName = property.ResolvePropertyName(_nodeMapper);
             if (propertyName is not null)
             {
@@ -161,7 +164,7 @@ internal class CustomNodeManager : CustomNodeManager2
                     {
                         // Check if this should be a VariableNode instead of ObjectNode
                         var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
-                        if (nodeConfiguration?.NodeClass == Mapping.OpcUaNodeClass.Variable)
+                        if (nodeConfiguration?.NodeClass == OpcUaNodeClass.Variable)
                         {
                             CreateVariableNodeForSubject(propertyName, property, parentNodeId, prefix);
                         }
@@ -292,6 +295,94 @@ internal class CustomNodeManager : CustomNodeManager2
         };
 
         property.Reference.SetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, variableNode);
+
+        CreateAttributeNodes(variableNode, property, parentPath + propertyName);
+        return variableNode;
+    }
+
+    private void CreateAttributeNodes(NodeState parentNode, RegisteredSubjectProperty property, string parentPath)
+    {
+        foreach (var attribute in property.Attributes)
+        {
+            var attributeConfiguration = _nodeMapper.TryGetNodeConfiguration(attribute);
+            if (attributeConfiguration is null)
+                continue;
+
+            var attributeName = attributeConfiguration.BrowseName ?? attribute.BrowseName;
+            var attributePath = parentPath + PathDelimiter + attributeName;
+            var referenceTypeId = GetReferenceTypeId(attribute) ?? ReferenceTypeIds.HasProperty;
+
+            // Create variable node for attribute
+            var attributeNode = CreateVariableNodeForAttribute(
+                attributeName,
+                attribute,
+                parentNode.NodeId,
+                attributePath,
+                referenceTypeId);
+
+            // Recursive: attributes can have attributes
+            CreateAttributeNodes(attributeNode, attribute, attributePath);
+        }
+    }
+
+    private BaseDataVariableState CreateVariableNodeForAttribute(
+        string attributeName,
+        RegisteredSubjectProperty attribute,
+        NodeId parentNodeId,
+        string path,
+        NodeId referenceTypeId)
+    {
+        var value = _configuration.ValueConverter.ConvertToNodeValue(attribute.GetValue(), attribute);
+        var typeInfo = _configuration.ValueConverter.GetNodeTypeInfo(attribute.Type);
+
+        var nodeId = GetNodeId(attribute, path);
+        var browseName = GetBrowseName(attributeName, attribute, null);
+        var dataTypeOverride = GetDataTypeOverride(attribute);
+        var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(attribute);
+
+        var variableNode = CreateVariableNode(parentNodeId, nodeId, browseName, typeInfo, referenceTypeId, dataTypeOverride, nodeConfiguration);
+        AddAdditionalReferences(variableNode, nodeConfiguration);
+        variableNode.Handle = attribute.Reference;
+
+        // Adjust access according to property setter
+        if (!attribute.HasSetter)
+        {
+            variableNode.AccessLevel = AccessLevels.CurrentRead;
+            variableNode.UserAccessLevel = AccessLevels.CurrentRead;
+        }
+        else
+        {
+            variableNode.AccessLevel = AccessLevels.CurrentReadOrWrite;
+            variableNode.UserAccessLevel = AccessLevels.CurrentReadOrWrite;
+        }
+
+        // Set array dimensions (works for 1D and multi-D)
+        if (value is Array arrayValue)
+        {
+            variableNode.ArrayDimensions = new ReadOnlyList<uint>(
+                Enumerable.Range(0, arrayValue.Rank)
+                    .Select(i => (uint)arrayValue.GetLength(i))
+                    .ToArray());
+        }
+
+        variableNode.Value = value;
+        variableNode.StateChanged += (_, _, changes) =>
+        {
+            if (changes.HasFlag(NodeStateChangeMasks.Value))
+            {
+                DateTimeOffset timestamp;
+                object? nodeValue;
+                lock (variableNode)
+                {
+                    timestamp = variableNode.Timestamp;
+                    nodeValue = variableNode.Value;
+                }
+
+                _source.UpdateProperty(attribute.Reference, timestamp, nodeValue);
+            }
+        };
+
+        attribute.Reference.SetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, variableNode);
 
         return variableNode;
     }

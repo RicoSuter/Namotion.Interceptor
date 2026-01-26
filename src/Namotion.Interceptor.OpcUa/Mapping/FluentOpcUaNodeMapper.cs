@@ -46,6 +46,9 @@ public class FluentOpcUaNodeMapper<T> : IOpcUaNodeMapper
 
         foreach (var property in subject.Properties)
         {
+            if (property.IsAttribute)
+                continue;
+
             var path = GetPropertyPath(property);
             if (_mappings.TryGetValue(path, out var config) && config.BrowseName == browseName)
             {
