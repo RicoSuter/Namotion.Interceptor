@@ -9,9 +9,6 @@ namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 /// Tests for OPC UA client stall detection and recovery.
 /// These tests verify that the client can detect when SDK reconnection is stuck
 /// and force a manual reconnection.
-///
-/// In a separate class for parallel execution since stall detection tests
-/// intentionally wait for timeouts.
 /// </summary>
 [Trait("Category", "Integration")]
 public class OpcUaStallDetectionTests
@@ -21,11 +18,15 @@ public class OpcUaStallDetectionTests
     // Stall detection config for tests: 15s max reconnect duration
     // Note: Under parallel execution, SDK can take 20-30s to even start reconnecting,
     // so we use the same 15s as OpcUaTestClient defaults for consistency.
+    // SessionTimeout determines when connection is considered lost (min 10s due to server MinSessionTimeout)
+    // KeepAliveInterval is set to 1s for fast disconnection detection.
     private readonly Action<OpcUaClientConfiguration> _fastStallConfig = config =>
     {
         config.SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(2);
         config.MaxReconnectDuration = TimeSpan.FromSeconds(15);
         config.ReconnectInterval = TimeSpan.FromSeconds(1);
+        config.SessionTimeout = TimeSpan.FromSeconds(10); // Minimum allowed by server
+        config.KeepAliveInterval = TimeSpan.FromSeconds(1); // Fast disconnection detection
     };
 
     public OpcUaStallDetectionTests(ITestOutputHelper output)
@@ -85,10 +86,10 @@ public class OpcUaStallDetectionTests
             logger.Log("Stopping server (will NOT restart)...");
             await server.StopAsync();
 
-            // Wait for client to detect disconnection
+            // Wait for client to detect disconnection (longer timeout for parallel test execution)
             await AsyncTestHelpers.WaitUntilAsync(
                 () => !client.Diagnostics.IsConnected,
-                timeout: TimeSpan.FromSeconds(30),
+                timeout: TimeSpan.FromSeconds(60),
                 message: "Client should detect disconnection");
             logger.Log("Client detected disconnection");
 
@@ -250,12 +251,13 @@ public class OpcUaStallDetectionTests
                 certificateStoreBasePath: port.CertificateStoreBasePath);
 
             // Use longer MaxReconnectDuration to ensure SDK has time to reconnect
-            // Use shorter KeepAliveInterval for faster disconnection detection on slow CI runners
+            // Use shorter SessionTimeout and KeepAliveInterval for faster disconnection detection on slow CI runners
             void QuickRestartConfig(OpcUaClientConfiguration config)
             {
                 config.SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(2);
                 config.MaxReconnectDuration = TimeSpan.FromSeconds(30); // Long enough for SDK to succeed
                 config.ReconnectInterval = TimeSpan.FromSeconds(1);
+                config.SessionTimeout = TimeSpan.FromSeconds(10); // Minimum allowed by server for fast detection
                 config.KeepAliveInterval = TimeSpan.FromSeconds(1); // Faster disconnection detection
             }
 
