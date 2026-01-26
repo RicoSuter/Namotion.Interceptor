@@ -48,7 +48,7 @@ public partial class TestRoot
     [Path("opc", "PeopleByName")]
     public partial Dictionary<string, TestPerson>? PeopleByName { get; set; }
 
-    [OpcUaNode("Sensor", null)]
+    [OpcUaNode("Sensor")]
     [OpcUaReference("HasComponent")]
     public partial TestSensor? Sensor { get; set; }
 }
@@ -101,7 +101,7 @@ public partial class TestAddress
 /// Test model demonstrating OpcUaValue pattern - a VariableNode with child properties.
 /// </summary>
 [InterceptorSubject]
-[OpcUaNode("TestSensor", null, NodeClass = OpcUaNodeClass.Variable)]
+[OpcUaNode("TestSensor", NodeClass = OpcUaNodeClass.Variable)]
 public partial class TestSensor
 {
     public TestSensor()
@@ -111,20 +111,20 @@ public partial class TestSensor
     }
 
     /// <summary>The OPC UA Value attribute - this is the VariableNode's value.</summary>
-    [OpcUaNode("Value", null)]
+    [OpcUaNode("Value")]
     [OpcUaValue]
     public partial double Value { get; set; }
 
     /// <summary>Child property of the VariableNode.</summary>
-    [OpcUaNode("Unit", null)]
+    [OpcUaNode("Unit")]
     public partial string? Unit { get; set; }
 
     /// <summary>Child property of the VariableNode.</summary>
-    [OpcUaNode("MinValue", null)]
+    [OpcUaNode("MinValue")]
     public partial double? MinValue { get; set; }
 
     /// <summary>Child property of the VariableNode.</summary>
-    [OpcUaNode("MaxValue", null)]
+    [OpcUaNode("MaxValue")]
     public partial double? MaxValue { get; set; }
 }
 
@@ -136,19 +136,19 @@ public partial class TestSensor
 public partial class TestSensorData
 {
     /// <summary>Temperature with absolute deadband of 0.5 via attribute.</summary>
-    [OpcUaNode("Temperature", null, DeadbandType = DeadbandType.Absolute, DeadbandValue = 0.5)]
+    [OpcUaNode("Temperature", DeadbandType = DeadbandType.Absolute, DeadbandValue = 0.5)]
     public partial double Temperature { get; set; }
 
     /// <summary>Pressure with percent deadband of 2.5 via attribute.</summary>
-    [OpcUaNode("Pressure", null, DeadbandType = DeadbandType.Percent, DeadbandValue = 2.5)]
+    [OpcUaNode("Pressure", DeadbandType = DeadbandType.Percent, DeadbandValue = 2.5)]
     public partial double Pressure { get; set; }
 
     /// <summary>Status with StatusValueTimestamp trigger via attribute.</summary>
-    [OpcUaNode("Status", null, DataChangeTrigger = DataChangeTrigger.StatusValueTimestamp)]
+    [OpcUaNode("Status", DataChangeTrigger = DataChangeTrigger.StatusValueTimestamp)]
     public partial int Status { get; set; }
 
     /// <summary>Signal with exception-based monitoring (sampling interval 0).</summary>
-    [OpcUaNode("Signal", null, SamplingInterval = 0)]
+    [OpcUaNode("Signal", SamplingInterval = 0)]
     public partial bool Signal { get; set; }
 
     /// <summary>Counter with no filter settings (uses defaults).</summary>
@@ -167,47 +167,47 @@ public partial class TestNodeMapperModel
     public partial string SimpleProp { get; set; }
 
     /// <summary>Property with explicit NodeIdentifier for Priority 1 matching.</summary>
-    [OpcUaNode("NodeIdProp", null, NodeIdentifier = "ns=2;s=MyExplicitNodeId", NodeNamespaceUri = "http://myserver/")]
+    [OpcUaNode("NodeIdProp", NodeIdentifier = "ns=2;s=MyExplicitNodeId", NodeNamespaceUri = "http://myserver/")]
     public partial double NodeIdProp { get; set; }
 
     /// <summary>Property with sampling/queue settings.</summary>
-    [OpcUaNode("MonitoredProp", null, SamplingInterval = 500, QueueSize = 10)]
+    [OpcUaNode("MonitoredProp", SamplingInterval = 500, QueueSize = 10)]
     public partial double MonitoredProp { get; set; }
 
     /// <summary>Property with data change filter settings.</summary>
-    [OpcUaNode("FilteredProp", null, DataChangeTrigger = DataChangeTrigger.StatusValueTimestamp, DeadbandType = DeadbandType.Absolute, DeadbandValue = 0.5)]
+    [OpcUaNode("FilteredProp", DataChangeTrigger = DataChangeTrigger.StatusValueTimestamp, DeadbandType = DeadbandType.Absolute, DeadbandValue = 0.5)]
     public partial double FilteredProp { get; set; }
 
     /// <summary>Property with discard oldest false.</summary>
-    [OpcUaNode("QueueProp", null, DiscardOldest = DiscardOldestMode.False)]
+    [OpcUaNode("QueueProp", DiscardOldest = DiscardOldestMode.False)]
     public partial int QueueProp { get; set; }
 
     /// <summary>Property with type definition.</summary>
-    [OpcUaNode("TypedProp", null, TypeDefinition = "AnalogItemType", TypeDefinitionNamespace = "http://opcfoundation.org/UA/")]
+    [OpcUaNode("TypedProp", TypeDefinition = "AnalogItemType", TypeDefinitionNamespace = "http://opcfoundation.org/UA/")]
     public partial double TypedProp { get; set; }
 
     /// <summary>Property with OpcUaReference attribute.</summary>
-    [OpcUaNode("RefProp", null)]
+    [OpcUaNode("RefProp")]
     [OpcUaReference("HasComponent")]
     public partial TestRefChild RefProp { get; set; }
 
     /// <summary>Simple double property for value testing (OpcUaValue moved to TestVariableChild).</summary>
-    [OpcUaNode("ValueProp", null)]
+    [OpcUaNode("ValueProp")]
     public partial double ValueProp { get; set; }
 
     /// <summary>Property with modelling rule.</summary>
-    [OpcUaNode("MandatoryProp", null, ModellingRule = ModellingRule.Mandatory)]
+    [OpcUaNode("MandatoryProp", ModellingRule = ModellingRule.Mandatory)]
     public partial string MandatoryProp { get; set; }
 
     /// <summary>Property with NodeClass override.</summary>
-    [OpcUaNode("VariableClassProp", null, NodeClass = OpcUaNodeClass.Variable)]
+    [OpcUaNode("VariableClassProp", NodeClass = OpcUaNodeClass.Variable)]
     public partial TestVariableChild VariableClassProp { get; set; }
 
     /// <summary>Property with no OPC UA attributes (for negative testing).</summary>
     public partial string PlainProp { get; set; }
 
     /// <summary>Property with EventNotifier explicitly set to 0 (no events).</summary>
-    [OpcUaNode("EventNotifierZeroProp", null, EventNotifier = 0)]
+    [OpcUaNode("EventNotifierZeroProp", EventNotifier = 0)]
     public partial int EventNotifierZeroProp { get; set; }
 
     public TestNodeMapperModel()
@@ -230,7 +230,7 @@ public partial class TestNodeMapperModel
 [InterceptorSubject]
 public partial class TestRefChild
 {
-    [OpcUaNode("Value", null)]
+    [OpcUaNode("Value")]
     public partial double Value { get; set; }
 
     public TestRefChild()
@@ -240,10 +240,10 @@ public partial class TestRefChild
 }
 
 [InterceptorSubject]
-[OpcUaNode("TestVariableChild", null, NodeClass = OpcUaNodeClass.Variable)]
+[OpcUaNode("TestVariableChild", NodeClass = OpcUaNodeClass.Variable)]
 public partial class TestVariableChild
 {
-    [OpcUaNode("Value", null)]
+    [OpcUaNode("Value")]
     [OpcUaValue]
     public partial double Value { get; set; }
 
@@ -268,7 +268,7 @@ public partial class TestInvalidOpcUaValueModel
 
 /// <summary>Child item for collection/dictionary tests with class-level OpcUaNode attribute.</summary>
 [InterceptorSubject]
-[OpcUaNode("TestCollectionChild", null, TypeDefinition = "CollectionItemType")]
+[OpcUaNode("TestCollectionChild", TypeDefinition = "CollectionItemType")]
 public partial class TestCollectionChild
 {
     public partial double Value { get; set; }
@@ -297,17 +297,17 @@ public partial class TestCollectionParent
 
 /// <summary>Analog signal model demonstrating VariableType pattern with [OpcUaValue].</summary>
 [InterceptorSubject]
-[OpcUaNode("TestAnalogSignal", null, TypeDefinition = "AnalogSignalVariableType", NodeClass = OpcUaNodeClass.Variable)]
+[OpcUaNode("TestAnalogSignal", TypeDefinition = "AnalogSignalVariableType", NodeClass = OpcUaNodeClass.Variable)]
 public partial class TestAnalogSignal
 {
-    [OpcUaNode("ActualValue", null)]
+    [OpcUaNode("ActualValue")]
     [OpcUaValue]
     public partial double ActualValue { get; set; }
 
-    [OpcUaNode("MinValue", null)]
+    [OpcUaNode("MinValue")]
     public partial double? MinValue { get; set; }
 
-    [OpcUaNode("MaxValue", null)]
+    [OpcUaNode("MaxValue")]
     public partial double? MaxValue { get; set; }
 
     public TestAnalogSignal()
@@ -320,7 +320,7 @@ public partial class TestAnalogSignal
 [InterceptorSubject]
 public partial class TestSensorWithAnalog
 {
-    [OpcUaNode("Temperature", null)]
+    [OpcUaNode("Temperature")]
     [OpcUaReference("HasComponent")]
     public partial TestAnalogSignal? Temperature { get; set; }
 

@@ -375,17 +375,7 @@ internal class CustomNodeManager : CustomNodeManager2
         }
 
         // Find the [OpcUaValue] property
-        RegisteredSubjectProperty? valueProperty = null;
-        foreach (var childProperty in childSubject.Properties)
-        {
-            var childConfig = _nodeMapper.TryGetNodeConfiguration(childProperty);
-            if (childConfig?.IsValue == true)
-            {
-                valueProperty = childProperty;
-                break;
-            }
-        }
-
+        var valueProperty = childSubject.TryGetValueProperty(_nodeMapper);
         if (valueProperty is null)
         {
             return;
@@ -581,6 +571,11 @@ internal class CustomNodeManager : CustomNodeManager2
             ReferenceTypeId = referenceType ?? ReferenceTypeIds.HasComponent
         };
 
+        if (nodeConfiguration?.EventNotifier is { } eventNotifier && eventNotifier != byte.MaxValue)
+        {
+            folderNode.EventNotifier = eventNotifier;
+        }
+
         parentNode?.AddChild(folderNode);
 
         AddPredefinedNode(SystemContext, folderNode);
@@ -611,6 +606,11 @@ internal class CustomNodeManager : CustomNodeManager2
             UserWriteMask = AttributeWriteMask.None,
             ReferenceTypeId = referenceType ?? ReferenceTypeIds.HasComponent
         };
+
+        if (nodeConfiguration?.EventNotifier is { } eventNotifier && eventNotifier != byte.MaxValue)
+        {
+            objectNode.EventNotifier = eventNotifier;
+        }
 
         parentNode?.AddChild(objectNode);
 
