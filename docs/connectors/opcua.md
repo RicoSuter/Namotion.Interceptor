@@ -12,7 +12,7 @@ The `Namotion.Interceptor.OpcUa` package provides integration between Namotion.I
 
 ## Client Setup
 
-Connect to an OPC UA server by configuring a client with `AddOpcUaSubjectClient`. The client automatically establishes connections, subscribes to node changes, and synchronizes values with your C# properties.
+Connect to an OPC UA server by configuring a client with `AddOpcUaSubjectClientSource`. The client automatically establishes connections, subscribes to node changes, and synchronizes values with your C# properties.
 
 ```csharp
 [InterceptorSubject]
@@ -25,7 +25,7 @@ public partial class Machine
     public partial decimal Speed { get; set; }
 }
 
-builder.Services.AddOpcUaSubjectClient<Machine>(
+builder.Services.AddOpcUaSubjectClientSource<Machine>(
     serverUrl: "opc.tcp://plc.factory.com:4840",
     sourceName: "opc",
     pathPrefix: null,
@@ -67,7 +67,7 @@ await host.StartAsync();
 For advanced scenarios, use the full configuration API to customize connection behavior, subscription settings, and dynamic property discovery. The required settings include the server URL and infrastructure components, while optional settings allow fine-tuning of reconnection delays, sampling intervals, and performance parameters.
 
 ```csharp
-builder.Services.AddOpcUaSubjectClient(
+builder.Services.AddOpcUaSubjectClientSource(
     subjectSelector: sp => sp.GetRequiredService<MyRoot>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {
@@ -109,6 +109,20 @@ ShouldAddDynamicProperty = async (node, ct) =>
 }
 ```
 
+**Dynamic Attribute Discovery:**
+
+When loading variable nodes, any child properties (HasProperty references) not found in the C# model can be added as dynamic attributes:
+
+```csharp
+ShouldAddDynamicAttribute = async (node, ct) =>
+{
+    // Add standard OPC UA metadata attributes dynamically
+    return node.BrowseName.Name is "EURange" or "EngineeringUnits";
+}
+```
+
+By default, all unknown attributes are added. Set to `null` to disable dynamic attribute discovery.
+
 ### Server Configuration
 
 The server configuration requires minimal setup with source path provider and value converter. Additional options control the application name, namespace URI, certificate management, and performance tuning.
@@ -132,81 +146,31 @@ builder.Services.AddOpcUaSubjectServer(
 
 The server automatically configures security policies, authentication, operation limits (MaxNodesPerRead/Write=4000), and companion specification namespaces.
 
-## Attributes
+## Property Mapping
 
-### OpcUaNodeAttribute
-
-Use `[OpcUaNode]` to map properties to specific OPC UA nodes with precise control over browse names, node identifiers, and subscription behavior. This attribute allows you to specify exact node IDs, custom sampling intervals, queue settings, and data change filters per property.
+Map C# properties to OPC UA nodes using attributes. For simple cases, use `[Path]`. For advanced OPC UA-specific configuration, use `[OpcUaNode]` and related attributes.
 
 ```csharp
 [InterceptorSubject]
-public partial class Device
+[OpcUaNode(TypeDefinition = "MachineType")]  // Class-level type definition
+public partial class Machine
 {
-    [OpcUaNode("Temperature")]
+    // Simple property mapping
+    [Path("opc", "Status")]
+    public partial int Status { get; set; }
+
+    // OPC UA-specific mapping with monitoring config
+    [OpcUaNode("Temperature", SamplingInterval = 100, DeadbandType = DeadbandType.Absolute, DeadbandValue = 0.5)]
     public partial double Temperature { get; set; }
 
-    // Analog sensor with deadband filtering to reduce noise
-    [OpcUaNode("Pressure", "http://factory.com",
-        NodeIdentifier = "ns=2;s=Sensor.Pressure",
-        NodeNamespaceUri = "http://factory.com",
-        SamplingInterval = 50,
-        QueueSize = 5,
-        DeadbandType = DeadbandType.Absolute,
-        DeadbandValue = 0.1)]
-    public partial double Pressure { get; set; }
-
-    // Discrete variable - use exception-based monitoring (SamplingInterval = 0)
-    // to catch rapid true→false transitions
-    [OpcUaNode("StartCommand", "http://factory.com",
-        SamplingInterval = 0)]
-    public partial bool StartCommand { get; set; }
+    // Child object with HasComponent reference
+    [OpcUaReference("HasComponent")]
+    [OpcUaNode(BrowseName = "MainMotor")]
+    public partial Motor? Motor { get; set; }
 }
 ```
 
-**Sampling interval values:**
-- `null` (default): Use configuration default or OPC UA library default (-1 = server decides)
-- `0`: Exception-based monitoring (immediate reporting on every change) - ideal for discrete variables
-- `> 0`: Sample at specified interval in milliseconds - suitable for analog variables
-
-**Data change filter options:**
-- `DataChangeTrigger`: `Status`, `StatusValue` (default), or `StatusValueTimestamp`
-- `DeadbandType`: `None` (default), `Absolute`, or `Percent`
-- `DeadbandValue`: Threshold value (absolute units or percentage depending on type)
-
-### OpcUaTypeDefinitionAttribute
-
-Apply `[OpcUaTypeDefinition]` to classes to use standard OPC UA companion specification types like Device Integration (DI) or Machinery types. This ensures your objects conform to industry-standard OPC UA information models.
-
-```csharp
-[InterceptorSubject]
-[OpcUaTypeDefinition("FunctionalGroupType", "http://opcfoundation.org/UA/DI/")]
-public partial class DeviceGroup
-{
-    public partial string Name { get; set; }
-}
-```
-
-### OpcUaNodeReferenceTypeAttribute
-
-Control how properties are linked in the OPC UA address space by specifying the reference type. This determines the semantic relationship between parent and child nodes.
-
-```csharp
-[OpcUaNodeReferenceType("Organizes")]
-[Path("opc", "Machines")]
-public partial Machine[] Machines { get; set; }
-```
-
-Common types: `HasComponent`, `Organizes`, `HasProperty`
-
-### OpcUaNodeItemReferenceTypeAttribute
-
-For collection properties, specify how individual items are referenced in the OPC UA address space. This controls the reference type used for each element in arrays or collections.
-
-```csharp
-[OpcUaNodeItemReferenceType("HasComponent")]
-[Path("opc", "Parameters")]
-public partial Parameter[] Parameters { get; set; }
-```
+For comprehensive mapping documentation including companion spec support, VariableTypes, and fluent configuration, see [OPC UA Mapping Guide](opcua-mapping.md).
 
 ## Monitoring Modes
 
@@ -385,7 +349,9 @@ The server automatically loads embedded NodeSets:
 - Opc.Ua.Machinery.NodeSet2.xml (Machinery)
 - Opc.Ua.Machinery.ProcessValues.NodeSet2.xml (Process values)
 
-Reference these types with `[OpcUaTypeDefinition]`.
+Reference these types with `[OpcUaNode(TypeDefinition = "...", TypeDefinitionNamespace = "...")]`.
+
+For comprehensive mapping documentation including companion spec support, VariableTypes, and fluent configuration, see [OPC UA Mapping Guide](opcua-mapping.md).
 
 ## Resilience Features
 
@@ -394,7 +360,7 @@ Reference these types with `[OpcUaTypeDefinition]`.
 The library automatically queues write operations when the connection is lost, preventing data loss during brief network interruptions. Queued writes are flushed in FIFO order when the connection is restored. This feature is provided by the `SubjectSourceBackgroundService`.
 
 ```csharp
-builder.Services.AddOpcUaSubjectClient(
+builder.Services.AddOpcUaSubjectClientSource(
     subjectSelector: sp => sp.GetRequiredService<Machine>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {
@@ -417,7 +383,7 @@ machine.Speed = 100; // Queued if disconnected, written immediately if connected
 The library automatically falls back to periodic polling when OPC UA nodes don't support subscriptions. This ensures all properties remain synchronized even with legacy servers or special node types.
 
 ```csharp
-builder.Services.AddOpcUaSubjectClient(
+builder.Services.AddOpcUaSubjectClientSource(
     subjectSelector: sp => sp.GetRequiredService<Machine>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {
@@ -440,7 +406,7 @@ builder.Services.AddOpcUaSubjectClient(
 The library automatically retries failed subscription items that may succeed later, such as when server resources become available.
 
 ```csharp
-builder.Services.AddOpcUaSubjectClient(
+builder.Services.AddOpcUaSubjectClientSource(
     subjectSelector: sp => sp.GetRequiredService<Machine>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {

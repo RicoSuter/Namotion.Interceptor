@@ -1,7 +1,8 @@
-﻿{
+{
   "Connected": true,
   "Name": "Foo bar",
   "Number": 0,
+  "Number@Unit": "count",
   "ScalarNumbers": [
     10,
     20,
@@ -21,7 +22,11 @@
     "Scores": [
       1,
       2
-    ]
+    ],
+    "Address": {
+      "City": "Seattle",
+      "ZipCode": "98101"
+    }
   },
   "People": [
     {
@@ -31,7 +36,11 @@
       "Scores": [
         85.5,
         92.3
-      ]
+      ],
+      "Address": {
+        "City": "Portland",
+        "ZipCode": "97201"
+      }
     },
     {
       "FirstName": "Jane",
@@ -40,7 +49,27 @@
       "Scores": [
         88.1,
         95.7
-      ]
+      ],
+      "Address": {
+        "City": "Vancouver",
+        "ZipCode": "98660"
+      }
     }
-  ]
+  ],
+  "PeopleByName": [
+    {
+      "FirstName": "John",
+      "LastName": "Dict",
+      "FullName": "John Dict",
+      "Scores": [],
+      "Address": {
+        "City": "Boston",
+        "ZipCode": "02101"
+      }
+    }
+  ],
+  "Sensor": 25.5,
+  "Sensor@Unit": "\u00B0C",
+  "Sensor@MinValue": -40,
+  "Sensor@MaxValue": 85
 }

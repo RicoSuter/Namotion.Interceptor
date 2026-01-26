@@ -24,7 +24,6 @@ public class DataChangeFilterTests
         return new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            PathProvider = new AttributeBasedPathProvider("opc"),
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance)
@@ -42,7 +41,7 @@ public class DataChangeFilterTests
         var nodeId = new NodeId("Counter", 2);
 
         // Act
-        var item = config.CreateMonitoredItem(nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property);
 
         // Assert - No filter when no options specified
         Assert.Null(item.Filter);
@@ -59,7 +58,7 @@ public class DataChangeFilterTests
         var nodeId = new NodeId("Temperature", 2);
 
         // Act
-        var item = config.CreateMonitoredItem(nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property);
 
         // Assert
         Assert.NotNull(item.Filter);
@@ -80,7 +79,7 @@ public class DataChangeFilterTests
         var nodeId = new NodeId("Pressure", 2);
 
         // Act
-        var item = config.CreateMonitoredItem(nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property);
 
         // Assert
         Assert.NotNull(item.Filter);
@@ -101,7 +100,7 @@ public class DataChangeFilterTests
         var nodeId = new NodeId("Status", 2);
 
         // Act
-        var item = config.CreateMonitoredItem(nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property);
 
         // Assert
         Assert.NotNull(item.Filter);
@@ -121,7 +120,7 @@ public class DataChangeFilterTests
         var nodeId = new NodeId("Signal", 2);
 
         // Act
-        var item = config.CreateMonitoredItem(nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property);
 
         // Assert
         Assert.Equal(0, item.SamplingInterval);
@@ -134,7 +133,6 @@ public class DataChangeFilterTests
         var config = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            PathProvider = new AttributeBasedPathProvider("opc"),
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -148,7 +146,7 @@ public class DataChangeFilterTests
         var nodeId = new NodeId("Temperature", 2);
 
         // Act
-        var item = config.CreateMonitoredItem(nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property);
 
         // Assert - Attribute values (Absolute, 0.5) override config defaults (Percent, 10.0)
         Assert.NotNull(item.Filter);
@@ -165,7 +163,6 @@ public class DataChangeFilterTests
         var config = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            PathProvider = new AttributeBasedPathProvider("opc"),
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -178,7 +175,7 @@ public class DataChangeFilterTests
         var nodeId = new NodeId("Counter", 2);
 
         // Act
-        var item = config.CreateMonitoredItem(nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property);
 
         // Assert - Uses config defaults since Counter has no filter settings in attribute
         Assert.NotNull(item.Filter);
@@ -195,7 +192,6 @@ public class DataChangeFilterTests
         var config = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            PathProvider = new AttributeBasedPathProvider("opc"),
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -207,7 +203,7 @@ public class DataChangeFilterTests
         var nodeId = new NodeId("Counter", 2);
 
         // Act
-        var item = config.CreateMonitoredItem(nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property);
 
         // Assert
         Assert.Equal(10u, item.QueueSize);
@@ -220,7 +216,6 @@ public class DataChangeFilterTests
         var config = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            PathProvider = new AttributeBasedPathProvider("opc"),
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -232,7 +227,7 @@ public class DataChangeFilterTests
         var nodeId = new NodeId("Counter", 2);
 
         // Act
-        var item = config.CreateMonitoredItem(nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property);
 
         // Assert
         Assert.False(item.DiscardOldest);
@@ -245,7 +240,6 @@ public class DataChangeFilterTests
         var config = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            PathProvider = new AttributeBasedPathProvider("opc"),
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -257,7 +251,7 @@ public class DataChangeFilterTests
         var nodeId = new NodeId("Counter", 2);
 
         // Act
-        var item = config.CreateMonitoredItem(nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property);
 
         // Assert - Should be Status (0), not confused with sentinel (-1)
         Assert.NotNull(item.Filter);
@@ -273,7 +267,6 @@ public class DataChangeFilterTests
         var config = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            PathProvider = new AttributeBasedPathProvider("opc"),
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -286,7 +279,7 @@ public class DataChangeFilterTests
         var nodeId = new NodeId("Counter", 2);
 
         // Act
-        var item = config.CreateMonitoredItem(nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property);
 
         // Assert - Should be None (0), not confused with sentinel (-1)
         Assert.NotNull(item.Filter);
@@ -302,7 +295,6 @@ public class DataChangeFilterTests
         var config = new OpcUaClientConfiguration
         {
             ServerUrl = "opc.tcp://localhost:4840",
-            PathProvider = new AttributeBasedPathProvider("opc"),
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaTypeResolver>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -314,7 +306,7 @@ public class DataChangeFilterTests
         var nodeId = new NodeId("Counter", 2);
 
         // Act
-        var item = config.CreateMonitoredItem(nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property);
 
         // Assert - Should be -1, not confused with sentinel (int.MinValue)
         Assert.Equal(-1, item.SamplingInterval);
@@ -331,7 +323,7 @@ public class DataChangeFilterTests
         var nodeId = new NodeId("Temperature", 2);
 
         // Act
-        var item = config.CreateMonitoredItem(nodeId, property);
+        var item = MonitoredItemFactory.Create(config, nodeId, property);
 
         // Assert - Both DeadbandType and DeadbandValue are set from attribute
         Assert.NotNull(item.Filter);
