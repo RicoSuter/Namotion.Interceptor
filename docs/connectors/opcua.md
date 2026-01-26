@@ -12,7 +12,7 @@ The `Namotion.Interceptor.OpcUa` package provides integration between Namotion.I
 
 ## Client Setup
 
-Connect to an OPC UA server by configuring a client with `AddOpcUaSubjectClient`. The client automatically establishes connections, subscribes to node changes, and synchronizes values with your C# properties.
+Connect to an OPC UA server by configuring a client with `AddOpcUaSubjectClientSource`. The client automatically establishes connections, subscribes to node changes, and synchronizes values with your C# properties.
 
 ```csharp
 [InterceptorSubject]
@@ -25,7 +25,7 @@ public partial class Machine
     public partial decimal Speed { get; set; }
 }
 
-builder.Services.AddOpcUaSubjectClient<Machine>(
+builder.Services.AddOpcUaSubjectClientSource<Machine>(
     serverUrl: "opc.tcp://plc.factory.com:4840",
     sourceName: "opc",
     pathPrefix: null,
@@ -67,7 +67,7 @@ await host.StartAsync();
 For advanced scenarios, use the full configuration API to customize connection behavior, subscription settings, and dynamic property discovery. The required settings include the server URL and infrastructure components, while optional settings allow fine-tuning of reconnection delays, sampling intervals, and performance parameters.
 
 ```csharp
-builder.Services.AddOpcUaSubjectClient(
+builder.Services.AddOpcUaSubjectClientSource(
     subjectSelector: sp => sp.GetRequiredService<MyRoot>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {
@@ -360,7 +360,7 @@ For comprehensive mapping documentation including companion spec support, Variab
 The library automatically queues write operations when the connection is lost, preventing data loss during brief network interruptions. Queued writes are flushed in FIFO order when the connection is restored. This feature is provided by the `SubjectSourceBackgroundService`.
 
 ```csharp
-builder.Services.AddOpcUaSubjectClient(
+builder.Services.AddOpcUaSubjectClientSource(
     subjectSelector: sp => sp.GetRequiredService<Machine>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {
@@ -383,7 +383,7 @@ machine.Speed = 100; // Queued if disconnected, written immediately if connected
 The library automatically falls back to periodic polling when OPC UA nodes don't support subscriptions. This ensures all properties remain synchronized even with legacy servers or special node types.
 
 ```csharp
-builder.Services.AddOpcUaSubjectClient(
+builder.Services.AddOpcUaSubjectClientSource(
     subjectSelector: sp => sp.GetRequiredService<Machine>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {
@@ -406,7 +406,7 @@ builder.Services.AddOpcUaSubjectClient(
 The library automatically retries failed subscription items that may succeed later, such as when server resources become available.
 
 ```csharp
-builder.Services.AddOpcUaSubjectClient(
+builder.Services.AddOpcUaSubjectClientSource(
     subjectSelector: sp => sp.GetRequiredService<Machine>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {
