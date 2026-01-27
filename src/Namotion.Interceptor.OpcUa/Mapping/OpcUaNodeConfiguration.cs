@@ -40,6 +40,12 @@ public record OpcUaNodeConfiguration
     /// <summary>DataType override (null = infer from C# type). Examples: "Double", "NodeId".</summary>
     public string? DataType { get; init; }
 
+    /// <summary>
+    /// Namespace URI for the DataType. Used for custom data types from imported nodesets.
+    /// When null, the DataType is resolved as a standard OPC UA data type.
+    /// </summary>
+    public string? DataTypeNamespace { get; init; }
+
     /// <summary>True if this property holds the main value for a VariableNode class.</summary>
     public bool? IsValue { get; init; }
 
@@ -47,8 +53,20 @@ public record OpcUaNodeConfiguration
     /// <summary>Reference type from parent (e.g., "HasComponent", "HasProperty"). Default: "HasProperty".</summary>
     public string? ReferenceType { get; init; }
 
+    /// <summary>
+    /// Namespace URI for the ReferenceType. Used for custom reference types from imported nodesets.
+    /// When null, the ReferenceType is resolved as a standard OPC UA reference type.
+    /// </summary>
+    public string? ReferenceTypeNamespace { get; init; }
+
     /// <summary>Reference type for collection/dictionary items.</summary>
     public string? ItemReferenceType { get; init; }
+
+    /// <summary>
+    /// Namespace URI for the ItemReferenceType. Used for custom reference types for collection items.
+    /// When null, the ItemReferenceType is resolved as a standard OPC UA reference type.
+    /// </summary>
+    public string? ItemReferenceTypeNamespace { get; init; }
 
     // Monitoring configuration (client only)
     /// <summary>Client only: Sampling interval in milliseconds.</summary>
@@ -100,9 +118,12 @@ public record OpcUaNodeConfiguration
             TypeDefinitionNamespace = TypeDefinitionNamespace ?? other.TypeDefinitionNamespace,
             NodeClass = NodeClass ?? other.NodeClass,
             DataType = DataType ?? other.DataType,
+            DataTypeNamespace = DataTypeNamespace ?? other.DataTypeNamespace,
             IsValue = IsValue ?? other.IsValue,
             ReferenceType = ReferenceType ?? other.ReferenceType,
+            ReferenceTypeNamespace = ReferenceTypeNamespace ?? other.ReferenceTypeNamespace,
             ItemReferenceType = ItemReferenceType ?? other.ItemReferenceType,
+            ItemReferenceTypeNamespace = ItemReferenceTypeNamespace ?? other.ItemReferenceTypeNamespace,
             SamplingInterval = SamplingInterval ?? other.SamplingInterval,
             QueueSize = QueueSize ?? other.QueueSize,
             DiscardOldest = DiscardOldest ?? other.DiscardOldest,
