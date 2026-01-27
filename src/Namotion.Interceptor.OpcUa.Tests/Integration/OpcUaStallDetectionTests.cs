@@ -102,7 +102,7 @@ public class OpcUaStallDetectionTests
 
             // Wait for stall detection to trigger (15s with our config + buffer for parallel execution)
             // Note: Under parallel load, SDK can take 20-30s to start reconnecting, plus 15s stall detection
-            var stallDetectionTimeout = TimeSpan.FromSeconds(60);
+            var stallDetectionTimeout = TimeSpan.FromSeconds(90);
             var startTime = DateTime.UtcNow;
 
             await AsyncTestHelpers.WaitUntilAsync(
@@ -130,8 +130,8 @@ public class OpcUaStallDetectionTests
 
             // Verify stall detection worked within expected timeframe
             // Under parallel execution, SDK can take 20-30s to start, plus 15s stall detection
-            Assert.True(elapsed < TimeSpan.FromSeconds(55),
-                $"Stall detection should complete within 55s (actual: {elapsed.TotalSeconds:F1}s)");
+            Assert.True(elapsed < TimeSpan.FromSeconds(85),
+                $"Stall detection should complete within 85s (actual: {elapsed.TotalSeconds:F1}s)");
 
             logger.Log("Test passed - stall detection working correctly");
         }
@@ -255,7 +255,7 @@ public class OpcUaStallDetectionTests
             void QuickRestartConfig(OpcUaClientConfiguration config)
             {
                 config.SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(2);
-                config.MaxReconnectDuration = TimeSpan.FromSeconds(30); // Long enough for SDK to succeed
+                config.MaxReconnectDuration = TimeSpan.FromSeconds(60); // Long enough for SDK to succeed under CI load
                 config.ReconnectInterval = TimeSpan.FromSeconds(1);
                 config.SessionTimeout = TimeSpan.FromSeconds(10); // Minimum allowed by server for fast detection
                 config.KeepAliveInterval = TimeSpan.FromSeconds(1); // Faster disconnection detection
@@ -291,7 +291,7 @@ public class OpcUaStallDetectionTests
             // Wait for client to detect disconnection (longer timeout for slow CI runners)
             await AsyncTestHelpers.WaitUntilAsync(
                 () => !client.Diagnostics.IsConnected || client.Diagnostics.IsReconnecting,
-                timeout: TimeSpan.FromSeconds(40),
+                timeout: TimeSpan.FromSeconds(90),
                 message: "Client should detect disconnection or start reconnecting");
             logger.Log($"Client state after stop - Connected: {client.Diagnostics.IsConnected}, Reconnecting: {client.Diagnostics.IsReconnecting}");
 

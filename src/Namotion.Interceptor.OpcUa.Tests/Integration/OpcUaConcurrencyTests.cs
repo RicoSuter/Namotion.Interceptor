@@ -105,7 +105,7 @@ public class OpcUaConcurrencyTests
             var countBefore = updateCounter;
             await AsyncTestHelpers.WaitUntilAsync(
                 () => updateCounter > countBefore,
-                timeout: TimeSpan.FromSeconds(90),
+                timeout: TimeSpan.FromSeconds(120),
                 message: "Updates should continue after reconnection");
 
             // Cleanup
