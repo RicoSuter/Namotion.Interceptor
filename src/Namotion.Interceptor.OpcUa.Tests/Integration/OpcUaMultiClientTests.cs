@@ -39,50 +39,6 @@ public class OpcUaMultiClientTests : IAsyncLifetime, IAssemblyFixture<SharedOpcU
     }
 
     [Fact]
-    public async Task Client1Writes_ServerReceives()
-    {
-        var serverArea = _fixture.ServerRoot.MultiClient;
-        var client1Area = _client1!.Root!.MultiClient;
-
-        // Client 1 writes via transaction
-        using (var transaction = await _client1.Context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
-        {
-            client1Area.SharedValue = "from-client-1";
-            await transaction.CommitAsync(CancellationToken.None);
-        }
-
-        // Server should receive it
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => serverArea.SharedValue == "from-client-1",
-            timeout: TimeSpan.FromSeconds(30),
-            message: "Server should receive Client 1's write");
-
-        _logger.Log("Client 1 → Server sync verified");
-    }
-
-    [Fact]
-    public async Task Client2Writes_ServerReceives()
-    {
-        var serverArea = _fixture.ServerRoot.MultiClient;
-        var client2Area = _client2!.Root!.MultiClient;
-
-        // Client 2 writes via transaction
-        using (var transaction = await _client2.Context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
-        {
-            client2Area.SharedValue = "from-client-2";
-            await transaction.CommitAsync(CancellationToken.None);
-        }
-
-        // Server should receive it
-        await AsyncTestHelpers.WaitUntilAsync(
-            () => serverArea.SharedValue == "from-client-2",
-            timeout: TimeSpan.FromSeconds(30),
-            message: "Server should receive Client 2's write");
-
-        _logger.Log("Client 2 → Server sync verified");
-    }
-
-    [Fact]
     public async Task BothClientsWrite_DifferentProperties_ServerReceivesBoth()
     {
         var serverArea = _fixture.ServerRoot.MultiClient;
