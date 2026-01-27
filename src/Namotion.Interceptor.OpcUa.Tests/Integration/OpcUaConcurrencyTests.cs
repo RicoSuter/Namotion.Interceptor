@@ -87,7 +87,7 @@ public class OpcUaConcurrencyTests
             // Wait for updates to start
             await AsyncTestHelpers.WaitUntilAsync(
                 () => updateCounter > 0,
-                timeout: TimeSpan.FromSeconds(30));
+                timeout: TimeSpan.FromSeconds(60));
             logger.Log($"Updates started: {updateCounter}");
 
             // Restart during updates

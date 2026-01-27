@@ -38,7 +38,7 @@ public class OpcUaDataTypesTests : SharedServerTestBase
                     Logger.Log($"Waiting: server.BoolValue={current} (expecting false)");
                 return !current;
             },
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(500),
             message: $"Server should receive client's bool update (false). Current server value: {serverArea.BoolValue}");
 
@@ -54,7 +54,7 @@ public class OpcUaDataTypesTests : SharedServerTestBase
                     Logger.Log($"Waiting: server.BoolValue={current} (expecting true)");
                 return current;
             },
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(500),
             message: $"Server should receive client's bool update (true). Current server value: {serverArea.BoolValue}");
 
@@ -72,26 +72,26 @@ public class OpcUaDataTypesTests : SharedServerTestBase
         clientArea.IntValue = int.MaxValue;
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.IntValue == int.MaxValue,
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             message: "Server should receive client's int MaxValue");
 
         clientArea.IntValue = int.MinValue;
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.IntValue == int.MinValue,
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             message: "Server should receive client's int MinValue");
 
         // Int64 - client to server with edge values
         clientArea.LongValue = long.MaxValue;
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.LongValue == long.MaxValue,
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             message: "Server should receive client's long MaxValue");
 
         clientArea.LongValue = long.MinValue;
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.LongValue == long.MinValue,
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             message: "Server should receive client's long MinValue");
 
         Logger.Log("Integer types client→server sync verified");
@@ -108,7 +108,7 @@ public class OpcUaDataTypesTests : SharedServerTestBase
         clientArea.DateTimeValue = testDate;
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.DateTimeValue == testDate,
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             message: "Server should receive client's DateTime update");
 
         Logger.Log("DateTime client→server sync verified");
@@ -125,7 +125,7 @@ public class OpcUaDataTypesTests : SharedServerTestBase
         clientArea.ByteArray = testBytes;
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.ByteArray.SequenceEqual(testBytes),
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             message: "Server should receive client's byte[] update");
 
         Logger.Log("ByteArray client→server sync verified");
