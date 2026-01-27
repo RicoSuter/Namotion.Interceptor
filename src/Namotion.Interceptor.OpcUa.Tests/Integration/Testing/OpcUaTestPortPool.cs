@@ -9,8 +9,8 @@ public static class OpcUaTestPortPool
 {
     private const int BasePort = 4850;   // Avoid conflict with shared server on 4840
     private const int PoolSize = 100;    // Large pool to avoid port reuse
-    private const int MaxParallel = 2;   // Limit parallel lifecycle tests to reduce resource contention
-    private const int AcquisitionTimeoutMs = 10 * 60 * 1000; // 10 minutes
+    private const int MaxParallel = 4;   // Limit parallel lifecycle tests to reduce resource contention
+    private const int AcquisitionTimeoutMs = 15 * 60 * 1000; // 15 minutes
 
     private static readonly SemaphoreSlim Semaphore = new(MaxParallel, MaxParallel);
     private static int _nextPortIndex = -1;
@@ -79,10 +79,7 @@ public sealed class PortLease : IDisposable
         if (!_disposed)
         {
             _disposed = true;
-
-            // Clean up certificate store to prevent disk accumulation
             CleanupCertificateStore();
-
             OpcUaTestPortPool.Release();
         }
     }
@@ -99,7 +96,7 @@ public sealed class PortLease : IDisposable
         }
         catch
         {
-            // Ignore cleanup failures - directory may be locked by OS
+            // Ignore cleanup failures - OS may lock directory
             // This is non-critical as each test uses isolated directories
         }
     }

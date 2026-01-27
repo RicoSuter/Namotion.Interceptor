@@ -169,6 +169,7 @@ public class OpcUaClientConfiguration
 
     /// <summary>
     /// Gets or sets the subscription lifetime count (default: 100).
+    /// SubscriptionLifetimeCount shall be at least 3 * SubscriptionKeepAliveCount.
     /// </summary>
     public uint SubscriptionLifetimeCount { get; set; } = 100;
 
