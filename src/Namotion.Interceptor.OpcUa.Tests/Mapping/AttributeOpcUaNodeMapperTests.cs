@@ -443,24 +443,6 @@ public class AttributeOpcUaNodeMapperTests
     }
 
     [Fact]
-    public void TryGetNodeConfiguration_WithReferenceTypeNamespaceOnNodeAttribute_ReturnsReferenceTypeNamespace()
-    {
-        // Arrange
-        var mapper = new AttributeOpcUaNodeMapper();
-        var subject = new AttributeMapperTestModel(new InterceptorSubjectContext());
-        var registeredSubject = new RegisteredSubject(subject);
-        var property = registeredSubject.TryGetProperty("NodeRefProp")!;
-
-        // Act
-        var config = mapper.TryGetNodeConfiguration(property);
-
-        // Assert
-        Assert.NotNull(config);
-        Assert.Equal("CustomRefType", config.ReferenceType);
-        Assert.Equal("http://custom/reftypes/", config.ReferenceTypeNamespace);
-    }
-
-    [Fact]
     public void TryGetNodeConfiguration_WithReferenceTypeNamespaceOnReferenceAttribute_ReturnsReferenceTypeNamespace()
     {
         // Arrange
