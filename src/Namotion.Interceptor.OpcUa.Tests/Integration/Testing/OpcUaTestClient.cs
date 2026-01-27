@@ -90,17 +90,13 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
                     SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
                     TelemetryContext = telemetryContext,
 
-                    // Reconnection behavior - keep aggressive for testing reconnection logic
                     ReconnectInterval = TimeSpan.FromSeconds(5),
                     ReconnectHandlerTimeout = TimeSpan.FromSeconds(5),
                     MaxReconnectDuration = TimeSpan.FromSeconds(15),
                     SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(5),
-
-                    // Session stability - use longer timeouts to prevent flaky tests under CI load
-                    // SessionTimeout must be >= server's MinSessionTimeout (10s), use 30s for margin
-                    SessionTimeout = TimeSpan.FromSeconds(30),
+                    SessionTimeout = TimeSpan.FromSeconds(5),
                     KeepAliveInterval = TimeSpan.FromSeconds(5),
-                    OperationTimeout = TimeSpan.FromSeconds(30),
+                    OperationTimeout = TimeSpan.FromSeconds(5),
 
                     CertificateStoreBasePath = certificateStoreBasePath ?? "pki"
                 };
