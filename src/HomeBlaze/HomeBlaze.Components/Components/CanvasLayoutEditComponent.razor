@@ -1,0 +1,92 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(CanvasLayout))]
+@implements ISubjectEditComponent
+@implements IDisposable
+
+<MudForm>
+    <MudNumericField @bind-Value="_minHeight"
+                     Label="Minimum Height (pixels)"
+                     HelperText="Optional. Leave empty for default (400px)."
+                     Class="mb-4" />
+
+    <MudSwitch @bind-Value="_isSnapToGridEnabled"
+               Label="Snap to Grid"
+               Color="Color.Primary"
+               Class="mb-4" />
+
+    @if (_isSnapToGridEnabled)
+    {
+        <MudNumericField @bind-Value="_gridSize"
+                         Label="Grid Size (pixels)"
+                         Min="10"
+                         Max="500"
+                         Class="mb-4" />
+    }
+
+    <MudText Typo="Typo.body2" Class="mud-text-secondary">
+        Nodes: @(Canvas?.Nodes?.Count ?? 0)
+    </MudText>
+</MudForm>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private CanvasLayout? Canvas => Subject as CanvasLayout;
+
+    private int? _minHeight;
+    private bool _isSnapToGridEnabled;
+    private int _gridSize;
+
+    private int? _originalMinHeight;
+    private bool _originalIsSnapToGridEnabled;
+    private int _originalGridSize;
+
+    public bool IsValid => true;
+    public bool IsDirty => _minHeight != _originalMinHeight
+                        || _isSnapToGridEnabled != _originalIsSnapToGridEnabled
+                        || _gridSize != _originalGridSize;
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        if (Canvas != null)
+        {
+            _minHeight = Canvas.MinHeight;
+            _isSnapToGridEnabled = Canvas.IsSnapToGridEnabled;
+            _gridSize = Canvas.GridSize;
+
+            _originalMinHeight = _minHeight;
+            _originalIsSnapToGridEnabled = _isSnapToGridEnabled;
+            _originalGridSize = _gridSize;
+        }
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Canvas != null)
+        {
+            Canvas.MinHeight = _minHeight;
+            Canvas.IsSnapToGridEnabled = _isSnapToGridEnabled;
+            Canvas.GridSize = _gridSize;
+
+            _originalMinHeight = _minHeight;
+            _originalIsSnapToGridEnabled = _isSnapToGridEnabled;
+            _originalGridSize = _gridSize;
+
+            IsDirtyChanged?.Invoke(false);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        IsValidChanged = null;
+        IsDirtyChanged = null;
+    }
+}
