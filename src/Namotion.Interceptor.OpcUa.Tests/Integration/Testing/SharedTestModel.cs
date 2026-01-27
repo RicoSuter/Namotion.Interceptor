@@ -16,6 +16,9 @@ public partial class SharedTestModel
         ReadWrite = new ReadWriteTestArea();
         Transactions = new TransactionTestArea();
         Nested = new NestedTestArea();
+        DataTypes = new DataTypesTestArea();
+        Collections = new CollectionsTestArea();
+        MultiClient = new MultiClientTestArea();
     }
 
     [Path("opc", "Connected")]
@@ -29,6 +32,15 @@ public partial class SharedTestModel
 
     [Path("opc", "Nested")]
     public partial NestedTestArea Nested { get; set; }
+
+    [Path("opc", "DataTypes")]
+    public partial DataTypesTestArea DataTypes { get; set; }
+
+    [Path("opc", "Collections")]
+    public partial CollectionsTestArea Collections { get; set; }
+
+    [Path("opc", "MultiClient")]
+    public partial MultiClientTestArea MultiClient { get; set; }
 }
 
 /// <summary>
@@ -262,4 +274,67 @@ public partial class NestedSensor
     /// <summary>Child property of the VariableNode.</summary>
     [OpcUaNode("MaxValue")]
     public partial double? MaxValue { get; set; }
+}
+
+/// <summary>
+/// Test area for various OPC UA data types.
+/// </summary>
+[InterceptorSubject]
+public partial class DataTypesTestArea
+{
+    public DataTypesTestArea()
+    {
+        ByteArray = [];
+    }
+
+    [Path("opc", "BoolValue")]
+    public partial bool BoolValue { get; set; }
+
+    [Path("opc", "IntValue")]
+    public partial int IntValue { get; set; }
+
+    [Path("opc", "LongValue")]
+    public partial long LongValue { get; set; }
+
+    [Path("opc", "DateTimeValue")]
+    public partial DateTime DateTimeValue { get; set; }
+
+    [Path("opc", "ByteArray")]
+    public partial byte[] ByteArray { get; set; }
+}
+
+/// <summary>
+/// Test area for collection edge cases (empty arrays, resize operations).
+/// </summary>
+[InterceptorSubject]
+public partial class CollectionsTestArea
+{
+    public CollectionsTestArea()
+    {
+        IntArray = [];
+    }
+
+    [Path("opc", "IntArray")]
+    public partial int[] IntArray { get; set; }
+}
+
+/// <summary>
+/// Test area for multi-client scenarios.
+/// </summary>
+[InterceptorSubject]
+public partial class MultiClientTestArea
+{
+    public MultiClientTestArea()
+    {
+        SharedValue = "";
+    }
+
+    [Path("opc", "SharedValue")]
+    public partial string SharedValue { get; set; }
+
+    [Path("opc", "Counter")]
+    public partial int Counter { get; set; }
+
+    [Path("opc", "LastWriter")]
+    public partial string? LastWriter { get; set; }
 }

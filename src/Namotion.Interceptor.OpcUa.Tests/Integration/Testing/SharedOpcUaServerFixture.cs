@@ -135,6 +135,30 @@ public class SharedOpcUaServerFixture : IAsyncLifetime
             Number = 42,
             Number_Unit = "count"
         };
+
+        // Initialize DataTypes test area
+        root.DataTypes = new DataTypesTestArea(context)
+        {
+            BoolValue = true,
+            IntValue = 42,
+            LongValue = 9876543210L,
+            DateTimeValue = new DateTime(2025, 1, 1, 12, 0, 0, DateTimeKind.Utc),
+            ByteArray = [0x01, 0x02, 0x03]
+        };
+
+        // Initialize Collections test area
+        root.Collections = new CollectionsTestArea(context)
+        {
+            IntArray = [1, 2, 3]
+        };
+
+        // Initialize MultiClient test area
+        root.MultiClient = new MultiClientTestArea(context)
+        {
+            SharedValue = "initial",
+            Counter = 0,
+            LastWriter = null
+        };
     }
 
     /// <summary>
