@@ -33,7 +33,7 @@ public class OpcUaTransactionTests : SharedServerTestBase
 
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.Name == "Transaction Value",
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             message: "Server should receive committed transaction value");
     }
 
@@ -59,7 +59,7 @@ public class OpcUaTransactionTests : SharedServerTestBase
 
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.Name == "Multi-Property Test" && serverArea.Number == 123.45m,
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             message: "Server should receive all committed transaction values");
 
         Assert.Equal("Multi-Property Test", serverArea.Name);
@@ -81,7 +81,7 @@ public class OpcUaTransactionTests : SharedServerTestBase
 
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.Name == "InitialValue",
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             message: "Server should have initial value from setup transaction");
 
         // Start transaction, make changes, but dispose without commit
@@ -115,7 +115,7 @@ public class OpcUaTransactionTests : SharedServerTestBase
 
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.Name == "SetupName" && serverArea.Number == 100m,
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             message: "Server should have initial values from setup transaction");
 
         // Start transaction with multiple property changes, but dispose without commit

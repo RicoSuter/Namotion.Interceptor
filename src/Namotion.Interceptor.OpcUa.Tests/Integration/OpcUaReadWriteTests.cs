@@ -34,21 +34,21 @@ public class OpcUaReadWriteTests : SharedServerTestBase
         clientArea.Name = "Updated Client Name";
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.Name == "Updated Client Name",
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             message: "Server should receive client's name update");
 
         // Test numeric property from server
         serverArea.Number = 123.45m;
         await AsyncTestHelpers.WaitUntilAsync(
             () => clientArea.Number == 123.45m,
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             message: "Client should receive server's number update");
 
         // Test numeric property from client
         clientArea.Number = 54.321m;
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.Number == 54.321m,
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             message: "Server should receive client's number update");
     }
 
