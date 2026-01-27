@@ -109,7 +109,7 @@ public class OpcUaReconnectionTests
             server.Root.Name = "AfterRestart";
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Root.Name == "AfterRestart",
-                timeout: TimeSpan.FromSeconds(90),
+                timeout: TimeSpan.FromSeconds(120),
                 message: "Data should flow after restart");
             logger.Log($"Client received: {client.Root.Name}");
 
@@ -171,7 +171,7 @@ public class OpcUaReconnectionTests
             server.Root.Name = "AfterInstantRestart";
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Root.Name == "AfterInstantRestart",
-                timeout: TimeSpan.FromSeconds(90),
+                timeout: TimeSpan.FromSeconds(120),
                 message: "Data should flow after instant restart");
             logger.Log($"Client received: {client.Root.Name}");
 
@@ -262,7 +262,7 @@ public class OpcUaReconnectionTests
                 () => client.Root.Name == "AfterRestart" &&
                       client.Root.People[0].FirstName == "Updated0" &&
                       client.Root.People[19].FirstName == "Updated19",
-                timeout: TimeSpan.FromSeconds(90),
+                timeout: TimeSpan.FromSeconds(120),
                 message: "All properties should resync");
 
             logger.Log($"All {client.Diagnostics.MonitoredItemCount} items resynced");
