@@ -196,8 +196,6 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
             NodeClass = attribute.NodeClass != OpcUaNodeClass.Auto ? attribute.NodeClass : null,
             DataType = attribute.DataType,
             DataTypeNamespace = attribute.DataTypeNamespace,
-            ReferenceType = attribute.ReferenceType,
-            ReferenceTypeNamespace = attribute.ReferenceTypeNamespace,
             SamplingInterval = attribute.SamplingInterval != int.MinValue ? attribute.SamplingInterval : null,
             QueueSize = attribute.QueueSize != uint.MaxValue ? attribute.QueueSize : null,
             DiscardOldest = attribute.DiscardOldest switch
