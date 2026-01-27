@@ -59,10 +59,6 @@ public partial class AttributeMapperTestModel
     [OpcUaNode("DataTypeProp", DataType = "CustomDataType", DataTypeNamespace = "http://custom/datatypes/")]
     public partial double DataTypeProp { get; set; }
 
-    /// <summary>Property with ReferenceType and ReferenceTypeNamespace via OpcUaNodeAttribute.</summary>
-    [OpcUaNode("NodeRefProp", ReferenceType = "CustomRefType", ReferenceTypeNamespace = "http://custom/reftypes/")]
-    public partial double NodeRefProp { get; set; }
-
     /// <summary>Property with ReferenceTypeNamespace via OpcUaReferenceAttribute.</summary>
     [OpcUaNode("RefAttrProp")]
     [OpcUaReference("HasComponent", ReferenceTypeNamespace = "http://custom/reftypes/")]
@@ -87,7 +83,6 @@ public partial class AttributeMapperTestModel
         PlainProp = "";
         EventNotifierZeroProp = 0;
         DataTypeProp = 0;
-        NodeRefProp = 0;
         RefAttrProp = new AttributeMapperTestChild();
         CollectionProp = [];
     }
