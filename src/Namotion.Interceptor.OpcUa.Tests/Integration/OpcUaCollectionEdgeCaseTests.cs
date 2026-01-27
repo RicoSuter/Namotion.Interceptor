@@ -11,13 +11,16 @@ namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 [Trait("Category", "Integration")]
 public class OpcUaCollectionEdgeCaseTests : SharedServerTestBase
 {
-    public OpcUaCollectionEdgeCaseTests(SharedOpcUaServerFixture fixture, ITestOutputHelper output)
-        : base(fixture, output) { }
+    public OpcUaCollectionEdgeCaseTests(
+        SharedOpcUaServerFixture serverFixture,
+        SharedOpcUaClientFixture clientFixture,
+        ITestOutputHelper output)
+        : base(serverFixture, clientFixture, output) { }
 
     [Fact]
     public async Task EmptyArray_ServerToClient_ShouldSync()
     {
-        var serverArea = Fixture.ServerRoot.Collections;
+        var serverArea = ServerFixture.ServerRoot.Collections;
         var clientArea = Client!.Root!.Collections;
 
         // Server to client: set to empty
@@ -40,7 +43,7 @@ public class OpcUaCollectionEdgeCaseTests : SharedServerTestBase
     [Fact]
     public async Task ArrayResize_GrowAndShrink_ServerToClient_ShouldSync()
     {
-        var serverArea = Fixture.ServerRoot.Collections;
+        var serverArea = ServerFixture.ServerRoot.Collections;
         var clientArea = Client!.Root!.Collections;
 
         // Start with 3 items

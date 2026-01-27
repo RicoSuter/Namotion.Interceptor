@@ -1,23 +1,31 @@
+using Xunit;
 using Xunit.Abstractions;
 using Xunit.Extensions.AssemblyFixture;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 
 /// <summary>
-/// Base class for tests that use the shared OPC UA server.
-/// Handles client creation and disposal automatically.
+/// Base class for tests that use the shared OPC UA server with per-class client reuse.
 /// </summary>
-public abstract class SharedServerTestBase<TClient> : IAsyncLifetime, IAssemblyFixture<SharedOpcUaServerFixture>
+/// <typeparam name="TClient">The client type.</typeparam>
+public abstract class SharedServerTestBase<TClient> : IAsyncLifetime,
+    IAssemblyFixture<SharedOpcUaServerFixture>,
+    IClassFixture<SharedOpcUaClientFixture>
     where TClient : class
 {
-    protected readonly SharedOpcUaServerFixture Fixture;
+    protected readonly SharedOpcUaServerFixture ServerFixture;
+    protected readonly SharedOpcUaClientFixture ClientFixture;
     protected readonly ITestOutputHelper Output;
     protected readonly TestLogger Logger;
     protected TClient? Client;
 
-    protected SharedServerTestBase(SharedOpcUaServerFixture fixture, ITestOutputHelper output)
+    protected SharedServerTestBase(
+        SharedOpcUaServerFixture serverFixture,
+        SharedOpcUaClientFixture clientFixture,
+        ITestOutputHelper output)
     {
-        Fixture = fixture;
+        ServerFixture = serverFixture;
+        ClientFixture = clientFixture;
         Output = output;
         Logger = new TestLogger(output);
     }
@@ -26,29 +34,30 @@ public abstract class SharedServerTestBase<TClient> : IAsyncLifetime, IAssemblyF
 
     public async Task DisposeAsync()
     {
-        if (Client is IAsyncDisposable asyncDisposable)
+        // Client is disposed by SharedOpcUaClientFixture at class level
+        // Only dispose if Client is a different type (e.g., DynamicSubject client)
+        if (Client is IAsyncDisposable asyncDisposable && Client is not OpcUaTestClient<SharedTestModel>)
         {
             await asyncDisposable.DisposeAsync();
-        }
-        else if (Client is IDisposable disposable)
-        {
-            disposable.Dispose();
         }
     }
 }
 
 /// <summary>
-/// Base class for tests using SharedTestModel client.
+/// Base class for tests using SharedTestModel client with per-class client reuse.
 /// </summary>
 public abstract class SharedServerTestBase : SharedServerTestBase<OpcUaTestClient<SharedTestModel>>
 {
-    protected SharedServerTestBase(SharedOpcUaServerFixture fixture, ITestOutputHelper output)
-        : base(fixture, output)
+    protected SharedServerTestBase(
+        SharedOpcUaServerFixture serverFixture,
+        SharedOpcUaClientFixture clientFixture,
+        ITestOutputHelper output)
+        : base(serverFixture, clientFixture, output)
     {
     }
 
     public override async Task InitializeAsync()
     {
-        Client = await Fixture.CreateClientAsync(Logger);
+        Client = await ClientFixture.GetOrCreateClientAsync(ServerFixture, Logger);
     }
 }

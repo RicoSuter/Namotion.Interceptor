@@ -8,13 +8,16 @@ namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 [Trait("Category", "Integration")]
 public class OpcUaTransactionTests : SharedServerTestBase
 {
-    public OpcUaTransactionTests(SharedOpcUaServerFixture fixture, ITestOutputHelper output)
-        : base(fixture, output) { }
+    public OpcUaTransactionTests(
+        SharedOpcUaServerFixture serverFixture,
+        SharedOpcUaClientFixture clientFixture,
+        ITestOutputHelper output)
+        : base(serverFixture, clientFixture, output) { }
 
     [Fact]
     public async Task Transaction_CommitSingleProperty_ServerReceivesChangeOnlyAfterCommit()
     {
-        var serverArea = Fixture.ServerRoot.Transactions.SingleProperty;
+        var serverArea = ServerFixture.ServerRoot.Transactions.SingleProperty;
         var clientArea = Client!.Root!.Transactions.SingleProperty;
         var initialName = serverArea.Name;
 
@@ -37,7 +40,7 @@ public class OpcUaTransactionTests : SharedServerTestBase
     [Fact]
     public async Task Transaction_CommitMultipleProperties_ServerReceivesAllChangesOnlyAfterCommit()
     {
-        var serverArea = Fixture.ServerRoot.Transactions.MultiProperty;
+        var serverArea = ServerFixture.ServerRoot.Transactions.MultiProperty;
         var clientArea = Client!.Root!.Transactions.MultiProperty;
         var initialName = serverArea.Name;
         var initialNumber = serverArea.Number;
@@ -66,7 +69,7 @@ public class OpcUaTransactionTests : SharedServerTestBase
     [Fact]
     public async Task Transaction_DisposedWithoutCommit_ServerShouldNotReceiveChanges()
     {
-        var serverArea = Fixture.ServerRoot.Transactions.SingleProperty;
+        var serverArea = ServerFixture.ServerRoot.Transactions.SingleProperty;
         var clientArea = Client!.Root!.Transactions.SingleProperty;
 
         // First, set a known value via committed transaction
@@ -99,7 +102,7 @@ public class OpcUaTransactionTests : SharedServerTestBase
     [Fact]
     public async Task Transaction_MultipleProperties_DisposedWithoutCommit_ServerShouldNotReceiveChanges()
     {
-        var serverArea = Fixture.ServerRoot.Transactions.MultiProperty;
+        var serverArea = ServerFixture.ServerRoot.Transactions.MultiProperty;
         var clientArea = Client!.Root!.Transactions.MultiProperty;
 
         // First, set known values via committed transaction
