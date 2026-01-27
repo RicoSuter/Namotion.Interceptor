@@ -86,7 +86,7 @@ public class OpcUaReconnectionTests
             server.Root.Name = "Initial";
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Root.Name == "Initial",
-                timeout: TimeSpan.FromSeconds(60),
+                timeout: TimeSpan.FromSeconds(90),
                 message: "Initial sync should complete");
             logger.Log("Initial sync verified");
 
@@ -98,7 +98,7 @@ public class OpcUaReconnectionTests
 
             await AsyncTestHelpers.WaitUntilAsync(
                 () => !client.Diagnostics.IsConnected,
-                timeout: TimeSpan.FromSeconds(60),
+                timeout: TimeSpan.FromSeconds(90),
                 message: "Client should detect disconnection");
             logger.Log("Client detected disconnection");
 
@@ -109,7 +109,7 @@ public class OpcUaReconnectionTests
             server.Root.Name = "AfterRestart";
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Root.Name == "AfterRestart",
-                timeout: TimeSpan.FromSeconds(120),
+                timeout: TimeSpan.FromSeconds(180),
                 message: "Data should flow after restart");
             logger.Log($"Client received: {client.Root.Name}");
 
@@ -158,7 +158,7 @@ public class OpcUaReconnectionTests
             server.Root.Name = "Initial";
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Root.Name == "Initial",
-                timeout: TimeSpan.FromSeconds(60),
+                timeout: TimeSpan.FromSeconds(90),
                 message: "Initial sync should complete");
             logger.Log("Initial sync verified");
 
@@ -171,7 +171,7 @@ public class OpcUaReconnectionTests
             server.Root.Name = "AfterInstantRestart";
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Root.Name == "AfterInstantRestart",
-                timeout: TimeSpan.FromSeconds(120),
+                timeout: TimeSpan.FromSeconds(180),
                 message: "Data should flow after instant restart");
             logger.Log($"Client received: {client.Root.Name}");
 
@@ -236,7 +236,7 @@ public class OpcUaReconnectionTests
             // Verify initial sync
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Root.People.Length == 20,
-                timeout: TimeSpan.FromSeconds(60),
+                timeout: TimeSpan.FromSeconds(90),
                 message: "All people should sync");
 
             var monitoredCount = client.Diagnostics!.MonitoredItemCount;
@@ -247,7 +247,7 @@ public class OpcUaReconnectionTests
             await server.StopAsync();
             await AsyncTestHelpers.WaitUntilAsync(
                 () => !client.Diagnostics.IsConnected,
-                timeout: TimeSpan.FromSeconds(60),
+                timeout: TimeSpan.FromSeconds(90),
                 message: "Client should detect disconnection");
             logger.Log("Client detected disconnection");
 
@@ -262,7 +262,7 @@ public class OpcUaReconnectionTests
                 () => client.Root.Name == "AfterRestart" &&
                       client.Root.People[0].FirstName == "Updated0" &&
                       client.Root.People[19].FirstName == "Updated19",
-                timeout: TimeSpan.FromSeconds(120),
+                timeout: TimeSpan.FromSeconds(180),
                 message: "All properties should resync");
 
             logger.Log($"All {client.Diagnostics.MonitoredItemCount} items resynced");

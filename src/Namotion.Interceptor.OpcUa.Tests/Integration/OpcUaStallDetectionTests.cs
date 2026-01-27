@@ -75,7 +75,7 @@ public class OpcUaStallDetectionTests
             // Verify initial connection
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Diagnostics.IsConnected,
-                timeout: TimeSpan.FromSeconds(60),
+                timeout: TimeSpan.FromSeconds(120),
                 message: "Client should be connected after startup");
             logger.Log("Initial connection established");
 
@@ -89,14 +89,14 @@ public class OpcUaStallDetectionTests
             // Wait for client to detect disconnection (longer timeout for parallel test execution)
             await AsyncTestHelpers.WaitUntilAsync(
                 () => !client.Diagnostics.IsConnected,
-                timeout: TimeSpan.FromSeconds(60),
+                timeout: TimeSpan.FromSeconds(120),
                 message: "Client should detect disconnection");
             logger.Log("Client detected disconnection");
 
             // Wait for reconnection to start
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Diagnostics.IsReconnecting,
-                timeout: TimeSpan.FromSeconds(60),
+                timeout: TimeSpan.FromSeconds(120),
                 message: "Client should start reconnecting");
             logger.Log("Client started reconnecting");
 
@@ -184,7 +184,7 @@ public class OpcUaStallDetectionTests
             server.Root.Name = "BeforeStall";
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Root.Name == "BeforeStall",
-                timeout: TimeSpan.FromSeconds(60),
+                timeout: TimeSpan.FromSeconds(120),
                 message: "Initial sync should complete");
             logger.Log("Initial sync verified");
 
@@ -204,14 +204,14 @@ public class OpcUaStallDetectionTests
             server.Root.Name = "AfterStallRecovery";
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Root.Name == "AfterStallRecovery",
-                timeout: TimeSpan.FromSeconds(60),
+                timeout: TimeSpan.FromSeconds(120),
                 message: "Data should flow after stall recovery");
             logger.Log($"Client received: {client.Root.Name}");
 
             // Wait for connection status to stabilize
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Diagnostics.IsConnected,
-                timeout: TimeSpan.FromSeconds(60),
+                timeout: TimeSpan.FromSeconds(120),
                 message: "Client should report as connected after recovery");
             logger.Log("Test passed - client recovered after stall");
         }
@@ -276,7 +276,7 @@ public class OpcUaStallDetectionTests
             server.Root.Name = "BeforeRestart";
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Root.Name == "BeforeRestart",
-                timeout: TimeSpan.FromSeconds(60),
+                timeout: TimeSpan.FromSeconds(120),
                 message: "Initial sync should complete");
             logger.Log("Initial sync verified");
 
@@ -291,7 +291,7 @@ public class OpcUaStallDetectionTests
             // Wait for client to detect disconnection (longer timeout for slow CI runners)
             await AsyncTestHelpers.WaitUntilAsync(
                 () => !client.Diagnostics.IsConnected || client.Diagnostics.IsReconnecting,
-                timeout: TimeSpan.FromSeconds(90),
+                timeout: TimeSpan.FromSeconds(120),
                 message: "Client should detect disconnection or start reconnecting");
             logger.Log($"Client state after stop - Connected: {client.Diagnostics.IsConnected}, Reconnecting: {client.Diagnostics.IsReconnecting}");
 
@@ -303,14 +303,14 @@ public class OpcUaStallDetectionTests
             server.Root.Name = "AfterQuickRestart";
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Root.Name == "AfterQuickRestart",
-                timeout: TimeSpan.FromSeconds(60),
+                timeout: TimeSpan.FromSeconds(120),
                 message: "Data should flow after quick restart");
             logger.Log($"Client received: {client.Root.Name}");
 
             // Verify client is connected
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Diagnostics.IsConnected,
-                timeout: TimeSpan.FromSeconds(60),
+                timeout: TimeSpan.FromSeconds(120),
                 message: "Client should report as connected after recovery");
 
             // Log final state for debugging

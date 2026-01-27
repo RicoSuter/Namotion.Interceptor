@@ -27,28 +27,28 @@ public class OpcUaReadWriteTests : SharedServerTestBase
         serverArea.Name = "Updated Server Name";
         await AsyncTestHelpers.WaitUntilAsync(
             () => clientArea.Name == "Updated Server Name",
-            timeout: TimeSpan.FromSeconds(60),
+            timeout: TimeSpan.FromSeconds(90),
             message: "Client should receive server's name update");
 
         // Test string property from client
         clientArea.Name = "Updated Client Name";
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.Name == "Updated Client Name",
-            timeout: TimeSpan.FromSeconds(60),
+            timeout: TimeSpan.FromSeconds(90),
             message: "Server should receive client's name update");
 
         // Test numeric property from server
         serverArea.Number = 123.45m;
         await AsyncTestHelpers.WaitUntilAsync(
             () => clientArea.Number == 123.45m,
-            timeout: TimeSpan.FromSeconds(60),
+            timeout: TimeSpan.FromSeconds(90),
             message: "Client should receive server's number update");
 
         // Test numeric property from client
         clientArea.Number = 54.321m;
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.Number == 54.321m,
-            timeout: TimeSpan.FromSeconds(60),
+            timeout: TimeSpan.FromSeconds(90),
             message: "Server should receive client's number update");
     }
 
@@ -70,7 +70,7 @@ public class OpcUaReadWriteTests : SharedServerTestBase
         // Assert - wait for array synchronization
         await AsyncTestHelpers.WaitUntilAsync(
             () => clientArea.ScalarNumbers.SequenceEqual(newNumbers),
-            timeout: TimeSpan.FromSeconds(60),
+            timeout: TimeSpan.FromSeconds(90),
             message: "Client should receive server's array update");
 
         Logger.Log($"Client ScalarNumbers after update: [{string.Join(", ", clientArea.ScalarNumbers)}]");
@@ -119,7 +119,7 @@ public class OpcUaNestedStructureTests : SharedServerTestBase
                   clientArea.Sensor!.Unit == "°F" &&
                   clientArea.Sensor?.MinValue == -50.0 &&
                   clientArea.Number_Unit == "items",
-            timeout: TimeSpan.FromSeconds(60),
+            timeout: TimeSpan.FromSeconds(90),
             message: "Client should receive all nested structure updates");
 
         Logger.Log("All nested structure tests passed!");

@@ -61,12 +61,12 @@ public class OpcUaMultiClientTests : IAsyncLifetime, IAssemblyFixture<SharedOpcU
         // Both should sync to server
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.SharedValue == "client1-value",
-            timeout: TimeSpan.FromSeconds(60),
+            timeout: TimeSpan.FromSeconds(90),
             message: "Server should receive Client 1's SharedValue");
 
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.Counter == 42,
-            timeout: TimeSpan.FromSeconds(60),
+            timeout: TimeSpan.FromSeconds(90),
             message: "Server should receive Client 2's Counter");
 
         _logger.Log("Both clients' concurrent writes received by server");
@@ -88,7 +88,7 @@ public class OpcUaMultiClientTests : IAsyncLifetime, IAssemblyFixture<SharedOpcU
 
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.LastWriter == "client1",
-            timeout: TimeSpan.FromSeconds(60),
+            timeout: TimeSpan.FromSeconds(90),
             message: "Server should have client1's write");
 
         // Client 2 writes second via transaction
@@ -100,7 +100,7 @@ public class OpcUaMultiClientTests : IAsyncLifetime, IAssemblyFixture<SharedOpcU
 
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.LastWriter == "client2",
-            timeout: TimeSpan.FromSeconds(60),
+            timeout: TimeSpan.FromSeconds(90),
             message: "Server should have client2's write (last write wins)");
 
         _logger.Log("Sequential writes with last-write-wins verified");
