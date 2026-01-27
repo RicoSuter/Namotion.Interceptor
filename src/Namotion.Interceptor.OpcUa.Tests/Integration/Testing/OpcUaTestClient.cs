@@ -94,9 +94,10 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
                     ReconnectHandlerTimeout = TimeSpan.FromSeconds(5),
                     MaxReconnectDuration = TimeSpan.FromSeconds(15),
                     SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(5),
-                    SessionTimeout = TimeSpan.FromSeconds(5),
+                    // SessionTimeout must be >= server's MinSessionTimeout (10s), use 30s for margin
+                    SessionTimeout = TimeSpan.FromSeconds(30),
                     KeepAliveInterval = TimeSpan.FromSeconds(5),
-                    OperationTimeout = TimeSpan.FromSeconds(5),
+                    OperationTimeout = TimeSpan.FromSeconds(30),
 
                     CertificateStoreBasePath = certificateStoreBasePath ?? "pki"
                 };
