@@ -22,8 +22,20 @@ public sealed class OpcUaReferenceAttribute : Attribute
     public string ReferenceType { get; }
 
     /// <summary>
+    /// Namespace URI for the ReferenceType.
+    /// Used for custom reference types from imported nodesets.
+    /// </summary>
+    public string? ReferenceTypeNamespace { get; init; }
+
+    /// <summary>
     /// Reference type for collection/dictionary items.
     /// If not specified, uses the same as ReferenceType.
     /// </summary>
     public string? ItemReferenceType { get; init; }
+
+    /// <summary>
+    /// Namespace URI for the ItemReferenceType.
+    /// Used for custom reference types for collection items from imported nodesets.
+    /// </summary>
+    public string? ItemReferenceTypeNamespace { get; init; }
 }
