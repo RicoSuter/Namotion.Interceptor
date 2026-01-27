@@ -14,23 +14,20 @@ public class OpcUaTransactionTests : SharedServerTestBase
     [Fact]
     public async Task Transaction_CommitSingleProperty_ServerReceivesChangeOnlyAfterCommit()
     {
-        // Arrange - use dedicated test area
         var serverArea = Fixture.ServerRoot.Transactions.SingleProperty;
         var clientArea = Client!.Root!.Transactions.SingleProperty;
         var initialName = serverArea.Name;
 
-        // Act
         using (var transaction = await Client.Context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             clientArea.Name = "Transaction Value";
 
-            // Assert - server should still have old value before commit
+            // Server should still have old value before commit
             Assert.Equal(initialName, serverArea.Name);
 
             await transaction.CommitAsync(CancellationToken.None);
         }
 
-        // Wait for OPC UA sync
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.Name == "Transaction Value",
             timeout: TimeSpan.FromSeconds(30),
@@ -40,33 +37,98 @@ public class OpcUaTransactionTests : SharedServerTestBase
     [Fact]
     public async Task Transaction_CommitMultipleProperties_ServerReceivesAllChangesOnlyAfterCommit()
     {
-        // Arrange - use dedicated test area
         var serverArea = Fixture.ServerRoot.Transactions.MultiProperty;
         var clientArea = Client!.Root!.Transactions.MultiProperty;
         var initialName = serverArea.Name;
         var initialNumber = serverArea.Number;
 
-        // Act
         using (var transaction = await Client.Context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
             clientArea.Name = "Multi-Property Test";
             clientArea.Number = 123.45m;
 
-            // Assert - server should still have old values before commit
+            // Server should still have old values before commit
             Assert.Equal(initialName, serverArea.Name);
             Assert.Equal(initialNumber, serverArea.Number);
 
             await transaction.CommitAsync(CancellationToken.None);
         }
 
-        // Wait for OPC UA sync of all properties
         await AsyncTestHelpers.WaitUntilAsync(
             () => serverArea.Name == "Multi-Property Test" && serverArea.Number == 123.45m,
             timeout: TimeSpan.FromSeconds(30),
             message: "Server should receive all committed transaction values");
 
-        // Assert - server should now have all new values after commit
         Assert.Equal("Multi-Property Test", serverArea.Name);
         Assert.Equal(123.45m, serverArea.Number);
+    }
+
+    [Fact]
+    public async Task Transaction_DisposedWithoutCommit_ServerShouldNotReceiveChanges()
+    {
+        var serverArea = Fixture.ServerRoot.Transactions.SingleProperty;
+        var clientArea = Client!.Root!.Transactions.SingleProperty;
+
+        // First, set a known value via committed transaction
+        using (var setupTransaction = await Client.Context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            clientArea.Name = "InitialValue";
+            await setupTransaction.CommitAsync(CancellationToken.None);
+        }
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverArea.Name == "InitialValue",
+            timeout: TimeSpan.FromSeconds(30),
+            message: "Server should have initial value from setup transaction");
+
+        // Start transaction, make changes, but dispose without commit
+        using (var transaction = await Client.Context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            clientArea.Name = "UncommittedValue";
+            // Intentionally NOT calling CommitAsync - dispose will rollback
+        }
+
+        // Wait to ensure no sync happens
+        await Task.Delay(TimeSpan.FromSeconds(2));
+
+        // Server should still have initial value
+        Assert.Equal("InitialValue", serverArea.Name);
+        Logger.Log("Transaction rollback verified - server did not receive uncommitted changes");
+    }
+
+    [Fact]
+    public async Task Transaction_MultipleProperties_DisposedWithoutCommit_ServerShouldNotReceiveChanges()
+    {
+        var serverArea = Fixture.ServerRoot.Transactions.MultiProperty;
+        var clientArea = Client!.Root!.Transactions.MultiProperty;
+
+        // First, set known values via committed transaction
+        using (var setupTransaction = await Client.Context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            clientArea.Name = "SetupName";
+            clientArea.Number = 100m;
+            await setupTransaction.CommitAsync(CancellationToken.None);
+        }
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverArea.Name == "SetupName" && serverArea.Number == 100m,
+            timeout: TimeSpan.FromSeconds(30),
+            message: "Server should have initial values from setup transaction");
+
+        // Start transaction with multiple property changes, but dispose without commit
+        using (var transaction = await Client.Context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            clientArea.Name = "UncommittedName";
+            clientArea.Number = 999m;
+            // Intentionally NOT calling CommitAsync - dispose will rollback
+        }
+
+        // Wait to ensure no sync happens
+        await Task.Delay(TimeSpan.FromSeconds(2));
+
+        // Server should still have initial values
+        Assert.Equal("SetupName", serverArea.Name);
+        Assert.Equal(100m, serverArea.Number);
+        Logger.Log("Transaction rollback with multiple properties verified");
     }
 }
