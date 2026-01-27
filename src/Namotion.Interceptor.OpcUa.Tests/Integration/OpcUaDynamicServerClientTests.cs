@@ -13,14 +13,18 @@ namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 public class OpcUaDynamicServerClientTests
     : SharedServerTestBase<OpcUaTestClient<DynamicSubject>>
 {
-    public OpcUaDynamicServerClientTests(SharedOpcUaServerFixture fixture, ITestOutputHelper output)
-        : base(fixture, output)
+    public OpcUaDynamicServerClientTests(
+        SharedOpcUaServerFixture serverFixture,
+        SharedOpcUaClientFixture clientFixture,
+        ITestOutputHelper output)
+        : base(serverFixture, clientFixture, output)
     {
     }
 
     public override async Task InitializeAsync()
     {
-        Client = await Fixture.CreateDynamicClientAsync(Logger);
+        // Dynamic client needs its own instance (not reused via SharedOpcUaClientFixture)
+        Client = await ServerFixture.CreateDynamicClientAsync(Logger);
     }
 
     [Fact]

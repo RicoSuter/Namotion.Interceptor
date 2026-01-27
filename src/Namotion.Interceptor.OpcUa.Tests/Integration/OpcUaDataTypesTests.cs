@@ -12,13 +12,16 @@ namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 [Trait("Category", "Integration")]
 public class OpcUaDataTypesTests : SharedServerTestBase
 {
-    public OpcUaDataTypesTests(SharedOpcUaServerFixture fixture, ITestOutputHelper output)
-        : base(fixture, output) { }
+    public OpcUaDataTypesTests(
+        SharedOpcUaServerFixture serverFixture,
+        SharedOpcUaClientFixture clientFixture,
+        ITestOutputHelper output)
+        : base(serverFixture, clientFixture, output) { }
 
     [Fact]
     public async Task BooleanType_ClientToServer_ShouldSync()
     {
-        var serverArea = Fixture.ServerRoot.DataTypes;
+        var serverArea = ServerFixture.ServerRoot.DataTypes;
         var clientArea = Client!.Root!.DataTypes;
 
         // Log initial state
@@ -62,7 +65,7 @@ public class OpcUaDataTypesTests : SharedServerTestBase
     [Fact]
     public async Task IntegerTypes_ClientToServer_ShouldSync()
     {
-        var serverArea = Fixture.ServerRoot.DataTypes;
+        var serverArea = ServerFixture.ServerRoot.DataTypes;
         var clientArea = Client!.Root!.DataTypes;
 
         // Int32 - client to server with edge values
@@ -97,7 +100,7 @@ public class OpcUaDataTypesTests : SharedServerTestBase
     [Fact]
     public async Task DateTimeType_ClientToServer_ShouldSync()
     {
-        var serverArea = Fixture.ServerRoot.DataTypes;
+        var serverArea = ServerFixture.ServerRoot.DataTypes;
         var clientArea = Client!.Root!.DataTypes;
 
         // Client to server
@@ -114,7 +117,7 @@ public class OpcUaDataTypesTests : SharedServerTestBase
     [Fact]
     public async Task ByteArrayType_ClientToServer_ShouldSync()
     {
-        var serverArea = Fixture.ServerRoot.DataTypes;
+        var serverArea = ServerFixture.ServerRoot.DataTypes;
         var clientArea = Client!.Root!.DataTypes;
 
         // Client to server

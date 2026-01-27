@@ -143,6 +143,10 @@ public class OpcUaServerConfiguration
             },
             ServerConfiguration = new ServerConfiguration
             {
+                // Reduce thread count for testing - default is 10 which creates too many threads
+                // when running multiple servers in parallel
+                MinRequestThreadCount = 2,
+                MaxRequestThreadCount = 10,
                 // Base addresses kept minimal (tcp only). Add https if required later.
                 BaseAddresses = { BaseAddress },
                 SecurityPolicies =
@@ -196,7 +200,7 @@ public class OpcUaServerConfiguration
             TraceConfiguration = new TraceConfiguration
             {
                 OutputFilePath = "Logs/OpcUaServer.log",
-                TraceMasks = 519, // Security, errors, service result exceptions & trace
+                TraceMasks = 0, // Disabled for performance - tracing causes high CPU under load
                 DeleteOnLoad = true
             },
             CertificateValidator = new CertificateValidator(TelemetryContext)

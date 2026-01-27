@@ -10,14 +10,17 @@ namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 [Trait("Category", "Integration")]
 public class OpcUaReadWriteTests : SharedServerTestBase
 {
-    public OpcUaReadWriteTests(SharedOpcUaServerFixture fixture, ITestOutputHelper output)
-        : base(fixture, output) { }
+    public OpcUaReadWriteTests(
+        SharedOpcUaServerFixture serverFixture,
+        SharedOpcUaClientFixture clientFixture,
+        ITestOutputHelper output)
+        : base(serverFixture, clientFixture, output) { }
 
     [Fact]
     public async Task WriteAndReadPrimitives_ShouldUpdateClient()
     {
         // Arrange - use dedicated test area
-        var serverArea = Fixture.ServerRoot.ReadWrite.BasicSync;
+        var serverArea = ServerFixture.ServerRoot.ReadWrite.BasicSync;
         var clientArea = Client!.Root!.ReadWrite.BasicSync;
 
         // Act & Assert - Test string property from server
@@ -53,7 +56,7 @@ public class OpcUaReadWriteTests : SharedServerTestBase
     public async Task WriteAndReadArraysOnServer_ShouldUpdateClient()
     {
         // Arrange - use dedicated test area
-        var serverArea = Fixture.ServerRoot.ReadWrite.ArraySync;
+        var serverArea = ServerFixture.ServerRoot.ReadWrite.ArraySync;
         var clientArea = Client!.Root!.ReadWrite.ArraySync;
 
         Logger.Log($"Server initial ScalarNumbers: [{string.Join(", ", serverArea.ScalarNumbers)}]");
@@ -82,13 +85,16 @@ public class OpcUaReadWriteTests : SharedServerTestBase
 [Trait("Category", "Integration")]
 public class OpcUaNestedStructureTests : SharedServerTestBase
 {
-    public OpcUaNestedStructureTests(SharedOpcUaServerFixture fixture, ITestOutputHelper output)
-        : base(fixture, output) { }
+    public OpcUaNestedStructureTests(
+        SharedOpcUaServerFixture serverFixture,
+        SharedOpcUaClientFixture clientFixture,
+        ITestOutputHelper output)
+        : base(serverFixture, clientFixture, output) { }
 
     [Fact]
     public async Task WriteAndReadNestedStructures_ShouldUpdateClient()
     {
-        var serverArea = Fixture.ServerRoot.Nested;
+        var serverArea = ServerFixture.ServerRoot.Nested;
         var clientArea = Client!.Root!.Nested;
 
         // Write all properties at once (no waiting between writes)
