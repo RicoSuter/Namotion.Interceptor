@@ -7,9 +7,9 @@ namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 /// </summary>
 public static class OpcUaTestPortPool
 {
-    private const int BasePort = 4840;
+    private const int BasePort = 4850;   // Avoid conflict with shared server on 4840
     private const int PoolSize = 100;    // Large pool to avoid port reuse
-    private const int MaxParallel = 4;   // Limit concurrent tests
+    private const int MaxParallel = 4;   // Allow more parallel lifecycle tests
     private const int AcquisitionTimeoutMs = 10 * 60 * 1000; // 10 minutes
 
     private static readonly SemaphoreSlim Semaphore = new(MaxParallel, MaxParallel);
