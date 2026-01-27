@@ -76,7 +76,7 @@ public class OpcUaReadWriteTests : SharedServerTestBase
 }
 
 /// <summary>
-/// Tests for nested structure synchronization using the shared OPC UA server.
+/// Tests for nested structure synchronization (server→client) using the shared OPC UA server.
 /// Tests object references, arrays, dictionaries, deep nesting, OpcUaValue pattern, and PropertyAttribute.
 /// </summary>
 [Trait("Category", "Integration")]
@@ -88,22 +88,21 @@ public class OpcUaNestedStructureTests : SharedServerTestBase
     [Fact]
     public async Task WriteAndReadNestedStructures_ShouldUpdateClient()
     {
-        // Arrange - use dedicated Nested test area
         var serverArea = Fixture.ServerRoot.Nested;
         var clientArea = Client!.Root!.Nested;
 
-        // Act: Write all properties at once (no waiting between writes)
-        serverArea.Person.FirstName = "UpdatedFirst";              // Test 1: Variable on object reference
-        serverArea.People[0].LastName = "UpdatedLast";             // Test 2: Variable on collection item
-        serverArea.PeopleByName!["john"].FirstName = "Johnny";     // Test 3: Variable on dictionary item
-        serverArea.Person.Address!.City = "New York";              // Test 4: Deep nesting
-        serverArea.People[0].Address!.ZipCode = "12345";           // Test 5: Collection + nesting
-        serverArea.Sensor!.Value = 42.5;                           // Test 6: OpcUaValue pattern
-        serverArea.Sensor.Unit = "°F";                             // Test 7: OpcUaValue child property
-        serverArea.Sensor.MinValue = -50.0;                        // Test 8: OpcUaValue child property
-        serverArea.Number_Unit = "items";                          // Test 9: PropertyAttribute subnode
+        // Write all properties at once (no waiting between writes)
+        serverArea.Person.FirstName = "UpdatedFirst";
+        serverArea.People[0].LastName = "UpdatedLast";
+        serverArea.PeopleByName!["john"].FirstName = "Johnny";
+        serverArea.Person.Address!.City = "New York";
+        serverArea.People[0].Address!.ZipCode = "12345";
+        serverArea.Sensor!.Value = 42.5;
+        serverArea.Sensor.Unit = "°F";
+        serverArea.Sensor.MinValue = -50.0;
+        serverArea.Number_Unit = "items";
 
-        // Assert: Wait for all properties to sync in single check
+        // Wait for all properties to sync
         await AsyncTestHelpers.WaitUntilAsync(
             () => clientArea.Person.FirstName == "UpdatedFirst" &&
                   clientArea.People[0].LastName == "UpdatedLast" &&
