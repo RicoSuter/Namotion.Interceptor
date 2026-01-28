@@ -2,437 +2,1413 @@
 
 ## Overview
 
-**Problem:** Currently, both OPC UA client and server only sync structure once at startup. Changes after initialization (local attach/detach or remote address space changes) are not reflected.
+**Problem:** Currently, both OPC UA client and server only sync structure once at startup. Changes after initialization (local model changes or remote address space changes) are not reflected.
 
 **Goals:**
 1. **Bidirectional live sync** - Local changes update OPC UA, remote changes update local model
-2. **Unified sync logic** - Single code path for initial load and live updates
-3. **Shared implementation** - Client and server share the sync coordinator via strategy pattern
-4. **Configurable** - Use existing `ShouldAddDynamicProperty` for runtime decisions; optional periodic fallback
+2. **Unified sync logic** - Single code path for initial load and live updates (idempotent)
+3. **Shared infrastructure** - Push abstractions to Connectors library for reuse by other protocols
+4. **Scoped processing** - Only process changes for relevant sub-graph (not global lifecycle events)
 
 **Non-goals:**
 - Changing the existing public API surface
 - Supporting OPC UA method calls (only structure/values)
 
-**Key Design Decisions:**
-
-| Decision | Choice |
-|----------|--------|
-| Remote change detection | ModelChangeEvents with periodic fallback (configurable, off by default) |
-| Unresolved object nodes | Create DynamicObject subjects |
-| Sync trigger | Incremental on each change, not full resync |
-| Shared code approach | Composition with strategy pattern (`IOpcUaSyncStrategy`) |
-| Client node management | Support AddNodes/DeleteNodes if server supports it, log warning otherwise |
-
 ---
 
 ## Architecture
 
-### Core Components
+### Key Design Decisions
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    OpcUaAddressSpaceSync                        │
-│  (Shared coordinator - handles sync logic for both directions) │
-├─────────────────────────────────────────────────────────────────┤
-│  - Subscribes to LifecycleInterceptor (SubjectAttached/Detached)│
-│  - Subscribes to ModelChangeEvents (remote changes)             │
-│  - Optional periodic resync timer                               │
-│  - Delegates actual operations to IOpcUaSyncStrategy            │
-└─────────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      IOpcUaSyncStrategy                         │
-├─────────────────────────────────────────────────────────────────┤
-│  + OnSubjectAttachedAsync(subject)     // Local → OPC UA        │
-│  + OnSubjectDetachedAsync(subject)     // Local → OPC UA        │
-│  + OnRemoteNodeAddedAsync(node)        // OPC UA → Local        │
-│  + OnRemoteNodeRemovedAsync(nodeId)    // OPC UA → Local        │
-│  + CreateMonitoredItemsAsync(subject)  // For value sync        │
-│  + BrowseNodeAsync(nodeId)             // Browse remote/local   │
-└─────────────────────────────────────────────────────────────────┘
-           ▲                                       ▲
-           │                                       │
-┌──────────┴──────────┐             ┌──────────────┴──────────────┐
-│ OpcUaClientStrategy │             │    OpcUaServerStrategy      │
-├─────────────────────┤             ├─────────────────────────────┤
-│ - Creates monitored │             │ - Creates OPC UA nodes      │
-│   items/subscriptions│            │ - Fires ModelChangeEvents   │
-│ - Connects to       │             │ - Updates CustomNodeManager │
-│   external server   │             │                             │
-│ - Calls AddNodes if │             │ - Handles AddNodes requests │
-│   server supports   │             │   from external clients     │
-└─────────────────────┘             └─────────────────────────────┘
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Change detection | Property change queue (not lifecycle events) | Scoped to sub-graph via `propertyFilter`, not global |
+| Structural vs value | Branch on `IsSubjectReference`, `IsSubjectCollection`, `IsSubjectDictionary` | Existing properties, no new abstractions needed |
+| Collection diffing | Use existing `CollectionDiffBuilder` | Already in Connectors library |
+| Loop prevention | Use existing `change.Source` mechanism | Mark changes from OPC UA to prevent sync-back |
+| Initial vs incremental | Same code path, initial = "sync with empty old state" | Idempotent, simplifies implementation |
+
+### The Four Cases
+
+| Direction | Client | Server |
+|-----------|--------|--------|
+| **Model → OPC UA** | AddNodes/DeleteNodes + MonitoredItems | Create/delete nodes in address space |
+| **OPC UA → Model** | ModelChangeEvent / browse → create/remove subjects | AddNodes/DeleteNodes handler → create/remove subjects |
+
+### Core Methods (Symmetric Design)
+
+| Direction | Method | Trigger | Unit |
+|-----------|--------|---------|------|
+| **Model → OPC UA** | `ProcessPropertyChangeAsync` | Property change queue | Property |
+| **OPC UA → Model** | `ProcessNodeChangeAsync` | ModelChangeEvent / browse / AddNodes | Property |
+
+Both methods:
+- Are **property-level** (subject-level is just iteration via extension)
+- Are **idempotent** (safe to call anytime, diff-based)
+- Branch on `IsSubjectReference` / `IsSubjectCollection` / `IsSubjectDictionary`
+- Handle the `else` case as value changes (existing logic)
+
+### OPC UA Mapping for Collections and Dictionaries
+
+Neither collections nor dictionaries have ordering in OPC UA - both map to folders with child references:
+
+| .NET Type | OPC UA Structure | Identity | Example |
+|-----------|------------------|----------|---------|
+| `IList<T>` | Folder with child object nodes | Subject reference (unordered) | `Devices/Pump1, Valve2, Sensor3` |
+| `IDictionary<K,T>` | Folder with child object nodes | BrowseName = dictionary key | `Machines/Machine1, Machine2` |
+| Single reference | Object node | Subject reference | `Identification` |
+
+**Per OPC UA Machinery Companion Spec:** The `Machines` dictionary maps to a folder where each machine's BrowseName is the dictionary key (e.g., `Machines/MyMachine`).
+
+### Shared Infrastructure (Connectors Library)
+
+**Existing (no changes needed):**
+- `CollectionDiffBuilder` - diffs collections and dictionaries
+- `ChangeQueueProcessor` - processes property changes with filtering
+- `DefaultSubjectFactory` - creates subjects
+
+**New (to be added):**
+- `ConnectorReferenceCounter<TData>` - connector-scoped reference counting with associated data
+- `StructuralChangeProcessor` - property type branching base class
+- `SubjectGraphSynchronizer<TData>` - recursive sync with ref counting
+
+**Existing properties used:**
+- `RegisteredSubjectProperty.IsSubjectReference` - single subject reference
+- `RegisteredSubjectProperty.IsSubjectCollection` - collection of subjects
+- `RegisteredSubjectProperty.IsSubjectDictionary` - dictionary of subjects
+
+---
+
+## Model → OPC UA Direction
+
+### Change Processing Logic
+
+When a property change is received from the change queue:
+
+```csharp
+async Task ProcessPropertyChangeAsync(SubjectPropertyChange change, RegisteredSubjectProperty property)
+{
+    // Skip if change came from OPC UA (loop prevention)
+    if (change.Source == _opcUaSource)
+        return;
+
+    if (property.IsSubjectReference)
+    {
+        // Single subject: compare old vs new
+        var oldSubject = change.GetOldValue<IInterceptorSubject?>();
+        var newSubject = change.GetNewValue<IInterceptorSubject?>();
+
+        if (oldSubject is not null && !ReferenceEquals(oldSubject, newSubject))
+            await OnSubjectRemovedAsync(property, oldSubject, index: null);
+        if (newSubject is not null && !ReferenceEquals(oldSubject, newSubject))
+            await OnSubjectAddedAsync(property, newSubject, index: null);
+    }
+    else if (property.IsSubjectCollection)
+    {
+        // Collection: use differ (matches by subject identity, not index)
+        var oldCollection = change.GetOldValue<IReadOnlyList<IInterceptorSubject>?>() ?? [];
+        var newCollection = change.GetNewValue<IReadOnlyList<IInterceptorSubject>?>() ?? [];
+
+        _diffBuilder.GetCollectionChanges(oldCollection, newCollection,
+            out var operations, out var newItems, out var reorderedItems);
+
+        // 1. Process removes (descending index order)
+        foreach (var op in operations ?? [])
+        {
+            if (op.Action == SubjectCollectionOperationType.Remove)
+            {
+                var subject = oldCollection[(int)op.Index];
+                await OnSubjectRemovedAsync(property, subject, op.Index);
+            }
+        }
+
+        // 2. Process adds (truly new subjects)
+        foreach (var (index, subject) in newItems ?? [])
+        {
+            await OnSubjectAddedAsync(property, subject, index);
+        }
+
+        // 3. Reorders are no-op for OPC UA
+        // Collections map to unordered OPC UA folder references
+        // Order is a .NET concept that doesn't translate to OPC UA
+        // (reorderedItems ignored)
+    }
+    else if (property.IsSubjectDictionary)
+    {
+        // Dictionary: use differ
+        var oldDict = change.GetOldValue<IDictionary?>();
+        var newDict = change.GetNewValue<IDictionary?>() ?? new Dictionary<object, object>();
+
+        _diffBuilder.GetDictionaryChanges(oldDict, newDict,
+            out var operations, out var newItems, out var removedKeys);
+
+        // removedKeys contains keys to remove
+        var oldChildren = property.Children.ToDictionary(c => c.Index!, c => c.Subject);
+        foreach (var key in removedKeys ?? [])
+        {
+            if (oldChildren.TryGetValue(key, out var subject))
+                await OnSubjectRemovedAsync(property, subject, key);
+        }
+
+        // newItems contains (key, subject) pairs to add
+        foreach (var (key, subject) in newItems ?? [])
+        {
+            await OnSubjectAddedAsync(property, subject, key);
+        }
+    }
+    else
+    {
+        // Regular value change - existing logic
+        await UpdateValueAsync(change);
+    }
+}
 ```
 
-### File Structure
+### Client Implementation (Model → OPC UA)
 
+Uses `ConnectorReferenceCounter<List<MonitoredItem>>` for resource management:
+
+```csharp
+async Task OnSubjectAddedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index)
+{
+    // Check ref count - only create resources on first reference
+    var isFirst = _refCounter.IncrementAndCheckFirst(subject,
+        () => CreateMonitoredItemsForSubject(subject),
+        out var monitoredItems);
+
+    if (isFirst)
+    {
+        // Add monitored items to subscription
+        _subscription.AddItems(monitoredItems);
+
+        // Call AddNodes on server if supported
+        if (_configuration.EnableRemoteNodeManagement)
+        {
+            try { await _session.AddNodesAsync(...); }
+            catch (ServiceResultException ex) when (ex.StatusCode == StatusCodes.BadServiceUnsupported)
+            { _logger.LogWarning("AddNodes not supported by server"); }
+        }
+
+        // Recursively sync child structure (ref counter stops cycles)
+        await _synchronizer.SyncSubjectAsync(subject);
+    }
+}
+
+async Task OnSubjectRemovedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index)
+{
+    // Check ref count - only cleanup on last reference
+    var isLast = _refCounter.DecrementAndCheckLast(subject, out var monitoredItems);
+
+    if (isLast && monitoredItems is not null)
+    {
+        _subscription.RemoveItems(monitoredItems);
+
+        if (_configuration.EnableRemoteNodeManagement)
+        {
+            try { await _session.DeleteNodesAsync(...); }
+            catch (ServiceResultException ex) when (ex.StatusCode == StatusCodes.BadServiceUnsupported)
+            { _logger.LogWarning("DeleteNodes not supported by server"); }
+        }
+    }
+}
 ```
-src/Namotion.Interceptor.OpcUa/
-├── Sync/
-│   ├── IOpcUaSyncStrategy.cs
-│   ├── OpcUaAddressSpaceSync.cs
-│   ├── OpcUaSyncConfigurationBase.cs
-│   └── ModelChangeEventSubscription.cs
-├── Client/
-│   ├── OpcUaClientSyncStrategy.cs      // New
-│   └── ... (existing files)
-├── Server/
-│   ├── OpcUaServerSyncStrategy.cs      // New
-│   ├── OpcUaNodeManagementHandler.cs   // New
-│   └── ... (existing files)
+
+### Server Implementation (Model → OPC UA)
+
+Uses `ConnectorReferenceCounter<NodeState>` for resource management:
+
+```csharp
+async Task OnSubjectAddedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index)
+{
+    await _structureLock.WaitAsync();
+    try
+    {
+        // Check ref count - only create node on first reference
+        var isFirst = _refCounter.IncrementAndCheckFirst(subject,
+            () => CreateNodeForSubject(subject, property, index),
+            out var node);
+
+        if (isFirst)
+        {
+            // Recursively sync child structure (ref counter stops cycles)
+            await _synchronizer.SyncSubjectAsync(subject);
+        }
+
+        // Always add reference from parent to node
+        AddReferenceToParent(property, node, index);
+    }
+    finally
+    {
+        _structureLock.Release();
+    }
+}
+
+async Task OnSubjectRemovedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index)
+{
+    await _structureLock.WaitAsync();
+    try
+    {
+        // Remove reference from parent
+        RemoveReferenceFromParent(property, subject, index);
+
+        // Check ref count - only delete node on last reference
+        var isLast = _refCounter.DecrementAndCheckLast(subject, out var node);
+
+        if (isLast && node is not null)
+        {
+            DeleteNode(SystemContext, node.NodeId);
+        }
+    }
+    finally
+    {
+        _structureLock.Release();
+    }
+}
 ```
+
+---
+
+## OPC UA → Model Direction
+
+### Core Method: `ProcessNodeChangeAsync`
+
+Property-level, idempotent - works for both initial load and incremental changes:
+
+```csharp
+async Task ProcessNodeChangeAsync(
+    RegisteredSubjectProperty property,
+    NodeId parentNodeId,
+    ISession session,
+    CancellationToken ct)
+{
+    // Browse OPC UA to get current remote state
+    var remoteNodes = await BrowseChildNodesAsync(parentNodeId, session, ct);
+
+    if (property.IsSubjectReference)
+    {
+        // Single reference: expect 0 or 1 remote node
+        var localSubject = property.Children.SingleOrDefault().Subject;
+        var remoteNode = remoteNodes.FirstOrDefault();
+
+        if (localSubject is not null && remoteNode is null)
+        {
+            // Remote removed → remove local
+            await RemoveLocalSubjectAsync(property, localSubject);
+        }
+        else if (localSubject is null && remoteNode is not null)
+        {
+            // Remote added → create local
+            await CreateLocalSubjectAsync(property, remoteNode, index: null);
+        }
+        else if (localSubject is not null && remoteNode is not null)
+        {
+            // Both exist → recurse to sync children
+            await ProcessSubjectNodeChangesAsync(localSubject, remoteNode.NodeId, session, ct);
+        }
+    }
+    else if (property.IsSubjectCollection)
+    {
+        // Collection: diff remote nodes vs local children
+        var localChildren = property.Children.ToList();
+
+        // Match by index/position
+        var remoteByIndex = remoteNodes.Select((n, i) => (Index: i, Node: n)).ToList();
+        var localByIndex = localChildren.Select((c, i) => (Index: i, Child: c)).ToList();
+
+        // Remove locals that no longer exist remotely
+        foreach (var local in localByIndex.Where(l => l.Index >= remoteNodes.Count))
+        {
+            await RemoveLocalSubjectAsync(property, local.Child.Subject, local.Index);
+        }
+
+        // Add/update for each remote node
+        foreach (var (index, node) in remoteByIndex)
+        {
+            if (index < localChildren.Count)
+            {
+                // Exists locally → recurse
+                await ProcessSubjectNodeChangesAsync(localChildren[index].Subject, node.NodeId, session, ct);
+            }
+            else
+            {
+                // New remote → create local
+                await CreateLocalSubjectAsync(property, node, index);
+            }
+        }
+    }
+    else if (property.IsSubjectDictionary)
+    {
+        // Dictionary: diff by BrowseName (key)
+        var localByKey = property.Children.ToDictionary(c => c.Index!.ToString()!, c => c);
+        var remoteByKey = remoteNodes.ToDictionary(n => n.BrowseName.Name, n => n);
+
+        // Remove locals not in remote
+        foreach (var key in localByKey.Keys.Except(remoteByKey.Keys))
+        {
+            await RemoveLocalSubjectAsync(property, localByKey[key].Subject, key);
+        }
+
+        // Add/update for each remote
+        foreach (var (key, node) in remoteByKey)
+        {
+            if (localByKey.TryGetValue(key, out var local))
+            {
+                // Exists locally → recurse
+                await ProcessSubjectNodeChangesAsync(local.Subject, node.NodeId, session, ct);
+            }
+            else
+            {
+                // New remote → create local
+                await CreateLocalSubjectAsync(property, node, key);
+            }
+        }
+    }
+    else
+    {
+        // Value property: handled by MonitoredItems (existing logic)
+    }
+}
+
+// Subject-level convenience (extension method)
+async Task ProcessSubjectNodeChangesAsync(
+    IInterceptorSubject subject,
+    NodeId nodeId,
+    ISession session,
+    CancellationToken ct)
+{
+    var registered = subject.TryGetRegisteredSubject();
+    if (registered is null) return;
+
+    foreach (var property in registered.Properties)
+    {
+        var propertyNodeId = GetNodeIdForProperty(property, nodeId);
+        await ProcessNodeChangeAsync(property, propertyNodeId, session, ct);
+    }
+}
+```
+
+### Helper Methods
+
+```csharp
+async Task CreateLocalSubjectAsync(RegisteredSubjectProperty property, ReferenceDescription node, object? index)
+{
+    // Reuse existing loader logic
+    var subject = await _configuration.SubjectFactory.CreateSubjectAsync(property, node, _session, ct);
+
+    // Add to local model with source tracking (prevents sync-back loop)
+    using (SubjectChangeContext.WithSource(_opcUaSource))
+    {
+        if (property.IsSubjectReference)
+            property.SetValue(subject);
+        else if (property.IsSubjectCollection)
+            AddToCollection(property, subject, (int)index!);
+        else if (property.IsSubjectDictionary)
+            AddToDictionary(property, subject, index!);
+    }
+
+    // Recurse to load children
+    await ProcessSubjectNodeChangesAsync(subject, node.NodeId, _session, ct);
+}
+
+async Task RemoveLocalSubjectAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index = null)
+{
+    using (SubjectChangeContext.WithSource(_opcUaSource))
+    {
+        if (property.IsSubjectReference)
+            property.SetValue(null);
+        else if (property.IsSubjectCollection)
+            RemoveFromCollection(property, (int)index!);
+        else if (property.IsSubjectDictionary)
+            RemoveFromDictionary(property, index!);
+    }
+}
+```
+
+**Implementation note:** Helper methods like `AddToCollection`, `RemoveFromCollection`, `AddToDictionary`, `RemoveFromDictionary`, `FindPropertyForNodeId`, `FindSubjectForNodeId`, and `GetNodeIdForProperty` are implementation details to be defined during implementation. They handle the mechanics of modifying collections/dictionaries and mapping between OPC UA NodeIds and model properties.
+
+### Client Triggers
+
+**1. ModelChangeEvent (preferred, if server supports):**
+```csharp
+// Subscribe to GeneralModelChangeEvent
+subscription.AddMonitoredItem(new MonitoredItem
+{
+    StartNodeId = ObjectIds.Server,
+    AttributeId = Attributes.EventNotifier,
+    // Filter for GeneralModelChangeEventType
+});
+
+// On event:
+void OnModelChangeEvent(MonitoredItem item, MonitoredItemNotificationEventArgs e)
+{
+    foreach (var change in e.NotificationValue.GetChanges())
+    {
+        if (change.Verb.HasFlag(ModelChangeStructureVerbMask.NodeAdded) ||
+            change.Verb.HasFlag(ModelChangeStructureVerbMask.NodeDeleted))
+        {
+            // Find affected property and sync
+            var property = FindPropertyForNodeId(change.Affected);
+            await ProcessNodeChangeAsync(property, parentNodeId, _session, ct);
+        }
+    }
+}
+```
+
+**2. Periodic Browse (fallback):**
+```csharp
+// Timer-based full resync
+async Task PeriodicResyncAsync(CancellationToken ct)
+{
+    while (!ct.IsCancellationRequested)
+    {
+        await Task.Delay(_configuration.PeriodicResyncInterval, ct);
+        await ProcessSubjectNodeChangesAsync(_rootSubject, _rootNodeId, _session, ct);
+    }
+}
+```
+
+**3. Reconnection:**
+
+On disconnect/reconnect, perform full resync from server:
+
+```csharp
+async Task OnReconnectedAsync()
+{
+    // Clear ref counter - server is source of truth
+    foreach (var items in _refCounter.Clear())
+    {
+        // Cleanup orphaned monitored items
+    }
+
+    // Full resync from server
+    await ProcessSubjectNodeChangesAsync(_rootSubject, _rootNodeId, _session, ct);
+}
+```
+
+**Rationale:**
+- Server is authoritative for OPC UA → Model direction
+- Local changes during disconnect are edge case
+- Simple and reliable
+- Existing subjects are reused where BrowseNames match
+
+### Server Triggers
+
+**AddNodes/DeleteNodes Service Handlers:**
+```csharp
+// Override in CustomNodeManager
+public override void AddNodes(ISystemContext context, IList<AddNodesItem> nodesToAdd)
+{
+    foreach (var item in nodesToAdd)
+    {
+        // Find parent property
+        var parentProperty = FindPropertyForNodeId(item.ParentNodeId);
+        if (parentProperty is null)
+        {
+            // Not in our managed tree
+            base.AddNodes(context, nodesToAdd);
+            continue;
+        }
+
+        // Create local subject
+        var subject = _subjectFactory.CreateSubjectForNodeClass(item.NodeClass, item.TypeDefinition);
+
+        // Add to local model with source tracking
+        using (SubjectChangeContext.WithSource(_externalClientSource))
+        {
+            AddSubjectToProperty(parentProperty, subject, item.BrowseName.Name);
+        }
+
+        // Create the OPC UA node (will be picked up by Model → OPC UA sync)
+        // Or directly create here to avoid round-trip
+    }
+}
+
+public override void DeleteNodes(ISystemContext context, IList<DeleteNodesItem> nodesToDelete)
+{
+    foreach (var item in nodesToDelete)
+    {
+        var property = FindPropertyForNodeId(item.NodeId);
+        if (property is null) continue;
+
+        var subject = FindSubjectForNodeId(item.NodeId);
+        if (subject is null) continue;
+
+        using (SubjectChangeContext.WithSource(_externalClientSource))
+        {
+            RemoveSubjectFromProperty(property, subject);
+        }
+    }
+}
+```
+
+---
+
+## Initial Load = Sync with Empty State
+
+The sync logic is **idempotent**. Initial load is just syncing when local state is empty:
+
+### Model → OPC UA (Server/Client startup)
+```csharp
+// Initial: local model exists, OPC UA is empty
+// Use SubjectGraphSynchronizer to sync entire graph
+// Result: creates all OPC UA nodes for current model state
+
+await _synchronizer.SyncSubjectAsync(rootSubject);  // Recursively syncs all subjects
+```
+
+### OPC UA → Model (Client connecting to server)
+```csharp
+// Initial: OPC UA has nodes, local model is empty
+// ProcessNodeChangeAsync sees: remote = OPC UA nodes, local = empty
+// Result: creates all local subjects from OPC UA
+
+await ProcessSubjectNodeChangesAsync(rootSubject, rootNodeId, session, ct);
+```
+
+**Same methods, same logic** - just different starting states. Safe to call anytime for resync.
 
 ---
 
 ## Configuration
 
-### Shared Base Configuration
-
 ```csharp
-public abstract class OpcUaConfigurationBase
+public class OpcUaClientConfiguration
 {
-    // Already shared between client/server
-    public ISourcePathProvider PathProvider { get; set; }
-    public OpcUaValueConverter ValueConverter { get; set; }
-    public OpcUaTypeResolver TypeResolver { get; set; }
-    public OpcUaSubjectFactory SubjectFactory { get; set; }
-    public Func<ReferenceDescription, CancellationToken, Task<bool>>? ShouldAddDynamicProperty { get; set; }
+    // Existing...
 
     // New sync options
-    public bool EnableLiveSync { get; set; } = false;              // Master switch
+    public bool EnableLiveSync { get; set; } = false;
     public bool EnableRemoteNodeManagement { get; set; } = false;  // AddNodes/DeleteNodes
-    public bool EnablePeriodicResync { get; set; } = false;        // Fallback polling
+    public bool EnableModelChangeEvents { get; set; } = false;
+    public bool EnablePeriodicResync { get; set; } = false;
     public TimeSpan PeriodicResyncInterval { get; set; } = TimeSpan.FromSeconds(30);
 }
 
-public class OpcUaClientConfiguration : OpcUaConfigurationBase
+public class OpcUaServerConfiguration
 {
-    public string ServerUrl { get; set; }
-    public string? RootName { get; set; }
-    public int DefaultSamplingInterval { get; set; }
-    // ... other client-specific settings
-}
+    // Existing...
 
-public class OpcUaServerConfiguration : OpcUaConfigurationBase
-{
-    public string? ApplicationName { get; set; }
-    public string? NamespaceUri { get; set; }
-    public bool CleanCertificateStore { get; set; }
-    // ... other server-specific settings
+    // New sync options
+    public bool EnableLiveSync { get; set; } = false;
+    public bool EnableExternalNodeManagement { get; set; } = false;  // Accept AddNodes/DeleteNodes
 }
 ```
 
 ---
 
-## Data Flow
+## Processing Architecture
 
-### Local Subject Attached → OPC UA
+### Separate Queues for Value vs Structure
 
-```
-Person.Children.Add(new Child(...))
-         │
-         ▼
-LifecycleInterceptor.SubjectAttached event
-         │
-         ▼
-OpcUaAddressSpaceSync.OnLocalSubjectAttached()
-         │
-         ▼
-IOpcUaSyncStrategy.OnSubjectAttachedAsync(child)
-         │
-         ├─── Client: Create MonitoredItems, call AddNodes if supported
-         │
-         └─── Server: Create OPC UA nodes, fire GeneralModelChangeEvent
-```
-
-### Local Subject Detached → OPC UA
-
-```
-Person.Children.Remove(child)
-         │
-         ▼
-LifecycleInterceptor.SubjectDetached event
-         │
-         ▼
-OpcUaAddressSpaceSync.OnLocalSubjectDetached()
-         │
-         ▼
-IOpcUaSyncStrategy.OnSubjectDetachedAsync(child)
-         │
-         ├─── Client: Remove MonitoredItems, call DeleteNodes if supported
-         │
-         └─── Server: Remove nodes (tracking only*), fire GeneralModelChangeEvent
-```
-
-*OPC UA SDK limitation: nodes remain in address space until restart
-
-### Remote Node Added → Local Subject
-
-```
-GeneralModelChangeEvent (Verb=NodeAdded)
-         │  (or periodic browse detects new node)
-         ▼
-OpcUaAddressSpaceSync.OnRemoteNodeAdded()
-         │
-         ▼
-ShouldAddDynamicProperty(node) → false? → skip
-         │ true
-         ▼
-TypeResolver.TryGetTypeForNodeAsync()
-         │
-         ├─── Type found → Create typed subject via SubjectFactory
-         │
-         └─── No type → Create DynamicObject subject
-         │
-         ▼
-Attach to parent (triggers value sync automatically)
-```
-
-### Remote Node Removed → Local Subject
-
-```
-GeneralModelChangeEvent (Verb=NodeDeleted)
-         │  (or periodic browse detects missing node)
-         ▼
-OpcUaAddressSpaceSync.OnRemoteNodeRemoved()
-         │
-         ▼
-Find local subject by NodeId mapping
-         │
-         ▼
-Detach from parent collection/property
-         │
-         ▼
-LifecycleInterceptor handles cleanup automatically
-```
-
-### Server Receives AddNodes from External Client
-
-```
-External OPC UA Client calls AddNodes service
-         │
-         ▼
-CustomNodeManager.AddNode() override
-         │
-         ▼
-OpcUaNodeManagementHandler.HandleAddNodeAsync()
-         │
-         ▼
-Create local subject, attach to parent
-         │
-         ▼
-Fire GeneralModelChangeEvent to notify other clients
-```
-
-### Client NodeManagement (Graceful Degradation)
+Structural changes need `_structureLock` and can be slow. Value changes are fast. Separate them:
 
 ```csharp
-public async Task OnSubjectAttachedAsync(IInterceptorSubject subject, CancellationToken ct)
+// In change handler (existing ChangeQueueProcessor)
+async Task ProcessChangeAsync(SubjectPropertyChange change, RegisteredSubjectProperty property)
 {
-    // Always create monitored items for value sync
-    await CreateMonitoredItemsAsync(subject, ct);
+    if (change.Source == _opcUaSource)
+        return;  // Loop prevention
 
-    // Try to create node on server (optional)
-    if (_configuration.EnableRemoteNodeManagement)
+    if (property.IsSubjectReference || property.IsSubjectCollection || property.IsSubjectDictionary)
     {
+        // Queue for structural processing (don't block value changes)
+        _structuralChangeQueue.Enqueue(change);
+    }
+    else
+    {
+        // Value change - process inline (fast)
+        await UpdateValueAsync(change);
+    }
+}
+
+// Separate worker for structural changes
+async Task ProcessStructuralChangesAsync(CancellationToken ct)
+{
+    while (!ct.IsCancellationRequested)
+    {
+        var change = await _structuralChangeQueue.DequeueAsync(ct);
+
+        await _structureLock.WaitAsync(ct);
         try
         {
-            var result = await _session.AddNodesAsync(..., ct);
-            if (result.StatusCode == StatusCodes.BadNotSupported ||
-                result.StatusCode == StatusCodes.BadServiceUnsupported)
-            {
-                _logger.LogWarning(
-                    "Server does not support AddNodes service. " +
-                    "Local subject '{SubjectType}' will sync values but not structure.",
-                    subject.GetType().Name);
-            }
+            await ProcessStructuralChangeAsync(change);
         }
-        catch (ServiceResultException ex) when (ex.StatusCode == StatusCodes.BadServiceUnsupported)
+        finally
         {
-            _logger.LogWarning("AddNodes service not supported by server.");
+            _structureLock.Release();
         }
     }
 }
 ```
 
----
+### Value Changes During Structure Creation
 
-## Error Handling
+Race condition: value change arrives before structure is created.
 
-### Connection Loss During Sync
-
-| Scenario | Behavior |
-|----------|----------|
-| Local change while disconnected | Queued in existing write retry queue; structure change logged as warning |
-| Reconnect after disconnect | Full resync triggered (same as initial connect) |
-| ModelChangeEvent missed | Periodic resync catches up (if enabled), or next connect |
-
-### Concurrent Changes
+**Solution:** Skip value changes if node not ready. Structure creation reads current values anyway.
 
 ```csharp
-// OpcUaAddressSpaceSync uses lock to serialize local/remote changes
-private readonly SemaphoreSlim _syncLock = new(1, 1);
-
-public async Task OnLocalSubjectAttachedAsync(SubjectLifecycleChange change, CancellationToken ct)
+async Task UpdateValueAsync(SubjectPropertyChange change)
 {
-    await _syncLock.WaitAsync(ct);
+    if (!change.Property.TryGetPropertyData(OpcVariableKey, out var node))
+    {
+        // Structure not created yet - skip
+        // When structure is created, it reads current value from model
+        _logger.LogDebug("Skipping value change for {Property} - node not ready", change.Property.Name);
+        return;
+    }
+
+    // Node exists - update value
+    UpdateNodeValue(node, change.GetNewValue<object?>());
+}
+```
+
+**Why no data is lost:**
+1. Value change updates local model (already happened before we process)
+2. Value handler skips (node not ready)
+3. Structure worker creates node, reads current value from model
+4. OPC UA gets correct value via structure creation
+
+---
+
+## Eventual Consistency Model
+
+All 4 cases are **eventually consistent**:
+
+### Model → OPC UA (Server)
+| Event | Processing | Consistency |
+|-------|------------|-------------|
+| Add subject | Structural queue → create node (reads current values) | ✓ Immediate |
+| Remove subject | Structural queue → remove node | ✓ Immediate |
+| Value change | Value handler → update node (skip if not ready) | ✓ Eventually |
+
+### Model → OPC UA (Client)
+| Event | Processing | Consistency |
+|-------|------------|-------------|
+| Add subject | Structural queue → AddNodes + MonitoredItems | ✓ Immediate |
+| Remove subject | Structural queue → DeleteNodes + remove items | ✓ Immediate |
+| Value change | Value handler → write to server (skip if not ready) | ✓ Eventually |
+
+### OPC UA → Model (Client)
+| Event | Processing | Consistency |
+|-------|------------|-------------|
+| Remote add node | ModelChangeEvent/browse → create local subject | ✓ Immediate |
+| Remote remove node | ModelChangeEvent/browse → remove local subject | ✓ Immediate |
+| Remote value change | MonitoredItem callback → update local property | ✓ Immediate |
+
+### OPC UA → Model (Server)
+| Event | Processing | Consistency |
+|-------|------------|-------------|
+| External AddNodes | Handler → create local subject | ✓ Immediate |
+| External DeleteNodes | Handler → remove local subject | ✓ Immediate |
+| External value write | StateChanged → update local property | ✓ Immediate |
+
+### Consistency Guarantees
+- **Structural changes:** Serialized via `_structureLock`, no races
+- **Value changes:** Skipped if structure not ready, structure reads current values
+- **Source tracking:** Prevents infinite loops in all directions
+- **Fallback:** Periodic resync ensures recovery from missed events
+
+### Error Handling Strategy
+
+Structural changes use retry-once-then-continue pattern:
+
+```csharp
+foreach (var op in operations)
+{
     try
     {
-        await _strategy.OnSubjectAttachedAsync(change.Subject, ct);
+        await ProcessOperationAsync(op);
     }
-    finally
+    catch (Exception ex)
     {
-        _syncLock.Release();
+        // One retry for transient failures
+        try
+        {
+            await Task.Delay(100, ct);
+            await ProcessOperationAsync(op);
+        }
+        catch (Exception retryEx)
+        {
+            _logger.LogWarning(retryEx,
+                "Failed to sync subject after retry, will recover on next resync");
+            // Continue - periodic resync will fix it
+        }
     }
 }
 ```
 
-### Circular References
-
-- Already handled by existing `LifecycleInterceptor` (tracks visited subjects)
-- Sync reuses same pattern: `HashSet<IInterceptorSubject> _processedSubjects`
-
-### Type Resolution Failures
-
-```
-Remote node added → TypeResolver returns null → ShouldAddDynamicProperty?
-    │                                                    │
-    ├── false → Log debug, skip node                     │
-    │                                                    │
-    └── true → Create DynamicObject subject ◄────────────┘
-```
-
-### NodeManagement Service Failures
-
-| Service | Failure Behavior |
-|---------|------------------|
-| AddNodes not supported | Log warning, continue value sync only |
-| DeleteNodes not supported | Log warning, local detach still works |
-| AddNodes fails (other error) | Log error, skip node |
-
-### Partial Sync Failures
-
-- Individual node failures don't abort entire sync
-- Each node synced independently with its own error handling
-- Failed nodes logged, successful nodes applied
+**Rationale:**
+- Partial progress better than no progress
+- OPC UA operations are independent (no transactions)
+- Periodic resync catches anything missed
+- Structural changes are rare, failures even rarer
 
 ---
 
-## Testing Strategy
+## OPC UA Reference Counting
 
-### Unit Tests
+### Problem with Lifecycle Events
 
-**OpcUaAddressSpaceSync tests:**
+Previously used `SubjectAttached`/`SubjectDetaching` for cleanup. This is wrong:
+
+| Scenario | Lifecycle Event | Issue |
+|----------|-----------------|-------|
+| Subject in multiple OPC UA properties | `Detaching` only when ALL refs gone | Too late |
+| Subject moved between properties | No detach (ref count >0) | Never cleaned up |
+| Subject removed from OPC UA but kept elsewhere | No detach | OPC UA resources never freed |
+
+### Solution: Connector-Scoped Reference Counting
+
+Track OPC UA-specific reference counts using `ConnectorReferenceCounter<TData>` (see full implementation in "Follow-Up: Apply Pattern to Other Connectors" section).
+
+Key methods:
+- `IncrementAndCheckFirst(subject, dataFactory, out data)` - returns true if first reference
+- `DecrementAndCheckLast(subject, out data)` - returns true if last reference
+- `Clear()` - returns all data for cleanup (used on reconnect)
+
+### All 4 Cases Use Same Ref Count
+
+**Server:**
 ```csharp
-[Fact] public async Task OnSubjectAttached_CallsStrategyOnSubjectAttachedAsync()
-[Fact] public async Task OnSubjectDetached_CallsStrategyOnSubjectDetachedAsync()
-[Fact] public async Task OnModelChangeEvent_NodeAdded_CallsOnRemoteNodeAddedAsync()
-[Fact] public async Task OnModelChangeEvent_NodeDeleted_CallsOnRemoteNodeRemovedAsync()
-[Fact] public async Task ConcurrentChanges_SerializedBySemaphore()
-```
-
-**Strategy tests (with mocked OPC UA session):**
-```csharp
-[Fact] public async Task OnSubjectAttached_CreatesMonitoredItems()
-[Fact] public async Task OnSubjectAttached_ServerSupportsAddNodes_CreatesRemoteNode()
-[Fact] public async Task OnSubjectAttached_ServerNotSupportsAddNodes_LogsWarningAndContinues()
-[Fact] public async Task OnRemoteNodeAdded_KnownType_CreatesTypedSubject()
-[Fact] public async Task OnRemoteNodeAdded_UnknownType_CreatesDynamicSubject()
-[Fact] public async Task OnRemoteNodeAdded_ShouldAddDynamicPropertyFalse_SkipsNode()
-```
-
-### Integration Tests
-
-**Extend existing `OpcUaServerClientReadWriteTests.cs`:**
-```csharp
-[Fact] public async Task LocalAttach_SyncsToServerAddressSpace()
-[Fact] public async Task LocalDetach_SyncsToServerAddressSpace()
-[Fact] public async Task RemoteNodeAdded_SyncsToLocalModel()
-[Fact] public async Task PeriodicResync_DetectsChanges_WhenModelChangeEventsUnsupported()
-```
-
-### Test Infrastructure
-
-```csharp
-// MockOpcUaSyncStrategy for unit testing coordinator
-internal class MockOpcUaSyncStrategy : IOpcUaSyncStrategy { ... }
-
-// Test helper for simulating ModelChangeEvents
-internal static class ModelChangeEventTestHelper
+// Model → OPC UA (local change)
+async Task OnLocalSubjectAddedAsync(property, subject, index)
 {
-    public static GeneralModelChangeEventState CreateNodeAddedEvent(NodeId nodeId) { ... }
-    public static GeneralModelChangeEventState CreateNodeDeletedEvent(NodeId nodeId) { ... }
+    var isFirst = IncrementRefCount(subject);
+    if (isFirst) CreateOpcUaNodes(subject);
+    AddOpcUaReference(property, subject, index);
+}
+
+async Task OnLocalSubjectRemovedAsync(property, subject, index)
+{
+    RemoveOpcUaReference(property, subject, index);
+    var isLast = DecrementRefCount(subject);
+    if (isLast) RemoveOpcUaNodes(subject);
+}
+
+// OPC UA → Model (external client AddNodes/DeleteNodes)
+async Task OnExternalNodeAddedAsync(property, nodeInfo, index)
+{
+    var subject = CreateLocalSubject(nodeInfo);
+    IncrementRefCount(subject);  // Same ref count!
+    // Nodes already created by external client
+
+    using (SubjectChangeContext.WithSource(_externalSource))
+        AddSubjectToProperty(property, subject, index);
+}
+
+async Task OnExternalNodeRemovedAsync(property, subject, index)
+{
+    using (SubjectChangeContext.WithSource(_externalSource))
+        RemoveSubjectFromProperty(property, index);
+
+    DecrementRefCount(subject);  // Same ref count!
+    // Nodes already removed by external client
 }
 ```
 
+**Client:**
+```csharp
+// Model → OPC UA (local change)
+async Task OnLocalSubjectAddedAsync(property, subject, index)
+{
+    var isFirst = IncrementRefCount(subject);
+    if (isFirst)
+    {
+        CreateMonitoredItems(subject);
+        TryCallAddNodes(subject);
+    }
+}
+
+async Task OnLocalSubjectRemovedAsync(property, subject, index)
+{
+    var isLast = DecrementRefCount(subject);
+    if (isLast)
+    {
+        RemoveMonitoredItems(subject);
+        TryCallDeleteNodes(subject);
+    }
+}
+
+// OPC UA → Model (remote server change)
+async Task OnRemoteNodeAddedAsync(property, node, index)
+{
+    var subject = CreateLocalSubject(node);
+    var isFirst = IncrementRefCount(subject);  // Same ref count!
+    if (isFirst) CreateMonitoredItems(subject);
+
+    using (SubjectChangeContext.WithSource(_opcUaSource))
+        AddSubjectToProperty(property, subject, index);
+}
+
+async Task OnRemoteNodeRemovedAsync(property, subject, index)
+{
+    using (SubjectChangeContext.WithSource(_opcUaSource))
+        RemoveSubjectFromProperty(property, index);
+
+    var isLast = DecrementRefCount(subject);  // Same ref count!
+    if (isLast) RemoveMonitoredItems(subject);
+}
+```
+
+### Why Source Tracking Prevents Double-Counting
+
+```
+Remote node added
+    │
+    ▼
+OnRemoteNodeAddedAsync
+    ├── IncrementRefCount (count: 0 → 1)
+    ├── CreateMonitoredItems
+    └── AddSubjectToProperty (source = OPC UA)
+            │
+            ▼
+        Property change fires (source = OPC UA)
+            │
+            ▼
+        Model → OPC UA processor
+            └── Skips (source == _opcUaSource)
+
+Result: Ref count incremented exactly once
+```
+
+### Cleanup: Remove Lifecycle Event Subscriptions
+
+With ref counting in structural change processor, remove:
+- `_lifecycleInterceptor.SubjectDetaching += ...` from server
+- `_lifecycleInterceptor.SubjectAttached += ...` from server/client
+- Any lifecycle-based cache cleanup
+
 ---
 
-## Implementation Plan
+## Loop Prevention
 
-### New Files
+Use existing `change.Source` mechanism:
 
-| File | Purpose | Est. Lines |
-|------|---------|------------|
-| `Sync/IOpcUaSyncStrategy.cs` | Strategy interface | ~30 |
-| `Sync/OpcUaAddressSpaceSync.cs` | Shared sync coordinator | ~250 |
-| `OpcUaConfigurationBase.cs` | Shared configuration base class | ~40 |
-| `Sync/ModelChangeEventSubscription.cs` | Event subscription helper | ~80 |
-| `Client/OpcUaClientSyncStrategy.cs` | Client implementation | ~200 |
-| `Server/OpcUaServerSyncStrategy.cs` | Server implementation | ~150 |
-| `Server/OpcUaNodeManagementHandler.cs` | AddNodes/DeleteNodes handling | ~120 |
+```csharp
+// When OPC UA updates local model:
+using (SubjectChangeContext.WithSource(_opcUaSource))
+{
+    property.SetValue(newCollection);
+}
 
-**Total new code: ~870 lines**
+// When processing changes:
+if (change.Source == _opcUaSource)
+    return;  // Skip - came from OPC UA, don't sync back
+```
 
-### Modified Files
+---
 
-| File | Changes |
-|------|---------|
-| `Client/OpcUaSubjectClientSource.cs` | Integrate `OpcUaAddressSpaceSync`, subscribe to `SubjectAttached` |
-| `Client/OpcUaSubjectLoader.cs` | Extract reusable logic to strategy |
-| `Client/OpcUaClientConfiguration.cs` | Inherit from `OpcUaConfigurationBase` |
-| `Server/OpcUaSubjectServerBackgroundService.cs` | Integrate `OpcUaAddressSpaceSync` |
-| `Server/CustomNodeManager.cs` | Override NodeManagement methods, fire ModelChangeEvents |
-| `Server/OpcUaServerConfiguration.cs` | Inherit from `OpcUaConfigurationBase` |
+## Coverage Matrix
 
-### Implementation Phases
+### All Cases Verified
 
-**Phase 1: Core infrastructure**
-- `IOpcUaSyncStrategy` interface
-- `OpcUaConfigurationBase`
-- `OpcUaAddressSpaceSync` (local change handling only)
+| Case | Direction | Method | Ref | Collection | Dictionary | Values |
+|------|-----------|--------|-----|------------|------------|--------|
+| Client | Model→OPC | `ProcessPropertyChangeAsync` | ✓ | ✓ | ✓ | ✓ |
+| Client | OPC→Model | `ProcessNodeChangeAsync` | ✓ | ✓ | ✓ | ✓ MonitoredItems |
+| Server | Model→OPC | `ProcessPropertyChangeAsync` | ✓ | ✓ | ✓ | ✓ |
+| Server | OPC→Model | AddNodes/DeleteNodes handlers | ✓ | ✓ | ✓ | ✓ StateChanged |
 
-**Phase 2: Client strategy**
-- `OpcUaClientSyncStrategy`
-- Extract logic from `OpcUaSubjectLoader`
-- Integrate into `OpcUaSubjectClientSource`
+### All Operations Verified
 
-**Phase 3: Server strategy**
-- `OpcUaServerSyncStrategy`
-- Extract logic from `CustomNodeManager`
-- Fire `GeneralModelChangeEvent` on changes
+| Operation | How Handled | Ref Count |
+|-----------|-------------|-----------|
+| **Add** | OnSubjectAddedAsync | Increment (create resources if first) |
+| **Remove** | OnSubjectRemovedAsync | Decrement (cleanup resources if last) |
+| **Move** | Remove + Add (two separate changes) | Decrement then Increment (net zero) |
+| **Replace** | Remove old, Add new (in order) | Old: decrement, New: increment |
 
-**Phase 4: Remote change detection**
-- `ModelChangeEventSubscription` (client subscribes to server events)
-- Server: Override NodeManagement methods
-- `OpcUaNodeManagementHandler`
+### Move/Reorder Handling
 
-**Phase 5: Periodic fallback**
-- Optional periodic resync in `OpcUaAddressSpaceSync`
-- Registry-based diff logic
+`CollectionDiffBuilder` detects moves via subject identity (reference equality), not index:
 
-### Breaking Changes
+```csharp
+_diffBuilder.GetCollectionChanges(oldCollection, newCollection,
+    out var operations,      // Remove/Insert ops
+    out var newItems,        // Truly new items
+    out var reorderedItems); // Items that moved position (same identity)
+```
 
-**None** - All changes are additive:
-- New configuration options have sensible defaults (all disabled)
-- Existing behavior preserved when sync features disabled
-- Public API unchanged
+**Reorder within same collection:** No-op for OPC UA.
+- Collections map to OPC UA folders with unordered child references
+- `reorderedItems` is ignored - order is a .NET concept only
+- No OPC UA operations needed for pure reorders
+
+**Move between different properties:**
+Two separate property changes, but ref count stays correct:
+```
+PropertyA: [subject] → []  → DecrementRefCount: 2 → 1 (no cleanup, still referenced)
+PropertyB: [] → [subject]  → IncrementRefCount: 1 → 2 (no create, already exists)
+```
+
+If subject only in one place: Remove first (1→0, cleanup), Add second (0→1, recreate).
+This is unavoidable for cross-property moves but rare.
+
+### Collection/Dictionary Identity Matching
+
+**Collections:** Match by subject reference (identity), not index position.
+- `CollectionDiffBuilder` uses subject as dictionary key
+- Same subject at different index = Move, not Remove+Add
+- Different subject at same index = Remove old + Add new
+
+**Dictionaries:** Match by dictionary key AND subject identity.
+- Same key, same subject = no change
+- Same key, different subject = Remove old + Add new (value changed)
+- Different key = Remove/Add as appropriate
+
+### Replace Operation Detail
+
+Subject reference: old=SubjectA, new=SubjectB
+```csharp
+// ProcessPropertyChangeAsync handles this:
+if (oldSubject is not null && !ReferenceEquals(oldSubject, newSubject))
+    await OnSubjectRemovedAsync(property, oldSubject, index: null);  // First
+if (newSubject is not null && !ReferenceEquals(oldSubject, newSubject))
+    await OnSubjectAddedAsync(property, newSubject, index: null);    // Second
+```
+
+Order: Remove old first, then Add new. Ensures no brief state where both exist.
+
+---
+
+## Resolved Design Decisions
+
+All open questions have been resolved through design review:
+
+| Decision | Resolution | Rationale |
+|----------|------------|-----------|
+| **Collection ordering** | N/A - unordered in OPC UA | Collections map to OPC UA folders with child references; order is a .NET concept that doesn't translate |
+| **Dictionary ordering** | BrowseName = key | Per OPC UA Machinery companion spec pattern (e.g., Machines folder) |
+| **Reorder handling** | No-op for OPC UA | `reorderedItems` from diff builder ignored; order changes are local-only |
+| **Initial value loading** | Eventual consistency via subscriptions | OPC UA subscriptions send initial values automatically; tiny window is acceptable |
+| **Circular references** | Handled by ref counter | `IncrementAndCheckFirst` returns false for already-tracked subjects, stopping recursion |
+| **Type mismatch** | SubjectFactory returns null → skip with warning | Rely on existing `SubjectFactory` + `TypeResolver` pattern |
+| **Reconnection** | Full resync from server | Server is source of truth; simple and reliable |
+| **Structural failures** | Retry once, log, continue | Eventual consistency; periodic resync recovers missed items |
+| **Collection AddNodes index** | Append to end | Collections are unordered; index is just insertion order |
+| **Concurrent modifications** | Last-write-wins | Structural changes are rare; not worth complex conflict resolution |
+| **Dynamic types** | Shared `ShouldAddDynamic*` + `TypeResolver` | Same pattern for both client and server sides |
+| **Consistency model** | Eventual consistency | OPC UA has no transactions; strict consistency not feasible |
+
+---
+
+## Implementation Phases
+
+### Existing Code Reuse Analysis
+
+**Server (`CustomNodeManager.cs`):**
+- `CreateChildObject` already has reference-like pattern (checks `_subjects` dictionary)
+- `CreateVariableNode`, `CreateArrayObjectNode`, `CreateDictionaryObjectNode` - reusable
+- `RemoveSubjectNodes` - needs ref count check before deletion
+- `_structureLock` pattern - reusable
+
+**Client (`OpcUaSubjectLoader.cs`):**
+- Property iteration in `LoadSubjectAsync` - reusable pattern
+- `LoadSubjectReferenceAsync`, `LoadSubjectCollectionAsync`, `LoadSubjectDictionaryAsync` - refactorable
+- `MonitorValueNode` - reusable
+- `BrowseNodeAsync` - reusable
+
+**Refactoring approach:**
+- Add `ConnectorReferenceCounter<TData>` to Connectors library
+- Server: Replace `_subjects` Dictionary with ref counter usage
+- Client: Make `loadedSubjects` HashSet persistent via ref counter
+- Both: Replace lifecycle event subscriptions with ref counting
+
+### Phase 1: Add Connectors Library Abstractions
+- `ConnectorReferenceCounter<TData>` - thread-safe ref counter with associated data
+- `StructuralChangeProcessor` - property type branching base class
+- `SubjectGraphSynchronizer<TData>` - recursive sync with ref counting
+- Unit tests for all new classes
+
+### Phase 2: Refactor Server for Reference Counting
+- Replace `_subjects` Dictionary with `ConnectorReferenceCounter<NodeState>`
+- Update `CreateChildObject` to use `IncrementAndCheckFirst`
+- Update `RemoveSubjectNodes` to use `DecrementAndCheckLast`
+- Remove lifecycle event subscriptions
+
+### Phase 3: Add Server Model → OPC UA Incremental Sync
+- Add `ProcessPropertyChangeAsync` to change handler
+- Wire up to `ChangeQueueProcessor`
+- Branch on property type, call existing creation/removal methods
+
+### Phase 4: Refactor Client for Reference Counting
+- Add `ConnectorReferenceCounter<List<MonitoredItem>>`
+- Refactor `OpcUaSubjectLoader` to use persistent tracking
+- Update monitored item cleanup
+
+### Phase 5: Add Client Model → OPC UA Incremental Sync
+- Add `ProcessPropertyChangeAsync` for structural changes
+- Manage MonitoredItems dynamically
+- Optional AddNodes/DeleteNodes support
+
+### Phase 6: Add Client OPC UA → Model Incremental Sync
+- Optional ModelChangeEvent subscription
+- Optional periodic resync fallback
+- Reuse refactored loader for incremental updates
+
+### Phase 7: Add Server OPC UA → Model Sync (Optional)
+- Implement AddNodes/DeleteNodes handlers
+- Collection AddNodes: append to end (unordered)
+- Dictionary AddNodes: BrowseName as key
+- Use `ShouldAddDynamicSubject` + `TypeResolver` pattern
+
+---
+
+## Follow-Up: Apply Pattern to Other Connectors
+
+The connector-scoped reference counting pattern should be applied to other bidirectional connectors:
+
+### MQTT Connector
+- **Same problem:** Subscriptions need cleanup when subjects removed from MQTT-synced graph
+- **Same solution:** MQTT-specific ref count, cleanup subscriptions when count reaches 0
+- **Triggers:** Topic subscription/unsubscription instead of OPC UA nodes
+
+### Future Connectors (GraphQL, WebSocket, etc.)
+- Each connector tracks its own ref counts
+- Cleanup happens when subject leaves that connector's scope
+- Independent of context lifecycle events
+
+### New Abstraction: `ConnectorReferenceCounter<TData>` (Connectors Library)
+
+A reusable reference counter for connector-scoped subject tracking with associated data:
+
+```csharp
+namespace Namotion.Interceptor.Connectors;
+
+/// <summary>
+/// Tracks connector-scoped reference counts for subjects with associated data.
+/// Key is always IInterceptorSubject, TData is connector-specific (e.g., NodeState, MonitoredItems).
+/// </summary>
+public class ConnectorReferenceCounter<TData>
+{
+    private readonly Dictionary<IInterceptorSubject, (int Count, TData Data)> _entries = new();
+    private readonly object _lock = new();
+
+    /// <summary>
+    /// Increments reference count. Returns true if this is the first reference.
+    /// For first reference, dataFactory is called to create associated data.
+    /// </summary>
+    public bool IncrementAndCheckFirst(IInterceptorSubject subject, Func<TData> dataFactory, out TData data)
+    {
+        lock (_lock)
+        {
+            if (_entries.TryGetValue(subject, out var entry))
+            {
+                _entries[subject] = (entry.Count + 1, entry.Data);
+                data = entry.Data;
+                return false;
+            }
+
+            data = dataFactory();
+            _entries[subject] = (1, data);
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Decrements reference count. Returns true if this was the last reference.
+    /// On last reference, data is returned for cleanup.
+    /// </summary>
+    public bool DecrementAndCheckLast(IInterceptorSubject subject, out TData? data)
+    {
+        lock (_lock)
+        {
+            if (!_entries.TryGetValue(subject, out var entry))
+            {
+                data = default;
+                return false;
+            }
+
+            if (entry.Count == 1)
+            {
+                _entries.Remove(subject);
+                data = entry.Data;
+                return true;
+            }
+
+            _entries[subject] = (entry.Count - 1, entry.Data);
+            data = default;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Gets data for subject if tracked, null otherwise.
+    /// </summary>
+    public bool TryGetData(IInterceptorSubject subject, out TData? data)
+    {
+        lock (_lock)
+        {
+            if (_entries.TryGetValue(subject, out var entry))
+            {
+                data = entry.Data;
+                return true;
+            }
+            data = default;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Clears all entries, returns all data for cleanup.
+    /// </summary>
+    public IEnumerable<TData> Clear()
+    {
+        lock (_lock)
+        {
+            var data = _entries.Values.Select(e => e.Data).ToList();
+            _entries.Clear();
+            return data;
+        }
+    }
+}
+```
+
+**Usage in OPC UA:**
+
+```csharp
+// Server - stores NodeState
+private readonly ConnectorReferenceCounter<NodeState> _refCounter = new();
+
+async Task OnSubjectAddedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index)
+{
+    var isFirst = _refCounter.IncrementAndCheckFirst(subject,
+        () => CreateNodeForSubject(subject),
+        out var node);
+
+    if (isFirst)
+    {
+        // Node just created, recurse into children
+        await SyncSubjectChildrenAsync(subject);
+    }
+
+    // Always add reference from parent
+    AddReferenceToParent(property, subject, index);
+}
+
+// Client - stores list of MonitoredItems
+private readonly ConnectorReferenceCounter<List<MonitoredItem>> _refCounter = new();
+
+var isFirst = _refCounter.IncrementAndCheckFirst(subject,
+    () => CreateMonitoredItemsForSubject(subject),
+    out var items);
+```
+
+### Additional Abstractions for Connectors Library
+
+**2. `StructuralChangeProcessor` - Property type branching base class:**
+
+```csharp
+namespace Namotion.Interceptor.Connectors;
+
+/// <summary>
+/// Base class for processing structural property changes (add/remove subjects).
+/// Handles branching on property type and collection diffing.
+/// </summary>
+public abstract class StructuralChangeProcessor
+{
+    private readonly CollectionDiffBuilder _diffBuilder = new();
+
+    /// <summary>
+    /// Source to ignore (prevents sync loops).
+    /// </summary>
+    protected abstract object? IgnoreSource { get; }
+
+    /// <summary>
+    /// Process a property change, branching on property type.
+    /// </summary>
+    public async Task ProcessPropertyChangeAsync(SubjectPropertyChange change, RegisteredSubjectProperty property)
+    {
+        if (change.Source == IgnoreSource)
+            return;
+
+        if (property.IsSubjectReference)
+        {
+            var oldSubject = change.GetOldValue<IInterceptorSubject?>();
+            var newSubject = change.GetNewValue<IInterceptorSubject?>();
+
+            if (oldSubject is not null && !ReferenceEquals(oldSubject, newSubject))
+                await OnSubjectRemovedAsync(property, oldSubject, index: null);
+            if (newSubject is not null && !ReferenceEquals(oldSubject, newSubject))
+                await OnSubjectAddedAsync(property, newSubject, index: null);
+        }
+        else if (property.IsSubjectCollection)
+        {
+            var oldCollection = change.GetOldValue<IReadOnlyList<IInterceptorSubject>?>() ?? [];
+            var newCollection = change.GetNewValue<IReadOnlyList<IInterceptorSubject>?>() ?? [];
+
+            _diffBuilder.GetCollectionChanges(oldCollection, newCollection,
+                out var operations, out var newItems, out _);
+
+            // Process removes (descending order)
+            foreach (var op in operations ?? [])
+            {
+                if (op.Action == SubjectCollectionOperationType.Remove)
+                    await OnSubjectRemovedAsync(property, oldCollection[(int)op.Index], op.Index);
+            }
+
+            // Process adds
+            foreach (var (index, subject) in newItems ?? [])
+                await OnSubjectAddedAsync(property, subject, index);
+
+            // Reorders ignored - order is connector-specific (OPC UA: no-op)
+        }
+        else if (property.IsSubjectDictionary)
+        {
+            var oldDict = change.GetOldValue<IDictionary?>();
+            var newDict = change.GetNewValue<IDictionary?>() ?? new Dictionary<object, object>();
+
+            _diffBuilder.GetDictionaryChanges(oldDict, newDict,
+                out _, out var newItems, out var removedKeys);
+
+            var oldChildren = property.Children.ToDictionary(c => c.Index!, c => c.Subject);
+            foreach (var key in removedKeys ?? [])
+            {
+                if (oldChildren.TryGetValue(key, out var subject))
+                    await OnSubjectRemovedAsync(property, subject, key);
+            }
+
+            foreach (var (key, subject) in newItems ?? [])
+                await OnSubjectAddedAsync(property, subject, key);
+        }
+        else
+        {
+            await OnValueChangedAsync(change);
+        }
+    }
+
+    protected abstract Task OnSubjectAddedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index);
+    protected abstract Task OnSubjectRemovedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index);
+    protected abstract Task OnValueChangedAsync(SubjectPropertyChange change);
+}
+```
+
+**3. `SubjectGraphSynchronizer<TData>` - Recursive sync with ref counting:**
+
+```csharp
+namespace Namotion.Interceptor.Connectors;
+
+/// <summary>
+/// Base class for synchronizing subject graphs with reference counting.
+/// Handles recursion with cycle detection via ref counter.
+/// </summary>
+public abstract class SubjectGraphSynchronizer<TData>
+{
+    protected ConnectorReferenceCounter<TData> RefCounter { get; } = new();
+
+    /// <summary>
+    /// Sync a subject and its children. Stops recursion for already-synced subjects.
+    /// </summary>
+    public async Task SyncSubjectAsync(IInterceptorSubject subject)
+    {
+        var isFirst = RefCounter.IncrementAndCheckFirst(subject, () => CreateDataForSubject(subject), out var data);
+
+        if (!isFirst)
+            return; // Already synced - stops recursion (handles cycles)
+
+        await OnSubjectFirstSyncAsync(subject, data);
+
+        // Recurse into structural children
+        var registered = subject.TryGetRegisteredSubject();
+        if (registered is null) return;
+
+        foreach (var property in registered.Properties)
+        {
+            if (property.IsSubjectReference || property.IsSubjectCollection || property.IsSubjectDictionary)
+            {
+                foreach (var child in property.Children)
+                {
+                    if (child.Subject is not null)
+                        await SyncSubjectAsync(child.Subject);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Remove a subject from sync. Cleans up if last reference.
+    /// </summary>
+    public async Task UnsyncSubjectAsync(IInterceptorSubject subject)
+    {
+        var isLast = RefCounter.DecrementAndCheckLast(subject, out var data);
+
+        if (isLast && data is not null)
+            await OnSubjectLastUnsyncAsync(subject, data);
+    }
+
+    /// <summary>
+    /// Create connector-specific data for a subject (called on first sync).
+    /// </summary>
+    protected abstract TData CreateDataForSubject(IInterceptorSubject subject);
+
+    /// <summary>
+    /// Called when subject is first synced (ref count 0 → 1).
+    /// </summary>
+    protected abstract Task OnSubjectFirstSyncAsync(IInterceptorSubject subject, TData data);
+
+    /// <summary>
+    /// Called when subject is last unsynced (ref count 1 → 0).
+    /// </summary>
+    protected abstract Task OnSubjectLastUnsyncAsync(IInterceptorSubject subject, TData data);
+}
+```
+
+**Usage in OPC UA Server:**
+
+```csharp
+public class OpcUaServerSynchronizer : SubjectGraphSynchronizer<NodeState>
+{
+    protected override NodeState CreateDataForSubject(IInterceptorSubject subject)
+        => _nodeManager.CreateNodeForSubject(subject);
+
+    protected override Task OnSubjectFirstSyncAsync(IInterceptorSubject subject, NodeState node)
+    {
+        // Node already created in CreateDataForSubject
+        return Task.CompletedTask;
+    }
+
+    protected override Task OnSubjectLastUnsyncAsync(IInterceptorSubject subject, NodeState node)
+    {
+        _nodeManager.DeleteNode(node.NodeId);
+        return Task.CompletedTask;
+    }
+}
+```
+
+**Usage in OPC UA Client:**
+
+```csharp
+public class OpcUaClientSynchronizer : SubjectGraphSynchronizer<List<MonitoredItem>>
+{
+    protected override List<MonitoredItem> CreateDataForSubject(IInterceptorSubject subject)
+        => CreateMonitoredItemsForSubject(subject);
+
+    protected override Task OnSubjectFirstSyncAsync(IInterceptorSubject subject, List<MonitoredItem> items)
+    {
+        _subscription.AddItems(items);
+        return Task.CompletedTask;
+    }
+
+    protected override Task OnSubjectLastUnsyncAsync(IInterceptorSubject subject, List<MonitoredItem> items)
+    {
+        _subscription.RemoveItems(items);
+        return Task.CompletedTask;
+    }
+}
+```
+
+### Future Abstractions (After Implementation)
+
+**Strategy:** Implement OPC UA first, validate these abstractions work, then consider:
+
+- `GraphChangeQueue` - Channel-based queue for structural changes (if needed)
 
 ---
 
 ## References
 
 - [OPC UA ModelChangeEvents Spec](https://reference.opcfoundation.org/Core/Part3/v104/docs/9.32)
-- [Triggering ModelChangeEvent - GitHub Issue #490](https://github.com/OPCFoundation/UA-.NETStandard/issues/490)
-- [Event Subscription Discussion](https://github.com/OPCFoundation/UA-.NETStandard/discussions/2618)
+- Existing `CollectionDiffBuilder` in Connectors library
+- Existing `OpcUaSubjectLoader` for client-side loading
+- Existing `CustomNodeManager` for server-side node management
