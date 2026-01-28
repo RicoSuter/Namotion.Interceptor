@@ -90,9 +90,12 @@ public class ChangeQueueProcessor : IDisposable
                     }
                     // ReSharper restore AccessToDisposedClosure
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Expected when stopping
+                    if (ex is not OperationCanceledException)
+                    {
+                        _logger.LogError(ex, "Failed to flush changes.");
+                    }
                 }
             }, linkedTokenSource.Token)
             : Task.CompletedTask;

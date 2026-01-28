@@ -12,7 +12,7 @@ namespace Namotion.Interceptor.OpcUa.Server;
 /// Uses <see cref="OpcUaNodeIdResolver"/> internally to resolve string identifiers to NodeIds
 /// with caching for performance.
 /// </summary>
-internal class OpcUaNodeFactory
+internal sealed class OpcUaNodeFactory
 {
     private readonly ILogger _logger;
     private readonly OpcUaNodeIdResolver _resolver;
