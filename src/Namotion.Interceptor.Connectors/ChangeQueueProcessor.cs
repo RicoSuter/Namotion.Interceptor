@@ -83,10 +83,12 @@ public class ChangeQueueProcessor : IDisposable
             {
                 try
                 {
+                    // ReSharper disable AccessToDisposedClosure
                     while (await periodicTimer.WaitForNextTickAsync(linkedTokenSource.Token).ConfigureAwait(false))
                     {
                         await TryFlushAsync(linkedTokenSource.Token).ConfigureAwait(false);
                     }
+                    // ReSharper restore AccessToDisposedClosure
                 }
                 catch
                 {
