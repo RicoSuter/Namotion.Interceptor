@@ -71,7 +71,7 @@ public class OpcUaServerConfiguration
     /// Should only be set to true for testing or development scenarios.
     /// Default is false for security.
     /// </summary>
-    public bool AutoAcceptUntrustedCertificates { get; set; } = false;
+    public bool AutoAcceptUntrustedCertificates { get; set; }
 
     /// <summary>
     /// Gets or sets the base path for certificate stores.
@@ -143,10 +143,6 @@ public class OpcUaServerConfiguration
             },
             ServerConfiguration = new ServerConfiguration
             {
-                // Reduce thread count for testing - default is 10 which creates too many threads
-                // when running multiple servers in parallel
-                MinRequestThreadCount = 2,
-                MaxRequestThreadCount = 10,
                 // Base addresses kept minimal (tcp only). Add https if required later.
                 BaseAddresses = { BaseAddress },
                 SecurityPolicies =
@@ -200,7 +196,6 @@ public class OpcUaServerConfiguration
             TraceConfiguration = new TraceConfiguration
             {
                 OutputFilePath = "Logs/OpcUaServer.log",
-                TraceMasks = 0, // Disabled for performance - tracing causes high CPU under load
                 DeleteOnLoad = true
             },
             CertificateValidator = new CertificateValidator(TelemetryContext)
