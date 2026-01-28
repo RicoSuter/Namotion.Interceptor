@@ -1,0 +1,147 @@
+﻿{
+  Root: 1,
+  Subjects: {
+    1: {
+      children: {
+        Kind: Collection,
+        Timestamp: {Scrubbed},
+        Operations: [
+          {
+            Index: 1
+          },
+          {
+            Index: 0
+          }
+        ],
+        Items: [
+          {
+            Index: 1,
+            Id: 3
+          },
+          {
+            Index: 3,
+            Id: 3
+          }
+        ],
+        Count: 2
+      },
+      father: {
+        Kind: Object,
+        Timestamp: {Scrubbed},
+        Id: 4
+      },
+      mother: {
+        Kind: Object,
+        Timestamp: {Scrubbed},
+        Id: 2
+      }
+    },
+    2: {
+      children: {
+        Kind: Collection,
+        Count: 0
+      },
+      father: {
+        Kind: Object
+      },
+      firstName: {
+        Kind: Value,
+        Value: Jane,
+        Timestamp: {Scrubbed},
+        Attributes: {
+          maxLength: {
+            Kind: Value,
+            Value: 123,
+            Attributes: {
+              unit: {
+                Kind: Value,
+                Value: Count
+              }
+            }
+          }
+        }
+      },
+      fullName: {
+        Kind: Value,
+        Value: Jane 
+      },
+      lastName: {
+        Kind: Value
+      },
+      mother: {
+        Kind: Object
+      }
+    },
+    3: {
+      children: {
+        Kind: Collection,
+        Count: 0
+      },
+      father: {
+        Kind: Object
+      },
+      firstName: {
+        Kind: Value,
+        Value: John,
+        Timestamp: {Scrubbed},
+        Attributes: {
+          maxLength: {
+            Kind: Value,
+            Value: 123,
+            Attributes: {
+              unit: {
+                Kind: Value,
+                Value: Count
+              }
+            }
+          }
+        }
+      },
+      fullName: {
+        Kind: Value,
+        Value: John 
+      },
+      lastName: {
+        Kind: Value
+      },
+      mother: {
+        Kind: Object
+      }
+    },
+    4: {
+      children: {
+        Kind: Collection,
+        Count: 0
+      },
+      father: {
+        Kind: Object
+      },
+      firstName: {
+        Kind: Value,
+        Value: MyFather,
+        Attributes: {
+          maxLength: {
+            Kind: Value,
+            Value: 123,
+            Attributes: {
+              unit: {
+                Kind: Value,
+                Value: Count
+              }
+            }
+          }
+        }
+      },
+      fullName: {
+        Kind: Value,
+        Value: MyFather 
+      },
+      lastName: {
+        Kind: Value
+      },
+      mother: {
+        Kind: Object
+      }
+    }
+  }
+}

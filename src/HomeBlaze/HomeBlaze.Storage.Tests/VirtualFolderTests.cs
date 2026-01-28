@@ -17,6 +17,7 @@ public class VirtualFolderTests
         services.AddSingleton(typeProvider);
         services.AddSingleton(typeRegistry);
         services.AddSingleton<IInterceptorSubjectContext>(context);
+        services.AddSingleton<SubjectFactory>();
         services.AddSingleton<ConfigurableSubjectSerializer>();
         services.AddSingleton<RootManager>();
         services.AddSingleton<SubjectPathResolver>();
@@ -71,6 +72,6 @@ public class VirtualFolderTests
         var folder = new VirtualFolder(storage, "test/");
 
         // Assert
-        Assert.Equal("Folder", folder.Icon);
+        Assert.Equal("Folder", folder.IconName);
     }
 }

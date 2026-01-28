@@ -14,10 +14,12 @@ var context = InterceptorSubjectContext
 
 This is a convenience method that registers:
 - Equality checking to prevent unnecessary change notifications
-- Context inheritance for child subjects
 - Derived property change detection
 - Property changed observable (Rx-based)
 - Property changed queue (high performance)
+- Context inheritance for child subjects
+
+> **Note**: Transaction support is opt-in. Add `.WithTransactions()` or `.WithSourceTransactions()` to enable transaction support.
 
 You can also enable features individually for more granular control.
 
@@ -40,7 +42,7 @@ context
     {
         Console.WriteLine(
             $"Property '{change.Property.Name}' changed " +
-            $"from '{change.GetOldValue<object>()}' to '{change.GetNewValue<object>()}'.");
+            $"from '{change.GetOldValue<object?>()}' to '{change.GetNewValue<object?>()}'.");
     });
 
 var person = new Person(context)
@@ -76,7 +78,7 @@ while (subscription.TryDequeue(out var change, cancellationToken))
 {
     Console.WriteLine(
         $"Property '{change.Property.Name}' changed " +
-        $"from '{change.GetOldValue<object>()}' to '{change.GetNewValue<object>()}'.");
+        $"from '{change.GetOldValue<object?>()}' to '{change.GetNewValue<object?>()}'.");
 }
 ```
 
@@ -109,6 +111,42 @@ person.Name = "John"; // No change triggered (same value)
 
 Uses `EqualityComparer<T>.Default` for value types and strings, and reference equality for reference types.
 
+## Transactions
+
+Transactions allow you to batch property changes and commit them atomically. Changes are captured during the transaction and applied together on commit, with change notifications fired after all changes are applied.
+
+```csharp
+var context = InterceptorSubjectContext
+    .Create()
+    .WithFullPropertyTracking()
+    .WithTransactions(); // Required for transaction support (opt-in)
+
+var person = new Person(context);
+
+using (var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+{
+    person.FirstName = "John";
+    person.LastName = "Doe";
+
+    // Changes captured but not applied yet
+    // Reading returns pending values (read-your-writes)
+    Console.WriteLine(person.FullName); // Output: John Doe
+
+    await transaction.CommitAsync(cancellationToken);
+    // All changes applied, notifications fired
+}
+```
+
+Key features:
+- **Atomic commits**: All changes applied together
+- **Read-your-writes**: Reading returns pending values inside the transaction
+- **Notification suppression**: Change notifications fired after commit, not during capture
+- **Rollback on dispose**: Uncommitted changes discarded if transaction not committed
+
+For external source integration (OPC UA, MQTT, etc.), use `WithSourceTransactions()` from the Sources package to write changes to external sources before applying them to the in-process model.
+
+See [Transactions](tracking-transactions.md) for detailed documentation.
+
 ## Derived Property Change Detection
 
 Automatically tracks dependencies between properties and triggers change events for derived properties when their dependencies change:
@@ -131,7 +169,7 @@ var context = InterceptorSubjectContext
 
 context.GetPropertyChangeObservable().Subscribe(change =>
 {
-    Console.WriteLine($"{change.Property.Name}: {change.GetOldValue<object>()} → {change.GetNewValue<object>()}");
+    Console.WriteLine($"{change.Property.Name}: {change.GetOldValue<object?>()} → {change.GetNewValue<object?>()}");
 });
 
 var person = new Person(context);
@@ -168,7 +206,7 @@ This ensures that all objects in the subject graph share the same context, enabl
 
 ## Subject Lifecycle Tracking
 
-Track when subjects are attached to or detached from the subject graph:
+Track when subjects enter or leave the object graph, and when property references are added or removed:
 
 ```csharp
 [InterceptorSubject]
@@ -184,24 +222,43 @@ var context = InterceptorSubjectContext
     .WithService(() => new MyLifecycleHandler());
 
 var person = new Person(context);
-var child = new Person(context) { Name = "Child" };
+var child = new Person { Name = "Child" };
 
-person.Children = [child]; // AttachSubject called for child
-person.Children = [];      // DetachSubject called for child
+person.Children = [child]; // HandleLifecycleChange: IsContextAttach + IsPropertyReferenceAdded
+person.Children = [];      // HandleLifecycleChange: IsPropertyReferenceRemoved + IsContextDetach
 
 public class MyLifecycleHandler : ILifecycleHandler
 {
-    public void AttachSubject(SubjectLifecycleChange change)
+    public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
-        Console.WriteLine($"Attached: {change.Subject} via property {change.Property?.Name}");
-    }
-
-    public void DetachSubject(SubjectLifecycleChange change)
-    {
-        Console.WriteLine($"Detached: {change.Subject} via property {change.Property?.Name}");
+        if (change.IsContextAttach)
+        {
+            Console.WriteLine($"Attached: {change.Subject} via {change.Property?.Name}");
+        }
+        if (change.IsContextDetach)
+        {
+            Console.WriteLine($"Detached: {change.Subject} via {change.Property?.Name}");
+        }
     }
 }
 ```
+
+### SubjectLifecycleChange Flags
+
+The `HandleLifecycleChange` method receives a `SubjectLifecycleChange` with flags indicating what happened:
+
+| Flag | Description |
+|------|-------------|
+| `IsContextAttach` | Subject **first entered** the graph (first property reference) |
+| `IsPropertyReferenceAdded` | A property reference to the subject was added |
+| `IsPropertyReferenceRemoved` | A property reference to the subject was removed |
+| `IsContextDetach` | Subject is **leaving** the graph (last reference removed) |
+
+Flags can be combined. For example, when a child is first assigned to a property:
+- `IsContextAttach = true` and `IsPropertyReferenceAdded = true`
+
+When the same subject is assigned to a second property:
+- `IsContextAttach = false` (already in graph) and `IsPropertyReferenceAdded = true`
 
 **Lifecycle tracking is used by:**
 - **Hosting package**: Start/stop `IHostedService` implementations when attached/detached
@@ -225,11 +282,22 @@ lifecycleInterceptor.SubjectAttached += change =>
     Console.WriteLine($"Subject attached: {change.Subject}");
 };
 
-lifecycleInterceptor.SubjectDetached += change =>
+lifecycleInterceptor.SubjectDetaching += change =>
 {
-    Console.WriteLine($"Subject detached: {change.Subject}");
+    Console.WriteLine($"Subject detaching: {change.Subject}");
 };
 ```
+
+**Important distinction:**
+- `ILifecycleHandler.HandleLifecycleChange`: Called for **every** lifecycle change (context attach, property add, property remove, context detach)
+- `SubjectAttached` event: Fires **once** when subject first enters the graph
+- `SubjectDetaching` event: Fires **once** when subject is about to leave the graph
+
+**Event timing (symmetry):**
+- `SubjectAttached` fires **after** `ILifecycleHandler.HandleLifecycleChange(attach)` - all handlers have initialized
+- `SubjectDetaching` fires **before** `ILifecycleHandler.HandleLifecycleChange(detach)` - handlers can still access full graph
+
+This symmetry ensures that both events fire when the full object graph is accessible, which is useful for handlers that need to traverse relationships or access child subjects during cleanup.
 
 Events are useful for:
 - Cache invalidation when subjects are removed from the object graph
@@ -248,13 +316,13 @@ Events are useful for:
 
 ```csharp
 // Good: Fast dispatch to queue
-lifecycleInterceptor.SubjectDetached += change =>
+lifecycleInterceptor.SubjectDetaching += change =>
 {
     _cleanupQueue.Enqueue(change.Subject); // Returns immediately
 };
 
 // Bad: Blocking I/O in handler
-lifecycleInterceptor.SubjectDetached += async change =>
+lifecycleInterceptor.SubjectDetaching += async change =>
 {
     await database.DeleteAsync(change.Subject); // Blocks the lock!
 };
@@ -266,7 +334,7 @@ lifecycleInterceptor.SubjectDetached += async change =>
 
 ### Reference Counting
 
-Each subject tracks how many parent references point to it via `GetReferenceCount()`:
+Each subject tracks how many property references point to it via `GetReferenceCount()`:
 
 ```csharp
 var referenceCount = subject.GetReferenceCount();
@@ -274,24 +342,72 @@ var referenceCount = subject.GetReferenceCount();
 // Returns 0 if not attached or lifecycle tracking is disabled
 ```
 
-The reference count is managed internally by the library:
-- `SubjectAttached` fires on **every** attachment (after count is incremented)
-- `SubjectDetached` fires on **every** detachment (after count is decremented)
+**Important notes:**
+- Subjects created directly with context (root subjects) have `refs: 0` - they have no property references pointing to them
+- Subjects attached via properties have their reference count incremented/decremented on add/remove
+- `GetReferenceCount()` returns property reference count, not total attachment count
 
-The `SubjectLifecycleChange` record includes `ReferenceCount` with the updated count after the increment/decrement. Handlers can check this to determine if this is a first attachment (count == 1) or last detachment (count == 0):
+The `SubjectLifecycleChange` includes `ReferenceCount` after the operation. Use the flags to determine the event type:
 
 ```csharp
-lifecycleInterceptor.SubjectDetached += change =>
+handler.HandleLifecycleChange = change =>
 {
-    if (change.ReferenceCount == 0)
+    if (change.IsContextDetach)
     {
-        // Fully detached - safe to clean up
+        // Subject leaving graph - safe to clean up
         CleanupResources(change.Subject);
     }
 };
 ```
 
 This enables proper cleanup when subjects are removed from all parent references, even when referenced by multiple properties or collections.
+
+### Object Graph Behavior
+
+Understanding how the lifecycle system handles different graph topologies:
+
+**Hierarchies (Trees)**
+
+When a branch is removed, the entire subtree cascades detachment:
+
+```
+Root
+  ├── Device1  ← stays attached
+  └── Device2  ← detached when Root.Device2 = null
+       ├── Child1  ← cascade detached
+       └── Child2  ← cascade detached
+```
+
+Siblings are protected - removing Device2 doesn't affect Device1.
+
+**DAGs (Directed Acyclic Graphs)**
+
+Shared nodes stay attached if they have remaining references:
+
+```
+Root
+  ├── A ──┐
+  └── B ──┴── Shared (refs: 2)
+```
+
+Removing A reduces Shared's refs to 1 - it stays attached via B.
+Removing B after A detaches Shared (refs: 0).
+
+**Cycles (Limitation)**
+
+Nodes that only reference each other stay attached due to reference counting:
+
+```
+Root → A → B ↔ C (internal cycle)
+```
+
+If `Root.A = null`:
+- A detaches (lost reference from Root)
+- B and C **stay attached** (they keep each other alive with refs: 1 each)
+
+This is the classic reference counting limitation. **Workarounds:**
+1. Call `DetachSubjectFromContext(subject)` explicitly
+2. Break all cycle references before removing the parent
 
 ## Parent-Child Relationship Tracking
 
@@ -307,7 +423,7 @@ var tire = new Tire(context);
 
 car.Tires = [tire];
 
-var parents = tire.GetParents(); // Returns [(car, "Tires", 0)]
+var parents = tire.GetParents(); // Returns ImmutableArray with [(car, "Tires", 0)]
 ```
 
 This enables scenarios like:

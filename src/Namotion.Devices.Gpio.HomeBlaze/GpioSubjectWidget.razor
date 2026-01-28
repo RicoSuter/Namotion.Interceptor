@@ -1,0 +1,56 @@
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(GpioSubject))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.Memory" Class="mr-2" />
+            GPIO
+        </MudText>
+
+        <MudDivider />
+
+        <MudStack Row="true" Spacing="4">
+            <MudStack>
+                <MudText Typo="Typo.caption">Digital Pins</MudText>
+                <MudText Typo="Typo.h5">@(GpioSubject?.Pins.Count ?? 0)</MudText>
+            </MudStack>
+
+            <MudStack>
+                <MudText Typo="Typo.caption">Inputs</MudText>
+                <MudText Typo="Typo.h5">@InputCount</MudText>
+            </MudStack>
+
+            <MudStack>
+                <MudText Typo="Typo.caption">Outputs</MudText>
+                <MudText Typo="Typo.h5">@OutputCount</MudText>
+            </MudStack>
+        </MudStack>
+
+        @if (GpioSubject?.AnalogChannels.Count > 0)
+        {
+            <MudDivider />
+            <MudStack Row="true" Spacing="4">
+                <MudStack>
+                    <MudText Typo="Typo.caption">Analog Channels</MudText>
+                    <MudText Typo="Typo.h5">@GpioSubject.AnalogChannels.Count</MudText>
+                </MudStack>
+            </MudStack>
+        }
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private GpioSubject? GpioSubject => Subject as GpioSubject;
+
+    private int InputCount => GpioSubject?.Pins.Values
+        .Count(p => p.Mode is GpioPinMode.Input or GpioPinMode.InputPullUp or GpioPinMode.InputPullDown) ?? 0;
+
+    private int OutputCount => GpioSubject?.Pins.Values
+        .Count(p => p.Mode == GpioPinMode.Output) ?? 0;
+}

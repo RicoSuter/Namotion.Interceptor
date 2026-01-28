@@ -1,8 +1,8 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Abstractions.Attributes;
-using HomeBlaze.Components.Abstractions.Pages;
 using HomeBlaze.Storage.Internal;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
@@ -28,7 +28,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     public string? Title => Frontmatter?.Title ?? FormatFilename(Name);
 
     [Derived]
-    public string? Icon => Frontmatter?.Icon ?? "Article";
+    public string? IconName => Frontmatter?.Icon ?? "Article";
 
     [Derived]
     public string? NavigationTitle => Frontmatter?.NavTitle;

@@ -3,6 +3,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Storage.Abstractions;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace HomeBlaze.Storage;
 
@@ -25,12 +26,13 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
     /// <summary>
     /// Child subjects (files and folders).
     /// </summary>
+    [InlinePaths]
     [State]
     public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
 
-    public string? Title => Path.GetFileName(RelativePath.TrimEnd('/'));
+    public string Title => Path.GetFileName(RelativePath.TrimEnd('/'));
 
-    public string Icon => "Folder";
+    public string IconName => "Folder";
 
     public StorageStatus Status => Storage.Status;
 
@@ -60,21 +62,34 @@ public partial class VirtualFolder : ITitleProvider, IIconProvider, IStorageCont
         => Storage.WriteBlobAsync(path, content, cancellationToken);
 
     /// <summary>
-    /// Deletes a blob from storage and removes it from Children.
-    /// Path is relative to the storage root.
+    /// Deletes a blob from storage. Path is relative to the storage root.
+    /// The parent storage handles removal from the hierarchy.
     /// </summary>
-    public async Task DeleteBlobAsync(string path, CancellationToken cancellationToken)
-    {
-        // Delete from storage
-        await Storage.DeleteBlobAsync(path, cancellationToken);
+    public Task DeleteBlobAsync(string path, CancellationToken cancellationToken)
+        => Storage.DeleteBlobAsync(path, cancellationToken);
 
-        // Remove from Children directly (don't rely on FileWatcher)
-        var fileName = Path.GetFileName(path);
-        if (Children.ContainsKey(fileName))
-        {
-            var children = new Dictionary<string, IInterceptorSubject>(Children);
-            children.Remove(fileName);
-            Children = children;
-        }
+    /// <summary>
+    /// Adds a subject to this folder.
+    /// </summary>
+    public Task AddSubjectAsync(string path, IInterceptorSubject subject, CancellationToken cancellationToken)
+    {
+        var fullPath = string.IsNullOrEmpty(RelativePath)
+            ? path
+            : Path.Combine(RelativePath, path);
+
+        return Storage.AddSubjectAsync(fullPath, subject, cancellationToken);
     }
+
+    /// <summary>
+    /// Deletes a subject from this folder.
+    /// </summary>
+    public Task DeleteSubjectAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
+        => Storage.DeleteSubjectAsync(subject, cancellationToken);
+
+    /// <summary>
+    /// Opens the create subject wizard to add a new subject to this folder.
+    /// </summary>
+    [Operation(Title = "Create", Icon = "Add", Position = 1)]
+    public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
+        => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
 }

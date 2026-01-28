@@ -1,0 +1,49 @@
+﻿{
+  Root: 1,
+  Subjects: {
+    1: {
+      Lookup: {
+        Kind: Dictionary,
+        Timestamp: DateTimeOffset_1,
+        Operations: [
+          {
+            Action: Insert,
+            Index: newKey,
+            Id: 2
+          }
+        ],
+        Count: 2
+      }
+    },
+    2: {
+      Child: {
+        Kind: Object
+      },
+      Items: {
+        Kind: Collection,
+        Count: 0
+      },
+      Lookup: {
+        Kind: Dictionary,
+        Count: 0
+      },
+      Name: {
+        Kind: Value,
+        Value: NewItem,
+        Timestamp: DateTimeOffset_2,
+        Attributes: {
+          Status: {
+            Kind: Value,
+            Value: active
+          }
+        }
+      },
+      Parent: {
+        Kind: Object
+      },
+      Self: {
+        Kind: Object
+      }
+    }
+  }
+}

@@ -1,25 +1,25 @@
 using Namotion.Interceptor.OpcUa.Attributes;
+using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources.Paths;
 
 namespace Namotion.Interceptor.OpcUa;
 
 internal static class OpcUaPropertyExtensions
 {
-    public static string? ResolvePropertyName(this RegisteredSubjectProperty property, ISourcePathProvider pathProvider)
+    public static string? ResolvePropertyName(this RegisteredSubjectProperty property, IOpcUaNodeMapper nodeMapper)
     {
-        if (property.IsAttribute)
+        var nodeConfiguration = nodeMapper.TryGetNodeConfiguration(property);
+        if (nodeConfiguration == null)
         {
-            var attributedProperty = property.GetAttributedProperty();
-            var propertyName = pathProvider.TryGetPropertySegment(property);
-            if (propertyName is null)
-                return null;
-
-            // TODO: Create property reference node instead of __?
-            return ResolvePropertyName(attributedProperty, pathProvider) + "__" + propertyName;
+            return null; // Property not mapped
         }
 
-        return pathProvider.TryGetPropertySegment(property);
+        return nodeConfiguration.BrowseName ?? property.BrowseName;
+    }
+
+    public static bool IsPropertyIncluded(this RegisteredSubjectProperty property, IOpcUaNodeMapper nodeMapper)
+    {
+        return nodeMapper.TryGetNodeConfiguration(property) != null;
     }
 
     public static OpcUaNodeAttribute? TryGetOpcUaNodeAttribute(this RegisteredSubjectProperty property)
@@ -29,6 +29,24 @@ internal static class OpcUaPropertyExtensions
             if (attribute is OpcUaNodeAttribute nodeAttribute)
             {
                 return nodeAttribute;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Finds the property marked with [OpcUaValue] (IsValue = true) in the given subject.
+    /// Returns null if no value property is found.
+    /// </summary>
+    public static RegisteredSubjectProperty? TryGetValueProperty(this RegisteredSubject subject, IOpcUaNodeMapper nodeMapper)
+    {
+        foreach (var property in subject.Properties)
+        {
+            var config = nodeMapper.TryGetNodeConfiguration(property);
+            if (config?.IsValue == true)
+            {
+                return property;
             }
         }
 

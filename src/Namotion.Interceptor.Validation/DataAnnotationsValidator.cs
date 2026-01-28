@@ -1,5 +1,5 @@
-﻿using System.ComponentModel.DataAnnotations;
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
+using System.ComponentModel.DataAnnotations;
 
 namespace Namotion.Interceptor.Validation;
 
@@ -7,21 +7,28 @@ public class DataAnnotationsValidator : IPropertyValidator
 {
     private static readonly ConcurrentDictionary<(Type SubjectType, string PropertyName), bool> RequiresValidationCache = new();
 
-    public IEnumerable<ValidationResult> Validate(PropertyReference property, object? value)
+    public IEnumerable<ValidationResult> Validate<TProperty>(PropertyReference property, TProperty value)
     {
-        if (CheckRequiresValidation(property))
+        // Fast path: no validation attributes = no boxing, no allocation
+        if (!CheckRequiresValidation(property))
         {
-            var validationContext = new ValidationContext(property.Subject)
-            {
-                MemberName = property.Name
-            };
-
-            var results = new List<ValidationResult>(capacity: 2);
-            Validator.TryValidateProperty(value, validationContext, results);
-            return results;
+            return [];
         }
 
-        return [];
+        // Slow path: has attributes, must box for .NET Validator API
+        return ValidateCore(property, value);
+    }
+
+    private static IEnumerable<ValidationResult> ValidateCore(PropertyReference property, object? value)
+    {
+        var validationContext = new ValidationContext(property.Subject)
+        {
+            MemberName = property.Name
+        };
+
+        var results = new List<ValidationResult>(capacity: 2);
+        Validator.TryValidateProperty(value, validationContext, results);
+        return results;
     }
 
     private static bool CheckRequiresValidation(PropertyReference property)

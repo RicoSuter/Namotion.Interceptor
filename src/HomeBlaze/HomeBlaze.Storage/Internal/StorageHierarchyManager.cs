@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions;
 using HomeBlaze.Storage.Abstractions;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
@@ -16,6 +17,24 @@ internal sealed class StorageHierarchyManager
         _logger = logger;
     }
 
+    /// <summary>
+    /// Computes the dictionary key for a child subject.
+    /// Configurable subjects from .json files use filename without extension.
+    /// All other files use filename with extension.
+    /// </summary>
+    private static string GetChildKey(string fullPath, IInterceptorSubject subject)
+    {
+        var fileName = Path.GetFileName(fullPath);
+        
+        if (subject is IConfigurableSubject &&
+            Path.GetExtension(fullPath).Equals(FileExtensions.Json, StringComparison.OrdinalIgnoreCase))
+        {
+            return Path.GetFileNameWithoutExtension(fullPath);
+        }
+
+        return fileName;
+    }
+
     public void PlaceInHierarchy(
         string path,
         IInterceptorSubject subject,
@@ -28,12 +47,18 @@ internal sealed class StorageHierarchyManager
 
         if (segments.Length == 1)
         {
-            children[segments[0]] = subject;
+            var key = GetChildKey(path, subject);
+
+            if (!children.TryAdd(key, subject))
+            {
+                _logger?.LogWarning("Skipping '{Path}' - key \"{Key}\" already claimed", path, key);
+            }
+
             return;
         }
 
-        // Track folders we traverse so we can reassign Children afterward
-        var foldersTraversed = new List<VirtualFolder>();
+        // Track folders and their new Children dicts as we traverse
+        var foldersToUpdate = new List<(VirtualFolder folder, Dictionary<string, IInterceptorSubject> newChildren)>();
         var current = children;
 
         for (int i = 0; i < segments.Length - 1; i++)
@@ -45,13 +70,18 @@ internal sealed class StorageHierarchyManager
                 var relativePath = string.Join("/", segments.Take(i + 1)) + "/";
                 var folder = new VirtualFolder(storage, relativePath);
                 current[folderName] = folder;
-                foldersTraversed.Add(folder);
-                current = folder.Children;
+
+                // Create new Children dict for new folder
+                var newChildren = new Dictionary<string, IInterceptorSubject>();
+                foldersToUpdate.Add((folder, newChildren));
+                current = newChildren;
             }
             else if (existing is VirtualFolder vf)
             {
-                foldersTraversed.Add(vf);
-                current = vf.Children;
+                // Create a COPY of the folder's Children (don't mutate the original!)
+                var newChildren = new Dictionary<string, IInterceptorSubject>(vf.Children);
+                foldersToUpdate.Add((vf, newChildren));
+                current = newChildren;
             }
             else
             {
@@ -60,46 +90,61 @@ internal sealed class StorageHierarchyManager
             }
         }
 
-        // Add the subject to the leaf folder's children
-        current[segments[^1]] = subject;
-
-        // Reassign Children for all traversed folders (triggers change tracking)
-        foreach (var folder in foldersTraversed.AsEnumerable().Reverse())
+        // Add the subject to the leaf folder's NEW children dict
+        var childKey = GetChildKey(path, subject);
+        if (!current.TryAdd(childKey, subject))
         {
-            folder.Children = new Dictionary<string, IInterceptorSubject>(folder.Children);
-        }
-    }
-
-    public void RemoveFromHierarchy(string path, Dictionary<string, IInterceptorSubject> children)
-    {
-        path = NormalizePath(path);
-        var segments = path.Split('/');
-
-        if (segments.Length == 1)
-        {
-            children.Remove(segments[0]);
+            _logger?.LogWarning("Skipping '{Path}' - key \"{Key}\" already claimed", path, childKey);
             return;
         }
 
-        // Track folders we traverse so we can reassign Children afterward
-        var foldersTraversed = new List<VirtualFolder>();
+        // Reassign Children for all traversed folders (triggers change tracking)
+        // Go in reverse order so child folders are updated before parent folders
+        for (var i = foldersToUpdate.Count - 1; i >= 0; i--)
+        {
+            var (folder, newChildren) = foldersToUpdate[i];
+            folder.Children = newChildren;
+        }
+    }
+
+    public void RemoveFromHierarchy(string path, IInterceptorSubject subject, Dictionary<string, IInterceptorSubject> children)
+    {
+        path = NormalizePath(path);
+        var segments = path.Split('/');
+        var key = GetChildKey(path, subject);
+
+        if (segments.Length == 1)
+        {
+            children.Remove(key);
+            return;
+        }
+
+        // Track folders and their new Children dicts as we traverse
+        var foldersToUpdate = new List<(VirtualFolder folder, Dictionary<string, IInterceptorSubject> newChildren)>();
         var current = children;
 
         for (int i = 0; i < segments.Length - 1; i++)
         {
-            if (!current.TryGetValue(segments[i], out var folder) || folder is not VirtualFolder vf)
+            var folderName = segments[i];
+
+            if (!current.TryGetValue(folderName, out var existing) || existing is not VirtualFolder vf)
                 return;
-            foldersTraversed.Add(vf);
-            current = vf.Children;
+
+            // Create a COPY of the folder's Children (don't mutate the original!)
+            var newChildren = new Dictionary<string, IInterceptorSubject>(vf.Children);
+            foldersToUpdate.Add((vf, newChildren));
+            current = newChildren;
         }
 
-        // Remove the subject from the leaf folder's children
-        current.Remove(segments[^1]);
+        // Remove the subject from the leaf folder's NEW children dict
+        current.Remove(key);
 
         // Reassign Children for all traversed folders (triggers change tracking)
-        foreach (var folder in foldersTraversed.AsEnumerable().Reverse())
+        // Go in reverse order so child folders are updated before parent folders
+        for (var i = foldersToUpdate.Count - 1; i >= 0; i--)
         {
-            folder.Children = new Dictionary<string, IInterceptorSubject>(folder.Children);
+            var (folder, newChildren) = foldersToUpdate[i];
+            folder.Children = newChildren;
         }
     }
 

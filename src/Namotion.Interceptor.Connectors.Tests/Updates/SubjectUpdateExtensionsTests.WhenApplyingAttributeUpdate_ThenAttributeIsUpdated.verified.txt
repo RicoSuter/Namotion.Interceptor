@@ -1,0 +1,36 @@
+﻿{
+  Root: 1,
+  Subjects: {
+    1: {
+      Child: {
+        Kind: Object
+      },
+      Items: {
+        Kind: Collection,
+        Count: 0
+      },
+      Lookup: {
+        Kind: Dictionary,
+        Count: 0
+      },
+      Name: {
+        Kind: Value,
+        Value: Node,
+        Timestamp: DateTimeOffset_1,
+        Attributes: {
+          Status: {
+            Kind: Value,
+            Value: updated,
+            Timestamp: DateTimeOffset_2
+          }
+        }
+      },
+      Parent: {
+        Kind: Object
+      },
+      Self: {
+        Kind: Object
+      }
+    }
+  }
+}

@@ -14,11 +14,11 @@ The demo simulates a small factory with the following equipment (live data):
 
 | Equipment | Current Speed | Target Speed | Temperature | Status |
 |-----------|---------------|--------------|-------------|--------|
-| **Conveyor Belt** | {{ Root.Children[Demo].Children[Conveyor.json].CurrentSpeed }} | {{ Root.Children[Demo].Children[Conveyor.json].TargetSpeed }} | {{ Root.Children[Demo].Children[Conveyor.json].Temperature }} | {{ Root.Children[Demo].Children[Conveyor.json].Status }} |
-| **Exhaust Fan** | {{ Root.Children[Demo].Children[ExhaustFan.json].CurrentSpeed }} | {{ Root.Children[Demo].Children[ExhaustFan.json].TargetSpeed }} | {{ Root.Children[Demo].Children[ExhaustFan.json].Temperature }} | {{ Root.Children[Demo].Children[ExhaustFan.json].Status }} |
-| **Cooling Fan** | {{ Root.Children[Demo].Children[CoolingFan.json].CurrentSpeed }} | {{ Root.Children[Demo].Children[CoolingFan.json].TargetSpeed }} | {{ Root.Children[Demo].Children[CoolingFan.json].Temperature }} | {{ Root.Children[Demo].Children[CoolingFan.json].Status }} |
-| **Water Pump** | {{ Root.Children[Demo].Children[WaterPump.json].CurrentSpeed }} | {{ Root.Children[Demo].Children[WaterPump.json].TargetSpeed }} | {{ Root.Children[Demo].Children[WaterPump.json].Temperature }} | {{ Root.Children[Demo].Children[WaterPump.json].Status }} |
-| **Compressor** | {{ Root.Children[Demo].Children[Compressor.json].CurrentSpeed }} | {{ Root.Children[Demo].Children[Compressor.json].TargetSpeed }} | {{ Root.Children[Demo].Children[Compressor.json].Temperature }} | {{ Root.Children[Demo].Children[Compressor.json].Status }} |
+| **Conveyor Belt** | {{ Root.Children[Demo].Children[Conveyor].CurrentSpeed }} | {{ Root.Children[Demo].Children[Conveyor].TargetSpeed }} | {{ Root.Children[Demo].Children[Conveyor].Temperature }} | {{ Root.Children[Demo].Children[Conveyor].Status }} |
+| **Exhaust Fan** | {{ Root.Children[Demo].Children[ExhaustFan].CurrentSpeed }} | {{ Root.Children[Demo].Children[ExhaustFan].TargetSpeed }} | {{ Root.Children[Demo].Children[ExhaustFan].Temperature }} | {{ Root.Children[Demo].Children[ExhaustFan].Status }} |
+| **Cooling Fan** | {{ Root.Children[Demo].Children[CoolingFan].CurrentSpeed }} | {{ Root.Children[Demo].Children[CoolingFan].TargetSpeed }} | {{ Root.Children[Demo].Children[CoolingFan].Temperature }} | {{ Root.Children[Demo].Children[CoolingFan].Status }} |
+| **Water Pump** | {{ Root.Children[Demo].Children[WaterPump].CurrentSpeed }} | {{ Root.Children[Demo].Children[WaterPump].TargetSpeed }} | {{ Root.Children[Demo].Children[WaterPump].Temperature }} | {{ Root.Children[Demo].Children[WaterPump].Status }} |
+| **Compressor** | {{ Root.Children[Demo].Children[Compressor].CurrentSpeed }} | {{ Root.Children[Demo].Children[Compressor].TargetSpeed }} | {{ Root.Children[Demo].Children[Compressor].Temperature }} | {{ Root.Children[Demo].Children[Compressor].Status }} |
 
 ## Motor Properties
 
@@ -115,7 +115,7 @@ To add a new motor to the demo:
 1. Create a new JSON file in the `demo` folder:
 ```json
 {
-  "type": "HomeBlaze.Samples.Motor",
+  "$type": "HomeBlaze.Samples.Motor",
   "name": "My Custom Motor",
   "targetSpeed": 2000,
   "simulationInterval": "00:00:01"
@@ -135,7 +135,7 @@ To start with a clean slate:
 ## Next Steps
 
 - Review [Building Custom Subjects](../docs/BuildingSubjects.md) to create your own subject types
-- Check out [Architecture](../docs/Architecture.md) to understand the system design
+- Check out [Architecture](../Docs/Architecture.md) to understand the system design
 - Explore the source code in `HomeBlaze.Samples/Motor.cs`
 
 ---

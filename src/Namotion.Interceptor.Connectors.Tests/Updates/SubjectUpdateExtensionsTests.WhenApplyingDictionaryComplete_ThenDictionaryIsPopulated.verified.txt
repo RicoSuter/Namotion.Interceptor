@@ -1,0 +1,106 @@
+﻿{
+  Root: 1,
+  Subjects: {
+    1: {
+      Child: {
+        Kind: Object
+      },
+      Items: {
+        Kind: Collection,
+        Count: 0
+      },
+      Lookup: {
+        Kind: Dictionary,
+        Timestamp: DateTimeOffset_1,
+        Items: [
+          {
+            Index: key1,
+            Id: 2
+          },
+          {
+            Index: key2,
+            Id: 3
+          }
+        ],
+        Count: 2
+      },
+      Name: {
+        Kind: Value,
+        Value: Root,
+        Timestamp: DateTimeOffset_2,
+        Attributes: {
+          Status: {
+            Kind: Value,
+            Value: active
+          }
+        }
+      },
+      Parent: {
+        Kind: Object
+      },
+      Self: {
+        Kind: Object
+      }
+    },
+    2: {
+      Child: {
+        Kind: Object
+      },
+      Items: {
+        Kind: Collection,
+        Count: 0
+      },
+      Lookup: {
+        Kind: Dictionary,
+        Count: 0
+      },
+      Name: {
+        Kind: Value,
+        Value: Item1,
+        Timestamp: DateTimeOffset_3,
+        Attributes: {
+          Status: {
+            Kind: Value,
+            Value: active
+          }
+        }
+      },
+      Parent: {
+        Kind: Object
+      },
+      Self: {
+        Kind: Object
+      }
+    },
+    3: {
+      Child: {
+        Kind: Object
+      },
+      Items: {
+        Kind: Collection,
+        Count: 0
+      },
+      Lookup: {
+        Kind: Dictionary,
+        Count: 0
+      },
+      Name: {
+        Kind: Value,
+        Value: Item2,
+        Timestamp: DateTimeOffset_4,
+        Attributes: {
+          Status: {
+            Kind: Value,
+            Value: active
+          }
+        }
+      },
+      Parent: {
+        Kind: Object
+      },
+      Self: {
+        Kind: Object
+      }
+    }
+  }
+}

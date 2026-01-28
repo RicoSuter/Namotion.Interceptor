@@ -18,13 +18,13 @@ public class TypeProviderTests
     }
 
     [Fact]
-    public void AddAssemblies_AddsTypesFromAssembly()
+    public void AddAssembly_AddsTypesFromAssembly()
     {
         // Arrange
         var provider = new TypeProvider();
 
         // Act
-        provider.AddAssemblies(typeof(TypeProvider).Assembly);
+        provider.AddAssembly(typeof(TypeProvider).Assembly);
         var types = provider.Types;
 
         // Assert

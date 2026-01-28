@@ -1,4 +1,5 @@
 using System.Reflection;
+using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Services;
 
@@ -18,20 +19,28 @@ public sealed class SubjectMethodParameter
     public Type Type { get; }
 
     /// <summary>
-    /// Whether this parameter type is supported for UI input (primitives, enums, nullable wrappers).
-    /// </summary>
-    public bool IsSupported { get; }
-
-    /// <summary>
     /// The underlying ParameterInfo from reflection.
     /// </summary>
     public ParameterInfo ParameterInfo { get; }
 
-    public SubjectMethodParameter(ParameterInfo parameterInfo, bool isSupported)
+    /// <summary>
+    /// The unit of the parameter value (from OperationParameterAttribute), or null if not specified.
+    /// </summary>
+    public StateUnit? Unit { get; }
+
+    /// <summary>
+    /// Whether this parameter should be resolved from dependency injection.
+    /// </summary>
+    public bool IsFromServices { get; }
+
+    public SubjectMethodParameter(ParameterInfo parameterInfo)
     {
         ParameterInfo = parameterInfo;
         Name = parameterInfo.Name ?? $"arg{parameterInfo.Position}";
         Type = parameterInfo.ParameterType;
-        IsSupported = isSupported;
+        IsFromServices = parameterInfo.GetCustomAttribute<FromServicesAttribute>() != null;
+
+        var attribute = parameterInfo.GetCustomAttribute<OperationParameterAttribute>();
+        Unit = attribute?.Unit;
     }
 }

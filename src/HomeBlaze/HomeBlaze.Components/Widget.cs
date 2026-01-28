@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
@@ -10,6 +11,8 @@ namespace HomeBlaze.Components;
 /// A subject that references another subject by path and renders its widget component.
 /// Enables embedding widgets by reference in markdown instead of defining them inline.
 /// </summary>
+[Category("Components")]
+[Description("References another subject by path and renders its widget")]
 [InterceptorSubject]
 public partial class Widget : ITitleProvider, IConfigurableSubject
 {
@@ -17,7 +20,7 @@ public partial class Widget : ITitleProvider, IConfigurableSubject
 
     /// <summary>
     /// Path to the subject to render.
-    /// Supports "Root.Children[folder].Children[file.json]" for absolute paths from root.
+    /// Supports "Root.folder.file.json" (with [InlinePaths] attribute) for absolute paths from root.
     /// </summary>
     [Configuration]
     public partial string Path { get; set; }

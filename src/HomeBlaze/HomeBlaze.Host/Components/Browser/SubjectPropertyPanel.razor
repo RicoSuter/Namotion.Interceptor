@@ -1,12 +1,14 @@
 @using HomeBlaze.Abstractions
 @using HomeBlaze.Abstractions.Services
 @using HomeBlaze.Host.Components.Dialogs
+@using HomeBlaze.Services
 @using HomeBlaze.Storage.Abstractions
 
 @inject IDialogService DialogService
 @inject SubjectComponentRegistry ComponentRegistry
 @inject DeveloperModeService DeveloperMode
 @inject ISubjectMethodInvoker MethodInvoker
+@inject IServiceProvider ServiceProvider
 
 <TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
 @if (Subject != null)
@@ -23,7 +25,7 @@
         }
 
         <h1 style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin: 0;">
-            <MudIcon Size="Size.Small" Icon="@GetSubjectIcon(Subject)" Class="mr-2" Style="vertical-align: middle;" />
+            <MudIcon Size="Size.Small" Icon="@GetSubjectIcon(Subject)" Color="@GetSubjectIconColor(Subject)" Class="mr-2" Style="vertical-align: middle;" />
             @GetSubjectTitle()
         </h1>
     </MudListSubheader>
@@ -38,7 +40,7 @@
                            Size="Size.Small"
                            Class="mr-2" />
         }
-        @if (Subject is IStorageFile)
+        @if (Subject is IStorageFile or IConfigurableSubject)
         {
             <MudIconButton OnClick="@(() => OnDelete.InvokeAsync())"
                            Icon="@Icons.Material.Filled.Delete"
@@ -63,40 +65,30 @@
             var methods = GetMethods();
             if (methods.Count > 0)
             {
-                <MudExpansionPanels MultiExpansion="true" Elevation="0" Gutters="false" Dense="true" Style="overflow: hidden;">
-                    <MudExpansionPanel Expanded="true" Gutters="false" Class="px-4">
-                        <TitleContent>
-                            Methods
-                            <MudChip T="string" Size="Size.Small" Color="Color.Dark">@methods.Count</MudChip>
-                        </TitleContent>
-                        <ChildContent>
-                            <MudStack Spacing="2" Class="py-2">
-                                @foreach (var method in methods)
-                                {
-                                    var isQuery = method.Kind == SubjectMethodKind.Query;
-                                    var defaultIcon = isQuery ? "Search" : "PlayArrow";
-                                    var methodName = method.MethodInfo.Name.Replace("Async", string.Empty, StringComparison.OrdinalIgnoreCase);
-                                    var methodProperty = _registeredSubject?.TryGetProperty(methodName);
-                                    var isEnabledAttribute = methodProperty?.TryGetAttribute(KnownAttributes.IsEnabled);
-                                    var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
-                                    <MudButton Variant="Variant.Filled"
-                                               Color="@(isQuery ? Color.Info : Color.Primary)"
-                                               Size="Size.Small"
-                                               FullWidth="true"
-                                               StartIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(method.Icon ?? defaultIcon)"
-                                               Disabled="@(!method.IsSupported || _executingOperation == method || !isEnabled)"
-                                               OnClick="@(() => ExecuteMethodAsync(method))">
-                                        @if (_executingOperation == method)
-                                        {
-                                            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
-                                        }
-                                        @method.Title
-                                    </MudButton>
-                                }
-                            </MudStack>
-                        </ChildContent>
-                    </MudExpansionPanel>
-                </MudExpansionPanels>
+                <MudStack Class="pl-4 pr-4">
+                    @foreach (var method in methods)
+                    {
+                        var isQuery = method.Kind == SubjectMethodKind.Query;
+                        var defaultIcon = isQuery ? "Search" : "PlayArrow";
+                        var methodName = method.MethodInfo.Name.Replace("Async", string.Empty, StringComparison.OrdinalIgnoreCase);
+                        var methodProperty = _registeredSubject?.TryGetProperty(methodName);
+                        var isEnabledAttribute = methodProperty?.TryGetAttribute(KnownAttributes.IsEnabled);
+                        var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
+                        <MudButton Variant="Variant.Filled"
+                                   Color="@(isQuery ? Color.Info : Color.Primary)"
+                                   Size="Size.Small"
+                                   FullWidth="true"
+                                   StartIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(method.Icon ?? defaultIcon)"
+                                   Disabled="@(_executingOperation == method || !isEnabled)"
+                                   OnClick="@(() => ExecuteMethodAsync(method))">
+                            @if (_executingOperation == method)
+                            {
+                                <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                            }
+                            @method.Title
+                        </MudButton>
+                    }
+                </MudStack>
             }
         }
 
@@ -107,7 +99,7 @@
             @if (children.Length == 1)
             {
                 @* Single child - no expansion panel *@
-                <MudList T="object" SelectedValue="SelectedChild" Style="padding-top: 0; padding-bottom: 0">
+                <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Style="padding-top: 0; padding-bottom: 0">
                     @{
                         var child = children[0];
                         var isSelected = child.Subject == SelectedChild;
@@ -116,11 +108,12 @@
                     <MudListItem Value="@child.Subject"
                                  OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
                                  Icon="@GetSubjectIcon(child.Subject)"
-                                 IconColor="Color.Default">
+                                 IconColor="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
+                                 Class="@(isSelected ? "mud-primary-text" : "")">
                         @if (isSelected)
                         {
                             <div style="float: right; line-height: 0">
-                                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" />
+                                <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
                             </div>
                         }
                         <span style="word-break: break-word;">@GetSubjectDisplayName(child)</span>
@@ -140,7 +133,7 @@
                         <MudChip T="string" Size="Size.Small" Color="Color.Dark">@children.Length</MudChip>
                     </TitleContent>
                     <ChildContent>
-                        <MudList T="object" SelectedValue="SelectedChild">
+                        <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary">
                             @foreach (var child in children)
                             {
                                 var isSelected = child.Subject == SelectedChild;
@@ -149,11 +142,12 @@
                                 <MudListItem Value="@child.Subject"
                                              OnClick="@(() => OnPropertyClick.InvokeAsync(new PropertyClickEventArgs(property.Name, child.Index, child.Subject)))"
                                              Icon="@GetSubjectIcon(child.Subject)"
-                                             IconColor="Color.Default">
+                                             IconColor="@(isSelected ? Color.Primary : GetSubjectIconColor(child.Subject))"
+                                             Class="@(isSelected ? "mud-primary-text" : "")">
                                     @if (isSelected)
                                     {
                                         <div style="float: right; line-height: 0">
-                                            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" />
+                                            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Color="Color.Primary" />
                                         </div>
                                     }
                                     <span style="word-break: break-word;">@GetSubjectDisplayName(child)</span>
@@ -244,6 +238,14 @@
             return Icons.Material.Filled.QuestionMark;
 
         return SubjectIconExtensions.ResolveMudBlazorIcon(subject.GetIcon());
+    }
+
+    private Color GetSubjectIconColor(IInterceptorSubject? subject)
+    {
+        if (subject == null)
+            return Color.Default;
+
+        return SubjectIconExtensions.ResolveMudBlazorColor(subject.GetIconColor());
     }
 
     private string GetObjectPath()
@@ -361,27 +363,8 @@
     {
         if (Subject == null) return;
 
-        var parameters = new DialogParameters<SubjectEditDialog>
-        {
-            { x => x.Subject, Subject }
-        };
-
-        // Check if custom edit component exists to determine dialog size
-        var editRegistration = ComponentRegistry.GetComponent(
-            Subject.GetType(),
-            SubjectComponentType.Edit);
-
-        var maxWidth = editRegistration != null ? MaxWidth.Large : MaxWidth.Small;
-
-        var options = new DialogOptions
-        {
-            MaxWidth = maxWidth,
-            FullWidth = true,
-            CloseButton = true
-        };
-
         var title = GetSubjectTitle();
-        await DialogService.ShowAsync<SubjectEditDialog>($"Edit {title}", parameters, options);
+        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, $"Edit {title}");
     }
 
     private IReadOnlyList<SubjectMethodInfo> GetMethods() =>
@@ -396,15 +379,45 @@
         {
             object?[]? parameters = null;
 
-            // If operation has parameters, show parameter dialog
-            if (operation.Parameters.Length > 0)
+            // Pre-resolve auto-injected and [FromServices] parameters
+            var resolvedParameters = new Dictionary<string, object?>();
+            foreach (var parameter in operation.Parameters)
             {
-                var parameterDialog = await MethodParameterDialog.ShowAsync(DialogService, operation);
+                if (SubjectMethodInvoker.IsAutoInjectedParameter(parameter.Type))
+                {
+                    resolvedParameters[parameter.Name] = null; // Placeholder, invoker will provide actual value
+                    continue;
+                }
+
+                if (parameter.IsFromServices)
+                {
+                    resolvedParameters[parameter.Name] = ServiceProvider.GetService(parameter.Type);
+                }
+            }
+
+            // Check if there are any parameters that need user input
+            var needsParameterDialog = operation.Parameters.Length > resolvedParameters.Count;
+
+            // If operation has parameters that need user input, show parameter dialog
+            if (needsParameterDialog)
+            {
+                var parameterDialog = await MethodParameterDialog.ShowAsync(
+                    DialogService, operation, resolvedParameters);
                 var parameterResult = await parameterDialog.Result;
                 if (parameterResult == null || parameterResult.Canceled)
                     return;
 
                 parameters = parameterResult.Data as object?[];
+            }
+            // If all parameters were DI-resolved, build parameters array
+            else if (resolvedParameters.Count > 0)
+            {
+                parameters = new object?[operation.Parameters.Length];
+                for (var i = 0; i < operation.Parameters.Length; i++)
+                {
+                    var parameter = operation.Parameters[i];
+                    parameters[i] = resolvedParameters[parameter.Name];
+                }
             }
             // If operation requires confirmation, show confirmation dialog
             else if (operation.RequiresConfirmation)

@@ -22,7 +22,29 @@ defaults:
     shell: pwsh
 
 jobs:
+  # Determine which integration test jobs should run based on changed files
+  # For non-PR events (push to master, release), always run all tests
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      homeblaze: ${{ github.event_name != 'pull_request' || steps.filter.outputs.homeblaze == 'true' }}
+      opcua: ${{ github.event_name != 'pull_request' || steps.filter.outputs.opcua == 'true' }}
+    steps:
+      - uses: actions/checkout@v3
+        if: github.event_name == 'pull_request'
+      - uses: dorny/paths-filter@v3
+        if: github.event_name == 'pull_request'
+        id: filter
+        with:
+          filters: |
+            homeblaze:
+              - 'src/HomeBlaze/**'
+            opcua:
+              - 'src/Namotion.Interceptor.OpcUa*/**'
+              - 'src/HomeBlaze/*OpcUa*/**'
+
   test:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -35,14 +57,12 @@ jobs:
       - name: Build
         run: dotnet build src/Namotion.Interceptor.slnx --configuration Release
 
-      - name: Install Playwright browsers
-        run: pwsh src/HomeBlaze/HomeBlaze.E2E.Tests/bin/Release/net9.0/playwright.ps1 install --with-deps
-
-      - name: Run tests and collect coverage (Cobertura)
+      - name: Run tests (excluding integration tests)
         run: |
           dotnet test src/Namotion.Interceptor.slnx `
             --configuration Release `
             --no-build `
+            --filter "Category!=Integration" `
             --results-directory ./TestResults `
             --collect:"XPlat Code Coverage" `
             -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
@@ -70,7 +90,77 @@ jobs:
           name: html-coverage-report
           path: coverage-report
 
+  test-homeblaze-integration:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.homeblaze == 'true'
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build
+        run: dotnet build src/Namotion.Interceptor.slnx --configuration Release
+
+      - name: Install Playwright browsers
+        run: pwsh src/HomeBlaze/HomeBlaze.E2E.Tests/bin/Release/net9.0/playwright.ps1 install --with-deps
+
+      - name: Run HomeBlaze integration tests
+        run: |
+          dotnet test src/HomeBlaze/HomeBlaze.E2E.Tests `
+            --configuration Release `
+            --no-build `
+            --filter "Category=Integration" `
+            --results-directory ./TestResults `
+            --collect:"XPlat Code Coverage" `
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+
+      - name: Upload HomeBlaze integration test coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-coverage-homeblaze-integration
+          path: '**/TestResults/**/coverage.cobertura.xml'
+          if-no-files-found: warn
+
+  test-opcua-integration:
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.opcua == 'true'
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build
+        run: dotnet build src/Namotion.Interceptor.slnx --configuration Release
+
+      - name: Run OPC UA integration tests
+        run: |
+          dotnet test src/Namotion.Interceptor.OpcUa.Tests `
+            --configuration Release `
+            --no-build `
+            --filter "Category=Integration" `
+            --results-directory ./TestResults `
+            --collect:"XPlat Code Coverage" `
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+
+      - name: Upload integration test coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-coverage-opcua-integration
+          path: '**/TestResults/**/coverage.cobertura.xml'
+          if-no-files-found: warn
+
   pack:
+    timeout-minutes: 15
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:
@@ -93,6 +183,7 @@ jobs:
           path: ${{ env.NUGET_DIRECTORY }}/*.nupkg
 
   validate:
+    timeout-minutes: 15
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
     needs: [ pack ]
@@ -114,9 +205,10 @@ jobs:
         run: meziantou.validate-nuget-package --excluded-rules IconMustBeSet,ReadmeMustBeSet,Symbols,ProjectUrlMustBeSet (Get-ChildItem "${{ env.NUGET_DIRECTORY }}/*.nupkg")
 
   deploy:
+    timeout-minutes: 15
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
-    needs: [ validate, test ]
+    needs: [ validate, test, test-homeblaze-integration, test-opcua-integration ]
     steps:
       - uses: actions/download-artifact@v4
         with:

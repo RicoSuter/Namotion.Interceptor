@@ -1,5 +1,4 @@
-using HomeBlaze.Services.Tests.Models;
-using Moq;
+using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
@@ -17,10 +16,13 @@ public abstract class SubjectPathResolverTestBase
 
     protected SubjectPathResolverTestBase()
     {
-        var mockServiceProvider = new Mock<IServiceProvider>();
         var typeProvider = new TypeProvider();
         var typeRegistry = new SubjectTypeRegistry(typeProvider);
-        var serializer = new ConfigurableSubjectSerializer(typeRegistry, mockServiceProvider.Object);
+
+        var services = new ServiceCollection();
+        var serviceProvider = services.BuildServiceProvider();
+
+        var serializer = new ConfigurableSubjectSerializer(typeProvider, serviceProvider);
 
         Context = InterceptorSubjectContext
             .Create()

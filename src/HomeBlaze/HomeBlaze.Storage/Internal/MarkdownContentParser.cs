@@ -75,13 +75,13 @@ public sealed partial class MarkdownContentParser
         var resolvedPath = ResolvePath(basePath, url);
 
         // Convert to /pages/... format with Children segments
-        // e.g., "foo/bar/baz.md" => "/pages/Children/foo/Children/bar/Children/baz.md"
+        // e.g., "foo/bar/baz.md" => "/pages/foo/bar/baz.md"
         var segments = resolvedPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
         var result = new StringBuilder("/pages");
 
         foreach (var segment in segments)
         {
-            result.Append("/Children/");
+            result.Append("/");
             result.Append(segment);
         }
 
@@ -280,7 +280,8 @@ public sealed partial class MarkdownContentParser
                         var newSubject = _serializer.Deserialize(subj.Json);
                         if (newSubject != null)
                         {
-                            newChildren[subj.Name] = newSubject;
+                            // All IConfigurableSubject implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
+                            newChildren[subj.Name] = (IInterceptorSubject)newSubject;
                         }
                     }
                     break;

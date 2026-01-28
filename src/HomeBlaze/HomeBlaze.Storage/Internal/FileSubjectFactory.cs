@@ -1,6 +1,6 @@
 using FluentStorage.Blobs;
-using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Services;
+using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Files;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -41,7 +41,7 @@ internal sealed class FileSubjectFactory
         CancellationToken cancellationToken)
     {
         var extension = Path.GetExtension(blob.FullPath).ToLowerInvariant();
-        if (extension == ".json")
+        if (extension == FileExtensions.Json)
         {
             return await CreateFromJsonBlobAsync(client, storage, blob, cancellationToken);
         }
@@ -87,7 +87,8 @@ internal sealed class FileSubjectFactory
             var subject = _serializer.Deserialize(json);
             if (subject != null)
             {
-                return subject;
+                // All IConfigurableSubject implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
+                return (IInterceptorSubject)subject;
             }
         }
         catch

@@ -5,7 +5,7 @@ using Namotion.Interceptor.Tracking.Parent;
 namespace Namotion.Interceptor.Tracking.Tests.Parent;
 
 /// <summary>
-/// Tests that parent tracking is properly set up before a subject's own ILifecycleHandler.AttachSubject runs.
+/// Tests that parent tracking is properly set up before a subject's own ILifecycleHandler.AttachSubjectToContext runs.
 /// This is critical for scenarios where a subject needs to access its parent hierarchy during initialization.
 /// </summary>
 public class ParentAccessDuringLifecycleTests
@@ -25,7 +25,7 @@ public class ParentAccessDuringLifecycleTests
         // Act: Attach component to simulation
         simulation.Component = component;
 
-        // Assert: Component should have found parents and root during its AttachSubject
+        // Assert: Component should have found parents and root during its AttachSubjectToContext
         Assert.Null(component.AttachException);
         Assert.NotNull(component.ParentsFoundDuringAttach);
         Assert.NotEmpty(component.ParentsFoundDuringAttach);
@@ -48,7 +48,7 @@ public class ParentAccessDuringLifecycleTests
         // Act: Add component to array
         simulation.Components = [component];
 
-        // Assert: Component should have found parents during its AttachSubject
+        // Assert: Component should have found parents during its AttachSubjectToContext
         Assert.Null(component.AttachException);
         Assert.NotNull(component.ParentsFoundDuringAttach);
         Assert.NotEmpty(component.ParentsFoundDuringAttach);
@@ -78,7 +78,7 @@ public class ParentAccessDuringLifecycleTests
         // Act: Attach component - context will be inherited, parents should be set
         simulation.Component = component;
 
-        // Assert: Parents should be available when component's AttachSubject runs
+        // Assert: Parents should be available when component's AttachSubjectToContext runs
         Assert.Null(component.AttachException);
         Assert.NotNull(component.ParentsFoundDuringAttach);
         Assert.NotEmpty(component.ParentsFoundDuringAttach);
@@ -238,7 +238,7 @@ public class ParentAccessDuringLifecycleTests
     public void WhenComponentIsRoot_ThenNoParentIsFound()
     {
         // When a component is created as a root (not attached to a parent),
-        // it should have no parents during AttachSubject
+        // it should have no parents during AttachSubjectToContext
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
@@ -275,7 +275,65 @@ public class ParentAccessDuringLifecycleTests
         root.Child = child;
 
         // Assert: Verify that parents were available when subject's handler ran
-        Assert.Contains("TrackedChild.AttachSubject - HasParents: True", handlerCallOrder);
+        Assert.Contains("TrackedChild.AttachSubjectToContext - HasParents: True", handlerCallOrder);
+    }
+
+    [Fact]
+    public void WhenFourLevelHierarchy_ThenTryGetFirstParentFindsInterfaceOnSecondLevel()
+    {
+        // Arrange: Create a 4-level tree: a => b => c => d
+        // Where 'b' implements ISpecialMarker interface
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithParents();
+
+        var levelA = new LevelA(context) { Name = "A" };
+        var levelB = new LevelB { Name = "B" };  // Implements ISpecialMarker
+        var levelC = new LevelC { Name = "C" };
+        var levelD = new LevelD { Name = "D" };
+
+        // Build hierarchy: A -> B -> C -> D
+        levelA.Child = levelB;
+        levelB.Child = levelC;
+        levelC.Child = levelD;
+
+        // Act: From D, find first parent implementing ISpecialMarker (should be B)
+        var foundParent = levelD.TryGetFirstParent<ISpecialMarker>();
+
+        // Assert
+        Assert.NotNull(foundParent);
+        Assert.Same(levelB, foundParent);
+    }
+
+    [Fact]
+    public void WhenMultipleParents_AndFirstParentDoesNotHaveInterface_ThenFindsSecondParent()
+    {
+        // Arrange: Create a multi-parent scenario where:
+        // - Child has two parents: ParentWithoutMarker and ParentWithMarker
+        // - First parent does NOT implement ISpecialMarker
+        // - Second parent DOES implement ISpecialMarker
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithParents();
+
+        var parentWithoutMarker = new ParentWithoutMarker(context) { Name = "NoMarker" };
+        var parentWithMarker = new ParentWithMarker(context) { Name = "WithMarker" };
+        var child = new MultiParentChild { Name = "Child" };
+
+        // Attach child to first parent (no marker)
+        parentWithoutMarker.Child = child;
+
+        // Also attach child to second parent (has marker) - creates multi-parent
+        parentWithMarker.Child = child;
+
+        // Act: Find first parent implementing ISpecialMarker
+        var foundParent = child.TryGetFirstParent<ISpecialMarker>();
+
+        // Assert: Should find parentWithMarker even though parentWithoutMarker was added first
+        Assert.NotNull(foundParent);
+        Assert.Same(parentWithMarker, foundParent);
     }
 
     private class OrderTrackingHandler : ILifecycleHandler
@@ -287,14 +345,17 @@ public class ParentAccessDuringLifecycleTests
             _callOrder = callOrder;
         }
 
-        public void AttachSubject(SubjectLifecycleChange change)
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
         {
-            _callOrder.Add($"OrderTrackingHandler.AttachSubject for {change.Subject.GetType().Name}");
-        }
+            if (change.IsContextAttach)
+            {
+                _callOrder.Add($"OrderTrackingHandler.OnAttached for {change.Subject.GetType().Name}");
+            }
 
-        public void DetachSubject(SubjectLifecycleChange change)
-        {
-            _callOrder.Add($"OrderTrackingHandler.DetachSubject for {change.Subject.GetType().Name}");
+            if (change.IsContextDetach)
+            {
+                _callOrder.Add($"OrderTrackingHandler.OnDetached for {change.Subject.GetType().Name}");
+            }
         }
     }
 }
@@ -331,15 +392,18 @@ public partial class TrackedChild : ILifecycleHandler
         Name = string.Empty;
     }
 
-    public void AttachSubject(SubjectLifecycleChange change)
+    public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
-        var hasParents = this.GetParents().Count > 0;
-        _callOrder.Add($"TrackedChild.AttachSubject - HasParents: {hasParents}");
-    }
+        if (change.IsContextAttach)
+        {
+            var hasParents = this.GetParents().Length > 0;
+            _callOrder.Add($"TrackedChild.AttachSubjectToContext - HasParents: {hasParents}");
+        }
 
-    public void DetachSubject(SubjectLifecycleChange change)
-    {
-        _callOrder.Add("TrackedChild.DetachSubject");
+        if (change.IsContextDetach)
+        {
+            _callOrder.Add("TrackedChild.DetachSubjectFromContext");
+        }
     }
 }
 
@@ -363,7 +427,7 @@ public partial class Simulation
 }
 
 /// <summary>
-/// A component that implements ILifecycleHandler and tries to access its parent during AttachSubject.
+/// A component that implements ILifecycleHandler and tries to access its parent during AttachSubjectToContext.
 /// Used to test that parent tracking is set up before the subject's own lifecycle handler runs.
 /// </summary>
 [InterceptorSubject]
@@ -382,74 +446,146 @@ public partial class Component : ILifecycleHandler
     }
 
     /// <summary>
-    /// Stores the root found during AttachSubject (if any).
+    /// Stores the root found during AttachSubjectToContext (if any).
     /// </summary>
     public Simulation? RootFoundDuringAttach { get; private set; }
 
     /// <summary>
-    /// Stores any exception that occurred during AttachSubject.
+    /// Stores any exception that occurred during AttachSubjectToContext.
     /// </summary>
     public Exception? AttachException { get; private set; }
 
     /// <summary>
-    /// Stores the parents found during AttachSubject.
+    /// Stores the parents found during AttachSubjectToContext.
     /// </summary>
     public HashSet<SubjectParent>? ParentsFoundDuringAttach { get; private set; }
 
-    public void AttachSubject(SubjectLifecycleChange change)
+    public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
-        try
+        if (change.IsContextAttach)
         {
-            // Store the parents at the moment AttachSubject is called
-            ParentsFoundDuringAttach = new HashSet<SubjectParent>(this.GetParents());
+            try
+            {
+                // Store the parents at the moment OnAttached is called
+                ParentsFoundDuringAttach = new HashSet<SubjectParent>(this.GetParents());
 
-            // Try to find the root simulation via parent traversal
-            RootFoundDuringAttach = this.TryGetFirstParent<Simulation>();
-        }
-        catch (Exception ex)
-        {
-            AttachException = ex;
+                // Try to find the root simulation via parent traversal
+                RootFoundDuringAttach = this.TryGetFirstParent<Simulation>();
+            }
+            catch (Exception ex)
+            {
+                AttachException = ex;
+            }
         }
     }
+}
 
-    public void DetachSubject(SubjectLifecycleChange change)
+/// <summary>
+/// Marker interface for testing TryGetFirstParent with interface type parameter.
+/// </summary>
+public interface ISpecialMarker
+{
+}
+
+/// <summary>
+/// Root level (level A) of the 4-level hierarchy test.
+/// </summary>
+[InterceptorSubject]
+public partial class LevelA
+{
+    public partial string Name { get; set; }
+    public partial LevelB? Child { get; set; }
+
+    public LevelA()
     {
+        Name = string.Empty;
     }
+}
 
-    /// <summary>
-    /// Tries to find the first parent of the specified type by traversing the parent hierarchy.
-    /// Returns null if not found instead of throwing.
-    /// </summary>
-    public TRoot? TryGetFirstParent<TRoot>()
-        where TRoot : class, IInterceptorSubject
+/// <summary>
+/// Level B of the 4-level hierarchy - implements ISpecialMarker.
+/// </summary>
+[InterceptorSubject]
+public partial class LevelB : ISpecialMarker
+{
+    public partial string Name { get; set; }
+    public partial LevelC? Child { get; set; }
+
+    public LevelB()
     {
-        var visited = new HashSet<IInterceptorSubject>();
-        var queue = new Queue<IInterceptorSubject>();
-        queue.Enqueue(this);
+        Name = string.Empty;
+    }
+}
 
-        while (queue.Count > 0)
-        {
-            var current = queue.Dequeue();
+/// <summary>
+/// Level C of the 4-level hierarchy.
+/// </summary>
+[InterceptorSubject]
+public partial class LevelC
+{
+    public partial string Name { get; set; }
+    public partial LevelD? Child { get; set; }
 
-            if (!visited.Add(current))
-            {
-                continue;
-            }
+    public LevelC()
+    {
+        Name = string.Empty;
+    }
+}
 
-            if (current is TRoot root && !ReferenceEquals(current, this))
-            {
-                return root;
-            }
+/// <summary>
+/// Leaf level (level D) of the 4-level hierarchy.
+/// </summary>
+[InterceptorSubject]
+public partial class LevelD
+{
+    public partial string Name { get; set; }
 
-            foreach (var parent in current.GetParents())
-            {
-                if (!parent.Equals(default))
-                {
-                    queue.Enqueue(parent.Property.Subject);
-                }
-            }
-        }
+    public LevelD()
+    {
+        Name = string.Empty;
+    }
+}
 
-        return null;
+/// <summary>
+/// Parent that does NOT implement ISpecialMarker for multi-parent test.
+/// </summary>
+[InterceptorSubject]
+public partial class ParentWithoutMarker
+{
+    public partial string Name { get; set; }
+    public partial MultiParentChild? Child { get; set; }
+
+    public ParentWithoutMarker()
+    {
+        Name = string.Empty;
+    }
+}
+
+/// <summary>
+/// Parent that implements ISpecialMarker for multi-parent test.
+/// </summary>
+[InterceptorSubject]
+public partial class ParentWithMarker : ISpecialMarker
+{
+    public partial string Name { get; set; }
+    public partial MultiParentChild? Child { get; set; }
+
+    public ParentWithMarker()
+    {
+        Name = string.Empty;
+    }
+}
+
+/// <summary>
+/// Child that can have multiple parents for multi-parent test.
+/// </summary>
+[InterceptorSubject]
+public partial class MultiParentChild
+{
+    public partial string Name { get; set; }
+
+    public MultiParentChild()
+    {
+        Name = string.Empty;
     }
 }

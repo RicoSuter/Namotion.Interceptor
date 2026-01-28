@@ -1,0 +1,11 @@
+﻿{
+  Root: 1,
+  Subjects: {
+    1: {
+      Father: {
+        Kind: Object,
+        Timestamp: DateTimeOffset_1
+      }
+    }
+  }
+}

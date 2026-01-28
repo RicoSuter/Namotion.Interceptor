@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- Disable NuGet package generation for all HomeBlaze projects -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+</Project>

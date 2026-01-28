@@ -1,7 +1,9 @@
 using System.Collections;
 using System.Collections.Concurrent;
+using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services;
@@ -33,13 +35,35 @@ public class SubjectPathResolver : ILifecycleHandler
     /// <summary>
     /// Converts bracket notation to slash notation.
     /// Children[demo].Children[file.json] → Children/demo/Children/file.json
+    /// [Demo].[Inline.md] (when using [InlinePaths]) → Demo/Inline.md
+    /// Root.Demo.Conveyor (simple dot notation) → Root/Demo/Conveyor
     /// </summary>
+    /// <remarks>
+    /// Two modes:
+    /// - No brackets: treats all dots as separators (simple paths like Root.Demo.Conveyor)
+    /// - Has brackets: uses bracket conversion, preserving dots inside brackets (for file extensions)
+    /// Use brackets when keys contain dots: Root.[Demo].[Inline.md]
+    /// </remarks>
     public static string BracketToSlash(string bracketPath)
     {
-        return bracketPath
-            .Replace("].", "/")
-            .Replace("[", "/")
-            .Replace("]", "");
+        // Simple mode: no brackets means all dots are separators
+        // Use this for paths like "Root.Demo.Conveyor"
+        if (!bracketPath.Contains('['))
+        {
+            return bracketPath.Replace('.', '/');
+        }
+
+        // Bracket mode: convert bracket patterns, preserving dots inside brackets
+        // Use this for paths with file extensions: "Root.[Demo].[Inline.md]"
+        var result = bracketPath
+            .Replace("].[", "/")  // Handle [key].[key] from [InlinePaths]
+            .Replace("].", "/")   // Handle Property[key].Next
+            .Replace(".[", "/")   // Handle Segment.[key] (mixed mode: Demo.[Setup.md])
+            .Replace("[", "/")    // Handle Property[key] opening bracket
+            .Replace("]", "");    // Handle trailing bracket
+
+        // Trim leading slash (from paths starting with [key])
+        return result.TrimStart('/');
     }
 
     /// <summary>
@@ -130,18 +154,11 @@ public class SubjectPathResolver : ILifecycleHandler
     }
 
     /// <summary>
-    /// Invalidates caches when subject is attached.
+    /// Invalidates caches when subject graph changes.
     /// </summary>
-    public void AttachSubject(SubjectLifecycleChange change)
+    public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
-        ClearCaches();
-    }
-
-    /// <summary>
-    /// Invalidates caches when subject is detached.
-    /// </summary>
-    public void DetachSubject(SubjectLifecycleChange change)
-    {
+        // Clear caches on any graph change (attach, detach, reference added/removed)
         ClearCaches();
     }
 
@@ -167,7 +184,23 @@ public class SubjectPathResolver : ILifecycleHandler
             var property = registered?.TryGetProperty(segment);
 
             if (property is not { HasChildSubjects: true })
+            {
+                // No direct property match - try [InlinePaths] fallback
+                var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(current.GetType());
+                if (inlinePathsPropertyName != null)
+                {
+                    var childrenProperty = registered?.TryGetProperty(inlinePathsPropertyName);
+                    if (childrenProperty?.GetValue() is IDictionary childrenDictionary && childrenDictionary.Contains(segment))
+                    {
+                        if (childrenDictionary[segment] is IInterceptorSubject childSubject)
+                        {
+                            current = childSubject;
+                            continue;
+                        }
+                    }
+                }
                 return null;
+            }
 
             var value = property.GetValue();
             if (value == null)
@@ -254,11 +287,38 @@ public class SubjectPathResolver : ILifecycleHandler
             if (BuildPathRecursive(subject, parent, pathSegments, visited, registry, root))
             {
                 pathSegments.Reverse();
-                paths.Add(string.Join(".", pathSegments));
+                paths.Add(JoinPathSegments(pathSegments));
             }
         }
 
         return paths.Count > 0 ? paths : Array.Empty<string>();
+    }
+
+    /// <summary>
+    /// Joins path segments, omitting the dot separator before bracketed segments.
+    /// Demo + Conveyor → Demo.Conveyor
+    /// Demo + [Inline.md] → Demo[Inline.md]
+    /// </summary>
+    private static string JoinPathSegments(List<string> segments)
+    {
+        if (segments.Count == 0)
+            return string.Empty;
+
+        var result = new System.Text.StringBuilder();
+        result.Append(segments[0]);
+
+        for (int i = 1; i < segments.Count; i++)
+        {
+            var segment = segments[i];
+            // Only add dot separator if segment doesn't start with bracket
+            if (!segment.StartsWith('['))
+            {
+                result.Append('.');
+            }
+            result.Append(segment);
+        }
+
+        return result.ToString();
     }
 
     private bool BuildPathRecursive(
@@ -279,11 +339,25 @@ public class SubjectPathResolver : ILifecycleHandler
         {
             var parentSubject = parent.Property.Subject;
 
-            // Build bracket segment: PropertyName or PropertyName[key]
+            // Build bracket segment: PropertyName, PropertyName[key], or [key] for [InlinePaths]
             var segment = parent.Property.Name;
+            var isInlinePathsProperty = InlinePathsAttribute.IsInlinePathsProperty(
+                parentSubject.GetType(), parent.Property.Name);
+
             if (parent.Index != null)
             {
-                segment += $"[{parent.Index}]";
+                if (isInlinePathsProperty)
+                {
+                    // For [InlinePaths] properties, use just the key (no property name)
+                    // If key contains a dot (like "Readme.md"), wrap in brackets to preserve it
+                    // This makes paths like "Notes" or "[Readme.md]" instead of "Children[Notes]"
+                    var key = parent.Index.ToString()!;
+                    segment = key.Contains('.') ? $"[{key}]" : key;
+                }
+                else
+                {
+                    segment += $"[{parent.Index}]";
+                }
             }
             pathSegments.Add(segment);
 

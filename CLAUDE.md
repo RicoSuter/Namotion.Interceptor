@@ -106,4 +106,4 @@ The library has specialized support for:
 
 ## Coding Style
 
-- **Avoid abbreviations** in variable and parameter names unless the name is very long. Use descriptive names (e.g., `location` not `loc`, `result` not `res`, `configuration` not `config`).
+- **Avoid abbreviations** in variable and parameter names unless the name is very long. Use descriptive names (e.g., `attribute` not `attr`).

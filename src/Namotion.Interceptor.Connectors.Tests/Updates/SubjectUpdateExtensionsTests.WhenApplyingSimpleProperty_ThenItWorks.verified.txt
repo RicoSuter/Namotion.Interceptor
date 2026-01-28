@@ -1,0 +1,43 @@
+﻿{
+  Root: 1,
+  Subjects: {
+    1: {
+      Children: {
+        Kind: Collection,
+        Count: 0
+      },
+      Father: {
+        Kind: Object
+      },
+      FirstName: {
+        Kind: Value,
+        Value: John,
+        Timestamp: DateTimeOffset_1,
+        Attributes: {
+          MaxLength: {
+            Kind: Value,
+            Value: 123,
+            Attributes: {
+              Unit: {
+                Kind: Value,
+                Value: Count
+              }
+            }
+          }
+        }
+      },
+      FullName: {
+        Kind: Value,
+        Value: John Doe
+      },
+      LastName: {
+        Kind: Value,
+        Value: Doe,
+        Timestamp: DateTimeOffset_2
+      },
+      Mother: {
+        Kind: Object
+      }
+    }
+  }
+}

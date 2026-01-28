@@ -1,6 +1,7 @@
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
+using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Tracking.Change;
 
@@ -29,13 +30,15 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     private static readonly Func<IInterceptorSubject, object?> GetOldValueDelegate = static _ => _threadLocalOldValue;
     private static readonly Action<IInterceptorSubject, object?> NoOpWriteDelegate = static (_, _) => { };
 
+    /// <inheritdoc />
     public void AttachProperty(SubjectPropertyLifecycleChange change)
     {
-        if (change.Property.Metadata.IsDerived)
+        var metadata = change.Property.Metadata;
+        if (metadata.IsDerived)
         {
             StartRecordingTouchedProperties();
 
-            var result = change.Property.Metadata.GetValue?.Invoke(change.Subject);
+            var result = metadata.GetValue?.Invoke(change.Subject);
             change.Property.SetLastKnownValue(result);
             change.Property.SetWriteTimestamp(SubjectChangeContext.Current.ChangedTimestamp);
             
@@ -43,11 +46,13 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
     }
 
+    /// <inheritdoc />
     public void DetachProperty(SubjectPropertyLifecycleChange change)
     {
         // No cleanup needed - dependencies are managed per-property
     }
 
+    /// <inheritdoc />
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
     {
         var result = next(ref context);
@@ -61,12 +66,35 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         return result;
     }
 
+    /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         next(ref context);
 
+        // If this property is itself a derived property with a setter, recalculate it.
+        // This handles the case where SetValue is called directly on a derived property -
+        // the setter modifies internal state, but the actual value is computed by the getter.
+        // We need to: 1) re-record dependencies, 2) fire change notification with correct value.
+        // Performance: Two boolean checks for common case, extra getter call only for
+        // the rare case of derived properties with setters.
+        var metadata = context.Property.Metadata;
+        if (metadata is { IsDerived: true, SetValue: not null })
+        {
+            var currentTimestamp = SubjectChangeContext.Current.ChangedTimestamp;
+            var property = context.Property;
+            RecalculateDerivedProperty(ref property, ref currentTimestamp);
+        }
+
+        // Check this first as it's more likely to early-exit than transaction check
         var usedByProperties = context.Property.GetUsedByProperties().Items;
         if (usedByProperties.Length == 0)
+        {
+            return;
+        }
+
+        // Skip derived property recalculation during transaction capture
+        if (SubjectTransaction.HasActiveTransaction &&
+            SubjectTransaction.Current is { IsCommitting: false })
         {
             return;
         }
@@ -106,6 +134,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         using (SubjectChangeContext.WithSource(null))
         {
             derivedProperty.SetPropertyValueWithInterception(newValue, GetOldValueDelegate, NoOpWriteDelegate);
+        }
+
+        if (derivedProperty.Subject is IRaisePropertyChanged raiser)
+        {
+            raiser.RaisePropertyChanged(derivedProperty.Metadata.Name);
         }
     }
 

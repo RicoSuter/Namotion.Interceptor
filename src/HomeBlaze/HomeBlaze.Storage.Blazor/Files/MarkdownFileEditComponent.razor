@@ -1,58 +1,69 @@
+@using System.Text.RegularExpressions
 @using BlazorMonaco.Editor
 @using HomeBlaze.Abstractions
+@using HomeBlaze.Components
 @using HomeBlaze.Components.Abstractions
 @using HomeBlaze.Components.Abstractions.Attributes
+@using HomeBlaze.Components.Dialogs
 @using HomeBlaze.Services
+@using HomeBlaze.Services.Components
 @using HomeBlaze.Storage.Blazor.Models
 @using HomeBlaze.Storage.Files
 @using HomeBlaze.Storage.Internal
+@using Microsoft.AspNetCore.Components.Sections
+@using Microsoft.JSInterop
 @using MudBlazor
 @using Namotion.Interceptor
-@using Microsoft.JSInterop
-@using System.Text.RegularExpressions
 
 @inject IJSRuntime JsRuntime
 @inject IDialogService DialogService
 @inject ConfigurableSubjectSerializer Serializer
+@inject SubjectComponentRegistry ComponentRegistry
 
 @attribute [SubjectComponent(SubjectComponentType.Edit, typeof(MarkdownFile))]
 @implements ISubjectEditComponent
 
-@if (_isLoading)
+@if (string.IsNullOrEmpty(_originalContent))
 {
-    <MudProgressCircular Indeterminate="true" />
+    <MudProgressCircular Indeterminate="true"/>
 }
 else
 {
-    <div style="position: relative;">
-        <StandaloneCodeEditor @ref="_editor"
-            Id="markdown-editor"
-            CssClass="monaco-editor-container"
-            ConstructionOptions="GetEditorOptions"
-            OnDidInit="OnEditorInit"
-            OnDidChangeModelContent="OnContentChanged"
-            OnDidChangeCursorPosition="OnCursorPositionChanged" />
-
+    <SectionContent SectionName="EditActions">
+        <MudButton Variant="Variant.Filled"
+                   Color="Color.Primary"
+                   Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Add"
+                   OnClick="OnCreateClick"
+                   data-testid="create-subject-button">
+            Create
+        </MudButton>
         @if (_activeRegion != null)
         {
-            <div class="edit-button-overlay">
-                <MudButton Variant="Variant.Filled"
-                           Color="Color.Primary"
-                           Size="Size.Small"
-                           StartIcon="@Icons.Material.Filled.Edit"
-                           OnClick="OnEditButtonClick"
-                           data-testid="@(_activeRegion.Type == DecorationRegionType.SubjectBlock ? "edit-subject-button" : "edit-expression-button")">
-                    @(_activeRegion.Type == DecorationRegionType.SubjectBlock ? $"Edit {_activeRegion.Name}" : "Edit Expression")
-                </MudButton>
-            </div>
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Edit"
+                       OnClick="OnEditButtonClick"
+                       data-testid="@(_activeRegion.Type == DecorationRegionType.SubjectBlock ? "edit-subject-button" : "edit-expression-button")">
+                @(_activeRegion.Type == DecorationRegionType.SubjectBlock ? $"Edit {_activeRegion.Name}" : "Edit Expression")
+            </MudButton>
         }
-    </div>
+    </SectionContent>
+
+    <StandaloneCodeEditor @ref="_editor"
+                          Id="markdown-editor"
+                          CssClass="monaco-editor-container"
+                          ConstructionOptions="GetEditorOptions"
+                          OnDidInit="OnEditorInit"
+                          OnDidChangeModelContent="OnContentChanged"
+                          OnDidChangeCursorPosition="OnCursorPositionChanged"/>
 }
 
 <style>
     .monaco-editor-container {
-        min-height: 500px;
-        height: 60vh;
+        height: calc(100vh - 200px);
+        width: 100%;
     }
 
     /* Decoration styles for subject blocks and expressions */
@@ -65,19 +76,13 @@ else
         background-color: rgba(65, 105, 225, 0.25); /* Royal blue, works in light/dark modes */
         border-radius: 3px;
     }
-
-    /* Edit button overlay */
-    .edit-button-overlay {
-        position: absolute;
-        top: 8px;
-        right: 8px;
-        z-index: 100;
-    }
 </style>
 
 @code {
+    [Parameter] public IInterceptorSubject? Subject { get; set; }
+
     [Parameter]
-    public IInterceptorSubject? Subject { get; set; }
+    public bool IsCreating { get; set; }
 
     [CascadingParameter(Name = "IsDarkMode")]
     public bool IsDarkMode { get; set; } = true;
@@ -86,7 +91,6 @@ else
     private StandaloneCodeEditor? _editor;
     private string _originalContent = string.Empty;
     private string _currentContent = string.Empty;
-    private bool _isLoading = true;
     private bool _previousDarkMode = true;
     private List<DecorationRegion> _decorationRegions = new();
     private string[] _currentDecorationIds = Array.Empty<string>();
@@ -102,6 +106,7 @@ else
         add { }
         remove { }
     }
+
     public event Action<bool>? IsDirtyChanged;
 
     private StandaloneEditorConstructionOptions GetEditorOptions(StandaloneCodeEditor editor)
@@ -137,8 +142,8 @@ else
     private void OnCursorPositionChanged(CursorPositionChangedEvent e)
     {
         // Find if cursor is inside any decoration region
-        var cursorLine = (int)e.Position.LineNumber;
-        var cursorColumn = (int)e.Position.Column;
+        var cursorLine = e.Position.LineNumber;
+        var cursorColumn = e.Position.Column;
 
         var previousRegion = _activeRegion;
         _activeRegion = _decorationRegions.FirstOrDefault(r => r.ContainsPosition(cursorLine, cursorColumn));
@@ -174,25 +179,8 @@ else
         if (!File.Children.TryGetValue(region.Name, out var subject))
             return;
 
-        // Open the SubjectEditDialog
-        // Note: SubjectEditDialog is in HomeBlaze.Host, so we use a dynamic type name
-        var parameters = new DialogParameters<object>
-        {
-            { "Subject", subject }
-        };
-
-        var options = new DialogOptions
-        {
-            MaxWidth = MaxWidth.Small,
-            FullWidth = true
-        };
-
-        // Use dynamic type lookup for SubjectEditDialog since it's in HomeBlaze.Host
-        var dialogType = Type.GetType("HomeBlaze.Host.Components.Dialogs.SubjectEditDialog, HomeBlaze.Host");
-        if (dialogType == null)
-            return;
-
-        var dialog = await DialogService.ShowAsync(dialogType, $"Edit {region.Name}", parameters, options);
+        // Open the SubjectEditDialog using the static ShowAsync method
+        var dialog = await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, subject, $"Edit {region.Name}");
         var result = await dialog.Result;
 
         if (result?.Canceled != false)
@@ -206,6 +194,7 @@ else
         var replacement = $"```subject({region.Name})\n{newJson}\n```";
         _currentContent = Regex.Replace(_currentContent, pattern, replacement);
 
+        // TODO: Code below is repeated 3x (extract to method)
         // Update the Monaco editor
         await _editor.SetValue(_currentContent);
 
@@ -215,6 +204,9 @@ else
         // Save the file
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
         await File.WriteAsync(stream, CancellationToken.None);
+
+        // Reload the file to update Children dictionary with new parsed content
+        await File.OnFileChangedAsync(CancellationToken.None);
 
         // Apply configuration if needed
         if (subject is IConfigurableSubject configurable)
@@ -300,6 +292,69 @@ else
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
         await File.WriteAsync(stream, CancellationToken.None);
 
+        // Reload the file to update Children dictionary with new parsed content
+        await File.OnFileChangedAsync(CancellationToken.None);
+
+        // Update dirty state
+        _originalContent = _currentContent;
+        IsDirtyChanged?.Invoke(false);
+    }
+
+    private async Task OnCreateClick()
+    {
+        if (File == null || _editor == null)
+            return;
+
+        // Open the SubjectSetupDialog
+        var result = await SubjectSetupDialog.ShowAsync(DialogService);
+        if (result == null)
+            return;
+
+        // Serialize the new subject
+        var json = Serializer.Serialize(result.Subject);
+
+        // Create the subject block
+        var subjectBlock = $"```subject({result.Name})\n{json}\n```";
+
+        // Get cursor position to insert at
+        var position = await _editor.GetPosition();
+        var lines = _currentContent.Split('\n');
+
+        // Insert at cursor line (or end if no cursor)
+        var insertLine = position?.LineNumber ?? lines.Length;
+        var newLines = new List<string>(lines);
+
+        // Add a blank line before if not at start
+        if (insertLine > 1 && !string.IsNullOrWhiteSpace(lines[insertLine - 2]))
+        {
+            newLines.Insert(insertLine - 1, "");
+            insertLine++;
+        }
+
+        // Insert the subject block
+        newLines.InsertRange(insertLine - 1, subjectBlock.Split('\n'));
+
+        // Add a blank line after
+        if (insertLine + 2 < newLines.Count && !string.IsNullOrWhiteSpace(newLines[insertLine + 2]))
+        {
+            newLines.Insert(insertLine + 2, "");
+        }
+
+        _currentContent = string.Join('\n', newLines);
+
+        // Update the Monaco editor
+        await _editor.SetValue(_currentContent);
+
+        // Refresh decorations
+        await RefreshDecorationsAsync();
+
+        // Save the file
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(_currentContent));
+        await File.WriteAsync(stream, CancellationToken.None);
+
+        // Reload the file to update Children dictionary with new parsed content
+        await File.OnFileChangedAsync(CancellationToken.None);
+
         // Update dirty state
         _originalContent = _currentContent;
         IsDirtyChanged?.Invoke(false);
@@ -334,15 +389,14 @@ else
         _currentDecorationIds = await _editor.DeltaDecorations(_currentDecorationIds, decorations);
     }
 
-    protected override async Task OnParametersSetAsync()
+    protected override async Task OnInitializedAsync()
     {
-        if (File != null && _isLoading)
+        if (File != null)
         {
             await using var stream = await File.ReadAsync(CancellationToken.None);
             using var reader = new StreamReader(stream);
             _originalContent = await reader.ReadToEndAsync();
             _currentContent = _originalContent;
-            _isLoading = false;
         }
     }
 
@@ -350,6 +404,7 @@ else
     {
         // Content changed, we'll get the actual value on save
         // For now, mark as potentially dirty
+        // TODO: Add try-catch for ObjectDisposedException/JSDisconnectedException - component may be disposed during async operation
         Task.Run(async () =>
         {
             if (_editor != null)
@@ -373,13 +428,14 @@ else
         if (File == null || _editor == null) return;
 
         var content = await _editor.GetValue();
-        
+
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content));
         await File.WriteAsync(stream, cancellationToken);
 
         _originalContent = content;
         _currentContent = content;
-        
+
         IsDirtyChanged?.Invoke(false);
     }
+
 }

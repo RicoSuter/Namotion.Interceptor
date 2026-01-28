@@ -1,0 +1,17 @@
+﻿{
+  Root: 1,
+  Subjects: {
+    1: {
+      FirstName: {
+        Kind: Value,
+        Value: Updated,
+        Timestamp: DateTimeOffset_1
+      },
+      FullName: {
+        Kind: Value,
+        Value: Updated Name,
+        Timestamp: DateTimeOffset_2
+      }
+    }
+  }
+}
