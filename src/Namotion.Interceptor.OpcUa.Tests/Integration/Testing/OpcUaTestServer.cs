@@ -93,7 +93,9 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
                     TelemetryContext = telemetryContext,
                     CleanCertificateStore = false,
                     AutoAcceptUntrustedCertificates = true,
-                    CertificateStoreBasePath = _certificateStoreBasePath
+                    CertificateStoreBasePath = _certificateStoreBasePath,
+                    
+                    BufferTime = TimeSpan.FromMilliseconds(100)
                 };
             });
 
