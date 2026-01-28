@@ -50,15 +50,96 @@ Both methods:
 
 ### OPC UA Mapping for Collections and Dictionaries
 
-Neither collections nor dictionaries have ordering in OPC UA - both map to folders with child references:
+Collections and dictionaries map to OPC UA structures differently:
 
-| .NET Type | OPC UA Structure | Identity | Example |
-|-----------|------------------|----------|---------|
-| `IList<T>` | Folder with child object nodes | Subject reference (unordered) | `Devices/Pump1, Valve2, Sensor3` |
-| `IDictionary<K,T>` | Folder with child object nodes | BrowseName = dictionary key | `Machines/Machine1, Machine2` |
-| Single reference | Object node | Subject reference | `Identification` |
+| .NET Type | OPC UA Structure | Identity | BrowseName Source | Example |
+|-----------|------------------|----------|-------------------|---------|
+| `IList<T>` (Flat) | Direct children on parent | NodeId mapping | `PropertyName[index]` | `Parent/Sensors[0], Sensors[1]` |
+| `IList<T>` (Container) | Container with child nodes | NodeId mapping | `PropertyName[index]` | `Parent/Sensors/Sensors[0], Sensors[1]` |
+| `IDictionary<K,T>` | Container with child nodes (always) | BrowseName = dictionary key | Dictionary key (string) | `Machines/Machine1, Machine2` |
+| Single reference | Object node | Subject reference | From subject/property | `Identification` |
 
 **Per OPC UA Machinery Companion Spec:** The `Machines` dictionary maps to a folder where each machine's BrowseName is the dictionary key (e.g., `Machines/MyMachine`).
+
+**Collections vs Dictionaries for OPC UA:**
+- **Dictionaries** always use container nodes (keys could conflict with property names)
+- **Collections** default to flat structure (children directly on parent)
+- Collections can optionally use container structure for compatibility
+
+### Collection Node Structure
+
+Collections support two node structures, configured via `[OpcUaReference]`:
+
+```csharp
+public enum CollectionNodeStructure
+{
+    Flat,       // Default: Parent/Machines[0] - no intermediate node
+    Container   // Parent/Machines/Machines[0] - intermediate container node
+}
+```
+
+**Flat (default):**
+```
+Plant/
+  ├── Machines[0]/        ← Direct children of Plant
+  ├── Machines[1]/
+  ├── Status              ← Regular property (no conflict - different pattern)
+```
+Path: `Plant.Machines[0].Temp`
+
+**Container:**
+```
+Plant/
+  └── Machines/           ← Container node (FolderType by default)
+        ├── Machines[0]/
+        ├── Machines[1]/
+```
+Path: `Plant.Machines.Machines[0].Temp`
+
+**Configuration examples:**
+```csharp
+// Flat (default) - children directly on parent
+public partial IList<Machine> Machines { get; set; }
+
+// Container with default FolderType
+[OpcUaReference(CollectionStructure = CollectionNodeStructure.Container)]
+public partial IList<Machine> Machines { get; set; }
+
+// Container with custom TypeDefinition
+[OpcUaNode(TypeDefinition = "CustomContainerType")]
+[OpcUaReference(CollectionStructure = CollectionNodeStructure.Container)]
+public partial IList<Machine> Machines { get; set; }
+```
+
+**Rules:**
+- `[OpcUaReference]` controls `Flat` vs `Container`
+- `[OpcUaNode]` configures the container node (ignored when `Flat`)
+- Container defaults to FolderType if no `[OpcUaNode]` specified
+- Dictionaries always use Container (no option) - keys could conflict with property names
+
+**OPC UA → Model matching:**
+- **Flat:** Pattern match children by `PropertyName[\d+]` regex on parent
+- **Container:** Browse container node for children (existing logic)
+
+**Null vs Empty Semantics:**
+
+| C# Value | Flat Collection | Container Collection | Dictionary (always Container) |
+|----------|-----------------|---------------------|-------------------------------|
+| `null` | No children on parent | No container node | No container node |
+| Empty `[]` or `{}` | No children on parent | Container with 0 children | Container with 0 children |
+
+**On load from OPC UA:**
+- Flat: No matching `PropertyName[*]` children → empty collection (not null)
+- Container: Container with 0 children → empty collection (not null)
+- Container: No container node found → null
+
+**Note:** For Flat collections, null and empty are indistinguishable in OPC UA (both result in no children). If you need to distinguish null from empty, use Container structure.
+
+**Shared Subject BrowseName:**
+When the same subject instance is referenced from multiple places (e.g., two dictionaries with different keys), the subject gets ONE OPC UA node. The BrowseName is determined by **first-reference-wins** - whichever property processes the subject first sets the BrowseName.
+
+**Dictionary Key Handling:**
+Dictionary keys are converted to strings via `ToString()` for the OPC UA BrowseName. On load, `BrowseName.Name` becomes the dictionary key (always string). Non-string key types must have consistent `ToString()` formatting.
 
 ### Shared Infrastructure (Connectors Library)
 
@@ -76,6 +157,40 @@ Neither collections nor dictionaries have ordering in OPC UA - both map to folde
 - `RegisteredSubjectProperty.IsSubjectReference` - single subject reference
 - `RegisteredSubjectProperty.IsSubjectCollection` - collection of subjects
 - `RegisteredSubjectProperty.IsSubjectDictionary` - dictionary of subjects
+
+### Subject Identity Tracking
+
+For OPC UA → Model synchronization, we need to match remote OPC UA nodes to local subjects. Different property types use different identity mechanisms:
+
+| Property Type | Identity Mechanism | Rationale |
+|---------------|-------------------|-----------|
+| Single reference | Subject object reference | Only one child, trivial match |
+| Dictionary | BrowseName = dictionary key | Keys are stable identifiers |
+| Collection | NodeId mapping | Index is unstable; NodeId is stable |
+
+**Collection Identity via NodeId Mapping:**
+
+Collections are unordered in OPC UA (folders with references). Index-based matching is unreliable because browse order isn't guaranteed. Instead, we maintain a `Subject → NodeId` mapping:
+
+```csharp
+// Stored when subject is first synced to OPC UA
+private readonly Dictionary<IInterceptorSubject, NodeId> _subjectToNodeId = new();
+
+// On first sync (Model → OPC UA or OPC UA → Model):
+_subjectToNodeId[subject] = nodeId;
+
+// On resync (OPC UA → Model), match by NodeId:
+var localSubject = _subjectToNodeId
+    .FirstOrDefault(kvp => kvp.Value == remoteNodeId).Key;
+```
+
+**When mapping is established:**
+- **Model → OPC UA:** When node is created for subject
+- **OPC UA → Model:** When subject is created from node
+
+**Cleanup:**
+- When subject is removed (ref count → 0), remove from mapping
+- On reconnect, clear mapping and rebuild during full resync
 
 ---
 
@@ -129,7 +244,7 @@ async Task ProcessPropertyChangeAsync(SubjectPropertyChange change, RegisteredSu
         }
 
         // 3. Reorders are no-op for OPC UA
-        // Collections map to unordered OPC UA folder references
+        // Whether Flat or Container, OPC UA has no ordering concept
         // Order is a .NET concept that doesn't translate to OPC UA
         // (reorderedItems ignored)
     }
@@ -215,7 +330,11 @@ async Task OnSubjectRemovedAsync(RegisteredSubjectProperty property, IIntercepto
 
 ### Server Implementation (Model → OPC UA)
 
-Uses `ConnectorReferenceCounter<NodeState>` for resource management:
+Uses `ConnectorReferenceCounter<NodeState>` for resource management.
+
+**Flat vs Container handling:** `CreateNodeForSubject` and `AddReferenceToParent` must check `GetCollectionStructure(property)`:
+- **Flat:** Add child node directly to grandparent with BrowseName `PropertyName[index]`
+- **Container:** Create/reuse container node, add child to container
 
 ```csharp
 async Task OnSubjectAddedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index)
@@ -308,31 +427,78 @@ async Task ProcessNodeChangeAsync(
     }
     else if (property.IsSubjectCollection)
     {
-        // Collection: diff remote nodes vs local children
+        // Get collection structure setting from attribute
+        var collectionStructure = GetCollectionStructure(property); // Flat or Container
+
+        IEnumerable<ReferenceDescription> collectionNodes;
+
+        if (collectionStructure == CollectionNodeStructure.Flat)
+        {
+            // Flat: Children are direct children of parent, matched by pattern
+            var pattern = new Regex($@"^{Regex.Escape(property.Name)}\[(\d+)\]$");
+            collectionNodes = remoteNodes
+                .Where(n => pattern.IsMatch(n.BrowseName.Name))
+                .ToList();
+        }
+        else
+        {
+            // Container: Browse the container node for children
+            var containerNode = remoteNodes.FirstOrDefault(n => n.BrowseName.Name == property.Name);
+            if (containerNode is null)
+            {
+                // No container = null or empty collection
+                if (property.Children.Any())
+                {
+                    foreach (var child in property.Children.ToList())
+                        await RemoveLocalSubjectAsync(property, child.Subject, null);
+                }
+                return;
+            }
+            var containerNodeId = ExpandedNodeId.ToNodeId(containerNode.NodeId, session.NamespaceUris);
+            collectionNodes = await BrowseChildNodesAsync(containerNodeId, session, ct);
+        }
+
+        // Match by NodeId (subject identity), not index
         var localChildren = property.Children.ToList();
 
-        // Match by index/position
-        var remoteByIndex = remoteNodes.Select((n, i) => (Index: i, Node: n)).ToList();
-        var localByIndex = localChildren.Select((c, i) => (Index: i, Child: c)).ToList();
-
-        // Remove locals that no longer exist remotely
-        foreach (var local in localByIndex.Where(l => l.Index >= remoteNodes.Count))
+        // Build NodeId → local subject mapping
+        var localByNodeId = new Dictionary<NodeId, (int Index, SubjectPropertyChild Child)>();
+        foreach (var (child, index) in localChildren.Select((c, i) => (c, i)))
         {
-            await RemoveLocalSubjectAsync(property, local.Child.Subject, local.Index);
+            if (_subjectToNodeId.TryGetValue(child.Subject, out var nodeId))
+            {
+                localByNodeId[nodeId] = (index, child);
+            }
+        }
+
+        // Build remote NodeId set
+        var remoteNodeIds = collectionNodes
+            .Select(n => ExpandedNodeId.ToNodeId(n.NodeId, session.NamespaceUris))
+            .ToHashSet();
+
+        // Remove locals whose NodeId no longer exists remotely
+        foreach (var (nodeId, (index, child)) in localByNodeId)
+        {
+            if (!remoteNodeIds.Contains(nodeId))
+            {
+                await RemoveLocalSubjectAsync(property, child.Subject, index);
+            }
         }
 
         // Add/update for each remote node
-        foreach (var (index, node) in remoteByIndex)
+        foreach (var node in collectionNodes)
         {
-            if (index < localChildren.Count)
+            var nodeId = ExpandedNodeId.ToNodeId(node.NodeId, session.NamespaceUris);
+
+            if (localByNodeId.TryGetValue(nodeId, out var local))
             {
-                // Exists locally → recurse
-                await ProcessSubjectNodeChangesAsync(localChildren[index].Subject, node.NodeId, session, ct);
+                // Exists locally → recurse to sync children
+                await ProcessSubjectNodeChangesAsync(local.Child.Subject, nodeId, session, ct);
             }
             else
             {
-                // New remote → create local
-                await CreateLocalSubjectAsync(property, node, index);
+                // New remote → create local (append to collection)
+                await CreateLocalSubjectAsync(property, node, index: null);
             }
         }
     }
@@ -395,36 +561,49 @@ async Task CreateLocalSubjectAsync(RegisteredSubjectProperty property, Reference
     // Reuse existing loader logic
     var subject = await _configuration.SubjectFactory.CreateSubjectAsync(property, node, _session, ct);
 
+    // Store NodeId mapping for identity tracking (used for collection matching on resync)
+    var nodeId = ExpandedNodeId.ToNodeId(node.NodeId, _session.NamespaceUris);
+    _subjectToNodeId[subject] = nodeId;
+
     // Add to local model with source tracking (prevents sync-back loop)
     using (SubjectChangeContext.WithSource(_opcUaSource))
     {
         if (property.IsSubjectReference)
             property.SetValue(subject);
         else if (property.IsSubjectCollection)
-            AddToCollection(property, subject, (int)index!);
+            AddToCollection(property, subject);  // Append (index not used - collections unordered)
         else if (property.IsSubjectDictionary)
-            AddToDictionary(property, subject, index!);
+            AddToDictionary(property, subject, index!);  // index = dictionary key
     }
 
     // Recurse to load children
-    await ProcessSubjectNodeChangesAsync(subject, node.NodeId, _session, ct);
+    await ProcessSubjectNodeChangesAsync(subject, nodeId, _session, ct);
 }
 
 async Task RemoveLocalSubjectAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index = null)
 {
+    // Clean up NodeId mapping
+    _subjectToNodeId.Remove(subject);
+
     using (SubjectChangeContext.WithSource(_opcUaSource))
     {
         if (property.IsSubjectReference)
             property.SetValue(null);
         else if (property.IsSubjectCollection)
-            RemoveFromCollection(property, (int)index!);
+            RemoveFromCollection(property, subject);  // Remove by subject reference
         else if (property.IsSubjectDictionary)
-            RemoveFromDictionary(property, index!);
+            RemoveFromDictionary(property, index!);   // Remove by key
     }
 }
 ```
 
-**Implementation note:** Helper methods like `AddToCollection`, `RemoveFromCollection`, `AddToDictionary`, `RemoveFromDictionary`, `FindPropertyForNodeId`, `FindSubjectForNodeId`, and `GetNodeIdForProperty` are implementation details to be defined during implementation. They handle the mechanics of modifying collections/dictionaries and mapping between OPC UA NodeIds and model properties.
+**Implementation note:** Helper methods like `AddToCollection`, `RemoveFromCollection`, `AddToDictionary`, `RemoveFromDictionary`, `FindPropertyForNodeId`, `FindSubjectForNodeId`, `GetNodeIdForProperty`, and `GetCollectionStructure` are implementation details to be defined during implementation. They handle the mechanics of modifying collections/dictionaries, mapping between OPC UA NodeIds and model properties, and reading attribute configuration.
+
+**Required state:**
+```csharp
+// Subject → NodeId mapping for collection identity matching
+private readonly Dictionary<IInterceptorSubject, NodeId> _subjectToNodeId = new();
+```
 
 ### Client Triggers
 
@@ -480,6 +659,9 @@ async Task OnReconnectedAsync()
         // Cleanup orphaned monitored items
     }
 
+    // Clear NodeId mapping - will be rebuilt during resync
+    _subjectToNodeId.Clear();
+
     // Full resync from server
     await ProcessSubjectNodeChangesAsync(_rootSubject, _rootNodeId, _session, ct);
 }
@@ -489,7 +671,8 @@ async Task OnReconnectedAsync()
 - Server is authoritative for OPC UA → Model direction
 - Local changes during disconnect are edge case
 - Simple and reliable
-- Existing subjects are reused where BrowseNames match
+- Existing subjects are reused where BrowseNames/NodeIds match
+- NodeId mapping rebuilt during resync (subjects matched by dictionary key or recreated)
 
 ### Server Triggers
 
@@ -931,7 +1114,7 @@ _diffBuilder.GetCollectionChanges(oldCollection, newCollection,
 ```
 
 **Reorder within same collection:** No-op for OPC UA.
-- Collections map to OPC UA folders with unordered child references
+- Whether Flat or Container, OPC UA has no ordering concept
 - `reorderedItems` is ignored - order is a .NET concept only
 - No OPC UA operations needed for pure reorders
 
@@ -990,6 +1173,14 @@ All open questions have been resolved through design review:
 | **Concurrent modifications** | Last-write-wins | Structural changes are rare; not worth complex conflict resolution |
 | **Dynamic types** | Shared `ShouldAddDynamic*` + `TypeResolver` | Same pattern for both client and server sides |
 | **Consistency model** | Eventual consistency | OPC UA has no transactions; strict consistency not feasible |
+| **Collection identity (OPC→Model)** | NodeId mapping | Index-based matching unreliable; NodeId is stable across browse calls |
+| **Dictionary identity (OPC→Model)** | BrowseName = key | Dictionary key is the natural identifier |
+| **Null vs empty collection** | Null = no folder; empty = folder with 0 children | Distinguishes "not set" from "empty set" |
+| **Shared subject BrowseName** | First-reference-wins | Subject gets one node; first property to sync determines BrowseName |
+| **Dictionary key types** | `ToString()` conversion | Keys become BrowseName strings; non-string keys must have consistent formatting |
+| **Collections for OPC UA** | Supported with Flat/Container option | Flat is default (cleaner paths), Container for compatibility |
+| **Collection node structure** | `CollectionNodeStructure.Flat` default | No intermediate node; children use `PropertyName[index]` pattern |
+| **Dictionary node structure** | Always Container | Keys could conflict with property names; no Flat option |
 
 ---
 
@@ -1403,6 +1594,86 @@ public class OpcUaClientSynchronizer : SubjectGraphSynchronizer<List<MonitoredIt
 **Strategy:** Implement OPC UA first, validate these abstractions work, then consider:
 
 - `GraphChangeQueue` - Channel-based queue for structural changes (if needed)
+
+---
+
+## Documentation Updates
+
+### Updates to opcua-mapping.md
+
+Add documentation for collection and dictionary node structure:
+
+1. **Collection Node Structure**
+   - `CollectionNodeStructure.Flat` (default): Children directly on parent with `PropertyName[index]` BrowseName
+   - `CollectionNodeStructure.Container`: Intermediate container node (FolderType by default)
+   - Configuration via `[OpcUaReference(CollectionStructure = ...)]`
+   - Container TypeDefinition via `[OpcUaNode(TypeDefinition = "...")]`
+
+2. **Dictionary Node Structure**
+   - Always uses container node (no Flat option)
+   - Keys become BrowseNames of children
+   - Keys could conflict with property names, hence container required
+
+3. **Examples**
+   ```csharp
+   // Collection - flat (default)
+   public partial IList<Machine> Machines { get; set; }
+   // Results in: Parent/Machines[0], Parent/Machines[1]
+
+   // Collection - container
+   [OpcUaReference(CollectionStructure = CollectionNodeStructure.Container)]
+   public partial IList<Machine> Machines { get; set; }
+   // Results in: Parent/Machines/Machines[0], Parent/Machines/Machines[1]
+
+   // Dictionary - always container
+   public partial IDictionary<string, Machine> Machines { get; set; }
+   // Results in: Parent/Machines/Machine1, Parent/Machines/Machine2
+   ```
+
+### Updates to opcua.md
+
+After implementation, add a new "Structural Synchronization" section to `docs/connectors/opcua.md` covering:
+
+### Structural Synchronization
+
+**Topics to document:**
+
+1. **Live Sync Overview**
+   - Bidirectional structural sync (add/remove subjects at runtime)
+   - Configuration options: `EnableLiveSync`, `EnableModelChangeEvents`, `EnablePeriodicResync`
+
+2. **Collections vs Dictionaries**
+   - Dictionaries always use container nodes (keys could conflict with properties)
+   - Collections default to flat structure (`Parent/Items[0]`) - cleaner, PLC-style
+   - Collections can use container structure for compatibility (`[OpcUaReference(CollectionStructure = Container)]`)
+   - Configure container TypeDefinition via `[OpcUaNode]` attribute
+
+3. **Null vs Empty Semantics**
+   - `null` collection/dictionary = no OPC UA folder node
+   - Empty `[]` or `{}` = folder node with 0 children
+   - On load: folder with 0 children → empty collection (not null)
+
+4. **BrowseName Handling**
+   - Dictionary items: BrowseName = dictionary key
+   - Collection items: BrowseName = `PropertyName[index]`
+   - Shared subjects: first-reference-wins for BrowseName
+   - Dictionary keys converted via `ToString()`
+
+5. **Eventual Consistency**
+   - Structural changes are eventually consistent
+   - Value changes may be skipped if structure not ready (no data loss - structure creation reads current values)
+   - Periodic resync recovers from missed events
+   - Error handling: retry once, log, continue
+
+6. **Consistency Windows**
+   - Brief window between structural change and OPC UA node creation
+   - Brief window between value change and node update
+   - Reconnection triggers full resync (server is source of truth)
+
+7. **Subject Identity**
+   - Collections: matched by NodeId mapping (not index)
+   - Dictionaries: matched by BrowseName (dictionary key)
+   - Single references: trivial match (only one child)
 
 ---
 
