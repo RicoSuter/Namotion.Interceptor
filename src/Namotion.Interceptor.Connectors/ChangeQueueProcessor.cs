@@ -83,17 +83,31 @@ public class ChangeQueueProcessor : IDisposable
             {
                 try
                 {
+                    // ReSharper disable AccessToDisposedClosure
                     while (await periodicTimer.WaitForNextTickAsync(linkedTokenSource.Token).ConfigureAwait(false))
                     {
                         await TryFlushAsync(linkedTokenSource.Token).ConfigureAwait(false);
                     }
+                    // ReSharper restore AccessToDisposedClosure
                 }
-                catch (OperationCanceledException)
+                catch (Exception ex)
                 {
-                    // Expected when stopping
+                    if (ex is not OperationCanceledException)
+                    {
+                        _logger.LogError(ex, "Failed to flush changes.");
+                    }
                 }
             }, linkedTokenSource.Token)
             : Task.CompletedTask;
+
+        if (periodicTimer is null)
+        {
+            _logger.LogWarning(
+                "Change queue processor is running without buffering (bufferTime <= 0). " +
+                "Each property change will be processed individually without deduplication, " +
+                "which can cause high CPU usage under load. " +
+                "Consider setting a bufferTime (e.g., 8-50ms) to enable batching and deduplication.");
+        }
 
         try
         {
@@ -114,7 +128,7 @@ public class ChangeQueueProcessor : IDisposable
 
                 if (periodicTimer is null)
                 {
-                    // Immediate path: send single change without buffering (zero allocation)
+                    // Immediate path: send a single change without buffering (zero allocation)
                     _immediateBuffer[0] = change;
                     try
                     {

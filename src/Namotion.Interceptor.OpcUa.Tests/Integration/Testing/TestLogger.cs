@@ -33,6 +33,14 @@ public sealed class TestLogger
     public void Log(string message)
     {
         var time = $"{_stopwatch.Elapsed.TotalSeconds:F1}s";
-        _output.WriteLine($"[{time}] [Test] {message}");
+        try
+        {
+            _output.WriteLine($"[{time}] [Test] {message}");
+        }
+        catch (InvalidOperationException)
+        {
+            // Ignore - this happens when logging during fixture cleanup
+            // when there's no active test context
+        }
     }
 }

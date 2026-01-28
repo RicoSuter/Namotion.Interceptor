@@ -11,6 +11,12 @@ public record OpcUaAdditionalReference
     public required string ReferenceType { get; init; }
 
     /// <summary>
+    /// The namespace URI for the reference type.
+    /// Used for custom reference types from imported nodesets.
+    /// </summary>
+    public string? ReferenceTypeNamespace { get; init; }
+
+    /// <summary>
     /// The target node identifier.
     /// </summary>
     public required string TargetNodeId { get; init; }
