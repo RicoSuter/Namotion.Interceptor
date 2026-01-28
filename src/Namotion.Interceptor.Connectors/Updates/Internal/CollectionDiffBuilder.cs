@@ -1,0 +1,239 @@
+using System.Collections;
+
+namespace Namotion.Interceptor.Connectors.Updates.Internal;
+
+/// <summary>
+/// Builds collection change operations (Insert/Remove/Move) by comparing old and new collections.
+/// Designed to be pooled and reused.
+/// </summary>
+internal sealed class CollectionDiffBuilder
+{
+    // Reusable containers
+    private readonly Dictionary<IInterceptorSubject, int> _oldIndexMap = new();
+    private readonly Dictionary<IInterceptorSubject, int> _newIndexMap = new();
+    private readonly Dictionary<IInterceptorSubject, int> _oldCommonIndexMap = new();
+    private readonly List<IInterceptorSubject> _oldCommonOrder = [];
+    private readonly List<IInterceptorSubject> _newCommonOrder = [];
+    private readonly HashSet<object> _oldKeys = [];
+
+    /// <summary>
+    /// Builds collection change operations.
+    /// </summary>
+    /// <param name="oldItems">The old collection items.</param>
+    /// <param name="newItems">The new collection items.</param>
+    /// <param name="operations">Output: structural operations (Insert/Remove/Move), or null if none.</param>
+    /// <param name="newItemsToProcess">Output: items that are new and need full processing, or null if none.</param>
+    /// <param name="reorderedItems">Output: items that were reordered (for Move operations), or null if none.</param>
+    public void GetCollectionChanges(
+        IReadOnlyList<IInterceptorSubject> oldItems,
+        IReadOnlyList<IInterceptorSubject> newItems,
+        out List<SubjectCollectionOperation>? operations,
+        out List<(int index, IInterceptorSubject item)>? newItemsToProcess,
+        out List<(int oldIndex, int newIndex, IInterceptorSubject item)>? reorderedItems)
+    {
+        operations = null;
+        newItemsToProcess = null;
+        reorderedItems = null;
+
+        // Build index maps
+        _oldIndexMap.Clear();
+        _newIndexMap.Clear();
+        for (var i = 0; i < oldItems.Count; i++)
+            _oldIndexMap[oldItems[i]] = i;
+        for (var i = 0; i < newItems.Count; i++)
+            _newIndexMap[newItems[i]] = i;
+
+        // Generate Remove operations in descending order.
+        // Descending order ensures each remove doesn't affect indices of subsequent removes
+        // when applied sequentially.
+        for (var i = oldItems.Count - 1; i >= 0; i--)
+        {
+            var item = oldItems[i];
+            if (!_newIndexMap.ContainsKey(item))
+            {
+                operations ??= [];
+                operations.Add(new SubjectCollectionOperation
+                {
+                    Action = SubjectCollectionOperationType.Remove,
+                    Index = i
+                });
+            }
+        }
+        // Keep descending order - do NOT reverse
+
+        // Generate Insert operations for new items
+        for (var i = 0; i < newItems.Count; i++)
+        {
+            var item = newItems[i];
+            if (!_oldIndexMap.ContainsKey(item))
+            {
+                newItemsToProcess ??= [];
+                newItemsToProcess.Add((i, item));
+            }
+        }
+
+        // Build common order lists to detect reordering
+        _oldCommonOrder.Clear();
+        _newCommonOrder.Clear();
+        for (var i = 0; i < oldItems.Count; i++)
+        {
+            if (_newIndexMap.ContainsKey(oldItems[i]))
+                _oldCommonOrder.Add(oldItems[i]);
+        }
+        for (var i = 0; i < newItems.Count; i++)
+        {
+            if (_oldIndexMap.ContainsKey(newItems[i]))
+                _newCommonOrder.Add(newItems[i]);
+        }
+
+        // Detect reordering and compute intermediate indices for moves
+        if (_oldCommonOrder.Count > 0 && !_oldCommonOrder.SequenceEqual(_newCommonOrder))
+        {
+            _oldCommonIndexMap.Clear();
+            for (var i = 0; i < _oldCommonOrder.Count; i++)
+                _oldCommonIndexMap[_oldCommonOrder[i]] = i;
+
+            // Build set of removed indices to compute index shifts for moves
+            HashSet<int>? removedIndices = null;
+            if (operations is not null)
+            {
+                foreach (var op in operations)
+                {
+                    if (op.Action == SubjectCollectionOperationType.Remove)
+                    {
+                        removedIndices ??= [];
+                        removedIndices.Add((int)op.Index);
+                    }
+                }
+            }
+
+            for (var i = 0; i < _newCommonOrder.Count; i++)
+            {
+                var item = _newCommonOrder[i];
+                var oldCommonIndex = _oldCommonIndexMap[item];
+                if (oldCommonIndex != i)
+                {
+                    var originalOldIndex = _oldIndexMap[item];
+                    var originalNewIndex = _newIndexMap[item];
+
+                    // Compute intermediate fromIndex: original index minus removes before it
+                    // This accounts for index shifts after removes are applied
+                    var removesBeforeOldIndex = CountRemovesBefore(removedIndices, originalOldIndex);
+                    var intermediateFromIndex = originalOldIndex - removesBeforeOldIndex;
+
+                    reorderedItems ??= [];
+                    reorderedItems.Add((intermediateFromIndex, originalNewIndex, item));
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Counts how many removed indices are less than the given index.
+    /// </summary>
+    private static int CountRemovesBefore(HashSet<int>? removedIndices, int index)
+    {
+        if (removedIndices is null)
+            return 0;
+
+        var count = 0;
+        foreach (var removedIndex in removedIndices)
+        {
+            if (removedIndex < index)
+                count++;
+        }
+        return count;
+    }
+
+    /// <summary>
+    /// Builds dictionary change operations.
+    /// </summary>
+    /// <param name="oldDictionary">The old dictionary.</param>
+    /// <param name="newDictionary">The new dictionary.</param>
+    /// <param name="operations">Output: structural operations (Insert/Remove), or null if none.</param>
+    /// <param name="newItemsToProcess">Output: items that are new and need full processing, or null if none.</param>
+    /// <param name="removedKeys">Output: keys that were removed, or null if none.</param>
+    public void GetDictionaryChanges(
+        IDictionary? oldDictionary,
+        IDictionary newDictionary,
+        out List<SubjectCollectionOperation>? operations,
+        out List<(object key, IInterceptorSubject item)>? newItemsToProcess,
+        out HashSet<object>? removedKeys)
+    {
+        operations = null;
+        newItemsToProcess = null;
+        removedKeys = null;
+
+        _oldKeys.Clear();
+        if (oldDictionary is not null)
+        {
+            foreach (var key in oldDictionary.Keys)
+                _oldKeys.Add(key);
+        }
+
+        // Track removed keys - start with all old keys, remove ones that still exist with same value
+        HashSet<object>? keysToRemove = _oldKeys.Count > 0 ? [.._oldKeys] : null;
+
+        foreach (DictionaryEntry entry in newDictionary)
+        {
+            var key = entry.Key;
+            if (entry.Value is not IInterceptorSubject newItem)
+                continue;
+
+            if (_oldKeys.Contains(key))
+            {
+                // Key exists in both - check if VALUE changed (different object reference)
+                var oldValue = oldDictionary![key];
+                if (ReferenceEquals(oldValue, newItem))
+                {
+                    // Same object - key is not removed, not a new item
+                    keysToRemove?.Remove(key);
+                }
+                else
+                {
+                    // Different object at same key - treat as Remove + Insert
+                    // Key stays in keysToRemove (will generate Remove)
+                    // Add to newItemsToProcess (will generate Insert)
+                    newItemsToProcess ??= [];
+                    newItemsToProcess.Add((key, newItem));
+                }
+            }
+            else
+            {
+                // New key
+                newItemsToProcess ??= [];
+                newItemsToProcess.Add((key, newItem));
+            }
+        }
+
+        // Only return removedKeys if there are actually keys to remove
+        if (keysToRemove is { Count: > 0 })
+        {
+            removedKeys = keysToRemove;
+        }
+    }
+
+    /// <summary>
+    /// Gets the new index for an item.
+    /// </summary>
+    public int GetNewIndex(IInterceptorSubject item) =>
+        _newIndexMap.GetValueOrDefault(item, -1);
+
+    /// <summary>
+    /// Gets items that exist in both old and new collections.
+    /// </summary>
+    public IReadOnlyList<IInterceptorSubject> GetCommonItems() => _newCommonOrder;
+
+    /// <summary>
+    /// Clears the builder for reuse. Call before returning to pool.
+    /// </summary>
+    public void Clear()
+    {
+        _oldIndexMap.Clear();
+        _newIndexMap.Clear();
+        _oldCommonIndexMap.Clear();
+        _oldCommonOrder.Clear();
+        _newCommonOrder.Clear();
+        _oldKeys.Clear();
+    }
+}

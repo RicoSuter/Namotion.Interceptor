@@ -185,7 +185,7 @@ The configuration file that defines the storage location and root subject type.
 
 ```json
 {
-    "type": "HomeBlaze.Storage.FluentStorageContainer",
+    "$type": "HomeBlaze.Storage.FluentStorageContainer",
     "storageType": "disk",
     "connectionString": "./Data"
 }
@@ -195,7 +195,7 @@ The configuration file that defines the storage location and root subject type.
 
 | Extension | Subject Type | Description |
 |-----------|--------------|-------------|
-| `.json` | Configured type | Subject defined by `type` property |
+| `.json` | Configured type | Subject defined by `$type` property |
 | `.md` | `MarkdownFile` | Interactive page with expressions |
 | Other | `GenericFile` | Basic file representation |
 
@@ -231,7 +231,7 @@ A subject defined inline within a markdown page using fenced code blocks.
 ~~~markdown
 ```subject(mymotor)
 {
-  "type": "HomeBlaze.Samples.Motor",
+  "$type": "HomeBlaze.Samples.Motor",
   "name": "My Motor"
 }
 ```
@@ -247,13 +247,17 @@ Paths reference subjects and properties in the object graph:
 
 | Prefix | Description | Example |
 |--------|-------------|---------|
-| `Root.` | Absolute from root | `Root.Children[demo].Children[motor.json]` |
+| `Root.` | Absolute from root | `Root.Demo.Conveyor` |
 | `this.` | Relative to current | `this.Child.Name` |
 | `../` | Parent navigation | `../Sibling.Temperature` |
 
+### Simplified Syntax
+
+For `[InlinePaths]` dictionaries, use dot notation: `Root.Demo.Conveyor`
+
 ### Bracket Notation
 
-Access dictionary children using brackets: `Children[folder-name].Children[file.json]`
+Use brackets when keys contain dots (like file extensions): `Root.Demo[Setup.md]`
 
 ---
 

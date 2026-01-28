@@ -15,7 +15,7 @@ internal class OpcUaSubjectServer : StandardServer
     public OpcUaSubjectServer(IInterceptorSubject subject, OpcUaSubjectServerBackgroundService source, OpcUaServerConfiguration configuration, ILogger logger)
     {
         _logger = logger;
-        _nodeManagerFactory = new CustomNodeManagerFactory(subject, source, configuration);
+        _nodeManagerFactory = new CustomNodeManagerFactory(subject, source, configuration, logger);
         AddNodeManager(_nodeManagerFactory);
     }
 
@@ -31,6 +31,16 @@ internal class OpcUaSubjectServer : StandardServer
 
     protected override void OnServerStarted(IServerInternal server)
     {
+        // Unsubscribe any existing handlers to prevent accumulation on server restart
+        if (_server is not null && _sessionCreatedHandler is not null)
+        {
+            _server.SessionManager.SessionCreated -= _sessionCreatedHandler;
+        }
+        if (_server is not null && _sessionClosingHandler is not null)
+        {
+            _server.SessionManager.SessionClosing -= _sessionClosingHandler;
+        }
+
         _server = server;
 
         _sessionCreatedHandler = (session, _) =>

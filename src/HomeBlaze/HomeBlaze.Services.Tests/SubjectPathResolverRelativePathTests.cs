@@ -320,4 +320,71 @@ public class SubjectPathResolverRelativePathTests : SubjectPathResolverTestBase
     }
 
     #endregion
+
+    #region Widget.Path scenario - Root.Demo.Conveyor with [InlinePaths]
+
+    [Fact]
+    public void ResolveFromRelativePath_WidgetPath_RootDemoConveyor_WithInlinePaths_Resolves()
+    {
+        // Arrange - Simulates Widget.Path = "Root.Demo.Conveyor"
+        // Root has [InlinePaths] Children dictionary containing "Demo"
+        // Demo has [InlinePaths] Children dictionary containing "Conveyor"
+        var conveyor = new TestContainerWithChildren(Context) { Name = "Conveyor" };
+        var demo = new TestContainerWithChildren(Context) { Name = "Demo" };
+        demo.Children["Conveyor"] = conveyor;
+
+        var root = new TestContainerWithChildren(Context) { Name = "Root" };
+        root.Children["Demo"] = demo;
+
+        RootManager.Root = root;
+
+        // Act - This is what Widget.ResolveSubject() does
+        var result = Resolver.ResolveFromRelativePath("Root.Demo.Conveyor");
+
+        // Assert
+        Assert.Same(conveyor, result);
+    }
+
+    [Fact]
+    public void ResolveFromRelativePath_WidgetPath_WithFileExtension_RequiresBrackets()
+    {
+        // Arrange - Simulates path with file extension like "Root.[Demo].[Inline.md]"
+        var inlineMd = new TestContainerWithChildren(Context) { Name = "Inline.md" };
+        var demo = new TestContainerWithChildren(Context) { Name = "Demo" };
+        demo.Children["Inline.md"] = inlineMd;
+
+        var root = new TestContainerWithChildren(Context) { Name = "Root" };
+        root.Children["Demo"] = demo;
+
+        RootManager.Root = root;
+
+        // Act - Use bracket notation to preserve dots in keys
+        var result = Resolver.ResolveFromRelativePath("Root.[Demo].[Inline.md]");
+
+        // Assert - Brackets preserve the dot in "Inline.md"
+        Assert.Same(inlineMd, result);
+    }
+
+    [Fact]
+    public void ResolveFromRelativePath_WidgetPath_WithFileExtension_WithoutBrackets_Fails()
+    {
+        // Arrange - Same structure as above
+        var inlineMd = new TestContainerWithChildren(Context) { Name = "Inline.md" };
+        var demo = new TestContainerWithChildren(Context) { Name = "Demo" };
+        demo.Children["Inline.md"] = inlineMd;
+
+        var root = new TestContainerWithChildren(Context) { Name = "Root" };
+        root.Children["Demo"] = demo;
+
+        RootManager.Root = root;
+
+        // Act - Without brackets, dots are treated as separators
+        // "Root.Demo.Inline.md" becomes "Root/Demo/Inline/md" - 4 segments, not 3
+        var result = Resolver.ResolveFromRelativePath("Root.Demo.Inline.md");
+
+        // Assert - Returns null because "Inline" and "md" are not valid keys
+        Assert.Null(result);
+    }
+
+    #endregion
 }

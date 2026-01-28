@@ -10,10 +10,10 @@ using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Packets;
 using MQTTnet.Server;
+using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources;
-using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -80,7 +80,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         _lifecycleInterceptor = _context.TryGetLifecycleInterceptor();
         if (_lifecycleInterceptor is not null)
         {
-            _lifecycleInterceptor.SubjectDetached += OnSubjectDetached;
+            _lifecycleInterceptor.SubjectDetaching += OnSubjectDetaching;
         }
 
         var optionsBuilder = new MqttServerOptionsBuilder()
@@ -240,7 +240,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             return cachedTopic;
         }
 
-        var path = property.TryGetSourcePath(_configuration.PathProvider, _subject);
+        var path = property.TryGetPath(_configuration.PathProvider, _subject);
         var topic = path is null ? null : MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
 
         // Add first, then validate (guarantees no memory leak)
@@ -263,7 +263,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             return cachedProperty;
         }
 
-        var (property, _) = _subject.TryGetPropertyFromSourcePath(path, _configuration.PathProvider);
+        var (property, _) = _subject.TryGetPropertyFromPath(path, _configuration.PathProvider);
         var propertyReference = property?.Reference;
 
         // Add first, then validate (guarantees no memory leak)
@@ -331,7 +331,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                 .TryGetRegisteredSubject()?
                 .GetAllProperties()
                 .Where(p => !p.HasChildSubjects)
-                .GetSourcePaths(_configuration.PathProvider, _subject);
+                .GetPaths(_configuration.PathProvider, _subject);
 
             if (properties is null) return;
 
@@ -415,7 +415,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         return Task.CompletedTask;
     }
 
-    private void OnSubjectDetached(SubjectLifecycleChange change)
+    private void OnSubjectDetaching(SubjectLifecycleChange change)
     {
         // TODO(perf): O(n) scan over all cached entries per detached subject.
         // Consider adding a reverse index (Dictionary<IInterceptorSubject, List<PropertyReference>>) for O(1) cleanup
@@ -447,7 +447,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
 
         if (_lifecycleInterceptor is not null)
         {
-            _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
+            _lifecycleInterceptor.SubjectDetaching -= OnSubjectDetaching;
         }
 
         var server = _mqttServer;

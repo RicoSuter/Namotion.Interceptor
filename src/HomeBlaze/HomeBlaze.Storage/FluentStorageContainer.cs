@@ -2,13 +2,14 @@ using FluentStorage;
 using FluentStorage.Blobs;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Services;
+using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Internal;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace HomeBlaze.Storage;
 
@@ -23,14 +24,18 @@ public partial class FluentStorageContainer :
 {
     private IBlobStorage? _client;
 
+    private IBlobStorage Client => _client
+        ?? throw new InvalidOperationException("Storage not connected");
+
     private readonly StoragePathRegistry _pathRegistry = new();
     private readonly FileSubjectFactory _subjectFactory;
     private readonly StorageHierarchyManager _hierarchyManager;
+    private readonly ILogger<FluentStorageContainer>? _logger;
+
     private readonly ConfigurableSubjectSerializer _serializer;
+
     private StorageFileWatcher? _fileWatcher;
     private JsonSubjectSynchronizer? _jsonSyncHelper;
-
-    private readonly ILogger<FluentStorageContainer>? _logger;
 
     /// <summary>
     /// Storage type identifier (e.g., "disk", "azure-blob").
@@ -59,6 +64,7 @@ public partial class FluentStorageContainer :
     /// <summary>
     /// Child subjects (files and folders).
     /// </summary>
+    [InlinePaths]
     [State]
     public partial Dictionary<string, IInterceptorSubject> Children { get; set; }
 
@@ -72,7 +78,15 @@ public partial class FluentStorageContainer :
         ? "Storage"
         : Path.GetFileName(ConnectionString.TrimEnd('/', '\\'));
 
-    public string Icon => "Storage";
+    public string IconName => "Storage";
+
+    [Derived]
+    public string IconColor => Status switch
+    {
+        StorageStatus.Connected => "Success",
+        StorageStatus.Error => "Error",
+        _ => "Warning"
+    };
 
     public FluentStorageContainer(
         SubjectTypeRegistry typeRegistry,
@@ -111,14 +125,14 @@ public partial class FluentStorageContainer :
     /// </summary>
     public async Task ConnectAsync(CancellationToken cancellationToken)
     {
-        var isInMemory = StorageType.ToLowerInvariant() == "inmemory";
+        var isInMemory = StorageType == "inmemory";
         if (!isInMemory && string.IsNullOrWhiteSpace(ConnectionString))
             throw new InvalidOperationException("ConnectionString is not configured");
 
         Status = StorageStatus.Initializing;
         try
         {
-            _client = StorageType.ToLowerInvariant() switch
+            _client = StorageType switch
             {
                 "disk" or "filesystem" => StorageFactory.Blobs.DirectoryFiles(
                     Path.GetFullPath(ConnectionString)),
@@ -152,12 +166,9 @@ public partial class FluentStorageContainer :
     /// </summary>
     private async Task ScanAsync(CancellationToken cancellationToken)
     {
-        if (_client == null)
-            throw new InvalidOperationException("Storage not connected");
-
         _logger?.LogInformation("Scanning storage...");
 
-        var blobs = await _client.ListAsync(recurse: true, cancellationToken: cancellationToken);
+        var blobs = await Client.ListAsync(recurse: true, cancellationToken: cancellationToken);
 
         _pathRegistry.Clear();
         var children = new Dictionary<string, IInterceptorSubject>();
@@ -169,20 +180,23 @@ public partial class FluentStorageContainer :
 
             try
             {
-                var subject = await _subjectFactory.CreateFromBlobAsync(_client, this, blob, cancellationToken);
+                var subject = await _subjectFactory.CreateFromBlobAsync(Client, this, blob, cancellationToken);
                 if (subject != null)
                 {
                     _hierarchyManager.PlaceInHierarchy(blob.FullPath, subject, children, context, this);
                     _pathRegistry.Register(subject, blob.FullPath);
 
-                    if (Path.GetExtension(blob.FullPath).Equals(".json", StringComparison.OrdinalIgnoreCase))
+                    if (Path.GetExtension(blob.FullPath).Equals(FileExtensions.Json, StringComparison.OrdinalIgnoreCase))
                     {
                         try
                         {
-                            var content = await _client.ReadTextAsync(blob.FullPath, cancellationToken: cancellationToken);
+                            var content = await Client.ReadTextAsync(blob.FullPath, cancellationToken: cancellationToken);
                             _pathRegistry.UpdateHash(blob.FullPath, StoragePathRegistry.ComputeHash(content));
                         }
-                        catch { /* Ignore hash computation errors */ }
+                        catch (Exception ex)
+                        {
+                            _logger?.LogWarning(ex, "Failed to compute hash for: {Path}", blob.FullPath);
+                        }
                     }
                 }
             }
@@ -231,22 +245,21 @@ public partial class FluentStorageContainer :
 
         if (subject != null)
         {
-            if (Path.GetExtension(relativePath).Equals(".json", StringComparison.OrdinalIgnoreCase))
+            if (Path.GetExtension(relativePath).Equals(FileExtensions.Json, StringComparison.OrdinalIgnoreCase))
             {
                 try
                 {
                     var content = await _client!.ReadTextAsync(relativePath);
                     _pathRegistry.UpdateHash(relativePath, StoragePathRegistry.ComputeHash(content));
                 }
-                catch { /* Ignore */ }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex, "Failed to compute hash for: {Path}", relativePath);
+                }
             }
 
-            _pathRegistry.Register(subject, relativePath);
-
-            var context = ((IInterceptorSubject)this).Context;
-            var children = new Dictionary<string, IInterceptorSubject>(Children);
-            _hierarchyManager.PlaceInHierarchy(relativePath, subject, children, context, this);
-            Children = children;
+            // Use reusable helper to add to hierarchy
+            AddToHierarchy(relativePath, subject);
 
             _logger?.LogInformation("Added file from external: {Path}", relativePath);
         }
@@ -279,11 +292,14 @@ public partial class FluentStorageContainer :
     {
         _logger?.LogDebug("File deleted: {Path}", relativePath);
 
-        _pathRegistry.Unregister(relativePath);
+        if (!_pathRegistry.TryGetSubject(relativePath, out var subject))
+        {
+            _logger?.LogDebug("Subject not found for path: {Path}", relativePath);
+            return Task.CompletedTask;
+        }
 
-        var children = new Dictionary<string, IInterceptorSubject>(Children);
-        _hierarchyManager.RemoveFromHierarchy(relativePath, children);
-        Children = children;
+        // Use reusable helper to remove from hierarchy
+        RemoveFromHierarchy(relativePath, subject);
 
         _logger?.LogInformation("Removed deleted file: {Path}", relativePath);
         return Task.CompletedTask;
@@ -312,7 +328,7 @@ public partial class FluentStorageContainer :
         var json = _subjectFactory.Serialize(subject);
         _pathRegistry.UpdateHash(path, StoragePathRegistry.ComputeHash(json));
 
-        await _client.WriteTextAsync(path, json, cancellationToken: cancellationToken);
+        await Client.WriteTextAsync(path, json, cancellationToken: cancellationToken);
 
         _logger?.LogDebug("Saved subject to storage: {Path}", path);
         return true;
@@ -323,17 +339,26 @@ public partial class FluentStorageContainer :
     /// </summary>
     public async Task AddSubjectAsync(string path, IInterceptorSubject subject, CancellationToken cancellationToken)
     {
-        if (_client == null)
-            throw new InvalidOperationException("Storage not connected");
-
         var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
         _fileWatcher?.MarkAsOwnWrite(fullPath);
 
         var json = _subjectFactory.Serialize(subject);
         _pathRegistry.UpdateHash(path, StoragePathRegistry.ComputeHash(json));
 
-        await _client.WriteTextAsync(path, json, cancellationToken: cancellationToken);
+        await Client.WriteTextAsync(path, json, cancellationToken: cancellationToken);
 
+        // Update hierarchy - extracted to reusable method
+        AddToHierarchy(path, subject);
+
+        _logger?.LogInformation("Added subject to storage: {Path}", path);
+    }
+
+    /// <summary>
+    /// Adds a subject to the hierarchy. Reusable helper for AddSubjectAsync and file watcher events.
+    /// </summary>
+    // TODO: Consider adding synchronization (lock) for thread safety if AddSubjectAsync/DeleteSubjectAsync can be called concurrently
+    private void AddToHierarchy(string path, IInterceptorSubject subject)
+    {
         var context = ((IInterceptorSubject)this).Context;
         var children = new Dictionary<string, IInterceptorSubject>(Children);
 
@@ -341,25 +366,19 @@ public partial class FluentStorageContainer :
         _hierarchyManager.PlaceInHierarchy(path, subject, children, context, this);
 
         Children = children;
-
-        _logger?.LogInformation("Added subject to storage: {Path}", path);
     }
 
     /// <summary>
-    /// Deletes a subject from storage.
+    /// Removes a subject from the hierarchy. Reusable helper for delete operations and file watcher events.
     /// </summary>
-    public async Task DeleteSubjectAsync(string path, CancellationToken cancellationToken)
+    private void RemoveFromHierarchy(string path, IInterceptorSubject subject)
     {
-        if (_client == null)
-            throw new InvalidOperationException("Storage not connected");
-
-        var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
-        _fileWatcher?.MarkAsOwnWrite(fullPath);
-
-        await _client.DeleteAsync(path, cancellationToken: cancellationToken);
         _pathRegistry.Unregister(path);
 
-        _logger?.LogInformation("Deleted from storage: {Path}", path);
+        var children = new Dictionary<string, IInterceptorSubject>(Children);
+        _hierarchyManager.RemoveFromHierarchy(path, subject, children);
+
+        Children = children;
     }
 
     /// <summary>
@@ -367,10 +386,7 @@ public partial class FluentStorageContainer :
     /// </summary>
     public async Task<BlobMetadata?> GetBlobMetadataAsync(string path, CancellationToken cancellationToken)
     {
-        if (_client == null)
-            throw new InvalidOperationException("Storage not connected");
-
-        var blobs = await _client.ListAsync(folderPath: Path.GetDirectoryName(path)?.Replace('\\', '/'),
+        var blobs = await Client.ListAsync(folderPath: Path.GetDirectoryName(path)?.Replace('\\', '/'),
             recurse: false, cancellationToken: cancellationToken);
         var blob = blobs.FirstOrDefault(b =>
             b.FullPath.Equals(path, StringComparison.OrdinalIgnoreCase) ||
@@ -387,10 +403,7 @@ public partial class FluentStorageContainer :
     /// </summary>
     public async Task<Stream> ReadBlobAsync(string path, CancellationToken cancellationToken)
     {
-        if (_client == null)
-            throw new InvalidOperationException("Storage not connected");
-
-        return await _client.OpenReadAsync(path, cancellationToken: cancellationToken);
+        return await Client.OpenReadAsync(path, cancellationToken: cancellationToken);
     }
 
     /// <summary>
@@ -398,13 +411,10 @@ public partial class FluentStorageContainer :
     /// </summary>
     public async Task WriteBlobAsync(string path, Stream content, CancellationToken cancellationToken)
     {
-        if (_client == null)
-            throw new InvalidOperationException("Storage not connected");
-
         var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
         _fileWatcher?.MarkAsOwnWrite(fullPath);
 
-        await _client.WriteAsync(path, content, append: false, cancellationToken: cancellationToken);
+        await Client.WriteAsync(path, content, append: false, cancellationToken: cancellationToken);
         _logger?.LogDebug("Wrote blob to storage: {Path}", path);
 
         // Notify the file subject to reload its in-memory state
@@ -419,22 +429,43 @@ public partial class FluentStorageContainer :
     /// </summary>
     public async Task DeleteBlobAsync(string path, CancellationToken cancellationToken)
     {
-        if (_client == null)
-            throw new InvalidOperationException("Storage not connected");
+        // Get subject BEFORE deleting (needed for hierarchy removal)
+        if (!_pathRegistry.TryGetSubject(path, out var subject))
+        {
+            _logger?.LogWarning("Cannot delete blob - subject not found in registry: {Path}", path);
+            return;
+        }
 
         var fullPath = Path.GetFullPath(Path.Combine(ConnectionString, path));
         _fileWatcher?.MarkAsOwnWrite(fullPath);
 
-        await _client.DeleteAsync(path, cancellationToken: cancellationToken);
+        await Client.DeleteAsync(path, cancellationToken: cancellationToken);
 
-        // Remove from hierarchy directly (don't rely on FileWatcher)
-        _pathRegistry.Unregister(path);
-        var children = new Dictionary<string, IInterceptorSubject>(Children);
-        _hierarchyManager.RemoveFromHierarchy(path, children);
-        Children = children;
+        // Remove from hierarchy - uses reusable helper
+        RemoveFromHierarchy(path, subject);
 
         _logger?.LogDebug("Deleted blob from storage: {Path}", path);
     }
+
+    /// <summary>
+    /// Opens the create subject wizard to add a new subject to this storage.
+    /// </summary>
+    [Operation(Title = "Create", Icon = "Add", Position = 1)]
+    public Task CreateAsync([FromServices] ISubjectSetupService subjectSetupService, CancellationToken cancellationToken)
+        => subjectSetupService.CreateSubjectAndAddToStorageAsync(this, cancellationToken);
+
+    /// <summary>
+    /// IStorageContainer - Deletes a subject by finding its path in the registry.
+    /// </summary>
+    public async Task DeleteSubjectAsync(IInterceptorSubject subject, CancellationToken cancellationToken)
+    {
+        if (!_pathRegistry.TryGetPath(subject, out var path))
+            throw new InvalidOperationException("Subject not found in storage registry");
+
+        // Delegate to DeleteBlobAsync which handles file deletion and hierarchy removal
+        await DeleteBlobAsync(path, cancellationToken);
+    }
+
 
     public override void Dispose()
     {

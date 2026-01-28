@@ -8,6 +8,7 @@ namespace HomeBlaze.E2E.Tests;
 /// Tests Monaco decorations, subject block editing, and expression editing.
 /// </summary>
 [Collection(nameof(PlaywrightCollection))]
+[Trait("Category", "Integration")]
 public class MarkdownEditorTests
 {
     private readonly PlaywrightFixture _fixture;
@@ -24,7 +25,7 @@ public class MarkdownEditorTests
         var page = await _fixture.CreatePageAsync();
 
         // Navigate to Inline.md (has ```subject(mymotor)```)
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/Children/Demo/Children/Inline.md");
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Inline.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // Open Split mode via dropdown menu
@@ -59,7 +60,7 @@ public class MarkdownEditorTests
         var page = await _fixture.CreatePageAsync();
 
         // Navigate to Inline.md (has {{ mymotor.Temperature }})
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/Children/Demo/Children/Inline.md");
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Inline.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // Open Split mode via dropdown menu
@@ -91,7 +92,7 @@ public class MarkdownEditorTests
         var page = await _fixture.CreatePageAsync();
 
         // Navigate to Inline.md (has a motor widget)
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/Children/Demo/Children/Inline.md");
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Inline.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // Initially, edit buttons on widgets should not be visible
@@ -119,7 +120,7 @@ public class MarkdownEditorTests
         var page = await _fixture.CreatePageAsync();
 
         // Navigate to Inline.md
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/Children/Demo/Children/Inline.md");
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Inline.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // Open Split mode via dropdown menu
@@ -152,7 +153,7 @@ public class MarkdownEditorTests
         var page = await _fixture.CreatePageAsync();
 
         // Navigate to Inline.md
-        await page.GotoAsync($"{_fixture.ServerAddress}pages/Children/Demo/Children/Inline.md");
+        await page.GotoAsync($"{_fixture.ServerAddress}pages/Demo/Inline.md");
         await page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
 
         // Open Split mode via dropdown menu

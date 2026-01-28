@@ -31,7 +31,7 @@ public class DynamicSubjectTests
     public void WhenCreatingDynamicSubject_ThenItImplementsInterfaces()
     {
         // Act
-        var subject = DynamicSubjectFactory.CreateDynamicSubject(null, typeof(IMotor), typeof(ISensor));
+        var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotor), typeof(ISensor));
         var motor = (IMotor)subject;
         var sensor = (ISensor)subject;
 
@@ -51,7 +51,8 @@ public class DynamicSubjectTests
             .Create()
             .WithRegistry();
 
-        var subject = DynamicSubjectFactory.CreateDynamicSubject(context, typeof(IMotor), typeof(ISensor));
+        var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotor), typeof(ISensor));
+        subject.Context.AddFallbackContext(context);
 
         // Act
         var registeredSubject = subject.TryGetRegisteredSubject()!;
@@ -73,7 +74,9 @@ public class DynamicSubjectTests
             .WithService(() => new TestInterceptor("a", logs), _ => false)
             .WithService(() => new TestInterceptor("b", logs), _ => false);
 
-        var subject = DynamicSubjectFactory.CreateDynamicSubject(context, typeof(IMotor), typeof(ISensor));
+        var subject = DynamicSubjectFactory.CreateDynamicSubject(typeof(IMotor), typeof(ISensor));
+        subject.Context.AddFallbackContext(context);
+
         var motor = (IMotor)subject;
         var sensor = (ISensor)subject;
 
@@ -82,8 +85,8 @@ public class DynamicSubjectTests
         sensor.Temperature = 25;
         var speed = motor.Speed;
         var temperature = sensor.Temperature;
-
-        ((IInterceptorSubject)subject).Context.RemoveFallbackContext(context);
+        
+        subject.Context.RemoveFallbackContext(context);
 
         // Assert & Act (read)
         Assert.Equal(102, motor.Speed);
@@ -97,7 +100,7 @@ public class DynamicSubjectTests
     public void WhenCreatingDynamicSubjectForClass_ThenItImplementsInterfaces()
     {
         // Arrange
-        var motor = DynamicSubjectFactory.CreateSubject<Motor>(null, typeof(IMotor), typeof(ISensor));
+        var motor = DynamicSubjectFactory.CreateSubject<Motor>(typeof(IMotor), typeof(ISensor));
         var motorFromInterface = (IMotor)motor;
         var sensor = (ISensor)motor;
 
@@ -142,12 +145,12 @@ public class DynamicSubjectTests
             _logs.Add($"{_name}: After write {context.Property.Name}");
         }
 
-        public void AttachTo(IInterceptorSubject subject)
+        public void AttachSubjectToContext(IInterceptorSubject subject)
         {
             _logs.Add($"{_name}: Attached");
         }
 
-        public void DetachFrom(IInterceptorSubject subject)
+        public void DetachSubjectFromContext(IInterceptorSubject subject)
         {
             _logs.Add($"{_name}: Detached");
         }

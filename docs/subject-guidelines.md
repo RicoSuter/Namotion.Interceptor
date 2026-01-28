@@ -250,6 +250,109 @@ public partial class Sensor
 }
 ```
 
+## Property Change Hooks
+
+The source generator creates optional partial method hooks for each partial property, allowing you to execute custom logic before or after property changes.
+
+### Generated Methods
+
+For each partial property `PropertyName`, the generator creates:
+- `partial void OnPropertyNameChanging(ref TProperty newValue, ref bool cancel)` - Called before setter runs
+- `partial void OnPropertyNameChanged(TProperty newValue)` - Called after successful write
+
+### Execution Order
+
+```
+Setter: OnChanging → (if not cancelled) Interceptors → Field Update → OnChanged → PropertyChanged event
+Getter: Field Read → Interceptors → Return
+```
+
+See [Interceptor Pipeline](interceptor.md#interceptor-pipeline) for how interceptors work.
+
+### Cancellation Example
+
+```csharp
+[InterceptorSubject]
+public partial class Person
+{
+    public partial string FirstName { get; set; }
+
+    partial void OnFirstNameChanging(ref string newValue, ref bool cancel)
+    {
+        if (string.IsNullOrWhiteSpace(newValue))
+        {
+            cancel = true;  // Reject empty names
+            return;
+        }
+        newValue = newValue.Trim();  // Or coerce the value
+    }
+}
+```
+
+### Post-Change Side Effects
+
+```csharp
+[InterceptorSubject]
+public partial class Sensor
+{
+    public partial double Temperature { get; set; }
+
+    partial void OnTemperatureChanged(double newValue)
+    {
+        if (newValue > 100)
+        {
+            Logger.LogWarning("High temperature: {Temp}", newValue);
+        }
+    }
+}
+```
+
+### When Hooks Are Called
+
+- `OnChanging` is always called when the setter is invoked
+- `OnChanged` is only called if:
+  - The change was not cancelled (`cancel` remained `false`)
+  - The interceptor chain performed the write (interceptors can skip writes)
+- If `OnChanged` throws, the property value is already written but `PropertyChanged` won't fire
+
+**Use property hooks when:**
+- Logic is specific to a single property
+- You need access to instance members
+- You want to validate, transform, or cancel changes
+- You need to react to successful property changes
+
+**Use Interceptors when:**
+- Logic applies to many properties/classes
+- You need cross-cutting concerns (logging, validation)
+- Logic should be configurable at runtime
+
+## INotifyPropertyChanged Support
+
+All generated classes automatically implement `INotifyPropertyChanged` for data binding compatibility with WPF, MAUI, Blazor, and other UI frameworks.
+
+```csharp
+[InterceptorSubject]
+public partial class Person
+{
+    public partial string FirstName { get; set; }
+}
+
+// Usage - no extra code needed
+var person = new Person(context);
+person.PropertyChanged += (s, e) => Console.WriteLine($"{e.PropertyName} changed");
+person.FirstName = "Rico";  // Fires PropertyChanged event
+```
+
+### Performance
+
+The `PropertyChanged?.Invoke(...)` pattern ensures zero overhead when no handlers are subscribed - only a null check occurs. The `PropertyChangedEventArgs` is not allocated unless the event has subscribers.
+
+### When PropertyChanged Fires
+
+The event fires only when a property actually changes:
+- Not fired if `OnChanging` cancels the change
+- Not fired if an interceptor skips the write
+
 ## Summary
 
 1. **Mark all stored properties `partial`** - Tracking everything is safer
@@ -260,3 +363,73 @@ public partial class Sensor
 6. **Abstract doesn't work** - Use `virtual` instead
 
 Most other C# patterns (nullable, required, init, virtual, override, data annotations) work naturally.
+
+## Implementing Hosted Subjects for DI
+
+> See [Hosting](hosting.md) for foundational concepts on hosted subjects and the hosting lifecycle.
+
+When creating a subject library that extends `BackgroundService`, provide a DI extension method using `AddHostedSubject<T>` from `Namotion.Interceptor.Hosting`.
+
+### DI Extension Method
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Hosting;
+
+namespace MyLibrary;
+
+public static class MySubjectServiceCollectionExtensions
+{
+    /// <summary>
+    /// Adds MySubject as a hosted service.
+    /// </summary>
+    /// <param name="services">The service collection.</param>
+    /// <param name="configure">Optional callback to configure the subject.</param>
+    /// <param name="contextResolver">
+    /// Optional context resolver. Only used if subject has a constructor accepting IInterceptorSubjectContext.
+    /// </param>
+    public static IServiceCollection AddMySubject(
+        this IServiceCollection services,
+        Action<MySubject>? configure = null,
+        Func<IServiceProvider, IInterceptorSubjectContext?>? contextResolver = null)
+        => services.AddHostedSubject(configure, contextResolver);
+}
+```
+
+### Required Project References
+
+```xml
+<ItemGroup>
+  <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.*" />
+  <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.*" />
+  <ProjectReference Include="..\Namotion.Interceptor.Hosting\Namotion.Interceptor.Hosting.csproj" />
+</ItemGroup>
+```
+
+### Usage
+
+```csharp
+// Minimal
+services.AddMySubject();
+
+// With configuration
+services.AddMySubject(subject =>
+{
+    subject.Name = "Sensor 1";
+    subject.PollingInterval = TimeSpan.FromSeconds(5);
+});
+```
+
+### Context Support (Optional)
+
+If your subject needs access to the `IInterceptorSubjectContext`, add an optional parameter to the constructor. `AddHostedSubject` will automatically detect and use it:
+
+```csharp
+public MySubject(IInterceptorSubjectContext? context = null, IMyDriver? driver = null)
+{
+    // Context is automatically passed if:
+    // 1. Subject has this constructor parameter, AND
+    // 2. Context is registered in DI or provided via contextResolver
+}
+```

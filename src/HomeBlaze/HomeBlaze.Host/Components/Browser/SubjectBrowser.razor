@@ -1,6 +1,7 @@
-@inherits HomeBlazorComponentBase
-
 @using HomeBlaze.Storage.Abstractions
+@using Namotion.Interceptor.Registry.Attributes
+
+@inherits HomeBlazorComponentBase
 
 @inject NavigationManager NavigationManager
 @inject IJSRuntime JsRuntime
@@ -152,8 +153,35 @@
             var registered = currentSubject.TryGetRegisteredSubject();
             var property = registered?.TryGetProperty(propertyName);
 
-            if (property == null || !property.HasChildSubjects)
+            if (property is not { HasChildSubjects: true })
+            {
+                // Try [InlinePaths] fallback
+                var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(currentSubject.GetType());
+                if (inlinePathsPropertyName != null)
+                {
+                    property = registered?.TryGetProperty(inlinePathsPropertyName);
+                    if (property is { HasChildSubjects: true })
+                    {
+                        // This segment is actually a child key, not a property name
+                        var childKey = propertyName;
+                        var child = SubjectPathResolverExtensions.FindChildByIndex(property, childKey);
+                        if (child != null)
+                        {
+                            currentPathParts.Add(childKey);
+                            // Use brackets for keys with dots to preserve them
+                            currentObjectPath = childKey.Contains('.')
+                                ? $"{currentObjectPath}[{childKey}]"
+                                : $"{currentObjectPath}.{childKey}";
+                            var breadcrumbPath = "/browser/" + string.Join("/", currentPathParts);
+                            _breadcrumbs.Add(new BreadcrumbItem(childKey, breadcrumbPath));
+                            _panes.Add(new SubjectPane { Subject = child, DisplayName = childKey, ObjectPath = currentObjectPath, PropertyName = inlinePathsPropertyName, Index = childKey });
+                            currentSubject = child;
+                            continue;
+                        }
+                    }
+                }
                 break;
+            }
 
             currentPathParts.Add(propertyName);
 
@@ -212,10 +240,18 @@
         }
 
         // Build display name and object path
-        var displayName = index != null ? $"{propertyName}[{index}]" : propertyName;
+        var isInlinePathsProperty = InlinePathsAttribute.IsInlinePathsProperty(
+            clickedPane.Subject.GetType(), propertyName);
+        var displayName = index != null
+            ? (isInlinePathsProperty ? index.ToString()! : $"{propertyName}[{index}]")
+            : propertyName;
         var parentPath = clickedPane.ObjectPath;
+        // Use brackets for [InlinePaths] keys with dots to preserve them
+        var indexStr = index?.ToString();
         var objectPath = index != null
-            ? $"{parentPath}.{propertyName}[{index}]"
+            ? (isInlinePathsProperty
+                ? (indexStr!.Contains('.') ? $"{parentPath}[{index}]" : $"{parentPath}.{index}")
+                : $"{parentPath}.{propertyName}[{index}]")
             : $"{parentPath}.{propertyName}";
 
         // Add the new subject pane
@@ -250,13 +286,41 @@
 
     private async Task OnPaneDelete(SubjectPane pane)
     {
-        if (pane.Subject is not IStorageFile storageFile)
+        // Get subject name for confirmation dialog
+        string subjectName;
+        IStorageContainer? storage = null;
+
+        if (pane.Subject is IStorageFile storageFile)
+        {
+            subjectName = storageFile.Name;
+            storage = storageFile.Storage;
+        }
+        else if (pane.Subject is IConfigurableSubject configurableSubject)
+        {
+            subjectName = pane.DisplayName;
+
+            // Find the parent IStorageContainer by traversing up the pane hierarchy
+            for (int i = _panes.IndexOf(pane) - 1; i >= 0; i--)
+            {
+                if (_panes[i].Subject is IStorageContainer container)
+                {
+                    storage = container;
+                    break;
+                }
+            }
+
+            if (storage == null)
+                return;
+        }
+        else
+        {
             return;
+        }
 
         // Show confirmation dialog
         var confirmed = await DialogService.ShowMessageBox(
-            "Delete File",
-            $"Are you sure you want to delete '{storageFile.Name}'?",
+            "Delete Subject",
+            $"Are you sure you want to delete '{subjectName}'?",
             yesText: "Delete",
             cancelText: "Cancel");
 
@@ -265,8 +329,8 @@
 
         try
         {
-            // Delete the file from storage
-            await storageFile.Storage.DeleteBlobAsync(storageFile.FullPath, CancellationToken.None);
+            // Delete the subject from storage
+            await storage.DeleteSubjectAsync(pane.Subject, CancellationToken.None);
 
             // Close this pane and any after it
             var paneIndex = _panes.IndexOf(pane);
@@ -285,7 +349,7 @@
         {
             await DialogService.ShowMessageBox(
                 "Delete Failed",
-                $"Failed to delete file: {ex.Message}",
+                $"Failed to delete: {ex.Message}",
                 yesText: "OK");
         }
     }
@@ -297,16 +361,29 @@
         // Skip the first pane (root) when building path
         foreach (var pane in _panes.Skip(1))
         {
-            // Add property name
-            if (pane.PropertyName != null)
-            {
-                pathParts.Add(Uri.EscapeDataString(pane.PropertyName));
-            }
+            // For [InlinePaths] properties, only add the index (key), not the property name
+            var parentPane = _panes[_panes.IndexOf(pane) - 1];
+            var isInlinePathsProperty = pane.PropertyName != null &&
+                InlinePathsAttribute.IsInlinePathsProperty(parentPane.Subject.GetType(), pane.PropertyName);
 
-            // Add index/key if present (for collections/dictionaries)
-            if (pane.Index != null)
+            if (isInlinePathsProperty && pane.Index != null)
             {
+                // Only add the key for [InlinePaths] properties
                 pathParts.Add(Uri.EscapeDataString(pane.Index.ToString()!));
+            }
+            else
+            {
+                // Add property name
+                if (pane.PropertyName != null)
+                {
+                    pathParts.Add(Uri.EscapeDataString(pane.PropertyName));
+                }
+
+                // Add index/key if present (for collections/dictionaries)
+                if (pane.Index != null)
+                {
+                    pathParts.Add(Uri.EscapeDataString(pane.Index.ToString()!));
+                }
             }
         }
 
@@ -323,13 +400,26 @@
         var breadcrumbParts = new List<string>();
         foreach (var pane in _panes.Skip(1))
         {
-            if (pane.PropertyName != null)
+            // For [InlinePaths] properties, only add the index (key), not the property name
+            var parentPane = _panes[_panes.IndexOf(pane) - 1];
+            var isInlinePathsProp = pane.PropertyName != null &&
+                InlinePathsAttribute.IsInlinePathsProperty(parentPane.Subject.GetType(), pane.PropertyName);
+
+            if (isInlinePathsProp && pane.Index != null)
             {
-                breadcrumbParts.Add(Uri.EscapeDataString(pane.PropertyName));
-            }
-            if (pane.Index != null)
-            {
+                // Only add the key for [InlinePaths] properties
                 breadcrumbParts.Add(Uri.EscapeDataString(pane.Index.ToString()!));
+            }
+            else
+            {
+                if (pane.PropertyName != null)
+                {
+                    breadcrumbParts.Add(Uri.EscapeDataString(pane.PropertyName));
+                }
+                if (pane.Index != null)
+                {
+                    breadcrumbParts.Add(Uri.EscapeDataString(pane.Index.ToString()!));
+                }
             }
 
             var breadcrumbPath = "/browser/" + string.Join("/", breadcrumbParts);

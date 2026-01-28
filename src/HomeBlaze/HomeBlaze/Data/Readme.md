@@ -50,7 +50,7 @@ root.json          -->         FluentStorageContainer
 
 ## Quick Start
 
-> **Try the Demo!** The `demo/` folder includes 5 pre-configured motors. Navigate to the **Browser** to see them live, or read the [Demo Setup Guide](demo/Setup.md).
+> **Try the Demo!** The `demo/` folder includes 5 pre-configured motors. Navigate to the **Browser** to see them live, or read the [Demo Setup Guide](Demo/Setup.md).
 
 ### Step 1: Configure Storage
 
@@ -58,7 +58,7 @@ Edit `root.json` to point to your data folder:
 
 ```json
 {
-    "type": "HomeBlaze.Storage.FluentStorageContainer",
+    "$type": "HomeBlaze.Storage.FluentStorageContainer",
     "storageType": "disk",
     "connectionString": "./Data"
 }
@@ -66,11 +66,11 @@ Edit `root.json` to point to your data folder:
 
 ### Step 2: Add Subjects
 
-Create JSON files with a `type` discriminator:
+Create JSON files with a `$type` discriminator:
 
 ```json
 {
-    "type": "HomeBlaze.Samples.Motor",
+    "$type": "HomeBlaze.Samples.Motor",
     "name": "Cooling Fan",
     "targetSpeed": 1500
 }
@@ -86,7 +86,7 @@ Create markdown files anywhere in the data folder. They'll appear in the navigat
 
 | Extension | Subject Type | Description |
 |-----------|--------------|-------------|
-| `.json` | *Polymorphic* | Deserialized via `type` property |
+| `.json` | *Polymorphic* | Deserialized via `$type` property |
 | `.md` | `MarkdownFile` | Rendered markdown with frontmatter |
 | `.markdown` | `MarkdownFile` | Alternative extension |
 | *folder* | `VirtualFolder` | Container for nested subjects |
@@ -138,8 +138,8 @@ Paths use familiar C# syntax:
 | Path | Description |
 |------|-------------|
 | `Root` | The root storage container |
-| `Root.Children[motor.json]` | A subject named "motor.json" |
-| `Root.Children[Demo].Children[Conveyor.json]` | Conveyor motor in Demo folder |
+| `Root.Children[motor]` | A motor subject (JSON without extension) |
+| `Root.Children[Demo].Children[Conveyor]` | Conveyor motor in Demo folder |
 
 ---
 
@@ -174,22 +174,14 @@ HomeBlaze supports multiple storage backends via FluentStorage:
 
 ## Demo System
 
-The `demo/` folder contains a working example with 5 motors simulating a small factory:
+The `demo/` folder contains a working example with 5 motors simulating a small factory. 
 
-| Equipment | Current Speed | Target Speed | Temperature |
-|-----------|---------------|--------------|-------------|
-| Conveyor Belt | {{ Root.Children[Demo].Children[Conveyor.json].CurrentSpeed }} | {{ Root.Children[Demo].Children[Conveyor.json].TargetSpeed }} | {{ Root.Children[Demo].Children[Conveyor.json].Temperature }} |
-| Exhaust Fan | {{ Root.Children[Demo].Children[ExhaustFan.json].CurrentSpeed }} | {{ Root.Children[Demo].Children[ExhaustFan.json].TargetSpeed }} | {{ Root.Children[Demo].Children[ExhaustFan.json].Temperature }} |
-| Cooling Fan | {{ Root.Children[Demo].Children[CoolingFan.json].CurrentSpeed }} | {{ Root.Children[Demo].Children[CoolingFan.json].TargetSpeed }} | {{ Root.Children[Demo].Children[CoolingFan.json].Temperature }} |
-| Water Pump | {{ Root.Children[Demo].Children[WaterPump.json].CurrentSpeed }} | {{ Root.Children[Demo].Children[WaterPump.json].TargetSpeed }} | {{ Root.Children[Demo].Children[WaterPump.json].Temperature }} |
-| Compressor | {{ Root.Children[Demo].Children[Compressor.json].CurrentSpeed }} | {{ Root.Children[Demo].Children[Compressor.json].TargetSpeed }} | {{ Root.Children[Demo].Children[Compressor.json].Temperature }} |
-
-👉 **[View Demo Setup Guide](demo/Setup.md)** for detailed exploration steps.
+👉 **[View Demo Setup Guide](Demo/Setup.md)** for detailed exploration steps.
 
 ## What's Next?
 
-1. 📂 **Explore the Demo** - Check out the [demo folder](demo/) with live motor simulations
-2. 📖 **Read Documentation** - Browse the [docs folder](docs/) for in-depth guides
+1. 📂 **Explore the Demo** - Check out the [demo folder](Demo/) with live motor simulations
+2. 📖 **Read Documentation** - Browse the [docs folder](Docs/) for in-depth guides
 3. 🔧 **Edit a Motor** - Click any motor in the Browser and change its target speed
 4. 📝 **External Edits** - Try editing `demo/CoolingFan.json` externally and watch it update!
 

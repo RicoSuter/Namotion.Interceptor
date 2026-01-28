@@ -187,4 +187,73 @@ public class SubjectPathResolverGetPathTests : SubjectPathResolverTestBase
         // Assert
         Assert.Empty(paths);
     }
+
+    [Fact]
+    public void GetPath_WithInlinePathsAttribute_ReturnsPathWithoutPropertyName()
+    {
+        // Arrange
+        var notes = new TestContainerWithChildren(Context) { Name = "Notes" };
+        var root = new TestContainerWithChildren(Context) { Name = "Root" };
+        root.Children = new Dictionary<string, TestContainerWithChildren> { ["Notes"] = notes };
+
+        // Act
+        var path = Resolver.GetPath(notes);
+
+        // Assert - Should be "Notes" not "Children[Notes]"
+        Assert.Equal("Notes", path);
+    }
+
+    [Fact]
+    public void GetPath_WithInlinePathsAttribute_ReturnsNestedPathWithoutPropertyNames()
+    {
+        // Arrange
+        var page = new TestContainerWithChildren(Context) { Name = "Page" };
+        var folder = new TestContainerWithChildren(Context) { Name = "Folder" };
+        folder.Children = new Dictionary<string, TestContainerWithChildren> { ["Page"] = page };
+        var root = new TestContainerWithChildren(Context) { Name = "Root" };
+        root.Children = new Dictionary<string, TestContainerWithChildren> { ["Folder"] = folder };
+
+        // Act
+        var path = Resolver.GetPath(page);
+
+        // Assert - Should be "Folder.Page" not "Children[Folder].Children[Page]"
+        Assert.Equal("Folder.Page", path);
+    }
+
+    [Fact]
+    public void GetPath_WithInlinePathsAttribute_SlashFormat_ReturnsSimplifiedPath()
+    {
+        // Arrange
+        var notes = new TestContainerWithChildren(Context) { Name = "Notes" };
+        var root = new TestContainerWithChildren(Context) { Name = "Root" };
+        root.Children = new Dictionary<string, TestContainerWithChildren> { ["Notes"] = notes };
+
+        // Act
+        var path = Resolver.GetPath(notes, PathFormat.Slash);
+
+        // Assert - Should be "Notes" not "Children/Notes"
+        Assert.Equal("Notes", path);
+    }
+
+    [Fact]
+    public void GetPath_ChildKeyMatchesPropertyName_ReturnsSimplifiedPath_ResolvesToProperty()
+    {
+        // Arrange - "Child" exists as both property name and dictionary key
+        // This test documents the asymmetry when using a dictionary key that matches a property name
+        var childProperty = new TestContainerWithChildren(Context) { Name = "Via Property" };
+        var root = new TestContainerWithChildren(Context) { Name = "Root" };
+        root.Child = childProperty;
+
+        // Act - Get path for the property-based child
+        var pathForProperty = Resolver.GetPath(childProperty);
+
+        // Assert - When a child key matches a property name, property takes precedence during resolution
+        // This documents that property names should be preferred in path resolution
+        Assert.NotNull(pathForProperty);
+        Assert.Equal("Child", pathForProperty);
+
+        // When resolving "Child", it resolves to the property, not a hypothetical dictionary entry
+        var resolved = Resolver.ResolveSubject(pathForProperty, PathFormat.Bracket, root);
+        Assert.Same(childProperty, resolved); // Property wins - documented behavior
+    }
 }

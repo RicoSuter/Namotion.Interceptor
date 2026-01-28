@@ -9,13 +9,12 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using MQTTnet;
 using MQTTnet.Packets;
+using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Performance;
-using Namotion.Interceptor.Sources;
-using Namotion.Interceptor.Sources.Paths;
 using Namotion.Interceptor.Tracking.Change;
-using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Mqtt.Client;
 
@@ -37,7 +36,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
     private readonly ConcurrentDictionary<string, PropertyReference?> _topicToProperty = new();
     private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
 
-    private LifecycleInterceptor? _lifecycleInterceptor;
+    private readonly SourceOwnershipManager _ownership;
 
     private IMqttClient? _client;
     private SubjectPropertyWriter? _propertyWriter;
@@ -56,13 +55,37 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
         _factory = new MqttClientFactory();
+        _ownership = new SourceOwnershipManager(
+            this,
+            onSubjectDetaching: CleanupTopicCachesForSubject);
 
         configuration.Validate();
     }
 
+    private void CleanupTopicCachesForSubject(IInterceptorSubject subject)
+    {
+        // Clean up topic caches for the detached subject
+        // TODO(perf): O(n) scan over all cached entries per detached subject.
+        // Consider adding a reverse index for O(1) cleanup if profiling shows this as a bottleneck.
+        foreach (var kvp in _propertyToTopic)
+        {
+            if (kvp.Key.Subject == subject)
+            {
+                _propertyToTopic.TryRemove(kvp.Key, out _);
+            }
+        }
+
+        foreach (var kvp in _topicToProperty)
+        {
+            if (kvp.Value?.Subject == subject)
+            {
+                _topicToProperty.TryRemove(kvp.Key, out _);
+            }
+        }
+    }
+
     /// <inheritdoc />
-    public bool IsPropertyIncluded(RegisteredSubjectProperty property) =>
-        _configuration.PathProvider.IsPropertyIncluded(property);
+    public IInterceptorSubject RootSubject => _subject;
 
     /// <inheritdoc />
     public int WriteBatchSize => 0; // No server-imposed limit for MQTT
@@ -72,12 +95,6 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
     {
         _propertyWriter = propertyWriter;
         _logger.LogInformation("Connecting to MQTT broker at {Host}:{Port}.", _configuration.BrokerHost, _configuration.BrokerPort);
-
-        _lifecycleInterceptor = _subject.Context.TryGetLifecycleInterceptor();
-        if (_lifecycleInterceptor is not null)
-        {
-            _lifecycleInterceptor.SubjectDetached += OnSubjectDetached;
-        }
 
         _client = _factory.CreateMqttClient();
         _client.ApplicationMessageReceivedAsync += OnMessageReceivedAsync;
@@ -118,107 +135,154 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
     }
 
     /// <inheritdoc />
-    public async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        var client = _client;
-        if (client is null || !client.IsConnected)
-        {
-            throw new InvalidOperationException("MQTT client is not connected.");
-        }
-
-        var length = changes.Length;
-        if (length == 0) return;
-
-        var messagesPool = ArrayPool<MqttApplicationMessage>.Shared;
-        var userPropsArrayPool = ArrayPool<List<MqttUserProperty>?>.Shared;
-
-        var messages = messagesPool.Rent(length);
-        var userPropertiesArray = _configuration.SourceTimestampPropertyName is not null
-            ? userPropsArrayPool.Rent(length)
-            : null;
-        var messageCount = 0;
-
         try
         {
-            var changesSpan = changes.Span;
-
-            // Build all messages first
-            for (var i = 0; i < length; i++)
+            var client = _client;
+            if (client is null || !client.IsConnected)
             {
-                var change = changesSpan[i];
-                var property = change.Property.TryGetRegisteredProperty();
-                if (property is null || property.HasChildSubjects)
+                return WriteResult.Failure(changes, new InvalidOperationException("MQTT client is not connected."));
+            }
+
+            var length = changes.Length;
+            if (length == 0) return WriteResult.Success;
+
+            var messagesPool = ArrayPool<MqttApplicationMessage>.Shared;
+            var userPropsArrayPool = ArrayPool<List<MqttUserProperty>?>.Shared;
+            var changeIndicesPool = ArrayPool<int>.Shared;
+
+            var messages = messagesPool.Rent(length);
+            var changeIndices = changeIndicesPool.Rent(length); // Track which original change index each message corresponds to
+            var userPropertiesArray = _configuration.SourceTimestampPropertyName is not null
+                ? userPropsArrayPool.Rent(length)
+                : null;
+
+            var messageCount = 0;
+            try
+            {
+                var changesSpan = changes.Span;
+
+                // Build all messages first
+                for (var i = 0; i < length; i++)
                 {
-                    continue;
+                    var change = changesSpan[i];
+                    var property = change.Property.TryGetRegisteredProperty();
+                    if (property is null || property.HasChildSubjects)
+                    {
+                        continue;
+                    }
+
+                    var topic = TryGetTopicForProperty(change.Property, property);
+                    if (topic is null) continue;
+
+                    byte[] payload;
+                    try
+                    {
+                        payload = _configuration.ValueConverter.Serialize(
+                            change.GetNewValue<object?>(),
+                            property.Type);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to serialize value for property {PropertyName}.", property.Name);
+                        continue;
+                    }
+
+                    var message = new MqttApplicationMessage
+                    {
+                        Topic = topic,
+                        PayloadSegment = new ArraySegment<byte>(payload),
+                        QualityOfServiceLevel = _configuration.DefaultQualityOfService,
+                        Retain = _configuration.UseRetainedMessages
+                    };
+
+                    if (userPropertiesArray is not null)
+                    {
+                        var userProps = UserPropertiesPool.Rent();
+                        userProps.Clear();
+                        userProps.Add(new MqttUserProperty(
+                            _configuration.SourceTimestampPropertyName!,
+                            _configuration.SourceTimestampConverter(change.ChangedTimestamp)));
+                        message.UserProperties = userProps;
+                        userPropertiesArray[messageCount] = userProps;
+                    }
+
+                    changeIndices[messageCount] = i;
+                    messages[messageCount++] = message;
                 }
 
-                var topic = TryGetTopicForProperty(change.Property, property);
-                if (topic is null) continue;
+                if (messageCount <= 0)
+                    return WriteResult.Success;
 
-                byte[] payload;
+                Exception? publishException = null;
+                var failedStartIndex = messageCount; // Index where failures start (in message space)
+
+#if USE_LOCAL_MQTTNET
                 try
                 {
-                    payload = _configuration.ValueConverter.Serialize(
-                        change.GetNewValue<object?>(),
-                        property.Type);
+                    await client.PublishManyAsync(
+                        new ArraySegment<MqttApplicationMessage>(messages, 0, messageCount),
+                        cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to serialize value for property {PropertyName}.", property.Name);
-                    continue;
+                    publishException = ex;
+                    failedStartIndex = 0; // All failed
                 }
-
-                var message = new MqttApplicationMessage
-                {
-                    Topic = topic,
-                    PayloadSegment = new ArraySegment<byte>(payload),
-                    QualityOfServiceLevel = _configuration.DefaultQualityOfService,
-                    Retain = _configuration.UseRetainedMessages
-                };
-
-                if (userPropertiesArray is not null)
-                {
-                    var userProps = UserPropertiesPool.Rent();
-                    userProps.Clear();
-                    userProps.Add(new MqttUserProperty(
-                        _configuration.SourceTimestampPropertyName!,
-                        _configuration.SourceTimestampConverter(change.ChangedTimestamp)));
-                    message.UserProperties = userProps;
-                    userPropertiesArray[messageCount] = userProps;
-                }
-
-                messages[messageCount++] = message;
-            }
-
-            if (messageCount > 0)
-            {
-#if USE_LOCAL_MQTTNET
-                await client.PublishManyAsync(
-                    new ArraySegment<MqttApplicationMessage>(messages, 0, messageCount),
-                    cancellationToken).ConfigureAwait(false);
 #else
                 for (var i = 0; i < messageCount; i++)
                 {
-                    await client.PublishAsync(messages[i], cancellationToken).ConfigureAwait(false);
-                }
-#endif
-            }
-        }
-        finally
-        {
-            if (userPropertiesArray is not null)
-            {
-                for (var i = 0; i < messageCount; i++)
-                {
-                    if (userPropertiesArray[i] is { } list)
+                    try
                     {
-                        UserPropertiesPool.Return(list);
+                        await client.PublishAsync(messages[i], cancellationToken).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        publishException = ex;
+                        failedStartIndex = i; // This and all remaining failed
+                        break;
                     }
                 }
-                userPropsArrayPool.Return(userPropertiesArray);
-            }
+#endif
 
-            messagesPool.Return(messages);
+                if (publishException is not null)
+                {
+                    // Build failed changes array from the failed message indices
+                    var failedCount = messageCount - failedStartIndex;
+                    var failedChanges = new SubjectPropertyChange[failedCount];
+                    for (var i = 0; i < failedCount; i++)
+                    {
+                        failedChanges[i] = changes.Span[changeIndices[failedStartIndex + i]];
+                    }
+                    return failedStartIndex > 0
+                        ? WriteResult.PartialFailure(failedChanges, publishException)
+                        : WriteResult.Failure(failedChanges, publishException);
+                }
+
+                return WriteResult.Success;
+            }
+            finally
+            {
+                if (userPropertiesArray is not null)
+                {
+                    for (var i = 0; i < messageCount; i++)
+                    {
+                        if (userPropertiesArray[i] is { } list)
+                        {
+                            UserPropertiesPool.Return(list);
+                        }
+                    }
+                    userPropsArrayPool.Return(userPropertiesArray);
+                }
+
+                changeIndicesPool.Return(changeIndices);
+                messagesPool.Return(messages);
+            }
+        }
+        catch (Exception ex)
+        {
+            return WriteResult.Failure(changes, ex);
         }
     }
 
@@ -233,7 +297,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
         var properties = registeredSubject
             .GetAllProperties()
-            .Where(p => !p.HasChildSubjects && IsPropertyIncluded(p))
+            .Where(p => !p.HasChildSubjects && _configuration.PathProvider.IsPropertyIncluded(p))
             .ToList();
 
         if (properties.Count == 0)
@@ -242,12 +306,20 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             return;
         }
 
-        var subscribeOptionsBuilder = _factory!.CreateSubscribeOptionsBuilder();
+        var subscribeOptionsBuilder = _factory.CreateSubscribeOptionsBuilder();
 
         foreach (var property in properties)
         {
             var topic = TryGetTopicForProperty(property.Reference, property);
             if (topic is null) continue;
+
+            if (!_ownership.ClaimSource(property.Reference))
+            {
+                _logger.LogError(
+                    "Property {Subject}.{Property} already owned by another source. Skipping MQTT subscription.",
+                    property.Subject.GetType().Name, property.Name);
+                continue;
+            }
 
             _topicToProperty[topic] = property.Reference;
             subscribeOptionsBuilder.WithTopicFilter(f => f
@@ -267,7 +339,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             return cachedTopic;
         }
 
-        var path = property.TryGetSourcePath(_configuration.PathProvider, _subject);
+        var path = property.TryGetPath(_configuration.PathProvider, _subject);
         var topic = path is null ? null : MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
 
         // Add first, then validate (guarantees no memory leak)
@@ -291,7 +363,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         }
 
         var path = MqttHelper.StripTopicPrefix(topic, _configuration.TopicPrefix);
-        var (property, _) = _subject.TryGetPropertyFromSourcePath(path, _configuration.PathProvider);
+        var (property, _) = _subject.TryGetPropertyFromPath(path, _configuration.PathProvider);
         var propertyReference = property?.Reference;
 
         // Add first, then validate (guarantees no memory leak)
@@ -393,28 +465,6 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         }
     }
 
-    private void OnSubjectDetached(SubjectLifecycleChange change)
-    {
-        // TODO(perf): O(n) scan over all cached entries per detached subject.
-        // Consider adding a reverse index (Dictionary<IInterceptorSubject, List<PropertyReference>>) for O(1) cleanup
-        // if profiling shows this as a bottleneck with large object graphs and frequent attach/detach cycles.
-        foreach (var kvp in _propertyToTopic)
-        {
-            if (kvp.Key.Subject == change.Subject)
-            {
-                _propertyToTopic.TryRemove(kvp.Key, out _);
-            }
-        }
-
-        foreach (var kvp in _topicToProperty)
-        {
-            if (kvp.Value?.Subject == change.Subject)
-            {
-                _topicToProperty.TryRemove(kvp.Key, out _);
-            }
-        }
-    }
-
     private MqttClientOptions GetClientOptions()
     {
         var options = new MqttClientOptionsBuilder()
@@ -445,11 +495,6 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             return;
         }
 
-        if (_lifecycleInterceptor is not null)
-        {
-            _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
-        }
-
         if (_connectionMonitor is not null)
         {
             await _connectionMonitor.DisposeAsync().ConfigureAwait(false);
@@ -477,7 +522,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             _client = null;
         }
 
-        // Clear caches to allow GC of subject references
+        _ownership.Dispose();
         _topicToProperty.Clear();
         _propertyToTopic.Clear();
 

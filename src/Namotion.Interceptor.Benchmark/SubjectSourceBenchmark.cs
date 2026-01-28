@@ -4,10 +4,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -42,7 +42,8 @@ public class SubjectSourceBenchmark
             .Select(i => $"Name{i}")
             .ToArray();
 
-        _source = new TestSubjectSource(_propertyNames.Length);
+        _car = new Car(_context);
+        _source = new TestSubjectSource(_propertyNames.Length) { RootSubject = _car };
         _service = new SubjectSourceBackgroundService(
             _source,
             _context,
@@ -50,12 +51,11 @@ public class SubjectSourceBenchmark
             bufferTime: TimeSpan.FromMilliseconds(1),
             retryTime: TimeSpan.FromSeconds(1));
 
-        _car = new Car(_context);
-
+        var registeredSubject = _car.TryGetRegisteredSubject()!;
         foreach (var name in _propertyNames)
         {
-            _car.TryGetRegisteredSubject()!
-                .AddProperty(name, typeof(string), static _ => "foo", static (_, _) => { });
+            var property = registeredSubject.AddProperty(name, typeof(string), static _ => "foo", static (_, _) => { });
+            property.Reference.SetSource(_source);
         }
 
         _cts = new CancellationTokenSource();
@@ -122,6 +122,8 @@ public class SubjectSourceBenchmark
 
         public SubjectPropertyWriter PropertyWriter { get; private set; }
 
+        public IInterceptorSubject RootSubject { get; set; }
+
         public TestSubjectSource(int targetCount)
         {
             _targetCount = targetCount;
@@ -137,8 +139,6 @@ public class SubjectSourceBenchmark
             _signal.WaitOne();
         }
 
-        public bool IsPropertyIncluded(RegisteredSubjectProperty property) => true;
-
         public Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
         {
             PropertyWriter = propertyWriter;
@@ -152,7 +152,7 @@ public class SubjectSourceBenchmark
 
         public int WriteBatchSize => int.MaxValue;
 
-        public ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+        public ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
         {
             _count += changes.Length;
 
@@ -161,7 +161,7 @@ public class SubjectSourceBenchmark
                 _signal.Set();
             }
 
-            return ValueTask.CompletedTask;
+            return new ValueTask<WriteResult>(WriteResult.Success);
         }
     }
 }

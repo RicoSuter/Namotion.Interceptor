@@ -70,7 +70,7 @@ public partial class Motor
     [State(Position = 2, Unit = StateUnit.DegreeCelsius)]
     public partial double Temperature { get; set; }
 
-    [State(Position = 3)]
+    [State(Position = 3, IsDiscrete = true)]
     public partial MotorStatus Status { get; set; }
 }
 ```
@@ -83,7 +83,7 @@ public partial class Motor
 | `Position` | Sort position in property panel | `1`, `2`, `3` |
 | `Unit` | Formatting unit | `StateUnit.DegreeCelsius` |
 | `IsCumulative` | Value accumulates over time | `true` for energy meters |
-| `IsSignal` | Precise value (not a sensor reading) | `true` for commands |
+| `IsDiscrete` | Discrete variable (binary on/off, every transition matters) vs analog (sensor readings) | `true` for commands, flags |
 | `IsEstimated` | Calculated/estimated value | `true` for predictions |
 
 **Available units:**
@@ -280,21 +280,21 @@ using Namotion.Interceptor.Registry.Attributes;
 public partial class Server
 {
     [State]
-    public partial ServerStatus Status { get; set; }
+    public partial ServiceStatus Status { get; set; }
 
     [Operation(Title = "Start", Position = 1)]
     public Task StartAsync() { /* ... */ }
 
     [Derived]
     [PropertyAttribute("Start", KnownAttributes.IsEnabled)]
-    public bool Start_IsEnabled => Status == ServerStatus.Stopped || Status == ServerStatus.Error;
+    public bool Start_IsEnabled => Status == ServiceStatus.Stopped || Status == ServiceStatus.Error;
 
     [Operation(Title = "Stop", Position = 2)]
     public Task StopAsync() { /* ... */ }
 
     [Derived]
     [PropertyAttribute("Stop", KnownAttributes.IsEnabled)]
-    public bool Stop_IsEnabled => Status == ServerStatus.Running;
+    public bool Stop_IsEnabled => Status == ServiceStatus.Running;
 }
 ```
 
@@ -558,14 +558,14 @@ Subjects are configured via JSON files. The Motor would be saved as:
 
 ```json
 {
-  "type": "HomeBlaze.Samples.Motor",
+  "$type": "HomeBlaze.Samples.Motor",
   "Name": "Pump Motor",
   "TargetSpeed": 1500,
   "SimulationInterval": "00:00:01"
 }
 ```
 
-Only `[Configuration]` properties are persisted. The `type` field enables polymorphic deserialization.
+Only `[Configuration]` properties are persisted. The `$type` field enables polymorphic deserialization.
 
 ## Summary
 
@@ -633,9 +633,10 @@ Use paths to reference subjects in the object graph. See [Configuration Guide - 
 
 | Prefix | Example |
 |--------|---------|
-| `Root.` | `Root.Children[demo].Children[motor.json]` |
+| `Root.` | `Root.Demo.Conveyor` |
 | `this.` | `this.Child.Property` |
 | `../` | `../Sibling.Property` |
+| Brackets | `Root.Demo[Setup.md]` (for keys with dots) |
 
 Use `SubjectPathResolver.ResolveFromRelativePath()` to resolve paths in code:
 
@@ -663,7 +664,7 @@ For subject path configuration properties, use the `SubjectPathField` component 
 <SubjectPathField @bind-Value="_path"
                   @bind-Value:after="OnFieldChanged"
                   Label="Subject Path"
-                  Placeholder="e.g., Root or Root.Children[demo]"
+                  Placeholder="e.g., Root or Root.Demo.Conveyor"
                   Class="mt-4" />
 ```
 
@@ -820,6 +821,158 @@ Edit components provide configuration forms:
 | `IsValidChanged` | Event fired when validity changes |
 | `IsDirtyChanged` | Event fired when dirty state changes |
 | `SaveAsync` | Persist changes |
+
+### Edit Component Lifecycle: OnInitialized vs OnParametersSet
+
+**CRITICAL:** Edit components must use `OnInitialized()` or `OnInitializedAsync()`, **NOT** `OnParametersSet()` or `OnParametersSetAsync()`.
+
+**Why?**
+
+`OnParametersSet()` is called **multiple times** whenever any parameter changes, which causes:
+- **Loss of user edits**: Form field values are reset to the Subject's current values
+- **Broken dirty tracking**: `_original*` values are reset, breaking `IsDirty` logic
+- **Poor UX**: Users lose their work mid-edit
+
+**Correct pattern with local state and dirty tracking:**
+
+```razor
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(Motor))]
+@implements ISubjectEditComponent
+
+<MudForm>
+    <MudTextField @bind-Value="_name"
+                  Label="Name"
+                  Required="true"
+                  OnKeyUp="OnFieldChanged" />
+
+    <MudNumericField @bind-Value="_targetSpeed"
+                     Label="Target Speed (RPM)"
+                     Min="0" Max="10000"
+                     Class="mt-4"
+                     OnChange="OnFieldChanged" />
+</MudForm>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private Motor? MotorSubject => Subject as Motor;
+
+    // Local backing fields for form inputs
+    private string _name = string.Empty;
+    private int _targetSpeed;
+
+    // Original values for dirty tracking
+    private string _originalName = string.Empty;
+    private int _originalTargetSpeed;
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(_name);
+    public bool IsDirty => _name != _originalName ||
+                           _targetSpeed != _originalTargetSpeed;
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    // ✓ CORRECT: Use OnInitialized - runs once when component is created
+    protected override void OnInitialized()
+    {
+        if (MotorSubject != null)
+        {
+            // Load values from subject into local fields
+            _name = MotorSubject.Name;
+            _targetSpeed = MotorSubject.TargetSpeed;
+
+            // Store originals for dirty tracking
+            _originalName = _name;
+            _originalTargetSpeed = _targetSpeed;
+        }
+    }
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (MotorSubject != null && IsValid)
+        {
+            // Apply local values back to subject
+            MotorSubject.Name = _name;
+            MotorSubject.TargetSpeed = _targetSpeed;
+
+            // Update originals after save
+            _originalName = _name;
+            _originalTargetSpeed = _targetSpeed;
+
+            IsDirtyChanged?.Invoke(false);
+        }
+
+        return Task.CompletedTask;
+    }
+}
+```
+
+**For async initialization (e.g., file loading):**
+
+```razor
+@implements ISubjectEditComponent
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private JsonFile? File => Subject as JsonFile;
+    private string _originalContent = string.Empty;
+    private string _currentContent = string.Empty;
+
+    public bool IsDirty => _currentContent != _originalContent;
+
+    // ✓ CORRECT: Use OnInitializedAsync for async operations
+    protected override async Task OnInitializedAsync()
+    {
+        if (File != null)
+        {
+            await using var stream = await File.ReadAsync(CancellationToken.None);
+            using var reader = new StreamReader(stream);
+            _originalContent = await reader.ReadToEndAsync();
+            _currentContent = _originalContent;
+        }
+    }
+}
+```
+
+**Why OnInitialized works:**
+
+Edit components are **recreated** when editing different subjects. The component lifetime matches the editing session:
+- Opening edit dialog → component created → `OnInitialized` runs once
+- Editing in dialog → component stays alive, parameters don't change
+- Closing/saving → component disposed
+- Opening different subject → **new component instance** → `OnInitialized` runs for new subject
+
+**Common mistake to avoid:**
+
+```razor
+// ✗ WRONG: Don't use OnParametersSet
+protected override void OnParametersSet()
+{
+    if (MotorSubject != null)
+    {
+        _name = MotorSubject.Name;         // Overwrites user edits!
+        _originalName = _name;              // Resets dirty tracking!
+    }
+}
+```
+
+This pattern applies to:
+- **Edit components** (opened via SubjectEditDialog)
+- **Setup/creation wizards** (SubjectSetupDialog uses the same edit components with `IsCreating = true`)
+- **Widget components** (if they use local state for inline editing)
+- **Configuration editors** (ConfigurationPropertiesEditor pattern)
 
 ### Page Components
 

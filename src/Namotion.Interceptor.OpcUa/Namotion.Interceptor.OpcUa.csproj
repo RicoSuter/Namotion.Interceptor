@@ -4,7 +4,13 @@
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <PackageLicenseExpression>GPL-2.0-only</PackageLicenseExpression>
+    <!-- Set to true to use local OPC UA project references (development), false for NuGet packages (production) -->
+    <UseLocalOpcUaProjects>false</UseLocalOpcUaProjects>
+  </PropertyGroup>
+
+  <!-- Define compiler constant when using local OPC UA projects -->
+  <PropertyGroup Condition="'$(UseLocalOpcUaProjects)' == 'true'">
+    <DefineConstants>$(DefineConstants);USE_LOCAL_OPCUA</DefineConstants>
   </PropertyGroup>
 
   <ItemGroup>
@@ -22,15 +28,21 @@
     <EmbeddedResource Include="NodeSets\*" />
   </ItemGroup>
 
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.0.10" />
-    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Server" Version="1.5.376.244" />
-    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Client" Version="1.5.376.244" />
+  <!-- Local project references for development -->
+  <ItemGroup Condition="'$(UseLocalOpcUaProjects)' == 'true'">
+    <ProjectReference Include="..\..\..\UA-.NETStandard\Libraries\Opc.Ua.Server\Opc.Ua.Server.csproj" />
+    <ProjectReference Include="..\..\..\UA-.NETStandard\Libraries\Opc.Ua.Client\Opc.Ua.Client.csproj" />
+  </ItemGroup>
+
+  <!-- NuGet package references for production -->
+  <ItemGroup Condition="'$(UseLocalOpcUaProjects)' != 'true'">
+    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Server" Version="1.5.378.65" />
+    <PackageReference Include="OPCFoundation.NetStandard.Opc.Ua.Client" Version="1.5.378.65" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Namotion.Interceptor.Dynamic\Namotion.Interceptor.Dynamic.csproj" />
-    <ProjectReference Include="..\Namotion.Interceptor.Sources\Namotion.Interceptor.Sources.csproj" />
+    <ProjectReference Include="..\Namotion.Interceptor.Connectors\Namotion.Interceptor.Connectors.csproj" />
   </ItemGroup>
 
 </Project>

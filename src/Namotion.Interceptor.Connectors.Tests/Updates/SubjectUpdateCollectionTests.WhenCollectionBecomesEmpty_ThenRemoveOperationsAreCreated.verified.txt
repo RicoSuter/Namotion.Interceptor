@@ -1,0 +1,20 @@
+﻿{
+  Root: 1,
+  Subjects: {
+    1: {
+      Items: {
+        Kind: Collection,
+        Timestamp: DateTimeOffset_1,
+        Operations: [
+          {
+            Index: 1
+          },
+          {
+            Index: 0
+          }
+        ],
+        Count: 0
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+﻿{
+  Root: 1,
+  Subjects: {
+    1: {
+      Lookup: {
+        Kind: Dictionary,
+        Timestamp: DateTimeOffset_1,
+        Operations: [
+          {
+            Index: key1
+          }
+        ],
+        Count: 1
+      }
+    }
+  }
+}

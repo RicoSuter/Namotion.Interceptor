@@ -1,6 +1,5 @@
 using HomeBlaze.Components.Abstractions.Attributes;
 using HomeBlaze.Services.Components;
-using HomeBlaze.Services;
 
 namespace HomeBlaze.Services.Tests;
 
@@ -9,7 +8,7 @@ public class SubjectComponentRegistryTests
     private static SubjectComponentRegistry CreateRegistryWithScanning()
     {
         var typeProvider = new TypeProvider();
-        typeProvider.AddAssemblies(typeof(SubjectComponentRegistryTests).Assembly);
+        typeProvider.AddAssembly(typeof(SubjectComponentRegistryTests).Assembly);
         return new SubjectComponentRegistry(typeProvider);
     }
 

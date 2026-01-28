@@ -34,7 +34,7 @@ public class LifecycleEventsTests
     }
 
     [Fact]
-    public void SubjectDetached_FiresWithCorrectReferenceCount()
+    public void SubjectDetaching_FiresWithCorrectReferenceCount()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -45,7 +45,7 @@ public class LifecycleEventsTests
         Assert.NotNull(lifecycleInterceptor);
 
         SubjectLifecycleChange? capturedEvent = null;
-        lifecycleInterceptor.SubjectDetached += change => capturedEvent = change;
+        lifecycleInterceptor.SubjectDetaching += change => capturedEvent = change;
 
         var parent = new Person(context) { FirstName = "Parent" };
         var child = new Person { FirstName = "Child" };
@@ -64,7 +64,7 @@ public class LifecycleEventsTests
     }
 
     [Fact]
-    public void MultipleReferences_EventsFireWithIncrementingAndDecrementingCounts()
+    public void MultipleReferences_EventsFireOnceForAttachAndDetach()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -78,7 +78,7 @@ public class LifecycleEventsTests
         var detachedEvents = new List<SubjectLifecycleChange>();
 
         lifecycleInterceptor.SubjectAttached += change => attachedEvents.Add(change);
-        lifecycleInterceptor.SubjectDetached += change => detachedEvents.Add(change);
+        lifecycleInterceptor.SubjectDetaching += change => detachedEvents.Add(change);
 
         var person = new Person(context) { FirstName = "Person" };
         var parent = new Person { FirstName = "Parent" };
@@ -87,32 +87,30 @@ public class LifecycleEventsTests
         person.Father = parent;
         person.Mother = parent;
 
-        // Assert - SubjectAttached fires twice with incrementing counts
-        // Note: attachedEvents[0] is for 'person' itself, [1] and [2] are for 'parent'
+        // Assert - SubjectAttached fires once (on first attach)
         var parentAttachEvents = attachedEvents.Where(e => e.Subject == parent).ToList();
-        Assert.Equal(2, parentAttachEvents.Count);
+        Assert.Single(parentAttachEvents);
         Assert.Equal(1, parentAttachEvents[0].ReferenceCount);
-        Assert.Equal(2, parentAttachEvents[1].ReferenceCount);
         Assert.Equal("Father", parentAttachEvents[0].Property?.Name);
-        Assert.Equal("Mother", parentAttachEvents[1].Property?.Name);
 
-        // Act - Detach one reference
+        // Verify reference count is updated
+        Assert.Equal(2, parent.GetReferenceCount());
+
+        // Act - Detach one reference (subject still in graph)
         person.Father = null;
 
-        // Assert - SubjectDetached fires with count 1
-        Assert.Single(detachedEvents);
-        Assert.Equal(parent, detachedEvents[0].Subject);
-        Assert.Equal(1, detachedEvents[0].ReferenceCount);
-        Assert.Equal("Father", detachedEvents[0].Property?.Name);
+        // Assert - SubjectDetaching does NOT fire yet (still has one reference)
+        Assert.Empty(detachedEvents);
+        Assert.Equal(1, parent.GetReferenceCount());
 
-        // Act - Detach second reference
+        // Act - Detach second reference (subject leaves graph)
         person.Mother = null;
 
-        // Assert - SubjectDetached fires with count 0
-        Assert.Equal(2, detachedEvents.Count);
-        Assert.Equal(parent, detachedEvents[1].Subject);
-        Assert.Equal(0, detachedEvents[1].ReferenceCount);
-        Assert.Equal("Mother", detachedEvents[1].Property?.Name);
+        // Assert - SubjectDetaching fires once (on last detach)
+        Assert.Single(detachedEvents);
+        Assert.Equal(parent, detachedEvents[0].Subject);
+        Assert.Equal(0, detachedEvents[0].ReferenceCount);
+        Assert.Equal("Mother", detachedEvents[0].Property?.Name);
     }
 
     [Fact]
@@ -130,7 +128,7 @@ public class LifecycleEventsTests
         var detachedEvents = new List<SubjectLifecycleChange>();
 
         lifecycleInterceptor.SubjectAttached += change => attachedEvents.Add(change);
-        lifecycleInterceptor.SubjectDetached += change => detachedEvents.Add(change);
+        lifecycleInterceptor.SubjectDetaching += change => detachedEvents.Add(change);
 
         var parent = new Person(context) { FirstName = "Parent" };
         var child1 = new Person { FirstName = "Child1" };
@@ -318,12 +316,12 @@ public class LifecycleEventsTests
         // Assert
         Assert.Single(attachedEvents);
         Assert.Equal(person, attachedEvents[0].Subject);
-        Assert.Equal(1, attachedEvents[0].ReferenceCount);
+        Assert.Equal(0, attachedEvents[0].ReferenceCount); // Root subjects have no property references
         Assert.Null(attachedEvents[0].Property); // Root subject has no parent property
     }
 
     [Fact]
-    public void SubjectDetached_FiresForRootSubject_WhenContextRemoved()
+    public void SubjectDetaching_FiresForRootSubject_WhenContextRemoved()
     {
         // Arrange
         var detachedEvents = new List<SubjectLifecycleChange>();
@@ -334,7 +332,7 @@ public class LifecycleEventsTests
         var lifecycleInterceptor = context.TryGetLifecycleInterceptor();
         Assert.NotNull(lifecycleInterceptor);
 
-        lifecycleInterceptor.SubjectDetached += change => detachedEvents.Add(change);
+        lifecycleInterceptor.SubjectDetaching += change => detachedEvents.Add(change);
 
         var person = new Person(context) { FirstName = "Person" };
 
@@ -367,7 +365,7 @@ public class LifecycleEventsTests
         var attachedEvents = new List<SubjectLifecycleChange>();
         var detachedEvents = new List<SubjectLifecycleChange>();
         lifecycleInterceptor.SubjectAttached += change => attachedEvents.Add(change);
-        lifecycleInterceptor.SubjectDetached += change => detachedEvents.Add(change);
+        lifecycleInterceptor.SubjectDetaching += change => detachedEvents.Add(change);
 
         // Act - Set to same value
         person.Father = child;
@@ -396,20 +394,82 @@ public class LifecycleEventsTests
 
         var events = new List<(string type, IInterceptorSubject subject, int count)>();
         lifecycleInterceptor.SubjectAttached += change =>
-            events.Add(("Attached", change.Subject, change.ReferenceCount));
-        lifecycleInterceptor.SubjectDetached += change =>
-            events.Add(("Detached", change.Subject, change.ReferenceCount));
+            events.Add(("Subject Attached", change.Subject, change.ReferenceCount));
+        lifecycleInterceptor.SubjectDetaching += change =>
+            events.Add(("Subject Detaching", change.Subject, change.ReferenceCount));
 
         // Act - Replace child1 with child2
         person.Father = child2;
 
         // Assert - Detach of old value happens before attach of new value
         Assert.Equal(2, events.Count);
-        Assert.Equal("Detached", events[0].type);
+        Assert.Equal("Subject Detaching", events[0].type);
         Assert.Equal(child1, events[0].subject);
         Assert.Equal(0, events[0].count);
-        Assert.Equal("Attached", events[1].type);
+        Assert.Equal("Subject Attached", events[1].type);
         Assert.Equal(child2, events[1].subject);
         Assert.Equal(1, events[1].count);
+    }
+
+    [Fact]
+    public void SubjectAttached_FiresAfterHandler_And_SubjectDetaching_FiresBeforeHandler()
+    {
+        // Arrange
+        var events = new List<(string source, string eventType, IInterceptorSubject subject)>();
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithLifecycle()
+            .WithService(() => new EventOrderTracker(events));
+
+        var lifecycleInterceptor = context.TryGetLifecycleInterceptor();
+        Assert.NotNull(lifecycleInterceptor);
+
+        lifecycleInterceptor.SubjectAttached += change =>
+            events.Add(("Event", "Attached", change.Subject));
+        lifecycleInterceptor.SubjectDetaching += change =>
+            events.Add(("Event", "Detaching", change.Subject));
+
+        // Act - attach
+        var person = new Person(context) { FirstName = "TestPerson" };
+
+        // Assert - SubjectAttached fires AFTER HandleLifecycleChange(attach)
+        Assert.Equal(2, events.Count);
+        Assert.Equal("Handler", events[0].source);
+        Assert.Equal("attached", events[0].eventType);
+        Assert.Equal(person, events[0].subject);
+        Assert.Equal("Event", events[1].source);
+        Assert.Equal("Attached", events[1].eventType);
+        Assert.Equal(person, events[1].subject);
+
+        events.Clear();
+
+        // Act - detach
+        ((IInterceptorSubject)person).Context.RemoveFallbackContext(context);
+
+        // Assert - SubjectDetaching fires BEFORE HandleLifecycleChange(detach)
+        Assert.Equal(2, events.Count);
+        Assert.Equal("Event", events[0].source);
+        Assert.Equal("Detaching", events[0].eventType);
+        Assert.Equal(person, events[0].subject);
+        Assert.Equal("Handler", events[1].source);
+        Assert.Equal("detached", events[1].eventType);
+        Assert.Equal(person, events[1].subject);
+    }
+
+    private class EventOrderTracker : ILifecycleHandler
+    {
+        private readonly List<(string source, string eventType, IInterceptorSubject subject)> _events;
+
+        public EventOrderTracker(List<(string source, string eventType, IInterceptorSubject subject)> events) => _events = events;
+
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
+        {
+            var type = change.IsContextAttach ? "attached" : change.IsContextDetach ? "detached" : null;
+            if (type is not null)
+            {
+                _events.Add(("Handler", type, change.Subject));
+            }
+        }
     }
 }

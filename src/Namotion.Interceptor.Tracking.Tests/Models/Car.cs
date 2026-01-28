@@ -23,17 +23,20 @@ namespace Namotion.Interceptor.Tracking.Tests.Models
         }
 
         public List<SubjectLifecycleChange> Attachements { get; } = new();
-        
+
         public List<SubjectLifecycleChange> Detachements { get; } = new();
 
-        public void AttachSubject(SubjectLifecycleChange change)
+        public void HandleLifecycleChange(SubjectLifecycleChange change)
         {
-            Attachements.Add(change);
-        }
-        
-        public void DetachSubject(SubjectLifecycleChange change)
-        {
-            Detachements.Add(change);
+            if (change.IsContextAttach)
+            {
+                Attachements.Add(change);
+            }
+
+            if (change.IsContextDetach)
+            {
+                Detachements.Add(change);
+            }
         }
 
         public override string ToString()

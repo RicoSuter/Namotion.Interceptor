@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
@@ -9,13 +10,15 @@ using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.Registry.Attributes;
-using Namotion.Interceptor.Sources.Paths;
+using Namotion.Interceptor.Registry.Paths;
 
 namespace HomeBlaze.Servers.OpcUa;
 
 /// <summary>
 /// OPC UA server subject that exposes other subjects via OPC UA protocol.
 /// </summary>
+[Category("Servers")]
+[Description("Exposes subjects via OPC UA protocol")]
 [InterceptorSubject]
 public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITitleProvider, IIconProvider, IServerSubject
 {
@@ -75,10 +78,12 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
     public partial int? BufferTimeMs { get; set; }
 
     /// <summary>
-    /// Retry delay time in seconds. Uses default if not specified.
+    /// Whether the server is enabled and should auto-start on application startup.
+    /// When stopped manually, this is set to false to prevent auto-restart.
     /// </summary>
     [Configuration]
-    public partial int? RetryTimeSeconds { get; set; }
+    [State]
+    public partial bool IsEnabled { get; set; }
 
     // State properties (runtime only)
 
@@ -86,41 +91,57 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
     /// Current server status.
     /// </summary>
     [State]
-    public partial ServerStatus Status { get; set; }
+    public partial ServiceStatus Status { get; set; }
 
     /// <summary>
     /// Error message when Status is Error.
     /// </summary>
     [State]
-    public partial string? ErrorMessage { get; set; }
+    public partial string? StatusMessage { get; set; }
 
     // Operations
 
     /// <summary>
-    /// Starts the OPC UA server.
+    /// Starts the OPC UA server and enables auto-start on next application startup.
     /// </summary>
     [Operation(Title = "Start", Position = 1, Icon = "Start", RequiresConfirmation = true)]
-    public Task StartAsync() => StartServerAsync(CancellationToken.None);
+    public Task StartAsync()
+    {
+        IsEnabled = true;
+        return StartServerAsync(CancellationToken.None);
+    }
 
     [Derived]
     [PropertyAttribute("Start", KnownAttributes.IsEnabled)]
-    public bool Start_IsEnabled => Status == ServerStatus.Stopped || Status == ServerStatus.Error;
+    public bool Start_IsEnabled => Status == ServiceStatus.Stopped || Status == ServiceStatus.Error;
 
     /// <summary>
-    /// Stops the OPC UA server.
+    /// Stops the OPC UA server and disables auto-start on next application startup.
     /// </summary>
     [Operation(Title = "Stop", Position = 2, Icon = "Stop", RequiresConfirmation = true)]
-    public Task StopAsync() => StopServerAsync(CancellationToken.None);
+    public Task StopAsync()
+    {
+        IsEnabled = false;
+        return StopServerAsync(CancellationToken.None);
+    }
 
     [Derived]
     [PropertyAttribute("Stop", KnownAttributes.IsEnabled)]
-    public bool Stop_IsEnabled => Status == ServerStatus.Running || Status == ServerStatus.Starting;
+    public bool Stop_IsEnabled => Status is ServiceStatus.Running or ServiceStatus.Starting; // TODO: Should check state of _serverService
 
     // Interface implementations
 
     public string? Title => Name;
 
-    public string? Icon => "Dns";
+    public string? IconName => "Dns";
+
+    [Derived]
+    public string? IconColor => Status switch
+    {
+        ServiceStatus.Running => "Success",
+        ServiceStatus.Error => "Error",
+        _ => "Warning"
+    };
 
     public OpcUaServer(
         RootManager rootManager,
@@ -133,12 +154,17 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
 
         Name = string.Empty;
         Path = string.Empty;
-        Status = ServerStatus.Stopped;
+        Status = ServiceStatus.Stopped;
+        IsEnabled = true;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await StartServerAsync(stoppingToken);
+        // Only auto-start if enabled (respects last persisted state)
+        if (IsEnabled)
+        {
+            await StartServerAsync(stoppingToken);
+        }
 
         // Keep running until cancelled
         try
@@ -163,13 +189,13 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
     {
         try
         {
-            Status = ServerStatus.Starting;
-            ErrorMessage = null;
+            Status = ServiceStatus.Starting;
+            StatusMessage = null;
 
             if (string.IsNullOrEmpty(Path))
             {
-                Status = ServerStatus.Error;
-                ErrorMessage = "Path is not configured";
+                Status = ServiceStatus.Error;
+                StatusMessage = "Path is not configured";
                 return;
             }
 
@@ -181,7 +207,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
 
             if (cancellationToken.IsCancellationRequested)
             {
-                Status = ServerStatus.Stopped;
+                Status = ServiceStatus.Stopped;
                 return;
             }
 
@@ -191,21 +217,19 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
                 : _pathResolver.ResolveSubject(Path);
             if (targetSubject == null)
             {
-                Status = ServerStatus.Error;
-                ErrorMessage = $"Could not resolve subject at path: {Path}";
+                Status = ServiceStatus.Error;
+                StatusMessage = $"Could not resolve subject at path: {Path}";
                 return;
             }
 
             // Build configuration with defaults
             var defaults = new OpcUaServerConfiguration
             {
-                PathProvider = DefaultSourcePathProvider.Instance,
                 ValueConverter = new OpcUaValueConverter()
             };
 
             var configuration = new OpcUaServerConfiguration
             {
-                PathProvider = DefaultSourcePathProvider.Instance,
                 ValueConverter = new OpcUaValueConverter(),
                 ApplicationName = ApplicationName ?? defaults.ApplicationName,
                 NamespaceUri = NamespaceUri ?? defaults.NamespaceUri,
@@ -213,20 +237,18 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
                 BaseAddress = BaseAddress ?? defaults.BaseAddress,
                 CleanCertificateStore = CleanCertificateStore ?? defaults.CleanCertificateStore,
                 BufferTime = BufferTimeMs.HasValue ? TimeSpan.FromMilliseconds(BufferTimeMs.Value) : defaults.BufferTime,
-                RetryTime = RetryTimeSeconds.HasValue ? TimeSpan.FromSeconds(RetryTimeSeconds.Value) : defaults.RetryTime
             };
 
             _serverService = targetSubject.CreateOpcUaServer(configuration, _logger);
-
             await this.AttachHostedServiceAsync(_serverService, cancellationToken);
 
-            Status = ServerStatus.Running;
+            Status = ServiceStatus.Running;
             _logger.LogInformation("OPC UA server started for path: {Path}", Path);
         }
         catch (Exception ex)
         {
-            Status = ServerStatus.Error;
-            ErrorMessage = ex.Message;
+            Status = ServiceStatus.Error;
+            StatusMessage = ex.Message;
             _logger.LogError(ex, "Failed to start OPC UA server");
         }
     }
@@ -237,7 +259,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
         {
             try
             {
-                Status = ServerStatus.Stopping;
+                Status = ServiceStatus.Stopping;
                 await this.DetachHostedServiceAsync(_serverService, cancellationToken);
                 _logger.LogInformation("OPC UA server stopped");
             }
@@ -248,7 +270,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
             finally
             {
                 _serverService = null;
-                Status = ServerStatus.Stopped;
+                Status = ServiceStatus.Stopped;
             }
         }
     }

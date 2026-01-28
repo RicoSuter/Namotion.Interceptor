@@ -1,0 +1,184 @@
+﻿{
+  Root: 1,
+  Subjects: {
+    1: {
+      child: {
+        Kind: Object,
+        Timestamp: {Scrubbed},
+        Id: 2
+      },
+      items: {
+        Kind: Collection,
+        Timestamp: {Scrubbed},
+        Items: [
+          {
+            Index: 0,
+            Id: 5
+          }
+        ],
+        Count: 1
+      },
+      lookup: {
+        Kind: Dictionary,
+        Count: 0
+      },
+      name: {
+        Kind: Value,
+        Value: Root,
+        Timestamp: {Scrubbed},
+        Attributes: {
+          status: {
+            Kind: Value,
+            Value: active
+          }
+        }
+      },
+      parent: {
+        Kind: Object
+      },
+      self: {
+        Kind: Object,
+        Timestamp: {Scrubbed},
+        Id: 1
+      }
+    },
+    2: {
+      child: {
+        Kind: Object
+      },
+      items: {
+        Kind: Collection,
+        Timestamp: {Scrubbed},
+        Items: [
+          {
+            Index: 0,
+            Id: 3
+          }
+        ],
+        Count: 1
+      },
+      lookup: {
+        Kind: Dictionary,
+        Timestamp: {Scrubbed},
+        Items: [
+          {
+            Index: key,
+            Id: 4
+          }
+        ],
+        Count: 1
+      },
+      name: {
+        Kind: Value,
+        Value: Child1,
+        Attributes: {
+          status: {
+            Kind: Value,
+            Value: active
+          }
+        }
+      },
+      parent: {
+        Kind: Object,
+        Timestamp: {Scrubbed},
+        Id: 1
+      },
+      self: {
+        Kind: Object
+      }
+    },
+    3: {
+      child: {
+        Kind: Object
+      },
+      items: {
+        Kind: Collection,
+        Count: 0
+      },
+      lookup: {
+        Kind: Dictionary,
+        Count: 0
+      },
+      name: {
+        Kind: Value,
+        Value: GrandChild,
+        Attributes: {
+          status: {
+            Kind: Value,
+            Value: active
+          }
+        }
+      },
+      parent: {
+        Kind: Object,
+        Timestamp: {Scrubbed},
+        Id: 1
+      },
+      self: {
+        Kind: Object
+      }
+    },
+    4: {
+      child: {
+        Kind: Object
+      },
+      items: {
+        Kind: Collection,
+        Count: 0
+      },
+      lookup: {
+        Kind: Dictionary,
+        Count: 0
+      },
+      name: {
+        Kind: Value,
+        Value: AnotherChild,
+        Attributes: {
+          status: {
+            Kind: Value,
+            Value: active
+          }
+        }
+      },
+      parent: {
+        Kind: Object,
+        Timestamp: {Scrubbed},
+        Id: 1
+      },
+      self: {
+        Kind: Object
+      }
+    },
+    5: {
+      child: {
+        Kind: Object
+      },
+      items: {
+        Kind: Collection,
+        Count: 0
+      },
+      lookup: {
+        Kind: Dictionary,
+        Count: 0
+      },
+      name: {
+        Kind: Value,
+        Value: Child2,
+        Attributes: {
+          status: {
+            Kind: Value,
+            Value: active
+          }
+        }
+      },
+      parent: {
+        Kind: Object,
+        Timestamp: {Scrubbed},
+        Id: 1
+      },
+      self: {
+        Kind: Object
+      }
+    }
+  }
+}

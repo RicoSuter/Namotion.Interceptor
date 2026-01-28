@@ -1,8 +1,8 @@
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Sources;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
@@ -22,6 +22,39 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
     private LifecycleInterceptor? _lifecycleInterceptor;
     private volatile OpcUaSubjectServer? _server;
     private int _consecutiveFailures;
+    private OpcUaServerDiagnostics? _diagnostics;
+    private DateTimeOffset? _startTime;
+    private Exception? _lastError;
+
+    /// <summary>
+    /// Gets diagnostic information about the server state.
+    /// </summary>
+    public OpcUaServerDiagnostics Diagnostics => _diagnostics ??= new OpcUaServerDiagnostics(this);
+
+    /// <summary>
+    /// Gets a value indicating whether the server is running.
+    /// </summary>
+    internal bool IsRunning => _server?.CurrentInstance != null;
+
+    /// <summary>
+    /// Gets the number of active sessions.
+    /// </summary>
+    internal int ActiveSessionCount => _server?.CurrentInstance?.SessionManager?.GetSessions()?.Count ?? 0;
+
+    /// <summary>
+    /// Gets the server start time.
+    /// </summary>
+    internal DateTimeOffset? StartTime => _startTime;
+
+    /// <summary>
+    /// Gets the last error.
+    /// </summary>
+    internal Exception? LastError => _lastError;
+
+    /// <summary>
+    /// Gets the consecutive failure count.
+    /// </summary>
+    internal int ConsecutiveFailures => _consecutiveFailures;
 
     public OpcUaSubjectServerBackgroundService(
         IInterceptorSubject subject,
@@ -34,9 +67,9 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
         _configuration = configuration;
     }
 
-    internal bool IsPropertyIncluded(RegisteredSubjectProperty property)
+    private bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {
-        return _configuration.PathProvider.IsPropertyIncluded(property);
+        return property.IsPropertyIncluded(_configuration.NodeMapper);
     }
 
     private ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
@@ -78,7 +111,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
         _lifecycleInterceptor = _context.TryGetLifecycleInterceptor();
         if (_lifecycleInterceptor is not null)
         {
-            _lifecycleInterceptor.SubjectDetached += OnSubjectDetached;
+            _lifecycleInterceptor.SubjectDetaching += OnSubjectDetaching;
         }
 
         try
@@ -89,7 +122,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
         {
             if (_lifecycleInterceptor is not null)
             {
-                _lifecycleInterceptor.SubjectDetached -= OnSubjectDetached;
+                _lifecycleInterceptor.SubjectDetaching -= OnSubjectDetaching;
             }
         }
     }
@@ -98,7 +131,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            var application = _configuration.CreateApplicationInstance();
+            var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
 
             if (_configuration.CleanCertificateStore)
             {
@@ -112,8 +145,12 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                 {
                     _server = server;
 
-                    await application.CheckApplicationInstanceCertificates(true);
-                    await application.Start(server);
+                    await application.CheckApplicationInstanceCertificatesAsync(true, ct: stoppingToken).ConfigureAwait(false);
+                    await application.StartAsync(server).ConfigureAwait(false);
+
+                    _startTime = DateTimeOffset.UtcNow;
+                    _consecutiveFailures = 0;
+                    _lastError = null;
 
                     using var changeQueueProcessor = new ChangeQueueProcessor(
                         source: this, _context,
@@ -121,31 +158,36 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                         _configuration.BufferTime, _logger);
 
                     await changeQueueProcessor.ProcessAsync(stoppingToken);
-                    _consecutiveFailures = 0;
                 }
                 finally
                 {
+                    _startTime = null;
                     var serverToClean = _server;
                     _server = null;
                     serverToClean?.ClearPropertyData();
                 }
             }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                // Normal shutdown - don't log as error
+            }
             catch (Exception ex)
             {
-                if (ex is not TaskCanceledException)
-                {
-                    _consecutiveFailures++;
-                    _logger.LogError(ex, "Failed to start OPC UA server (attempt {Attempt}).", _consecutiveFailures);
+                _consecutiveFailures++;
+                _lastError = ex;
+                _logger.LogError(ex, "Failed to start OPC UA server (attempt {Attempt}).", _consecutiveFailures);
 
-                    var delaySeconds = Math.Min(Math.Pow(2, _consecutiveFailures - 1), 30);
-                    await Task.Delay(TimeSpan.FromSeconds(delaySeconds), stoppingToken);
-                }
+                // Exponential backoff with jitter: 1s, 2s, 4s, 8s, 16s, 30s (capped) + 0-2s random jitter
+                // Jitter prevents thundering herd when multiple servers fail simultaneously
+                var baseDelay = Math.Min(Math.Pow(2, _consecutiveFailures - 1), 30);
+                var jitter = Random.Shared.NextDouble() * 2;
+                await Task.Delay(TimeSpan.FromSeconds(baseDelay + jitter), stoppingToken);
             }
             finally
             {
                 try
                 {
-                    ShutdownServer(application);
+                    await ShutdownServerAsync(application).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -155,7 +197,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
         }
     }
 
-    private void ShutdownServer(ApplicationInstance application)
+    private async Task ShutdownServerAsync(ApplicationInstance application)
     {
         try
         {
@@ -168,7 +210,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                 }
             }
 
-            application.Stop();
+            await application.StopAsync().ConfigureAwait(false);
         }
         catch (ServiceResultException e) when (e.StatusCode == StatusCodes.BadServerHalted)
         {
@@ -176,7 +218,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
         }
     }
 
-    private static void CleanCertificateStore(ApplicationInstance application)
+    private void CleanCertificateStore(ApplicationInstance application)
     {
         var path = application
             .ApplicationConfiguration
@@ -184,9 +226,23 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
             .ApplicationCertificate
             .StorePath;
 
-        if (Directory.Exists(path))
+        if (string.IsNullOrEmpty(path))
         {
-            Directory.Delete(path, true);
+            _logger.LogWarning("Certificate store path is empty, skipping cleanup.");
+            return;
+        }
+
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, true);
+                _logger.LogDebug("Cleaned certificate store at {Path}.", path);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to clean certificate store at {Path}. Continuing with existing certificates.", path);
         }
     }
 
@@ -210,7 +266,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
         }
     }
 
-    private void OnSubjectDetached(SubjectLifecycleChange change)
+    private void OnSubjectDetaching(SubjectLifecycleChange change)
     {
         _server?.RemoveSubjectNodes(change.Subject);
     }

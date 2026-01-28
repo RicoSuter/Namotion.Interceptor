@@ -1,0 +1,5 @@
+﻿[
+  - Device2.Children[0] -> Child1 (refs: 0, detached),
+  - Device2.Children[1] -> Child2 (refs: 0, detached),
+  - Root.Mother -> Device2 (refs: 0, detached)
+]

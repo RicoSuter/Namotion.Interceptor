@@ -1,0 +1,13 @@
+﻿{
+  Root: 1,
+  Subjects: {
+    1: {
+      FirstName: {
+        Kind: Value,
+        Value: {
+          ValueKind: String
+        }
+      }
+    }
+  }
+}

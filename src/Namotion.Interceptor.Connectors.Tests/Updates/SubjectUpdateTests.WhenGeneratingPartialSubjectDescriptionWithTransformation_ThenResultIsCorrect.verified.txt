@@ -1,0 +1,39 @@
+﻿{
+  Root: 1,
+  Subjects: {
+    1: {
+      children: {
+        Kind: Collection,
+        Items: [
+          {
+            Index: 2,
+            Id: 3
+          }
+        ]
+      },
+      father: {
+        Kind: Object,
+        Id: 2
+      },
+      firstName: {
+        Kind: Value,
+        Value: NewPerson,
+        Timestamp: {Scrubbed}
+      }
+    },
+    2: {
+      firstName: {
+        Kind: Value,
+        Value: NewFather,
+        Timestamp: {Scrubbed}
+      }
+    },
+    3: {
+      firstName: {
+        Kind: Value,
+        Value: TransformedValue,
+        Timestamp: {Scrubbed}
+      }
+    }
+  }
+}

@@ -31,12 +31,12 @@ public class DerivedPropertyChangeHandlerTests
         // Assert
         Assert.Contains(changes, c =>
             c.Property.Name == nameof(Person.FullName) &&
-            c.GetOldValue<string?>() == " " &&
-            c.GetNewValue<string?>() == "Rico ");
+            c.GetOldValue<string?>() == "NA" &&
+            c.GetNewValue<string?>() == "Rico");
 
         Assert.Contains(changes, c =>
             c.Property.Name == nameof(Person.FullName) &&
-            c.GetOldValue<string?>() == "Rico " &&
+            c.GetOldValue<string?>() == "Rico" &&
             c.GetNewValue<string?>() == "Rico Suter");
 
         Assert.Contains(changes, c =>
@@ -99,8 +99,8 @@ public class DerivedPropertyChangeHandlerTests
         Assert.Equal(10000, changes.Count);
         foreach (var c in changes)
         {
-            // the fullname should contain the timestamp as firstname
-            Assert.Equal(c.GetNewValue<string>(), $"{c.ChangedTimestamp} ");
+            // the fullname should contain the timestamp as firstname (trimmed, no trailing space)
+            Assert.Equal($"{c.ChangedTimestamp}", c.GetNewValue<string>());
         }
     }
 
@@ -386,5 +386,81 @@ public class DerivedPropertyChangeHandlerTests
             Update1 = update1,
             Update2 = update2,
         });
+    }
+
+    [Fact]
+    public void WhenSourcePropertyChanges_ThenDerivedPropertyFiresPropertyChanged()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithDerivedPropertyChangeDetection();
+
+        var person = new Person(context)
+        {
+            FirstName = "John",
+            LastName = "Doe"
+        };
+
+        var firedEvents = new List<string>();
+        person.PropertyChanged += (s, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act
+        person.FirstName = "Jane";
+
+        // Assert
+        Assert.Contains("FirstName", firedEvents);
+        Assert.Contains("FullName", firedEvents);
+    }
+
+    [Fact]
+    public void WhenSourceChanges_ThenNestedDerivedPropertiesFirePropertyChanged()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithDerivedPropertyChangeDetection();
+
+        var person = new Person(context)
+        {
+            FirstName = "John",
+            LastName = "Doe"
+        };
+
+        var firedEvents = new List<string>();
+        person.PropertyChanged += (s, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act
+        person.FirstName = "Jane";
+
+        // Assert - All levels should fire: FirstName -> FullName -> FullNameWithPrefix
+        Assert.Contains("FirstName", firedEvents);
+        Assert.Contains("FullName", firedEvents);
+        Assert.Contains("FullNameWithPrefix", firedEvents);
+    }
+
+    [Fact]
+    public void WhenSourceChanges_ThenAllDependentDerivedPropertiesFirePropertyChangedOnce()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithDerivedPropertyChangeDetection();
+
+        var person = new Person(context)
+        {
+            FirstName = "John",
+            LastName = "Doe"
+        };
+
+        var firedEvents = new List<string>();
+        person.PropertyChanged += (s, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act
+        person.FirstName = "Jane";
+
+        // Assert - Each derived property should fire exactly once (no duplicates)
+        Assert.Single(firedEvents, e => e == "FullName");
+        Assert.Single(firedEvents, e => e == "FullNameWithPrefix");
     }
 }

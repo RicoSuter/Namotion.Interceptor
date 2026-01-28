@@ -1,7 +1,3 @@
-using System.Reflection;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
-using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -14,7 +10,6 @@ namespace Namotion.Interceptor.OpcUa.Tests.Client;
 /// </summary>
 public class AutoHealingTests
 {
-    private readonly ILogger<OpcUaTypeResolver> _typeResolverLogger = NullLogger<OpcUaTypeResolver>.Instance;
 
     [Fact]
     public void IsRetryable_WithBadNodeIdUnknown_ReturnsFalse()
@@ -111,7 +106,7 @@ public class AutoHealingTests
     public void IsUnhealthy_WhenNotCreated_ReturnsTrue()
     {
         // Arrange - Create an item that is NOT marked as created
-        var monitoredItem = new MonitoredItem();
+        var monitoredItem = new MonitoredItem(NullTelemetryContext.Instance);
         // Created defaults to false
 
         // Act
@@ -159,25 +154,15 @@ public class AutoHealingTests
 
     private MonitoredItem CreateMonitoredItemWithStatus(uint statusCode)
     {
-        var monitoredItem = new MonitoredItem
+        var monitoredItem = new MonitoredItem(NullTelemetryContext.Instance)
         {
             StartNodeId = new NodeId("ns=2;s=TestNode"),
             AttributeId = Opc.Ua.Attributes.Value,
-            DisplayName = "TestItem"
+            DisplayName = "TestItem",
+            ServerId = 1 // Makes Created return true (Status.Id != 0)
         };
 
-        // Use reflection to set the internal m_status field
-        var status = Activator.CreateInstance(typeof(MonitoredItemStatus), nonPublic: true);
-        var errorField = typeof(MonitoredItemStatus).GetField("m_error", BindingFlags.NonPublic | BindingFlags.Instance);
-        errorField?.SetValue(status, new ServiceResult(statusCode));
-
-        var statusField = typeof(MonitoredItem).GetField("m_status", BindingFlags.NonPublic | BindingFlags.Instance);
-        statusField?.SetValue(monitoredItem, status);
-
-        // Mark as created
-        var createdField = typeof(MonitoredItem).GetField("m_created", BindingFlags.NonPublic | BindingFlags.Instance);
-        createdField?.SetValue(monitoredItem, true);
-
+        monitoredItem.SetError(new ServiceResult(statusCode));
         return monitoredItem;
     }
 

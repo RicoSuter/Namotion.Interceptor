@@ -1,7 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Storage.Abstractions;
-using HomeBlaze.Storage.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Storage.Files;
@@ -14,7 +13,7 @@ public partial class GenericFile : IStorageFile, ITitleProvider, IIconProvider
 {
     public string? Title => Name;
 
-    public string Icon => "InsertDriveFile";
+    public string IconName => "InsertDriveFile";
 
     public IStorageContainer Storage { get; }
     

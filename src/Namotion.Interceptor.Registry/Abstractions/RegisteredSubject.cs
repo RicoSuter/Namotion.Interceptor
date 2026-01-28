@@ -36,10 +36,13 @@ public class RegisteredSubject
         }
     }
 
+    /// <summary>
+    /// Gets all registered properties.
+    /// </summary>
     public ImmutableArray<RegisteredSubjectProperty> Properties => _properties.Values;
 
     /// <summary>
-    /// Gets all attributes which are attached to this property.
+    /// Gets all attributes that are attached to this property.
     /// </summary>
     public IEnumerable<RegisteredSubjectProperty> GetPropertyAttributes(string propertyName)
     {

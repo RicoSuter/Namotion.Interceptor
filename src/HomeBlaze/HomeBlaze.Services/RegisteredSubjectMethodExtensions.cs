@@ -53,39 +53,68 @@ public static class RegisteredSubjectMethodExtensions
     private static SubjectMethodInfo[] DiscoverMethods(Type type)
     {
         var methods = new List<SubjectMethodInfo>();
+        var discoveredMethods = new HashSet<string>();
 
+        // Discover methods from the type itself
         foreach (var method in type.GetMethods(BindingFlags.Public | BindingFlags.Instance))
         {
-            var operationAttr = method.GetCustomAttribute<OperationAttribute>();
-            var queryAttr = method.GetCustomAttribute<QueryAttribute>();
-
-            SubjectMethodAttribute? attribute = null;
-            SubjectMethodKind kind = SubjectMethodKind.Operation;
-
-            if (operationAttr != null)
+            var methodInfo = TryCreateMethodInfo(method);
+            if (methodInfo != null)
             {
-                attribute = operationAttr;
-                kind = SubjectMethodKind.Operation;
+                methods.Add(methodInfo);
+                discoveredMethods.Add(method.Name);
             }
-            else if (queryAttr != null)
+        }
+
+        // Discover methods from interfaces (for default interface implementations)
+        foreach (var interfaceType in type.GetInterfaces())
+        {
+            foreach (var method in interfaceType.GetMethods(BindingFlags.Public | BindingFlags.Instance))
             {
-                attribute = queryAttr;
-                kind = SubjectMethodKind.Query;
+                // Skip if already discovered from the type itself
+                if (discoveredMethods.Contains(method.Name))
+                    continue;
+
+                var methodInfo = TryCreateMethodInfo(method);
+                if (methodInfo != null)
+                {
+                    methods.Add(methodInfo);
+                    discoveredMethods.Add(method.Name);
+                }
             }
-
-            if (attribute == null)
-                continue;
-
-            var parameters = method.GetParameters()
-                .Select(p => new SubjectMethodParameter(p, ParameterConverter.IsSupported(p.ParameterType)))
-                .ToArray();
-
-            var resultType = GetUnwrappedResultType(method.ReturnType);
-
-            methods.Add(new SubjectMethodInfo(method, attribute, kind, parameters, resultType));
         }
 
         return methods.ToArray();
+    }
+
+    private static SubjectMethodInfo? TryCreateMethodInfo(MethodInfo method)
+    {
+        var operationAttribute = method.GetCustomAttribute<OperationAttribute>();
+        var queryAttribute = method.GetCustomAttribute<QueryAttribute>();
+
+        SubjectMethodAttribute? attribute = null;
+        SubjectMethodKind kind = SubjectMethodKind.Operation;
+
+        if (operationAttribute != null)
+        {
+            attribute = operationAttribute;
+            kind = SubjectMethodKind.Operation;
+        }
+        else if (queryAttribute != null)
+        {
+            attribute = queryAttribute;
+            kind = SubjectMethodKind.Query;
+        }
+
+        if (attribute == null)
+            return null;
+
+        var parameters = method.GetParameters()
+            .Select(p => new SubjectMethodParameter(p))
+            .ToArray();
+
+        var resultType = GetUnwrappedResultType(method.ReturnType);
+        return new SubjectMethodInfo(method, attribute, kind, parameters, resultType);
     }
 
     private static Type? GetUnwrappedResultType(Type returnType)

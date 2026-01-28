@@ -4,14 +4,11 @@ using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Cache;
 
-internal sealed class ReadInterceptorChain<TInterceptor, TProperty>
+internal sealed class ReadInterceptorChain<TProperty>
 {
-    public delegate TProperty ExecuteInterceptorFunc(TInterceptor interceptor, ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> a);
-
     public delegate TProperty ReadInterceptionFunc(ref PropertyReadContext context, Func<IInterceptorSubject, TProperty> terminal);
 
-    private readonly ImmutableArray<TInterceptor> _interceptors;
-    private readonly ExecuteInterceptorFunc _executeInterceptor;
+    private readonly ImmutableArray<IReadInterceptor> _interceptors;
     private readonly ReadInterceptionFunc _executeTerminal;
     private readonly ContinuationNode[] _continuations;
 
@@ -20,12 +17,10 @@ internal sealed class ReadInterceptorChain<TInterceptor, TProperty>
     private static Func<IInterceptorSubject, TProperty>? _threadLocalTerminal;
 
     public ReadInterceptorChain(
-        ImmutableArray<TInterceptor> interceptors,
-        ExecuteInterceptorFunc executeInterceptor,
+        ImmutableArray<IReadInterceptor> interceptors,
         ReadInterceptionFunc executeTerminal)
     {
         _interceptors = interceptors;
-        _executeInterceptor = executeInterceptor;
         _executeTerminal = executeTerminal;
 
         _continuations = new ContinuationNode[interceptors.Length];
@@ -53,17 +48,17 @@ internal sealed class ReadInterceptorChain<TInterceptor, TProperty>
         var interceptor = _interceptors[index];
         var continuation = _continuations[index];
 
-        return _executeInterceptor(interceptor, ref context, continuation.ContinuationDelegate);
+        return interceptor.ReadProperty(ref context, continuation.ContinuationDelegate);
     }
 
     private sealed class ContinuationNode
     {
-        private readonly ReadInterceptorChain<TInterceptor, TProperty> _chain;
+        private readonly ReadInterceptorChain<TProperty> _chain;
         private readonly int _nextIndex;
 
         public readonly ReadInterceptionDelegate<TProperty> ContinuationDelegate;
 
-        public ContinuationNode(ReadInterceptorChain<TInterceptor, TProperty> chain, int nextIndex)
+        public ContinuationNode(ReadInterceptorChain<TProperty> chain, int nextIndex)
         {
             _chain = chain;
             _nextIndex = nextIndex;

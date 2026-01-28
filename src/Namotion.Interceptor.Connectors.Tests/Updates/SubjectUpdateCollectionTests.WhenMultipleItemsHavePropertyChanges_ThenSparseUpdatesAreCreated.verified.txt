@@ -1,0 +1,34 @@
+﻿{
+  Root: 1,
+  Subjects: {
+    1: {
+      Items: {
+        Kind: Collection,
+        Items: [
+          {
+            Index: 0,
+            Id: 2
+          },
+          {
+            Index: 2,
+            Id: 3
+          }
+        ]
+      }
+    },
+    2: {
+      Name: {
+        Kind: Value,
+        Value: Child1Updated,
+        Timestamp: DateTimeOffset_1
+      }
+    },
+    3: {
+      Name: {
+        Kind: Value,
+        Value: Child3Updated,
+        Timestamp: DateTimeOffset_2
+      }
+    }
+  }
+}

@@ -63,9 +63,9 @@ Expressions resolve relative to the current page's embedded subjects first, then
 | Path | Resolution |
 |------|------------|
 | `mymotor.Speed` | Inline subject named `mymotor` embedded in current page |
-| `Root.Children[demo].Children[Conveyor.json].CurrentSpeed` | Absolute path from root |
+| `Root.Demo.Conveyor.CurrentSpeed` | Absolute path from root |
 
-See [Configuration Guide - Path Syntax](Configuration.md#path-syntax) for full path documentation including `this.`, `../`, and more.
+See [Configuration Guide - Path Syntax](Configuration.md#path-syntax) for full path documentation including `this.`, `../`, brackets for keys with dots, and more.
 
 ### Expression Features
 
@@ -82,7 +82,7 @@ Create subjects inline within your markdown using fenced code blocks:
 ~~~markdown
 ```subject(mymotor)
 {
-  "type": "HomeBlaze.Samples.Motor",
+  "$type": "HomeBlaze.Samples.Motor",
   "name": "My Motor",
   "targetSpeed": 2000,
   "simulationInterval": "00:00:01"
@@ -94,7 +94,7 @@ Create subjects inline within your markdown using fenced code blocks:
 
 - **Block type**: Use `subject(name)` as the language identifier
 - **Name**: The `name` in parentheses becomes the subject's key for expression references
-- **JSON content**: Valid JSON with `type` discriminator for polymorphic deserialization
+- **JSON content**: Valid JSON with `$type` discriminator for polymorphic deserialization
 
 ### Subject Lifecycle
 
@@ -112,7 +112,7 @@ Here's my motor:
 
 ```subject(motor1)
 {
-  "type": "HomeBlaze.Samples.Motor",
+  "$type": "HomeBlaze.Samples.Motor",
   "name": "Primary Motor",
   "targetSpeed": 1500
 }
@@ -130,7 +130,7 @@ Links between markdown pages use relative paths that HomeBlaze converts to prope
 ```markdown
 See the [Architecture Guide](Architecture.md) for details.
 
-Check the [demo setup](../demo/Setup.md) for examples.
+Check the [demo setup](../Demo/Setup.md) for examples.
 ```
 
 ### Link Resolution
@@ -164,7 +164,7 @@ position: 0
 
 ```subject(conveyor)
 {
-  "type": "HomeBlaze.Samples.Motor",
+  "$type": "HomeBlaze.Samples.Motor",
   "name": "Conveyor Belt",
   "targetSpeed": 600,
   "simulationInterval": "00:00:02"
@@ -177,7 +177,7 @@ Current speed: **{{ conveyor.CurrentSpeed }}** RPM
 
 ```subject(cooler)
 {
-  "type": "HomeBlaze.Samples.Motor",
+  "$type": "HomeBlaze.Samples.Motor",
   "name": "Cooling Fan",
   "targetSpeed": 1800,
   "simulationInterval": "00:00:01"
@@ -206,4 +206,4 @@ For more details, see [Motor Setup Guide](../samples/MotorSetup.md).
 
 - [Building Custom Subjects](BuildingSubjects.md) - Create subject types for embedding
 - [Configuration Guide](Configuration.md) - Configure storage and subjects
-- [Demo Setup Guide](../demo/Setup.md) - See embedded subjects in action
+- [Demo Setup Guide](../Demo/Setup.md) - See embedded subjects in action
