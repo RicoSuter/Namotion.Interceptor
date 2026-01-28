@@ -51,7 +51,7 @@ public class OpcUaServerConfiguration
     /// <summary>
     /// Gets or sets the time window to buffer incoming changes (default: 8ms).
     /// </summary>
-    public TimeSpan? BufferTime { get; set; }
+    public TimeSpan? BufferTime { get; set; } = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
     /// Gets or sets the base address for the OPC UA server.
@@ -71,7 +71,7 @@ public class OpcUaServerConfiguration
     /// Should only be set to true for testing or development scenarios.
     /// Default is false for security.
     /// </summary>
-    public bool AutoAcceptUntrustedCertificates { get; set; } = false;
+    public bool AutoAcceptUntrustedCertificates { get; set; }
 
     /// <summary>
     /// Gets or sets the base path for certificate stores.
@@ -196,7 +196,6 @@ public class OpcUaServerConfiguration
             TraceConfiguration = new TraceConfiguration
             {
                 OutputFilePath = "Logs/OpcUaServer.log",
-                TraceMasks = 519, // Security, errors, service result exceptions & trace
                 DeleteOnLoad = true
             },
             CertificateValidator = new CertificateValidator(TelemetryContext)

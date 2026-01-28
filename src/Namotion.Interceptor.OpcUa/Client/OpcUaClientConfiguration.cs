@@ -101,7 +101,7 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets or sets the time window to buffer incoming changes (default: 8ms).
     /// </summary>
-    public TimeSpan? BufferTime { get; set; }
+    public TimeSpan? BufferTime { get; set; } = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
     /// Gets or sets the retry time (default: 10s).
@@ -169,6 +169,7 @@ public class OpcUaClientConfiguration
 
     /// <summary>
     /// Gets or sets the subscription lifetime count (default: 100).
+    /// SubscriptionLifetimeCount shall be at least 3 * SubscriptionKeepAliveCount.
     /// </summary>
     public uint SubscriptionLifetimeCount { get; set; } = 100;
 

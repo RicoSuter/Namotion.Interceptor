@@ -89,13 +89,19 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
                     ValueConverter = new OpcUaValueConverter(),
                     SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
                     TelemetryContext = telemetryContext,
+
                     ReconnectInterval = TimeSpan.FromSeconds(5),
                     ReconnectHandlerTimeout = TimeSpan.FromSeconds(5),
-                    SessionTimeout = TimeSpan.FromSeconds(5),
-                    SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(5),
-                    KeepAliveInterval = TimeSpan.FromSeconds(5),
-                    OperationTimeout = TimeSpan.FromSeconds(5),
                     MaxReconnectDuration = TimeSpan.FromSeconds(15),
+                    SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(5),
+                    
+                    // SessionTimeout must be >= server's MinSessionTimeout (10s), use 30s for margin
+                    SessionTimeout = TimeSpan.FromSeconds(30),
+                    KeepAliveInterval = TimeSpan.FromSeconds(5),
+                    OperationTimeout = TimeSpan.FromSeconds(30),
+                    
+                    BufferTime = TimeSpan.FromMilliseconds(100),
+
                     CertificateStoreBasePath = certificateStoreBasePath ?? "pki"
                 };
 

@@ -87,6 +87,12 @@ public class OpcUaNodeAttribute : PathAttribute
     public string? DataType { get; init; }
 
     /// <summary>
+    /// Gets or sets the namespace URI for the DataType.
+    /// Used for custom data types from imported nodesets.
+    /// </summary>
+    public string? DataTypeNamespace { get; init; }
+
+    /// <summary>
     /// Gets or sets the sampling interval in milliseconds to be used in monitored item.
     /// Default is int.MinValue (not set), which uses the configuration default or OPC UA library default (-1 = server decides).
     /// Set to 0 for exception-based monitoring (immediate reporting on every change).

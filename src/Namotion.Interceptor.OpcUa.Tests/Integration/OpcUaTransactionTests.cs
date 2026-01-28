@@ -6,132 +6,132 @@ using Xunit.Abstractions;
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 
 [Trait("Category", "Integration")]
-public class OpcUaTransactionTests
+public class OpcUaTransactionTests : SharedServerTestBase
 {
-    private readonly ITestOutputHelper _output;
-    private TestLogger? _logger;
-
-    private OpcUaTestServer<TestRoot>? _server;
-    private OpcUaTestClient<TestRoot>? _client;
-    private PortLease? _port;
-
-    public OpcUaTransactionTests(ITestOutputHelper output)
-    {
-        _output = output;
-    }
+    public OpcUaTransactionTests(
+        SharedOpcUaServerFixture serverFixture,
+        SharedOpcUaClientFixture clientFixture,
+        ITestOutputHelper output)
+        : base(serverFixture, clientFixture, output) { }
 
     [Fact]
     public async Task Transaction_CommitSingleProperty_ServerReceivesChangeOnlyAfterCommit()
     {
-        try
+        var serverArea = ServerFixture.ServerRoot.Transactions.SingleProperty;
+        var clientArea = Client!.Root!.Transactions.SingleProperty;
+        var initialName = serverArea.Name;
+
+        using (var transaction = await Client.Context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
-            // Arrange
-            await StartServerAsync();
-            await StartClientAsync();
+            clientArea.Name = "Transaction Value";
 
-            Assert.NotNull(_server?.Root);
-            Assert.NotNull(_client?.Root);
+            // Server should still have old value before commit
+            Assert.Equal(initialName, serverArea.Name);
 
-            var initialName = _server.Root.Name;
-
-            // Act
-            using (var transaction = await _client.Context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
-            {
-                _client.Root.Name = "Transaction Value";
-
-                // Assert - server should still have old value before commit
-                Assert.Equal(initialName, _server.Root.Name);
-
-                await transaction.CommitAsync(CancellationToken.None);
-            }
-
-            // Wait for OPC UA sync
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => _server.Root.Name == "Transaction Value",
-                timeout: TimeSpan.FromSeconds(30),
-                message: "Server should receive committed transaction value");
+            await transaction.CommitAsync(CancellationToken.None);
         }
-        finally
-        {
-            await (_client?.StopAsync() ?? Task.CompletedTask);
-            await (_server?.StopAsync() ?? Task.CompletedTask);
-            _port?.Dispose();
-            _port = null;
-        }
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverArea.Name == "Transaction Value",
+            timeout: TimeSpan.FromSeconds(90),
+            message: "Server should receive committed transaction value");
     }
 
     [Fact]
     public async Task Transaction_CommitMultipleProperties_ServerReceivesAllChangesOnlyAfterCommit()
     {
-        try
+        var serverArea = ServerFixture.ServerRoot.Transactions.MultiProperty;
+        var clientArea = Client!.Root!.Transactions.MultiProperty;
+        var initialName = serverArea.Name;
+        var initialNumber = serverArea.Number;
+
+        using (var transaction = await Client.Context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
         {
-            // Arrange
-            await StartServerAsync();
-            await StartClientAsync();
+            clientArea.Name = "Multi-Property Test";
+            clientArea.Number = 123.45m;
 
-            Assert.NotNull(_server?.Root);
-            Assert.NotNull(_client?.Root);
+            // Server should still have old values before commit
+            Assert.Equal(initialName, serverArea.Name);
+            Assert.Equal(initialNumber, serverArea.Number);
 
-            var initialName = _server.Root.Name;
-            var initialNumber = _server.Root.Number;
-
-            // Act
-            using (var transaction = await _client.Context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
-            {
-                _client.Root.Name = "Multi-Property Test";
-                _client.Root.Number = 123.45m;
-
-                // Assert - server should still have old values before commit
-                Assert.Equal(initialName, _server.Root.Name);
-                Assert.Equal(initialNumber, _server.Root.Number);
-
-                await transaction.CommitAsync(CancellationToken.None);
-            }
-
-            // Wait for OPC UA sync of all properties
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => _server.Root.Name == "Multi-Property Test" && _server.Root.Number == 123.45m,
-                timeout: TimeSpan.FromSeconds(30),
-                message: "Server should receive all committed transaction values");
-
-            // Assert - server should now have all new values after commit
-            Assert.Equal("Multi-Property Test", _server.Root.Name);
-            Assert.Equal(123.45m, _server.Root.Number);
+            await transaction.CommitAsync(CancellationToken.None);
         }
-        finally
-        {
-            await (_client?.StopAsync() ?? Task.CompletedTask);
-            await (_server?.StopAsync() ?? Task.CompletedTask);
-            _port?.Dispose();
-            _port = null;
-        }
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverArea.Name == "Multi-Property Test" && serverArea.Number == 123.45m,
+            timeout: TimeSpan.FromSeconds(90),
+            message: "Server should receive all committed transaction values");
+
+        Assert.Equal("Multi-Property Test", serverArea.Name);
+        Assert.Equal(123.45m, serverArea.Number);
     }
 
-    private async Task StartServerAsync()
+    [Fact]
+    public async Task Transaction_DisposedWithoutCommit_ServerShouldNotReceiveChanges()
     {
-        _logger = new TestLogger(_output);
-        _port = await OpcUaTestPortPool.AcquireAsync();
+        var serverArea = ServerFixture.ServerRoot.Transactions.SingleProperty;
+        var clientArea = Client!.Root!.Transactions.SingleProperty;
 
-        _server = new OpcUaTestServer<TestRoot>(_logger);
-        await _server.StartAsync(
-            context => new TestRoot(context),
-            (context, root) =>
-            {
-                root.Connected = true;
-                root.Name = "Initial Server Value";
-                root.Number = 0m;
-            },
-            baseAddress: _port.BaseAddress,
-            certificateStoreBasePath: _port.CertificateStoreBasePath);
+        // First, set a known value via committed transaction
+        using (var setupTransaction = await Client.Context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            clientArea.Name = "InitialValue";
+            await setupTransaction.CommitAsync(CancellationToken.None);
+        }
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverArea.Name == "InitialValue",
+            timeout: TimeSpan.FromSeconds(90),
+            message: "Server should have initial value from setup transaction");
+
+        // Start transaction, make changes, but dispose without commit
+        using (var transaction = await Client.Context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            clientArea.Name = "UncommittedValue";
+            // Intentionally NOT calling CommitAsync - dispose will rollback
+        }
+
+        // Wait to ensure no sync happens
+        await Task.Delay(TimeSpan.FromSeconds(2));
+
+        // Server should still have initial value
+        Assert.Equal("InitialValue", serverArea.Name);
+        Logger.Log("Transaction rollback verified - server did not receive uncommitted changes");
     }
 
-    private async Task StartClientAsync()
+    [Fact]
+    public async Task Transaction_MultipleProperties_DisposedWithoutCommit_ServerShouldNotReceiveChanges()
     {
-        _client = new OpcUaTestClient<TestRoot>(_logger!);
-        await _client.StartAsync(
-            context => new TestRoot(context),
-            isConnected: root => root.Connected,
-            serverUrl: _port!.ServerUrl,
-            certificateStoreBasePath: _port.CertificateStoreBasePath);
+        var serverArea = ServerFixture.ServerRoot.Transactions.MultiProperty;
+        var clientArea = Client!.Root!.Transactions.MultiProperty;
+
+        // First, set known values via committed transaction
+        using (var setupTransaction = await Client.Context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            clientArea.Name = "SetupName";
+            clientArea.Number = 100m;
+            await setupTransaction.CommitAsync(CancellationToken.None);
+        }
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverArea.Name == "SetupName" && serverArea.Number == 100m,
+            timeout: TimeSpan.FromSeconds(90),
+            message: "Server should have initial values from setup transaction");
+
+        // Start transaction with multiple property changes, but dispose without commit
+        using (var transaction = await Client.Context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
+        {
+            clientArea.Name = "UncommittedName";
+            clientArea.Number = 999m;
+            // Intentionally NOT calling CommitAsync - dispose will rollback
+        }
+
+        // Wait to ensure no sync happens
+        await Task.Delay(TimeSpan.FromSeconds(2));
+
+        // Server should still have initial values
+        Assert.Equal("SetupName", serverArea.Name);
+        Assert.Equal(100m, serverArea.Number);
+        Logger.Log("Transaction rollback with multiple properties verified");
     }
 }
