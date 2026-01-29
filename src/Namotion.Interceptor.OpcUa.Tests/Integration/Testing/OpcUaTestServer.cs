@@ -91,7 +91,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
                     BaseAddress = _baseAddress,
                     ValueConverter = new OpcUaValueConverter(),
                     TelemetryContext = telemetryContext,
-                    CleanCertificateStore = false,
+                    CleanCertificateStore = true,
                     AutoAcceptUntrustedCertificates = true,
                     CertificateStoreBasePath = _certificateStoreBasePath,
                     
