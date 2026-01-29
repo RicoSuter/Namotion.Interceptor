@@ -98,4 +98,16 @@ public class ConnectorReferenceCounter<TData>
             return data;
         }
     }
+
+    /// <summary>
+    /// Gets all tracked subjects.
+    /// </summary>
+    /// <returns>All tracked subjects.</returns>
+    public IEnumerable<IInterceptorSubject> GetAllSubjects()
+    {
+        lock (_lock)
+        {
+            return _entries.Keys.ToList();
+        }
+    }
 }

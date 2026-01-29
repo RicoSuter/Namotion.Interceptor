@@ -1,5 +1,6 @@
 using System.Reflection;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry;
@@ -21,7 +22,7 @@ internal class CustomNodeManager : CustomNodeManager2
     private readonly OpcUaNodeFactory _nodeFactory;
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
-    private readonly Dictionary<RegisteredSubject, NodeState> _subjects = new();
+    private readonly ConnectorReferenceCounter<NodeState> _subjectRefCounter = new();
 
     public CustomNodeManager(
         IInterceptorSubject subject,
@@ -65,12 +66,16 @@ internal class CustomNodeManager : CustomNodeManager2
             }
         }
 
-        foreach (var subject in _subjects.Keys)
+        foreach (var subject in _subjectRefCounter.GetAllSubjects())
         {
-            foreach (var property in subject.Properties)
+            var registeredSubject = subject.TryGetRegisteredSubject();
+            if (registeredSubject != null)
             {
-                property.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
-                ClearAttributePropertyData(property);
+                foreach (var property in registeredSubject.Properties)
+                {
+                    property.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
+                    ClearAttributePropertyData(property);
+                }
             }
         }
     }
@@ -116,36 +121,167 @@ internal class CustomNodeManager : CustomNodeManager2
     /// <summary>
     /// Removes nodes for a detached subject. Idempotent - safe to call multiple times.
     /// Uses DeleteNode to properly cleanup nodes and event handlers, preventing memory leaks.
+    /// Uses reference counting - only deletes the node when the last reference is removed.
     /// </summary>
     public void RemoveSubjectNodes(IInterceptorSubject subject)
     {
         _structureLock.Wait();
         try
         {
-            var registeredSubject = subject.TryGetRegisteredSubject();
+            // Decrement reference count and check if this was the last reference
+            var isLast = _subjectRefCounter.DecrementAndCheckLast(subject, out var nodeState);
 
-            // Remove variable nodes for this subject's properties
-            if (registeredSubject != null)
+            if (isLast && nodeState is not null)
             {
-                foreach (var property in registeredSubject.Properties)
+                var registeredSubject = subject.TryGetRegisteredSubject();
+
+                // Remove variable nodes for this subject's properties
+                if (registeredSubject != null)
                 {
-                    if (property.Reference.TryGetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, out var node)
-                        && node is BaseDataVariableState variableNode)
+                    foreach (var property in registeredSubject.Properties)
                     {
-                        DeleteNode(SystemContext, variableNode.NodeId);
-                        property.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
+                        if (property.Reference.TryGetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, out var node)
+                            && node is BaseDataVariableState variableNode)
+                        {
+                            DeleteNode(SystemContext, variableNode.NodeId);
+                            property.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
+                        }
                     }
                 }
+
+                // Remove object node
+                DeleteNode(SystemContext, nodeState.NodeId);
+            }
+        }
+        finally
+        {
+            _structureLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Creates a node for a subject that was added to a property at runtime.
+    /// Determines parent node and path from the property context.
+    /// </summary>
+    /// <param name="property">The property that the subject was added to.</param>
+    /// <param name="subject">The subject to create a node for.</param>
+    /// <param name="index">The collection/dictionary index, or null for single references.</param>
+    public void CreateSubjectNode(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index)
+    {
+        _structureLock.Wait();
+        try
+        {
+            // Find parent subject's node to determine where to attach the new node
+            var parentSubject = property.Parent.Subject;
+            NodeId parentNodeId;
+            string parentPath;
+
+            if (ReferenceEquals(parentSubject, _subject))
+            {
+                // Parent is the root subject
+                if (_configuration.RootName is not null)
+                {
+                    parentNodeId = new NodeId(_configuration.RootName, NamespaceIndex);
+                    parentPath = _configuration.RootName + PathDelimiter;
+                }
+                else
+                {
+                    parentNodeId = ObjectIds.ObjectsFolder;
+                    parentPath = string.Empty;
+                }
+            }
+            else if (_subjectRefCounter.TryGetData(parentSubject, out var parentNode) && parentNode is not null)
+            {
+                // Parent subject has an existing node
+                parentNodeId = parentNode.NodeId;
+                // Extract path from NodeId if it's a string identifier
+                parentPath = parentNode.NodeId.Identifier is string stringId
+                    ? stringId + PathDelimiter
+                    : string.Empty;
+            }
+            else
+            {
+                // Parent node not found - can't create child node
+                _logger.LogWarning(
+                    "Cannot create node for subject on property '{PropertyName}': parent node not found.",
+                    property.Name);
+                return;
             }
 
-            // Remove object nodes
-            var keysToRemove = _subjects.Where(kvp => kvp.Key.Subject == subject).Select(kvp => kvp.Key).ToList();
-            foreach (var key in keysToRemove)
+            var propertyName = property.ResolvePropertyName(_nodeMapper);
+            if (propertyName is null)
             {
-                if (_subjects.TryGetValue(key, out var nodeState))
+                return;
+            }
+
+            var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
+
+            if (property.IsSubjectCollection)
+            {
+                // For collections, we need to find or create the container folder first
+                var containerNodeId = _nodeFactory.GetNodeId(this, nodeConfiguration, parentPath + propertyName);
+                var containerNode = FindNodeInAddressSpace(containerNodeId);
+
+                if (containerNode is null)
                 {
-                    DeleteNode(SystemContext, nodeState.NodeId);
-                    _subjects.Remove(key);
+                    // Container doesn't exist yet - create it
+                    var browseName = _nodeFactory.GetBrowseName(this, propertyName, nodeConfiguration, null);
+                    var typeDefinitionId = _nodeFactory.GetTypeDefinitionId(this, nodeConfiguration);
+                    var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, nodeConfiguration);
+                    containerNode = _nodeFactory.CreateFolderNode(this, parentNodeId, containerNodeId, browseName, typeDefinitionId, referenceTypeId, nodeConfiguration);
+                }
+
+                // Create child under container
+                var childIndex = index ?? property.Children.Length - 1;
+                var childBrowseName = new QualifiedName($"{propertyName}[{childIndex}]", NamespaceIndex);
+                var childPath = $"{parentPath}{propertyName}[{childIndex}]";
+                var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(this, nodeConfiguration);
+
+                CreateChildObject(property, childBrowseName, subject, childPath, containerNode.NodeId, childReferenceTypeId);
+            }
+            else if (property.IsSubjectDictionary)
+            {
+                // For dictionaries, similar to collections but with key-based naming
+                var containerNodeId = _nodeFactory.GetNodeId(this, nodeConfiguration, parentPath + propertyName);
+                var containerNode = FindNodeInAddressSpace(containerNodeId);
+
+                if (containerNode is null)
+                {
+                    // Container doesn't exist yet - create it
+                    var browseName = _nodeFactory.GetBrowseName(this, propertyName, nodeConfiguration, null);
+                    var typeDefinitionId = _nodeFactory.GetTypeDefinitionId(this, nodeConfiguration);
+                    var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, nodeConfiguration);
+                    containerNode = _nodeFactory.CreateFolderNode(this, parentNodeId, containerNodeId, browseName, typeDefinitionId, referenceTypeId, nodeConfiguration);
+                }
+
+                var indexString = index?.ToString();
+                if (string.IsNullOrEmpty(indexString))
+                {
+                    _logger.LogWarning(
+                        "Dictionary property '{PropertyName}' has a child with null or empty key. Skipping OPC UA node creation.",
+                        propertyName);
+                    return;
+                }
+
+                var childBrowseName = new QualifiedName(indexString, NamespaceIndex);
+                var childPath = parentPath + propertyName + PathDelimiter + index;
+                var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(this, nodeConfiguration);
+
+                CreateChildObject(property, childBrowseName, subject, childPath, containerNode.NodeId, childReferenceTypeId);
+            }
+            else if (property.IsSubjectReference)
+            {
+                // Single subject reference
+                if (nodeConfiguration?.NodeClass == OpcUaNodeClass.Variable)
+                {
+                    CreateVariableNodeForSubject(propertyName, property, parentNodeId, parentPath);
+                }
+                else
+                {
+                    var browseName = _nodeFactory.GetBrowseName(this, propertyName, nodeConfiguration, index);
+                    var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, nodeConfiguration);
+                    var path = parentPath + propertyName;
+                    CreateChildObject(property, browseName, subject, path, parentNodeId, referenceTypeId);
                 }
             }
         }
@@ -435,23 +571,28 @@ internal class CustomNodeManager : CustomNodeManager2
     {
         var registeredSubject = subject.TryGetRegisteredSubject() ?? throw new InvalidOperationException("Registered subject not found.");
 
-        if (_subjects.TryGetValue(registeredSubject, out var existingNode))
+        var isFirst = _subjectRefCounter.IncrementAndCheckFirst(subject, () =>
         {
-            // Subject already created, add reference to existing node
-            var parentNode = FindNodeInAddressSpace(parentNodeId);
-            parentNode.AddReference(referenceTypeId ?? ReferenceTypeIds.HasComponent, false, existingNode.NodeId);
-        }
-        else
-        {
-            // Create new node and add to dictionary (protected by _structureLock)
+            // Create new node (only called on first reference, protected by _structureLock)
             var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
             var nodeId = _nodeFactory.GetNodeId(this, nodeConfiguration, path);
             var typeDefinitionId = GetTypeDefinitionIdForSubject(subject);
 
             var node = _nodeFactory.CreateObjectNode(this, parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId, nodeConfiguration);
             _nodeFactory.AddAdditionalReferences(this, node, nodeConfiguration);
-            _subjects[registeredSubject] = node;
-            CreateSubjectNodes(node.NodeId, registeredSubject, path + PathDelimiter);
+            return node;
+        }, out var nodeState);
+
+        if (isFirst)
+        {
+            // First reference - recursively create child nodes
+            CreateSubjectNodes(nodeState.NodeId, registeredSubject, path + PathDelimiter);
+        }
+        else
+        {
+            // Subject already created, add reference from parent to existing node
+            var parentNode = FindNodeInAddressSpace(parentNodeId);
+            parentNode.AddReference(referenceTypeId ?? ReferenceTypeIds.HasComponent, false, nodeState.NodeId);
         }
     }
 

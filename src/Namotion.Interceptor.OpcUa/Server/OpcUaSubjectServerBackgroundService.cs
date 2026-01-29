@@ -21,6 +21,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
 
     private LifecycleInterceptor? _lifecycleInterceptor;
     private volatile OpcUaSubjectServer? _server;
+    private OpcUaServerStructuralChangeProcessor? _structuralChangeProcessor;
     private int _consecutiveFailures;
     private OpcUaServerDiagnostics? _diagnostics;
     private DateTimeOffset? _startTime;
@@ -72,21 +73,41 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
         return property.IsPropertyIncluded(_configuration.NodeMapper);
     }
 
-    private ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    private async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         var currentInstance = _server?.CurrentInstance;
         if (currentInstance == null)
         {
-            return ValueTask.CompletedTask;
+            return;
         }
 
-        var span = changes.Span;
-        for (var i = 0; i < span.Length; i++)
+        for (var i = 0; i < changes.Length; i++)
         {
-            var change = span[i];
+            // Access the change by index from memory (not span) to avoid span-across-await issues
+            var change = changes.Span[i];
+            var registeredProperty = change.Property.TryGetRegisteredProperty();
+            if (registeredProperty is null)
+            {
+                continue;
+            }
+
+            // Process structural changes first when live sync is enabled
+            if (_structuralChangeProcessor is not null)
+            {
+                var handled = await _structuralChangeProcessor
+                    .ProcessPropertyChangeAsync(change, registeredProperty)
+                    .ConfigureAwait(false);
+
+                if (handled)
+                {
+                    // Structural change was handled - skip value processing for this change
+                    continue;
+                }
+            }
+
+            // Process value changes for non-structural properties
             if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) &&
-                data is BaseDataVariableState node &&
-                change.Property.TryGetRegisteredProperty() is { } registeredProperty)
+                data is BaseDataVariableState node)
             {
                 var value = change.GetNewValue<object?>();
                 var convertedValue = _configuration.ValueConverter
@@ -100,8 +121,6 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                 }
             }
         }
-
-        return ValueTask.CompletedTask;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -148,6 +167,13 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                     await application.CheckApplicationInstanceCertificatesAsync(true, ct: stoppingToken).ConfigureAwait(false);
                     await application.StartAsync(server).ConfigureAwait(false);
 
+                    // Create structural change processor for live sync if enabled
+                    if (_configuration.EnableLiveSync && server.NodeManager is not null)
+                    {
+                        _structuralChangeProcessor = new OpcUaServerStructuralChangeProcessor(
+                            server.NodeManager);
+                    }
+
                     _startTime = DateTimeOffset.UtcNow;
                     _consecutiveFailures = 0;
                     _lastError = null;
@@ -161,6 +187,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                 }
                 finally
                 {
+                    _structuralChangeProcessor = null;
                     _startTime = null;
                     var serverToClean = _server;
                     _server = null;

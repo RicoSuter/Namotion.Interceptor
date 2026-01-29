@@ -130,35 +130,7 @@ public class StructuralChangeProcessorTests
     }
 
     [Fact]
-    public async Task ProcessPropertyChangeAsync_IgnoresSourceFromIgnoreSource()
-    {
-        // Arrange
-        var ignoreSource = new object();
-        var processor = new TestStructuralChangeProcessor { TestIgnoreSource = ignoreSource };
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var parent = new Person(context);
-        var child = new Person(context);
-
-        var registered = parent.TryGetRegisteredSubject()!;
-        var property = registered.Properties.First(p => p.Name == nameof(Person.Father));
-
-        var change = SubjectPropertyChange.Create<Person?>(
-            property.Reference,
-            source: ignoreSource, // Same as ignore source
-            changedTimestamp: DateTimeOffset.UtcNow,
-            receivedTimestamp: null,
-            oldValue: null,
-            newValue: child);
-
-        // Act
-        await processor.ProcessPropertyChangeAsync(change, property);
-
-        // Assert
-        Assert.Empty(processor.AddedSubjects);
-    }
-
-    [Fact]
-    public async Task ProcessPropertyChangeAsync_NonStructuralProperty_CallsOnValueChanged()
+    public async Task ProcessPropertyChangeAsync_NonStructuralProperty_ReturnsFalse()
     {
         // Arrange
         var processor = new TestStructuralChangeProcessor();
@@ -177,10 +149,10 @@ public class StructuralChangeProcessorTests
             newValue: "New");
 
         // Act
-        await processor.ProcessPropertyChangeAsync(change, property);
+        var result = await processor.ProcessPropertyChangeAsync(change, property);
 
-        // Assert
-        Assert.Single(processor.ValueChanges);
+        // Assert - Returns false for non-structural (value) changes; caller handles value processing
+        Assert.False(result);
         Assert.Empty(processor.AddedSubjects);
         Assert.Empty(processor.RemovedSubjects);
     }
@@ -633,12 +605,8 @@ public class StructuralChangeProcessorTests
 
     private class TestStructuralChangeProcessor : StructuralChangeProcessor
     {
-        public object? TestIgnoreSource { get; set; }
         public List<(RegisteredSubjectProperty Property, IInterceptorSubject Subject, object? Index)> AddedSubjects { get; } = new();
         public List<(RegisteredSubjectProperty Property, IInterceptorSubject Subject, object? Index)> RemovedSubjects { get; } = new();
-        public List<SubjectPropertyChange> ValueChanges { get; } = new();
-
-        protected override object? IgnoreSource => TestIgnoreSource;
 
         protected override Task OnSubjectAddedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index)
         {
@@ -649,12 +617,6 @@ public class StructuralChangeProcessorTests
         protected override Task OnSubjectRemovedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index)
         {
             RemovedSubjects.Add((property, subject, index));
-            return Task.CompletedTask;
-        }
-
-        protected override Task OnValueChangedAsync(SubjectPropertyChange change)
-        {
-            ValueChanges.Add(change);
             return Task.CompletedTask;
         }
     }
