@@ -78,6 +78,8 @@ public enum CollectionNodeStructure
 }
 ```
 
+> **Breaking Change:** The current implementation (`CustomNodeManager.CreateArrayObjectNode`) always creates a Container structure. This design changes the default to Flat. Existing deployments using collections will see different OPC UA address space structure after upgrade. Use `[OpcUaReference(CollectionStructure = CollectionNodeStructure.Container)]` to preserve the old behavior.
+
 **Flat (default):**
 ```
 Plant/
@@ -191,6 +193,22 @@ var localSubject = _subjectToNodeId
 **Cleanup:**
 - When subject is removed (ref count → 0), remove from mapping
 - On reconnect, clear mapping and rebuild during full resync
+
+**Storage Location:**
+
+The `_subjectToNodeId` mapping and `ConnectorReferenceCounter<TData>` have different storage for client vs server:
+
+| Component | Client | Server |
+|-----------|--------|--------|
+| Ref counter | `ConnectorReferenceCounter<List<MonitoredItem>>` | `ConnectorReferenceCounter<NodeState>` |
+| NodeId mapping | Separate `Dictionary<IInterceptorSubject, NodeId>` | Implicit via `NodeState.NodeId` |
+| Owner class | `OpcUaSubjectClientSource` (or new sync coordinator) | `CustomNodeManager` |
+
+**Rationale:**
+- **Client:** The ref counter's `TData` is `List<MonitoredItem>` (for cleanup), but MonitoredItems don't expose the subject's main NodeId. A separate dictionary provides identity mapping for collection matching during OPC→Model resync.
+- **Server:** The ref counter's `TData` is `NodeState`, which already contains `NodeId`. No separate mapping needed - use `nodeState.NodeId` directly.
+
+Both are cleared together on reconnect/restart.
 
 ---
 
@@ -414,6 +432,23 @@ private void ReindexCollectionBrowseNames(RegisteredSubjectProperty property)
 - Clients subscribing via NodeId are unaffected
 
 **When to call:** After `OnSubjectRemovedAsync` or `OnSubjectAddedAsync` for collection properties.
+
+**Integration Test Required:**
+
+The in-place modification of `NodeState.BrowseName` after the node is added to the address space needs verification. Add an integration test to confirm:
+1. BrowseName changes propagate correctly to browsing clients
+2. Connected clients see updated BrowseNames after re-browse
+3. No SDK-level issues with modifying BrowseName post-creation
+
+```csharp
+[Fact]
+public async Task Server_CollectionItemRemoved_BrowseNamesReindexed()
+{
+    // Arrange: Server with collection [A, B, C] → BrowseNames: Items[0], Items[1], Items[2]
+    // Act: Remove B from collection
+    // Assert: Browse server, verify BrowseNames are now Items[0], Items[1] (not Items[0], Items[2])
+}
+```
 
 ### Server-Side ModelChangeEvent Emission
 
@@ -1432,6 +1467,7 @@ All open questions have been resolved through design review:
 - Branch on property type, call existing creation/removal methods
 - Emit `GeneralModelChangeEvent` on structural changes (batched)
 - Implement collection BrowseName re-indexing
+- **Integration test:** Verify BrowseName re-indexing propagates correctly to clients (see "Collection BrowseName Re-indexing" section)
 
 ### Phase 4: Refactor Client for Reference Counting
 - Add `ConnectorReferenceCounter<List<MonitoredItem>>`
