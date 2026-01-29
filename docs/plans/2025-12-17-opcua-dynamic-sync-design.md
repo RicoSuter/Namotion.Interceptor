@@ -71,14 +71,26 @@ Collections and dictionaries map to OPC UA structures differently:
 Collections support two node structures, configured via `[OpcUaReference]`:
 
 ```csharp
+// Location: Namotion.Interceptor.OpcUa.Attributes namespace
 public enum CollectionNodeStructure
 {
     Flat,       // Default: Parent/Machines[0] - no intermediate node
     Container   // Parent/Machines/Machines[0] - intermediate container node
 }
+
+// Extension to existing OpcUaReferenceAttribute
+public class OpcUaReferenceAttribute : Attribute
+{
+    // Existing properties...
+    public string ReferenceType { get; }
+    public string? ItemReferenceType { get; init; }
+
+    // New property for collection structure
+    public CollectionNodeStructure CollectionStructure { get; init; } = CollectionNodeStructure.Flat;
+}
 ```
 
-> **Breaking Change:** The current implementation (`CustomNodeManager.CreateArrayObjectNode`) always creates a Container structure. This design changes the default to Flat. Existing deployments using collections will see different OPC UA address space structure after upgrade. Use `[OpcUaReference(CollectionStructure = CollectionNodeStructure.Container)]` to preserve the old behavior.
+> **Note:** The current implementation (`CustomNodeManager.CreateArrayObjectNode`) always creates a Container structure. This design changes the default to Flat. This feature is not currently in use, so there is no breaking change for existing deployments.
 
 **Flat (default):**
 ```
@@ -88,6 +100,8 @@ Plant/
   ├── Status              ← Regular property (no conflict - different pattern)
 ```
 Path: `Plant.Machines[0].Temp`
+
+> **Known Limitation:** Property names should not use the `PropertyName[N]` pattern (e.g., `Sensors[0]`) as this would conflict with collection item BrowseNames. This is an edge case unlikely in practice.
 
 **Container:**
 ```
@@ -139,6 +153,8 @@ public partial IList<Machine> Machines { get; set; }
 
 **Shared Subject BrowseName:**
 When the same subject instance is referenced from multiple places (e.g., two dictionaries with different keys), the subject gets ONE OPC UA node. The BrowseName is determined by **first-reference-wins** - whichever property processes the subject first sets the BrowseName.
+
+> **Thread Safety:** No race condition exists because `_structureLock` serializes structural changes and `ConnectorReferenceCounter.IncrementAndCheckFirst` is atomic. The processing order is deterministic based on queue order (for runtime changes) or depth-first traversal order (for initial sync).
 
 **Dictionary Key Handling:**
 Dictionary keys are converted to strings via `ToString()` for the OPC UA BrowseName. On load, `BrowseName.Name` becomes the dictionary key (always string). Non-string key types must have consistent `ToString()` formatting.
@@ -707,15 +723,13 @@ async Task CreateLocalSubjectAsync(RegisteredSubjectProperty property, Reference
     _subjectToNodeId[subject] = nodeId;
 
     // Add to local model with source tracking (prevents sync-back loop)
-    using (SubjectChangeContext.WithSource(_opcUaSource))
-    {
-        if (property.IsSubjectReference)
-            property.SetValue(subject);
-        else if (property.IsSubjectCollection)
-            AddToCollection(property, subject);  // Append (index not used - collections unordered)
-        else if (property.IsSubjectDictionary)
-            AddToDictionary(property, subject, index!);  // index = dictionary key
-    }
+    // Use SetValueFromSource which internally handles source tracking
+    if (property.IsSubjectReference)
+        property.SetValueFromSource(_opcUaSource, null, null, subject);
+    else if (property.IsSubjectCollection)
+        AddToCollectionFromSource(property, subject, _opcUaSource);  // Append (index not used - collections unordered)
+    else if (property.IsSubjectDictionary)
+        AddToDictionaryFromSource(property, subject, index!, _opcUaSource);  // index = dictionary key
 
     // Recurse to load children
     await ProcessSubjectNodeChangesAsync(subject, nodeId, _session, ct);
@@ -726,15 +740,14 @@ async Task RemoveLocalSubjectAsync(RegisteredSubjectProperty property, IIntercep
     // Clean up NodeId mapping
     _subjectToNodeId.Remove(subject);
 
-    using (SubjectChangeContext.WithSource(_opcUaSource))
-    {
-        if (property.IsSubjectReference)
-            property.SetValue(null);
-        else if (property.IsSubjectCollection)
-            RemoveFromCollection(property, subject);  // Remove by subject reference
-        else if (property.IsSubjectDictionary)
-            RemoveFromDictionary(property, index!);   // Remove by key
-    }
+    // Remove from local model with source tracking (prevents sync-back loop)
+    // Use SetValueFromSource which internally handles source tracking
+    if (property.IsSubjectReference)
+        property.SetValueFromSource(_opcUaSource, subject, null, null);
+    else if (property.IsSubjectCollection)
+        RemoveFromCollectionFromSource(property, subject, _opcUaSource);  // Remove by subject reference
+    else if (property.IsSubjectDictionary)
+        RemoveFromDictionaryFromSource(property, index!, _opcUaSource);   // Remove by key
 }
 ```
 
@@ -891,16 +904,13 @@ public class InterceptorOpcUaServer : StandardServer
 
         // Add to local model with source tracking (prevents sync-back loop)
         // The existing Model → OPC UA sync will create the OPC UA node
-        using (SubjectChangeContext.WithSource(_externalClientSource))
+        if (parentProperty.IsSubjectDictionary)
         {
-            if (parentProperty.IsSubjectDictionary)
-            {
-                AddToDictionary(parentProperty, subject, item.BrowseName.Name);
-            }
-            else // IsSubjectCollection
-            {
-                AddToCollection(parentProperty, subject);
-            }
+            AddToDictionaryFromSource(parentProperty, subject, item.BrowseName.Name, _externalClientSource);
+        }
+        else // IsSubjectCollection
+        {
+            AddToCollectionFromSource(parentProperty, subject, _externalClientSource);
         }
 
         // Return the NodeId that will be assigned by Model → OPC UA sync
@@ -955,10 +965,7 @@ public class InterceptorOpcUaServer : StandardServer
 
         // Remove from local model with source tracking
         // The existing Model → OPC UA sync will delete the OPC UA node
-        using (SubjectChangeContext.WithSource(_externalClientSource))
-        {
-            RemoveSubjectFromProperty(property, subject);
-        }
+        RemoveSubjectFromPropertyWithSource(property, subject, _externalClientSource);
 
         return StatusCodes.Good;
     }
@@ -1253,87 +1260,18 @@ Key methods:
 
 ### All 4 Cases Use Same Ref Count
 
-**Server:**
-```csharp
-// Model → OPC UA (local change)
-async Task OnLocalSubjectAddedAsync(property, subject, index)
-{
-    var isFirst = IncrementRefCount(subject);
-    if (isFirst) CreateOpcUaNodes(subject);
-    AddOpcUaReference(property, subject, index);
-}
+Both server and client use the same `ConnectorReferenceCounter<TData>` for **all directions**. The key insight: whether the change originates locally or remotely, the same ref counter tracks subject lifetime.
 
-async Task OnLocalSubjectRemovedAsync(property, subject, index)
-{
-    RemoveOpcUaReference(property, subject, index);
-    var isLast = DecrementRefCount(subject);
-    if (isLast) RemoveOpcUaNodes(subject);
-}
+| Component | Direction | On Add | On Remove | Resources |
+|-----------|-----------|--------|-----------|-----------|
+| **Server** | Model → OPC | `IncrementAndCheckFirst` → create node if first | `DecrementAndCheckLast` → delete node if last | `NodeState` |
+| **Server** | OPC → Model | Same ref count (nodes already exist) | Same ref count (nodes already removed) | `NodeState` |
+| **Client** | Model → OPC | `IncrementAndCheckFirst` → create MonitoredItems if first | `DecrementAndCheckLast` → remove items if last | `List<MonitoredItem>` |
+| **Client** | OPC → Model | Same ref count → create MonitoredItems if first | Same ref count → remove items if last | `List<MonitoredItem>` |
 
-// OPC UA → Model (external client AddNodes/DeleteNodes)
-async Task OnExternalNodeAddedAsync(property, nodeInfo, index)
-{
-    var subject = CreateLocalSubject(nodeInfo);
-    IncrementRefCount(subject);  // Same ref count!
-    // Nodes already created by external client
+**Key principle:** Remote changes (OPC → Model) use source tracking (`*FromSource` methods) to prevent sync-back loops, but share the same ref counter as local changes.
 
-    using (SubjectChangeContext.WithSource(_externalSource))
-        AddSubjectToProperty(property, subject, index);
-}
-
-async Task OnExternalNodeRemovedAsync(property, subject, index)
-{
-    using (SubjectChangeContext.WithSource(_externalSource))
-        RemoveSubjectFromProperty(property, index);
-
-    DecrementRefCount(subject);  // Same ref count!
-    // Nodes already removed by external client
-}
-```
-
-**Client:**
-```csharp
-// Model → OPC UA (local change)
-async Task OnLocalSubjectAddedAsync(property, subject, index)
-{
-    var isFirst = IncrementRefCount(subject);
-    if (isFirst)
-    {
-        CreateMonitoredItems(subject);
-        TryCallAddNodes(subject);
-    }
-}
-
-async Task OnLocalSubjectRemovedAsync(property, subject, index)
-{
-    var isLast = DecrementRefCount(subject);
-    if (isLast)
-    {
-        RemoveMonitoredItems(subject);
-        TryCallDeleteNodes(subject);
-    }
-}
-
-// OPC UA → Model (remote server change)
-async Task OnRemoteNodeAddedAsync(property, node, index)
-{
-    var subject = CreateLocalSubject(node);
-    var isFirst = IncrementRefCount(subject);  // Same ref count!
-    if (isFirst) CreateMonitoredItems(subject);
-
-    using (SubjectChangeContext.WithSource(_opcUaSource))
-        AddSubjectToProperty(property, subject, index);
-}
-
-async Task OnRemoteNodeRemovedAsync(property, subject, index)
-{
-    using (SubjectChangeContext.WithSource(_opcUaSource))
-        RemoveSubjectFromProperty(property, index);
-
-    var isLast = DecrementRefCount(subject);  // Same ref count!
-    if (isLast) RemoveMonitoredItems(subject);
-}
-```
+See "Client Implementation" and "Server Implementation" sections above for full code.
 
 ### Why Source Tracking Prevents Double-Counting
 
@@ -1344,14 +1282,14 @@ Remote node added
 OnRemoteNodeAddedAsync
     ├── IncrementRefCount (count: 0 → 1)
     ├── CreateMonitoredItems
-    └── AddSubjectToProperty (source = OPC UA)
+    └── AddSubjectToPropertyFromSource (source = _opcUaSource)
             │
             ▼
-        Property change fires (source = OPC UA)
+        Property change fires (change.Source = _opcUaSource)
             │
             ▼
         Model → OPC UA processor
-            └── Skips (source == _opcUaSource)
+            └── Skips (change.Source == _opcUaSource)
 
 Result: Ref count incremented exactly once
 ```
@@ -1367,14 +1305,15 @@ With ref counting in structural change processor, remove:
 
 ## Loop Prevention
 
-Use existing `change.Source` mechanism:
+Use existing `change.Source` mechanism via `SetValueFromSource`:
 
 ```csharp
-// When OPC UA updates local model:
-using (SubjectChangeContext.WithSource(_opcUaSource))
-{
-    property.SetValue(newCollection);
-}
+// When OPC UA updates local model (uses SetValueFromSource which tracks source internally):
+property.SetValueFromSource(_opcUaSource, oldValue, null, newCollection);
+
+// Or for collections/dictionaries:
+AddToCollectionFromSource(property, subject, _opcUaSource);
+AddToDictionaryFromSource(property, subject, key, _opcUaSource);
 
 // When processing changes:
 if (change.Source == _opcUaSource)
