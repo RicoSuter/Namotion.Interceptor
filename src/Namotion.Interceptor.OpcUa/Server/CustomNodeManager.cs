@@ -24,6 +24,11 @@ internal class CustomNodeManager : CustomNodeManager2
     private readonly SemaphoreSlim _structureLock = new(1, 1);
     private readonly ConnectorReferenceCounter<NodeState> _subjectRefCounter = new();
 
+    // Pending model changes for batch emission
+    // Protected by _pendingModelChangesLock for thread-safe access
+    private readonly object _pendingModelChangesLock = new();
+    private List<ModelChangeStructureDataType> _pendingModelChanges = new();
+
     public CustomNodeManager(
         IInterceptorSubject subject,
         OpcUaSubjectServerBackgroundService source,
@@ -151,6 +156,128 @@ internal class CustomNodeManager : CustomNodeManager2
 
                 // Remove object node
                 DeleteNode(SystemContext, nodeState.NodeId);
+
+                // Queue model change event for node deletion
+                QueueModelChange(nodeState.NodeId, ModelChangeStructureVerbMask.NodeDeleted);
+            }
+        }
+        finally
+        {
+            _structureLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Queues a model change for batched emission.
+    /// Changes are emitted when FlushModelChangeEvents is called.
+    /// Thread-safe: uses _pendingModelChangesLock for synchronization.
+    /// </summary>
+    /// <param name="affectedNodeId">The NodeId of the affected node.</param>
+    /// <param name="verb">The type of change (NodeAdded, NodeDeleted, ReferenceAdded, etc.).</param>
+    private void QueueModelChange(NodeId affectedNodeId, ModelChangeStructureVerbMask verb)
+    {
+        lock (_pendingModelChangesLock)
+        {
+            _pendingModelChanges.Add(new ModelChangeStructureDataType
+            {
+                Affected = affectedNodeId,
+                AffectedType = null, // Optional: could be set to TypeDefinitionId for added nodes
+                Verb = (byte)verb
+            });
+        }
+    }
+
+    /// <summary>
+    /// Flushes all pending model change events to clients.
+    /// Emits a GeneralModelChangeEvent containing all batched changes.
+    /// Called after a batch of structural changes has been processed.
+    /// Thread-safe: uses atomic swap pattern to capture pending changes.
+    /// </summary>
+    public void FlushModelChangeEvents()
+    {
+        // Atomically swap the pending changes list with a new empty list
+        // This ensures thread-safety without holding the lock during event emission
+        List<ModelChangeStructureDataType> changesToEmit;
+        lock (_pendingModelChangesLock)
+        {
+            if (_pendingModelChanges.Count == 0)
+            {
+                return;
+            }
+
+            changesToEmit = _pendingModelChanges;
+            _pendingModelChanges = new List<ModelChangeStructureDataType>();
+        }
+
+        try
+        {
+            // Create and emit the GeneralModelChangeEvent
+            var eventState = new GeneralModelChangeEventState(null);
+            eventState.Initialize(
+                SystemContext,
+                null,
+                EventSeverity.Medium,
+                new LocalizedText($"Address space changed: {changesToEmit.Count} modification(s)"));
+
+            eventState.Changes = new PropertyState<ModelChangeStructureDataType[]>(eventState)
+            {
+                Value = changesToEmit.ToArray()
+            };
+
+            // Report the event on the Server node (standard location for model change events)
+            eventState.SetChildValue(SystemContext, BrowseNames.SourceNode, ObjectIds.Server, false);
+            eventState.SetChildValue(SystemContext, BrowseNames.SourceName, "AddressSpace", false);
+
+            // Note: The event will be distributed to subscribed clients via the server's event queue
+            Server.ReportEvent(SystemContext, eventState);
+
+            _logger.LogDebug("Emitted GeneralModelChangeEvent with {ChangeCount} changes.", changesToEmit.Count);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to emit GeneralModelChangeEvent. Continuing without event notification.");
+        }
+    }
+
+    /// <summary>
+    /// Re-indexes collection BrowseNames after an item has been removed.
+    /// Updates all remaining items to have sequential indices starting from 0.
+    /// This ensures BrowseNames like "People[0]", "People[1]" remain contiguous.
+    /// </summary>
+    /// <param name="property">The collection property whose children should be re-indexed.</param>
+    public void ReindexCollectionBrowseNames(RegisteredSubjectProperty property)
+    {
+        if (!property.IsSubjectCollection)
+        {
+            return;
+        }
+
+        _structureLock.Wait();
+        try
+        {
+            var propertyName = property.ResolvePropertyName(_nodeMapper);
+            if (propertyName is null)
+            {
+                return;
+            }
+
+            var children = property.Children.ToList();
+            for (var i = 0; i < children.Count; i++)
+            {
+                if (_subjectRefCounter.TryGetData(children[i].Subject, out var nodeState) && nodeState is not null)
+                {
+                    var newBrowseName = new QualifiedName($"{propertyName}[{i}]", NamespaceIndex);
+
+                    // Only update if the BrowseName has actually changed
+                    if (!nodeState.BrowseName.Equals(newBrowseName))
+                    {
+                        nodeState.BrowseName = newBrowseName;
+
+                        _logger.LogDebug(
+                            "Re-indexed collection item BrowseName to '{BrowseName}'.",
+                            newBrowseName);
+                    }
+                }
             }
         }
         finally
@@ -218,71 +345,21 @@ internal class CustomNodeManager : CustomNodeManager2
 
             if (property.IsSubjectCollection)
             {
-                // For collections, we need to find or create the container folder first
-                var containerNodeId = _nodeFactory.GetNodeId(this, nodeConfiguration, parentPath + propertyName);
-                var containerNode = FindNodeInAddressSpace(containerNodeId);
-
-                if (containerNode is null)
-                {
-                    // Container doesn't exist yet - create it
-                    var browseName = _nodeFactory.GetBrowseName(this, propertyName, nodeConfiguration, null);
-                    var typeDefinitionId = _nodeFactory.GetTypeDefinitionId(this, nodeConfiguration);
-                    var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, nodeConfiguration);
-                    containerNode = _nodeFactory.CreateFolderNode(this, parentNodeId, containerNodeId, browseName, typeDefinitionId, referenceTypeId, nodeConfiguration);
-                }
-
-                // Create child under container
+                var containerNode = GetOrCreateContainerNode(propertyName, nodeConfiguration, parentNodeId, parentPath);
                 var childIndex = index ?? property.Children.Length - 1;
-                var childBrowseName = new QualifiedName($"{propertyName}[{childIndex}]", NamespaceIndex);
-                var childPath = $"{parentPath}{propertyName}[{childIndex}]";
-                var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(this, nodeConfiguration);
-
-                CreateChildObject(property, childBrowseName, subject, childPath, containerNode.NodeId, childReferenceTypeId);
+                CreateCollectionChildNode(property, subject, childIndex, propertyName, parentPath, containerNode.NodeId, nodeConfiguration);
             }
             else if (property.IsSubjectDictionary)
             {
-                // For dictionaries, similar to collections but with key-based naming
-                var containerNodeId = _nodeFactory.GetNodeId(this, nodeConfiguration, parentPath + propertyName);
-                var containerNode = FindNodeInAddressSpace(containerNodeId);
-
-                if (containerNode is null)
+                var containerNode = GetOrCreateContainerNode(propertyName, nodeConfiguration, parentNodeId, parentPath);
+                if (!CreateDictionaryChildNode(property, subject, index, propertyName, parentPath, containerNode.NodeId, nodeConfiguration))
                 {
-                    // Container doesn't exist yet - create it
-                    var browseName = _nodeFactory.GetBrowseName(this, propertyName, nodeConfiguration, null);
-                    var typeDefinitionId = _nodeFactory.GetTypeDefinitionId(this, nodeConfiguration);
-                    var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, nodeConfiguration);
-                    containerNode = _nodeFactory.CreateFolderNode(this, parentNodeId, containerNodeId, browseName, typeDefinitionId, referenceTypeId, nodeConfiguration);
-                }
-
-                var indexString = index?.ToString();
-                if (string.IsNullOrEmpty(indexString))
-                {
-                    _logger.LogWarning(
-                        "Dictionary property '{PropertyName}' has a child with null or empty key. Skipping OPC UA node creation.",
-                        propertyName);
                     return;
                 }
-
-                var childBrowseName = new QualifiedName(indexString, NamespaceIndex);
-                var childPath = parentPath + propertyName + PathDelimiter + index;
-                var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(this, nodeConfiguration);
-
-                CreateChildObject(property, childBrowseName, subject, childPath, containerNode.NodeId, childReferenceTypeId);
             }
             else if (property.IsSubjectReference)
             {
-                // Single subject reference
-                if (nodeConfiguration?.NodeClass == OpcUaNodeClass.Variable)
-                {
-                    CreateVariableNodeForSubject(propertyName, property, parentNodeId, parentPath);
-                }
-                else
-                {
-                    var browseName = _nodeFactory.GetBrowseName(this, propertyName, nodeConfiguration, index);
-                    var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, nodeConfiguration);
-                    var path = parentPath + propertyName;
-                    CreateChildObject(property, browseName, subject, path, parentNodeId, referenceTypeId);
-                }
+                CreateSubjectReferenceNode(propertyName, property, subject, index, parentNodeId, parentPath, nodeConfiguration);
             }
         }
         finally
@@ -291,7 +368,7 @@ internal class CustomNodeManager : CustomNodeManager2
         }
     }
 
-    private void CreateSubjectNodes(NodeId parentNodeId, RegisteredSubject subject, string prefix)
+    private void CreateSubjectNodes(NodeId parentNodeId, RegisteredSubject subject, string parentPath)
     {
         foreach (var property in subject.Properties)
         {
@@ -301,102 +378,167 @@ internal class CustomNodeManager : CustomNodeManager2
             var propertyName = property.ResolvePropertyName(_nodeMapper);
             if (propertyName is not null)
             {
+                var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
+
                 if (property.IsSubjectCollection)
                 {
-                    CreateArrayObjectNode(propertyName, property, property.Children, parentNodeId, prefix);
+                    CreateCollectionObjectNode(propertyName, property, property.Children, parentNodeId, parentPath, nodeConfiguration);
                 }
                 else if (property.IsSubjectDictionary)
                 {
-                    CreateDictionaryObjectNode(propertyName, property, property.Children, parentNodeId, prefix);
+                    CreateDictionaryObjectNode(propertyName, property, property.Children, parentNodeId, parentPath, nodeConfiguration);
                 }
                 else if (property.IsSubjectReference)
                 {
-                    var referencedSubject = property.Children.SingleOrDefault();
-                    if (referencedSubject.Subject is not null)
+                    var referencedChild = property.Children.SingleOrDefault();
+                    if (referencedChild.Subject is not null)
                     {
-                        // Check if this should be a VariableNode instead of ObjectNode
-                        var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
-                        if (nodeConfiguration?.NodeClass == OpcUaNodeClass.Variable)
-                        {
-                            CreateVariableNodeForSubject(propertyName, property, parentNodeId, prefix);
-                        }
-                        else
-                        {
-                            CreateReferenceObjectNode(propertyName, property, referencedSubject, parentNodeId, prefix);
-                        }
+                        CreateSubjectReferenceNode(propertyName, property, referencedChild.Subject, referencedChild.Index, parentNodeId, parentPath, nodeConfiguration);
                     }
                 }
-                else 
+                else
                 {
-                    CreateVariableNode(propertyName, property, parentNodeId, prefix);
+                    CreateVariableNode(propertyName, property, parentNodeId, parentPath);
                 }
             }
         }
     }
 
-    private void CreateReferenceObjectNode(string propertyName, RegisteredSubjectProperty property, SubjectPropertyChild child, NodeId parentNodeId, string parentPath)
+    /// <summary>
+    /// Creates a node for a subject reference (single subject property).
+    /// Handles both ObjectNode and VariableNode representations based on configuration.
+    /// </summary>
+    private void CreateSubjectReferenceNode(
+        string propertyName,
+        RegisteredSubjectProperty property,
+        IInterceptorSubject subject,
+        object? index,
+        NodeId parentNodeId,
+        string parentPath,
+        OpcUaNodeConfiguration? nodeConfiguration)
     {
-        var path = parentPath + propertyName;
-        var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
-        var browseName = _nodeFactory.GetBrowseName(this, propertyName, nodeConfiguration, child.Index);
-        var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, nodeConfiguration);
-
-        CreateChildObject(property, browseName, child.Subject, path, parentNodeId, referenceTypeId);
-    }
-
-    private void CreateArrayObjectNode(string propertyName, RegisteredSubjectProperty property, ICollection<SubjectPropertyChild> children, NodeId parentNodeId, string parentPath)
-    {
-        // Cache node configuration to avoid repeated lookups
-        var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
-
-        var nodeId = _nodeFactory.GetNodeId(this, nodeConfiguration, parentPath + propertyName);
-        var browseName = _nodeFactory.GetBrowseName(this, propertyName, nodeConfiguration, null);
-
-        var typeDefinitionId = _nodeFactory.GetTypeDefinitionId(this, nodeConfiguration);
-        var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, nodeConfiguration);
-
-        var propertyNode = _nodeFactory.CreateFolderNode(this, parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId, nodeConfiguration);
-
-        // Child objects below the array folder use path: parentPath + propertyName + "[index]"
-        var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(this, nodeConfiguration);
-        foreach (var child in children)
+        if (nodeConfiguration?.NodeClass == OpcUaNodeClass.Variable)
         {
-            var childBrowseName = new QualifiedName($"{propertyName}[{child.Index}]", NamespaceIndex);
-            var childPath = $"{parentPath}{propertyName}[{child.Index}]";
-
-            CreateChildObject(property, childBrowseName, child.Subject, childPath, propertyNode.NodeId, childReferenceTypeId);
+            CreateVariableNodeForSubject(propertyName, property, parentNodeId, parentPath);
+        }
+        else
+        {
+            var path = parentPath + propertyName;
+            var browseName = _nodeFactory.GetBrowseName(this, propertyName, nodeConfiguration, index);
+            var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, nodeConfiguration);
+            CreateChildObject(property, browseName, subject, path, parentNodeId, referenceTypeId);
         }
     }
 
-    private void CreateDictionaryObjectNode(string propertyName, RegisteredSubjectProperty property, ICollection<SubjectPropertyChild> children, NodeId parentNodeId, string parentPath)
+    /// <summary>
+    /// Gets an existing container node or creates a new folder node for collections/dictionaries.
+    /// </summary>
+    private NodeState GetOrCreateContainerNode(
+        string propertyName,
+        OpcUaNodeConfiguration? nodeConfiguration,
+        NodeId parentNodeId,
+        string parentPath)
     {
-        // Cache node configuration to avoid repeated lookups
-        var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
+        var containerNodeId = _nodeFactory.GetNodeId(this, nodeConfiguration, parentPath + propertyName);
+        var existingNode = FindNodeInAddressSpace(containerNodeId);
 
-        var nodeId = _nodeFactory.GetNodeId(this, nodeConfiguration, parentPath + propertyName);
+        if (existingNode is not null)
+        {
+            return existingNode;
+        }
+
+        // Container doesn't exist yet - create it
         var browseName = _nodeFactory.GetBrowseName(this, propertyName, nodeConfiguration, null);
-
         var typeDefinitionId = _nodeFactory.GetTypeDefinitionId(this, nodeConfiguration);
         var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, nodeConfiguration);
 
-        var propertyNode = _nodeFactory.CreateFolderNode(this, parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId, nodeConfiguration);
+        return _nodeFactory.CreateFolderNode(this, parentNodeId, containerNodeId, browseName, typeDefinitionId, referenceTypeId, nodeConfiguration);
+    }
+
+    /// <summary>
+    /// Creates a child node for a collection item.
+    /// </summary>
+    private void CreateCollectionChildNode(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject subject,
+        object childIndex,
+        string propertyName,
+        string parentPath,
+        NodeId containerNodeId,
+        OpcUaNodeConfiguration? nodeConfiguration)
+    {
+        var childBrowseName = new QualifiedName($"{propertyName}[{childIndex}]", NamespaceIndex);
+        var childPath = $"{parentPath}{propertyName}[{childIndex}]";
         var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(this, nodeConfiguration);
+
+        CreateChildObject(property, childBrowseName, subject, childPath, containerNodeId, childReferenceTypeId);
+    }
+
+    /// <summary>
+    /// Creates a child node for a dictionary item.
+    /// Returns false if the index is null or empty (invalid key).
+    /// </summary>
+    private bool CreateDictionaryChildNode(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject subject,
+        object? index,
+        string propertyName,
+        string parentPath,
+        NodeId containerNodeId,
+        OpcUaNodeConfiguration? nodeConfiguration)
+    {
+        var indexString = index?.ToString();
+        if (string.IsNullOrEmpty(indexString))
+        {
+            _logger.LogWarning(
+                "Dictionary property '{PropertyName}' has a child with null or empty key. Skipping OPC UA node creation.",
+                propertyName);
+            return false;
+        }
+
+        var childBrowseName = new QualifiedName(indexString, NamespaceIndex);
+        var childPath = parentPath + propertyName + PathDelimiter + index;
+        var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(this, nodeConfiguration);
+
+        CreateChildObject(property, childBrowseName, subject, childPath, containerNodeId, childReferenceTypeId);
+        return true;
+    }
+
+    /// <summary>
+    /// Creates a folder node for a collection property and all its child nodes.
+    /// </summary>
+    private void CreateCollectionObjectNode(
+        string propertyName,
+        RegisteredSubjectProperty property,
+        ICollection<SubjectPropertyChild> children,
+        NodeId parentNodeId,
+        string parentPath,
+        OpcUaNodeConfiguration? nodeConfiguration)
+    {
+        var containerNode = GetOrCreateContainerNode(propertyName, nodeConfiguration, parentNodeId, parentPath);
+
         foreach (var child in children)
         {
-            var indexString = child.Index?.ToString();
-            if (string.IsNullOrEmpty(indexString))
-            {
-                _logger.LogWarning(
-                    "Dictionary property '{PropertyName}' contains a child with null or empty key. Skipping OPC UA node creation.",
-                    propertyName);
+            CreateCollectionChildNode(property, child.Subject, child.Index!, propertyName, parentPath, containerNode.NodeId, nodeConfiguration);
+        }
+    }
 
-                continue;
-            }
+    /// <summary>
+    /// Creates a folder node for a dictionary property and all its child nodes.
+    /// </summary>
+    private void CreateDictionaryObjectNode(
+        string propertyName,
+        RegisteredSubjectProperty property,
+        ICollection<SubjectPropertyChild> children,
+        NodeId parentNodeId,
+        string parentPath,
+        OpcUaNodeConfiguration? nodeConfiguration)
+    {
+        var containerNode = GetOrCreateContainerNode(propertyName, nodeConfiguration, parentNodeId, parentPath);
 
-            var childBrowseName = new QualifiedName(indexString, NamespaceIndex);
-            var childPath = parentPath + propertyName + PathDelimiter + child.Index;
-
-            CreateChildObject(property, childBrowseName, child.Subject, childPath, propertyNode.NodeId, childReferenceTypeId);
+        foreach (var child in children)
+        {
+            CreateDictionaryChildNode(property, child.Subject, child.Index, propertyName, parentPath, containerNode.NodeId, nodeConfiguration);
         }
     }
 
@@ -587,12 +729,18 @@ internal class CustomNodeManager : CustomNodeManager2
         {
             // First reference - recursively create child nodes
             CreateSubjectNodes(nodeState.NodeId, registeredSubject, path + PathDelimiter);
+
+            // Queue model change event for node creation
+            QueueModelChange(nodeState.NodeId, ModelChangeStructureVerbMask.NodeAdded);
         }
         else
         {
             // Subject already created, add reference from parent to existing node
             var parentNode = FindNodeInAddressSpace(parentNodeId);
             parentNode.AddReference(referenceTypeId ?? ReferenceTypeIds.HasComponent, false, nodeState.NodeId);
+
+            // Queue model change event for reference addition
+            QueueModelChange(nodeState.NodeId, ModelChangeStructureVerbMask.ReferenceAdded);
         }
     }
 
