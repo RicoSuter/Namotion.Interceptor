@@ -385,6 +385,105 @@ async Task OnSubjectRemovedAsync(RegisteredSubjectProperty property, IIntercepto
 }
 ```
 
+### Collection BrowseName Re-indexing
+
+When collection items are added or removed, BrowseNames must be updated to maintain contiguous indices:
+
+```csharp
+// After structural changes to a collection, update BrowseNames to match current positions
+private void ReindexCollectionBrowseNames(RegisteredSubjectProperty property)
+{
+    var children = property.Children.ToList();
+    for (var i = 0; i < children.Count; i++)
+    {
+        if (_refCounter.TryGetData(children[i].Subject, out var node) && node is not null)
+        {
+            node.BrowseName = new QualifiedName($"{property.Name}[{i}]", NamespaceIndex);
+        }
+    }
+
+    // Emit ModelChangeEvent for the reindexing
+    ReportModelChange(property, ModelChangeStructureVerbMask.ReferenceDeleted);
+}
+```
+
+**Why re-index:**
+- Keeps BrowseNames contiguous: `[0], [1], [2]` instead of `[0], [2], [3]` after removing `[1]`
+- BrowseNames match C# collection positions - intuitive for debugging
+- NodeIds remain stable (identity tracking uses NodeId, not BrowseName)
+- Clients subscribing via NodeId are unaffected
+
+**When to call:** After `OnSubjectRemovedAsync` or `OnSubjectAddedAsync` for collection properties.
+
+### Server-Side ModelChangeEvent Emission
+
+When structural changes occur (Model → OPC UA), the server emits `GeneralModelChangeEvent` to notify connected clients:
+
+```csharp
+private void ReportModelChange(NodeId affectedNodeId, ModelChangeStructureVerbMask verb)
+{
+    var e = new GeneralModelChangeEventState(null);
+    e.Initialize(
+        SystemContext,
+        null,
+        EventSeverity.Low,
+        new LocalizedText("Model structure changed"));
+
+    e.Changes = new ModelChangeStructureDataTypeCollection
+    {
+        new ModelChangeStructureDataType
+        {
+            Affected = affectedNodeId,
+            AffectedType = null,
+            Verb = (byte)verb
+        }
+    };
+
+    Server.ReportEvent(SystemContext, e);
+}
+
+// Batched version for multiple changes
+private readonly List<ModelChangeStructureDataType> _pendingModelChanges = new();
+
+private void QueueModelChange(NodeId affectedNodeId, ModelChangeStructureVerbMask verb)
+{
+    _pendingModelChanges.Add(new ModelChangeStructureDataType
+    {
+        Affected = affectedNodeId,
+        AffectedType = null,
+        Verb = (byte)verb
+    });
+}
+
+private void FlushModelChangeEvents()
+{
+    if (_pendingModelChanges.Count == 0)
+        return;
+
+    var e = new GeneralModelChangeEventState(null);
+    e.Initialize(
+        SystemContext,
+        null,
+        EventSeverity.Low,
+        new LocalizedText($"Model structure changed ({_pendingModelChanges.Count} nodes)"));
+
+    e.Changes = new ModelChangeStructureDataTypeCollection(_pendingModelChanges);
+    Server.ReportEvent(SystemContext, e);
+
+    _pendingModelChanges.Clear();
+}
+```
+
+**Integration with structural change processing:**
+- `OnSubjectAddedAsync` → `QueueModelChange(nodeId, ModelChangeStructureVerbMask.NodeAdded)`
+- `OnSubjectRemovedAsync` → `QueueModelChange(nodeId, ModelChangeStructureVerbMask.NodeDeleted)`
+- After processing batch → `FlushModelChangeEvents()`
+
+**Benefits:**
+- Connected clients receive immediate notification of structural changes
+- Batching reduces event overhead when multiple nodes change together
+- Clients can subscribe to `GeneralModelChangeEventType` for real-time updates
+
 ---
 
 ## OPC UA → Model Direction
@@ -677,52 +776,158 @@ async Task OnReconnectedAsync()
 ### Server Triggers
 
 **AddNodes/DeleteNodes Service Handlers:**
+
+The OPC UA Foundation's `ServerBase` returns `BadServiceUnsupported` for AddNodes/DeleteNodes by default. To support external clients modifying structure, create a custom server class:
+
 ```csharp
-// Override in CustomNodeManager
-public override void AddNodes(ISystemContext context, IList<AddNodesItem> nodesToAdd)
+/// <summary>
+/// Custom OPC UA server that supports external AddNodes/DeleteNodes when enabled.
+/// </summary>
+public class InterceptorOpcUaServer : StandardServer
 {
-    foreach (var item in nodesToAdd)
+    private readonly OpcUaServerConfiguration _configuration;
+    private readonly CustomNodeManager _nodeManager;
+    private readonly object _externalClientSource = new();
+
+    public override async Task<AddNodesResponse> AddNodesAsync(
+        SecureChannelContext secureChannelContext,
+        RequestHeader requestHeader,
+        AddNodesItemCollection nodesToAdd,
+        CancellationToken ct)
     {
-        // Find parent property
-        var parentProperty = FindPropertyForNodeId(item.ParentNodeId);
+        // Check configuration - disabled by default for security
+        if (!_configuration.EnableExternalNodeManagement)
+        {
+            return new AddNodesResponse
+            {
+                ResponseHeader = CreateResponse(requestHeader, StatusCodes.BadServiceUnsupported)
+            };
+        }
+
+        ValidateRequest(requestHeader);
+
+        var results = new AddNodesResultCollection();
+        var diagnosticInfos = new DiagnosticInfoCollection();
+
+        foreach (var item in nodesToAdd)
+        {
+            var result = await HandleAddNodeAsync(item, ct);
+            results.Add(result);
+        }
+
+        return new AddNodesResponse
+        {
+            ResponseHeader = CreateResponse(requestHeader, StatusCodes.Good),
+            Results = results,
+            DiagnosticInfos = diagnosticInfos
+        };
+    }
+
+    private async Task<AddNodesResult> HandleAddNodeAsync(AddNodesItem item, CancellationToken ct)
+    {
+        // Find parent property from NodeId
+        var parentProperty = _nodeManager.FindPropertyForNodeId(item.ParentNodeId);
         if (parentProperty is null)
         {
-            // Not in our managed tree
-            base.AddNodes(context, nodesToAdd);
-            continue;
+            return new AddNodesResult { StatusCode = StatusCodes.BadParentNodeIdInvalid };
         }
 
-        // Create local subject
-        var subject = _subjectFactory.CreateSubjectForNodeClass(item.NodeClass, item.TypeDefinition);
+        // Validate property can accept children
+        if (!parentProperty.IsSubjectCollection && !parentProperty.IsSubjectDictionary)
+        {
+            return new AddNodesResult { StatusCode = StatusCodes.BadNodeClassInvalid };
+        }
 
-        // Add to local model with source tracking
+        // Create subject using TypeResolver + SubjectFactory
+        var subject = await _configuration.SubjectFactory
+            .CreateSubjectForNodeClassAsync(item.NodeClass, item.TypeDefinition, ct);
+
+        if (subject is null)
+        {
+            return new AddNodesResult { StatusCode = StatusCodes.BadTypeDefinitionInvalid };
+        }
+
+        // Add to local model with source tracking (prevents sync-back loop)
+        // The existing Model → OPC UA sync will create the OPC UA node
         using (SubjectChangeContext.WithSource(_externalClientSource))
         {
-            AddSubjectToProperty(parentProperty, subject, item.BrowseName.Name);
+            if (parentProperty.IsSubjectDictionary)
+            {
+                AddToDictionary(parentProperty, subject, item.BrowseName.Name);
+            }
+            else // IsSubjectCollection
+            {
+                AddToCollection(parentProperty, subject);
+            }
         }
 
-        // Create the OPC UA node (will be picked up by Model → OPC UA sync)
-        // Or directly create here to avoid round-trip
+        // Return the NodeId that will be assigned by Model → OPC UA sync
+        var assignedNodeId = _nodeManager.GetNodeIdForSubject(subject);
+        return new AddNodesResult
+        {
+            StatusCode = StatusCodes.Good,
+            AddedNodeId = assignedNodeId
+        };
     }
-}
 
-public override void DeleteNodes(ISystemContext context, IList<DeleteNodesItem> nodesToDelete)
-{
-    foreach (var item in nodesToDelete)
+    public override async Task<DeleteNodesResponse> DeleteNodesAsync(
+        SecureChannelContext secureChannelContext,
+        RequestHeader requestHeader,
+        DeleteNodesItemCollection nodesToDelete,
+        CancellationToken ct)
     {
-        var property = FindPropertyForNodeId(item.NodeId);
-        if (property is null) continue;
+        if (!_configuration.EnableExternalNodeManagement)
+        {
+            return new DeleteNodesResponse
+            {
+                ResponseHeader = CreateResponse(requestHeader, StatusCodes.BadServiceUnsupported)
+            };
+        }
 
-        var subject = FindSubjectForNodeId(item.NodeId);
-        if (subject is null) continue;
+        ValidateRequest(requestHeader);
 
+        var results = new StatusCodeCollection();
+
+        foreach (var item in nodesToDelete)
+        {
+            var result = HandleDeleteNode(item);
+            results.Add(result);
+        }
+
+        return new DeleteNodesResponse
+        {
+            ResponseHeader = CreateResponse(requestHeader, StatusCodes.Good),
+            Results = results
+        };
+    }
+
+    private StatusCode HandleDeleteNode(DeleteNodesItem item)
+    {
+        var property = _nodeManager.FindPropertyForNodeId(item.NodeId);
+        if (property is null)
+            return StatusCodes.BadNodeIdUnknown;
+
+        var subject = _nodeManager.FindSubjectForNodeId(item.NodeId);
+        if (subject is null)
+            return StatusCodes.BadNodeIdUnknown;
+
+        // Remove from local model with source tracking
+        // The existing Model → OPC UA sync will delete the OPC UA node
         using (SubjectChangeContext.WithSource(_externalClientSource))
         {
             RemoveSubjectFromProperty(property, subject);
         }
+
+        return StatusCodes.Good;
     }
 }
 ```
+
+**Key design points:**
+- **Disabled by default:** `EnableExternalNodeManagement = false` for security
+- **Reuses existing sync:** External changes update C# model → Model → OPC UA sync creates/removes nodes
+- **Source tracking:** Prevents infinite sync loops
+- **~150-200 lines total:** Manageable complexity
 
 ---
 
@@ -1181,6 +1386,9 @@ All open questions have been resolved through design review:
 | **Collections for OPC UA** | Supported with Flat/Container option | Flat is default (cleaner paths), Container for compatibility |
 | **Collection node structure** | `CollectionNodeStructure.Flat` default | No intermediate node; children use `PropertyName[index]` pattern |
 | **Dictionary node structure** | Always Container | Keys could conflict with property names; no Flat option |
+| **Collection BrowseName indices** | Re-index on change | Keep contiguous `[0], [1], [2]`; NodeIds stable, BrowseNames match C# positions |
+| **Server ModelChangeEvent** | Emit on structural changes | Batch if possible; enables real-time client notification |
+| **External AddNodes/DeleteNodes** | Custom server class, disabled by default | `EnableExternalNodeManagement = false` for security; reuses existing sync |
 
 ---
 
@@ -1222,6 +1430,8 @@ All open questions have been resolved through design review:
 - Add `ProcessPropertyChangeAsync` to change handler
 - Wire up to `ChangeQueueProcessor`
 - Branch on property type, call existing creation/removal methods
+- Emit `GeneralModelChangeEvent` on structural changes (batched)
+- Implement collection BrowseName re-indexing
 
 ### Phase 4: Refactor Client for Reference Counting
 - Add `ConnectorReferenceCounter<List<MonitoredItem>>`
@@ -1238,10 +1448,13 @@ All open questions have been resolved through design review:
 - Optional periodic resync fallback
 - Reuse refactored loader for incremental updates
 
-### Phase 7: Add Server OPC UA → Model Sync (Optional)
-- Implement AddNodes/DeleteNodes handlers
-- Collection AddNodes: append to end (unordered)
+### Phase 7: Add Server OPC UA → Model Sync
+- Create `InterceptorOpcUaServer` extending `StandardServer`
+- Override `AddNodesAsync` / `DeleteNodesAsync`
+- Gate behind `EnableExternalNodeManagement` config (default: false)
+- Collection AddNodes: append to end (unordered), re-index BrowseNames
 - Dictionary AddNodes: BrowseName as key
+- Reuse existing Model → OPC UA sync for node creation/deletion
 - Use `ShouldAddDynamicSubject` + `TypeResolver` pattern
 
 ---
@@ -1674,6 +1887,18 @@ After implementation, add a new "Structural Synchronization" section to `docs/co
    - Collections: matched by NodeId mapping (not index)
    - Dictionaries: matched by BrowseName (dictionary key)
    - Single references: trivial match (only one child)
+
+8. **ModelChangeEvent Emission**
+   - Server emits `GeneralModelChangeEvent` on structural changes
+   - Changes are batched for efficiency
+   - Connected clients can subscribe for real-time notifications
+   - Collection re-indexing triggers reference change events
+
+9. **External Node Management**
+   - Disabled by default (`EnableExternalNodeManagement = false`)
+   - When enabled, external clients can call AddNodes/DeleteNodes
+   - Requires custom server class (`InterceptorOpcUaServer`)
+   - Changes update C# model, existing sync creates/removes OPC UA nodes
 
 ---
 
