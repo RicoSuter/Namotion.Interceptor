@@ -60,6 +60,18 @@ internal class OpcUaSubjectLoader
         }
 
         var nodeId = ExpandedNodeId.ToNodeId(node.NodeId, session.NamespaceUris);
+
+        // Track subject with reference counter
+        // On first reference: creates an empty list that will be populated during property loading
+        // On subsequent references: the subject's MonitoredItems already exist, skip processing
+        var isFirstReference = _source.TrackSubject(subject, nodeId, () => []);
+
+        if (!isFirstReference)
+        {
+            // Subject already tracked from another property reference
+            // Its MonitoredItems were already added during the first load, skip to avoid duplicates
+            return;
+        }
         var nodeReferences = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
         
         for (var index = 0; index < nodeReferences.Count; index++)
@@ -361,6 +373,9 @@ internal class OpcUaSubjectLoader
         }
 
         monitoredItems.Add(monitoredItem);
+
+        // Also track the monitored item with its owning subject for reference counting
+        _source.AddMonitoredItemToSubject(property.Reference.Subject, monitoredItem);
     }
 
     private async Task LoadVariableNodeForSubjectAsync(

@@ -28,6 +28,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private SubjectPropertyWriter? _propertyWriter;
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
+    private readonly ConnectorReferenceCounter<List<MonitoredItem>> _subjectRefCounter = new();
+    private readonly Dictionary<IInterceptorSubject, NodeId> _subjectToNodeId = new();
+    private readonly Lock _subjectToNodeIdLock = new();
+
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private volatile bool _isStarted;
     private long _reconnectStartedTimestamp; // 0 = not reconnecting, otherwise Stopwatch timestamp when reconnection started (for stall detection)
@@ -91,13 +95,109 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _structureLock.Wait();
         try
         {
-            _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
-            _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
+            // Decrement reference count and only cleanup on last reference
+            var isLast = _subjectRefCounter.DecrementAndCheckLast(subject, out var monitoredItems);
+            if (isLast && monitoredItems is not null)
+            {
+                // Clean up NodeId mapping
+                lock (_subjectToNodeIdLock)
+                {
+                    _subjectToNodeId.Remove(subject);
+                }
+
+                // Remove monitored items from subscription/polling managers
+                _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
+                _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
+            }
         }
         finally
         {
             _structureLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Tracks a subject with its associated monitored items and NodeId.
+    /// Uses reference counting - only creates monitored items on first reference.
+    /// </summary>
+    /// <param name="subject">The subject to track.</param>
+    /// <param name="nodeId">The OPC UA NodeId for this subject.</param>
+    /// <param name="monitoredItemsFactory">Factory to create monitored items on first reference.</param>
+    /// <returns>True if this is the first reference (caller should create subscriptions), false otherwise.</returns>
+    internal bool TrackSubject(IInterceptorSubject subject, NodeId nodeId, Func<List<MonitoredItem>> monitoredItemsFactory)
+    {
+        var isFirst = _subjectRefCounter.IncrementAndCheckFirst(subject, monitoredItemsFactory, out _);
+        if (isFirst)
+        {
+            lock (_subjectToNodeIdLock)
+            {
+                _subjectToNodeId[subject] = nodeId;
+            }
+        }
+        return isFirst;
+    }
+
+    /// <summary>
+    /// Gets the NodeId for a tracked subject.
+    /// </summary>
+    /// <param name="subject">The subject to look up.</param>
+    /// <param name="nodeId">The NodeId if found.</param>
+    /// <returns>True if the subject is tracked, false otherwise.</returns>
+    internal bool TryGetSubjectNodeId(IInterceptorSubject subject, out NodeId? nodeId)
+    {
+        lock (_subjectToNodeIdLock)
+        {
+            if (_subjectToNodeId.TryGetValue(subject, out var id))
+            {
+                nodeId = id;
+                return true;
+            }
+            nodeId = null;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Gets the monitored items for a tracked subject.
+    /// </summary>
+    /// <param name="subject">The subject to look up.</param>
+    /// <param name="monitoredItems">The monitored items if found.</param>
+    /// <returns>True if the subject is tracked, false otherwise.</returns>
+    internal bool TryGetSubjectMonitoredItems(IInterceptorSubject subject, out List<MonitoredItem>? monitoredItems)
+    {
+        return _subjectRefCounter.TryGetData(subject, out monitoredItems);
+    }
+
+    /// <summary>
+    /// Adds a monitored item to a subject's tracked list.
+    /// </summary>
+    /// <param name="subject">The subject that owns this monitored item.</param>
+    /// <param name="monitoredItem">The monitored item to add.</param>
+    internal void AddMonitoredItemToSubject(IInterceptorSubject subject, MonitoredItem monitoredItem)
+    {
+        if (_subjectRefCounter.TryGetData(subject, out var monitoredItems) && monitoredItems is not null)
+        {
+            monitoredItems.Add(monitoredItem);
+        }
+    }
+
+    /// <summary>
+    /// Checks if a subject is already tracked by the reference counter.
+    /// </summary>
+    /// <param name="subject">The subject to check.</param>
+    /// <returns>True if the subject is tracked, false otherwise.</returns>
+    internal bool IsSubjectTracked(IInterceptorSubject subject)
+    {
+        return _subjectRefCounter.TryGetData(subject, out _);
+    }
+
+    /// <summary>
+    /// Gets all tracked subjects.
+    /// </summary>
+    /// <returns>All tracked subjects.</returns>
+    internal IEnumerable<IInterceptorSubject> GetTrackedSubjects()
+    {
+        return _subjectRefCounter.GetAllSubjects();
     }
 
     public OpcUaSubjectClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger logger)
@@ -729,6 +829,13 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         foreach (var property in _ownership.Properties)
         {
             property.RemovePropertyData(OpcUaNodeIdKey);
+        }
+
+        // Clear reference counter and NodeId mapping for fresh resync
+        _subjectRefCounter.Clear();
+        lock (_subjectToNodeIdLock)
+        {
+            _subjectToNodeId.Clear();
         }
     }
 }
