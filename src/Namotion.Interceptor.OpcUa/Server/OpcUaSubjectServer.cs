@@ -19,6 +19,11 @@ internal class OpcUaSubjectServer : StandardServer
         AddNodeManager(_nodeManagerFactory);
     }
 
+    /// <summary>
+    /// Gets the custom node manager, if the server has started.
+    /// </summary>
+    public CustomNodeManager? NodeManager => _nodeManagerFactory.NodeManager;
+
     public void ClearPropertyData()
     {
         _nodeManagerFactory.NodeManager?.ClearPropertyData();

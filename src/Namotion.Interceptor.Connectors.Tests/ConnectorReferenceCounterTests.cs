@@ -209,6 +209,38 @@ public class ConnectorReferenceCounterTests
         Assert.False(counter.TryGetData(subject, out _));
     }
 
+    [Fact]
+    public void GetAllSubjects_ReturnsAllTrackedSubjects()
+    {
+        // Arrange
+        var counter = new ConnectorReferenceCounter<string>();
+        var subject1 = new TestSubject();
+        var subject2 = new TestSubject();
+        counter.IncrementAndCheckFirst(subject1, () => "data1", out _);
+        counter.IncrementAndCheckFirst(subject2, () => "data2", out _);
+
+        // Act
+        var subjects = counter.GetAllSubjects().ToList();
+
+        // Assert
+        Assert.Equal(2, subjects.Count);
+        Assert.Contains(subject1, subjects);
+        Assert.Contains(subject2, subjects);
+    }
+
+    [Fact]
+    public void GetAllSubjects_EmptyCounter_ReturnsEmpty()
+    {
+        // Arrange
+        var counter = new ConnectorReferenceCounter<string>();
+
+        // Act
+        var subjects = counter.GetAllSubjects().ToList();
+
+        // Assert
+        Assert.Empty(subjects);
+    }
+
     private class TestSubject : IInterceptorSubject
     {
         public object SyncRoot => new object();

@@ -9,23 +9,18 @@ namespace Namotion.Interceptor.Connectors;
 /// <summary>
 /// Base class for processing structural property changes (add/remove subjects).
 /// Handles branching on property type and collection diffing.
+/// Note: Source filtering (loop prevention) is handled by ChangeQueueProcessor, not here.
 /// </summary>
 public abstract class StructuralChangeProcessor
 {
     private readonly CollectionDiffBuilder _diffBuilder = new();
 
     /// <summary>
-    /// Source to ignore (prevents sync loops).
-    /// </summary>
-    protected abstract object? IgnoreSource { get; }
-
-    /// <summary>
     /// Process a property change, branching on property type.
     /// </summary>
-    public async Task ProcessPropertyChangeAsync(SubjectPropertyChange change, RegisteredSubjectProperty property)
+    /// <returns>True if the change was processed as a structural change, false for value properties.</returns>
+    public async Task<bool> ProcessPropertyChangeAsync(SubjectPropertyChange change, RegisteredSubjectProperty property)
     {
-        if (change.Source == IgnoreSource && IgnoreSource is not null)
-            return;
 
         if (property.IsSubjectReference)
         {
@@ -36,6 +31,8 @@ public abstract class StructuralChangeProcessor
                 await OnSubjectRemovedAsync(property, oldSubject, index: null);
             if (newSubject is not null && !ReferenceEquals(oldSubject, newSubject))
                 await OnSubjectAddedAsync(property, newSubject, index: null);
+
+            return true;
         }
         else if (property.IsSubjectCollection)
         {
@@ -68,6 +65,9 @@ public abstract class StructuralChangeProcessor
             }
 
             // Reorders ignored - order is connector-specific (OPC UA: no-op)
+            // TODO: Support reordering for connectors which need this?
+
+            return true;
         }
         else if (property.IsSubjectDictionary)
         {
@@ -92,10 +92,13 @@ public abstract class StructuralChangeProcessor
                 foreach (var (key, subject) in newItems)
                     await OnSubjectAddedAsync(property, (IInterceptorSubject)subject, key);
             }
+
+            return true;
         }
         else
         {
-            await OnValueChangedAsync(change);
+            // Value changes are not structural - return false to signal caller should handle them
+            return false;
         }
     }
 
@@ -109,8 +112,4 @@ public abstract class StructuralChangeProcessor
     /// </summary>
     protected abstract Task OnSubjectRemovedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index);
 
-    /// <summary>
-    /// Called when a value property changes (non-structural).
-    /// </summary>
-    protected abstract Task OnValueChangedAsync(SubjectPropertyChange change);
 }
