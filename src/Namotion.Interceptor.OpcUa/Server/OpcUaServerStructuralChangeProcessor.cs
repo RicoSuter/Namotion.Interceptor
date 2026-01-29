@@ -32,6 +32,14 @@ internal class OpcUaServerStructuralChangeProcessor : StructuralChangeProcessor
     protected override Task OnSubjectRemovedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index)
     {
         _nodeManager.RemoveSubjectNodes(subject);
+
+        // Re-index collection BrowseNames after removal to maintain contiguous indices
+        // This ensures BrowseNames like "People[0]", "People[1]" remain sequential
+        if (property.IsSubjectCollection)
+        {
+            _nodeManager.ReindexCollectionBrowseNames(property);
+        }
+
         return Task.CompletedTask;
     }
 }

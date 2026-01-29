@@ -121,6 +121,9 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                 }
             }
         }
+
+        // Flush any batched model change events after processing all changes
+        _server?.NodeManager?.FlushModelChangeEvents();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
