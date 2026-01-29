@@ -1,6 +1,7 @@
 # TwinCAT ADS Connector Design
 
 **Date:** 2025-01-28
+**Updated:** 2025-01-29
 **Status:** Ready for Implementation
 **Package:** `Namotion.Interceptor.Connectors.TwinCAT`
 
@@ -16,10 +17,31 @@ When working with Beckhoff PLCs, OPC UA adds unnecessary overhead:
 
 Benefits: Lower latency, no OPC UA license required, direct control over read strategy.
 
+## Key Design Decisions
+
+| Category | Decision |
+|----------|----------|
+| **Connection** | Use `AdsSession` with built-in resurrection (not raw `AdsClient`) |
+| **Session Settings** | Expose full `SessionSettings` for advanced users |
+| **After Resurrection** | Full recreation - dispose subscriptions, reload, re-register |
+| **PLC State Change** | Full rescan when PLC returns to Run state |
+| **Symbol Version Change** | Monitor and trigger full rescan on change |
+| **Initial Connection** | Retry indefinitely with backoff |
+| **Writes During Disconnect** | Queue in `WriteRetryQueue`, flush after reconnection |
+| **Notification Limit** | Configurable, default 500 |
+| **Demotion Order** | Priority attribute first, then CycleTime (higher = demoted first) |
+| **Polling** | Use `PollValues` from Reactive extensions |
+| **String Encoding** | Auto-detect from PLC symbol metadata (STRING vs WSTRING) |
+| **Null Handling** | Return PLC's actual value, no null interpretation |
+| **Collection Size** | Use PLC metadata if empty, otherwise existing collection size |
+| **Concurrent Writes** | No - sequential writes only |
+| **Error Logging** | First occurrence pattern (Warning → Debug until resolved) |
+| **Diagnostics** | `AdsClientDiagnostics` class only (no IHealthCheck) |
+
 ## Dependencies
 
-- `Beckhoff.TwinCAT.Ads` - Core ADS client library
-- `Beckhoff.TwinCAT.Ads.Reactive` - Reactive extensions for notifications and polling
+- `Beckhoff.TwinCAT.Ads` (7.0+) - Core ADS client library with `AdsSession` support
+- `Beckhoff.TwinCAT.Ads.Reactive` (7.0+) - Reactive extensions for notifications and polling
 - `Namotion.Interceptor.Connectors` - Base connector infrastructure
 
 ## Documentation References
@@ -192,16 +214,19 @@ The default `AdsValueConverter` handles standard PLC-to-.NET type conversions:
 | LINT | long | Direct mapping |
 | REAL | float | Direct mapping |
 | LREAL | double | Direct mapping |
-| STRING | string | ASCII encoding (default) |
-| WSTRING | string | UTF-16 encoding |
+| STRING | string | Auto-detect from symbol metadata (ASCII) |
+| WSTRING | string | Auto-detect from symbol metadata (UTF-16) |
 | DATE_AND_TIME, DT | DateTimeOffset | TwinCAT epoch conversion |
 | TIME | TimeSpan | Milliseconds |
 | Arrays | T[] | Element-wise conversion |
 
+**String Encoding**: Automatically detected from PLC symbol metadata. The converter reads the symbol's type information to determine whether it's `STRING` (ASCII) or `WSTRING` (UTF-16).
+
+**Null Handling**: PLC variables always have a value - there's no "null" concept in IEC 61131-3. The converter returns the actual PLC value, never interpreting default values as null.
+
 Custom converters can be provided for:
 - Custom PLC structs
 - Enum mappings
-- Special string encodings
 
 ## Configuration
 
@@ -210,11 +235,15 @@ Custom converters can be provided for:
 ```csharp
 public class AdsClientConfiguration
 {
-    // Connection
+    // Connection (uses AdsSession for built-in resurrection/self-healing)
     public required string Host { get; set; }       // IP or hostname, e.g., "192.168.1.100" or "plc.local"
     public required string AmsNetId { get; set; }   // ADS device ID, e.g., "192.168.1.100.1.1" (typically IP + ".1.1")
     public int AmsPort { get; set; } = 851;         // TwinCAT3 PLC runtime port
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(5);  // ADS communication timeout
+
+    // AdsSession settings (for resurrection/self-healing)
+    // Expose full SessionSettings for advanced users who need fine-grained control
+    public SessionSettings? SessionSettings { get; set; }  // null = use defaults
 
     // Path provider for property-to-symbol mapping
     public required IPathProvider PathProvider { get; set; }
@@ -224,12 +253,14 @@ public class AdsClientConfiguration
     public int DefaultCycleTime { get; set; } = 100;  // ms for notifications
     public int DefaultMaxDelay { get; set; } = 0;     // ms max delay for batching
 
-    // Polling settings (for Polled mode)
+    // Notification limit and demotion
+    public int MaxNotifications { get; set; } = 500;  // Max concurrent notifications before demotion
+
+    // Polling settings (for Polled mode or demoted Auto mode)
     public TimeSpan PollingInterval { get; set; } = TimeSpan.FromMilliseconds(100);
 
     // Resilience (used by SubjectSourceBackgroundService)
     public int WriteRetryQueueSize { get; set; } = 1000;
-    public TimeSpan ReconnectInterval { get; set; } = TimeSpan.FromSeconds(5);
     public TimeSpan HealthCheckInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     // Performance tuning
@@ -265,6 +296,14 @@ public class AdsVariableAttribute : PathAttribute
     public AdsReadMode ReadMode { get; init; } = AdsReadMode.Auto;
     public int CycleTime { get; init; } = int.MinValue;  // Uses global default if not set
     public int MaxDelay { get; init; } = int.MinValue;
+
+    /// <summary>
+    /// Priority for notification demotion (lower = higher priority, demoted last).
+    /// When MaxNotifications limit is reached, Auto mode properties are demoted to polling.
+    /// Demotion order: Priority first (higher values demoted first), then CycleTime as tiebreaker.
+    /// Default: 0 (normal priority)
+    /// </summary>
+    public int Priority { get; init; } = 0;
 }
 ```
 
@@ -291,10 +330,22 @@ public enum AdsReadMode
 
 ### Auto Mode Demotion
 
-When ADS notification limits are reached:
-1. Variables with **higher** `CycleTime` are demoted **first** (less time-sensitive)
-2. Variables with **lower** `CycleTime` are demoted **last** (more time-sensitive)
-3. `Notification` mode variables are never demoted
+When the `MaxNotifications` limit (default: 500) is reached:
+
+1. **`Notification` mode variables are never demoted** (protected)
+2. **`Auto` mode variables are demoted to polling** based on:
+   - **Priority first**: Higher `Priority` values demoted first (lower priority = demoted first)
+   - **CycleTime as tiebreaker**: Higher `CycleTime` demoted first (less time-sensitive)
+3. **`Polled` mode variables always use polling** (never uses notifications)
+
+Example priority ordering (demoted first → last):
+```
+Priority=10, CycleTime=1000  → demoted first (low priority, slow)
+Priority=10, CycleTime=100   → demoted second
+Priority=0, CycleTime=1000   → demoted third (normal priority, slow)
+Priority=0, CycleTime=100    → demoted fourth (normal priority, fast)
+Priority=-1, CycleTime=10    → demoted last (high priority, very fast)
+```
 
 ## Subject Graph Loading
 
@@ -529,18 +580,38 @@ internal class AdsSubjectLoader
 
 ### Array Size Discovery
 
-TwinCAT arrays have fixed sizes defined in the PLC. The connector discovers array dimensions via:
+TwinCAT arrays have fixed sizes defined in the PLC. The connector uses a hybrid approach:
+
+**If the C# collection is empty**: Discover array dimensions from PLC symbol metadata and create child subjects dynamically.
+
+**If the C# collection is pre-populated**: Use the existing collection size (user has pre-created the subjects).
 
 ```csharp
-// Read symbol metadata to get array dimensions
-var symbolInfo = await _client.ReadSymbolAsync("GVL.Motors", cancellationToken);
-// symbolInfo.ArrayDimensions = [{ LowerBound: 0, Length: 4 }]
+// Discover array size from PLC if collection is empty
+private async Task<int> GetCollectionSizeAsync(RegisteredSubjectProperty property, string symbolPath, CancellationToken ct)
+{
+    var currentSize = property.Children.Count;
+    if (currentSize > 0)
+    {
+        // User pre-populated the collection - use their size
+        return currentSize;
+    }
+
+    // Collection empty - discover from PLC
+    var symbolInfo = await _connection.ReadSymbolAsync(symbolPath, ct);
+    if (symbolInfo.ArrayDimensions.Length > 0)
+    {
+        return symbolInfo.ArrayDimensions[0].Length;
+    }
+
+    return 0;
+}
 ```
 
-This allows the connector to:
-1. Create the correct number of child subjects
-2. Register notifications/polling for each element
-3. Build paths like `GVL.Motors[0].Speed`, `GVL.Motors[1].Speed`, etc.
+This allows:
+1. **Static model**: Pre-populate collections in code for compile-time safety
+2. **Dynamic model**: Let the connector discover and create subjects at runtime
+3. Path building like `GVL.Motors[0].Speed`, `GVL.Motors[1].Speed`, etc.
 
 ## Implementation Details
 
@@ -553,9 +624,12 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
     private readonly AdsClientConfiguration _configuration;
     private readonly ILogger _logger;
     private readonly SourceOwnershipManager _ownership;
+    private readonly CircuitBreaker _circuitBreaker;
+    private readonly AdsSubjectLoader _subjectLoader;
 
-    // ADS client from Beckhoff library
-    private AdsClient? _client;
+    // AdsSession for built-in resurrection/self-healing (preferred over raw AdsClient)
+    private AdsSession? _session;
+    private AdsConnection? _connection;
     private SubjectPropertyWriter? _propertyWriter;
 
     // Caches - keyed by PropertyReference (stable), not RegisteredSubjectProperty (can become stale)
@@ -563,22 +637,50 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
     private readonly ConcurrentDictionary<PropertyReference, uint> _propertyToHandle = new();
     private readonly CompositeDisposable _subscriptions = new();
 
+    // First-occurrence logging state (Warning → Debug until resolved)
+    private readonly ConcurrentDictionary<string, bool> _loggedErrors = new();
+
+    // Diagnostics
+    private volatile bool _isStarted;
+    private long _totalReconnectionAttempts;
+    private long _successfulReconnections;
+    private long _failedReconnections;
+    private long _lastConnectedAtTicks;
+    private AdsClientDiagnostics? _diagnostics;
+
     // ISubjectSource implementation
     public IInterceptorSubject RootSubject => _subject;
-    public int WriteBatchSize => 0; // No limit
+    public int WriteBatchSize => 0; // No limit (sequential writes)
 
     public bool IsPropertyIncluded(RegisteredSubjectProperty property)
         => _configuration.PathProvider.IsPropertyIncluded(property);
+
+    public AdsClientDiagnostics Diagnostics => _diagnostics ??= new AdsClientDiagnostics(this);
 }
 ```
 
 ### ADS Library Integration
 
-Use the Reactive extensions directly:
+Use `AdsSession` for connection management with built-in resurrection:
+
+```csharp
+// Create session with resurrection support
+var settings = _configuration.SessionSettings ?? new SessionSettings(AmsNetId.Parse(_configuration.AmsNetId));
+_session = new AdsSession(_configuration.Host, _configuration.AmsPort, settings);
+_connection = _session.Connect();
+
+// Subscribe to connection state changes for monitoring
+_session.ConnectionStateChanged += OnConnectionStateChanged;
+
+// Subscribe to ADS state changes (Run/Stop/Config transitions)
+_connection.AdsStateChanged += OnAdsStateChanged;
+```
+
+Use the Reactive extensions for notifications and polling:
 
 ```csharp
 // For notifications - use WhenNotification
-IDisposable subscription = _client
+IDisposable subscription = _connection
     .WhenNotification<T>(symbolPath, notificationSettings)
     .Subscribe(value => OnValueReceived(propertyReference, value));
 
@@ -597,16 +699,62 @@ public async Task<IDisposable?> StartListeningAsync(
 {
     _propertyWriter = propertyWriter;
 
-    // Connect to PLC via ADS router
-    _client = new AdsClient();
-    _client.Connect(
-        _configuration.Host,
-        AmsNetId.Parse(_configuration.AmsNetId),
-        _configuration.AmsPort);
+    // Connect to PLC via AdsSession (built-in resurrection/self-healing)
+    await ConnectWithRetryAsync(cancellationToken);
 
-    // Register all properties
+    // Load subject graph and register notifications/polling
+    await FullRescanAsync(cancellationToken);
+
+    _isStarted = true;
+    return new CompositeDisposable(_subscriptions);
+}
+
+private async Task ConnectWithRetryAsync(CancellationToken cancellationToken)
+{
+    // Retry indefinitely with backoff until connection succeeds (true 24/7 behavior)
+    while (!cancellationToken.IsCancellationRequested)
+    {
+        try
+        {
+            if (_circuitBreaker.ShouldAttempt())
+            {
+                var settings = _configuration.SessionSettings
+                    ?? new SessionSettings(AmsNetId.Parse(_configuration.AmsNetId));
+                _session = new AdsSession(_configuration.Host, _configuration.AmsPort, settings);
+                _connection = _session.Connect();
+
+                _session.ConnectionStateChanged += OnConnectionStateChanged;
+                _connection.AdsStateChanged += OnAdsStateChanged;
+
+                Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
+                _circuitBreaker.RecordSuccess();
+                _logger.LogInformation("Connected to TwinCAT PLC at {Host}:{Port}.",
+                    _configuration.Host, _configuration.AmsPort);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            LogFirstOccurrence("Connection", ex,
+                "Failed to connect to TwinCAT PLC. Retrying...");
+            _circuitBreaker.RecordFailure();
+        }
+
+        await Task.Delay(_configuration.HealthCheckInterval, cancellationToken);
+    }
+}
+
+private async Task FullRescanAsync(CancellationToken cancellationToken)
+{
+    // Dispose existing subscriptions
+    _subscriptions.Clear();
+    _symbolToProperty.Clear();
+
+    // Load subject graph and register notifications/polling
     var registeredSubject = _subject.TryGetRegisteredSubject();
-    if (registeredSubject is null) return null;
+    if (registeredSubject is null) return;
+
+    _subjectLoader.LoadSubjectGraph(_subject);
 
     foreach (var property in registeredSubject.GetAllProperties())
     {
@@ -621,8 +769,6 @@ public async Task<IDisposable?> StartListeningAsync(
         else
             RegisterPolling(property, symbolPath);
     }
-
-    return new CompositeDisposable(_subscriptions);
 }
 
 public async Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
@@ -878,46 +1024,101 @@ Access via `TwinCatSubjectClientSource.Diagnostics` property.
 
 ## Resilience Features
 
-### Reconnection Handling
+### Connection Strategy: AdsSession with Built-in Resurrection
 
-The connector automatically handles disconnections and reconnects when the PLC becomes available again.
+The connector uses `AdsSession` instead of raw `AdsClient` for connection management. `AdsSession` provides:
 
-**Disconnection Detection:**
-- `AdsClient.ConnectionStateChanged` event
-- Failed read/write operations
-- Health check loop in `ExecuteAsync`
+- **Automatic resurrection** after communication timeouts
+- **Faster error detection** via `IFailFastHandler`
+- **Connection state monitoring** via `ConnectionStateChanged` event
+- **Resurrection diagnostics** via `ResurrectingTries` and `Resurrections` properties
 
-**Reconnection Flow:**
-1. Disconnection detected → start buffering inbound updates
-2. Wait for `ReconnectInterval` before attempting reconnection
-3. Reconnect to PLC via ADS router
+### Reconnection Flow
+
+**Triggers for full rescan:**
+1. `AdsSession` resurrection completes (connection restored)
+2. PLC state changes from non-Run → Run (e.g., after program download)
+3. Symbol version changes (PLC program updated)
+
+**Full Rescan Flow:**
+1. Start buffering inbound updates (`propertyWriter.StartBuffering()`)
+2. Dispose all existing subscriptions
+3. Reload subject graph (discover collection sizes from PLC if needed)
 4. Re-register all notifications and polling subscriptions
 5. Flush pending writes from retry queue
 6. Load current state via `LoadInitialStateAsync`
 7. Replay buffered updates
 
 ```csharp
+private void OnConnectionStateChanged(object? sender, ConnectionStateChangedEventArgs e)
+{
+    if (e.NewState == ConnectionState.Connected && e.OldState != ConnectionState.Connected)
+    {
+        _logger.LogInformation("AdsSession resurrected. Triggering full rescan.");
+        Interlocked.Increment(ref _successfulReconnections);
+        _ = TriggerFullRescanAsync();
+    }
+    else if (e.NewState != ConnectionState.Connected)
+    {
+        _propertyWriter?.StartBuffering();
+        ClearFirstOccurrenceLog("Connection");  // Reset for next error
+    }
+}
+
+private void OnAdsStateChanged(object? sender, AdsStateChangedEventArgs e)
+{
+    if (e.State.AdsState == AdsState.Run && _previousAdsState != AdsState.Run)
+    {
+        _logger.LogInformation("PLC entered Run state. Triggering full rescan.");
+        _ = TriggerFullRescanAsync();
+    }
+    else if (e.State.AdsState != AdsState.Run)
+    {
+        LogFirstOccurrence("PlcState", null,
+            "PLC left Run state: {State}. Writes paused.", e.State.AdsState);
+    }
+    _previousAdsState = e.State.AdsState;
+}
+
 protected override async Task ExecuteAsync(CancellationToken stoppingToken)
 {
     while (!stoppingToken.IsCancellationRequested)
     {
         try
         {
-            if (_isStarted && !IsConnected && !_circuitBreaker.IsOpen)
+            // Monitor symbol version for PLC program changes
+            if (_isStarted && IsConnected)
             {
-                await ReconnectAsync(stoppingToken).ConfigureAwait(false);
+                var currentSymbolVersion = await GetSymbolVersionAsync(stoppingToken);
+                if (_lastSymbolVersion != null && currentSymbolVersion != _lastSymbolVersion)
+                {
+                    _logger.LogInformation("Symbol version changed. Triggering full rescan.");
+                    await TriggerFullRescanAsync(stoppingToken);
+                }
+                _lastSymbolVersion = currentSymbolVersion;
             }
 
-            await Task.Delay(_configuration.HealthCheckInterval, stoppingToken).ConfigureAwait(false);
+            await Task.Delay(_configuration.HealthCheckInterval, stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Normal shutdown
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Health check failed. Retrying after delay.");
-            _circuitBreaker.RecordFailure();
+            LogFirstOccurrence("HealthCheck", ex, "Health check failed.");
         }
     }
 }
 ```
+
+### Initial Connection Behavior
+
+The connector retries indefinitely with backoff until the PLC becomes available:
+
+- Supports scenarios where the service starts before the PLC is ready
+- Uses circuit breaker to prevent reconnection storms
+- Logs first occurrence as Warning, subsequent as Debug until resolved
 
 ### Circuit Breaker
 
@@ -1118,10 +1319,6 @@ Current implementation uses `PollValues` which polls each symbol individually. F
 
 Cache variable handles (`CreateVariableHandle`) instead of using symbol paths for read/write operations. Handles provide faster repeated access.
 
-### Symbol Version Monitoring
-
-Monitor PLC symbol version changes to detect when PLC program is updated (download vs online change). Could trigger automatic re-initialization of subscriptions.
-
 ### Dynamic Symbol Discovery
 
 Like OPC UA, support discovering PLC symbols at runtime and adding them as dynamic properties:
@@ -1133,9 +1330,75 @@ Like OPC UA, support discovering PLC symbols at runtime and adding them as dynam
 
 Support dynamic addition/removal of variables at runtime. This requires careful design across all connectors to ensure consistent behavior.
 
+### IHealthCheck Implementation
+
+Add optional ASP.NET Core health check integration for Kubernetes/Docker health probes.
+
+## Error Logging Strategy
+
+Use **first-occurrence pattern** to avoid log spam during 24/7 operation:
+
+```csharp
+private readonly ConcurrentDictionary<string, bool> _loggedErrors = new();
+
+private void LogFirstOccurrence(string category, Exception? ex, string message, params object[] args)
+{
+    if (_loggedErrors.TryAdd(category, true))
+    {
+        // First occurrence - log as Warning
+        if (ex is not null)
+            _logger.LogWarning(ex, message, args);
+        else
+            _logger.LogWarning(message, args);
+    }
+    else
+    {
+        // Subsequent occurrences - log as Debug
+        if (ex is not null)
+            _logger.LogDebug(ex, message, args);
+        else
+            _logger.LogDebug(message, args);
+    }
+}
+
+private void ClearFirstOccurrenceLog(string category)
+{
+    _loggedErrors.TryRemove(category, out _);
+}
+```
+
+Categories used:
+- `"Connection"` - Connection failures (cleared on successful connect)
+- `"PlcState"` - PLC state transitions (cleared when Run state restored)
+- `"HealthCheck"` - Health check loop errors
+- `"Write:{symbolPath}"` - Per-symbol write failures
+
 ## Testing Strategy
 
-Use [dsian.TwinCAT.Ads.Server.Mock](https://github.com/densogiaichned/dsian.TwinCAT.Ads.Server.Mock) NuGet package to mock ADS server for unit tests:
+### Mock Library Limitations
+
+The [dsian.TwinCAT.Ads.Server.Mock](https://github.com/densogiaichned/dsian.TwinCAT.Ads.Server.Mock) library has limitations:
+- ❌ No connection drop simulation
+- ❌ No device notifications support
+- ❌ No symbol access via SymbolLoader
+- ✅ Basic read/write request handling only
+
+This means **reconnection scenarios cannot be fully tested with the mock**.
+
+### Testing Approach
+
+**Unit tests (no real PLC):**
+- Value converter tests (all type mappings)
+- Error classifier tests
+- Path building and attribute parsing
+- Demotion priority ordering logic
+- Configuration validation
+
+**Integration tests (requires TwinCAT XAR or real PLC):**
+- Full ISubjectSource flow
+- Notification/polling registration
+- Reconnection scenarios
+- Symbol version change detection
 
 ```xml
 <PackageReference Include="dsian.TwinCAT.Ads.Server.Mock" Version="0.7.1" />
@@ -1582,46 +1845,59 @@ The mock library can also replay recorded ADS communication from `.cap` files (T
 ## Implementation Tasks
 
 1. Create project `Namotion.Interceptor.Connectors.TwinCAT`
-2. Add NuGet references (`Beckhoff.TwinCAT.Ads`, `Beckhoff.TwinCAT.Ads.Reactive`)
-3. Implement `AdsClientConfiguration` with `Validate()` method
-4. Implement `AdsValueConverter` with virtual methods for type conversion
-5. Implement `AdsVariableAttribute` extending `PathAttribute`
+2. Add NuGet references (`Beckhoff.TwinCAT.Ads` 7.0+, `Beckhoff.TwinCAT.Ads.Reactive` 7.0+)
+3. Implement `AdsClientConfiguration`:
+   - Connection settings (Host, AmsNetId, AmsPort)
+   - Optional `SessionSettings` exposure for advanced users
+   - `MaxNotifications` limit (default 500)
+   - `Validate()` method
+4. Implement `AdsValueConverter`:
+   - Virtual methods for type conversion
+   - Auto-detect STRING vs WSTRING encoding from symbol metadata
+   - No null interpretation (return actual PLC values)
+5. Implement `AdsVariableAttribute`:
+   - Extends `PathAttribute`
+   - `Priority` property for demotion ordering
+   - `ReadMode`, `CycleTime`, `MaxDelay` properties
 6. Implement `AdsReadMode` enum
 7. Implement `AdsErrorClassifier` for transient vs permanent error classification
-8. Implement `AdsWriteException` (like `OpcUaWriteException`) with transient/permanent failure counts
+8. Implement `AdsWriteException` with transient/permanent failure counts
 9. Implement `AdsClientDiagnostics` for runtime health monitoring
 10. Implement `AdsSubjectLoader`:
     - Recursive subject graph loading with cycle detection
     - Handle `IsSubjectReference`, `IsSubjectCollection`, `IsSubjectDictionary`
-    - Array size discovery via TwinCAT symbol metadata
+    - Hybrid array size: use PLC metadata if empty, otherwise existing size
     - Path building for nested subjects, collections, dictionaries
 11. Implement `TwinCatSubjectClientSource`:
+    - Use `AdsSession` for connection (not raw `AdsClient`)
     - Implement `ISubjectSource` interface
-    - Add ADS connection management
-    - Add notification registration via `WhenNotification`
-    - Add polling registration via `PollValues`
-    - Add Auto mode demotion logic (CycleTime-based priority)
-    - Add cache invalidation on detach
-    - Add reconnection handling in `ExecuteAsync`
-    - Integrate existing `CircuitBreaker` from `Namotion.Interceptor.Connectors.Resilience`
+    - `ConnectionStateChanged` handling for resurrection detection
+    - `AdsStateChanged` handling for PLC Run/Stop transitions
+    - Symbol version monitoring for PLC program changes
+    - Full rescan on resurrection/state change/symbol change
+    - Notification registration via `WhenNotification`
+    - Polling registration via `PollValues`
+    - Demotion logic: Priority first, then CycleTime
+    - First-occurrence logging pattern
+    - Cache invalidation on detach
+    - Retry indefinitely on initial connection
+    - Integrate `CircuitBreaker` from `Namotion.Interceptor.Connectors.Resilience`
     - Expose `Diagnostics` property
 12. Implement `TwinCatSubjectExtensions` for DI registration
-13. Write unit tests with `dsian.TwinCAT.Ads.Server.Mock`:
-    - Value converter tests (all type mappings)
+13. Write unit tests:
+    - Value converter tests (all type mappings, encoding detection)
     - Error classifier tests
-    - Read mode demotion logic
-    - Subject graph loading (nested subjects, collections, dictionaries)
+    - Demotion priority ordering (Priority + CycleTime)
+    - Configuration validation
     - Path building for all property types
-    - Full `ISubjectSource` flow with mocked ADS
-    - Reconnection tests (server restart recovery)
-    - Circuit breaker tests (open after failures, close after success)
-    - Write retry queue flush after reconnection
-    - Cache invalidation on detach
+    - First-occurrence logging behavior
+    - (Integration tests require TwinCAT XAR or real PLC)
 14. Write user-facing documentation (`docs/connectors/twincat.md`)
 15. Add to `docs/connectors.md` index
 
 ## Open Questions
 
 1. Does `PollValues` batch internally or poll each symbol individually? (Assumed individual based on API shape)
-2. What are the exact ADS notification limits? (Runtime-dependent)
-3. Should we support ADS sum commands for writes as well as reads?
+2. What are the exact ADS notification limits on various TwinCAT versions? (We use configurable `MaxNotifications` with default 500)
+3. Should we support ADS sum commands for writes as well as reads? (Future enhancement)
+4. How does `WhenNotification` behave during `AdsSession` resurrection? (Assumed subscriptions need recreation)
