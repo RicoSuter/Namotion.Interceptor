@@ -210,6 +210,13 @@ The `_subjectToNodeId` mapping and `ConnectorReferenceCounter<TData>` have diffe
 
 Both are cleared together on reconnect/restart.
 
+**Why separate dictionary instead of PropertyData:**
+- **PropertyData** (`OpcUaNodeIdKey`) stores per-property NodeIds for value nodes (used during value sync)
+- **Subject mapping** (`_subjectToNodeId`) stores per-subject NodeIds for object nodes (used for collection identity matching)
+- These are different NodeIds: a subject may have many property value nodes but one identity node
+- Collection matching needs O(1) reverse lookup (NodeId → Subject), which PropertyData doesn't support efficiently
+- The separate dictionary is cleared on reconnect; PropertyData persists (allowing value sync to resume)
+
 ---
 
 ## Model → OPC UA Direction
@@ -964,6 +971,37 @@ public class InterceptorOpcUaServer : StandardServer
 - **Source tracking:** Prevents infinite sync loops
 - **~150-200 lines total:** Manageable complexity
 
+**Authorization:**
+
+External node management is gated only by `EnableExternalNodeManagement`. Fine-grained authorization (per-type, per-property, per-user) is out of scope for this design. Applications requiring authorization should:
+
+1. Extend `InterceptorOpcUaServer` with custom authorization logic
+2. Override `AddNodesAsync`/`DeleteNodesAsync` to check `SecureChannelContext` and user identity
+3. Validate against application-specific rules before calling base implementation
+
+**TypeDefinition → C# Type Resolution:**
+
+When processing external AddNodes, the server needs to map OPC UA TypeDefinition NodeId to a C# type:
+
+```csharp
+// SubjectFactory extension for server-side type resolution
+public interface IOpcUaSubjectFactory
+{
+    // Existing client-side method
+    Task<IInterceptorSubject> CreateSubjectAsync(
+        RegisteredSubjectProperty property, ReferenceDescription node, ISession session, CancellationToken ct);
+
+    // New server-side method for external AddNodes
+    Task<IInterceptorSubject> CreateSubjectAsync(
+        NodeClass nodeClass, ExpandedNodeId typeDefinition, CancellationToken ct);
+}
+```
+
+Implementation requires a type registry mapping `TypeDefinition` NodeIds to C# types. This can be:
+- Attribute-based: Scan for `[OpcUaNode(TypeDefinition = "...")]` attributes at startup
+- Configuration-based: Explicit `Dictionary<NodeId, Type>` in server configuration
+- Convention-based: Match TypeDefinition BrowseName to C# type name
+
 ---
 
 ## Initial Load = Sync with Empty State
@@ -989,6 +1027,15 @@ await ProcessSubjectNodeChangesAsync(rootSubject, rootNodeId, session, ct);
 ```
 
 **Same methods, same logic** - just different starting states. Safe to call anytime for resync.
+
+### Initial Value Handling
+
+When a node is created for a subject (in either direction), current property values are read from the model and set on the node at creation time. This means:
+
+1. **Model → OPC UA:** `CreateVariableNode` calls `property.GetValue()` and sets `variableNode.Value`
+2. **OPC UA → Model:** `CreateLocalSubjectAsync` creates the subject, then recurses to load child values via MonitoredItems
+
+No separate "initial value sync" phase is needed - values are populated as part of structural sync. Value changes that occur during structural sync are handled by eventual consistency (the structure creation reads the current value, which may include concurrent changes).
 
 ---
 
@@ -1166,6 +1213,20 @@ foreach (var op in operations)
 - OPC UA operations are independent (no transactions)
 - Periodic resync catches anything missed
 - Structural changes are rare, failures even rarer
+
+**Partial Failure Scenarios:**
+
+| Scenario | State After Failure | Recovery |
+|----------|---------------------|----------|
+| AddNodes succeeds, MonitoredItem fails | OPC UA node exists, no value sync | Periodic resync retries MonitoredItem creation |
+| CreateLocalSubject succeeds, child load fails | Partial subject tree | Periodic resync completes child loading |
+| DeleteNodes succeeds, local removal fails | Orphaned local subject | Next structural change or resync removes it |
+| BrowseName re-index fails mid-collection | Non-contiguous indices (e.g., `[0], [2]`) | Periodic resync corrects indices |
+
+**Design decision:** No rollback/compensation logic. Partial state is acceptable because:
+1. OPC UA has no transaction semantics
+2. Eventual consistency via periodic resync guarantees recovery
+3. Rollback complexity exceeds benefit for rare failure cases
 
 ---
 
@@ -1424,6 +1485,11 @@ All open questions have been resolved through design review:
 | **Collection BrowseName indices** | Re-index on change | Keep contiguous `[0], [1], [2]`; NodeIds stable, BrowseNames match C# positions |
 | **Server ModelChangeEvent** | Emit on structural changes | Batch if possible; enables real-time client notification |
 | **External AddNodes/DeleteNodes** | Custom server class, disabled by default | `EnableExternalNodeManagement = false` for security; reuses existing sync |
+| **External AddNodes authorization** | Config flag only, no fine-grained auth | Fine-grained authorization (per-type, per-property) is out of scope; applications requiring it should implement in a custom server class |
+| **Initial value handling** | Read from model during node creation | When a node is created for a subject, current property values are read from the model and set on the node; no separate initial value sync needed |
+| **Partial failure recovery** | No rollback, periodic resync recovers | If AddNodes succeeds but MonitoredItem fails, partial state remains; periodic resync ensures eventual consistency |
+| **Server-side TypeResolver** | Reverse mapping via SubjectFactory | `SubjectFactory.CreateSubjectForNodeClassAsync()` maps OPC UA TypeDefinition → C# Type; requires TypeDefinition registration |
+| **Client NodeId mapping storage** | Separate dictionary, not PropertyData | `_subjectToNodeId` dictionary provides O(1) lookup for collection matching; PropertyData stores per-property NodeId for value sync |
 
 ---
 
