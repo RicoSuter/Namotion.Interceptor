@@ -3,48 +3,22 @@ using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Interceptor.Tests;
 
-[AttributeUsage(AttributeTargets.Property)]
-public class UnitAttribute : Attribute
+public partial class PropertyInfoExtensionsTests
 {
-    public string Unit { get; }
-    public UnitAttribute(string unit) => Unit = unit;
-}
+    [AttributeUsage(AttributeTargets.Property)]
+    private class UnitAttribute : Attribute
+    {
+        public string Unit { get; }
+        public UnitAttribute(string unit) => Unit = unit;
+    }
 
-[AttributeUsage(AttributeTargets.Property, AllowMultiple = true)]
-public class TagAttribute : Attribute
-{
-    public string Value { get; }
-    public TagAttribute(string value) => Value = value;
-}
+    [AttributeUsage(AttributeTargets.Property, AllowMultiple = true)]
+    private class TagAttribute : Attribute
+    {
+        public string Value { get; }
+        public TagAttribute(string value) => Value = value;
+    }
 
-public interface ITemperatureSensor
-{
-    [Unit("°C")]
-    double Temperature { get; }
-}
-
-[InterceptorSubject]
-public partial class TemperatureSensor : ITemperatureSensor
-{
-    public partial double Temperature { get; set; }
-}
-
-public interface IWithMultipleAttributes
-{
-    [Unit("m/s")]
-    [Tag("speed")]
-    double Speed { get; }
-}
-
-[InterceptorSubject]
-public partial class SpeedSensor : IWithMultipleAttributes
-{
-    [Tag("class")]
-    public partial double Speed { get; set; }
-}
-
-public class PropertyInfoExtensionsTests
-{
     [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
     private class SingleAttribute : Attribute
     {
@@ -64,6 +38,32 @@ public class PropertyInfoExtensionsTests
     {
         public string Value { get; }
         public DefaultAttribute(string value) => Value = value;
+    }
+
+    private interface ITemperatureSensor
+    {
+        [Unit("°C")]
+        double Temperature { get; }
+    }
+
+    [InterceptorSubject]
+    private partial class TemperatureSensor : ITemperatureSensor
+    {
+        public partial double Temperature { get; set; }
+    }
+
+    private interface IWithMultipleAttributes
+    {
+        [Unit("m/s")]
+        [Tag("speed")]
+        double Speed { get; }
+    }
+
+    [InterceptorSubject]
+    private partial class SpeedSensor : IWithMultipleAttributes
+    {
+        [Tag("class")]
+        public partial double Speed { get; set; }
     }
 
     private interface IWithSingleAttribute

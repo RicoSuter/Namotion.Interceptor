@@ -137,12 +137,23 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
             if (cls is null) return;
             
             var className = cls.ClassNode.Identifier.ValueText;
-            var namespaceName = (cls.ClassNode.Parent as NamespaceDeclarationSyntax)?.Name.ToString() ??
-                                (cls.ClassNode.Parent as FileScopedNamespaceDeclarationSyntax)?.Name.ToString()
+
+            // Collect containing types for nested class support
+            var containingTypes = GetContainingTypes(cls.ClassNode);
+
+            // Walk up past containing types to find namespace
+            SyntaxNode? current = cls.ClassNode.Parent;
+            while (current is TypeDeclarationSyntax)
+                current = current.Parent;
+            var namespaceName = (current as NamespaceDeclarationSyntax)?.Name.ToString() ??
+                                (current as FileScopedNamespaceDeclarationSyntax)?.Name.ToString()
                                 ?? "YourDefaultNamespace";
 
-            // Include namespace in filename to avoid conflicts when same class name exists in different namespaces
-            var fileName = $"{namespaceName}.{className}.g.cs";
+            // Include namespace and containing types in filename to avoid conflicts
+            var containingTypesPath = containingTypes.Length > 0
+                ? string.Join(".", containingTypes) + "."
+                : "";
+            var fileName = $"{namespaceName}.{containingTypesPath}{className}.g.cs";
             
             try
             {
@@ -192,7 +203,7 @@ using System.Text.Json.Serialization;
 
 namespace {namespaceName}
 {{
-    public partial class {className} : IInterceptorSubject{(baseClassHasInpc ? "" : ", INotifyPropertyChanged, IRaisePropertyChanged")}
+{GenerateContainingTypeOpening(containingTypes)}    public partial class {className} : IInterceptorSubject{(baseClassHasInpc ? "" : ", INotifyPropertyChanged, IRaisePropertyChanged")}
     {{
         {(baseClassHasInpc ? "" : @"public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -429,7 +440,7 @@ namespace {namespaceName}
             return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
         }}
     }}
-}}
+{GenerateContainingTypeClosing(containingTypes)}}}
 ";
                     spc.AddSource(fileName, SourceText.From(generatedCode, Encoding.UTF8));
             }
@@ -539,5 +550,44 @@ namespace {namespaceName}
         }
 
         return typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+    }
+
+    private static string[] GetContainingTypes(SyntaxNode node)
+    {
+        var types = new System.Collections.Generic.List<string>();
+        var parent = node.Parent;
+        while (parent is TypeDeclarationSyntax typeDecl)
+        {
+            types.Insert(0, typeDecl.Identifier.ValueText);
+            parent = parent.Parent;
+        }
+        return types.ToArray();
+    }
+
+    private static string GenerateContainingTypeOpening(string[] containingTypes)
+    {
+        if (containingTypes.Length == 0)
+            return "";
+
+        var sb = new StringBuilder();
+        foreach (var type in containingTypes)
+        {
+            sb.AppendLine($"    partial class {type}");
+            sb.AppendLine("    {");
+        }
+        return sb.ToString();
+    }
+
+    private static string GenerateContainingTypeClosing(string[] containingTypes)
+    {
+        if (containingTypes.Length == 0)
+            return "";
+
+        var sb = new StringBuilder();
+        foreach (var _ in containingTypes)
+        {
+            sb.AppendLine("    }");
+        }
+        return sb.ToString();
     }
 }
