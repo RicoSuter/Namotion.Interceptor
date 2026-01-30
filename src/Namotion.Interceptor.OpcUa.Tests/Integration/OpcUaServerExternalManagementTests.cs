@@ -7,9 +7,8 @@ using Xunit.Abstractions;
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 
 /// <summary>
-/// Tests for OPC UA server external node management - verifies that external clients
-/// can create/delete nodes via AddNodes/DeleteNodes services.
-/// These tests validate Phase 7: Server OPC UA → Model sync.
+/// Configuration and helper tests for OPC UA server external node management.
+/// Integration tests are covered by OpcUaBidirectionalGraphTests (Client→Server sync).
 /// </summary>
 [Trait("Category", "Integration")]
 public class OpcUaServerExternalManagementTests
@@ -399,42 +398,6 @@ public class OpcUaServerExternalManagementTests
         Assert.Equal(StatusCodes.Good, results[0]);
     }
 
-    [Fact(Skip = "Integration test - requires dedicated server, run manually")]
-    public async Task ExternalAddNodes_CreatesSubjectInModel()
-    {
-        // This test would:
-        // 1. Start a server with EnableExternalNodeManagement = true and TypeRegistry configured
-        // 2. Connect an external client
-        // 3. External client calls AddNodes to create a new node
-        // 4. Verify the corresponding subject is created in the C# model
-
-        // Implementation would require full server/client lifecycle setup
-        await Task.CompletedTask;
-    }
-
-    [Fact(Skip = "Integration test - requires dedicated server, run manually")]
-    public async Task ExternalDeleteNodes_RemovesSubjectFromModel()
-    {
-        // This test would:
-        // 1. Start a server with EnableExternalNodeManagement = true
-        // 2. Server has a model with existing subjects
-        // 3. External client calls DeleteNodes to remove a node
-        // 4. Verify the corresponding subject is removed from the C# model
-
-        // Implementation would require full server/client lifecycle setup
-        await Task.CompletedTask;
-    }
-
-    [Fact(Skip = "Integration test - requires dedicated server, run manually")]
-    public async Task ExternalNodeManagementDisabled_ReturnsBadServiceUnsupported()
-    {
-        // This test would:
-        // 1. Start a server with EnableExternalNodeManagement = false (default)
-        // 2. Connect an external client
-        // 3. External client calls AddNodes
-        // 4. Verify the response contains BadServiceUnsupported status codes
-
-        // Implementation would require full server/client lifecycle setup
-        await Task.CompletedTask;
-    }
+    // Note: Integration tests for external AddNodes/DeleteNodes are covered by
+    // OpcUaBidirectionalGraphTests (Client→Server tests with EnableRemoteNodeManagement).
 }
