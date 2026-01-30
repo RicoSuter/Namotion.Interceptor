@@ -24,7 +24,7 @@ public partial class InterfaceAttributeInheritanceTests
     }
 
     [InterceptorSubject]
-    private partial class TemperatureSensor : ITemperatureSensor
+    public partial class TemperatureSensor : ITemperatureSensor
     {
         public partial double Temperature { get; set; }
     }
