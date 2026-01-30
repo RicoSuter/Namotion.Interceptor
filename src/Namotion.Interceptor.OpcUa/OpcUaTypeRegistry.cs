@@ -1,6 +1,6 @@
 using Opc.Ua;
 
-namespace Namotion.Interceptor.OpcUa.Server;
+namespace Namotion.Interceptor.OpcUa;
 
 /// <summary>
 /// Registry for mapping OPC UA TypeDefinition NodeIds to C# types.

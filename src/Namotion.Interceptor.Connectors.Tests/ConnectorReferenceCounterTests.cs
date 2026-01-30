@@ -210,7 +210,7 @@ public class ConnectorReferenceCounterTests
     }
 
     [Fact]
-    public void GetAllSubjects_ReturnsAllTrackedSubjects()
+    public void GetAllEntries_ReturnsAllSubjectsAndData()
     {
         // Arrange
         var counter = new ConnectorReferenceCounter<string>();
@@ -220,25 +220,25 @@ public class ConnectorReferenceCounterTests
         counter.IncrementAndCheckFirst(subject2, () => "data2", out _);
 
         // Act
-        var subjects = counter.GetAllSubjects().ToList();
+        var entries = counter.GetAllEntries().ToList();
 
         // Assert
-        Assert.Equal(2, subjects.Count);
-        Assert.Contains(subject1, subjects);
-        Assert.Contains(subject2, subjects);
+        Assert.Equal(2, entries.Count);
+        Assert.Contains(entries, e => ReferenceEquals(e.Subject, subject1) && e.Data == "data1");
+        Assert.Contains(entries, e => ReferenceEquals(e.Subject, subject2) && e.Data == "data2");
     }
 
     [Fact]
-    public void GetAllSubjects_EmptyCounter_ReturnsEmpty()
+    public void GetAllEntries_EmptyCounter_ReturnsEmpty()
     {
         // Arrange
         var counter = new ConnectorReferenceCounter<string>();
 
         // Act
-        var subjects = counter.GetAllSubjects().ToList();
+        var entries = counter.GetAllEntries().ToList();
 
         // Assert
-        Assert.Empty(subjects);
+        Assert.Empty(entries);
     }
 
     private class TestSubject : IInterceptorSubject

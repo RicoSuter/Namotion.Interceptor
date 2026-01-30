@@ -61,19 +61,17 @@ internal class OpcUaSubjectLoader
 
         var nodeId = ExpandedNodeId.ToNodeId(node.NodeId, session.NamespaceUris);
 
-        // Track subject with reference counter
-        // On first reference: creates an empty list that will be populated during property loading
-        // On subsequent references: the subject's MonitoredItems already exist, skip processing
+        // Track subject with reference counter - only process on first reference
         var isFirstReference = _source.TrackSubject(subject, nodeId, () => []);
-
         if (!isFirstReference)
         {
-            // Subject already tracked from another property reference
-            // Its MonitoredItems were already added during the first load, skip to avoid duplicates
             return;
         }
         var nodeReferences = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
         
+        // Track which properties were matched to server nodes
+        var claimedPropertyNames = new HashSet<string>();
+
         for (var index = 0; index < nodeReferences.Count; index++)
         {
             var nodeReference = nodeReferences[index];
@@ -128,10 +126,14 @@ internal class OpcUaSubjectLoader
             var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
             if (propertyName is not null)
             {
+                claimedPropertyNames.Add(property.Name);
                 var childNodeId = ExpandedNodeId.ToNodeId(nodeReference.NodeId, session.NamespaceUris);
 
                 if (property.IsSubjectReference)
                 {
+                    // Claim ownership of structural property so changes flow through ChangeQueueProcessor
+                    _ownership.ClaimSource(property.Reference);
+
                     // Check if this should be treated as a VariableNode
                     var nodeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(property);
                     if (nodeConfiguration?.NodeClass == Mapping.OpcUaNodeClass.Variable)
@@ -145,10 +147,16 @@ internal class OpcUaSubjectLoader
                 }
                 else if (property.IsSubjectCollection)
                 {
+                    // Claim ownership of structural property so changes flow through ChangeQueueProcessor
+                    _ownership.ClaimSource(property.Reference);
+
                     await LoadSubjectCollectionAsync(property, childNodeId, monitoredItems, session, loadedSubjects, cancellationToken).ConfigureAwait(false);
                 }
                 else if (property.IsSubjectDictionary)
                 {
+                    // Claim ownership of structural property so changes flow through ChangeQueueProcessor
+                    _ownership.ClaimSource(property.Reference);
+
                     await LoadSubjectDictionaryAsync(property, childNodeId, monitoredItems, session, loadedSubjects, cancellationToken).ConfigureAwait(false);
                 }
                 else
@@ -157,6 +165,21 @@ internal class OpcUaSubjectLoader
                     var visitedNodes = new HashSet<NodeId>();
                     await LoadAttributeNodesAsync(property, childNodeId, session, monitoredItems, visitedNodes, cancellationToken).ConfigureAwait(false);
                 }
+            }
+        }
+
+        // Second pass: claim ownership of structural properties that weren't matched to server nodes
+        // This enables Client → Server sync for new nodes that don't exist on the server yet
+        foreach (var property in registeredSubject.Properties)
+        {
+            if (claimedPropertyNames.Contains(property.Name))
+            {
+                continue;
+            }
+
+            if (property.IsSubjectReference || property.IsSubjectCollection || property.IsSubjectDictionary)
+            {
+                _ownership.ClaimSource(property.Reference);
             }
         }
     }

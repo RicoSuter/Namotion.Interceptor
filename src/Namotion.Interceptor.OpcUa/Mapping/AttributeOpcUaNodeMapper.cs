@@ -61,6 +61,14 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
         var classConfig = classAttribute is not null ? BuildConfigFromNodeAttribute(classAttribute) : null;
         var propertyConfig = propertyAttribute is not null ? BuildConfigFromNodeAttribute(propertyAttribute) : null;
 
+        // For collections/dictionaries/references, the class-level BrowseName should NOT override the property name.
+        // The class-level BrowseName is for the element type, not the container or reference property.
+        // Clear BrowseName from classConfig so the property path (e.g., "People", "Person") is used.
+        if ((property.IsSubjectCollection || property.IsSubjectDictionary || property.IsSubjectReference) && classConfig?.BrowseName is not null)
+        {
+            classConfig = classConfig with { BrowseName = null };
+        }
+
         // Start with property config, merge class config as fallback
         var config = propertyConfig?.WithFallback(classConfig) ?? classConfig ?? new OpcUaNodeConfiguration();
 

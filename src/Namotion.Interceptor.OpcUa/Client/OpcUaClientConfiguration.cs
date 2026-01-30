@@ -245,6 +245,13 @@ public class OpcUaClientConfiguration
     public bool EnableRemoteNodeManagement { get; set; } = false;
 
     /// <summary>
+    /// Gets or sets the optional type registry for mapping C# types to OPC UA TypeDefinition NodeIds.
+    /// Used when creating remote nodes via AddNodes service.
+    /// If not set, the client will try to use [OpcUaNode(TypeDefinition = "...")] attributes on the subject classes.
+    /// </summary>
+    public OpcUaTypeRegistry? TypeRegistry { get; set; }
+
+    /// <summary>
     /// Gets or sets whether to enable subscription to ModelChangeEvents from the server.
     /// When enabled, the client will subscribe to GeneralModelChangeEventType events
     /// on the Server node to detect structural changes made by other clients.
@@ -555,6 +562,13 @@ public class OpcUaClientConfiguration
             throw new ArgumentException(
                 $"ReadAfterWriteBuffer must be non-negative, got: {ReadAfterWriteBuffer}",
                 nameof(ReadAfterWriteBuffer));
+        }
+
+        if (EnablePeriodicResync && PeriodicResyncInterval < TimeSpan.FromSeconds(1))
+        {
+            throw new ArgumentException(
+                $"PeriodicResyncInterval must be at least 1 second when EnablePeriodicResync is true, got: {PeriodicResyncInterval.TotalSeconds}s",
+                nameof(PeriodicResyncInterval));
         }
     }
 }

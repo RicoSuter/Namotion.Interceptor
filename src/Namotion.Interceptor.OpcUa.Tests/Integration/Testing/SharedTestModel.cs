@@ -19,6 +19,7 @@ public partial class SharedTestModel
         DataTypes = new DataTypesTestArea();
         Collections = new CollectionsTestArea();
         MultiClient = new MultiClientTestArea();
+        ClientToServerSync = new ClientToServerSyncTestArea();
     }
 
     [Path("opc", "Connected")]
@@ -41,6 +42,9 @@ public partial class SharedTestModel
 
     [Path("opc", "MultiClient")]
     public partial MultiClientTestArea MultiClient { get; set; }
+
+    [Path("opc", "ClientToServerSync")]
+    public partial ClientToServerSyncTestArea ClientToServerSync { get; set; }
 }
 
 /// <summary>
@@ -337,4 +341,27 @@ public partial class MultiClientTestArea
 
     [Path("opc", "LastWriter")]
     public partial string? LastWriter { get; set; }
+}
+
+/// <summary>
+/// Test area for client-to-server synchronization tests.
+/// Contains nested subjects for testing value sync on existing subjects.
+/// </summary>
+[InterceptorSubject]
+public partial class ClientToServerSyncTestArea
+{
+    public ClientToServerSyncTestArea()
+    {
+        Person = new NestedPerson();
+        Sensor = new NestedSensor();
+    }
+
+    /// <summary>Person reference for testing property value sync on nested objects.</summary>
+    [Path("opc", "Person")]
+    public partial NestedPerson Person { get; set; }
+
+    /// <summary>OpcUaValue pattern sensor for testing value sync.</summary>
+    [OpcUaNode("Sensor")]
+    [OpcUaReference("HasComponent")]
+    public partial NestedSensor? Sensor { get; set; }
 }

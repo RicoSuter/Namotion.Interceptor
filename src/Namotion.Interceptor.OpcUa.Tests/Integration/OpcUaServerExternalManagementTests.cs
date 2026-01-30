@@ -270,6 +270,135 @@ public class OpcUaServerExternalManagementTests
         Assert.Equal(StatusCodes.BadServiceUnsupported, results[0]);
     }
 
+    [Fact]
+    public void ExternalNodeManagementHelper_ValidateAddNodes_WhenEnabled_WithValidType_ReturnsGood()
+    {
+        // Arrange
+        var typeRegistry = new OpcUaTypeRegistry();
+        var personTypeId = new NodeId("PersonType", 2);
+        typeRegistry.RegisterType<TestPerson>(personTypeId);
+
+        var configuration = new OpcUaServerConfiguration
+        {
+            ValueConverter = new OpcUaValueConverter(),
+            EnableExternalNodeManagement = true,
+            TypeRegistry = typeRegistry
+        };
+        var helper = new ExternalNodeManagementHelper(configuration, NullLogger.Instance);
+
+        var namespaceTable = new NamespaceTable();
+        namespaceTable.Append("http://test/");
+
+        var nodesToAdd = new AddNodesItemCollection
+        {
+            new AddNodesItem
+            {
+                BrowseName = new QualifiedName("NewPerson", 2),
+                TypeDefinition = personTypeId
+            }
+        };
+
+        // Act
+        var validatedItems = helper.ValidateAddNodes(nodesToAdd, namespaceTable, out var results);
+
+        // Assert
+        Assert.Single(validatedItems);
+        Assert.Single(results);
+        Assert.Equal(StatusCodes.Good, results[0].StatusCode);
+        Assert.Equal(typeof(TestPerson), validatedItems[0].CSharpType);
+    }
+
+    [Fact]
+    public void ExternalNodeManagementHelper_ValidateAddNodes_WhenEnabled_WithUnknownType_ReturnsBadTypeDefinitionInvalid()
+    {
+        // Arrange
+        var typeRegistry = new OpcUaTypeRegistry();
+        // Don't register any types
+
+        var configuration = new OpcUaServerConfiguration
+        {
+            ValueConverter = new OpcUaValueConverter(),
+            EnableExternalNodeManagement = true,
+            TypeRegistry = typeRegistry
+        };
+        var helper = new ExternalNodeManagementHelper(configuration, NullLogger.Instance);
+
+        var nodesToAdd = new AddNodesItemCollection
+        {
+            new AddNodesItem
+            {
+                BrowseName = new QualifiedName("NewPerson", 2),
+                TypeDefinition = new NodeId("UnknownType", 2)
+            }
+        };
+
+        // Act
+        var validatedItems = helper.ValidateAddNodes(nodesToAdd, new NamespaceTable(), out var results);
+
+        // Assert
+        Assert.Empty(validatedItems);
+        Assert.Single(results);
+        Assert.Equal(StatusCodes.BadTypeDefinitionInvalid, results[0].StatusCode);
+    }
+
+    [Fact]
+    public void ExternalNodeManagementHelper_ValidateAddNodes_WhenEnabled_WithNoTypeRegistry_ReturnsBadNotSupported()
+    {
+        // Arrange
+        var configuration = new OpcUaServerConfiguration
+        {
+            ValueConverter = new OpcUaValueConverter(),
+            EnableExternalNodeManagement = true,
+            TypeRegistry = null // No registry
+        };
+        var helper = new ExternalNodeManagementHelper(configuration, NullLogger.Instance);
+
+        var nodesToAdd = new AddNodesItemCollection
+        {
+            new AddNodesItem
+            {
+                BrowseName = new QualifiedName("NewPerson", 2),
+                TypeDefinition = new NodeId("SomeType", 2)
+            }
+        };
+
+        // Act
+        var validatedItems = helper.ValidateAddNodes(nodesToAdd, new NamespaceTable(), out var results);
+
+        // Assert
+        Assert.Empty(validatedItems);
+        Assert.Single(results);
+        Assert.Equal(StatusCodes.BadNotSupported, results[0].StatusCode);
+    }
+
+    [Fact]
+    public void ExternalNodeManagementHelper_ValidateDeleteNodes_WhenEnabled_ReturnsGood()
+    {
+        // Arrange
+        var configuration = new OpcUaServerConfiguration
+        {
+            ValueConverter = new OpcUaValueConverter(),
+            EnableExternalNodeManagement = true
+        };
+        var helper = new ExternalNodeManagementHelper(configuration, NullLogger.Instance);
+
+        var nodesToDelete = new DeleteNodesItemCollection
+        {
+            new DeleteNodesItem
+            {
+                NodeId = new NodeId("TestNode", 2)
+            }
+        };
+
+        // Act
+        var canProceed = helper.ValidateDeleteNodes(nodesToDelete, out var results);
+
+        // Assert
+        Assert.True(canProceed);
+        Assert.Single(results);
+        Assert.Equal(StatusCodes.Good, results[0]);
+    }
+
     [Fact(Skip = "Integration test - requires dedicated server, run manually")]
     public async Task ExternalAddNodes_CreatesSubjectInModel()
     {

@@ -58,7 +58,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         {
             logging.ClearProviders();
             logging.SetMinimumLevel(LogLevel.Debug);
-            logging.AddXunit(_logger, "Client", LogLevel.Information);
+            logging.AddXunit(_logger, "Client", LogLevel.Debug);
         });
 
         _context = InterceptorSubjectContext
