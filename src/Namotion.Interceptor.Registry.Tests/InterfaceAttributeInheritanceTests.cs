@@ -6,49 +6,27 @@ namespace Namotion.Interceptor.Registry.Tests;
 #region Test Types
 
 [AttributeUsage(AttributeTargets.Property)]
-public class InitializerAttribute : Attribute, ISubjectPropertyInitializer
+public class UnitAttribute : Attribute, ISubjectPropertyInitializer
 {
-    public static int InitializeCount { get; set; }
-    public static string? LastPropertyName { get; set; }
-
-    public string Value { get; }
-    public InitializerAttribute(string value) => Value = value;
+    public string Unit { get; }
+    public UnitAttribute(string unit) => Unit = unit;
 
     public void InitializeProperty(RegisteredSubjectProperty property)
     {
-        InitializeCount++;
-        LastPropertyName = property.Name;
-    }
-
-    public static void Reset()
-    {
-        InitializeCount = 0;
-        LastPropertyName = null;
+        property.AddAttribute("Unit", typeof(string), _ => Unit, null);
     }
 }
 
-public interface IWithInitializer
+public interface ITemperatureSensor
 {
-    [Initializer("from-interface")]
-    double Value { get; }
+    [Unit("°C")]
+    double Temperature { get; }
 }
 
 [InterceptorSubject]
-public partial class SubjectWithInterfaceInitializer : IWithInitializer
+public partial class TemperatureSensor : ITemperatureSensor
 {
-    public partial double Value { get; set; }
-}
-
-public interface IWithInitializerOnClass
-{
-    double Value { get; }
-}
-
-[InterceptorSubject]
-public partial class SubjectWithClassInitializer : IWithInitializerOnClass
-{
-    [Initializer("from-class")]
-    public partial double Value { get; set; }
+    public partial double Temperature { get; set; }
 }
 
 #endregion
@@ -56,36 +34,21 @@ public partial class SubjectWithClassInitializer : IWithInitializerOnClass
 public class InterfaceAttributeInheritanceTests
 {
     [Fact]
-    public void InterfaceAttribute_WithInitializer_IsInvoked()
+    public void InterfaceAttribute_WithInitializer_AddsPropertyAttribute()
     {
         // Arrange
-        InitializerAttribute.Reset();
         var context = InterceptorSubjectContext
             .Create()
             .WithRegistry();
 
-        // Act
-        var subject = new SubjectWithInterfaceInitializer(context);
-
-        // Assert
-        Assert.Equal(1, InitializerAttribute.InitializeCount);
-        Assert.Equal("Value", InitializerAttribute.LastPropertyName);
-    }
-
-    [Fact]
-    public void ClassAttribute_WithInitializer_IsInvoked()
-    {
-        // Arrange
-        InitializerAttribute.Reset();
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry();
+        var sensor = new TemperatureSensor(context);
 
         // Act
-        var subject = new SubjectWithClassInitializer(context);
+        var registeredProperty = sensor.TryGetRegisteredSubject()?.TryGetProperty("Temperature");
+        var unitAttribute = registeredProperty?.TryGetAttribute("Unit");
 
         // Assert
-        Assert.Equal(1, InitializerAttribute.InitializeCount);
-        Assert.Equal("Value", InitializerAttribute.LastPropertyName);
+        Assert.NotNull(unitAttribute);
+        Assert.Equal("°C", unitAttribute.GetValue());
     }
 }
