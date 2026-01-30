@@ -27,6 +27,12 @@ internal class SubscriptionManager : IAsyncDisposable
     private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
     private readonly ConcurrentDictionary<Subscription, byte> _subscriptions = new();
 
+    /// <summary>
+    /// Event raised when an OPC UA event notification is received.
+    /// Used for ModelChangeEvents and other event-based notifications.
+    /// </summary>
+    public event Action<EventNotificationList>? EventNotificationReceived;
+
     private volatile bool _shuttingDown; // Prevents new callbacks during cleanup
 
     /// <summary>
@@ -65,6 +71,7 @@ internal class SubscriptionManager : IAsyncDisposable
         foreach (var oldSubscription in _subscriptions.Keys)
         {
             oldSubscription.FastDataChangeCallback -= OnFastDataChange;
+            oldSubscription.FastEventCallback -= OnFastEventNotification;
         }
         _subscriptions.Clear();
         _monitoredItems.Clear();
@@ -97,6 +104,7 @@ internal class SubscriptionManager : IAsyncDisposable
             }
 
             subscription.FastDataChangeCallback += OnFastDataChange;
+            subscription.FastEventCallback += OnFastEventNotification;
             await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
 
             var batchEnd = Math.Min(i + maximumItemsPerSubscription, itemCount);
@@ -200,6 +208,23 @@ internal class SubscriptionManager : IAsyncDisposable
         }
     }
 
+    private void OnFastEventNotification(Subscription subscription, EventNotificationList notification, IList<string> stringTable)
+    {
+        if (_shuttingDown)
+        {
+            return;
+        }
+
+        try
+        {
+            EventNotificationReceived?.Invoke(notification);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in event notification handler.");
+        }
+    }
+
     /// <summary>
     /// Adds monitored items to existing subscriptions for live sync of structural changes.
     /// Items are added to the first subscription that has room, or a new subscription is created if all are full.
@@ -287,6 +312,7 @@ internal class SubscriptionManager : IAsyncDisposable
             }
 
             subscription.FastDataChangeCallback += OnFastDataChange;
+            subscription.FastEventCallback += OnFastEventNotification;
             await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
 
             var itemsForThisSubscription = itemsToAdd.Take(maximumItemsPerSubscription).ToList();
@@ -332,6 +358,8 @@ internal class SubscriptionManager : IAsyncDisposable
         {
             subscription.FastDataChangeCallback -= OnFastDataChange;
             subscription.FastDataChangeCallback += OnFastDataChange;
+            subscription.FastEventCallback -= OnFastEventNotification;
+            subscription.FastEventCallback += OnFastEventNotification;
             _subscriptions.TryAdd(subscription, 0);
         }
 
@@ -339,8 +367,8 @@ internal class SubscriptionManager : IAsyncDisposable
         {
             _subscriptions.TryRemove(oldSubscription, out _);
             oldSubscription.FastDataChangeCallback -= OnFastDataChange;
+            oldSubscription.FastEventCallback -= OnFastEventNotification;
         }
-
 
         _logger.LogInformation("Updated subscription manager with {Count} transferred subscriptions (removed {OldCount} old)",
             transferredSubscriptions.Count, oldSubscriptions.Length);
@@ -496,6 +524,7 @@ internal class SubscriptionManager : IAsyncDisposable
         foreach (var subscription in subscriptions)
         {
             subscription.FastDataChangeCallback -= OnFastDataChange;
+            subscription.FastEventCallback -= OnFastEventNotification;
         }
 
         var deleteTasks = subscriptions.Select(async subscription =>

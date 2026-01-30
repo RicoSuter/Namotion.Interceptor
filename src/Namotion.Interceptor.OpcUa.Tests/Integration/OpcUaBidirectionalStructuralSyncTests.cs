@@ -166,15 +166,14 @@ public class OpcUaBidirectionalStructuralSyncTests : IAsyncLifetime
                     EnableLiveSync = true,
                     EnableRemoteNodeManagement = true,
                     EnableModelChangeEvents = true,
-                    EnablePeriodicResync = true, // Needed for Server → Client sync; Client → Server uses DeleteNodes
-                    PeriodicResyncInterval = TimeSpan.FromSeconds(1),
+                    EnablePeriodicResync = false,
                     BufferTime = TimeSpan.FromMilliseconds(50)
                 };
             });
 
         _clientHost = clientBuilder.Build();
         await _clientHost.StartAsync();
-        _logger.Log("Client started with EnableLiveSync=true, EnableRemoteNodeManagement=true, EnablePeriodicResync=true");
+        _logger.Log("Client started with EnableLiveSync=true, EnableRemoteNodeManagement=true, EnableModelChangeEvents=true");
 
         // Wait for client to connect and sync
         await AsyncTestHelpers.WaitUntilAsync(

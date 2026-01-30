@@ -464,14 +464,17 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 Filter = eventFilter
             };
 
-            _modelChangeEventItem.Notification += OnModelChangeEventNotification;
-
             // Add to first subscription or create new one
             var sessionManager = _sessionManager;
             if (sessionManager is not null)
             {
+                // Subscribe to event notifications via FastEventCallback (since DisableMonitoredItemCache=true)
+                sessionManager.SubscriptionManager.EventNotificationReceived += OnEventNotificationReceived;
+
                 await sessionManager.AddMonitoredItemsAsync([_modelChangeEventItem], session, cancellationToken).ConfigureAwait(false);
-                _logger.LogInformation("Subscribed to ModelChangeEvents on Server node.");
+                _logger.LogDebug("Subscribed to ModelChangeEvents on Server node. Status={Status}, MonitoringMode={Mode}",
+                    _modelChangeEventItem.Status?.Id.ToString() ?? "null",
+                    _modelChangeEventItem.MonitoringMode);
             }
         }
         catch (Exception ex)
@@ -481,13 +484,26 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }
     }
 
-    private void OnModelChangeEventNotification(MonitoredItem item, MonitoredItemNotificationEventArgs eventArgs)
+    private void OnEventNotificationReceived(EventNotificationList notification)
     {
-        if (eventArgs.NotificationValue is not EventFieldList eventFields)
+        // Dispatch event notifications to the appropriate handler based on ClientHandle
+        var modelChangeItem = _modelChangeEventItem;
+        if (modelChangeItem is null)
         {
             return;
         }
 
+        foreach (var eventFields in notification.Events)
+        {
+            if (eventFields.ClientHandle == modelChangeItem.ClientHandle)
+            {
+                OnModelChangeEventNotification(eventFields);
+            }
+        }
+    }
+
+    private void OnModelChangeEventNotification(EventFieldList eventFields)
+    {
         if (_nodeChangeProcessor is null)
         {
             return;
@@ -498,6 +514,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         {
             return;
         }
+
+        _logger.LogDebug("ModelChangeEvent received with {Count} event fields.", eventFields.EventFields.Count);
 
         // First field should be the Changes array (ModelChangeStructureDataType[])
         if (eventFields.EventFields.Count > 0 && eventFields.EventFields[0].Value is ExtensionObject[] changes)
@@ -552,9 +570,11 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         var processor = _nodeChangeProcessor;
         if (processor is null)
         {
+            _logger.LogWarning("Periodic resync skipped: _nodeChangeProcessor is null.");
             return;
         }
 
+        _logger.LogInformation("Starting periodic resync.");
         _periodicResyncInProgress = true;
 
         _ = Task.Run(async () =>
@@ -1161,11 +1181,12 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _periodicResyncInProgress = false;
 
         // Clean up ModelChangeEvent subscription
-        if (_modelChangeEventItem is not null)
+        var sessionManager = _sessionManager;
+        if (sessionManager is not null)
         {
-            _modelChangeEventItem.Notification -= OnModelChangeEventNotification;
-            _modelChangeEventItem = null;
+            sessionManager.SubscriptionManager.EventNotificationReceived -= OnEventNotificationReceived;
         }
+        _modelChangeEventItem = null;
 
         // Clear node change processor
         _nodeChangeProcessor?.Clear();
@@ -1185,23 +1206,19 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _periodicResyncTimer?.Dispose();
         _periodicResyncTimer = null;
 
-        // Clean up ModelChangeEvent subscription
-        if (_modelChangeEventItem is not null)
+        // Clean up ModelChangeEvent subscription and dispose session manager
+        var sessionManager = _sessionManager;
+        if (sessionManager is not null)
         {
-            _modelChangeEventItem.Notification -= OnModelChangeEventNotification;
-            _modelChangeEventItem = null;
+            sessionManager.SubscriptionManager.EventNotificationReceived -= OnEventNotificationReceived;
+            await sessionManager.DisposeAsync().ConfigureAwait(false);
+            _sessionManager = null;
         }
+        _modelChangeEventItem = null;
 
         // Clear node change processor
         _nodeChangeProcessor?.Clear();
         _nodeChangeProcessor = null;
-
-        var sessionManager = _sessionManager;
-        if (sessionManager is not null)
-        {
-            await sessionManager.DisposeAsync().ConfigureAwait(false);
-            _sessionManager = null;
-        }
 
         // Clean up property data to prevent memory leaks
         // This ensures that property data associated with this OpcUaNodeIdKey is cleared

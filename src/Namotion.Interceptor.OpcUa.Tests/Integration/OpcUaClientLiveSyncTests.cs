@@ -136,10 +136,15 @@ public class OpcUaClientLiveSyncTests
         Assert.Equal(TimeSpan.FromSeconds(60), configuration.PeriodicResyncInterval);
     }
 
-    private async Task<(IHost ServerHost, TestRoot ServerRoot, IInterceptorSubjectContext ServerContext, IHost ClientHost, TestRoot ClientRoot, IInterceptorSubjectContext ClientContext, PortLease Port, TestLogger Logger, OpcUaClientDiagnostics? ClientDiagnostics)> StartServerAndClientWithLiveSyncAsync()
+    private async Task<(IHost ServerHost, TestRoot ServerRoot, IInterceptorSubjectContext ServerContext, IHost ClientHost, TestRoot ClientRoot, IInterceptorSubjectContext ClientContext, PortLease Port, TestLogger Logger, OpcUaClientDiagnostics? ClientDiagnostics)> StartServerAndClientWithLiveSyncAsync(
+        bool enableModelChangeEvents = true,
+        bool enablePeriodicResync = false,
+        TimeSpan? periodicResyncInterval = null)
     {
         var logger = new TestLogger(_output);
         var port = await OpcUaTestPortPool.AcquireAsync();
+
+        logger.Log($"Sync mode: EnableModelChangeEvents={enableModelChangeEvents}, EnablePeriodicResync={enablePeriodicResync}");
 
         // Start server
         var serverBuilder = Host.CreateApplicationBuilder();
@@ -251,7 +256,10 @@ public class OpcUaClientLiveSyncTests
                     SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
                     TelemetryContext = telemetryContext,
                     CertificateStoreBasePath = $"{port.CertificateStoreBasePath}/client",
-                    EnableLiveSync = true, // Enable live sync on client
+                    EnableLiveSync = true,
+                    EnableModelChangeEvents = enableModelChangeEvents,
+                    EnablePeriodicResync = enablePeriodicResync,
+                    PeriodicResyncInterval = periodicResyncInterval ?? TimeSpan.FromMilliseconds(200), // Fast for tests
                     BufferTime = TimeSpan.FromMilliseconds(50)
                 };
             });
@@ -283,8 +291,11 @@ public class OpcUaClientLiveSyncTests
         return (serverHost, serverRoot, serverContext, clientHost, clientRoot, clientContext, port, logger, diagnostics);
     }
 
-    [Fact(Skip = "Integration test - requires dedicated server, run manually")]
-    public async Task AddSubjectToCollection_WithLiveSync_MonitoredItemsCreated()
+    [Theory]
+    [InlineData(true, false, "EventBased")] // ModelChangeEvents enabled, PeriodicResync disabled
+    [InlineData(false, true, "PeriodicResync")] // ModelChangeEvents disabled, PeriodicResync enabled
+    public async Task AddSubjectToCollection_WithLiveSync_MonitoredItemsCreated(
+        bool enableModelChangeEvents, bool enablePeriodicResync, string syncMode)
     {
         IHost? serverHost = null;
         IHost? clientHost = null;
@@ -294,7 +305,9 @@ public class OpcUaClientLiveSyncTests
         try
         {
             (serverHost, var serverRoot, var serverContext, clientHost, var clientRoot, var clientContext, port, logger, var diagnostics) =
-                await StartServerAndClientWithLiveSyncAsync();
+                await StartServerAndClientWithLiveSyncAsync(enableModelChangeEvents, enablePeriodicResync);
+
+            logger.Log($"Testing with sync mode: {syncMode}");
 
             // Verify initial state
             var initialMonitoredItemCount = diagnostics?.MonitoredItemCount ?? 0;
@@ -358,8 +371,11 @@ public class OpcUaClientLiveSyncTests
         }
     }
 
-    [Fact(Skip = "Integration test - requires dedicated server, run manually")]
-    public async Task RemoveSubjectFromCollection_WithLiveSync_MonitoredItemsRemoved()
+    [Theory]
+    [InlineData(true, false, "EventBased")] // ModelChangeEvents enabled, PeriodicResync disabled
+    [InlineData(false, true, "PeriodicResync")] // ModelChangeEvents disabled, PeriodicResync enabled
+    public async Task RemoveSubjectFromCollection_WithLiveSync_MonitoredItemsRemoved(
+        bool enableModelChangeEvents, bool enablePeriodicResync, string syncMode)
     {
         IHost? serverHost = null;
         IHost? clientHost = null;
@@ -369,7 +385,9 @@ public class OpcUaClientLiveSyncTests
         try
         {
             (serverHost, var serverRoot, var serverContext, clientHost, var clientRoot, var clientContext, port, logger, var diagnostics) =
-                await StartServerAndClientWithLiveSyncAsync();
+                await StartServerAndClientWithLiveSyncAsync(enableModelChangeEvents, enablePeriodicResync);
+
+            logger.Log($"Testing with sync mode: {syncMode}");
 
             // Setup: Add two people to the collection
             var person1 = new TestPerson(serverContext) { FirstName = "Alice", LastName = "Smith" };

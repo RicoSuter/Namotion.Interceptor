@@ -67,6 +67,7 @@ internal class OpcUaSubjectLoader
         {
             return;
         }
+
         var nodeReferences = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
         
         // Track which properties were matched to server nodes
