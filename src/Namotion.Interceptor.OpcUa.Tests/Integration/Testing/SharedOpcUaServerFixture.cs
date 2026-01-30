@@ -159,6 +159,25 @@ public class SharedOpcUaServerFixture : IAsyncLifetime
             Counter = 0,
             LastWriter = null
         };
+
+        // Initialize ClientToServerSync test area
+        root.ClientToServerSync = new ClientToServerSyncTestArea(context)
+        {
+            Person = new NestedPerson(context)
+            {
+                FirstName = "SyncTest",
+                LastName = "Person",
+                Scores = [90.0, 95.0],
+                Address = new NestedAddress(context) { City = "SyncCity", ZipCode = "11111" }
+            },
+            Sensor = new NestedSensor(context)
+            {
+                Value = 50.0,
+                Unit = "°C",
+                MinValue = 0.0,
+                MaxValue = 100.0
+            }
+        };
     }
 
     /// <summary>

@@ -36,6 +36,20 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private volatile bool _isStarted;
     private long _reconnectStartedTimestamp; // 0 = not reconnecting, otherwise Stopwatch timestamp when reconnection started (for stall detection)
     private OpcUaClientStructuralChangeProcessor? _structuralChangeProcessor;
+    private OpcUaNodeChangeProcessor? _nodeChangeProcessor;
+
+    // Periodic resync timer for servers that don't support ModelChangeEvents
+    private Timer? _periodicResyncTimer;
+    private volatile bool _periodicResyncInProgress;
+
+    // ModelChangeEvent subscription tracking
+    private MonitoredItem? _modelChangeEventItem;
+
+    // Track recently deleted NodeIds to prevent periodic resync from re-adding them
+    // This is needed when EnableRemoteNodeManagement is true - the client is the source of truth
+    private readonly Dictionary<NodeId, DateTime> _recentlyDeletedNodeIds = new();
+    private readonly Lock _recentlyDeletedLock = new();
+    private static readonly TimeSpan RecentlyDeletedExpiry = TimeSpan.FromSeconds(30);
 
     // Diagnostics tracking - accessed from multiple threads via Diagnostics property
     private long _totalReconnectionAttempts;
@@ -59,6 +73,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     internal SourceOwnershipManager Ownership => _ownership;
 
     internal OpcUaSubjectLoader SubjectLoader => _subjectLoader;
+
+    internal OpcUaNodeChangeProcessor? NodeChangeProcessor => _nodeChangeProcessor;
 
     // Diagnostics accessors
     internal long TotalReconnectionAttempts => Interlocked.Read(ref _totalReconnectionAttempts);
@@ -96,19 +112,22 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private void RemoveItemsForSubject(IInterceptorSubject subject)
     {
         _structureLock.Wait();
+        NodeId? nodeIdToDelete = null;
         try
         {
-            // Decrement reference count and only cleanup on last reference
-            var isLast = _subjectRefCounter.DecrementAndCheckLast(subject, out var monitoredItems);
-            if (isLast && monitoredItems is not null)
+            var isLast = _subjectRefCounter.DecrementAndCheckLast(subject, out _);
+
+            if (isLast)
             {
-                // Clean up NodeId mapping
                 lock (_subjectToNodeIdLock)
                 {
-                    _subjectToNodeId.Remove(subject);
+                    if (_subjectToNodeId.TryGetValue(subject, out var nodeId))
+                    {
+                        nodeIdToDelete = nodeId;
+                        _subjectToNodeId.Remove(subject);
+                    }
                 }
 
-                // Remove monitored items from subscription/polling managers
                 _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
                 _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
             }
@@ -116,6 +135,95 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         finally
         {
             _structureLock.Release();
+        }
+
+        // Delete remote node if enabled
+        if (nodeIdToDelete is not null && _configuration.EnableRemoteNodeManagement)
+        {
+            lock (_recentlyDeletedLock)
+            {
+                _recentlyDeletedNodeIds[nodeIdToDelete] = DateTime.UtcNow;
+            }
+
+            var session = _sessionManager?.CurrentSession;
+            if (session is not null && session.Connected)
+            {
+                _ = TryDeleteRemoteNodeAsync(session, nodeIdToDelete, CancellationToken.None);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Checks if a NodeId was recently deleted by the client.
+    /// Used by periodic resync to avoid re-adding items that the client intentionally removed.
+    /// </summary>
+    internal bool WasRecentlyDeleted(NodeId nodeId)
+    {
+        lock (_recentlyDeletedLock)
+        {
+            // Clean up expired entries
+            var now = DateTime.UtcNow;
+            var expiredKeys = new List<NodeId>();
+            foreach (var (key, deletedAt) in _recentlyDeletedNodeIds)
+            {
+                if (now - deletedAt > RecentlyDeletedExpiry)
+                {
+                    expiredKeys.Add(key);
+                }
+            }
+            foreach (var key in expiredKeys)
+            {
+                _recentlyDeletedNodeIds.Remove(key);
+            }
+
+            // Check if this NodeId (or any parent) was recently deleted
+            // Also check for parent NodeIds in case we deleted a container
+            return _recentlyDeletedNodeIds.ContainsKey(nodeId);
+        }
+    }
+
+    /// <summary>
+    /// Attempts to delete a remote node on the OPC UA server via DeleteNodes service.
+    /// </summary>
+    private async Task TryDeleteRemoteNodeAsync(Opc.Ua.Client.ISession session, NodeId nodeId, CancellationToken cancellationToken)
+    {
+        var deleteNodesItem = new DeleteNodesItem
+        {
+            NodeId = nodeId,
+            DeleteTargetReferences = true
+        };
+
+        var nodesToDelete = new DeleteNodesItemCollection { deleteNodesItem };
+
+        try
+        {
+            var response = await session.DeleteNodesAsync(
+                null,
+                nodesToDelete,
+                cancellationToken).ConfigureAwait(false);
+
+            if (response.Results.Count > 0)
+            {
+                var result = response.Results[0];
+                if (StatusCode.IsGood(result))
+                {
+                    _logger.LogDebug(
+                        "Deleted remote node '{NodeId}'.",
+                        nodeId);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "DeleteNodes failed for '{NodeId}': {StatusCode}.",
+                        nodeId, result);
+                }
+            }
+        }
+        catch (ServiceResultException ex)
+        {
+            _logger.LogWarning(ex,
+                "DeleteNodes service call failed for '{NodeId}'.",
+                nodeId);
         }
     }
 
@@ -200,7 +308,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// <returns>All tracked subjects.</returns>
     internal IEnumerable<IInterceptorSubject> GetTrackedSubjects()
     {
-        return _subjectRefCounter.GetAllSubjects();
+        return _subjectRefCounter.GetAllEntries().Select(e => e.Subject);
     }
 
     public OpcUaSubjectClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger logger)
@@ -291,8 +399,179 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 _logger);
         }
 
+        // Create node change processor for remote sync features
+        if (_configuration.EnableModelChangeEvents || _configuration.EnablePeriodicResync)
+        {
+            _nodeChangeProcessor = new OpcUaNodeChangeProcessor(
+                this,
+                _configuration,
+                _subjectLoader,
+                _logger);
+
+            // Register all tracked subjects with the processor for reverse NodeId lookup
+            foreach (var subject in GetTrackedSubjects())
+            {
+                if (TryGetSubjectNodeId(subject, out var nodeId) && nodeId is not null)
+                {
+                    _nodeChangeProcessor.RegisterSubjectNodeId(subject, nodeId);
+                }
+            }
+        }
+
+        // Subscribe to ModelChangeEvents if enabled
+        if (_configuration.EnableModelChangeEvents)
+        {
+            await SetupModelChangeEventSubscriptionAsync(session, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Start periodic resync timer if enabled
+        if (_configuration.EnablePeriodicResync)
+        {
+            StartPeriodicResyncTimer();
+        }
+
         _isStarted = true;
         return _sessionManager;
+    }
+
+    private async Task SetupModelChangeEventSubscriptionAsync(Session session, CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Create an event monitored item for GeneralModelChangeEventType on the Server node
+            var eventFilter = new EventFilter();
+            eventFilter.SelectClauses.Add(new SimpleAttributeOperand
+            {
+                TypeDefinitionId = ObjectTypeIds.GeneralModelChangeEventType,
+                BrowsePath = { new QualifiedName("Changes") },
+                AttributeId = Opc.Ua.Attributes.Value
+            });
+            eventFilter.SelectClauses.Add(new SimpleAttributeOperand
+            {
+                TypeDefinitionId = ObjectTypeIds.BaseEventType,
+                BrowsePath = { new QualifiedName("EventType") },
+                AttributeId = Opc.Ua.Attributes.Value
+            });
+
+            _modelChangeEventItem = new MonitoredItem(_configuration.TelemetryContext)
+            {
+                DisplayName = "ModelChangeEvent",
+                StartNodeId = ObjectIds.Server,
+                AttributeId = Opc.Ua.Attributes.EventNotifier,
+                SamplingInterval = 0,
+                QueueSize = 100,
+                DiscardOldest = true,
+                Filter = eventFilter
+            };
+
+            _modelChangeEventItem.Notification += OnModelChangeEventNotification;
+
+            // Add to first subscription or create new one
+            var sessionManager = _sessionManager;
+            if (sessionManager is not null)
+            {
+                await sessionManager.AddMonitoredItemsAsync([_modelChangeEventItem], session, cancellationToken).ConfigureAwait(false);
+                _logger.LogInformation("Subscribed to ModelChangeEvents on Server node.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to subscribe to ModelChangeEvents. Server may not support GeneralModelChangeEventType.");
+            _modelChangeEventItem = null;
+        }
+    }
+
+    private void OnModelChangeEventNotification(MonitoredItem item, MonitoredItemNotificationEventArgs eventArgs)
+    {
+        if (eventArgs.NotificationValue is not EventFieldList eventFields)
+        {
+            return;
+        }
+
+        if (_nodeChangeProcessor is null)
+        {
+            return;
+        }
+
+        var session = _sessionManager?.CurrentSession;
+        if (session is null || !session.Connected)
+        {
+            return;
+        }
+
+        // First field should be the Changes array (ModelChangeStructureDataType[])
+        if (eventFields.EventFields.Count > 0 && eventFields.EventFields[0].Value is ExtensionObject[] changes)
+        {
+            var modelChanges = new List<ModelChangeStructureDataType>();
+            foreach (var change in changes)
+            {
+                if (change.Body is ModelChangeStructureDataType modelChange)
+                {
+                    modelChanges.Add(modelChange);
+                }
+            }
+
+            if (modelChanges.Count > 0)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await _nodeChangeProcessor.ProcessModelChangeEventAsync(modelChanges, session, CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Error processing ModelChangeEvent.");
+                    }
+                });
+            }
+        }
+    }
+
+    private void StartPeriodicResyncTimer()
+    {
+        var interval = _configuration.PeriodicResyncInterval;
+        _periodicResyncTimer = new Timer(OnPeriodicResyncTimerCallback, null, interval, interval);
+    }
+
+    private void OnPeriodicResyncTimerCallback(object? state)
+    {
+        if (Volatile.Read(ref _disposed) == 1 ||
+            _periodicResyncInProgress ||
+            !_isStarted)
+        {
+            return;
+        }
+
+        var session = _sessionManager?.CurrentSession;
+        if (session is null || !session.Connected)
+        {
+            return;
+        }
+
+        var processor = _nodeChangeProcessor;
+        if (processor is null)
+        {
+            return;
+        }
+
+        _periodicResyncInProgress = true;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await processor.PerformFullResyncAsync(session, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error during periodic resync.");
+            }
+            finally
+            {
+                _periodicResyncInProgress = false;
+            }
+        });
     }
 
     public int WriteBatchSize => (int)(_sessionManager?.CurrentSession?.OperationLimits?.MaxNodesPerWrite ?? 0);
@@ -348,7 +627,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             }
         }
 
-        _logger.LogInformation("Successfully read {Count} OPC UA nodes from server.", itemCount);
         return () =>
         {
             foreach (var (property, dataValue) in result)
@@ -356,8 +634,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
                 property.SetValueFromSource(this, dataValue.SourceTimestamp, null, value);
             }
-
-            _logger.LogInformation("Updated {Count} properties with OPC UA node values.", itemCount);
         };
     }
 
@@ -370,7 +646,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         var result = new List<(RegisteredSubjectProperty, NodeId)>();
         foreach (var property in _ownership.Properties)
         {
-            if (property.TryGetPropertyData(OpcUaNodeIdKey, out var nodeIdObj) && 
+            if (property.TryGetPropertyData(OpcUaNodeIdKey, out var nodeIdObj) &&
                 nodeIdObj is NodeId nodeId &&
                 property.GetRegisteredProperty() is { } registeredProperty)
             {
@@ -378,6 +654,68 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             }
         }
         return result;
+    }
+
+    /// <summary>
+    /// Reads and applies initial values for a newly created subject's properties.
+    /// Called after dynamically creating a subject (e.g., for reference properties or collection items).
+    /// </summary>
+    /// <param name="subject">The subject whose properties should be read.</param>
+    /// <param name="session">The OPC UA session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    internal async Task ReadAndApplySubjectValuesAsync(IInterceptorSubject subject, ISession session, CancellationToken cancellationToken)
+    {
+        var registeredSubject = subject.TryGetRegisteredSubject();
+        if (registeredSubject is null)
+        {
+            _logger.LogWarning("Cannot read values: subject {Type} is not registered.", subject.GetType().Name);
+            return;
+        }
+
+        // Collect properties with NodeIds for this subject
+        var propertiesWithNodeIds = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
+        foreach (var property in registeredSubject.Properties)
+        {
+            if (property.Reference.TryGetPropertyData(OpcUaNodeIdKey, out var nodeIdObj) &&
+                nodeIdObj is NodeId nodeId)
+            {
+                propertiesWithNodeIds.Add((property, nodeId));
+            }
+        }
+
+        if (propertiesWithNodeIds.Count == 0)
+        {
+            return;
+        }
+
+        var readValues = new ReadValueIdCollection(propertiesWithNodeIds.Count);
+        foreach (var (_, nodeId) in propertiesWithNodeIds)
+        {
+            readValues.Add(new ReadValueId
+            {
+                NodeId = nodeId,
+                AttributeId = Opc.Ua.Attributes.Value
+            });
+        }
+
+        var readResponse = await session.ReadAsync(
+            requestHeader: null,
+            maxAge: 0,
+            timestampsToReturn: TimestampsToReturn.Source,
+            readValues,
+            cancellationToken).ConfigureAwait(false);
+
+        var resultCount = Math.Min(readResponse.Results.Count, propertiesWithNodeIds.Count);
+        for (var i = 0; i < resultCount; i++)
+        {
+            if (StatusCode.IsGood(readResponse.Results[i].StatusCode))
+            {
+                var dataValue = readResponse.Results[i];
+                var property = propertiesWithNodeIds[i].Property;
+                var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
+                property.SetValueFromSource(this, dataValue.SourceTimestamp, null, value);
+            }
+        }
     }
 
     /// <summary>
@@ -590,7 +928,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     {
         if (_configuration.RootName is not null)
         {
-            var references = await BrowseNodeAsync(session, ObjectIds.ObjectsFolder, cancellationToken).ConfigureAwait(false);
+            var references = await OpcUaBrowseHelper.BrowseNodeAsync(session, ObjectIds.ObjectsFolder, cancellationToken).ConfigureAwait(false);
             return references.FirstOrDefault(reference => reference.BrowseName.Name == _configuration.RootName);
         }
 
@@ -812,31 +1150,27 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         return StatusCode.IsBad(statusCode);
     }
 
-    private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
-        Session session,
-        NodeId nodeId,
-        CancellationToken cancellationToken)
-    {
-        const uint nodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object;
-
-        var (_, _, nodeProperties, _) = await session.BrowseAsync(
-            requestHeader: null,
-            view: null,
-            [nodeId],
-            maxResultsToReturn: 0u,
-            BrowseDirection.Forward,
-            ReferenceTypeIds.HierarchicalReferences,
-            includeSubtypes: true,
-            nodeClassMask,
-            cancellationToken).ConfigureAwait(false);
-
-        return nodeProperties[0];
-    }
-
     private void Reset()
     {
         _isStarted = false;
         _structuralChangeProcessor = null;
+
+        // Stop and dispose periodic resync timer
+        _periodicResyncTimer?.Dispose();
+        _periodicResyncTimer = null;
+        _periodicResyncInProgress = false;
+
+        // Clean up ModelChangeEvent subscription
+        if (_modelChangeEventItem is not null)
+        {
+            _modelChangeEventItem.Notification -= OnModelChangeEventNotification;
+            _modelChangeEventItem = null;
+        }
+
+        // Clear node change processor
+        _nodeChangeProcessor?.Clear();
+        _nodeChangeProcessor = null;
+
         CleanupPropertyData();
     }
 
@@ -846,6 +1180,21 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         {
             return; // Already disposed
         }
+
+        // Stop and dispose periodic resync timer first
+        _periodicResyncTimer?.Dispose();
+        _periodicResyncTimer = null;
+
+        // Clean up ModelChangeEvent subscription
+        if (_modelChangeEventItem is not null)
+        {
+            _modelChangeEventItem.Notification -= OnModelChangeEventNotification;
+            _modelChangeEventItem = null;
+        }
+
+        // Clear node change processor
+        _nodeChangeProcessor?.Clear();
+        _nodeChangeProcessor = null;
 
         var sessionManager = _sessionManager;
         if (sessionManager is not null)

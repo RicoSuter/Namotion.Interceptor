@@ -100,14 +100,14 @@ public class ConnectorReferenceCounter<TData>
     }
 
     /// <summary>
-    /// Gets all tracked subjects.
+    /// Gets all entries (subject and data pairs).
     /// </summary>
-    /// <returns>All tracked subjects.</returns>
-    public IEnumerable<IInterceptorSubject> GetAllSubjects()
+    /// <returns>All tracked entries as (subject, data) tuples.</returns>
+    public IEnumerable<(IInterceptorSubject Subject, TData Data)> GetAllEntries()
     {
         lock (_lock)
         {
-            return _entries.Keys.ToList();
+            return _entries.Select(kvp => (kvp.Key, kvp.Value.Data)).ToList();
         }
     }
 }

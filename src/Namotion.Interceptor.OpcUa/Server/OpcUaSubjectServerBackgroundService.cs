@@ -100,6 +100,9 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
 
                 if (handled)
                 {
+                    _logger.LogInformation(
+                        "Processed structural change for property '{PropertyName}' on subject.",
+                        registeredProperty.Name);
                     // Structural change was handled - skip value processing for this change
                     continue;
                 }
