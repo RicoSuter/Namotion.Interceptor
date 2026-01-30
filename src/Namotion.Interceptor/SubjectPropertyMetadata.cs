@@ -66,7 +66,7 @@ public readonly record struct SubjectPropertyMetadata
         : this(
             propertyInfo.Name,
             propertyInfo.PropertyType,
-            propertyInfo.GetCustomAttributesWithInterfaceInheritance(),
+            propertyInfo.GetCustomAttributesIncludingInterfaces(),
             getValue,
             setValue,
             isIntercepted,

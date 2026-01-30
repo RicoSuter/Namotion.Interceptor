@@ -38,7 +38,7 @@ public class DynamicSubjectFactory
                 .Select(property => new SubjectPropertyMetadata(
                     property.Name,
                     property.PropertyType,
-                    property.GetCustomAttributesWithInterfaceInheritance(),
+                    property.GetCustomAttributesIncludingInterfaces(),
                     property.GetValue,
                     property.SetValue,
                     isIntercepted: true,

@@ -14,11 +14,11 @@ public static class PropertyInfoExtensions
     private static readonly ConcurrentDictionary<PropertyInfo, Attribute[]> Cache = new();
 
     /// <summary>
-    /// Gets custom attributes including inherited attributes from base classes and interfaces.
+    /// Gets custom attributes from the property, including attributes from implemented interface properties.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// This method extends .NET's attribute inheritance to also include interface property attributes.
+    /// This method extends .NET's attribute retrieval to also include interface property attributes.
     /// Attributes are collected in the following order:
     /// </para>
     /// <list type="number">
@@ -35,12 +35,12 @@ public static class PropertyInfoExtensions
     /// </remarks>
     /// <param name="property">The property to get attributes from.</param>
     /// <returns>An array of attributes from the property, its base classes, and implemented interfaces.</returns>
-    public static Attribute[] GetCustomAttributesWithInterfaceInheritance(this PropertyInfo property)
+    public static Attribute[] GetCustomAttributesIncludingInterfaces(this PropertyInfo property)
     {
-        return Cache.GetOrAdd(property, static p => GetCustomAttributesWithInterfaceInheritanceCore(p));
+        return Cache.GetOrAdd(property, static p => GetCustomAttributesIncludingInterfacesCore(p));
     }
 
-    private static Attribute[] GetCustomAttributesWithInterfaceInheritanceCore(PropertyInfo property)
+    private static Attribute[] GetCustomAttributesIncludingInterfacesCore(PropertyInfo property)
     {
         // 1. Get class attributes WITH class inheritance
         //    Note: Use parameterless GetCustomAttributes() which correctly includes

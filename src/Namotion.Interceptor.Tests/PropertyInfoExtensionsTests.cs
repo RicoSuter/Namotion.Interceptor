@@ -200,7 +200,7 @@ public class PropertyInfoExtensionsTests
         var property = typeof(ImplementsInterfaceOnly).GetProperty(nameof(ImplementsInterfaceOnly.Property))!;
 
         // Act
-        var attributes = property.GetCustomAttributesWithInterfaceInheritance();
+        var attributes = property.GetCustomAttributesIncludingInterfaces();
 
         // Assert
         var single = Assert.Single(attributes.OfType<SingleAttribute>());
@@ -214,7 +214,7 @@ public class PropertyInfoExtensionsTests
         var property = typeof(ImplementsInterfaceWithOwnAttribute).GetProperty(nameof(ImplementsInterfaceWithOwnAttribute.Property))!;
 
         // Act
-        var attributes = property.GetCustomAttributesWithInterfaceInheritance();
+        var attributes = property.GetCustomAttributesIncludingInterfaces();
 
         // Assert
         var single = Assert.Single(attributes.OfType<SingleAttribute>());
@@ -228,7 +228,7 @@ public class PropertyInfoExtensionsTests
         var property = typeof(ImplementsInterfaceWithMultiple).GetProperty(nameof(ImplementsInterfaceWithMultiple.Property))!;
 
         // Act
-        var attributes = property.GetCustomAttributesWithInterfaceInheritance();
+        var attributes = property.GetCustomAttributesIncludingInterfaces();
 
         // Assert
         var multiples = attributes.OfType<MultipleAttribute>().ToList();
@@ -244,7 +244,7 @@ public class PropertyInfoExtensionsTests
         var property = typeof(ImplementsMultipleInterfaces).GetProperty(nameof(ImplementsMultipleInterfaces.Property))!;
 
         // Act
-        var attributes = property.GetCustomAttributesWithInterfaceInheritance();
+        var attributes = property.GetCustomAttributesIncludingInterfaces();
 
         // Assert
         var single = Assert.Single(attributes.OfType<SingleAttribute>());
@@ -259,7 +259,7 @@ public class PropertyInfoExtensionsTests
         var property = typeof(ImplementsMultipleInterfacesWithOwn).GetProperty(nameof(ImplementsMultipleInterfacesWithOwn.Property))!;
 
         // Act
-        var attributes = property.GetCustomAttributesWithInterfaceInheritance();
+        var attributes = property.GetCustomAttributesIncludingInterfaces();
 
         // Assert
         var single = Assert.Single(attributes.OfType<SingleAttribute>());
@@ -277,7 +277,7 @@ public class PropertyInfoExtensionsTests
         var property = typeof(HasStringPropertySameName).GetProperty(nameof(HasStringPropertySameName.Value))!;
 
         // Act
-        var attributes = property.GetCustomAttributesWithInterfaceInheritance();
+        var attributes = property.GetCustomAttributesIncludingInterfaces();
 
         // Assert - should NOT have the interface attribute since types don't match
         Assert.Empty(attributes.OfType<SingleAttribute>());
@@ -294,7 +294,7 @@ public class PropertyInfoExtensionsTests
         var property = typeof(DerivedClass).GetProperty(nameof(DerivedClass.Property))!;
 
         // Act
-        var attributes = property.GetCustomAttributesWithInterfaceInheritance();
+        var attributes = property.GetCustomAttributesIncludingInterfaces();
 
         // Assert
         var single = Assert.Single(attributes.OfType<SingleAttribute>());
@@ -308,7 +308,7 @@ public class PropertyInfoExtensionsTests
         var property = typeof(DerivedClassWithOwnAttribute).GetProperty(nameof(DerivedClassWithOwnAttribute.Property))!;
 
         // Act
-        var attributes = property.GetCustomAttributesWithInterfaceInheritance();
+        var attributes = property.GetCustomAttributesIncludingInterfaces();
 
         // Assert
         var singles = attributes.OfType<SingleAttribute>().ToList();
@@ -328,7 +328,7 @@ public class PropertyInfoExtensionsTests
         var property = typeof(DerivedFromBaseWithInterface).GetProperty(nameof(DerivedFromBaseWithInterface.Property))!;
 
         // Act
-        var attributes = property.GetCustomAttributesWithInterfaceInheritance();
+        var attributes = property.GetCustomAttributesIncludingInterfaces();
 
         // Assert
         // Base class attribute should be present (via .NET inheritance)
@@ -349,8 +349,8 @@ public class PropertyInfoExtensionsTests
         var property = typeof(ImplementsInterfaceOnly).GetProperty(nameof(ImplementsInterfaceOnly.Property))!;
 
         // Act
-        var first = property.GetCustomAttributesWithInterfaceInheritance();
-        var second = property.GetCustomAttributesWithInterfaceInheritance();
+        var first = property.GetCustomAttributesIncludingInterfaces();
+        var second = property.GetCustomAttributesIncludingInterfaces();
 
         // Assert
         Assert.Same(first, second);
