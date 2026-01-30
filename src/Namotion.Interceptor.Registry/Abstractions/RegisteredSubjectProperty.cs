@@ -64,8 +64,27 @@ public class RegisteredSubjectProperty
     public Type Type { get; }
 
     /// <summary>
-    /// Gets a list of all .NET reflection attributes.
+    /// Gets all .NET reflection attributes for this property, including inherited attributes.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This collection includes attributes from multiple sources in the following order:
+    /// </para>
+    /// <list type="number">
+    ///   <item>Attributes declared directly on the class property (and inherited from base classes)</item>
+    ///   <item>Attributes from implemented interface properties (matched by name)</item>
+    /// </list>
+    /// <para>
+    /// The inheritance rules mirror .NET's class inheritance behavior:
+    /// </para>
+    /// <list type="bullet">
+    ///   <item>If an attribute has <c>AllowMultiple=false</c> and exists on both the class
+    ///         and interface, only the class attribute is included (class wins)</item>
+    ///   <item>If an attribute has <c>AllowMultiple=true</c>, attributes from both class
+    ///         and interfaces are included</item>
+    ///   <item>Interface attributes are collected in interface declaration order</item>
+    /// </list>
+    /// </remarks>
     public IReadOnlyCollection<Attribute> ReflectionAttributes { get; }
     
     /// <summary>
