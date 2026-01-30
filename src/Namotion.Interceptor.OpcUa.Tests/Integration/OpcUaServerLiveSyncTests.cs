@@ -206,7 +206,7 @@ public class OpcUaServerLiveSyncTests
         return Array.Empty<ReferenceDescription>();
     }
 
-    [Fact(Skip = "Lifecycle test - requires dedicated server, run manually")]
+    [Fact]
     public async Task AddSubjectToCollection_ClientSeesBrowseChange()
     {
         IHost? serverHost = null;
@@ -293,7 +293,7 @@ public class OpcUaServerLiveSyncTests
         }
     }
 
-    [Fact(Skip = "Lifecycle test - requires dedicated server, run manually")]
+    [Fact]
     public async Task RemoveSubjectFromCollection_ClientSeesBrowseChange()
     {
         IHost? serverHost = null;
@@ -375,7 +375,7 @@ public class OpcUaServerLiveSyncTests
         }
     }
 
-    [Fact(Skip = "Lifecycle test - requires dedicated server, run manually")]
+    [Fact]
     public async Task ReplaceSubjectReference_ClientSeesBrowseChange()
     {
         IHost? serverHost = null;
@@ -493,7 +493,7 @@ public class OpcUaServerLiveSyncTests
         }
     }
 
-    [Fact(Skip = "Lifecycle test - requires dedicated server, run manually")]
+    [Fact]
     public async Task CollectionItemRemoved_BrowseNamesReindexed()
     {
         IHost? serverHost = null;
@@ -546,16 +546,21 @@ public class OpcUaServerLiveSyncTests
             root.People = [person1, person3];
             logger.Log("Removed middle person (Bob) from collection");
 
-            // Wait for live sync to propagate
+            // Wait for live sync to propagate AND for re-indexing to complete
+            // Re-indexing happens after structural change processing, not immediately
             IReadOnlyList<ReferenceDescription>? updatedChildren = null;
             await AsyncTestHelpers.WaitUntilAsync(
                 () =>
                 {
                     updatedChildren = BrowseNodeChildrenAsync(session, peopleNodeId).GetAwaiter().GetResult();
-                    return updatedChildren.Count == 2;
+                    // Wait not just for count=2, but for correct BrowseNames (re-indexed)
+                    if (updatedChildren.Count != 2) return false;
+                    var names = updatedChildren.Select(c => c.BrowseName.Name).ToList();
+                    logger.Log($"Checking children: {string.Join(", ", names)}");
+                    return names.Any(n => n.Contains("[0]")) && names.Any(n => n.Contains("[1]"));
                 },
                 timeout: TimeSpan.FromSeconds(10),
-                message: "Client should see two nodes after removal");
+                message: "Client should see two nodes with re-indexed BrowseNames [0] and [1]");
 
             // Verify re-indexed BrowseNames: People[0], People[1] (not People[0], People[2])
             Assert.NotNull(updatedChildren);
@@ -583,7 +588,7 @@ public class OpcUaServerLiveSyncTests
         }
     }
 
-    [Fact(Skip = "Lifecycle test - requires dedicated server, run manually")]
+    [Fact]
     public async Task MultipleAddAndRemove_SequentialOperations_ClientSeesBrowseChanges()
     {
         IHost? serverHost = null;

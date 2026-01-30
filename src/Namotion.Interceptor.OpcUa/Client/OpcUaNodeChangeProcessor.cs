@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
@@ -157,6 +158,10 @@ internal class OpcUaNodeChangeProcessor
         // Browse remote nodes
         var remoteChildren = await OpcUaBrowseHelper.BrowseNodeAsync(session, containerNodeId, cancellationToken).ConfigureAwait(false);
 
+        _logger.LogInformation("Browse '{Container}' returned {Count} children: {Names}",
+            containerNodeId, remoteChildren.Count,
+            string.Join(", ", remoteChildren.Select(c => c.BrowseName.Name)));
+
         // Get current local children
         var localChildren = property.Children.ToList();
 
@@ -179,6 +184,10 @@ internal class OpcUaNodeChangeProcessor
 
         var indicesToAdd = remoteIndices.Except(localIndices).OrderBy(i => i).ToList();
         var indicesToRemove = localIndices.Except(remoteIndices).OrderByDescending(i => i).ToList();
+
+        _logger.LogInformation("Collection sync for '{Property}': remote={Remote}, local={Local}, toAdd={Add}, toRemove={Remove}",
+            property.Name, string.Join(",", remoteIndices), string.Join(",", localIndices),
+            string.Join(",", indicesToAdd), string.Join(",", indicesToRemove));
 
         // When EnableRemoteNodeManagement is true and an item was recently deleted by the client,
         // skip re-adding it. The DeleteNodes call will eventually remove it from the server.
@@ -211,8 +220,12 @@ internal class OpcUaNodeChangeProcessor
                 var nodeId = ExpandedNodeId.ToNodeId(remoteChild.NodeId, session.NamespaceUris);
                 RegisterSubjectNodeId(newSubject, nodeId);
 
-                // Load and track subject BEFORE adding to collection - ensures subject is fully tracked
-                // before it becomes removable (prevents race condition with user removing subject)
+                // Add to collection FIRST - this attaches the subject to the parent which registers it
+                // The subject must be registered before LoadSubjectAsync can set up monitored items
+                AddToCollectionProperty(property, localChildren, index, newSubject);
+                localChildren = property.Children.ToList();
+
+                // Now load and set up monitoring - subject is now registered
                 var monitoredItems = await _subjectLoader.LoadSubjectAsync(
                     newSubject, remoteChild, session, cancellationToken).ConfigureAwait(false);
 
@@ -225,10 +238,6 @@ internal class OpcUaNodeChangeProcessor
                             monitoredItems, session, cancellationToken).ConfigureAwait(false);
                     }
                 }
-
-                // Now add to collection - subject is already fully tracked
-                AddToCollectionProperty(property, localChildren, index, newSubject);
-                localChildren = property.Children.ToList();
 
                 await _source.ReadAndApplySubjectValuesAsync(newSubject, session, cancellationToken).ConfigureAwait(false);
             }
@@ -314,7 +323,12 @@ internal class OpcUaNodeChangeProcessor
                 var nodeId = ExpandedNodeId.ToNodeId(remoteChild.NodeId, session.NamespaceUris);
                 RegisterSubjectNodeId(newSubject, nodeId);
 
-                // Load and track subject BEFORE adding to dictionary
+                // Add to dictionary FIRST - this attaches the subject to the parent which registers it
+                // The subject must be registered before LoadSubjectAsync can set up monitored items
+                AddToDictionaryProperty(property, localChildren, key, newSubject);
+                localChildren = property.Children.ToDictionary(c => c.Index?.ToString() ?? "", c => c.Subject);
+
+                // Now load and set up monitoring - subject is now registered
                 var monitoredItems = await _subjectLoader.LoadSubjectAsync(
                     newSubject, remoteChild, session, cancellationToken).ConfigureAwait(false);
 
@@ -327,10 +341,6 @@ internal class OpcUaNodeChangeProcessor
                             monitoredItems, session, cancellationToken).ConfigureAwait(false);
                     }
                 }
-
-                // Now add to dictionary - subject is already fully tracked
-                AddToDictionaryProperty(property, localChildren, key, newSubject);
-                localChildren = property.Children.ToDictionary(c => c.Index?.ToString() ?? "", c => c.Subject);
 
                 await _source.ReadAndApplySubjectValuesAsync(newSubject, session, cancellationToken).ConfigureAwait(false);
             }
@@ -392,7 +402,11 @@ internal class OpcUaNodeChangeProcessor
             var nodeId = ExpandedNodeId.ToNodeId(referenceNode!.NodeId, session.NamespaceUris);
             RegisterSubjectNodeId(newSubject, nodeId);
 
-            // Load and track subject BEFORE setting property value
+            // Set property value FIRST - this attaches the subject to the parent which registers it
+            // The subject must be registered before LoadSubjectAsync can set up monitored items
+            property.SetValueFromSource(_source, null, null, newSubject);
+
+            // Now load and set up monitoring - subject is now registered
             var monitoredItems = await _subjectLoader.LoadSubjectAsync(
                 newSubject, referenceNode!, session, cancellationToken).ConfigureAwait(false);
 
@@ -405,9 +419,6 @@ internal class OpcUaNodeChangeProcessor
                         monitoredItems, session, cancellationToken).ConfigureAwait(false);
                 }
             }
-
-            // Now set the property value - subject is already fully tracked
-            property.SetValue(newSubject);
 
             try
             {
@@ -425,7 +436,7 @@ internal class OpcUaNodeChangeProcessor
             {
                 UnregisterSubjectNodeId(oldNodeId);
             }
-            property.SetValue(null);
+            property.SetValueFromSource(_source, null, null, null);
         }
     }
 
@@ -516,13 +527,31 @@ internal class OpcUaNodeChangeProcessor
         var browseName = nodeDetails.BrowseName.Name;
         foreach (var property in registeredParent.Properties)
         {
-            if (!property.IsSubjectCollection && !property.IsSubjectDictionary)
+            var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
+            if (propertyName is null)
             {
                 continue;
             }
 
-            var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
-            if (propertyName is null)
+            // Check if this is a reference property
+            if (property.IsSubjectReference)
+            {
+                // If the browse name matches the property name, this could be a new reference
+                if (browseName == propertyName)
+                {
+                    _logger.LogDebug("ProcessNodeAddedAsync: Found matching reference property '{PropertyName}' for node '{BrowseName}'.",
+                        propertyName, browseName);
+                    // Get the parent's NodeId so we can browse for the reference
+                    if (_source.TryGetSubjectNodeId(parentSubject, out var parentSubjectNodeId) && parentSubjectNodeId is not null)
+                    {
+                        await ProcessReferenceNodeChangesAsync(property, parentSubjectNodeId, propertyName, session, cancellationToken).ConfigureAwait(false);
+                    }
+                    return;
+                }
+                continue;
+            }
+
+            if (!property.IsSubjectCollection && !property.IsSubjectDictionary)
             {
                 continue;
             }
@@ -559,9 +588,87 @@ internal class OpcUaNodeChangeProcessor
 
     private void ProcessNodeDeleted(NodeId nodeId)
     {
+        IInterceptorSubject? deletedSubject = null;
+
         lock (_nodeIdToSubjectLock)
         {
-            _nodeIdToSubject.Remove(nodeId);
+            if (_nodeIdToSubject.TryGetValue(nodeId, out deletedSubject))
+            {
+                _nodeIdToSubject.Remove(nodeId);
+            }
+        }
+
+        if (deletedSubject is null)
+        {
+            _logger.LogDebug("ProcessNodeDeleted: NodeId {NodeId} not found in tracking.", nodeId);
+            return;
+        }
+
+        _logger.LogInformation("ProcessNodeDeleted: Removing subject {Type} for NodeId {NodeId}.",
+            deletedSubject.GetType().Name, nodeId);
+
+        // Find the parent subject and property that contains this subject
+        var registeredSubject = deletedSubject.TryGetRegisteredSubject();
+        if (registeredSubject is null)
+        {
+            _logger.LogWarning("ProcessNodeDeleted: Subject {Type} is not registered.", deletedSubject.GetType().Name);
+            return;
+        }
+
+        var parents = registeredSubject.Parents;
+        if (parents.Length == 0)
+        {
+            _logger.LogWarning("ProcessNodeDeleted: Subject {Type} has no parent.", deletedSubject.GetType().Name);
+            return;
+        }
+
+        var parentProperty = parents[0].Property;
+
+        // Determine the type of parent property and remove accordingly
+        if (parentProperty.IsSubjectReference)
+        {
+            // Clear the reference property
+            _logger.LogDebug("ProcessNodeDeleted: Clearing reference property '{Property}'.", parentProperty.Name);
+            parentProperty.SetValueFromSource(_source, null, null, null);
+        }
+        else if (parentProperty.IsSubjectCollection)
+        {
+            // Remove from collection - find the index by matching the subject
+            var children = parentProperty.Children;
+            for (var i = 0; i < children.Length; i++)
+            {
+                if (ReferenceEquals(children[i].Subject, deletedSubject) && children[i].Index is int index)
+                {
+                    _logger.LogDebug("ProcessNodeDeleted: Removing from collection '{Property}' at index {Index}.",
+                        parentProperty.Name, index);
+                    RemoveFromCollectionProperty(parentProperty, [index]);
+                    break;
+                }
+            }
+        }
+        else if (parentProperty.IsSubjectDictionary)
+        {
+            // Remove from dictionary
+            var dictionary = (parentProperty.GetValue() as System.Collections.IDictionary);
+            if (dictionary is not null)
+            {
+                string? keyToRemove = null;
+                foreach (System.Collections.DictionaryEntry entry in dictionary)
+                {
+                    if (ReferenceEquals(entry.Value, deletedSubject))
+                    {
+                        keyToRemove = entry.Key as string;
+                        break;
+                    }
+                }
+
+                if (keyToRemove is not null)
+                {
+                    _logger.LogDebug("ProcessNodeDeleted: Removing from dictionary '{Property}' key '{Key}'.",
+                        parentProperty.Name, keyToRemove);
+                    RemoveFromDictionaryProperty(parentProperty, [keyToRemove]);
+                }
+            }
         }
     }
 
@@ -722,8 +829,8 @@ internal class OpcUaNodeChangeProcessor
                 newArray.SetValue(subject, insertIndex++);
             }
 
-            // Set the new array value
-            property.SetValue(newArray);
+            // Set the new array value - use SetValueFromSource to prevent mirroring back to server
+            property.SetValueFromSource(_source, null, null, newArray);
 
             _logger.LogDebug(
                 "Updated collection property '{PropertyName}' with {NewCount} new subjects. Total: {Total}",
@@ -773,7 +880,8 @@ internal class OpcUaNodeChangeProcessor
             newArray.SetValue(newSubject, currentArray.Length);
 
             // Set the new array value (this attaches the subject and registers it)
-            property.SetValue(newArray);
+            // Use SetValueFromSource to prevent changes from being mirrored back to server
+            property.SetValueFromSource(_source, null, null, newArray);
 
             _logger.LogDebug(
                 "Added subject to collection property '{PropertyName}' at index {Index}. Total: {Total}",
@@ -822,8 +930,8 @@ internal class OpcUaNodeChangeProcessor
                 }
             }
 
-            // Set the new array value
-            property.SetValue(newArray);
+            // Set the new array value - use SetValueFromSource to prevent mirroring back to server
+            property.SetValueFromSource(_source, null, null, newArray);
 
             _logger.LogDebug(
                 "Removed {RemovedCount} subjects from collection property '{PropertyName}'. Remaining: {Remaining}",
@@ -884,8 +992,8 @@ internal class OpcUaNodeChangeProcessor
                 newDict[key] = subject;
             }
 
-            // Set the new dictionary value
-            property.SetValue(newDict);
+            // Set the new dictionary value - use SetValueFromSource to prevent mirroring back to server
+            property.SetValueFromSource(_source, null, null, newDict);
 
             _logger.LogDebug(
                 "Updated dictionary property '{PropertyName}' with {NewCount} new entries. Total: {Total}",
@@ -945,7 +1053,8 @@ internal class OpcUaNodeChangeProcessor
             newDict[key] = newSubject;
 
             // Set the new dictionary value (this attaches the subject and registers it)
-            property.SetValue(newDict);
+            // Use SetValueFromSource to prevent mirroring back to server
+            property.SetValueFromSource(_source, null, null, newDict);
 
             _logger.LogDebug(
                 "Added subject to dictionary property '{PropertyName}' with key '{Key}'. Total: {Total}",
@@ -1009,8 +1118,8 @@ internal class OpcUaNodeChangeProcessor
                 }
             }
 
-            // Set the new dictionary value
-            property.SetValue(newDict);
+            // Set the new dictionary value - use SetValueFromSource to prevent mirroring back to server
+            property.SetValueFromSource(_source, null, null, newDict);
 
             _logger.LogDebug(
                 "Removed {RemovedCount} entries from dictionary property '{PropertyName}'. Remaining: {Remaining}",

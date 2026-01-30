@@ -142,6 +142,9 @@ internal class CustomNodeManager : CustomNodeManager2
             // Decrement reference count and check if this was the last reference
             var isLast = _subjectRefCounter.DecrementAndCheckLast(subject, out var nodeState);
 
+            _logger.LogInformation("RemoveSubjectNodes: subject={SubjectType}, isLast={IsLast}, hasNodeState={HasNodeState}, nodeId={NodeId}",
+                subject.GetType().Name, isLast, nodeState is not null, nodeState?.NodeId?.ToString() ?? "null");
+
             if (isLast && nodeState is not null)
             {
                 var registeredSubject = subject.TryGetRegisteredSubject();
@@ -160,8 +163,8 @@ internal class CustomNodeManager : CustomNodeManager2
                     }
                 }
 
-                // Remove object node
-                DeleteNode(SystemContext, nodeState.NodeId);
+                // Remove object node and its references
+                RemoveNodeAndReferences(nodeState);
 
                 // Queue model change event for node deletion
                 QueueModelChange(nodeState.NodeId, ModelChangeStructureVerbMask.NodeDeleted);
@@ -171,6 +174,77 @@ internal class CustomNodeManager : CustomNodeManager2
         {
             _structureLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Removes a node and all references pointing to it from parent nodes.
+    /// This is necessary because the OPC UA SDK's DeleteNode only removes the node itself,
+    /// but leaves references from parent nodes intact, causing browse operations to still return the deleted node.
+    /// </summary>
+    /// <param name="nodeState">The node to remove.</param>
+    private void RemoveNodeAndReferences(NodeState nodeState)
+    {
+        var nodeId = nodeState.NodeId;
+
+        // Find parent node by parsing the path-based NodeId
+        // Node IDs follow pattern like "Root.People[1]", parent would be "Root.People"
+        var parentNodeId = FindParentNodeIdFromPath(nodeId);
+        if (parentNodeId is not null)
+        {
+            var parentNode = FindNodeInAddressSpace(parentNodeId);
+            if (parentNode is not null && nodeState is BaseInstanceState instanceState)
+            {
+                // Remove child from parent using RemoveChild which handles both
+                // the parent-child relationship and the reference
+                parentNode.RemoveChild(instanceState);
+
+                _logger.LogDebug(
+                    "Removed child node '{NodeId}' from parent '{ParentNodeId}'.",
+                    nodeId, parentNodeId);
+            }
+        }
+
+        // Delete the node from the address space
+        DeleteNode(SystemContext, nodeId);
+    }
+
+    /// <summary>
+    /// Finds the parent NodeId by parsing a path-based node identifier.
+    /// For "Root.People[1]", returns "Root.People".
+    /// For "Root.People[1].Address", returns "Root.People[1]".
+    /// </summary>
+    private NodeId? FindParentNodeIdFromPath(NodeId nodeId)
+    {
+        if (nodeId.IdType != IdType.String || nodeId.Identifier is not string path)
+        {
+            return null;
+        }
+
+        // Handle collection item patterns like "Root.People[1]"
+        // Parent is the container "Root.People"
+        var bracketIndex = path.LastIndexOf('[');
+        if (bracketIndex > 0)
+        {
+            // Check if this is a direct collection item (no dot after the bracket would be in a sub-property)
+            var dotAfterBracket = path.IndexOf('.', bracketIndex);
+            if (dotAfterBracket < 0)
+            {
+                // This is a collection item like "Root.People[1]"
+                // Parent is "Root.People"
+                var containerPath = path.Substring(0, bracketIndex);
+                return new NodeId(containerPath, nodeId.NamespaceIndex);
+            }
+        }
+
+        // For regular path patterns, find the last dot
+        var lastDotIndex = path.LastIndexOf('.');
+        if (lastDotIndex > 0)
+        {
+            var parentPath = path.Substring(0, lastDotIndex);
+            return new NodeId(parentPath, nodeId.NamespaceIndex);
+        }
+
+        return null;
     }
 
     /// <summary>
