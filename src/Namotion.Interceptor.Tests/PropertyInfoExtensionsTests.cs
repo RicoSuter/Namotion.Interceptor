@@ -47,7 +47,7 @@ public partial class PropertyInfoExtensionsTests
     }
 
     [InterceptorSubject]
-    private partial class TemperatureSensor : ITemperatureSensor
+    public partial class TemperatureSensor : ITemperatureSensor
     {
         public partial double Temperature { get; set; }
     }
@@ -60,7 +60,7 @@ public partial class PropertyInfoExtensionsTests
     }
 
     [InterceptorSubject]
-    private partial class SpeedSensor : IWithMultipleAttributes
+    public partial class SpeedSensor : IWithMultipleAttributes
     {
         [Tag("class")]
         public partial double Speed { get; set; }
