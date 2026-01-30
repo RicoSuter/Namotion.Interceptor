@@ -3,32 +3,32 @@ using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Registry.Tests;
 
-[AttributeUsage(AttributeTargets.Property)]
-public class UnitAttribute : Attribute, ISubjectPropertyInitializer
+public partial class InterfaceAttributeInheritanceTests
 {
-    public string Unit { get; }
-    public UnitAttribute(string unit) => Unit = unit;
-
-    public void InitializeProperty(RegisteredSubjectProperty property)
+    [AttributeUsage(AttributeTargets.Property)]
+    private class UnitAttribute : Attribute, ISubjectPropertyInitializer
     {
-        property.AddAttribute("Unit", typeof(string), _ => Unit, null);
+        public string Unit { get; }
+        public UnitAttribute(string unit) => Unit = unit;
+
+        public void InitializeProperty(RegisteredSubjectProperty property)
+        {
+            property.AddAttribute("Unit", typeof(string), _ => Unit, null);
+        }
     }
-}
 
-public interface ITemperatureSensor
-{
-    [Unit("°C")]
-    double Temperature { get; }
-}
+    private interface ITemperatureSensor
+    {
+        [Unit("°C")]
+        double Temperature { get; }
+    }
 
-[InterceptorSubject]
-public partial class TemperatureSensor : ITemperatureSensor
-{
-    public partial double Temperature { get; set; }
-}
+    [InterceptorSubject]
+    private partial class TemperatureSensor : ITemperatureSensor
+    {
+        public partial double Temperature { get; set; }
+    }
 
-public class InterfaceAttributeInheritanceTests
-{
     [Fact]
     public void InterfaceAttribute_WithInitializer_AddsPropertyAttribute()
     {
