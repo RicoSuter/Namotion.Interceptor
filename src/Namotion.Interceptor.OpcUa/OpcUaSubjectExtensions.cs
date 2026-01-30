@@ -108,8 +108,10 @@ public static class OpcUaSubjectExtensions
             {
                 var configuration = sp.GetRequiredKeyedService<OpcUaClientConfiguration>(key);
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
+                var source = sp.GetRequiredKeyedService<OpcUaSubjectClientSource>(key);
+
                 return new SubjectSourceBackgroundService(
-                    sp.GetRequiredKeyedService<OpcUaSubjectClientSource>(key),
+                    source,
                     subject.Context,
                     sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>(),
                     configuration.BufferTime,

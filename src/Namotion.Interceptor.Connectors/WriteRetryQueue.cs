@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.Connectors;
 /// Manages a write retry queue with ring buffer semantics for buffering writes during disconnection.
 /// When the queue is full, oldest writes are dropped to make room for new ones.
 /// </summary>
-internal sealed class WriteRetryQueue : IDisposable
+public sealed class WriteRetryQueue : IDisposable
 {
     private readonly List<SubjectPropertyChange> _pendingWrites = [];
     private readonly SemaphoreSlim _flushSemaphore = new(1, 1);

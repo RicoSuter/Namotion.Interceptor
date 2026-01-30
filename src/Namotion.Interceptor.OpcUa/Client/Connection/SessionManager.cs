@@ -208,6 +208,29 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
+    /// Adds monitored items to existing subscriptions for live sync of structural changes.
+    /// </summary>
+    /// <param name="monitoredItems">The monitored items to add.</param>
+    /// <param name="session">The current session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task AddMonitoredItemsAsync(
+        IReadOnlyList<MonitoredItem> monitoredItems,
+        ISession session,
+        CancellationToken cancellationToken)
+    {
+        if (monitoredItems.Count == 0)
+        {
+            return;
+        }
+
+        await SubscriptionManager.AddMonitoredItemsAsync(monitoredItems, (Session)session, cancellationToken).ConfigureAwait(false);
+
+        _logger.LogDebug(
+            "Added {Count} monitored items for live sync.",
+            monitoredItems.Count);
+    }
+
+    /// <summary>
     /// Handles KeepAlive events and triggers automatic reconnection when connection is lost.
     /// </summary>
     private void OnKeepAlive(ISession sender, KeepAliveEventArgs e)
@@ -472,11 +495,14 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
 
         try { _reconnectHandler.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing reconnect handler."); }
+     
         if (ReadAfterWriteManager is not null)
         {
             try { await ReadAfterWriteManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing read-after-write manager."); }
         }
+        
         try { await SubscriptionManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing subscription manager."); }
+
         if (PollingManager is not null)
         {
             try { await PollingManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing polling manager."); }

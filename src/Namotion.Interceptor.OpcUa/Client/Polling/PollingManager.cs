@@ -445,11 +445,9 @@ internal sealed class PollingManager : IAsyncDisposable
         _logger.LogDebug("Disposing OPC UA polling manager (Total reads: {TotalReads}, Failed: {FailedReads}, Value changes: {ValueChanges}, Slow polls: {SlowPolls}, Circuit breaker trips: {Trips})",
             _metrics.TotalReads, _metrics.FailedReads, _metrics.ValueChanges, _metrics.SlowPolls, _circuitBreaker.TripCount);
 
-        // Stop timer and cancel work
-        _timer.Dispose();
         await _cts.CancelAsync();
+        _timer.Dispose();
 
-        // Wait for polling task to complete asynchronously (with timeout)
         try
         {
             if (_pollingTask != null)
