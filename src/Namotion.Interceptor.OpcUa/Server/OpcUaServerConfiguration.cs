@@ -82,6 +82,21 @@ public class OpcUaServerConfiguration
     public bool EnableLiveSync { get; set; } = false;
 
     /// <summary>
+    /// Gets or sets a value indicating whether to enable external node management via AddNodes/DeleteNodes.
+    /// When enabled, external OPC UA clients can create or delete nodes in the address space,
+    /// and the changes will be reflected in the C# model.
+    /// Requires a TypeRegistry to be configured to map TypeDefinitions to C# types.
+    /// Default is false for security and backward compatibility.
+    /// </summary>
+    public bool EnableExternalNodeManagement { get; set; } = false;
+
+    /// <summary>
+    /// Gets or sets the type registry for resolving TypeDefinition NodeIds to C# types.
+    /// Required when EnableExternalNodeManagement is true.
+    /// </summary>
+    public OpcUaTypeRegistry? TypeRegistry { get; set; }
+
+    /// <summary>
     /// Gets or sets the base path for certificate stores.
     /// Default is "pki". Change this to isolate certificate stores for parallel test execution.
     /// </summary>

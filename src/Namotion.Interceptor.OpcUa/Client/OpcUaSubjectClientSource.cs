@@ -35,6 +35,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private volatile bool _isStarted;
     private long _reconnectStartedTimestamp; // 0 = not reconnecting, otherwise Stopwatch timestamp when reconnection started (for stall detection)
+    private OpcUaClientStructuralChangeProcessor? _structuralChangeProcessor;
 
     // Diagnostics tracking - accessed from multiple threads via Diagnostics property
     private long _totalReconnectionAttempts;
@@ -56,6 +57,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     internal SessionManager? SessionManager => _sessionManager;
 
     internal SourceOwnershipManager Ownership => _ownership;
+
+    internal OpcUaSubjectLoader SubjectLoader => _subjectLoader;
 
     // Diagnostics accessors
     internal long TotalReconnectionAttempts => Interlocked.Read(ref _totalReconnectionAttempts);
@@ -276,6 +279,16 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         finally
         {
             _structureLock.Release();
+        }
+
+        // Create structural change processor if live sync is enabled
+        if (_configuration.EnableLiveSync)
+        {
+            _structuralChangeProcessor = new OpcUaClientStructuralChangeProcessor(
+                this,
+                _configuration,
+                _subjectLoader,
+                _logger);
         }
 
         _isStarted = true;
@@ -603,6 +616,30 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 return WriteResult.Failure(changes, new InvalidOperationException("OPC UA session is not connected."));
             }
 
+            // Process structural changes first if live sync is enabled
+            var structuralProcessor = _structuralChangeProcessor;
+            if (structuralProcessor is not null)
+            {
+                structuralProcessor.CurrentSession = session;
+
+                for (var i = 0; i < changes.Length; i++)
+                {
+                    var change = changes.Span[i];
+                    var registeredProperty = change.Property.TryGetRegisteredProperty();
+                    if (registeredProperty is null)
+                    {
+                        continue;
+                    }
+
+                    // Check if this is a structural change and process it
+                    // Structural properties (IsSubjectReference, IsSubjectCollection, IsSubjectDictionary)
+                    // are fully handled here - they don't have NodeIds so CreateWriteValuesCollection will skip them
+                    await structuralProcessor
+                        .ProcessPropertyChangeAsync(change, registeredProperty)
+                        .ConfigureAwait(false);
+                }
+            }
+
             var writeValues = CreateWriteValuesCollection(changes);
             if (writeValues.Count is 0)
             {
@@ -799,6 +836,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private void Reset()
     {
         _isStarted = false;
+        _structuralChangeProcessor = null;
         CleanupPropertyData();
     }
 

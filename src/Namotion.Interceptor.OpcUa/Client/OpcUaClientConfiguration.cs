@@ -228,6 +228,47 @@ public class OpcUaClientConfiguration
     public string CertificateStoreBasePath { get; set; } = "pki";
 
     /// <summary>
+    /// Gets or sets whether to enable live synchronization of structural changes.
+    /// When enabled, adding or removing subjects from collections or reference properties
+    /// will immediately create or remove MonitoredItems for the affected subjects.
+    /// Default is false for backward compatibility.
+    /// </summary>
+    public bool EnableLiveSync { get; set; } = false;
+
+    /// <summary>
+    /// Gets or sets whether to enable remote node management via AddNodes/DeleteNodes.
+    /// When enabled and EnableLiveSync is true, structural changes in the C# model
+    /// will attempt to create or delete nodes on the OPC UA server.
+    /// This requires the server to support AddNodes/DeleteNodes services.
+    /// Default is false - changes only affect local MonitoredItems.
+    /// </summary>
+    public bool EnableRemoteNodeManagement { get; set; } = false;
+
+    /// <summary>
+    /// Gets or sets whether to enable subscription to ModelChangeEvents from the server.
+    /// When enabled, the client will subscribe to GeneralModelChangeEventType events
+    /// on the Server node to detect structural changes made by other clients.
+    /// Default is false.
+    /// </summary>
+    public bool EnableModelChangeEvents { get; set; } = false;
+
+    /// <summary>
+    /// Gets or sets whether to enable periodic resync of the address space structure.
+    /// When enabled, the client will periodically browse the server's address space
+    /// and update the local model to reflect any structural changes.
+    /// This is a fallback for servers that don't support ModelChangeEvents.
+    /// Default is false.
+    /// </summary>
+    public bool EnablePeriodicResync { get; set; } = false;
+
+    /// <summary>
+    /// Gets or sets the interval for periodic resync of the address space structure.
+    /// Only used when EnablePeriodicResync is true.
+    /// Default is 30 seconds.
+    /// </summary>
+    public TimeSpan PeriodicResyncInterval { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// Gets or sets the polling interval for items that don't support subscriptions.
     /// Only used when EnablePollingFallback is true.
     /// Default is 1000ms (1 second).
