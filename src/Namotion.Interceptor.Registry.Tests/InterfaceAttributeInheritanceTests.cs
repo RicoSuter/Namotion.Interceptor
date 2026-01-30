@@ -3,8 +3,6 @@ using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Registry.Tests;
 
-#region Test Types
-
 [AttributeUsage(AttributeTargets.Property)]
 public class UnitAttribute : Attribute, ISubjectPropertyInitializer
 {
@@ -28,8 +26,6 @@ public partial class TemperatureSensor : ITemperatureSensor
 {
     public partial double Temperature { get; set; }
 }
-
-#endregion
 
 public class InterfaceAttributeInheritanceTests
 {

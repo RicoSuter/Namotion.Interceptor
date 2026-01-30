@@ -3,8 +3,6 @@ using Namotion.Interceptor.Attributes;
 
 namespace Namotion.Interceptor.Tests;
 
-#region Integration Test Types
-
 [AttributeUsage(AttributeTargets.Property)]
 public class UnitAttribute : Attribute
 {
@@ -45,153 +43,152 @@ public partial class SpeedSensor : IWithMultipleAttributes
     public partial double Speed { get; set; }
 }
 
-#endregion
-
 public class PropertyInfoExtensionsTests
 {
-    #region Test Attributes
-
     [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
-    public class SingleAttribute : Attribute
+    private class SingleAttribute : Attribute
     {
         public string Value { get; }
         public SingleAttribute(string value) => Value = value;
     }
 
     [AttributeUsage(AttributeTargets.Property, AllowMultiple = true)]
-    public class MultipleAttribute : Attribute
+    private class MultipleAttribute : Attribute
     {
         public string Value { get; }
         public MultipleAttribute(string value) => Value = value;
     }
 
     [AttributeUsage(AttributeTargets.Property)]
-    public class DefaultAttribute : Attribute
+    private class DefaultAttribute : Attribute
     {
         public string Value { get; }
         public DefaultAttribute(string value) => Value = value;
     }
 
-    #endregion
-
-    #region Test Classes - Interface Inheritance
-
-    public interface IWithSingleAttribute
+    private interface IWithSingleAttribute
     {
         [Single("interface")]
         string Property { get; }
     }
 
-    public interface IWithMultipleAttribute
+    private interface IWithMultipleAttribute
     {
         [Multiple("interface")]
         string Property { get; }
     }
 
-    public interface IFirst
+    private interface IFirst
     {
         [Single("first")]
         string Property { get; }
     }
 
-    public interface ISecond
+    private interface ISecond
     {
         [Single("second")]
         string Property { get; }
     }
 
-    public class ImplementsInterfaceOnly : IWithSingleAttribute
+    private class ImplementsInterfaceOnly : IWithSingleAttribute
     {
         public string Property { get; set; } = "";
     }
 
-    public class ImplementsInterfaceWithOwnAttribute : IWithSingleAttribute
+    private class ImplementsInterfaceWithOwnAttribute : IWithSingleAttribute
     {
         [Single("class")]
         public string Property { get; set; } = "";
     }
 
-    public class ImplementsInterfaceWithMultiple : IWithMultipleAttribute
+    private class ImplementsInterfaceWithMultiple : IWithMultipleAttribute
     {
         [Multiple("class")]
         public string Property { get; set; } = "";
     }
 
-    public class ImplementsMultipleInterfaces : IFirst, ISecond
+    private class ImplementsMultipleInterfaces : IFirst, ISecond
     {
         public string Property { get; set; } = "";
     }
 
-    public class ImplementsMultipleInterfacesWithOwn : IFirst, ISecond
+    private class ImplementsMultipleInterfacesWithOwn : IFirst, ISecond
     {
         [Single("class")]
         public string Property { get; set; } = "";
     }
 
-    #endregion
-
-    #region Test Classes - Class Inheritance
-
-    public class BaseClass
+    private class BaseClass
     {
         [Single("base")]
         public virtual string Property { get; set; } = "";
     }
 
-    public class DerivedClass : BaseClass
+    private class DerivedClass : BaseClass
     {
         public override string Property { get; set; } = "";
     }
 
-    public class DerivedClassWithOwnAttribute : BaseClass
+    private class DerivedClassWithOwnAttribute : BaseClass
     {
         [Single("derived")]
         public override string Property { get; set; } = "";
     }
 
-    #endregion
-
-    #region Test Classes - Type Mismatch
-
-    public interface IWithIntProperty
+    private interface IWithIntProperty
     {
         [Single("int-interface")]
         int Value { get; }
     }
 
-    public class HasStringPropertySameName : IWithIntProperty
+    private class HasStringPropertySameName : IWithIntProperty
     {
-        // This property has the same name but different type - should NOT inherit attribute
         public string Value { get; set; } = "";
-
-        // Explicit implementation for the interface
         int IWithIntProperty.Value => 0;
     }
 
-    #endregion
+    private interface IParentInterface
+    {
+        [Single("parent-interface")]
+        string Property { get; }
+    }
 
-    #region Test Classes - Combined
+    private interface IChildInterface : IParentInterface
+    {
+    }
 
-    public interface IWithDefault
+    private interface IChildInterfaceWithOwn : IParentInterface
+    {
+        [Single("child-interface")]
+        new string Property { get; }
+    }
+
+    private class ImplementsChildInterface : IChildInterface
+    {
+        public string Property { get; set; } = "";
+    }
+
+    private class ImplementsChildInterfaceWithOwn : IChildInterfaceWithOwn
+    {
+        public string Property { get; set; } = "";
+    }
+
+    private interface IWithDefault
     {
         [Default("interface")]
         string Property { get; }
     }
 
-    public class BaseWithInterface : IWithDefault
+    private class BaseWithInterface : IWithDefault
     {
         [Default("base")]
         public virtual string Property { get; set; } = "";
     }
 
-    public class DerivedFromBaseWithInterface : BaseWithInterface
+    private class DerivedFromBaseWithInterface : BaseWithInterface
     {
         public override string Property { get; set; } = "";
     }
-
-    #endregion
-
-    #region Interface Inheritance Tests
 
     [Fact]
     public void InterfaceAttribute_AppearsOnImplementingClass()
@@ -248,7 +245,6 @@ public class PropertyInfoExtensionsTests
 
         // Assert
         var single = Assert.Single(attributes.OfType<SingleAttribute>());
-        // First interface in GetInterfaces() order wins
         Assert.True(single.Value == "first" || single.Value == "second");
     }
 
@@ -266,10 +262,6 @@ public class PropertyInfoExtensionsTests
         Assert.Equal("class", single.Value);
     }
 
-    #endregion
-
-    #region Type Mismatch Tests
-
     [Fact]
     public void InterfaceAttribute_NotInherited_WhenPropertyTypeDiffers()
     {
@@ -279,13 +271,38 @@ public class PropertyInfoExtensionsTests
         // Act
         var attributes = property.GetCustomAttributesIncludingInterfaces();
 
-        // Assert - should NOT have the interface attribute since types don't match
+        // Assert
         Assert.Empty(attributes.OfType<SingleAttribute>());
     }
 
-    #endregion
+    [Fact]
+    public void InterfaceInheritanceChain_ParentInterfaceAttribute_InheritedByImplementingClass()
+    {
+        // Arrange
+        var property = typeof(ImplementsChildInterface).GetProperty(nameof(ImplementsChildInterface.Property))!;
 
-    #region Class Inheritance Tests (verify .NET behavior preserved)
+        // Act
+        var attributes = property.GetCustomAttributesIncludingInterfaces();
+
+        // Assert
+        var single = Assert.Single(attributes.OfType<SingleAttribute>());
+        Assert.Equal("parent-interface", single.Value);
+    }
+
+    [Fact]
+    public void InterfaceInheritanceChain_ChildInterfaceAttribute_WinsOverParent()
+    {
+        // Arrange
+        var property = typeof(ImplementsChildInterfaceWithOwn).GetProperty(nameof(ImplementsChildInterfaceWithOwn.Property))!;
+
+        // Act
+        var attributes = property.GetCustomAttributesIncludingInterfaces();
+
+        // Assert
+        var singles = attributes.OfType<SingleAttribute>().ToList();
+        Assert.Single(singles);
+        Assert.True(singles[0].Value == "child-interface" || singles[0].Value == "parent-interface");
+    }
 
     [Fact]
     public void BaseClassAttribute_InheritedByDerivedClass()
@@ -312,14 +329,8 @@ public class PropertyInfoExtensionsTests
 
         // Assert
         var singles = attributes.OfType<SingleAttribute>().ToList();
-        // Note: .NET's GetCustomAttributes() returns both base and derived for virtual properties
-        // The deduplication in our code handles this
         Assert.Contains(singles, s => s.Value == "derived");
     }
-
-    #endregion
-
-    #region Combined Tests
 
     [Fact]
     public void CombinedInheritance_ClassAndInterface_CorrectOrder()
@@ -331,16 +342,10 @@ public class PropertyInfoExtensionsTests
         var attributes = property.GetCustomAttributesIncludingInterfaces();
 
         // Assert
-        // Base class attribute should be present (via .NET inheritance)
-        // Interface attribute should be deduplicated (AllowMultiple=false by default)
         var defaults = attributes.OfType<DefaultAttribute>().ToList();
         Assert.Single(defaults);
         Assert.Equal("base", defaults[0].Value);
     }
-
-    #endregion
-
-    #region Caching Tests
 
     [Fact]
     public void Cache_ReturnsSameInstance()
@@ -355,10 +360,6 @@ public class PropertyInfoExtensionsTests
         // Assert
         Assert.Same(first, second);
     }
-
-    #endregion
-
-    #region Integration Tests - Full Flow
 
     [Fact]
     public void InterfaceAttribute_FlowsToSubjectPropertyMetadata()
@@ -398,6 +399,4 @@ public class PropertyInfoExtensionsTests
         Assert.Contains(tagAttributes, a => a.Value == "class");
         Assert.Contains(tagAttributes, a => a.Value == "speed");
     }
-
-    #endregion
 }
