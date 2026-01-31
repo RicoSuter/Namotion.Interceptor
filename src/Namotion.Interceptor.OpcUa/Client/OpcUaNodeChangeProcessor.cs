@@ -225,8 +225,13 @@ internal class OpcUaNodeChangeProcessor
 
                 // Add to collection FIRST - this attaches the subject to the parent which registers it
                 // The subject must be registered before LoadSubjectAsync can set up monitored items
-                AddToCollectionProperty(property, localChildren, index, newSubject);
-                localChildren = property.Children.ToList();
+                if (!SubjectPropertyHelper.AddToCollection(property, newSubject, _source))
+                {
+                    _logger.LogWarning(
+                        "Cannot add to collection property '{PropertyName}': value is not an array.",
+                        property.Name);
+                    continue;
+                }
 
                 // Now load and set up monitoring - subject is now registered
                 var monitoredItems = await _subjectLoader.LoadSubjectAsync(
@@ -249,7 +254,12 @@ internal class OpcUaNodeChangeProcessor
         // Process removals
         if (indicesToRemove.Count > 0)
         {
-            RemoveFromCollectionProperty(property, indicesToRemove);
+            if (!SubjectPropertyHelper.RemoveFromCollectionByIndices(property, indicesToRemove, _source))
+            {
+                _logger.LogWarning(
+                    "Could not remove {RemovedCount} subjects from collection property '{PropertyName}'.",
+                    indicesToRemove.Count, property.Name);
+            }
         }
     }
 
@@ -643,7 +653,7 @@ internal class OpcUaNodeChangeProcessor
                 {
                     _logger.LogDebug("ProcessNodeDeleted: Removing from collection '{Property}' at index {Index}.",
                         parentProperty.Name, index);
-                    RemoveFromCollectionProperty(parentProperty, [index]);
+                    SubjectPropertyHelper.RemoveFromCollectionByIndices(parentProperty, [index], _source);
                     break;
                 }
             }
@@ -764,107 +774,6 @@ internal class OpcUaNodeChangeProcessor
                     }
                 }
             }
-        }
-    }
-
-    private void AddToCollectionProperty(
-        RegisteredSubjectProperty property,
-        List<SubjectPropertyChild> localChildren,
-        int index,
-        IInterceptorSubject newSubject)
-    {
-        try
-        {
-            // Get current array value
-            var currentValue = property.GetValue();
-            if (currentValue is not Array currentArray)
-            {
-                _logger.LogWarning(
-                    "Cannot add to collection property '{PropertyName}': value is not an array.",
-                    property.Name);
-                return;
-            }
-
-            var elementType = currentArray.GetType().GetElementType();
-            if (elementType is null)
-            {
-                return;
-            }
-
-            // Create new array with space for the new item
-            var newLength = currentArray.Length + 1;
-            var newArray = Array.CreateInstance(elementType, newLength);
-
-            // Copy existing elements
-            for (var i = 0; i < currentArray.Length; i++)
-            {
-                newArray.SetValue(currentArray.GetValue(i), i);
-            }
-
-            // Add the new element at the end
-            newArray.SetValue(newSubject, currentArray.Length);
-
-            // Set the new array value (this attaches the subject and registers it)
-            // Use SetValueFromSource to prevent changes from being mirrored back to server
-            property.SetValueFromSource(_source, null, null, newArray);
-
-            _logger.LogDebug(
-                "Added subject to collection property '{PropertyName}' at index {Index}. Total: {Total}",
-                property.Name, index, newLength);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to add to collection property '{PropertyName}'.", property.Name);
-        }
-    }
-
-    private void RemoveFromCollectionProperty(
-        RegisteredSubjectProperty property,
-        List<int> indicesToRemove)
-    {
-        try
-        {
-            // Get current array value
-            var currentValue = property.GetValue();
-            if (currentValue is not Array currentArray)
-            {
-                return;
-            }
-
-            var elementType = currentArray.GetType().GetElementType();
-            if (elementType is null)
-            {
-                return;
-            }
-
-            // Create set of indices to remove
-            var removeSet = new HashSet<int>(indicesToRemove);
-
-            // Create new array without removed elements
-            var newLength = currentArray.Length - indicesToRemove.Count;
-            if (newLength < 0) newLength = 0;
-
-            var newArray = Array.CreateInstance(elementType, newLength);
-            var newIndex = 0;
-
-            for (var i = 0; i < currentArray.Length; i++)
-            {
-                if (!removeSet.Contains(i))
-                {
-                    newArray.SetValue(currentArray.GetValue(i), newIndex++);
-                }
-            }
-
-            // Set the new array value - use SetValueFromSource to prevent mirroring back to server
-            property.SetValueFromSource(_source, null, null, newArray);
-
-            _logger.LogDebug(
-                "Removed {RemovedCount} subjects from collection property '{PropertyName}'. Remaining: {Remaining}",
-                indicesToRemove.Count, property.Name, newLength);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to remove from collection property '{PropertyName}'.", property.Name);
         }
     }
 
