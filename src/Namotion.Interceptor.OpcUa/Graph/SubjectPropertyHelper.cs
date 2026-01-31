@@ -25,8 +25,8 @@ internal static class SubjectPropertyHelper
         DateTimeOffset? changedTimestamp = null,
         DateTimeOffset? receivedTimestamp = null)
     {
-        // TOOD: Need to check whether we should move this and other methods of this class to same place or into DefaultSubjectFactory,
-        // also should support other collection types, not only arrays (same as in DefaultSubjectFactory)
+        // TODO: Need to check whether we should move this and other methods of this class to same place or into DefaultSubjectFactory,
+        // also should support other collection types (all methods in this class!), not only arrays (same as in DefaultSubjectFactory)
         
         // Get current array value
         var currentValue = property.GetValue();
@@ -133,6 +133,159 @@ internal static class SubjectPropertyHelper
         else
         {
             property.SetValue(newArray);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Adds a subject to a dictionary property with the specified key.
+    /// Creates a new dictionary with the entry added.
+    /// </summary>
+    /// <param name="property">The registered dictionary property to add to.</param>
+    /// <param name="key">The key for the new entry.</param>
+    /// <param name="subject">The subject to add to the dictionary.</param>
+    /// <param name="source">The source of the change (for change tracking).</param>
+    /// <param name="changedTimestamp">Optional timestamp when the value was changed at the source.</param>
+    /// <param name="receivedTimestamp">Optional timestamp when the value was received.</param>
+    /// <returns>True if the subject was added successfully, false otherwise.</returns>
+    public static bool AddToDictionary(
+        RegisteredSubjectProperty property,
+        object key,
+        IInterceptorSubject subject,
+        object? source,
+        DateTimeOffset? changedTimestamp = null,
+        DateTimeOffset? receivedTimestamp = null)
+    {
+        // Get current dictionary value
+        var currentValue = property.GetValue();
+        if (currentValue is null)
+        {
+            return false;
+        }
+
+        var dictType = currentValue.GetType();
+        if (!dictType.IsGenericType || dictType.GetGenericTypeDefinition() != typeof(Dictionary<,>))
+        {
+            return false;
+        }
+
+        // Cast to IDictionary to read existing entries
+        if (currentValue is not System.Collections.IDictionary currentDict)
+        {
+            return false;
+        }
+
+        // Create new dictionary with existing entries plus new one
+        var keyType = dictType.GetGenericArguments()[0];
+        var valueType = dictType.GetGenericArguments()[1];
+        var newDictType = typeof(Dictionary<,>).MakeGenericType(keyType, valueType);
+        var newDict = Activator.CreateInstance(newDictType) as System.Collections.IDictionary;
+
+        if (newDict is null)
+        {
+            return false;
+        }
+
+        // Copy existing entries
+        foreach (System.Collections.DictionaryEntry entry in currentDict)
+        {
+            newDict[entry.Key] = entry.Value;
+        }
+
+        // Add the new entry
+        newDict[key] = subject;
+
+        // Set the new dictionary value (this attaches the subject and registers it)
+        // Use SetValueFromSource to prevent mirroring back to server
+        if (source is not null)
+        {
+            property.SetValueFromSource(source, changedTimestamp, receivedTimestamp, newDict);
+        }
+        else
+        {
+            property.SetValue(newDict);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Removes entries from a dictionary property by keys.
+    /// Creates a new dictionary with the entries removed.
+    /// </summary>
+    /// <param name="property">The registered dictionary property to remove from.</param>
+    /// <param name="keysToRemove">The keys of entries to remove.</param>
+    /// <param name="source">The source of the change (for change tracking).</param>
+    /// <param name="changedTimestamp">Optional timestamp when the value was changed at the source.</param>
+    /// <param name="receivedTimestamp">Optional timestamp when the value was received.</param>
+    /// <returns>True if entries were removed successfully, false otherwise.</returns>
+    public static bool RemoveFromDictionary(
+        RegisteredSubjectProperty property,
+        IReadOnlyList<string> keysToRemove,
+        object? source,
+        DateTimeOffset? changedTimestamp = null,
+        DateTimeOffset? receivedTimestamp = null)
+    {
+        if (keysToRemove.Count == 0)
+        {
+            return true;
+        }
+
+        // Get current dictionary value
+        var currentValue = property.GetValue();
+        if (currentValue is null)
+        {
+            return false;
+        }
+
+        var dictType = currentValue.GetType();
+        if (!dictType.IsGenericType || dictType.GetGenericTypeDefinition() != typeof(Dictionary<,>))
+        {
+            return false;
+        }
+
+        // Cast to IDictionary to manipulate
+        if (currentValue is not System.Collections.IDictionary currentDict)
+        {
+            return false;
+        }
+
+        // Create new dictionary without removed keys
+        var keyType = dictType.GetGenericArguments()[0];
+        var valueType = dictType.GetGenericArguments()[1];
+        var newDictType = typeof(Dictionary<,>).MakeGenericType(keyType, valueType);
+        var newDict = Activator.CreateInstance(newDictType) as System.Collections.IDictionary;
+
+        if (newDict is null)
+        {
+            return false;
+        }
+
+        var removeSet = new HashSet<string>(keysToRemove);
+
+        foreach (System.Collections.DictionaryEntry entry in currentDict)
+        {
+            if (entry.Key is null)
+            {
+                continue;
+            }
+
+            var keyString = entry.Key.ToString() ?? "";
+            if (!removeSet.Contains(keyString))
+            {
+                newDict[entry.Key] = entry.Value;
+            }
+        }
+
+        // Set the new dictionary value - use SetValueFromSource to prevent mirroring back to server
+        if (source is not null)
+        {
+            property.SetValueFromSource(source, changedTimestamp, receivedTimestamp, newDict);
+        }
+        else
+        {
+            property.SetValue(newDict);
         }
 
         return true;
