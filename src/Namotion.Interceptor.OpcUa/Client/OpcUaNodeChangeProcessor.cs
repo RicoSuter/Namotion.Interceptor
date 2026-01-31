@@ -16,7 +16,7 @@ namespace Namotion.Interceptor.OpcUa.Client;
 internal class OpcUaNodeChangeProcessor
 {
     //  TODO: Rename to OpcUaGraphChangeProcessor and move to /Client/Graph?
-    
+
     private readonly OpcUaSubjectClientSource _source;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly OpcUaSubjectLoader _subjectLoader;
@@ -221,7 +221,7 @@ internal class OpcUaNodeChangeProcessor
         // Browse remote nodes
         var remoteChildren = await OpcUaBrowseHelper.BrowseNodeAsync(session, containerNodeId, cancellationToken).ConfigureAwait(false);
 
-        _logger.LogInformation("Browse '{Container}' returned {Count} children: {Names}",
+        _logger.LogDebug("Browse '{Container}' returned {Count} children: {Names}",
             containerNodeId, remoteChildren.Count,
             string.Join(", ", remoteChildren.Select(c => c.BrowseName.Name)));
 
@@ -248,7 +248,7 @@ internal class OpcUaNodeChangeProcessor
         var indicesToAdd = remoteIndices.Except(localIndices).OrderBy(i => i).ToList();
         var indicesToRemove = localIndices.Except(remoteIndices).OrderByDescending(i => i).ToList();
 
-        _logger.LogInformation("Collection sync for '{Property}': remote={Remote}, local={Local}, toAdd={Add}, toRemove={Remove}",
+        _logger.LogDebug("Collection sync for '{Property}': remote={Remote}, local={Local}, toAdd={Add}, toRemove={Remove}",
             property.Name, string.Join(",", remoteIndices), string.Join(",", localIndices),
             string.Join(",", indicesToAdd), string.Join(",", indicesToRemove));
 
@@ -533,7 +533,7 @@ internal class OpcUaNodeChangeProcessor
         CancellationToken cancellationToken)
     {
         // TODO: Do we need to run under _structureSemaphore here? also check other places which operate on nodes/structure whether they are correctly synchronized
-        
+
         foreach (var change in changes)
         {
             var verb = (ModelChangeStructureVerbMask)change.Verb;
@@ -699,7 +699,7 @@ internal class OpcUaNodeChangeProcessor
             return;
         }
 
-        _logger.LogInformation("ProcessNodeDeleted: Removing subject {Type} for NodeId {NodeId}.",
+        _logger.LogDebug("ProcessNodeDeleted: Removing subject {Type} for NodeId {NodeId}.",
             deletedSubject.GetType().Name, nodeId);
 
         // Find the parent subject and property that contains this subject

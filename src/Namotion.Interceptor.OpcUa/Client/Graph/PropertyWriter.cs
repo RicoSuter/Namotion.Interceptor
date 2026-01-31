@@ -15,7 +15,7 @@ namespace Namotion.Interceptor.OpcUa.Client.Graph;
 internal class PropertyWriter
 {
     // TODO: Find better name (RSP) comapred to SubjectPropertyWriter, confusing name maybe OpcUaPropertyWriter or similar?
-    
+
     private readonly OpcUaClientConfiguration _configuration;
     private readonly string _opcUaNodeIdKey;
     private readonly ILogger _logger;

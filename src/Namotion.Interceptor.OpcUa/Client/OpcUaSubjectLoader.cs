@@ -69,7 +69,7 @@ internal class OpcUaSubjectLoader
         }
 
         var nodeReferences = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
-        
+
         // Track which properties were matched to server nodes
         var claimedPropertyNames = new HashSet<string>();
 
@@ -314,10 +314,10 @@ internal class OpcUaSubjectLoader
         var childNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken).ConfigureAwait(false);
         var childCount = childNodes.Count;
         var children = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>(childCount);
-        
+
         // Convert to array once to avoid multiple enumerations
         var existingChildren = property.Children.ToArray();
-        
+
         for (var i = 0; i < childCount; i++)
         {
             var childNode = childNodes[i];

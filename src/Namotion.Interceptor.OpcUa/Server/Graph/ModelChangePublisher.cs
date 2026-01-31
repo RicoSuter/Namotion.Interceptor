@@ -85,7 +85,7 @@ internal class ModelChangePublisher
             // Note: The event will be distributed to subscribed clients via the server's event queue
             server.ReportEvent(systemContext, eventState);
 
-            _logger.LogInformation("Emitted GeneralModelChangeEvent with {ChangeCount} changes.", changesToEmit.Count);
+            _logger.LogDebug("Emitted GeneralModelChangeEvent with {ChangeCount} changes.", changesToEmit.Count);
         }
         catch (Exception ex)
         {
