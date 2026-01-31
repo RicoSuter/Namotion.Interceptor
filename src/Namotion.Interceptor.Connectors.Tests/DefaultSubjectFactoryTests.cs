@@ -49,7 +49,7 @@ public class DefaultSubjectFactoryTests
 
         // Act
         var subjectFactory = new DefaultSubjectFactory();
-        var myClass = subjectFactory.CreateSubject(property) as MyClass;
+        var myClass = subjectFactory.CreateSubjectForReferenceProperty(property) as MyClass;
         
         // Assert
         Assert.NotNull(myClass);

@@ -297,7 +297,7 @@ internal class OpcUaSubjectLoader
         else
         {
             // Create new subject instance
-            var newSubject = await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeReference, session, cancellationToken).ConfigureAwait(false);
+            var newSubject = await _configuration.SubjectFactory.CreateSubjectForPropertyAsync(property, nodeReference, session, cancellationToken).ConfigureAwait(false);
             newSubject.Context.AddFallbackContext(subject.Context);
             await LoadSubjectAsync(newSubject, nodeReference, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
             property.SetValueFromSource(_source, null, null, newSubject);
@@ -322,7 +322,7 @@ internal class OpcUaSubjectLoader
         {
             var childNode = childNodes[i];
             var childSubject = i < existingChildren.Length ? existingChildren[i].Subject : null;
-            childSubject ??= DefaultSubjectFactory.Instance.CreateCollectionSubject(property, i);
+            childSubject ??= DefaultSubjectFactory.Instance.CreateSubjectForCollectionOrDictionaryProperty(property);
 
             children.Add((childNode, childSubject));
         }
@@ -357,7 +357,7 @@ internal class OpcUaSubjectLoader
         {
             var key = childNode.BrowseName.Name; // Use BrowseName as dictionary key
             var childSubject = existingChildren.GetValueOrDefault(key)
-                ?? DefaultSubjectFactory.Instance.CreateCollectionSubject(property, key);
+                ?? DefaultSubjectFactory.Instance.CreateSubjectForCollectionOrDictionaryProperty(property);
             entries[key] = childSubject;
             nodesByKey[key] = childNode;
         }

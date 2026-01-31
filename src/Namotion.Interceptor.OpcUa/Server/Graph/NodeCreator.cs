@@ -202,8 +202,8 @@ internal class NodeCreator
         string parentPath,
         OpcUaNodeConfiguration? nodeConfiguration)
     {
-        // Determine collection structure mode (default is Flat per attribute definition)
-        var collectionStructure = nodeConfiguration?.CollectionStructure ?? CollectionNodeStructure.Flat;
+        // Determine collection structure mode (default is Container for backward compatibility)
+        var collectionStructure = nodeConfiguration?.CollectionStructure ?? CollectionNodeStructure.Container;
         if (collectionStructure == CollectionNodeStructure.Flat)
         {
             // Flat mode: create children directly under the parent node

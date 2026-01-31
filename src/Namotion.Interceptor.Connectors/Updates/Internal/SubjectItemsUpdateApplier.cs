@@ -233,7 +233,7 @@ internal static class SubjectItemsUpdateApplier
         Dictionary<string, SubjectPropertyUpdate> properties,
         SubjectUpdateApplyContext context)
     {
-        var newItem = context.SubjectFactory.CreateCollectionSubject(property, indexOrKey);
+        var newItem = context.SubjectFactory.CreateSubjectForCollectionOrDictionaryProperty(property);
         newItem.Context.AddFallbackContext(parent.Context);
         if (context.TryMarkAsProcessed(subjectId))
         {
