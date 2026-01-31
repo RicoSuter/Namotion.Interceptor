@@ -1,3 +1,4 @@
+using System.Collections;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Graph;
@@ -338,7 +339,13 @@ internal class OpcUaNodeChangeProcessor
 
                 // Add to dictionary FIRST - this attaches the subject to the parent which registers it
                 // The subject must be registered before LoadSubjectAsync can set up monitored items
-                AddToDictionaryProperty(property, localChildren, key, newSubject);
+                if (!SubjectPropertyHelper.AddToDictionary(property, key, newSubject, _source))
+                {
+                    _logger.LogWarning(
+                        "Cannot add to dictionary property '{PropertyName}': value is not a Dictionary<,>.",
+                        property.Name);
+                    continue;
+                }
                 localChildren = property.Children.ToDictionary(c => c.Index?.ToString() ?? "", c => c.Subject);
 
                 // Now load and set up monitoring - subject is now registered
@@ -362,7 +369,12 @@ internal class OpcUaNodeChangeProcessor
         // Process removals
         if (keysToRemove.Count > 0)
         {
-            RemoveFromDictionaryProperty(property, keysToRemove);
+            if (!SubjectPropertyHelper.RemoveFromDictionary(property, keysToRemove, _source))
+            {
+                _logger.LogWarning(
+                    "Could not remove {RemovedCount} entries from dictionary property '{PropertyName}'.",
+                    keysToRemove.Count, property.Name);
+            }
         }
     }
 
@@ -640,7 +652,6 @@ internal class OpcUaNodeChangeProcessor
         if (parentProperty.IsSubjectReference)
         {
             // Clear the reference property
-            _logger.LogDebug("ProcessNodeDeleted: Clearing reference property '{Property}'.", parentProperty.Name);
             parentProperty.SetValueFromSource(_source, null, null, null);
         }
         else if (parentProperty.IsSubjectCollection)
@@ -651,9 +662,7 @@ internal class OpcUaNodeChangeProcessor
             {
                 if (ReferenceEquals(children[i].Subject, deletedSubject) && children[i].Index is int index)
                 {
-                    _logger.LogDebug("ProcessNodeDeleted: Removing from collection '{Property}' at index {Index}.",
-                        parentProperty.Name, index);
-                    SubjectPropertyHelper.RemoveFromCollectionByIndices(parentProperty, [index], _source);
+                    SubjectPropertyHelper.RemoveFromCollectionByIndices(parentProperty, [index], _source); // TODO: Add warning when failed, same as other places
                     break;
                 }
             }
@@ -661,8 +670,7 @@ internal class OpcUaNodeChangeProcessor
         else if (parentProperty.IsSubjectDictionary)
         {
             // Remove from dictionary
-            var dictionary = (parentProperty.GetValue() as System.Collections.IDictionary);
-            if (dictionary is not null)
+            if (parentProperty.GetValue() is IDictionary dictionary)
             {
                 string? keyToRemove = null;
                 foreach (System.Collections.DictionaryEntry entry in dictionary)
@@ -676,9 +684,7 @@ internal class OpcUaNodeChangeProcessor
 
                 if (keyToRemove is not null)
                 {
-                    _logger.LogDebug("ProcessNodeDeleted: Removing from dictionary '{Property}' key '{Key}'.",
-                        parentProperty.Name, keyToRemove);
-                    RemoveFromDictionaryProperty(parentProperty, [keyToRemove]);
+                    SubjectPropertyHelper.RemoveFromDictionary(parentProperty, [keyToRemove], _source); // TODO: Add warning when failed, same as other places
                 }
             }
         }
@@ -774,132 +780,6 @@ internal class OpcUaNodeChangeProcessor
                     }
                 }
             }
-        }
-    }
-
-    private void AddToDictionaryProperty(
-        RegisteredSubjectProperty property,
-        Dictionary<string, IInterceptorSubject> localChildren,
-        string key,
-        IInterceptorSubject newSubject)
-    {
-        try
-        {
-            // Get current dictionary value
-            var currentValue = property.GetValue();
-            if (currentValue is null)
-            {
-                _logger.LogWarning(
-                    "Cannot add to dictionary property '{PropertyName}': value is null.",
-                    property.Name);
-                return;
-            }
-
-            var dictType = currentValue.GetType();
-            if (!dictType.IsGenericType || dictType.GetGenericTypeDefinition() != typeof(Dictionary<,>))
-            {
-                _logger.LogWarning(
-                    "Cannot add to dictionary property '{PropertyName}': value is not a Dictionary<,>.",
-                    property.Name);
-                return;
-            }
-
-            // Create new dictionary with existing entries plus new one
-            var keyType = dictType.GetGenericArguments()[0];
-            var valueType = dictType.GetGenericArguments()[1];
-            var newDictType = typeof(Dictionary<,>).MakeGenericType(keyType, valueType);
-            var newDict = Activator.CreateInstance(newDictType) as System.Collections.IDictionary;
-
-            if (newDict is null)
-            {
-                return;
-            }
-
-            // Copy existing entries
-            foreach (var kvp in localChildren)
-            {
-                newDict[kvp.Key] = kvp.Value;
-            }
-
-            // Add the new entry
-            newDict[key] = newSubject;
-
-            // Set the new dictionary value (this attaches the subject and registers it)
-            // Use SetValueFromSource to prevent mirroring back to server
-            property.SetValueFromSource(_source, null, null, newDict);
-
-            _logger.LogDebug(
-                "Added subject to dictionary property '{PropertyName}' with key '{Key}'. Total: {Total}",
-                property.Name, key, newDict.Count);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to add to dictionary property '{PropertyName}'.", property.Name);
-        }
-    }
-
-    private void RemoveFromDictionaryProperty(
-        RegisteredSubjectProperty property,
-        List<string> keysToRemove)
-    {
-        try
-        {
-            // Get current dictionary value
-            var currentValue = property.GetValue();
-            if (currentValue is null)
-            {
-                return;
-            }
-
-            var dictType = currentValue.GetType();
-            if (!dictType.IsGenericType || dictType.GetGenericTypeDefinition() != typeof(Dictionary<,>))
-            {
-                return;
-            }
-
-            // Cast to IDictionary to manipulate
-            if (currentValue is not System.Collections.IDictionary currentDict)
-            {
-                return;
-            }
-
-            // Create new dictionary without removed keys
-            var keyType = dictType.GetGenericArguments()[0];
-            var valueType = dictType.GetGenericArguments()[1];
-            var newDictType = typeof(Dictionary<,>).MakeGenericType(keyType, valueType);
-            var newDict = Activator.CreateInstance(newDictType) as System.Collections.IDictionary;
-
-            if (newDict is null)
-            {
-                return;
-            }
-
-            var removeSet = new HashSet<string>(keysToRemove);
-
-            foreach (System.Collections.DictionaryEntry entry in currentDict)
-            {
-                if (entry.Key is null)
-                {
-                    continue;
-                }
-
-                var key = entry.Key.ToString() ?? "";
-                if (!removeSet.Contains(key))
-                {
-                    newDict[entry.Key] = entry.Value;
-                }
-            }
-
-            // Set the new dictionary value - use SetValueFromSource to prevent mirroring back to server
-            property.SetValueFromSource(_source, null, null, newDict);
-
-            _logger.LogDebug(
-                "Removed {RemovedCount} entries from dictionary property '{PropertyName}'. Remaining: {Remaining}",
-                keysToRemove.Count, property.Name, newDict.Count);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to remove from dictionary property '{PropertyName}'.", property.Name);
         }
     }
 }
