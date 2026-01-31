@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
+using Namotion.Interceptor.OpcUa.Graph;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
@@ -185,7 +186,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// <summary>
     /// Attempts to delete a remote node on the OPC UA server via DeleteNodes service.
     /// </summary>
-    private async Task TryDeleteRemoteNodeAsync(Opc.Ua.Client.ISession session, NodeId nodeId, CancellationToken cancellationToken)
+    private async Task TryDeleteRemoteNodeAsync(ISession session, NodeId nodeId, CancellationToken cancellationToken)
     {
         var deleteNodesItem = new DeleteNodesItem
         {

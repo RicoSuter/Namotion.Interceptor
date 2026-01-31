@@ -189,7 +189,7 @@ internal sealed class OpcUaNodeFactory
     public BaseDataVariableState CreateVariableNode(
         CustomNodeManager manager,
         NodeId parentId, NodeId nodeId, QualifiedName browseName,
-        Opc.Ua.TypeInfo dataType, NodeId? referenceType, NodeId? dataTypeOverride,
+        TypeInfo dataType, NodeId? referenceType, NodeId? dataTypeOverride,
         OpcUaNodeConfiguration? nodeConfiguration)
     {
         var parentNode = manager.FindNode(parentId);
@@ -206,7 +206,7 @@ internal sealed class OpcUaNodeFactory
                 : null,
 
             TypeDefinitionId = VariableTypeIds.BaseDataVariableType,
-            DataType = dataTypeOverride ?? Opc.Ua.TypeInfo.GetDataTypeId(dataType),
+            DataType = dataTypeOverride ?? TypeInfo.GetDataTypeId(dataType),
             ValueRank = dataType.ValueRank,
             AccessLevel = AccessLevels.CurrentReadOrWrite,
             UserAccessLevel = AccessLevels.CurrentReadOrWrite,
