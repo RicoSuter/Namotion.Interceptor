@@ -1,6 +1,6 @@
 using System.Collections;
 using Microsoft.Extensions.Logging;
-using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Graph;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -166,10 +166,22 @@ internal class OpcUaNodeChangeProcessor
 
                 if (property.IsSubjectCollection)
                 {
-                    var containerNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(session, subjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
-                    if (containerNodeId is not null)
+                    // Check collection structure mode
+                    var nodeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(property);
+                    var collectionStructure = nodeConfiguration?.CollectionStructure ?? CollectionNodeStructure.Flat;
+                    if (collectionStructure == CollectionNodeStructure.Flat)
                     {
-                        await ProcessCollectionNodeChangesAsync(property, containerNodeId, session, cancellationToken).ConfigureAwait(false);
+                        // Flat mode: items are directly under the parent node
+                        await ProcessCollectionNodeChangesAsync(property, subjectNodeId, session, cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        // Container mode: items are under a container folder
+                        var containerNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(session, subjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
+                        if (containerNodeId is not null)
+                        {
+                            await ProcessCollectionNodeChangesAsync(property, containerNodeId, session, cancellationToken).ConfigureAwait(false);
+                        }
                     }
                 }
                 else if (property.IsSubjectDictionary)
@@ -625,7 +637,7 @@ internal class OpcUaNodeChangeProcessor
                 continue;
             }
 
-            if (!property.IsSubjectCollection && !property.IsSubjectDictionary)
+            if (property is { IsSubjectCollection: false, IsSubjectDictionary: false })
             {
                 continue;
             }
@@ -635,10 +647,22 @@ internal class OpcUaNodeChangeProcessor
             {
                 if (_source.TryGetSubjectNodeId(parentSubject, out var parentSubjectNodeId) && parentSubjectNodeId is not null)
                 {
-                    var containerNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(session, parentSubjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
-                    if (containerNodeId is not null)
+                    // Check collection structure mode
+                    var nodeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(property);
+                    var collectionStructure = nodeConfiguration?.CollectionStructure ?? CollectionNodeStructure.Flat;
+                    if (collectionStructure == CollectionNodeStructure.Flat)
                     {
-                        await ProcessCollectionNodeChangesAsync(property, containerNodeId, session, cancellationToken).ConfigureAwait(false);
+                        // Flat mode: items are directly under the parent node
+                        await ProcessCollectionNodeChangesAsync(property, parentSubjectNodeId, session, cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        // Container mode: items are under a container folder
+                        var containerNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(session, parentSubjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
+                        if (containerNodeId is not null)
+                        {
+                            await ProcessCollectionNodeChangesAsync(property, containerNodeId, session, cancellationToken).ConfigureAwait(false);
+                        }
                     }
                 }
                 return;

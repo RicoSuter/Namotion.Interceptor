@@ -100,7 +100,7 @@ internal class OpcUaClientStructuralChangeProcessor : StructuralChangeProcessor
             return;
         }
 
-        var childNodeRef = await TryFindChildNodeAsync(session, parentNodeId, propertyName, index, property.IsSubjectCollection, CancellationToken.None).ConfigureAwait(false);
+        var childNodeRef = await TryFindChildNodeAsync(session, parentNodeId, property, propertyName, index, CancellationToken.None).ConfigureAwait(false);
         var wasCreatedRemotely = false;
 
         if (childNodeRef is null)
@@ -166,15 +166,67 @@ internal class OpcUaClientStructuralChangeProcessor : StructuralChangeProcessor
     private async Task<ReferenceDescription?> TryFindChildNodeAsync(
         ISession session,
         NodeId parentNodeId,
+        RegisteredSubjectProperty property,
         string propertyName,
         object? index,
-        bool isCollection,
         CancellationToken cancellationToken)
     {
         var references = await OpcUaBrowseHelper.BrowseNodeAsync(session, parentNodeId, cancellationToken).ConfigureAwait(false);
 
-        // For collections/dictionaries, first find the container node
-        if (isCollection || index is not null)
+        // For collections, check the structure mode (default is Container for backward compatibility)
+        if (property.IsSubjectCollection)
+        {
+            var nodeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(property);
+            var collectionStructure = nodeConfiguration?.CollectionStructure ?? CollectionNodeStructure.Container;
+
+            if (collectionStructure == CollectionNodeStructure.Flat)
+            {
+                // Flat mode: items are directly under the parent node
+                var expectedBrowseName = $"{propertyName}[{index}]";
+                foreach (var reference in references)
+                {
+                    if (reference.BrowseName.Name == expectedBrowseName)
+                    {
+                        return reference;
+                    }
+                }
+                return null;
+            }
+            else
+            {
+                // Container mode: find container first, then item inside
+                NodeId? containerNodeId = null;
+                foreach (var reference in references)
+                {
+                    if (reference.BrowseName.Name == propertyName)
+                    {
+                        containerNodeId = ExpandedNodeId.ToNodeId(reference.NodeId, session.NamespaceUris);
+                        break;
+                    }
+                }
+
+                if (containerNodeId is null)
+                {
+                    return null;
+                }
+
+                var containerChildren = await OpcUaBrowseHelper.BrowseNodeAsync(session, containerNodeId, cancellationToken).ConfigureAwait(false);
+                var expectedBrowseName = $"{propertyName}[{index}]";
+
+                foreach (var child in containerChildren)
+                {
+                    if (child.BrowseName.Name == expectedBrowseName)
+                    {
+                        return child;
+                    }
+                }
+
+                return null;
+            }
+        }
+
+        // For dictionaries (always container mode)
+        if (index is not null)
         {
             // Find container first
             NodeId? containerNodeId = null;
@@ -194,7 +246,7 @@ internal class OpcUaClientStructuralChangeProcessor : StructuralChangeProcessor
 
             // Browse container for specific item
             var containerChildren = await OpcUaBrowseHelper.BrowseNodeAsync(session, containerNodeId, cancellationToken).ConfigureAwait(false);
-            var expectedBrowseName = isCollection ? $"{propertyName}[{index}]" : index?.ToString();
+            var expectedBrowseName = index.ToString();
 
             foreach (var child in containerChildren)
             {
@@ -289,14 +341,26 @@ internal class OpcUaClientStructuralChangeProcessor : StructuralChangeProcessor
 
         if (property.IsSubjectCollection)
         {
-            // For collections: parent is the container node, browse name is PropertyName[index]
-            actualParentNodeId = await TryFindContainerNodeAsync(session, parentNodeId, propertyName, cancellationToken).ConfigureAwait(false);
-            if (NodeId.IsNull(actualParentNodeId))
+            // Check collection structure mode (default is Container for backward compatibility)
+            var nodeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(property);
+            var collectionStructure = nodeConfiguration?.CollectionStructure ?? CollectionNodeStructure.Container;
+
+            if (collectionStructure == CollectionNodeStructure.Flat)
             {
-                _logger.LogWarning(
-                    "Cannot create remote node: container node '{PropertyName}' not found.",
-                    propertyName);
-                return null;
+                // Flat mode: create directly under parent
+                actualParentNodeId = parentNodeId;
+            }
+            else
+            {
+                // Container mode: parent is the container node
+                actualParentNodeId = await TryFindContainerNodeAsync(session, parentNodeId, propertyName, cancellationToken).ConfigureAwait(false);
+                if (NodeId.IsNull(actualParentNodeId))
+                {
+                    _logger.LogWarning(
+                        "Cannot create remote node: container node '{PropertyName}' not found.",
+                        propertyName);
+                    return null;
+                }
             }
             browseName = $"{propertyName}[{index}]";
         }

@@ -190,7 +190,9 @@ internal class NodeCreator
     }
 
     /// <summary>
-    /// Creates a folder node for a collection property and all its child nodes.
+    /// Creates nodes for a collection property and all its child nodes.
+    /// In Flat mode, children are created directly under the parent.
+    /// In Container mode, a folder node is created first, then children are added under it.
     /// </summary>
     public void CreateCollectionObjectNode(
         string propertyName,
@@ -200,11 +202,25 @@ internal class NodeCreator
         string parentPath,
         OpcUaNodeConfiguration? nodeConfiguration)
     {
-        var containerNode = GetOrCreateContainerNode(propertyName, nodeConfiguration, parentNodeId, parentPath);
-
-        foreach (var child in children)
+        // Determine collection structure mode (default is Flat per attribute definition)
+        var collectionStructure = nodeConfiguration?.CollectionStructure ?? CollectionNodeStructure.Flat;
+        if (collectionStructure == CollectionNodeStructure.Flat)
         {
-            CreateCollectionChildNode(property, child.Subject, child.Index!, propertyName, parentPath, containerNode.NodeId, nodeConfiguration);
+            // Flat mode: create children directly under the parent node
+            foreach (var child in children)
+            {
+                CreateCollectionChildNode(property, child.Subject, child.Index!, propertyName, parentPath, parentNodeId, nodeConfiguration);
+            }
+        }
+        else
+        {
+            // Container mode: create folder first, then children under it
+            var containerNode = GetOrCreateContainerNode(propertyName, nodeConfiguration, parentNodeId, parentPath);
+
+            foreach (var child in children)
+            {
+                CreateCollectionChildNode(property, child.Subject, child.Index!, propertyName, parentPath, containerNode.NodeId, nodeConfiguration);
+            }
         }
     }
 
