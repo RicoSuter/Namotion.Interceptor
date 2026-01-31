@@ -1497,13 +1497,57 @@ Could add `SubjectTracker` alongside existing counter for `FindSubjectByNodeId()
 **Recommendation:** Skip this step for server. `SubjectTracker` is client-only. Consider renaming step or updating plan.
 
 ### Step 10 Findings
-*(To be filled by executing agent)*
+**Status:** ✅ FINISHED
+
+**Implementation:**
+- Added `SubjectTracker _subjectTracker` to `OpcUaSubjectClientSource`
+- Replaced `_subjectToNodeId` dictionary + `_subjectToNodeIdLock` with `SubjectTracker`
+- Updated 5 methods: `TrackSubject`, `RemoveItemsForSubject`, `TryGetSubjectNodeId`, `GetTrackedSubjects`, `CleanupPropertyData`
+
+**Lines Removed:** ~16 lines
+
+**Design Note:** Client still needs `ConnectorReferenceCounter<List<MonitoredItem>>` separately for subscription lifecycle management
+
+**Test Results:** 290/298 passed, 6 skipped, 2 flaky timeouts (infrastructure)
+
+**Blocking Issues:** None
+
+**Follow-up (deferred to cleanup/future plan):**
+- [ ] Client has TWO ref counters: `SubjectTracker._refCounter` + `_subjectRefCounter` (tracks MonitoredItems)
+- [ ] SubjectTracker is essentially a wrapper around ConnectorReferenceCounter (see TODO in file)
+- [ ] **Unify into single manager** - consolidate reference counting + NodeId mapping + MonitoredItem tracking
+- [ ] Create follow-up plan after Step 20 to address this architectural simplification
 
 ### Step 11 Findings
-*(To be filled by executing agent)*
+**Status:** ✅ FINISHED
+
+**Implementation:**
+- Added `_recentlyDeletedNodeIds`, `MarkRecentlyDeleted()`, `WasRecentlyDeleted()` to `OpcUaNodeChangeProcessor.cs`
+- Updated `RemoveItemsForSubject` in `OpcUaSubjectClientSource` to call processor method
+- Removed field + method from `OpcUaSubjectClientSource`
+
+**Lines Removed:** ~33 lines from `OpcUaSubjectClientSource.cs`
+
+**Test Results:** 292/298 passed, 6 skipped
+
+**Blocking Issues:** None
+
+**Benefit:** Recently-deleted tracking now co-located with resync logic (single responsibility)
 
 ### Step 12 Findings
-*(To be filled by executing agent)*
+**Status:** ✅ FINISHED
+
+**Implementation:**
+- Created `Client/Graph/PropertyWriter.cs` (221 lines)
+- Extracted: `WriteChangesAsync`, `ProcessWriteResults`, `TryGetWritableNodeId`, `CreateWriteValuesCollection`, `NotifyPropertiesWritten`, `IsTransientWriteError`
+- Updated `OpcUaSubjectClientSource` to delegate to new class
+
+**Lines Removed:** ~149 lines from `OpcUaSubjectClientSource.cs`
+**Current:** 1,038 lines (target: ~400)
+
+**Test Results:** 292/298 passed, 6 skipped
+
+**Blocking Issues:** None
 
 ### Step 13 Findings
 *(To be filled by executing agent)*
