@@ -9,6 +9,9 @@ namespace Namotion.Interceptor.OpcUa.Graph;
 /// </summary>
 internal static class SubjectPropertyHelper
 {
+    // TODO: Maybe transform into extension methods? Methods should use DefaultSubjectFactory internally,
+    // to create a new copy of collection or dictionary (will then support any collection/dict type automatically)
+    
     /// <summary>
     /// Adds a subject to a collection property by creating a new array with the subject appended.
     /// </summary>
