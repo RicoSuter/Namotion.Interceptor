@@ -242,7 +242,7 @@ internal class RemoteSyncManager : IDisposable
             return;
         }
 
-        _logger.LogInformation("Starting periodic resync.");
+        _logger.LogDebug("Starting periodic resync.");
         _periodicResyncInProgress = true;
 
         _ = Task.Run(async () =>

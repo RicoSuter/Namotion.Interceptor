@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.OpcUa.Graph;
 internal static class OpcUaBrowseHelper
 {
     // TODO: Move to ../ (ie root of project), not only used by graph features/classes
-    
+
     /// <summary>
     /// Finds a child node by browse name under a parent node.
     /// </summary>

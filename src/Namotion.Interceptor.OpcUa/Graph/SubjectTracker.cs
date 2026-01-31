@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.OpcUa.Graph;
 internal class SubjectTracker
 {
     // TODO: Merge SubjectTracker with ConnectorReferenceCounter into ConnectorReferenceManager or similar name? 
-    
+
     private readonly ConnectorReferenceCounter<NodeId> _refCounter = new();
     private readonly Dictionary<NodeId, IInterceptorSubject> _nodeIdToSubject = new();
     private readonly Lock _lock = new();

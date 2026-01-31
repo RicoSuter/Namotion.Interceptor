@@ -11,7 +11,7 @@ internal static class SubjectPropertyHelper
 {
     // TODO: Maybe transform into extension methods with subject factory as parameter? Methods should use DefaultSubjectFactory internally
     // to create a new copy of collection or dictionary (will then support any collection/dict type automatically)
-    
+
     /// <summary>
     /// Adds a subject to a collection property by creating a new array with the subject appended.
     /// </summary>
@@ -30,7 +30,7 @@ internal static class SubjectPropertyHelper
     {
         // TODO: Need to check whether we should move this and other methods of this class to same place or into DefaultSubjectFactory,
         // also should support other collection types (all methods in this class!), not only arrays (same as in DefaultSubjectFactory)
-        
+
         // Get current array value
         var currentValue = property.GetValue();
         if (currentValue is not Array currentArray)

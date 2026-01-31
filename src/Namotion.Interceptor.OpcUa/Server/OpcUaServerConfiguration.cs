@@ -250,7 +250,7 @@ public class OpcUaServerConfiguration
         LoadNodeSetFromEmbeddedResource<OpcUaServerConfiguration>("NodeSets.Opc.Ua.PADIM.NodeSet2.xml", collection, context);
         LoadNodeSetFromEmbeddedResource<OpcUaServerConfiguration>("NodeSets.Opc.Ua.Machinery.NodeSet2.xml", collection, context);
         LoadNodeSetFromEmbeddedResource<OpcUaServerConfiguration>("NodeSets.Opc.Ua.Machinery.ProcessValues.NodeSet2.xml", collection, context);
-    } 
+    }
 
     protected void LoadNodeSetFromEmbeddedResource<TAssemblyType>(string name, NodeStateCollection nodes, ISystemContext context)
     {

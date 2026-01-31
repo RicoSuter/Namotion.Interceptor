@@ -166,7 +166,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
         var newSession = sessionResult as Session
             ?? throw new InvalidOperationException(
-                $"Session factory returned unexpected type '{sessionResult?.GetType().FullName ?? "null"}'. " +
+                $"Session factory returned unexpected type '{sessionResult.GetType().FullName ?? "null"}'. " +
                 $"Expected '{typeof(Session).FullName}'. Ensure the configured SessionFactory returns a valid Session instance.");
 
         // Enable SDK's built-in subscription transfer for seamless reconnection
@@ -495,12 +495,12 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
 
         try { _reconnectHandler.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing reconnect handler."); }
-     
+
         if (ReadAfterWriteManager is not null)
         {
             try { await ReadAfterWriteManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing read-after-write manager."); }
         }
-        
+
         try { await SubscriptionManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing subscription manager."); }
 
         if (PollingManager is not null)

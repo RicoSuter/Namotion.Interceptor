@@ -138,7 +138,7 @@ internal class CustomNodeManager : CustomNodeManager2
             // Decrement reference count and check if this was the last reference
             var isLast = _subjectRefCounter.DecrementAndCheckLast(subject, out var nodeState);
 
-            _logger.LogInformation("RemoveSubjectNodes: subject={SubjectType}, isLast={IsLast}, hasNodeState={HasNodeState}, nodeId={NodeId}",
+            _logger.LogDebug("RemoveSubjectNodes: subject={SubjectType}, isLast={IsLast}, hasNodeState={HasNodeState}, nodeId={NodeId}",
                 subject.GetType().Name, isLast, nodeState is not null, nodeState?.NodeId?.ToString() ?? "null");
 
             if (isLast && nodeState is not null)

@@ -26,18 +26,18 @@ public class OpcUaClientConfiguration
     /// If not specified, browsing starts from the ObjectsFolder root.
     /// </summary>
     public string? RootName { get; set; }
-    
+
     /// <summary>
     /// Gets the OPC UA client application name used for identification and certificate generation.
     /// Default is "Namotion.Interceptor.Client".
     /// </summary>
     public string ApplicationName { get; set; } = "Namotion.Interceptor.Client";
-    
+
     /// <summary>
     /// Gets the default namespace URI to use when a [OpcUaNode] attribute defines a NodeIdentifier but no NodeNamespaceUri.
     /// </summary>
     public string? DefaultNamespaceUri { get; set; }
-    
+
     /// <summary>
     /// Gets the maximum number of monitored items per subscription. Default is 1000.
     /// </summary>
@@ -86,13 +86,13 @@ public class OpcUaClientConfiguration
     /// Gets the type resolver used to infer C# types from OPC UA nodes during dynamic property discovery.
     /// </summary>
     public required OpcUaTypeResolver TypeResolver { get; set; }
-    
+
     /// <summary>
     /// Gets the value converter used to convert between OPC UA node values and C# property values.
     /// Handles type conversions such as decimal to double for OPC UA compatibility.
     /// </summary>
     public required OpcUaValueConverter ValueConverter { get; set; }
-    
+
     /// <summary>
     /// Gets the subject factory used to create interceptor subject instances for OPC UA object nodes.
     /// </summary>
