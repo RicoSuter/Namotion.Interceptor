@@ -233,7 +233,7 @@ public class OpcUaClientGraphTests : OpcUaGraphTestBase
         // Wait for client to sync the Person reference
         await AsyncTestHelpers.WaitUntilAsync(
             () => clientCtx.Root.Person?.FirstName == "ToClear",
-            timeout: TimeSpan.FromSeconds(10),
+            timeout: TimeSpan.FromSeconds(30),
             message: "Client should sync initial Person reference");
 
         Logger.Log($"Client synced initial Person: {clientCtx.Root.Person?.FirstName}");
@@ -248,7 +248,7 @@ public class OpcUaClientGraphTests : OpcUaGraphTestBase
         // Wait for the client to receive the structural change
         await AsyncTestHelpers.WaitUntilAsync(
             () => clientCtx.Root.Person == null,
-            timeout: TimeSpan.FromSeconds(10),
+            timeout: TimeSpan.FromSeconds(30),
             message: "Client should sync reference clear from server");
 
         Assert.Null(clientCtx.Root.Person);

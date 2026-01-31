@@ -1309,7 +1309,7 @@ internal class CustomNodeManager : CustomNodeManager2
                         var elementType = list.GetType().GetElementType() ??
                             (list.GetType().IsGenericType ? list.GetType().GetGenericArguments()[0] : typeof(object));
 
-                        var newList = new System.Collections.Generic.List<object?>();
+                        var newList = new List<object?>();
                         foreach (var item in list)
                         {
                             if (!ReferenceEquals(item, subject))

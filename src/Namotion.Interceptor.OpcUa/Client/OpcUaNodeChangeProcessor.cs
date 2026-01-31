@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.OpcUa.Graph;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
@@ -13,6 +14,8 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// </summary>
 internal class OpcUaNodeChangeProcessor
 {
+    //  TODO: Rename to OpcUaGraphChangeProcessor and move to /Client/Graph?
+    
     private readonly OpcUaSubjectClientSource _source;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly OpcUaSubjectLoader _subjectLoader;
@@ -115,7 +118,7 @@ internal class OpcUaNodeChangeProcessor
 
                 if (property.IsSubjectCollection)
                 {
-                    var containerNodeId = await FindChildNodeIdAsync(session, subjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
+                    var containerNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(session, subjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
                     if (containerNodeId is not null)
                     {
                         await ProcessCollectionNodeChangesAsync(property, containerNodeId, session, cancellationToken).ConfigureAwait(false);
@@ -123,7 +126,7 @@ internal class OpcUaNodeChangeProcessor
                 }
                 else if (property.IsSubjectDictionary)
                 {
-                    var containerNodeId = await FindChildNodeIdAsync(session, subjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
+                    var containerNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(session, subjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
                     if (containerNodeId is not null)
                     {
                         await ProcessDictionaryNodeChangesAsync(property, containerNodeId, session, cancellationToken).ConfigureAwait(false);
@@ -172,7 +175,7 @@ internal class OpcUaNodeChangeProcessor
         foreach (var remoteChild in remoteChildren)
         {
             var browseName = remoteChild.BrowseName.Name;
-            if (TryParseCollectionIndex(browseName, propertyName, out var index))
+            if (OpcUaBrowseHelper.TryParseCollectionIndex(browseName, propertyName, out var index))
             {
                 remoteByIndex[index] = remoteChild;
             }
@@ -448,6 +451,8 @@ internal class OpcUaNodeChangeProcessor
         ISession session,
         CancellationToken cancellationToken)
     {
+        // TODO: Do we need to run under _structureSemaphore here? also check other places which operate on nodes/structure whether they are correctly synchronized
+        
         foreach (var change in changes)
         {
             var verb = (ModelChangeStructureVerbMask)change.Verb;
@@ -477,13 +482,13 @@ internal class OpcUaNodeChangeProcessor
 
     private async Task ProcessNodeAddedAsync(NodeId nodeId, ISession session, CancellationToken cancellationToken)
     {
-        var nodeDetails = await BrowseNodeDetailsAsync(session, nodeId, cancellationToken).ConfigureAwait(false);
+        var nodeDetails = await OpcUaBrowseHelper.ReadNodeDetailsAsync(session, nodeId, cancellationToken).ConfigureAwait(false);
         if (nodeDetails is null)
         {
             return;
         }
 
-        var directParentNodeId = await FindParentNodeIdAsync(session, nodeId, cancellationToken).ConfigureAwait(false);
+        var directParentNodeId = await OpcUaBrowseHelper.FindParentNodeIdAsync(session, nodeId, cancellationToken).ConfigureAwait(false);
         if (directParentNodeId is null)
         {
             return;
@@ -504,7 +509,7 @@ internal class OpcUaNodeChangeProcessor
                 }
             }
 
-            var nextParentNodeId = await FindParentNodeIdAsync(session, currentNodeId, cancellationToken).ConfigureAwait(false);
+            var nextParentNodeId = await OpcUaBrowseHelper.FindParentNodeIdAsync(session, currentNodeId, cancellationToken).ConfigureAwait(false);
             if (nextParentNodeId is null)
             {
                 break;
@@ -557,11 +562,11 @@ internal class OpcUaNodeChangeProcessor
             }
 
             // Check if this is a collection item (pattern: PropertyName[index])
-            if (property.IsSubjectCollection && TryParseCollectionIndex(browseName, propertyName, out _))
+            if (property.IsSubjectCollection && OpcUaBrowseHelper.TryParseCollectionIndex(browseName, propertyName, out _))
             {
                 if (_source.TryGetSubjectNodeId(parentSubject, out var parentSubjectNodeId) && parentSubjectNodeId is not null)
                 {
-                    var containerNodeId = await FindChildNodeIdAsync(session, parentSubjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
+                    var containerNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(session, parentSubjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
                     if (containerNodeId is not null)
                     {
                         await ProcessCollectionNodeChangesAsync(property, containerNodeId, session, cancellationToken).ConfigureAwait(false);
@@ -575,7 +580,7 @@ internal class OpcUaNodeChangeProcessor
             {
                 if (_source.TryGetSubjectNodeId(parentSubject, out var parentSubjectNodeId) && parentSubjectNodeId is not null)
                 {
-                    var containerNodeId = await FindChildNodeIdAsync(session, parentSubjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
+                    var containerNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(session, parentSubjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
                     if (containerNodeId is not null && containerNodeId.Equals(directParentNodeId))
                     {
                         await ProcessDictionaryNodeChangesAsync(property, containerNodeId, session, cancellationToken).ConfigureAwait(false);
@@ -592,10 +597,7 @@ internal class OpcUaNodeChangeProcessor
 
         lock (_nodeIdToSubjectLock)
         {
-            if (_nodeIdToSubject.TryGetValue(nodeId, out deletedSubject))
-            {
-                _nodeIdToSubject.Remove(nodeId);
-            }
+            _nodeIdToSubject.Remove(nodeId, out deletedSubject);
         }
 
         if (deletedSubject is null)
@@ -672,173 +674,96 @@ internal class OpcUaNodeChangeProcessor
         }
     }
 
-    private Task ProcessReferenceAddedAsync(NodeId nodeId, ISession session, CancellationToken cancellationToken)
+    private async Task ProcessReferenceAddedAsync(NodeId childNodeId, ISession session, CancellationToken cancellationToken)
     {
-        // Reference events often accompany NodeAdded - rely on that for structural changes
-        return Task.CompletedTask;
+        // Only handle if we track this child subject
+        if (!_nodeIdToSubject.TryGetValue(childNodeId, out var childSubject))
+        {
+            return;
+        }
+
+        // Browse inverse references to find all current parents
+        var parentRefs = await OpcUaBrowseHelper.BrowseInverseReferencesAsync(
+            session, childNodeId, cancellationToken).ConfigureAwait(false);
+
+        foreach (var parentRef in parentRefs)
+        {
+            var parentNodeId = ExpandedNodeId.ToNodeId(parentRef.NodeId, session.NamespaceUris);
+
+            // Check if we track this parent
+            if (!_nodeIdToSubject.TryGetValue(parentNodeId, out var parentSubject))
+            {
+                continue;
+            }
+
+            var registeredParent = parentSubject.TryGetRegisteredSubject();
+            if (registeredParent is null)
+            {
+                continue;
+            }
+
+            // Find reference property that should point to child
+            foreach (var property in registeredParent.Properties)
+            {
+                // TODO: Could it also be referenced by collection or dictionary property (then we need to check children)?
+                if (!property.IsSubjectReference)
+                {
+                    continue;
+                }
+
+                // If property is null locally, set it to the child
+                var currentValue = property.GetValue();
+                if (currentValue is null)
+                {
+                    property.SetValueFromSource(_source, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, childSubject);
+                    _logger.LogDebug(
+                        "ReferenceAdded: Set {ParentType}.{Property} = {ChildType}",
+                        parentSubject.GetType().Name,
+                        property.Name,
+                        childSubject.GetType().Name);
+                }
+            }
+        }
     }
 
-    private void ProcessReferenceDeleted(NodeId nodeId)
+    private void ProcessReferenceDeleted(NodeId childNodeId)
     {
-        // Reference events often accompany NodeDeleted - rely on that for structural changes
-    }
-
-    private async Task<NodeId?> FindParentNodeIdAsync(ISession session, NodeId childNodeId, CancellationToken cancellationToken)
-    {
-        var browseDescription = new BrowseDescriptionCollection
+        // Only handle if we track this child subject
+        if (!_nodeIdToSubject.TryGetValue(childNodeId, out var childSubject))
         {
-            new BrowseDescription
-            {
-                NodeId = childNodeId,
-                BrowseDirection = BrowseDirection.Inverse,
-                ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
-                IncludeSubtypes = true,
-                NodeClassMask = (uint)(NodeClass.Object | NodeClass.Variable),
-                ResultMask = (uint)BrowseResultMask.All
-            }
-        };
-
-        var response = await session.BrowseAsync(
-            null,
-            null,
-            0,
-            browseDescription,
-            cancellationToken).ConfigureAwait(false);
-
-        if (response.Results.Count > 0 && StatusCode.IsGood(response.Results[0].StatusCode))
-        {
-            var references = response.Results[0].References;
-            if (references.Count > 0)
-            {
-                return ExpandedNodeId.ToNodeId(references[0].NodeId, session.NamespaceUris);
-            }
+            return;
         }
 
-        return null;
-    }
-
-    private async Task<ReferenceDescription?> BrowseNodeDetailsAsync(ISession session, NodeId nodeId, CancellationToken cancellationToken)
-    {
-        // Read the node's attributes to construct a ReferenceDescription
-        var readValues = new ReadValueIdCollection
+        // Find all tracked parents that currently reference this child
+        lock (_nodeIdToSubjectLock)
         {
-            new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.BrowseName },
-            new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.DisplayName },
-            new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.NodeClass }
-        };
-
-        var response = await session.ReadAsync(
-            null,
-            0,
-            TimestampsToReturn.Neither,
-            readValues,
-            cancellationToken).ConfigureAwait(false);
-
-        if (response.Results.Count >= 3 &&
-            StatusCode.IsGood(response.Results[0].StatusCode) &&
-            StatusCode.IsGood(response.Results[2].StatusCode))
-        {
-            return new ReferenceDescription
+            foreach (var (_, parentSubject) in _nodeIdToSubject)
             {
-                NodeId = new ExpandedNodeId(nodeId),
-                BrowseName = response.Results[0].Value as QualifiedName ?? new QualifiedName("Unknown"),
-                DisplayName = response.Results[1].Value as LocalizedText ?? new LocalizedText("Unknown"),
-                NodeClass = (NodeClass)(int)response.Results[2].Value
-            };
-        }
+                var registeredParent = parentSubject.TryGetRegisteredSubject();
+                if (registeredParent is null)
+                {
+                    continue;
+                }
 
-        return null;
-    }
+                foreach (var property in registeredParent.Properties)
+                {
+                    if (!property.IsSubjectReference)
+                    {
+                        continue;
+                    }
 
-    private async Task<NodeId?> FindChildNodeIdAsync(ISession session, NodeId parentNodeId, string browseName, CancellationToken cancellationToken)
-    {
-        var children = await OpcUaBrowseHelper.BrowseNodeAsync(session, parentNodeId, cancellationToken).ConfigureAwait(false);
-        foreach (var child in children)
-        {
-            if (child.BrowseName.Name == browseName)
-            {
-                return ExpandedNodeId.ToNodeId(child.NodeId, session.NamespaceUris);
+                    // If this property references the child, clear it
+                    var currentValue = property.GetValue();
+                    if (ReferenceEquals(currentValue, childSubject))
+                    {
+                        property.SetValueFromSource(_source, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null);
+                        _logger.LogDebug(
+                            "ReferenceDeleted: Cleared {ParentType}.{Property}",
+                            parentSubject.GetType().Name,
+                            property.Name);
+                    }
+                }
             }
-        }
-        return null;
-    }
-
-    private static bool TryParseCollectionIndex(string browseName, string? propertyName, out int index)
-    {
-        index = -1;
-
-        if (propertyName is null)
-        {
-            return false;
-        }
-
-        // Expected format: "PropertyName[index]"
-        var prefix = propertyName + "[";
-        if (!browseName.StartsWith(prefix, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        var suffix = "]";
-        if (!browseName.EndsWith(suffix, StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        var indexStr = browseName.Substring(prefix.Length, browseName.Length - prefix.Length - suffix.Length);
-        return int.TryParse(indexStr, out index);
-    }
-
-    private void UpdateCollectionProperty(
-        RegisteredSubjectProperty property,
-        List<SubjectPropertyChild> localChildren,
-        List<(int Index, IInterceptorSubject Subject)> newSubjects)
-    {
-        try
-        {
-            // Get current array value
-            var currentValue = property.GetValue();
-            if (currentValue is not Array currentArray)
-            {
-                _logger.LogWarning(
-                    "Cannot update collection property '{PropertyName}': value is not an array.",
-                    property.Name);
-                return;
-            }
-
-            var elementType = currentArray.GetType().GetElementType();
-            if (elementType is null)
-            {
-                return;
-            }
-
-            // Create new array with existing + new subjects
-            var newLength = localChildren.Count + newSubjects.Count;
-            var newArray = Array.CreateInstance(elementType, newLength);
-
-            // Copy existing elements
-            for (var i = 0; i < localChildren.Count; i++)
-            {
-                newArray.SetValue(localChildren[i].Subject, i);
-            }
-
-            // Add new elements at their indices (simplified: append at end)
-            var insertIndex = localChildren.Count;
-            foreach (var (_, subject) in newSubjects.OrderBy(s => s.Index))
-            {
-                newArray.SetValue(subject, insertIndex++);
-            }
-
-            // Set the new array value - use SetValueFromSource to prevent mirroring back to server
-            property.SetValueFromSource(_source, null, null, newArray);
-
-            _logger.LogDebug(
-                "Updated collection property '{PropertyName}' with {NewCount} new subjects. Total: {Total}",
-                property.Name, newSubjects.Count, newLength);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to update collection property '{PropertyName}'.", property.Name);
         }
     }
 
@@ -940,68 +865,6 @@ internal class OpcUaNodeChangeProcessor
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to remove from collection property '{PropertyName}'.", property.Name);
-        }
-    }
-
-    private void UpdateDictionaryProperty(
-        RegisteredSubjectProperty property,
-        Dictionary<string, IInterceptorSubject> localChildren,
-        List<(string Key, IInterceptorSubject Subject)> newSubjects)
-    {
-        try
-        {
-            // Get current dictionary value
-            var currentValue = property.GetValue();
-            if (currentValue is null)
-            {
-                _logger.LogWarning(
-                    "Cannot update dictionary property '{PropertyName}': value is null.",
-                    property.Name);
-                return;
-            }
-
-            var dictType = currentValue.GetType();
-            if (!dictType.IsGenericType || dictType.GetGenericTypeDefinition() != typeof(Dictionary<,>))
-            {
-                _logger.LogWarning(
-                    "Cannot update dictionary property '{PropertyName}': value is not a Dictionary<,>.",
-                    property.Name);
-                return;
-            }
-
-            // Create new dictionary with existing + new entries
-            var keyType = dictType.GetGenericArguments()[0];
-            var valueType = dictType.GetGenericArguments()[1];
-            var newDictType = typeof(Dictionary<,>).MakeGenericType(keyType, valueType);
-            var newDict = Activator.CreateInstance(newDictType) as System.Collections.IDictionary;
-
-            if (newDict is null)
-            {
-                return;
-            }
-
-            // Copy existing entries
-            foreach (var kvp in localChildren)
-            {
-                newDict[kvp.Key] = kvp.Value;
-            }
-
-            // Add new entries
-            foreach (var (key, subject) in newSubjects)
-            {
-                newDict[key] = subject;
-            }
-
-            // Set the new dictionary value - use SetValueFromSource to prevent mirroring back to server
-            property.SetValueFromSource(_source, null, null, newDict);
-
-            _logger.LogDebug(
-                "Updated dictionary property '{PropertyName}' with {NewCount} new entries. Total: {Total}",
-                property.Name, newSubjects.Count, newDict.Count);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to update dictionary property '{PropertyName}'.", property.Name);
         }
     }
 
