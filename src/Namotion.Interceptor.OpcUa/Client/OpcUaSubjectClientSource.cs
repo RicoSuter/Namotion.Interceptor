@@ -30,8 +30,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
     private readonly ConnectorReferenceCounter<List<MonitoredItem>> _subjectRefCounter = new();
-    private readonly Dictionary<IInterceptorSubject, NodeId> _subjectToNodeId = new();
-    private readonly Lock _subjectToNodeIdLock = new();
+    private readonly SubjectTracker _subjectTracker = new();
 
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private volatile bool _isStarted;
@@ -45,12 +44,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     // ModelChangeEvent subscription tracking
     private MonitoredItem? _modelChangeEventItem;
-
-    // Track recently deleted NodeIds to prevent periodic resync from re-adding them
-    // This is needed when EnableRemoteNodeManagement is true - the client is the source of truth
-    private readonly Dictionary<NodeId, DateTime> _recentlyDeletedNodeIds = new();
-    private readonly Lock _recentlyDeletedLock = new();
-    private static readonly TimeSpan RecentlyDeletedExpiry = TimeSpan.FromSeconds(30);
 
     // Diagnostics tracking - accessed from multiple threads via Diagnostics property
     private long _totalReconnectionAttempts;
@@ -120,14 +113,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
             if (isLast)
             {
-                lock (_subjectToNodeIdLock)
-                {
-                    if (_subjectToNodeId.TryGetValue(subject, out var nodeId))
-                    {
-                        nodeIdToDelete = nodeId;
-                        _subjectToNodeId.Remove(subject);
-                    }
-                }
+                _subjectTracker.UntrackSubject(subject, out nodeIdToDelete);
 
                 _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
                 _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
@@ -141,45 +127,13 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         // Delete remote node if enabled
         if (nodeIdToDelete is not null && _configuration.EnableRemoteNodeManagement)
         {
-            lock (_recentlyDeletedLock)
-            {
-                _recentlyDeletedNodeIds[nodeIdToDelete] = DateTime.UtcNow;
-            }
+            _nodeChangeProcessor?.MarkRecentlyDeleted(nodeIdToDelete);
 
             var session = _sessionManager?.CurrentSession;
             if (session is not null && session.Connected)
             {
                 _ = TryDeleteRemoteNodeAsync(session, nodeIdToDelete, CancellationToken.None);
             }
-        }
-    }
-
-    /// <summary>
-    /// Checks if a NodeId was recently deleted by the client.
-    /// Used by periodic resync to avoid re-adding items that the client intentionally removed.
-    /// </summary>
-    internal bool WasRecentlyDeleted(NodeId nodeId)
-    {
-        lock (_recentlyDeletedLock)
-        {
-            // Clean up expired entries
-            var now = DateTime.UtcNow;
-            var expiredKeys = new List<NodeId>();
-            foreach (var (key, deletedAt) in _recentlyDeletedNodeIds)
-            {
-                if (now - deletedAt > RecentlyDeletedExpiry)
-                {
-                    expiredKeys.Add(key);
-                }
-            }
-            foreach (var key in expiredKeys)
-            {
-                _recentlyDeletedNodeIds.Remove(key);
-            }
-
-            // Check if this NodeId (or any parent) was recently deleted
-            // Also check for parent NodeIds in case we deleted a container
-            return _recentlyDeletedNodeIds.ContainsKey(nodeId);
         }
     }
 
@@ -241,10 +195,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         var isFirst = _subjectRefCounter.IncrementAndCheckFirst(subject, monitoredItemsFactory, out _);
         if (isFirst)
         {
-            lock (_subjectToNodeIdLock)
-            {
-                _subjectToNodeId[subject] = nodeId;
-            }
+            _subjectTracker.TrackSubject(subject, nodeId);
         }
         return isFirst;
     }
@@ -257,16 +208,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// <returns>True if the subject is tracked, false otherwise.</returns>
     internal bool TryGetSubjectNodeId(IInterceptorSubject subject, out NodeId? nodeId)
     {
-        lock (_subjectToNodeIdLock)
-        {
-            if (_subjectToNodeId.TryGetValue(subject, out var id))
-            {
-                nodeId = id;
-                return true;
-            }
-            nodeId = null;
-            return false;
-        }
+        return _subjectTracker.TryGetNodeId(subject, out nodeId);
     }
 
     /// <summary>
@@ -309,7 +251,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// <returns>All tracked subjects.</returns>
     internal IEnumerable<IInterceptorSubject> GetTrackedSubjects()
     {
-        return _subjectRefCounter.GetAllEntries().Select(e => e.Subject);
+        return _subjectTracker.GetAllSubjects();
     }
 
     public OpcUaSubjectClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger logger)
@@ -1238,9 +1180,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
         // Clear reference counter and NodeId mapping for fresh resync
         _subjectRefCounter.Clear();
-        lock (_subjectToNodeIdLock)
-        {
-            _subjectToNodeId.Clear();
-        }
+        _subjectTracker.Clear();
     }
 }

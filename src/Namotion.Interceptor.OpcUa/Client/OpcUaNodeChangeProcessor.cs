@@ -26,6 +26,11 @@ internal class OpcUaNodeChangeProcessor
     private readonly Dictionary<NodeId, IInterceptorSubject> _nodeIdToSubject = new();
     private readonly Lock _nodeIdToSubjectLock = new();
 
+    // Track recently deleted NodeIds to prevent periodic resync from re-adding them
+    // This is needed when EnableRemoteNodeManagement is true - the client is the source of truth
+    private readonly Dictionary<NodeId, DateTime> _recentlyDeletedNodeIds = new();
+    private static readonly TimeSpan RecentlyDeletedExpiry = TimeSpan.FromSeconds(30);
+
     /// <summary>
     /// Initializes a new instance of the <see cref="OpcUaNodeChangeProcessor"/> class.
     /// </summary>
@@ -78,6 +83,48 @@ internal class OpcUaNodeChangeProcessor
         lock (_nodeIdToSubjectLock)
         {
             _nodeIdToSubject.Clear();
+            _recentlyDeletedNodeIds.Clear();
+        }
+    }
+
+    /// <summary>
+    /// Marks a NodeId as recently deleted to prevent periodic resync from re-adding it.
+    /// </summary>
+    /// <param name="nodeId">The NodeId that was deleted.</param>
+    public void MarkRecentlyDeleted(NodeId nodeId)
+    {
+        lock (_nodeIdToSubjectLock)
+        {
+            _recentlyDeletedNodeIds[nodeId] = DateTime.UtcNow;
+        }
+    }
+
+    /// <summary>
+    /// Checks if a NodeId was recently deleted by the client.
+    /// Used by periodic resync to avoid re-adding items that the client intentionally removed.
+    /// </summary>
+    /// <param name="nodeId">The NodeId to check.</param>
+    /// <returns>True if the NodeId was recently deleted, false otherwise.</returns>
+    public bool WasRecentlyDeleted(NodeId nodeId)
+    {
+        lock (_nodeIdToSubjectLock)
+        {
+            // Clean up expired entries
+            var now = DateTime.UtcNow;
+            var expiredKeys = new List<NodeId>();
+            foreach (var (key, deletedAt) in _recentlyDeletedNodeIds)
+            {
+                if (now - deletedAt > RecentlyDeletedExpiry)
+                {
+                    expiredKeys.Add(key);
+                }
+            }
+            foreach (var key in expiredKeys)
+            {
+                _recentlyDeletedNodeIds.Remove(key);
+            }
+
+            return _recentlyDeletedNodeIds.ContainsKey(nodeId);
         }
     }
 
@@ -203,7 +250,7 @@ internal class OpcUaNodeChangeProcessor
                 if (remoteByIndex.TryGetValue(index, out var remoteChild))
                 {
                     var nodeId = ExpandedNodeId.ToNodeId(remoteChild.NodeId, session.NamespaceUris);
-                    if (_source.WasRecentlyDeleted(nodeId))
+                    if (WasRecentlyDeleted(nodeId))
                     {
                         continue;
                     }
@@ -316,7 +363,7 @@ internal class OpcUaNodeChangeProcessor
                 if (remoteByKey.TryGetValue(key, out var remoteChild))
                 {
                     var nodeId = ExpandedNodeId.ToNodeId(remoteChild.NodeId, session.NamespaceUris);
-                    if (_source.WasRecentlyDeleted(nodeId))
+                    if (WasRecentlyDeleted(nodeId))
                     {
                         continue;
                     }
@@ -414,7 +461,7 @@ internal class OpcUaNodeChangeProcessor
             if (_configuration.EnableRemoteNodeManagement)
             {
                 var referenceNodeId = ExpandedNodeId.ToNodeId(referenceNode!.NodeId, session.NamespaceUris);
-                if (_source.WasRecentlyDeleted(referenceNodeId))
+                if (WasRecentlyDeleted(referenceNodeId))
                 {
                     return;
                 }
