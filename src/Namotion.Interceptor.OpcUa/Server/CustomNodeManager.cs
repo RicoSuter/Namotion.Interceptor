@@ -160,7 +160,7 @@ internal class CustomNodeManager : CustomNodeManager2
                 }
 
                 // Remove object node and its references
-                RemoveNodeAndReferences(nodeState);
+                RemoveNodeAndReferences(subject, nodeState);
 
                 // Queue model change event for node deletion
                 _modelChangePublisher.QueueChange(nodeState.NodeId, ModelChangeStructureVerbMask.NodeDeleted);
@@ -177,14 +177,14 @@ internal class CustomNodeManager : CustomNodeManager2
     /// This is necessary because the OPC UA SDK's DeleteNode only removes the node itself,
     /// but leaves references from parent nodes intact, causing browse operations to still return the deleted node.
     /// </summary>
+    /// <param name="subject">The subject whose node is being removed.</param>
     /// <param name="nodeState">The node to remove.</param>
-    private void RemoveNodeAndReferences(NodeState nodeState)
+    private void RemoveNodeAndReferences(IInterceptorSubject subject, NodeState nodeState)
     {
         var nodeId = nodeState.NodeId;
 
-        // Find parent node by parsing the path-based NodeId
-        // Node IDs follow pattern like "Root.People[1]", parent would be "Root.People"
-        var parentNodeId = FindParentNodeIdFromPath(nodeId);
+        // Find parent node using model-based parent lookup
+        var parentNodeId = GetParentNodeId(subject);
         if (parentNodeId is not null)
         {
             var parentNode = FindNodeInAddressSpace(parentNodeId);
@@ -205,39 +205,57 @@ internal class CustomNodeManager : CustomNodeManager2
     }
 
     /// <summary>
-    /// Finds the parent NodeId by parsing a path-based node identifier.
-    /// For "Root.People[1]", returns "Root.People".
-    /// For "Root.People[1].Address", returns "Root.People[1]".
+    /// Gets the parent node ID for a subject using model-based parent tracking.
+    /// Uses RegisteredSubject.Parents to find the parent subject, then looks up its NodeId.
     /// </summary>
-    private NodeId? FindParentNodeIdFromPath(NodeId nodeId)
+    /// <param name="subject">The subject to find the parent for.</param>
+    /// <returns>The parent NodeId, or null if no parent is found.</returns>
+    private NodeId? GetParentNodeId(IInterceptorSubject subject)
     {
-        if (nodeId.IdType != IdType.String || nodeId.Identifier is not string path)
+        var registered = subject.TryGetRegisteredSubject();
+        if (registered?.Parents.Length > 0)
         {
-            return null;
-        }
+            var parentProperty = registered.Parents[0].Property;
+            var parentSubject = parentProperty.Parent.Subject;
 
-        // Handle collection item patterns like "Root.People[1]"
-        // Parent is the container "Root.People"
-        var bracketIndex = path.LastIndexOf('[');
-        if (bracketIndex > 0)
-        {
-            // Check if this is a direct collection item (no dot after the bracket would be in a sub-property)
-            var dotAfterBracket = path.IndexOf('.', bracketIndex);
-            if (dotAfterBracket < 0)
+            // Check if parent is the root subject
+            if (ReferenceEquals(parentSubject, _subject))
             {
-                // This is a collection item like "Root.People[1]"
-                // Parent is "Root.People"
-                var containerPath = path.Substring(0, bracketIndex);
-                return new NodeId(containerPath, nodeId.NamespaceIndex);
-            }
-        }
+                // For collection/dictionary items, parent is the container node
+                if (parentProperty.IsSubjectCollection || parentProperty.IsSubjectDictionary)
+                {
+                    var propertyName = parentProperty.ResolvePropertyName(_nodeMapper);
+                    if (propertyName is not null)
+                    {
+                        var rootPath = _configuration.RootName is not null
+                            ? $"{_configuration.RootName}.{propertyName}"
+                            : propertyName;
+                        return new NodeId(rootPath, NamespaceIndex);
+                    }
+                }
 
-        // For regular path patterns, find the last dot
-        var lastDotIndex = path.LastIndexOf('.');
-        if (lastDotIndex > 0)
-        {
-            var parentPath = path.Substring(0, lastDotIndex);
-            return new NodeId(parentPath, nodeId.NamespaceIndex);
+                // For direct references, parent is the root node
+                return _configuration.RootName is not null
+                    ? new NodeId(_configuration.RootName, NamespaceIndex)
+                    : ObjectIds.ObjectsFolder;
+            }
+
+            // Look up the parent subject's node
+            if (_subjectRefCounter.TryGetData(parentSubject, out var parentNodeState) && parentNodeState is not null)
+            {
+                // For collection/dictionary items, parent is the container node
+                if (parentProperty.IsSubjectCollection || parentProperty.IsSubjectDictionary)
+                {
+                    var propertyName = parentProperty.ResolvePropertyName(_nodeMapper);
+                    if (propertyName is not null && parentNodeState.NodeId.Identifier is string parentPath)
+                    {
+                        return new NodeId($"{parentPath}.{propertyName}", NamespaceIndex);
+                    }
+                }
+
+                // For direct references, parent is the subject's node
+                return parentNodeState.NodeId;
+            }
         }
 
         return null;
@@ -597,33 +615,41 @@ internal class CustomNodeManager : CustomNodeManager2
                 // Container node found - get the container's browse name (this is the property name)
                 containerPropertyName = folderState.BrowseName?.Name;
 
-                // Find the parent of the container (should be the actual subject)
-                var containerParentId = FindParentNodeId(containerNode);
-                if (containerParentId is not null)
+                // Find the parent of the container by parsing the path-based NodeId
+                // Container node IDs are path-based like "Root.PropertyName" - the parent is "Root"
+                if (containerNode.NodeId.IdType == IdType.String &&
+                    containerNode.NodeId.Identifier is string nodePath &&
+                    !string.IsNullOrEmpty(nodePath))
                 {
-                    // Check if container's parent is root
-                    if (_configuration.RootName is not null)
+                    var lastDotIndex = nodePath.LastIndexOf('.');
+                    if (lastDotIndex > 0)
                     {
-                        var rootNodeId = new NodeId(_configuration.RootName, NamespaceIndex);
-                        if (containerParentId.Equals(rootNodeId))
+                        var containerParentId = new NodeId(nodePath.Substring(0, lastDotIndex), containerNode.NodeId.NamespaceIndex);
+
+                        // Check if container's parent is root
+                        if (_configuration.RootName is not null)
+                        {
+                            var rootNodeId = new NodeId(_configuration.RootName, NamespaceIndex);
+                            if (containerParentId.Equals(rootNodeId))
+                            {
+                                parentSubject = _subject;
+                            }
+                        }
+                        else if (containerParentId.Equals(ObjectIds.ObjectsFolder))
                         {
                             parentSubject = _subject;
                         }
-                    }
-                    else if (containerParentId.Equals(ObjectIds.ObjectsFolder))
-                    {
-                        parentSubject = _subject;
-                    }
 
-                    // Try to find container's parent in ref counter
-                    if (parentSubject is null)
-                    {
-                        foreach (var (subj, nodeState) in _subjectRefCounter.GetAllEntries())
+                        // Try to find container's parent in ref counter
+                        if (parentSubject is null)
                         {
-                            if (nodeState.NodeId.Equals(containerParentId))
+                            foreach (var (subj, nodeState) in _subjectRefCounter.GetAllEntries())
                             {
-                                parentSubject = subj;
-                                break;
+                                if (nodeState.NodeId.Equals(containerParentId))
+                                {
+                                    parentSubject = subj;
+                                    break;
+                                }
                             }
                         }
                     }
@@ -724,37 +750,6 @@ internal class CustomNodeManager : CustomNodeManager2
             "External AddNode: No suitable property found on parent to accept subject of type '{Type}'.",
             subject.GetType().Name);
         return (null, null);
-    }
-
-    /// <summary>
-    /// Finds the parent node ID of a container node by parsing its path-based node ID.
-    /// Container nodes have node IDs like "Root.PropertyName" - the parent is "Root".
-    /// </summary>
-    private NodeId? FindParentNodeId(NodeState node)
-    {
-        // Container node IDs are path-based like "Root.PropertyName"
-        // We need to find the parent by removing the last segment
-        if (node.NodeId.IdType != IdType.String)
-        {
-            return null;
-        }
-
-        var nodePath = node.NodeId.Identifier as string;
-        if (string.IsNullOrEmpty(nodePath))
-        {
-            return null;
-        }
-
-        // Find the last dot to get the parent path
-        var lastDotIndex = nodePath.LastIndexOf('.');
-        if (lastDotIndex <= 0)
-        {
-            // No parent path segment - might be root
-            return null;
-        }
-
-        var parentPath = nodePath.Substring(0, lastDotIndex);
-        return new NodeId(parentPath, node.NodeId.NamespaceIndex);
     }
 
     private static Type? GetCollectionElementType(Type collectionType)
