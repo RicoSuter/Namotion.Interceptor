@@ -218,11 +218,17 @@ internal class CustomNodeManager : CustomNodeManager2
             var parentProperty = registered.Parents[0].Property;
             var parentSubject = parentProperty.Parent.Subject;
 
+            // Check collection structure mode for collections
+            var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(parentProperty);
+            var isContainerMode = parentProperty.IsSubjectDictionary ||
+                (parentProperty.IsSubjectCollection &&
+                 (nodeConfiguration?.CollectionStructure ?? Attributes.CollectionNodeStructure.Container) == Attributes.CollectionNodeStructure.Container);
+
             // Check if parent is the root subject
             if (ReferenceEquals(parentSubject, _subject))
             {
-                // For collection/dictionary items, parent is the container node
-                if (parentProperty.IsSubjectCollection || parentProperty.IsSubjectDictionary)
+                // For collection/dictionary items in Container mode, parent is the container node
+                if (isContainerMode)
                 {
                     var propertyName = parentProperty.ResolvePropertyName(_nodeMapper);
                     if (propertyName is not null)
@@ -234,7 +240,7 @@ internal class CustomNodeManager : CustomNodeManager2
                     }
                 }
 
-                // For direct references, parent is the root node
+                // For direct references or Flat mode collections, parent is the root node
                 return _configuration.RootName is not null
                     ? new NodeId(_configuration.RootName, NamespaceIndex)
                     : ObjectIds.ObjectsFolder;
@@ -243,8 +249,8 @@ internal class CustomNodeManager : CustomNodeManager2
             // Look up the parent subject's node
             if (_subjectRefCounter.TryGetData(parentSubject, out var parentNodeState) && parentNodeState is not null)
             {
-                // For collection/dictionary items, parent is the container node
-                if (parentProperty.IsSubjectCollection || parentProperty.IsSubjectDictionary)
+                // For collection/dictionary items in Container mode, parent is the container node
+                if (isContainerMode)
                 {
                     var propertyName = parentProperty.ResolvePropertyName(_nodeMapper);
                     if (propertyName is not null && parentNodeState.NodeId.Identifier is string parentPath)
@@ -253,7 +259,7 @@ internal class CustomNodeManager : CustomNodeManager2
                     }
                 }
 
-                // For direct references, parent is the subject's node
+                // For direct references or Flat mode collections, parent is the subject's node
                 return parentNodeState.NodeId;
             }
         }
@@ -377,9 +383,21 @@ internal class CustomNodeManager : CustomNodeManager2
 
             if (property.IsSubjectCollection)
             {
-                var containerNode = _nodeCreator.GetOrCreateContainerNode(propertyName, nodeConfiguration, parentNodeId, parentPath);
                 var childIndex = index ?? property.Children.Length - 1;
-                _nodeCreator.CreateCollectionChildNode(property, subject, childIndex, propertyName, parentPath, containerNode.NodeId, nodeConfiguration);
+
+                // Check collection structure mode - default is Container for backward compatibility
+                var collectionStructure = nodeConfiguration?.CollectionStructure ?? Attributes.CollectionNodeStructure.Container;
+                if (collectionStructure == Attributes.CollectionNodeStructure.Flat)
+                {
+                    // Flat mode: create directly under parent node
+                    _nodeCreator.CreateCollectionChildNode(property, subject, childIndex, propertyName, parentPath, parentNodeId, nodeConfiguration);
+                }
+                else
+                {
+                    // Container mode: create under container folder
+                    var containerNode = _nodeCreator.GetOrCreateContainerNode(propertyName, nodeConfiguration, parentNodeId, parentPath);
+                    _nodeCreator.CreateCollectionChildNode(property, subject, childIndex, propertyName, parentPath, containerNode.NodeId, nodeConfiguration);
+                }
             }
             else if (property.IsSubjectDictionary)
             {
@@ -684,6 +702,20 @@ internal class CustomNodeManager : CustomNodeManager2
             // Check if this property can accept the subject type
             if (property.IsSubjectCollection)
             {
+                // For Flat mode collections, the browse name should match pattern "PropertyName[index]"
+                // Check if this browse name matches this property's pattern
+                var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
+                var collectionStructure = nodeConfiguration?.CollectionStructure ?? Attributes.CollectionNodeStructure.Container;
+
+                if (containerPropertyName is null && collectionStructure == Attributes.CollectionNodeStructure.Flat)
+                {
+                    // In Flat mode, verify the browse name matches this property's pattern
+                    if (!Namotion.Interceptor.OpcUa.Graph.OpcUaBrowseHelper.TryParseCollectionIndex(browseName.Name, propertyName, out _))
+                    {
+                        continue; // Browse name doesn't match this property's pattern
+                    }
+                }
+
                 var elementType = GetCollectionElementType(property.Type);
                 if (elementType is not null && elementType.IsAssignableFrom(subject.GetType()))
                 {
@@ -734,6 +766,12 @@ internal class CustomNodeManager : CustomNodeManager2
             }
             else if (property.IsSubjectReference && property.GetValue() is null)
             {
+                // For reference properties, the browse name must match the property name exactly
+                if (containerPropertyName is null && browseName.Name != propertyName)
+                {
+                    continue; // Browse name doesn't match this property
+                }
+
                 var propertyType = property.Type;
                 if (propertyType.IsAssignableFrom(subject.GetType()))
                 {
@@ -941,11 +979,6 @@ internal class CustomNodeManager : CustomNodeManager2
     /// Gets whether external node management is enabled for this server.
     /// </summary>
     public bool IsExternalNodeManagementEnabled => _externalNodeManagementHelper.IsEnabled;
-
-    /// <summary>
-    /// Gets the external node management helper for validation operations.
-    /// </summary>
-    internal ExternalNodeManagementHelper ExternalNodeManagementHelper => _externalNodeManagementHelper;
 
     #endregion
 }

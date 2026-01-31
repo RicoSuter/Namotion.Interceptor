@@ -344,7 +344,6 @@ internal class OpcUaClientStructuralChangeProcessor : StructuralChangeProcessor
             // Check collection structure mode (default is Container for backward compatibility)
             var nodeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(property);
             var collectionStructure = nodeConfiguration?.CollectionStructure ?? CollectionNodeStructure.Container;
-
             if (collectionStructure == CollectionNodeStructure.Flat)
             {
                 // Flat mode: create directly under parent

@@ -70,11 +70,12 @@ public record OpcUaNodeConfiguration
     public string? ItemReferenceTypeNamespace { get; init; }
 
     /// <summary>
-    /// Gets the node structure for collections. Default is Flat (items are direct children of parent).
+    /// Gets the node structure for collections. Default is Container (backward compatible).
     /// Container mode creates an intermediate folder node.
+    /// Flat mode places items directly under the parent node.
     /// Dictionaries always use Container structure (this property is ignored for dictionaries).
     /// </summary>
-    public CollectionNodeStructure? CollectionStructure { get; init; } // TODO: Make non-nullable with flat as default assignment?
+    public CollectionNodeStructure? CollectionStructure { get; init; }
 
     // Monitoring configuration (client only)
     /// <summary>Client only: Sampling interval in milliseconds.</summary>

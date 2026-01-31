@@ -4,20 +4,16 @@ namespace Namotion.Interceptor.Connectors;
 
 public static class SubjectFactoryExtensions
 {
-    public static IInterceptorSubject CreateSubject(this ISubjectFactory subjectFactory, RegisteredSubjectProperty property)
+    public static IInterceptorSubject CreateSubjectForReferenceProperty(this ISubjectFactory subjectFactory, RegisteredSubjectProperty property)
     {
         var serviceProvider = property.Parent.Subject.Context.TryGetService<IServiceProvider>();
         return subjectFactory.CreateSubject(property.Type, serviceProvider);
     }
 
-    public static IInterceptorSubject CreateCollectionSubject(this ISubjectFactory subjectFactory, RegisteredSubjectProperty property, object? index)
+    public static IInterceptorSubject CreateSubjectForCollectionOrDictionaryProperty(this ISubjectFactory subjectFactory, RegisteredSubjectProperty property)
     {
         Type? itemType;
-        if (index is null)
-        {
-            itemType = property.Type;
-        }
-        else if (property.Type.IsArray)
+        if (property.Type.IsArray)
         {
             itemType = property.Type.GetElementType();
         }

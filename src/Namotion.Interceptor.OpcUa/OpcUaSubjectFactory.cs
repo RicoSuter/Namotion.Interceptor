@@ -14,7 +14,7 @@ public class OpcUaSubjectFactory
         _subjectFactory = subjectFactory;
     }
 
-    public virtual Task<IInterceptorSubject> CreateSubjectAsync(
+    public virtual Task<IInterceptorSubject> CreateSubjectForPropertyAsync(
         RegisteredSubjectProperty property, ReferenceDescription node,
         ISession session, CancellationToken cancellationToken)
     {
@@ -22,9 +22,9 @@ public class OpcUaSubjectFactory
         // (not the collection type itself which cannot be instantiated)
         if (property.IsSubjectCollection || property.IsSubjectDictionary)
         {
-            return Task.FromResult(_subjectFactory.CreateCollectionSubject(property, index: 0));
+            return Task.FromResult(_subjectFactory.CreateSubjectForCollectionOrDictionaryProperty(property));
         }
 
-        return Task.FromResult(_subjectFactory.CreateSubject(property));
+        return Task.FromResult(_subjectFactory.CreateSubjectForReferenceProperty(property));
     }
 }

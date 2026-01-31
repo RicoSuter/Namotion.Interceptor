@@ -40,8 +40,8 @@ public sealed class OpcUaReferenceAttribute : Attribute
     public string? ItemReferenceTypeNamespace { get; init; }
 
     /// <summary>
-    /// Gets or sets the node structure for collections. Default is Flat.
+    /// Gets or sets the node structure for collections. Default is Container (backward compatible).
     /// Dictionaries always use Container structure (this property is ignored for dictionaries).
     /// </summary>
-    public CollectionNodeStructure CollectionStructure { get; init; } = CollectionNodeStructure.Flat;
+    public CollectionNodeStructure CollectionStructure { get; init; } = CollectionNodeStructure.Container;
 }

@@ -168,7 +168,7 @@ internal class OpcUaNodeChangeProcessor
                 {
                     // Check collection structure mode
                     var nodeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(property);
-                    var collectionStructure = nodeConfiguration?.CollectionStructure ?? CollectionNodeStructure.Flat;
+                    var collectionStructure = nodeConfiguration?.CollectionStructure ?? CollectionNodeStructure.Container;
                     if (collectionStructure == CollectionNodeStructure.Flat)
                     {
                         // Flat mode: items are directly under the parent node
@@ -277,7 +277,7 @@ internal class OpcUaNodeChangeProcessor
         {
             if (remoteByIndex.TryGetValue(index, out var remoteChild))
             {
-                var newSubject = await _configuration.SubjectFactory.CreateSubjectAsync(
+                var newSubject = await _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
                     property, remoteChild, session, cancellationToken).ConfigureAwait(false);
 
                 var nodeId = ExpandedNodeId.ToNodeId(remoteChild.NodeId, session.NamespaceUris);
@@ -390,7 +390,7 @@ internal class OpcUaNodeChangeProcessor
         {
             if (remoteByKey.TryGetValue(key, out var remoteChild))
             {
-                var newSubject = await _configuration.SubjectFactory.CreateSubjectAsync(
+                var newSubject = await _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
                     property, remoteChild, session, cancellationToken).ConfigureAwait(false);
 
                 var nodeId = ExpandedNodeId.ToNodeId(remoteChild.NodeId, session.NamespaceUris);
@@ -480,7 +480,7 @@ internal class OpcUaNodeChangeProcessor
             }
 
             // Remote has value but local is null - create local subject
-            var newSubject = await _configuration.SubjectFactory.CreateSubjectAsync(
+            var newSubject = await _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
                 property, referenceNode!, session, cancellationToken).ConfigureAwait(false);
 
             var nodeId = ExpandedNodeId.ToNodeId(referenceNode!.NodeId, session.NamespaceUris);
@@ -649,7 +649,7 @@ internal class OpcUaNodeChangeProcessor
                 {
                     // Check collection structure mode
                     var nodeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(property);
-                    var collectionStructure = nodeConfiguration?.CollectionStructure ?? CollectionNodeStructure.Flat;
+                    var collectionStructure = nodeConfiguration?.CollectionStructure ?? CollectionNodeStructure.Container;
                     if (collectionStructure == CollectionNodeStructure.Flat)
                     {
                         // Flat mode: items are directly under the parent node
