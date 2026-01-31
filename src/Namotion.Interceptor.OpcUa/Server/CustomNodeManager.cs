@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Mapping;
+using Namotion.Interceptor.OpcUa.Server.Graph;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
@@ -24,15 +25,11 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
     private readonly ConnectorReferenceCounter<NodeState> _subjectRefCounter = new();
+    private readonly ModelChangePublisher _modelChangePublisher;
 
     // Mapping from NodeId to the subject that was created for external AddNodes requests
     private readonly Dictionary<NodeId, IInterceptorSubject> _externallyAddedSubjects = new();
     private readonly Lock _externallyAddedSubjectsLock = new();
-
-    // Pending model changes for batch emission
-    // Protected by _pendingModelChangesLock for thread-safe access
-    private readonly object _pendingModelChangesLock = new();
-    private List<ModelChangeStructureDataType> _pendingModelChanges = new();
 
     public CustomNodeManager(
         IInterceptorSubject subject,
@@ -50,6 +47,7 @@ internal class CustomNodeManager : CustomNodeManager2
         _logger = logger;
         _nodeFactory = new OpcUaNodeFactory(logger);
         _externalNodeManagementHelper = new ExternalNodeManagementHelper(configuration, logger);
+        _modelChangePublisher = new ModelChangePublisher(logger);
     }
 
     // Expose protected members for OpcUaNodeFactory
@@ -167,7 +165,7 @@ internal class CustomNodeManager : CustomNodeManager2
                 RemoveNodeAndReferences(nodeState);
 
                 // Queue model change event for node deletion
-                QueueModelChange(nodeState.NodeId, ModelChangeStructureVerbMask.NodeDeleted);
+                _modelChangePublisher.QueueChange(nodeState.NodeId, ModelChangeStructureVerbMask.NodeDeleted);
             }
         }
         finally
@@ -248,75 +246,13 @@ internal class CustomNodeManager : CustomNodeManager2
     }
 
     /// <summary>
-    /// Queues a model change for batched emission.
-    /// Changes are emitted when FlushModelChangeEvents is called.
-    /// Thread-safe: uses _pendingModelChangesLock for synchronization.
-    /// </summary>
-    /// <param name="affectedNodeId">The NodeId of the affected node.</param>
-    /// <param name="verb">The type of change (NodeAdded, NodeDeleted, ReferenceAdded, etc.).</param>
-    private void QueueModelChange(NodeId affectedNodeId, ModelChangeStructureVerbMask verb)
-    {
-        lock (_pendingModelChangesLock)
-        {
-            _pendingModelChanges.Add(new ModelChangeStructureDataType
-            {
-                Affected = affectedNodeId,
-                AffectedType = null, // Optional: could be set to TypeDefinitionId for added nodes
-                Verb = (byte)verb
-            });
-        }
-    }
-
-    /// <summary>
     /// Flushes all pending model change events to clients.
     /// Emits a GeneralModelChangeEvent containing all batched changes.
     /// Called after a batch of structural changes has been processed.
-    /// Thread-safe: uses atomic swap pattern to capture pending changes.
     /// </summary>
     public void FlushModelChangeEvents()
     {
-        // Atomically swap the pending changes list with a new empty list
-        // This ensures thread-safety without holding the lock during event emission
-        List<ModelChangeStructureDataType> changesToEmit;
-        lock (_pendingModelChangesLock)
-        {
-            if (_pendingModelChanges.Count == 0)
-            {
-                return;
-            }
-
-            changesToEmit = _pendingModelChanges;
-            _pendingModelChanges = new List<ModelChangeStructureDataType>();
-        }
-
-        try
-        {
-            // Create and emit the GeneralModelChangeEvent
-            var eventState = new GeneralModelChangeEventState(null);
-            eventState.Initialize(
-                SystemContext,
-                null,
-                EventSeverity.Medium,
-                new LocalizedText($"Address space changed: {changesToEmit.Count} modification(s)"));
-
-            eventState.Changes = new PropertyState<ModelChangeStructureDataType[]>(eventState)
-            {
-                Value = changesToEmit.ToArray()
-            };
-
-            // Report the event on the Server node (standard location for model change events)
-            eventState.SetChildValue(SystemContext, BrowseNames.SourceNode, ObjectIds.Server, false);
-            eventState.SetChildValue(SystemContext, BrowseNames.SourceName, "AddressSpace", false);
-
-            // Note: The event will be distributed to subscribed clients via the server's event queue
-            Server.ReportEvent(SystemContext, eventState);
-
-            _logger.LogInformation("Emitted GeneralModelChangeEvent with {ChangeCount} changes.", changesToEmit.Count);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to emit GeneralModelChangeEvent. Continuing without event notification.");
-        }
+        _modelChangePublisher.Flush(Server, SystemContext);
     }
 
     /// <summary>
@@ -811,7 +747,7 @@ internal class CustomNodeManager : CustomNodeManager2
             CreateSubjectNodes(nodeState.NodeId, registeredSubject, path + PathDelimiter);
 
             // Queue model change event for node creation
-            QueueModelChange(nodeState.NodeId, ModelChangeStructureVerbMask.NodeAdded);
+            _modelChangePublisher.QueueChange(nodeState.NodeId, ModelChangeStructureVerbMask.NodeAdded);
         }
         else
         {
@@ -820,7 +756,7 @@ internal class CustomNodeManager : CustomNodeManager2
             parentNode.AddReference(referenceTypeId ?? ReferenceTypeIds.HasComponent, false, nodeState.NodeId);
 
             // Queue model change event for reference addition
-            QueueModelChange(nodeState.NodeId, ModelChangeStructureVerbMask.ReferenceAdded);
+            _modelChangePublisher.QueueChange(nodeState.NodeId, ModelChangeStructureVerbMask.ReferenceAdded);
         }
     }
 

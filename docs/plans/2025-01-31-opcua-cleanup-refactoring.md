@@ -1566,7 +1566,19 @@ Could add `SubjectTracker` alongside existing counter for `FindSubjectByNodeId()
 **Note:** RemoteSyncManager is 264 lines vs 160 estimated (includes all event handling inline)
 
 ### Step 14 Findings
-*(To be filled by executing agent)*
+**Status:** ✅ FINISHED
+
+**Implementation:**
+- Created `Server/Graph/ModelChangePublisher.cs` (95 lines)
+- Extracted: `_pendingModelChanges`, `_pendingModelChangesLock`, `QueueModelChange` → `QueueChange`, `FlushModelChangeEvents` → `Flush`
+- Updated 3 call sites in `CustomNodeManager.cs`
+
+**Lines Removed:** ~64 lines from `CustomNodeManager.cs`
+**Current:** 1,340 lines (target: ~400)
+
+**Test Results:** 292/298 passed, 6 skipped
+
+**Blocking Issues:** None
 
 ### Step 15 Findings
 *(To be filled by executing agent)*
