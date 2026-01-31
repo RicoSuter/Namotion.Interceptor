@@ -1597,10 +1597,40 @@ Could add `SubjectTracker` alongside existing counter for `FindSubjectByNodeId()
 **Note:** NodeCreator is 457 lines vs 300 estimated (includes full documentation)
 
 ### Step 16 Findings
-*(To be filled by executing agent)*
+**Status:** ✅ FINISHED
+
+**Implementation:**
+- Removed `FindParentNodeIdFromPath` (33 lines) - path parsing
+- Removed `FindParentNodeId` (26 lines) - inlined into caller
+- Added `GetParentNodeId(IInterceptorSubject subject)` (42 lines) - uses `RegisteredSubject.Parents`
+- Updated `RemoveNodeAndReferences` to use model-based parent lookup
+
+**Lines Removed:** ~5 net (refactoring, not major extraction)
+**Current:** 950 lines (target: ~400)
+
+**Test Results:** 292/298 passed, 6 skipped
+
+**Blocking Issues:** None
+
+**Note:** Container node parent lookup still uses path parsing (inlined) - necessary because FolderState nodes don't have corresponding subjects
 
 ### Step 17 Findings
-*(To be filled by executing agent)*
+**Status:** ✅ FINISHED
+
+**Implementation:**
+- Added `CollectionStructure` property to `OpcUaNodeConfiguration`
+- Updated `AttributeOpcUaNodeMapper` to read `CollectionStructure` from attribute
+- Updated `NodeCreator.CreateCollectionObjectNode()` to skip container for Flat mode
+- Updated `OpcUaNodeChangeProcessor` to handle both structures when browsing/syncing
+- Updated `OpcUaClientStructuralChangeProcessor` to handle both structures
+
+**Files Changed:** 5 files (OpcUaNodeConfiguration, AttributeOpcUaNodeMapper, NodeCreator, OpcUaNodeChangeProcessor, OpcUaClientStructuralChangeProcessor)
+
+**Test Results:** 292/298 passed, 6 skipped
+
+**Blocking Issues:** None
+
+**Note:** Default is Container for backward compatibility (attribute says Flat but runtime uses Container as fallback)
 
 ### Step 18 Findings
 *(To be filled by executing agent)*

@@ -80,7 +80,8 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
                 ReferenceType = config.ReferenceType ?? referenceAttribute.ReferenceType,
                 ReferenceTypeNamespace = config.ReferenceTypeNamespace ?? referenceAttribute.ReferenceTypeNamespace,
                 ItemReferenceType = config.ItemReferenceType ?? referenceAttribute.ItemReferenceType,
-                ItemReferenceTypeNamespace = config.ItemReferenceTypeNamespace ?? referenceAttribute.ItemReferenceTypeNamespace
+                ItemReferenceTypeNamespace = config.ItemReferenceTypeNamespace ?? referenceAttribute.ItemReferenceTypeNamespace,
+                CollectionStructure = config.CollectionStructure ?? referenceAttribute.CollectionStructure
             };
         }
 
