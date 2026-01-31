@@ -1581,7 +1581,20 @@ Could add `SubjectTracker` alongside existing counter for `FindSubjectByNodeId()
 **Blocking Issues:** None
 
 ### Step 15 Findings
-*(To be filled by executing agent)*
+**Status:** ✅ FINISHED
+
+**Implementation:**
+- Created `Server/Graph/NodeCreator.cs` (457 lines)
+- Extracted 14 methods: `CreateSubjectNodes`, `CreateSubjectReferenceNode`, `GetOrCreateContainerNode`, `CreateCollectionChildNode`, `CreateDictionaryChildNode`, `CreateCollectionObjectNode`, `CreateDictionaryObjectNode`, `CreateVariableNode`, `CreateAttributeNodes`, `CreateVariableNodeForAttribute`, `ConfigureVariableNode`, `CreateVariableNodeForSubject`, `CreateChildObject`, `GetTypeDefinitionIdForSubject`
+
+**Lines Removed:** ~383 lines from `CustomNodeManager.cs`
+**Current:** 957 lines (target: ~400)
+
+**Test Results:** 292/298 passed, 6 skipped
+
+**Blocking Issues:** None
+
+**Note:** NodeCreator is 457 lines vs 300 estimated (includes full documentation)
 
 ### Step 16 Findings
 *(To be filled by executing agent)*
