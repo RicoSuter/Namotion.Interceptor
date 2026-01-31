@@ -429,7 +429,7 @@ internal class OpcUaNodeChangeProcessor
 
             // Set property value FIRST - this attaches the subject to the parent which registers it
             // The subject must be registered before LoadSubjectAsync can set up monitored items
-            property.SetValueFromSource(_source, null, null, newSubject);
+            SubjectPropertyHelper.SetReference(property, newSubject, _source);
 
             // Now load and set up monitoring - subject is now registered
             var monitoredItems = await _subjectLoader.LoadSubjectAsync(
@@ -461,7 +461,7 @@ internal class OpcUaNodeChangeProcessor
             {
                 UnregisterSubjectNodeId(oldNodeId);
             }
-            property.SetValueFromSource(_source, null, null, null);
+            SubjectPropertyHelper.SetReference(property, null, _source);
         }
     }
 
@@ -652,7 +652,7 @@ internal class OpcUaNodeChangeProcessor
         if (parentProperty.IsSubjectReference)
         {
             // Clear the reference property
-            parentProperty.SetValueFromSource(_source, null, null, null);
+            SubjectPropertyHelper.SetReference(parentProperty, null, _source);
         }
         else if (parentProperty.IsSubjectCollection)
         {
@@ -731,7 +731,8 @@ internal class OpcUaNodeChangeProcessor
                 var currentValue = property.GetValue();
                 if (currentValue is null)
                 {
-                    property.SetValueFromSource(_source, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, childSubject);
+                    var now = DateTimeOffset.UtcNow;
+                    SubjectPropertyHelper.SetReference(property, childSubject, _source, now, now);
                     _logger.LogDebug(
                         "ReferenceAdded: Set {ParentType}.{Property} = {ChildType}",
                         parentSubject.GetType().Name,
@@ -772,7 +773,8 @@ internal class OpcUaNodeChangeProcessor
                     var currentValue = property.GetValue();
                     if (ReferenceEquals(currentValue, childSubject))
                     {
-                        property.SetValueFromSource(_source, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null);
+                        var now = DateTimeOffset.UtcNow;
+                        SubjectPropertyHelper.SetReference(property, null, _source, now, now);
                         _logger.LogDebug(
                             "ReferenceDeleted: Cleared {ParentType}.{Property}",
                             parentSubject.GetType().Name,

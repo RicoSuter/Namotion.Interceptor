@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.OpcUa.Graph;
 /// </summary>
 internal static class SubjectPropertyHelper
 {
-    // TODO: Maybe transform into extension methods? Methods should use DefaultSubjectFactory internally,
+    // TODO: Maybe transform into extension methods with subject factory as parameter? Methods should use DefaultSubjectFactory internally
     // to create a new copy of collection or dictionary (will then support any collection/dict type automatically)
     
     /// <summary>
@@ -292,5 +292,32 @@ internal static class SubjectPropertyHelper
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Sets a reference property to the specified subject or null.
+    /// Uses SetValueFromSource when source is provided to prevent changes from being mirrored back.
+    /// </summary>
+    /// <param name="property">The registered reference property to set.</param>
+    /// <param name="subject">The subject to set as the reference value, or null to clear.</param>
+    /// <param name="source">The source of the change (for change tracking).</param>
+    /// <param name="changedTimestamp">Optional timestamp when the value was changed at the source.</param>
+    /// <param name="receivedTimestamp">Optional timestamp when the value was received.</param>
+    public static void SetReference(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject? subject,
+        object? source,
+        DateTimeOffset? changedTimestamp = null,
+        DateTimeOffset? receivedTimestamp = null)
+    {
+        // TODO: Remove method and use SetValueFromSource directly, source are never null at call sites, no?
+        if (source is not null)
+        {
+            property.SetValueFromSource(source, changedTimestamp, receivedTimestamp, subject);
+        }
+        else
+        {
+            property.SetValue(subject);
+        }
     }
 }
