@@ -1,3 +1,4 @@
+using Namotion.Interceptor.OpcUa.Attributes;
 using Opc.Ua;
 
 namespace Namotion.Interceptor.OpcUa.Mapping;
@@ -68,6 +69,14 @@ public record OpcUaNodeConfiguration
     /// </summary>
     public string? ItemReferenceTypeNamespace { get; init; }
 
+    /// <summary>
+    /// Gets the node structure for collections. Default is Container (backward compatible).
+    /// Container mode creates an intermediate folder node.
+    /// Flat mode places items directly under the parent node.
+    /// Dictionaries always use Container structure (this property is ignored for dictionaries).
+    /// </summary>
+    public CollectionNodeStructure? CollectionStructure { get; init; }
+
     // Monitoring configuration (client only)
     /// <summary>Client only: Sampling interval in milliseconds.</summary>
     public int? SamplingInterval { get; init; }
@@ -124,6 +133,7 @@ public record OpcUaNodeConfiguration
             ReferenceTypeNamespace = ReferenceTypeNamespace ?? other.ReferenceTypeNamespace,
             ItemReferenceType = ItemReferenceType ?? other.ItemReferenceType,
             ItemReferenceTypeNamespace = ItemReferenceTypeNamespace ?? other.ItemReferenceTypeNamespace,
+            CollectionStructure = CollectionStructure ?? other.CollectionStructure,
             SamplingInterval = SamplingInterval ?? other.SamplingInterval,
             QueueSize = QueueSize ?? other.QueueSize,
             DiscardOldest = DiscardOldest ?? other.DiscardOldest,

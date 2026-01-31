@@ -54,6 +54,7 @@ public partial class TestRoot
 }
 
 [InterceptorSubject]
+[OpcUaNode("TestPerson", TypeDefinition = "BaseObjectType")]
 public partial class TestPerson
 {
     public TestPerson()

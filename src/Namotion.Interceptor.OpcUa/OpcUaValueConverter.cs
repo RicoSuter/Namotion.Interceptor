@@ -29,8 +29,8 @@ public class OpcUaValueConverter
         if (targetType.IsArray)
         {
             var targetElement = targetType.GetElementType()!;
-            if (targetType.GetArrayRank() == 1 && 
-                targetElement == typeof(decimal) && 
+            if (targetType.GetArrayRank() == 1 &&
+                targetElement == typeof(decimal) &&
                 nodeValue is double[] doubleArray)
             {
                 var result = new decimal[doubleArray.Length]; // TODO(perf): Avoid memory allocation
@@ -82,7 +82,7 @@ public class OpcUaValueConverter
 
         return propertyValue;
     }
-    
+
     /// <summary>
     /// Converts a CLR property value to an OPC UA compatible value + data type.
     /// </summary>

@@ -121,7 +121,7 @@ internal static class SubjectUpdateApplier
             }
             else
             {
-                var newItem = context.SubjectFactory.CreateSubject(property);
+                var newItem = context.SubjectFactory.CreateSubjectForReferenceProperty(property);
                 newItem.Context.AddFallbackContext(parent.Context);
 
                 if (context.TryMarkAsProcessed(propertyUpdate.Id))

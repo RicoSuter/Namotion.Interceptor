@@ -61,7 +61,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         {
             logging.ClearProviders();
             logging.SetMinimumLevel(LogLevel.Debug);
-            logging.AddXunit(_logger, "Server", LogLevel.Information);
+            logging.AddXunit(_logger, "Server", LogLevel.Debug);
         });
 
         _context = InterceptorSubjectContext
@@ -91,7 +91,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
                     BaseAddress = _baseAddress,
                     ValueConverter = new OpcUaValueConverter(),
                     TelemetryContext = telemetryContext,
-                    CleanCertificateStore = false,
+                    CleanCertificateStore = true,
                     AutoAcceptUntrustedCertificates = true,
                     CertificateStoreBasePath = _certificateStoreBasePath,
                     
