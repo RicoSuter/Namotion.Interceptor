@@ -1376,22 +1376,125 @@ git commit -m "refactor: final cleanup and validation"
 **Simplification:** Better code reuse achieved
 
 ### Step 4 Findings
-*(To be filled by executing agent)*
+**Status:** ✅ FINISHED
+
+**Implementation:**
+- Created `Graph/SubjectPropertyHelper.cs`
+- Added `AddToCollection(property, subject, source, changedTimestamp?, receivedTimestamp?)` method
+- Updated caller in `OpcUaNodeChangeProcessor.cs`, removed old method (~50 lines)
+
+**Test Results:** 292/298 passed, 6 skipped
+
+**OPC UA Agnostic:** ✅ Yes - no OPC UA dependencies, could be moved to Connectors library
+
+**Blocking Issues:** None
+
+**Cleanup Items:**
+- [ ] `localChildren` and `index` params were unused/only for logging in old method - dead code pattern
+
+**Simplification:** Helper could move to `Namotion.Interceptor.Connectors` if needed by other connectors
 
 ### Step 5 Findings
-*(To be filled by executing agent)*
+**Status:** ✅ FINISHED
+
+**Implementation:**
+- Added `RemoveFromCollectionByIndices` to `SubjectPropertyHelper.cs`
+- Updated 2 call sites in `OpcUaNodeChangeProcessor.cs`
+- Removed old method (~50 lines)
+
+**Test Results:** 292/298 passed, 6 skipped
+
+**OPC UA Agnostic:** ✅ Yes
+
+**Blocking Issues:** None
+
+**Note:** Plan mentioned `RemoveFromCollection` but actual method was `RemoveFromCollectionByIndices` (takes list of indices)
 
 ### Step 6 Findings
-*(To be filled by executing agent)*
+**Status:** ✅ FINISHED
+
+**Implementation:**
+- Added `AddToDictionary` to `SubjectPropertyHelper.cs`
+- Added `RemoveFromDictionary` to `SubjectPropertyHelper.cs`
+- Updated 3 call sites in `OpcUaNodeChangeProcessor.cs`
+- Removed old methods (~120 lines)
+
+**Line counts:**
+- `OpcUaNodeChangeProcessor.cs`: 905 → 785 lines (-120)
+- `SubjectPropertyHelper.cs`: 140 → 293 lines (+153 shared/reusable)
+
+**Test Results:** 292/298 passed, 6 skipped
+
+**OPC UA Agnostic:** ✅ Yes
+
+**Blocking Issues:** None
 
 ### Step 7 Findings
-*(To be filled by executing agent)*
+**Status:** ✅ FINISHED
+
+**Implementation:**
+- Added `SetReference(property, subject, source, changedTimestamp?, receivedTimestamp?)` to `SubjectPropertyHelper.cs`
+- Updated 5 call sites in `OpcUaNodeChangeProcessor.cs`
+
+**Test Results:** 292/298 passed, 6 skipped
+
+**OPC UA Agnostic:** ✅ Yes
+
+**Blocking Issues:** None
 
 ### Step 8 Findings
-*(To be filled by executing agent)*
+**Status:** ✅ FINISHED
+
+**Implementation:**
+- Created `Graph/SubjectTracker.cs` with all planned methods
+- Uses `ConnectorReferenceCounter<NodeId>` + `Dictionary<NodeId, IInterceptorSubject>` for bidirectional mapping
+- Thread-safe with `Lock`
+
+**Build:** Succeeded
+
+**Design Notes:**
+- Server currently uses `ConnectorReferenceCounter<NodeState>` (stores node objects)
+- Client uses `ConnectorReferenceCounter<List<MonitoredItem>>` + separate dict
+- New `SubjectTracker` uses `NodeId` as tracked type (simpler)
+- May need adjustments when wiring up in Steps 9-10
+
+**Blocking Issues:** None
 
 ### Step 9 Findings
-*(To be filled by executing agent)*
+**Status:** EVALUATED - NO CHANGE NEEDED
+
+**Analysis:**
+
+The server's `CustomNodeManager.cs` uses `ConnectorReferenceCounter<NodeState>`:
+- Stores actual `NodeState` objects (not just `NodeId`)
+- `NodeState` is needed for: deleting nodes via SDK, updating BrowseNames, accessing node properties
+- Uses `_subjectRefCounter.IncrementAndCheckFirst(subject, () => nodeState, out nodeState)` - creates NodeState via factory
+- Uses `_subjectRefCounter.DecrementAndCheckLast(subject, out var nodeState)` - gets NodeState back for deletion
+- Uses `_subjectRefCounter.TryGetData(subject, out var nodeState)` - gets NodeState for reindexing
+- Uses `_subjectRefCounter.GetAllEntries()` - iterates all entries
+
+**Why SubjectTracker Does NOT Fit:**
+1. `SubjectTracker` tracks `NodeId` only, not `NodeState` objects
+2. Server NEEDS `NodeState` for node manipulation (SDK operations require the actual node object)
+3. Using `SubjectTracker` would require keeping `_subjectRefCounter<NodeState>` anyway, adding complexity
+
+**Conclusion:**
+- `SubjectTracker` is designed for **client-side** tracking where only NodeId is needed
+- Server needs `NodeState` objects for OPC UA SDK operations
+- Keeping `ConnectorReferenceCounter<NodeState>` in server is the correct design
+- **No changes made to `CustomNodeManager.cs`**
+
+**Alternative Considered:**
+Could add `SubjectTracker` alongside existing counter for `FindSubjectByNodeId()` optimization (O(1) vs O(n) lookup), but:
+- Current O(n) lookup is only used in external node management paths
+- Adding more tracking would increase complexity
+- Not worth the added complexity for this edge case
+
+**Test Results:** 292/298 passed, 6 skipped (infrastructure tests)
+
+**Blocking Issues:** None
+
+**Recommendation:** Skip this step for server. `SubjectTracker` is client-only. Consider renaming step or updating plan.
 
 ### Step 10 Findings
 *(To be filled by executing agent)*
