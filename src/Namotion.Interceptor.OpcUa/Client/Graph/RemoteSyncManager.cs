@@ -9,14 +9,13 @@ namespace Namotion.Interceptor.OpcUa.Client.Graph;
 /// Manages remote sync: ModelChangeEvents subscription and periodic resync.
 /// Extracted from OpcUaSubjectClientSource.
 /// </summary>
-internal class RemoteSyncManager : IDisposable
+internal class RemoteSyncManager : IAsyncDisposable
 {
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
 
     // Periodic resync timer for servers that don't support ModelChangeEvents
     private Timer? _periodicResyncTimer;
-    private volatile bool _periodicResyncInProgress;
 
     // ModelChangeEvent subscription tracking
     private MonitoredItem? _modelChangeEventItem;
@@ -27,6 +26,9 @@ internal class RemoteSyncManager : IDisposable
     private Func<bool>? _isStarted;
     private Func<bool>? _isDisposed;
     private SubscriptionManager? _subscriptionManager;
+
+    // Actor-style dispatcher for thread-safe, ordered change processing
+    private OpcUaServerChangeDispatcher? _changeDispatcher;
 
     public RemoteSyncManager(
         OpcUaClientConfiguration configuration,
@@ -51,6 +53,38 @@ internal class RemoteSyncManager : IDisposable
         _getCurrentSession = getCurrentSession;
         _isStarted = isStarted;
         _isDisposed = isDisposed;
+
+        // Create and start the dispatcher for thread-safe change processing
+        _changeDispatcher = new OpcUaServerChangeDispatcher(_logger, ProcessChangeAsync);
+        _changeDispatcher.Start();
+    }
+
+    /// <summary>
+    /// Callback invoked by the dispatcher for each queued change.
+    /// Runs on a single consumer thread, ensuring no concurrent access to model state.
+    /// </summary>
+    private async Task ProcessChangeAsync(object change, CancellationToken cancellationToken)
+    {
+        var processor = _nodeChangeProcessor;
+        var session = _getCurrentSession?.Invoke();
+
+        if (processor is null || session is null || !session.Connected)
+        {
+            return;
+        }
+
+        switch (change)
+        {
+            case List<ModelChangeStructureDataType> modelChanges:
+                await processor.ProcessModelChangeEventAsync(modelChanges, session, cancellationToken)
+                    .ConfigureAwait(false);
+                break;
+
+            case OpcUaServerChangeDispatcher.PeriodicResyncRequest:
+                await processor.PerformFullResyncAsync(session, cancellationToken)
+                    .ConfigureAwait(false);
+                break;
+        }
     }
 
     /// <summary>
@@ -128,12 +162,11 @@ internal class RemoteSyncManager : IDisposable
     /// <summary>
     /// Stops and cleans up all sync resources.
     /// </summary>
-    public void Stop()
+    public async Task StopAsync()
     {
         // Stop and dispose periodic resync timer
         _periodicResyncTimer?.Dispose();
         _periodicResyncTimer = null;
-        _periodicResyncInProgress = false;
 
         // Clean up ModelChangeEvent subscription
         var subscriptionManager = _subscriptionManager;
@@ -142,19 +175,27 @@ internal class RemoteSyncManager : IDisposable
             subscriptionManager.EventNotificationReceived -= OnEventNotificationReceived;
         }
         _modelChangeEventItem = null;
+
+        // Stop the dispatcher gracefully, draining any remaining items
+        if (_changeDispatcher is not null)
+        {
+            await _changeDispatcher.StopAsync().ConfigureAwait(false);
+            _changeDispatcher = null;
+        }
     }
 
     /// <summary>
     /// Resets the sync manager for a fresh connection.
     /// </summary>
-    public void Reset()
+    public async Task ResetAsync()
     {
-        Stop();
+        await StopAsync().ConfigureAwait(false);
     }
 
-    public void Dispose()
+    /// <inheritdoc/>
+    public async ValueTask DisposeAsync()
     {
-        Stop();
+        await StopAsync().ConfigureAwait(false);
     }
 
     private void OnEventNotificationReceived(EventNotificationList notification)
@@ -177,8 +218,8 @@ internal class RemoteSyncManager : IDisposable
 
     private void OnModelChangeEventNotification(EventFieldList eventFields)
     {
-        var nodeChangeProcessor = _nodeChangeProcessor;
-        if (nodeChangeProcessor is null)
+        var dispatcher = _changeDispatcher;
+        if (dispatcher is null || _nodeChangeProcessor is null)
         {
             return;
         }
@@ -205,26 +246,15 @@ internal class RemoteSyncManager : IDisposable
 
             if (modelChanges.Count > 0)
             {
-                _ = Task.Run(async () =>
-                {
-                    try
-                    {
-                        await nodeChangeProcessor.ProcessModelChangeEventAsync(modelChanges, session, CancellationToken.None).ConfigureAwait(false);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Error processing ModelChangeEvent.");
-                    }
-                });
+                // Route through the dispatcher for thread-safe, ordered processing
+                dispatcher.EnqueueModelChange(modelChanges);
             }
         }
     }
 
     private void OnPeriodicResyncTimerCallback(object? state)
     {
-        if (_isDisposed?.Invoke() == true ||
-            _periodicResyncInProgress ||
-            _isStarted?.Invoke() != true)
+        if (_isDisposed?.Invoke() == true || _isStarted?.Invoke() != true)
         {
             return;
         }
@@ -235,30 +265,14 @@ internal class RemoteSyncManager : IDisposable
             return;
         }
 
-        var processor = _nodeChangeProcessor;
-        if (processor is null)
+        var dispatcher = _changeDispatcher;
+        if (dispatcher is null || _nodeChangeProcessor is null)
         {
-            _logger.LogWarning("Periodic resync skipped: _nodeChangeProcessor is null.");
+            _logger.LogWarning("Periodic resync skipped: dispatcher or processor is null.");
             return;
         }
 
-        _logger.LogDebug("Starting periodic resync.");
-        _periodicResyncInProgress = true;
-
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                await processor.PerformFullResyncAsync(session, CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Error during periodic resync.");
-            }
-            finally
-            {
-                _periodicResyncInProgress = false;
-            }
-        });
+        _logger.LogDebug("Enqueuing periodic resync.");
+        dispatcher.EnqueuePeriodicResync();
     }
 }

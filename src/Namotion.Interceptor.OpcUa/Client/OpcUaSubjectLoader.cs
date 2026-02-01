@@ -1,6 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Attributes;
+using Namotion.Interceptor.OpcUa.Graph;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
@@ -73,6 +74,9 @@ internal class OpcUaSubjectLoader
         // Track which properties were matched to server nodes
         var claimedPropertyNames = new HashSet<string>();
 
+        // Accumulate flat collection items for batch processing
+        var flatCollectionItems = new Dictionary<RegisteredSubjectProperty, List<(int Index, ReferenceDescription Node)>>();
+
         for (var index = 0; index < nodeReferences.Count; index++)
         {
             var nodeReference = nodeReferences[index];
@@ -94,6 +98,37 @@ internal class OpcUaSubjectLoader
                 if (propertyExists)
                 {
                     continue;
+                }
+
+                // Check for flat collection item (e.g., "Sensors[0]")
+                if (OpcUaBrowseHelper.TryParseCollectionIndex(dynamicPropertyName, out var baseName, out var collectionIndex))
+                {
+                    RegisteredSubjectProperty? flatProperty = null;
+                    foreach (var childProperty in registeredSubject.Properties)
+                    {
+                        var propertyBrowseName = childProperty.ResolvePropertyName(_configuration.NodeMapper);
+                        if (propertyBrowseName == baseName && childProperty.IsSubjectCollection)
+                        {
+                            var nodeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(childProperty);
+                            if (nodeConfiguration?.CollectionStructure == CollectionNodeStructure.Flat)
+                            {
+                                flatProperty = childProperty;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (flatProperty is not null)
+                    {
+                        // Accumulate flat collection items for batch processing
+                        if (!flatCollectionItems.TryGetValue(flatProperty, out var items))
+                        {
+                            items = new List<(int Index, ReferenceDescription Node)>();
+                            flatCollectionItems[flatProperty] = items;
+                        }
+                        items.Add((collectionIndex, nodeReference));
+                        continue;
+                    }
                 }
 
                 var addAsDynamic = _configuration.ShouldAddDynamicProperty is not null &&
@@ -166,6 +201,36 @@ internal class OpcUaSubjectLoader
                     var visitedNodes = new HashSet<NodeId>();
                     await LoadAttributeNodesAsync(property, childNodeId, session, monitoredItems, visitedNodes, cancellationToken).ConfigureAwait(false);
                 }
+            }
+        }
+
+        // Process accumulated flat collection items (sorted by index)
+        foreach (var (flatProperty, items) in flatCollectionItems)
+        {
+            claimedPropertyNames.Add(flatProperty.Name);
+            _ownership.ClaimSource(flatProperty.Reference);
+
+            // Sort by index and load each item
+            var sortedItems = items.OrderBy(i => i.Index).ToList();
+            var children = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>(sortedItems.Count);
+
+            for (var i = 0; i < sortedItems.Count; i++)
+            {
+                var (_, itemNode) = sortedItems[i];
+                var childSubject = DefaultSubjectFactory.Instance.CreateSubjectForCollectionOrDictionaryProperty(flatProperty);
+                childSubject.Context.AddFallbackContext(subject.Context);
+                children.Add((itemNode, childSubject));
+            }
+
+            // Create and set the collection
+            var collection = DefaultSubjectFactory.Instance
+                .CreateSubjectCollection(flatProperty.Type, children.Select(c => c.Subject));
+            flatProperty.SetValueFromSource(_source, null, null, collection);
+
+            // Load each child subject
+            foreach (var (childNode, childSubject) in children)
+            {
+                await LoadSubjectAsync(childSubject, childNode, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
             }
         }
 

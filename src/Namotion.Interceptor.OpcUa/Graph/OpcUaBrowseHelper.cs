@@ -99,6 +99,45 @@ internal static class OpcUaBrowseHelper
 
     /// <summary>
     /// Tries to parse a collection index from a browse name like "PropertyName[3]".
+    /// Returns the base property name and index.
+    /// </summary>
+    /// <param name="browseName">The browse name to parse (e.g., "Sensors[3]").</param>
+    /// <param name="baseName">The base property name if successful (e.g., "Sensors").</param>
+    /// <param name="index">The parsed index if successful.</param>
+    /// <returns>True if the browse name matches the collection index format.</returns>
+    public static bool TryParseCollectionIndex(string browseName, out string? baseName, out int index)
+    {
+        // TODO: Do we really need both overloads? Seems like a lot of duplication...
+        
+        baseName = null;
+        index = -1;
+
+        if (string.IsNullOrEmpty(browseName))
+        {
+            return false;
+        }
+
+        var openBracket = browseName.LastIndexOf('[');
+        var closeBracket = browseName.LastIndexOf(']');
+
+        if (openBracket <= 0 || closeBracket != browseName.Length - 1 || closeBracket <= openBracket + 1)
+        {
+            return false;
+        }
+
+        var indexStr = browseName.Substring(openBracket + 1, closeBracket - openBracket - 1);
+        if (!int.TryParse(indexStr, out index) || index < 0)
+        {
+            index = -1;
+            return false;
+        }
+
+        baseName = browseName.Substring(0, openBracket);
+        return true;
+    }
+
+    /// <summary>
+    /// Tries to parse a collection index from a browse name like "PropertyName[3]".
     /// </summary>
     /// <param name="browseName">The browse name to parse (e.g., "People[3]").</param>
     /// <param name="propertyName">The expected property name prefix (e.g., "People").</param>
@@ -106,8 +145,6 @@ internal static class OpcUaBrowseHelper
     /// <returns>True if the browse name matches the expected format and index was parsed.</returns>
     public static bool TryParseCollectionIndex(string browseName, string? propertyName, out int index)
     {
-        // TODO: Add tests for this method
-
         index = -1;
 
         if (propertyName is null)

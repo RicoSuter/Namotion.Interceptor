@@ -2,8 +2,10 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.OpcUa.Attributes;
+using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Registry;
@@ -98,17 +100,40 @@ public class FlatCollectionServerContext : IAsyncDisposable
 }
 
 /// <summary>
+/// Encapsulates a running server + client pair for flat collection bidirectional sync tests.
+/// </summary>
+public class FlatCollectionBidirectionalContext : IAsyncDisposable
+{
+    public required IHost ServerHost { get; init; }
+    public required FlatSyncRoot ServerRoot { get; init; }
+    public required IInterceptorSubjectContext ServerContext { get; init; }
+    public required IHost ClientHost { get; init; }
+    public required FlatSyncRoot ClientRoot { get; init; }
+    public required IInterceptorSubjectContext ClientContext { get; init; }
+    public required PortLease Port { get; init; }
+    public required TestLogger Logger { get; init; }
+
+    public async ValueTask DisposeAsync()
+    {
+        await ClientHost.StopAsync();
+        ClientHost.Dispose();
+        await ServerHost.StopAsync();
+        ServerHost.Dispose();
+        Port.Dispose();
+    }
+}
+
+/// <summary>
 /// Integration tests for flat collection mode (CollectionNodeStructure.Flat).
 ///
 /// IMPLEMENTATION STATUS:
 /// - Server-side flat collection creation: WORKING
 /// - Server-side live sync (add/remove items): WORKING
-/// - Client-side initial sync for flat collections: NOT YET IMPLEMENTED
-///   (OpcUaSubjectLoader cannot map "Sensors[0]" to "Sensors" property)
-/// - Client-side live sync for flat collections: NOT YET IMPLEMENTED
+/// - Client-side initial sync for flat collections: WORKING
+///   (OpcUaSubjectLoader maps "PropertyName[index]" browse names to collection properties)
+/// - Client-side live sync for flat collections: Handled by OpcUaGraphChangeProcessor
 ///
-/// These tests verify the server-side implementation is correct by browsing the OPC UA address space.
-/// Client-side tests are skipped until OpcUaSubjectLoader is enhanced to handle flat collections.
+/// These tests verify both server-side and client-side flat collection synchronization.
 /// </summary>
 [Trait("Category", "Integration")]
 public class OpcUaFlatCollectionTests : IAsyncLifetime
@@ -393,47 +418,197 @@ public class OpcUaFlatCollectionTests : IAsyncLifetime
 
     #endregion
 
-    #region Client-Side Sync Tests (Skipped - Not Yet Implemented)
-
-    // NOTE: Client-side sync for flat collections is NOT yet implemented.
-    // The OpcUaSubjectLoader does not currently handle flat collection items
-    // because nodes like "Sensors[0]" cannot be matched to the "Sensors" property.
-    // These tests document the expected behavior once implemented.
+    #region Client-Side Sync Tests (End-to-End)
 
     /// <summary>
-    /// Tests that client can sync flat collection from server.
-    /// SKIPPED: OpcUaSubjectLoader cannot map "PropertyName[index]" to collection properties.
+    /// End-to-end test: Server has items in flat collection, verify client model has same items with correct values.
+    /// Tests the complete flow: Server model -> OPC UA -> Client model.
     /// </summary>
-    [Fact(Skip = "Flat collection client-side sync not implemented - OpcUaSubjectLoader cannot map indexed browse names to collection properties")]
+    [Fact]
     public async Task FlatCollection_ClientSyncsFromServer()
     {
-        // This test would verify that the client receives flat collection items
-        // once OpcUaSubjectLoader is enhanced to:
-        // 1. Detect browse names like "Sensors[0]", "Sensors[1]" etc.
-        // 2. Group them by property name prefix ("Sensors")
-        // 3. Match the grouped items to the "Sensors" collection property
-        // 4. Load each item as a collection element
-        await Task.CompletedTask;
+        await using var ctx = await StartFlatCollectionWithClientAsync(
+            initialSensors: [
+                ("Sensor1", 10.0),
+                ("Sensor2", 20.0),
+                ("Sensor3", 30.0)
+            ]);
+
+        // Verify server has the correct initial state
+        Assert.Equal(3, ctx.ServerRoot.Sensors.Length);
+        Assert.Equal("Sensor1", ctx.ServerRoot.Sensors[0].SensorId);
+        Assert.Equal(10.0, ctx.ServerRoot.Sensors[0].Value, precision: 1);
+        Assert.Equal("Sensor2", ctx.ServerRoot.Sensors[1].SensorId);
+        Assert.Equal(20.0, ctx.ServerRoot.Sensors[1].Value, precision: 1);
+        Assert.Equal("Sensor3", ctx.ServerRoot.Sensors[2].SensorId);
+        Assert.Equal(30.0, ctx.ServerRoot.Sensors[2].Value, precision: 1);
+        _logger.Log("Server model verified: 3 sensors with correct IDs and values");
+
+        // Wait for client to sync the flat collection count
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => ctx.ClientRoot.Sensors.Length == 3,
+            timeout: TimeSpan.FromSeconds(15),
+            pollInterval: TimeSpan.FromMilliseconds(500),
+            message: "Client should sync 3 sensors from flat collection");
+
+        _logger.Log($"Client synced {ctx.ClientRoot.Sensors.Length} sensors");
+
+        // Wait for all sensor IDs to sync (values may arrive asynchronously)
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                var sensorIds = ctx.ClientRoot.Sensors.Select(s => s.SensorId).ToHashSet();
+                return sensorIds.Contains("Sensor1") &&
+                       sensorIds.Contains("Sensor2") &&
+                       sensorIds.Contains("Sensor3");
+            },
+            timeout: TimeSpan.FromSeconds(10),
+            pollInterval: TimeSpan.FromMilliseconds(500),
+            message: "Client should have all sensor IDs");
+
+        // Verify client has all correct sensor IDs
+        var clientSensorIds = ctx.ClientRoot.Sensors.Select(s => s.SensorId).ToHashSet();
+        Assert.Contains("Sensor1", clientSensorIds);
+        Assert.Contains("Sensor2", clientSensorIds);
+        Assert.Contains("Sensor3", clientSensorIds);
+        _logger.Log("Client has all expected sensor IDs");
+
+        // Wait for sensor values to sync
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                var sensor1 = ctx.ClientRoot.Sensors.FirstOrDefault(s => s.SensorId == "Sensor1");
+                var sensor2 = ctx.ClientRoot.Sensors.FirstOrDefault(s => s.SensorId == "Sensor2");
+                var sensor3 = ctx.ClientRoot.Sensors.FirstOrDefault(s => s.SensorId == "Sensor3");
+                return sensor1 != null && Math.Abs(sensor1.Value - 10.0) < 0.1 &&
+                       sensor2 != null && Math.Abs(sensor2.Value - 20.0) < 0.1 &&
+                       sensor3 != null && Math.Abs(sensor3.Value - 30.0) < 0.1;
+            },
+            timeout: TimeSpan.FromSeconds(10),
+            pollInterval: TimeSpan.FromMilliseconds(500),
+            message: "Client should have all sensor values synced");
+
+        // Verify client has correct values for each sensor
+        var clientSensor1 = ctx.ClientRoot.Sensors.First(s => s.SensorId == "Sensor1");
+        var clientSensor2 = ctx.ClientRoot.Sensors.First(s => s.SensorId == "Sensor2");
+        var clientSensor3 = ctx.ClientRoot.Sensors.First(s => s.SensorId == "Sensor3");
+
+        Assert.Equal(10.0, clientSensor1.Value, precision: 1);
+        Assert.Equal(20.0, clientSensor2.Value, precision: 1);
+        Assert.Equal(30.0, clientSensor3.Value, precision: 1);
+
+        _logger.Log($"Verified: Client model matches server model");
+        _logger.Log($"  Sensor1: ServerValue={ctx.ServerRoot.Sensors[0].Value}, ClientValue={clientSensor1.Value}");
+        _logger.Log($"  Sensor2: ServerValue={ctx.ServerRoot.Sensors[1].Value}, ClientValue={clientSensor2.Value}");
+        _logger.Log($"  Sensor3: ServerValue={ctx.ServerRoot.Sensors[2].Value}, ClientValue={clientSensor3.Value}");
     }
 
     /// <summary>
-    /// Tests that client receives updates when server adds to flat collection.
-    /// SKIPPED: Requires client-side flat collection sync to be implemented first.
+    /// End-to-end test: Server has empty flat collection, verify client model has empty collection.
+    /// Tests that the client correctly synchronizes when no items exist.
     /// </summary>
-    [Fact(Skip = "Flat collection client-side sync not implemented")]
-    public async Task FlatCollection_ClientReceivesServerAdditions()
+    [Fact]
+    public async Task FlatCollection_ClientHandlesEmptyCollection()
     {
-        await Task.CompletedTask;
+        await using var ctx = await StartFlatCollectionWithClientAsync(
+            initialSensors: []);
+
+        // Verify server has empty collection
+        Assert.Empty(ctx.ServerRoot.Sensors);
+        _logger.Log("Server model verified: Empty sensors collection");
+
+        // Wait for client to be fully connected and synced (Connected property should be true)
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => ctx.ClientRoot.Connected,
+            timeout: TimeSpan.FromSeconds(10),
+            pollInterval: TimeSpan.FromMilliseconds(500),
+            message: "Client should be connected");
+
+        // Verify DeviceName synced to ensure full initial sync completed
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => ctx.ClientRoot.DeviceName == "FlatCollectionTestDevice",
+            timeout: TimeSpan.FromSeconds(10),
+            pollInterval: TimeSpan.FromMilliseconds(500),
+            message: "Client should sync DeviceName");
+
+        _logger.Log($"Client synced DeviceName: {ctx.ClientRoot.DeviceName}");
+
+        // Verify client has empty collection (matching server)
+        Assert.Empty(ctx.ClientRoot.Sensors);
+        _logger.Log("Verified: Client model has empty sensors collection (matches server)");
     }
 
     /// <summary>
-    /// Tests that client receives updates when server removes from flat collection.
-    /// SKIPPED: Requires client-side flat collection sync to be implemented first.
+    /// End-to-end test: Server changes sensor values, verify client model receives the updated values.
+    /// Tests live value synchronization for flat collection items.
     /// </summary>
-    [Fact(Skip = "Flat collection client-side sync not implemented")]
-    public async Task FlatCollection_ClientReceivesServerRemovals()
+    [Fact]
+    public async Task FlatCollection_ClientReceivesSensorValues()
     {
-        await Task.CompletedTask;
+        await using var ctx = await StartFlatCollectionWithClientAsync(
+            initialSensors: [
+                ("TempSensor", 98.6),
+                ("PressureSensor", 1013.25)
+            ]);
+
+        // Verify server has correct initial state
+        Assert.Equal(2, ctx.ServerRoot.Sensors.Length);
+        Assert.Equal("TempSensor", ctx.ServerRoot.Sensors[0].SensorId);
+        Assert.Equal(98.6, ctx.ServerRoot.Sensors[0].Value, precision: 2);
+        Assert.Equal("PressureSensor", ctx.ServerRoot.Sensors[1].SensorId);
+        Assert.Equal(1013.25, ctx.ServerRoot.Sensors[1].Value, precision: 2);
+        _logger.Log("Server model verified: 2 sensors with initial values");
+
+        // Wait for client to sync initial collection
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => ctx.ClientRoot.Sensors.Length == 2,
+            timeout: TimeSpan.FromSeconds(15),
+            pollInterval: TimeSpan.FromMilliseconds(500),
+            message: "Client should sync 2 sensors from flat collection");
+
+        // Wait for initial values to sync
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                var temp = ctx.ClientRoot.Sensors.FirstOrDefault(s => s.SensorId == "TempSensor");
+                var pressure = ctx.ClientRoot.Sensors.FirstOrDefault(s => s.SensorId == "PressureSensor");
+                return temp != null && Math.Abs(temp.Value - 98.6) < 0.1 &&
+                       pressure != null && Math.Abs(pressure.Value - 1013.25) < 0.1;
+            },
+            timeout: TimeSpan.FromSeconds(10),
+            pollInterval: TimeSpan.FromMilliseconds(500),
+            message: "Client should have initial sensor values");
+
+        _logger.Log("Client synced initial values");
+
+        // Act: Server changes sensor values
+        ctx.ServerRoot.Sensors[0].Value = 100.5;  // TempSensor value change
+        ctx.ServerRoot.Sensors[1].Value = 1020.0; // PressureSensor value change
+        _logger.Log("Server changed sensor values: TempSensor=100.5, PressureSensor=1020.0");
+
+        // Assert: Wait for client to receive the value changes
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                var temp = ctx.ClientRoot.Sensors.FirstOrDefault(s => s.SensorId == "TempSensor");
+                var pressure = ctx.ClientRoot.Sensors.FirstOrDefault(s => s.SensorId == "PressureSensor");
+                return temp != null && Math.Abs(temp.Value - 100.5) < 0.1 &&
+                       pressure != null && Math.Abs(pressure.Value - 1020.0) < 0.1;
+            },
+            timeout: TimeSpan.FromSeconds(15),
+            pollInterval: TimeSpan.FromMilliseconds(500),
+            message: "Client should receive updated sensor values from server");
+
+        // Verify final client state matches server
+        var clientTempSensor = ctx.ClientRoot.Sensors.First(s => s.SensorId == "TempSensor");
+        var clientPressureSensor = ctx.ClientRoot.Sensors.First(s => s.SensorId == "PressureSensor");
+
+        Assert.Equal(100.5, clientTempSensor.Value, precision: 1);
+        Assert.Equal(1020.0, clientPressureSensor.Value, precision: 1);
+
+        _logger.Log($"Verified: Client received value changes");
+        _logger.Log($"  TempSensor: ServerValue={ctx.ServerRoot.Sensors[0].Value}, ClientValue={clientTempSensor.Value}");
+        _logger.Log($"  PressureSensor: ServerValue={ctx.ServerRoot.Sensors[1].Value}, ClientValue={clientPressureSensor.Value}");
     }
 
     #endregion
@@ -490,6 +665,116 @@ public class OpcUaFlatCollectionTests : IAsyncLifetime
             Port = port,
             Logger = _logger,
             BrowseSession = browseSession
+        };
+    }
+
+    private async Task<FlatCollectionBidirectionalContext> StartFlatCollectionWithClientAsync(
+        (string id, double value)[] initialSensors,
+        bool enableLiveSync = true)
+    {
+        var port = await OpcUaTestPortPool.AcquireAsync();
+
+        // Start server
+        var serverBuilder = Host.CreateApplicationBuilder();
+        ConfigureHost(serverBuilder, "FlatCollectionServer");
+
+        var serverContext = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithDataAnnotationValidation()
+            .WithHostedServices(serverBuilder.Services);
+
+        var serverRoot = new FlatSyncRoot(serverContext)
+        {
+            Connected = true,
+            DeviceName = "FlatCollectionTestDevice",
+            Sensors = initialSensors
+                .Select(s => new FlatSensor(serverContext) { SensorId = s.id, Value = s.value })
+                .ToArray()
+        };
+
+        serverBuilder.Services.AddSingleton(serverRoot);
+        serverBuilder.Services.AddOpcUaSubjectServer(
+            sp => sp.GetRequiredService<FlatSyncRoot>(),
+            sp => CreateServerConfiguration(sp, port, enableLiveSync));
+
+        var serverHost = serverBuilder.Build();
+        await serverHost.StartAsync();
+        _logger.Log($"Server started with {initialSensors.Length} sensors");
+
+        await Task.Delay(500);
+
+        // Start client
+        var clientBuilder = Host.CreateApplicationBuilder();
+        ConfigureHost(clientBuilder, "FlatCollectionClient");
+
+        var clientContext = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithDataAnnotationValidation()
+            .WithHostedServices(clientBuilder.Services);
+
+        var clientRoot = new FlatSyncRoot(clientContext)
+        {
+            Connected = false,
+            DeviceName = "",
+            Sensors = []
+        };
+
+        clientBuilder.Services.AddSingleton(clientRoot);
+        clientBuilder.Services.AddOpcUaSubjectClientSource(
+            sp => sp.GetRequiredService<FlatSyncRoot>(),
+            sp => CreateClientConfiguration(sp, port));
+
+        var clientHost = clientBuilder.Build();
+        await clientHost.StartAsync();
+        _logger.Log("Client started");
+
+        // Wait for client to connect
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => clientRoot.Connected,
+            timeout: TimeSpan.FromSeconds(30),
+            message: "Client should connect and sync Connected property");
+
+        _logger.Log("Client connected and synced");
+
+        return new FlatCollectionBidirectionalContext
+        {
+            ServerHost = serverHost,
+            ServerRoot = serverRoot,
+            ServerContext = serverContext,
+            ClientHost = clientHost,
+            ClientRoot = clientRoot,
+            ClientContext = clientContext,
+            Port = port,
+            Logger = _logger
+        };
+    }
+
+    private OpcUaClientConfiguration CreateClientConfiguration(
+        IServiceProvider serviceProvider,
+        PortLease port)
+    {
+        var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
+        var telemetryContext = DefaultTelemetry.Create(b =>
+            b.Services.AddSingleton(loggerFactory));
+
+        return new OpcUaClientConfiguration
+        {
+            ServerUrl = port.ServerUrl,
+            RootName = "FlatRoot",
+            TypeResolver = new OpcUaTypeResolver(serviceProvider.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
+            ValueConverter = new OpcUaValueConverter(),
+            SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
+            TelemetryContext = telemetryContext,
+            CertificateStoreBasePath = $"{port.CertificateStoreBasePath}/flat-client",
+            EnableLiveSync = true,
+            EnableModelChangeEvents = true,
+            BufferTime = TimeSpan.FromMilliseconds(50)
         };
     }
 
