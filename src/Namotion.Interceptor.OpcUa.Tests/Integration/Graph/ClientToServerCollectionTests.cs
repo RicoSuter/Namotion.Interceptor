@@ -18,6 +18,73 @@ public class ClientToServerCollectionTests : SharedServerTestBase
         : base(serverFixture, output) { }
 
     [Fact]
+    public async Task RemoveFromContainerWithPreExistingItems_IndexTracking()
+    {
+        var clientArea = Client!.Root!.ClientToServerCollection;
+        var serverArea = ServerFixture.ServerRoot.ClientToServerCollection;
+
+        var testId = Guid.NewGuid().ToString("N")[..8];
+
+        // Log initial state
+        Logger.Log($"Initial client ContainerItems: {clientArea.ContainerItems.Length} items");
+        Logger.Log($"Initial server ContainerItems: {serverArea.ContainerItems.Length} items");
+        foreach (var p in clientArea.ContainerItems)
+            Logger.Log($"  Client[{Array.IndexOf(clientArea.ContainerItems, p)}]: {p.FirstName}");
+        foreach (var p in serverArea.ContainerItems)
+            Logger.Log($"  Server[{Array.IndexOf(serverArea.ContainerItems, p)}]: {p.FirstName}");
+
+        // Add two new persons
+        var person1 = new NestedPerson(Client.Context) { FirstName = $"Keep_{testId}", LastName = "Test" };
+        var person2 = new NestedPerson(Client.Context) { FirstName = $"Remove_{testId}", LastName = "Test" };
+
+        Logger.Log($"Adding person1: Keep_{testId} and person2: Remove_{testId}");
+        clientArea.ContainerItems = [..clientArea.ContainerItems, person1, person2];
+
+        Logger.Log($"Client array after add: {clientArea.ContainerItems.Length} items");
+        foreach (var p in clientArea.ContainerItems)
+            Logger.Log($"  Client[{Array.IndexOf(clientArea.ContainerItems, p)}]: {p.FirstName}");
+
+        // Wait for both to sync to server
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverArea.ContainerItems.Any(p => p.FirstName == $"Keep_{testId}") &&
+                  serverArea.ContainerItems.Any(p => p.FirstName == $"Remove_{testId}"),
+            timeout: TimeSpan.FromSeconds(30),
+            pollInterval: TimeSpan.FromMilliseconds(500),
+            message: "Server should have both new items");
+
+        Logger.Log($"Server after sync: {serverArea.ContainerItems.Length} items");
+        foreach (var p in serverArea.ContainerItems)
+            Logger.Log($"  Server[{Array.IndexOf(serverArea.ContainerItems, p)}]: {p.FirstName}");
+
+        // Now remove person2 (Remove_{testId})
+        Logger.Log($"Removing person2: Remove_{testId}");
+        var itemsToKeep = clientArea.ContainerItems.Where(p => p.FirstName != $"Remove_{testId}").ToArray();
+        clientArea.ContainerItems = itemsToKeep;
+
+        Logger.Log($"Client array after remove: {clientArea.ContainerItems.Length} items");
+        foreach (var p in clientArea.ContainerItems)
+            Logger.Log($"  Client[{Array.IndexOf(clientArea.ContainerItems, p)}]: {p.FirstName}");
+
+        // Wait for server to update
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                var hasRemoved = serverArea.ContainerItems.Any(p => p.FirstName == $"Remove_{testId}");
+                var hasKeep = serverArea.ContainerItems.Any(p => p.FirstName == $"Keep_{testId}");
+                Logger.Log($"Polling: hasKeep={hasKeep}, hasRemoved={hasRemoved}, count={serverArea.ContainerItems.Length}");
+                foreach (var p in serverArea.ContainerItems)
+                    Logger.Log($"  Server[{Array.IndexOf(serverArea.ContainerItems, p)}]: {p.FirstName}");
+                return !hasRemoved && hasKeep;
+            },
+            timeout: TimeSpan.FromSeconds(30),
+            pollInterval: TimeSpan.FromMilliseconds(500),
+            message: "Server should have Keep but not Remove");
+
+        Assert.Contains(serverArea.ContainerItems, p => p.FirstName == $"Keep_{testId}");
+        Assert.DoesNotContain(serverArea.ContainerItems, p => p.FirstName == $"Remove_{testId}");
+    }
+
+    [Fact]
     public async Task AddToContainerCollection_ServerReceivesChange()
     {
         var clientArea = Client!.Root!.ClientToServerCollection;
