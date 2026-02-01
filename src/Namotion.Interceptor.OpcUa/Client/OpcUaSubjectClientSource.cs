@@ -32,7 +32,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
     private readonly ConnectorReferenceCounter<List<MonitoredItem>> _subjectRefCounter = new();
-    private readonly SubjectTracker _subjectTracker = new();
+    private readonly ConnectorSubjectMapping<NodeId> _subjectMapping = new();
 
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private volatile bool _isStarted;
@@ -109,7 +109,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
             if (isLast)
             {
-                _subjectTracker.UntrackSubject(subject, out nodeIdToDelete);
+                _subjectMapping.Unregister(subject, out nodeIdToDelete);
 
                 _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
                 _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
@@ -191,7 +191,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         var isFirst = _subjectRefCounter.IncrementAndCheckFirst(subject, monitoredItemsFactory, out _);
         if (isFirst)
         {
-            _subjectTracker.TrackSubject(subject, nodeId);
+            _subjectMapping.Register(subject, nodeId);
         }
         return isFirst;
     }
@@ -204,7 +204,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// <returns>True if the subject is tracked, false otherwise.</returns>
     internal bool TryGetSubjectNodeId(IInterceptorSubject subject, out NodeId? nodeId)
     {
-        return _subjectTracker.TryGetNodeId(subject, out nodeId);
+        return _subjectMapping.TryGetExternalId(subject, out nodeId);
     }
 
     /// <summary>
@@ -247,7 +247,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// <returns>All tracked subjects.</returns>
     internal IEnumerable<IInterceptorSubject> GetTrackedSubjects()
     {
-        return _subjectTracker.GetAllSubjects();
+        return _subjectMapping.GetAllSubjects();
     }
 
     public OpcUaSubjectClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger logger)
@@ -858,6 +858,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
         // Clear reference counter and NodeId mapping for fresh resync
         _subjectRefCounter.Clear();
-        _subjectTracker.Clear();
+        _subjectMapping.Clear();
     }
 }

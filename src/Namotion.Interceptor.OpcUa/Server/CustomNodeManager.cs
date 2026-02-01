@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.OpcUa.Server.Graph;
 using Namotion.Interceptor.Registry;
@@ -129,17 +130,24 @@ internal class CustomNodeManager : CustomNodeManager2
     /// Removes nodes for a detached subject. Idempotent - safe to call multiple times.
     /// Uses DeleteNode to properly cleanup nodes and event handlers, preventing memory leaks.
     /// Uses reference counting - only deletes the node when the last reference is removed.
+    /// For shared subjects (multiple references), removes only the reference from the specified parent and sends ReferenceDeleted.
     /// </summary>
-    public void RemoveSubjectNodes(IInterceptorSubject subject)
+    /// <param name="subject">The subject being removed.</param>
+    /// <param name="sourceProperty">The property from which the subject is being removed (for shared subject reference removal).</param>
+    public void RemoveSubjectNodes(IInterceptorSubject subject, RegisteredSubjectProperty? sourceProperty = null)
     {
         _structureLock.Wait();
         try
         {
+            // Get the node state BEFORE decrementing (needed for ReferenceDeleted when not last)
+            _subjectRefCounter.TryGetData(subject, out var existingNodeState);
+
             // Decrement reference count and check if this was the last reference
             var isLast = _subjectRefCounter.DecrementAndCheckLast(subject, out var nodeState);
 
             _logger.LogDebug("RemoveSubjectNodes: subject={SubjectType}, isLast={IsLast}, hasNodeState={HasNodeState}, nodeId={NodeId}",
-                subject.GetType().Name, isLast, nodeState is not null, nodeState?.NodeId?.ToString() ?? "null");
+                subject.GetType().Name, isLast, nodeState is not null || existingNodeState is not null,
+                (nodeState ?? existingNodeState)?.NodeId?.ToString() ?? "null");
 
             if (isLast && nodeState is not null)
             {
@@ -165,11 +173,139 @@ internal class CustomNodeManager : CustomNodeManager2
                 // Queue model change event for node deletion
                 _modelChangePublisher.QueueChange(nodeState.NodeId, ModelChangeStructureVerbMask.NodeDeleted);
             }
+            else if (!isLast && existingNodeState is not null)
+            {
+                // Shared subject: removed from one parent but still exists in others
+                // Remove the reference from the specific parent container
+                if (sourceProperty is not null)
+                {
+                    RemoveReferenceFromParentProperty(sourceProperty, existingNodeState);
+                }
+
+                // Send ReferenceDeleted so clients know to remove from their collections
+                _logger.LogDebug(
+                    "RemoveSubjectNodes: Shared subject {SubjectType} removed from one parent, sending ReferenceDeleted for NodeId {NodeId}",
+                    subject.GetType().Name, existingNodeState.NodeId);
+                _modelChangePublisher.QueueChange(existingNodeState.NodeId, ModelChangeStructureVerbMask.ReferenceDeleted);
+            }
         }
         finally
         {
             _structureLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Removes a child node reference from a specific parent property's container.
+    /// Used for shared subjects where the node still exists but needs to be removed from one parent's collection.
+    /// </summary>
+    private void RemoveReferenceFromParentProperty(RegisteredSubjectProperty parentProperty, NodeState childNodeState)
+    {
+        var parentSubject = parentProperty.Subject;
+        if (parentSubject is null)
+        {
+            return;
+        }
+
+        // Get the parent subject's node - handle root subject specially
+        NodeState? parentNodeState = null;
+        if (ReferenceEquals(parentSubject, _subject))
+        {
+            // Parent is the root subject - get the root node
+            var rootNodeId = _configuration.RootName is not null
+                ? new NodeId(_configuration.RootName, NamespaceIndex)
+                : ObjectIds.ObjectsFolder;
+            parentNodeState = FindNodeInAddressSpace(rootNodeId);
+        }
+        else if (!_subjectRefCounter.TryGetData(parentSubject, out parentNodeState) || parentNodeState is null)
+        {
+            _logger.LogDebug(
+                "RemoveReferenceFromParentProperty: Parent subject {ParentType} has no node state",
+                parentSubject.GetType().Name);
+            return;
+        }
+
+        if (parentNodeState is null)
+        {
+            _logger.LogDebug(
+                "RemoveReferenceFromParentProperty: Could not find node state for parent subject {ParentType}",
+                parentSubject.GetType().Name);
+            return;
+        }
+
+        // For collection/dictionary properties, the parent is the container node
+        var propertyName = parentProperty.ResolvePropertyName(_nodeMapper);
+        if (propertyName is null)
+        {
+            return;
+        }
+
+        NodeState? containerNode = null;
+
+        if (parentProperty.IsSubjectCollection || parentProperty.IsSubjectDictionary)
+        {
+            // Check for flat collection mode
+            var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(parentProperty);
+            var isFlat = nodeConfiguration?.CollectionStructure == CollectionNodeStructure.Flat;
+
+            if (isFlat)
+            {
+                // Flat mode: container is the parent node itself
+                containerNode = parentNodeState;
+            }
+            else
+            {
+                // Container mode: need to find the container node by path-based NodeId
+                // Container nodes have IDs like "Root.PropertyName"
+                string containerPath;
+                if (parentNodeState.NodeId.IdType == IdType.String &&
+                    parentNodeState.NodeId.Identifier is string parentPath)
+                {
+                    containerPath = $"{parentPath}.{propertyName}";
+                }
+                else if (ReferenceEquals(parentSubject, _subject) && _configuration.RootName is not null)
+                {
+                    containerPath = $"{_configuration.RootName}.{propertyName}";
+                }
+                else
+                {
+                    containerPath = propertyName;
+                }
+
+                var containerNodeId = new NodeId(containerPath, NamespaceIndex);
+                containerNode = FindNodeInAddressSpace(containerNodeId);
+            }
+        }
+        else if (parentProperty.IsSubjectReference)
+        {
+            // Direct reference: container is the parent node
+            containerNode = parentNodeState;
+        }
+
+        if (containerNode is null)
+        {
+            _logger.LogDebug(
+                "RemoveReferenceFromParentProperty: Container not found for {ParentType}.{Property}",
+                parentSubject.GetType().Name, parentProperty.Name);
+            return;
+        }
+
+        // Remove the reference from the container to the child
+        // For shared subjects added via AddReference, we need to remove the reference
+        var referenceTypeId = ReferenceTypeIds.HasComponent; // Default, could be configured
+
+        // First try to remove the child if it was added as a child node
+        if (childNodeState is BaseInstanceState instanceState)
+        {
+            containerNode.RemoveChild(instanceState);
+        }
+
+        // Also remove any explicit references (for shared subjects)
+        containerNode.RemoveReference(referenceTypeId, false, childNodeState.NodeId);
+
+        _logger.LogDebug(
+            "RemoveReferenceFromParentProperty: Removed reference from {ContainerNodeId} to {ChildNodeId}",
+            containerNode.NodeId, childNodeState.NodeId);
     }
 
     /// <summary>
