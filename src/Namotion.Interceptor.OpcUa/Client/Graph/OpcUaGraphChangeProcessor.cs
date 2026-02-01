@@ -1,5 +1,6 @@
 using System.Collections;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Graph;
 using Namotion.Interceptor.Registry;
@@ -283,13 +284,17 @@ internal class OpcUaGraphChangeProcessor
 
                 // Add to collection FIRST - this attaches the subject to the parent which registers it
                 // The subject must be registered before LoadSubjectAsync can set up monitored items
-                if (!SubjectPropertyHelper.AddToCollection(property, newSubject, _source))
+                var currentCollection = property.GetValue() as IEnumerable<IInterceptorSubject?>;
+                if (currentCollection is null)
                 {
                     _logger.LogWarning(
-                        "Cannot add to collection property '{PropertyName}': value is not an array.",
+                        "Cannot add to collection property '{PropertyName}': value is not a collection.",
                         property.Name);
                     continue;
                 }
+
+                var newCollection = DefaultSubjectFactory.Instance.AppendSubjectsToCollection(currentCollection, newSubject);
+                property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newCollection);
 
                 // Now load and set up monitoring - subject is now registered
                 var monitoredItems = await _subjectLoader.LoadSubjectAsync(
@@ -312,11 +317,18 @@ internal class OpcUaGraphChangeProcessor
         // Process removals
         if (indicesToRemove.Count > 0)
         {
-            if (!SubjectPropertyHelper.RemoveFromCollectionByIndices(property, indicesToRemove, _source))
+            var currentCollectionForRemoval = property.GetValue() as IEnumerable<IInterceptorSubject?>;
+            if (currentCollectionForRemoval is null)
             {
                 _logger.LogWarning(
-                    "Could not remove {RemovedCount} subjects from collection property '{PropertyName}'.",
+                    "Could not remove {RemovedCount} subjects from collection property '{PropertyName}': value is not a collection.",
                     indicesToRemove.Count, property.Name);
+            }
+            else
+            {
+                var newCollectionAfterRemoval = DefaultSubjectFactory.Instance.RemoveSubjectsFromCollection(
+                    currentCollectionForRemoval, indicesToRemove.ToArray());
+                property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newCollectionAfterRemoval);
             }
         }
     }
@@ -396,13 +408,18 @@ internal class OpcUaGraphChangeProcessor
 
                 // Add to dictionary FIRST - this attaches the subject to the parent which registers it
                 // The subject must be registered before LoadSubjectAsync can set up monitored items
-                if (!SubjectPropertyHelper.AddToDictionary(property, key, newSubject, _source))
+                var currentDictionary = property.GetValue() as IDictionary;
+                if (currentDictionary is null)
                 {
                     _logger.LogWarning(
-                        "Cannot add to dictionary property '{PropertyName}': value is not a Dictionary<,>.",
+                        "Cannot add to dictionary property '{PropertyName}': value is not a dictionary.",
                         property.Name);
                     continue;
                 }
+
+                var newDictionary = DefaultSubjectFactory.Instance.AppendEntriesToDictionary(
+                    currentDictionary, new KeyValuePair<object, IInterceptorSubject>(key, newSubject));
+                property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newDictionary);
                 localChildren = property.Children.ToDictionary(c => c.Index?.ToString() ?? "", c => c.Subject);
 
                 // Now load and set up monitoring - subject is now registered
@@ -426,11 +443,18 @@ internal class OpcUaGraphChangeProcessor
         // Process removals
         if (keysToRemove.Count > 0)
         {
-            if (!SubjectPropertyHelper.RemoveFromDictionary(property, keysToRemove, _source))
+            var currentDictionaryForRemoval = property.GetValue() as IDictionary;
+            if (currentDictionaryForRemoval is null)
             {
                 _logger.LogWarning(
-                    "Could not remove {RemovedCount} entries from dictionary property '{PropertyName}'.",
+                    "Could not remove {RemovedCount} entries from dictionary property '{PropertyName}': value is not a dictionary.",
                     keysToRemove.Count, property.Name);
+            }
+            else
+            {
+                var newDictionaryAfterRemoval = DefaultSubjectFactory.Instance.RemoveEntriesFromDictionary(
+                    currentDictionaryForRemoval, keysToRemove.Cast<object>().ToArray());
+                property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newDictionaryAfterRemoval);
             }
         }
     }
@@ -486,7 +510,7 @@ internal class OpcUaGraphChangeProcessor
 
             // Set property value FIRST - this attaches the subject to the parent which registers it
             // The subject must be registered before LoadSubjectAsync can set up monitored items
-            SubjectPropertyHelper.SetReference(property, newSubject, _source);
+            property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newSubject);
 
             // Now load and set up monitoring - subject is now registered
             var monitoredItems = await _subjectLoader.LoadSubjectAsync(
@@ -518,7 +542,7 @@ internal class OpcUaGraphChangeProcessor
             {
                 UnregisterSubjectNodeId(oldNodeId);
             }
-            SubjectPropertyHelper.SetReference(property, null, _source);
+            property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, null);
         }
     }
 
@@ -554,7 +578,7 @@ internal class OpcUaGraphChangeProcessor
             else if (verb.HasFlag(ModelChangeStructureVerbMask.ReferenceDeleted))
             {
                 // A reference was deleted
-                ProcessReferenceDeleted(affectedNodeId);
+                await ProcessReferenceDeletedAsync(affectedNodeId, session, cancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -721,7 +745,7 @@ internal class OpcUaGraphChangeProcessor
         if (parentProperty.IsSubjectReference)
         {
             // Clear the reference property
-            SubjectPropertyHelper.SetReference(parentProperty, null, _source);
+            parentProperty.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, null);
         }
         else if (parentProperty.IsSubjectCollection)
         {
@@ -731,7 +755,19 @@ internal class OpcUaGraphChangeProcessor
             {
                 if (ReferenceEquals(children[i].Subject, deletedSubject) && children[i].Index is int index)
                 {
-                    SubjectPropertyHelper.RemoveFromCollectionByIndices(parentProperty, [index], _source); // TODO: Add warning when failed, same as other places
+                    var currentCollectionValue = parentProperty.GetValue() as IEnumerable<IInterceptorSubject?>;
+                    if (currentCollectionValue is not null)
+                    {
+                        var newCollectionValue = DefaultSubjectFactory.Instance.RemoveSubjectsFromCollection(
+                            currentCollectionValue, index);
+                        parentProperty.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newCollectionValue);
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "ProcessNodeDeleted: Could not remove subject from collection property '{PropertyName}': value is not a collection.",
+                            parentProperty.Name);
+                    }
                     break;
                 }
             }
@@ -741,19 +777,21 @@ internal class OpcUaGraphChangeProcessor
             // Remove from dictionary
             if (parentProperty.GetValue() is IDictionary dictionary)
             {
-                string? keyToRemove = null;
-                foreach (System.Collections.DictionaryEntry entry in dictionary)
+                object? keyToRemove = null;
+                foreach (DictionaryEntry entry in dictionary)
                 {
                     if (ReferenceEquals(entry.Value, deletedSubject))
                     {
-                        keyToRemove = entry.Key as string;
+                        keyToRemove = entry.Key;
                         break;
                     }
                 }
 
                 if (keyToRemove is not null)
                 {
-                    SubjectPropertyHelper.RemoveFromDictionary(parentProperty, [keyToRemove], _source); // TODO: Add warning when failed, same as other places
+                    var newDictionaryValue = DefaultSubjectFactory.Instance.RemoveEntriesFromDictionary(
+                        dictionary, keyToRemove);
+                    parentProperty.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newDictionaryValue);
                 }
             }
         }
@@ -761,94 +799,416 @@ internal class OpcUaGraphChangeProcessor
 
     private async Task ProcessReferenceAddedAsync(NodeId childNodeId, ISession session, CancellationToken cancellationToken)
     {
+        _logger.LogDebug("ProcessReferenceAddedAsync: Processing ReferenceAdded for NodeId {NodeId}", childNodeId);
+
         // Only handle if we track this child subject
         if (!_nodeIdToSubject.TryGetValue(childNodeId, out var childSubject))
         {
+            _logger.LogDebug("ProcessReferenceAddedAsync: NodeId {NodeId} not found in tracked subjects", childNodeId);
             return;
         }
 
-        // Browse inverse references to find all current parents
-        var parentRefs = await OpcUaBrowseHelper.BrowseInverseReferencesAsync(
-            session, childNodeId, cancellationToken).ConfigureAwait(false);
+        _logger.LogDebug("ProcessReferenceAddedAsync: Found tracked subject {Type} for NodeId {NodeId}",
+            childSubject.GetType().Name, childNodeId);
 
-        foreach (var parentRef in parentRefs)
+        // Since ReferenceAdded doesn't tell us WHICH parent added the reference,
+        // we need to check all tracked subjects' collection/dictionary properties
+        // to see if any should now contain this child.
+
+        await ProcessTrackedSubjectPropertiesAsync(
+            childNodeId,
+            childSubject,
+            session,
+            cancellationToken,
+            isReferenceAdded: true).ConfigureAwait(false);
+    }
+
+    private async Task ProcessReferenceDeletedAsync(NodeId childNodeId, ISession session, CancellationToken cancellationToken)
+    {
+        _logger.LogDebug("ProcessReferenceDeleted: Processing ReferenceDeleted for NodeId {NodeId}", childNodeId);
+
+        // Only handle if we track this child subject
+        if (!_nodeIdToSubject.TryGetValue(childNodeId, out var childSubject))
         {
-            var parentNodeId = ExpandedNodeId.ToNodeId(parentRef.NodeId, session.NamespaceUris);
+            _logger.LogDebug("ProcessReferenceDeleted: NodeId {NodeId} not found in tracked subjects", childNodeId);
+            return;
+        }
 
-            // Check if we track this parent
-            if (!_nodeIdToSubject.TryGetValue(parentNodeId, out var parentSubject))
+        _logger.LogDebug("ProcessReferenceDeleted: Found tracked subject {Type} for NodeId {NodeId}",
+            childSubject.GetType().Name, childNodeId);
+
+        // Find all tracked parents that currently reference this child
+        // We need to check the SERVER to see which containers still have the reference
+        await ProcessTrackedSubjectPropertiesAsync(
+            childNodeId,
+            childSubject,
+            session,
+            cancellationToken,
+            isReferenceAdded: false).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Iterates over all tracked subjects and their properties, processing reference changes.
+    /// This is the common iteration logic extracted from ProcessReferenceAddedAsync and ProcessReferenceDeletedAsync.
+    /// </summary>
+    private async Task ProcessTrackedSubjectPropertiesAsync(
+        NodeId childNodeId,
+        IInterceptorSubject childSubject,
+        ISession session,
+        CancellationToken cancellationToken,
+        bool isReferenceAdded)
+    {
+        foreach (var trackedSubject in _source.GetTrackedSubjects())
+        {
+            var registeredSubject = trackedSubject.TryGetRegisteredSubject();
+            if (registeredSubject is null)
             {
                 continue;
             }
 
-            var registeredParent = parentSubject.TryGetRegisteredSubject();
-            if (registeredParent is null)
+            // Get this subject's NodeId to browse its containers
+            if (!_source.TryGetSubjectNodeId(trackedSubject, out var subjectNodeId) || subjectNodeId is null)
             {
                 continue;
             }
 
-            // Find reference property that should point to child
-            foreach (var property in registeredParent.Properties)
+            foreach (var property in registeredSubject.Properties)
             {
-                // TODO: Could it also be referenced by collection or dictionary property (then we need to check children)?
-                if (!property.IsSubjectReference)
+                if (property.IsSubjectReference)
                 {
-                    continue;
+                    await ProcessReferencePropertyChangeAsync(
+                        property, trackedSubject, subjectNodeId, childNodeId, childSubject,
+                        session, cancellationToken, isReferenceAdded).ConfigureAwait(false);
                 }
-
-                // If property is null locally, set it to the child
-                var currentValue = property.GetValue();
-                if (currentValue is null)
+                else if (property.IsSubjectCollection)
                 {
-                    var now = DateTimeOffset.UtcNow;
-                    SubjectPropertyHelper.SetReference(property, childSubject, _source, now, now);
-                    _logger.LogDebug(
-                        "ReferenceAdded: Set {ParentType}.{Property} = {ChildType}",
-                        parentSubject.GetType().Name,
-                        property.Name,
-                        childSubject.GetType().Name);
+                    await ProcessCollectionPropertyChangeAsync(
+                        property, trackedSubject, subjectNodeId, childNodeId, childSubject,
+                        session, cancellationToken, isReferenceAdded).ConfigureAwait(false);
+                }
+                else if (property.IsSubjectDictionary)
+                {
+                    await ProcessDictionaryPropertyChangeAsync(
+                        property, trackedSubject, subjectNodeId, childNodeId, childSubject,
+                        session, cancellationToken, isReferenceAdded).ConfigureAwait(false);
                 }
             }
         }
     }
 
-    private void ProcessReferenceDeleted(NodeId childNodeId)
+    /// <summary>
+    /// Processes reference property changes (add or delete) for a single reference property.
+    /// </summary>
+    private async Task ProcessReferencePropertyChangeAsync(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject trackedSubject,
+        NodeId subjectNodeId,
+        NodeId childNodeId,
+        IInterceptorSubject childSubject,
+        ISession session,
+        CancellationToken cancellationToken,
+        bool isReferenceAdded)
     {
-        // Only handle if we track this child subject
-        if (!_nodeIdToSubject.TryGetValue(childNodeId, out var childSubject))
+        var currentValue = property.GetValue();
+        var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
+        if (propertyName is null)
         {
             return;
         }
 
-        // Find all tracked parents that currently reference this child
-        lock (_nodeIdToSubjectLock)
+        if (isReferenceAdded)
         {
-            foreach (var (_, parentSubject) in _nodeIdToSubject)
+            // For add: only process if currently null
+            if (currentValue is not null)
             {
-                var registeredParent = parentSubject.TryGetRegisteredSubject();
-                if (registeredParent is null)
+                return;
+            }
+
+            var childRefNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(
+                session, subjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
+
+            if (childRefNodeId is not null && childRefNodeId.Equals(childNodeId))
+            {
+                var now = DateTimeOffset.UtcNow;
+                property.SetValueFromSource(_source, now, now, childSubject);
+                _logger.LogDebug(
+                    "ReferenceAdded: Set {ParentType}.{Property} = {ChildType}",
+                    trackedSubject.GetType().Name,
+                    property.Name,
+                    childSubject.GetType().Name);
+            }
+        }
+        else
+        {
+            // For delete: only process if currently references the child
+            if (!ReferenceEquals(currentValue, childSubject))
+            {
+                return;
+            }
+
+            var refNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(
+                session, subjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
+
+            if (refNodeId is null || !refNodeId.Equals(childNodeId))
+            {
+                // Reference no longer exists on server - remove it
+                var now = DateTimeOffset.UtcNow;
+                property.SetValueFromSource(_source, now, now, null);
+                _logger.LogDebug(
+                    "ReferenceDeleted: Cleared {ParentType}.{Property}",
+                    trackedSubject.GetType().Name,
+                    property.Name);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the container NodeId for a collection property, handling both flat and container modes.
+    /// </summary>
+    private async Task<NodeId?> GetCollectionContainerNodeIdAsync(
+        RegisteredSubjectProperty property,
+        NodeId subjectNodeId,
+        string propertyName,
+        ISession session,
+        CancellationToken cancellationToken)
+    {
+        var nodeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(property);
+        var collectionStructure = nodeConfiguration?.CollectionStructure ?? CollectionNodeStructure.Container;
+
+        if (collectionStructure == CollectionNodeStructure.Flat)
+        {
+            return subjectNodeId;
+        }
+
+        return await OpcUaBrowseHelper.FindChildNodeIdAsync(
+            session, subjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Checks if a container contains a child node by browsing the container.
+    /// Returns the matching ReferenceDescription if found, null otherwise.
+    /// </summary>
+    private async Task<ReferenceDescription?> FindChildInContainerAsync(
+        NodeId containerNodeId,
+        NodeId childNodeId,
+        ISession session,
+        CancellationToken cancellationToken)
+    {
+        var containerChildren = await OpcUaBrowseHelper.BrowseNodeAsync(
+            session, containerNodeId, cancellationToken).ConfigureAwait(false);
+
+        foreach (var child in containerChildren)
+        {
+            var refNodeId = ExpandedNodeId.ToNodeId(child.NodeId, session.NamespaceUris);
+            if (refNodeId.Equals(childNodeId))
+            {
+                return child;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Processes collection property changes (add or delete) for a single collection property.
+    /// </summary>
+    private async Task ProcessCollectionPropertyChangeAsync(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject trackedSubject,
+        NodeId subjectNodeId,
+        NodeId childNodeId,
+        IInterceptorSubject childSubject,
+        ISession session,
+        CancellationToken cancellationToken,
+        bool isReferenceAdded)
+    {
+        var children = property.Children;
+        var containsChild = children.Any(c => ReferenceEquals(c.Subject, childSubject));
+
+        // For add: skip if already contains; for delete: skip if doesn't contain
+        if (isReferenceAdded && containsChild)
+        {
+            return;
+        }
+        if (!isReferenceAdded && !containsChild)
+        {
+            return;
+        }
+
+        var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
+        if (propertyName is null)
+        {
+            return;
+        }
+
+        var containerNodeId = await GetCollectionContainerNodeIdAsync(
+            property, subjectNodeId, propertyName, session, cancellationToken).ConfigureAwait(false);
+
+        if (containerNodeId is null)
+        {
+            return;
+        }
+
+        var childInContainer = await FindChildInContainerAsync(
+            containerNodeId, childNodeId, session, cancellationToken).ConfigureAwait(false);
+
+        if (isReferenceAdded)
+        {
+            if (childInContainer is not null)
+            {
+                // Add to collection
+                var currentCollection = property.GetValue() as IEnumerable<IInterceptorSubject?>;
+                if (currentCollection is not null)
                 {
-                    continue;
+                    var newCollection = DefaultSubjectFactory.Instance.AppendSubjectsToCollection(
+                        currentCollection, childSubject);
+                    property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newCollection);
+                    _logger.LogDebug(
+                        "ReferenceAdded: Added {ChildType} to collection {ParentType}.{Property}",
+                        childSubject.GetType().Name,
+                        trackedSubject.GetType().Name,
+                        property.Name);
                 }
-
-                foreach (var property in registeredParent.Properties)
+            }
+        }
+        else
+        {
+            if (childInContainer is null)
+            {
+                // Child no longer in this container - remove it from the local collection
+                for (var i = 0; i < children.Length; i++)
                 {
-                    if (!property.IsSubjectReference)
+                    if (ReferenceEquals(children[i].Subject, childSubject) && children[i].Index is int index)
                     {
-                        continue;
+                        var currentCollection = property.GetValue() as IEnumerable<IInterceptorSubject?>;
+                        if (currentCollection is not null)
+                        {
+                            var newCollection = DefaultSubjectFactory.Instance.RemoveSubjectsFromCollection(
+                                currentCollection, index);
+                            property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newCollection);
+                            _logger.LogDebug(
+                                "ReferenceDeleted: Removed {ChildType} from collection {ParentType}.{Property}",
+                                childSubject.GetType().Name,
+                                trackedSubject.GetType().Name,
+                                property.Name);
+                        }
+                        break;
                     }
+                }
+            }
+        }
+    }
 
-                    // If this property references the child, clear it
-                    var currentValue = property.GetValue();
-                    if (ReferenceEquals(currentValue, childSubject))
-                    {
-                        var now = DateTimeOffset.UtcNow;
-                        SubjectPropertyHelper.SetReference(property, null, _source, now, now);
-                        _logger.LogDebug(
-                            "ReferenceDeleted: Cleared {ParentType}.{Property}",
-                            parentSubject.GetType().Name,
-                            property.Name);
-                    }
+    /// <summary>
+    /// Processes dictionary property changes (add or delete) for a single dictionary property.
+    /// </summary>
+    private async Task ProcessDictionaryPropertyChangeAsync(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject trackedSubject,
+        NodeId subjectNodeId,
+        NodeId childNodeId,
+        IInterceptorSubject childSubject,
+        ISession session,
+        CancellationToken cancellationToken,
+        bool isReferenceAdded)
+    {
+        var children = property.Children;
+        var containsChild = children.Any(c => ReferenceEquals(c.Subject, childSubject));
+
+        // For add: skip if already contains; for delete: need to find the key
+        if (isReferenceAdded && containsChild)
+        {
+            return;
+        }
+
+        if (!isReferenceAdded)
+        {
+            if (property.GetValue() is not IDictionary dictionary)
+            {
+                return;
+            }
+
+            object? childKey = null;
+            foreach (DictionaryEntry entry in dictionary)
+            {
+                if (ReferenceEquals(entry.Value, childSubject))
+                {
+                    childKey = entry.Key;
+                    break;
+                }
+            }
+
+            if (childKey is null)
+            {
+                return; // Child not in this dictionary
+            }
+
+            var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
+            if (propertyName is null)
+            {
+                return;
+            }
+
+            var containerNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(
+                session, subjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
+
+            if (containerNodeId is null)
+            {
+                return;
+            }
+
+            var childInContainer = await FindChildInContainerAsync(
+                containerNodeId, childNodeId, session, cancellationToken).ConfigureAwait(false);
+
+            if (childInContainer is null)
+            {
+                // Child no longer in this container - remove it from the local dictionary
+                var newDictionary = DefaultSubjectFactory.Instance.RemoveEntriesFromDictionary(
+                    dictionary, childKey);
+                property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newDictionary);
+                _logger.LogDebug(
+                    "ReferenceDeleted: Removed {ChildType} from dictionary {ParentType}.{Property}[{Key}]",
+                    childSubject.GetType().Name,
+                    trackedSubject.GetType().Name,
+                    property.Name,
+                    childKey);
+            }
+        }
+        else
+        {
+            var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
+            if (propertyName is null)
+            {
+                return;
+            }
+
+            var containerNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(
+                session, subjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
+
+            if (containerNodeId is null)
+            {
+                return;
+            }
+
+            var childInContainer = await FindChildInContainerAsync(
+                containerNodeId, childNodeId, session, cancellationToken).ConfigureAwait(false);
+
+            if (childInContainer is not null)
+            {
+                var dictionaryKey = childInContainer.BrowseName.Name;
+                var currentDictionary = property.GetValue() as IDictionary;
+                if (currentDictionary is not null && dictionaryKey is not null)
+                {
+                    var newDictionary = DefaultSubjectFactory.Instance.AppendEntriesToDictionary(
+                        currentDictionary,
+                        new KeyValuePair<object, IInterceptorSubject>(dictionaryKey, childSubject));
+                    property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newDictionary);
+                    _logger.LogDebug(
+                        "ReferenceAdded: Added {ChildType} to dictionary {ParentType}.{Property}[{Key}]",
+                        childSubject.GetType().Name,
+                        trackedSubject.GetType().Name,
+                        property.Name,
+                        dictionaryKey);
                 }
             }
         }
