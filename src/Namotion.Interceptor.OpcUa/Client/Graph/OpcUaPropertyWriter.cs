@@ -12,15 +12,13 @@ namespace Namotion.Interceptor.OpcUa.Client.Graph;
 /// Handles writing property changes to OPC UA server.
 /// Extracted from OpcUaSubjectClientSource.
 /// </summary>
-internal class PropertyWriter
+internal class OpcUaPropertyWriter
 {
-    // TODO: Find better name (RSP) comapred to SubjectPropertyWriter, confusing name maybe OpcUaPropertyWriter or similar?
-
     private readonly OpcUaClientConfiguration _configuration;
     private readonly string _opcUaNodeIdKey;
     private readonly ILogger _logger;
 
-    public PropertyWriter(
+    public OpcUaPropertyWriter(
         OpcUaClientConfiguration configuration,
         string opcUaNodeIdKey,
         ILogger logger)

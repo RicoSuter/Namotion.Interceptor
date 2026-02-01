@@ -8,13 +8,13 @@ namespace Namotion.Interceptor.OpcUa.Server.Graph;
 /// Queues and emits model change events.
 /// Extracted from CustomNodeManager for better separation of concerns.
 /// </summary>
-internal class ModelChangePublisher
+internal class OpcUaModelChangePublisher
 {
     private readonly object _pendingModelChangesLock = new();
     private List<ModelChangeStructureDataType> _pendingModelChanges = new();
     private readonly ILogger _logger;
 
-    public ModelChangePublisher(ILogger logger)
+    public OpcUaModelChangePublisher(ILogger logger)
     {
         _logger = logger;
     }
