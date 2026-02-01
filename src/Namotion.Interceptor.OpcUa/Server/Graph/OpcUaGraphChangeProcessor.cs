@@ -323,6 +323,13 @@ internal class OpcUaGraphChangeProcessor
                 var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
                 var collectionStructure = nodeConfiguration?.CollectionStructure ?? CollectionNodeStructure.Container;
 
+                if (containerPropertyName is null && collectionStructure == CollectionNodeStructure.Container)
+                {
+                    // Container mode requires coming through a container folder
+                    // If containerPropertyName is null, we're not coming through a container folder
+                    continue;
+                }
+
                 if (containerPropertyName is null && collectionStructure == CollectionNodeStructure.Flat)
                 {
                     // In Flat mode, verify the browse name matches this property's pattern

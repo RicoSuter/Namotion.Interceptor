@@ -130,8 +130,9 @@ internal class OpcUaClientStructuralChangeProcessor : StructuralChangeProcessor
             }
         }
 
-        // If we created the node remotely, write the initial property values from the client's subject
-        if (wasCreatedRemotely)
+        // Write property values - either for newly created nodes OR when reusing existing nodes
+        // (existing nodes may have stale data from previous operations)
+        if (_configuration.EnableRemoteNodeManagement)
         {
             await WriteInitialPropertyValuesAsync(subject, session, CancellationToken.None).ConfigureAwait(false);
         }
