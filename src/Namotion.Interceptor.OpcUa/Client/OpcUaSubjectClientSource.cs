@@ -38,7 +38,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private volatile bool _isStarted;
     private long _reconnectStartedTimestamp; // 0 = not reconnecting, otherwise Stopwatch timestamp when reconnection started (for stall detection)
     private OpcUaClientStructuralChangeProcessor? _structuralChangeProcessor;
-    private OpcUaNodeChangeProcessor? _nodeChangeProcessor;
+    private OpcUaGraphChangeProcessor? _nodeChangeProcessor;
     private RemoteSyncManager? _remoteSyncManager;
 
     // Diagnostics tracking - accessed from multiple threads via Diagnostics property
@@ -64,7 +64,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     internal OpcUaSubjectLoader SubjectLoader => _subjectLoader;
 
-    internal OpcUaNodeChangeProcessor? NodeChangeProcessor => _nodeChangeProcessor;
+    internal OpcUaGraphChangeProcessor? NodeChangeProcessor => _nodeChangeProcessor;
 
     // Diagnostics accessors
     internal long TotalReconnectionAttempts => Interlocked.Read(ref _totalReconnectionAttempts);
@@ -342,7 +342,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         // Create node change processor for remote sync features
         if (_configuration.EnableModelChangeEvents || _configuration.EnablePeriodicResync)
         {
-            _nodeChangeProcessor = new OpcUaNodeChangeProcessor(
+            _nodeChangeProcessor = new OpcUaGraphChangeProcessor(
                 this,
                 _configuration,
                 _subjectLoader,

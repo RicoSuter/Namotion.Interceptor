@@ -22,7 +22,7 @@ internal class RemoteSyncManager : IDisposable
     private MonitoredItem? _modelChangeEventItem;
 
     // Callbacks for event handling
-    private OpcUaNodeChangeProcessor? _nodeChangeProcessor;
+    private OpcUaGraphChangeProcessor? _nodeChangeProcessor;
     private Func<ISession?>? _getCurrentSession;
     private Func<bool>? _isStarted;
     private Func<bool>? _isDisposed;
@@ -40,7 +40,7 @@ internal class RemoteSyncManager : IDisposable
     /// Initializes the sync manager with the required callbacks and processors.
     /// </summary>
     public void Initialize(
-        OpcUaNodeChangeProcessor nodeChangeProcessor,
+        OpcUaGraphChangeProcessor nodeChangeProcessor,
         SubscriptionManager subscriptionManager,
         Func<ISession?> getCurrentSession,
         Func<bool> isStarted,
