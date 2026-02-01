@@ -22,7 +22,7 @@ public class WriteErrorClassificationTests
         var status = new StatusCode(statusCode);
 
         // Act
-        var result = PropertyWriter.IsTransientWriteError(status);
+        var result = OpcUaPropertyWriter.IsTransientWriteError(status);
 
         // Assert
         Assert.Equal(expected, result);
@@ -41,7 +41,7 @@ public class WriteErrorClassificationTests
         var status = new StatusCode(statusCode);
 
         // Act
-        var result = PropertyWriter.IsTransientWriteError(status);
+        var result = OpcUaPropertyWriter.IsTransientWriteError(status);
 
         // Assert
         Assert.Equal(expected, result);
@@ -54,7 +54,7 @@ public class WriteErrorClassificationTests
         var status = new StatusCode(StatusCodes.Good);
 
         // Act
-        var result = PropertyWriter.IsTransientWriteError(status);
+        var result = OpcUaPropertyWriter.IsTransientWriteError(status);
 
         // Assert
         Assert.False(result); // Good is not a "bad" status, so IsBad returns false
@@ -67,7 +67,7 @@ public class WriteErrorClassificationTests
         var status = new StatusCode(StatusCodes.Uncertain);
 
         // Act
-        var result = PropertyWriter.IsTransientWriteError(status);
+        var result = OpcUaPropertyWriter.IsTransientWriteError(status);
 
         // Assert
         Assert.False(result); // Uncertain is not "bad"

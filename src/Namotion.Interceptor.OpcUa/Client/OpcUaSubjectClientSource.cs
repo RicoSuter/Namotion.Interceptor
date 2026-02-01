@@ -25,7 +25,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private readonly OpcUaClientConfiguration _configuration;
     private readonly OpcUaSubjectLoader _subjectLoader;
     private readonly SubscriptionHealthMonitor _subscriptionHealthMonitor;
-    private readonly PropertyWriter _opcUaPropertyWriter;
+    private readonly OpcUaPropertyWriter _opcUaPropertyWriter;
 
     private volatile SessionManager? _sessionManager;
     private SubjectPropertyWriter? _propertyWriter;
@@ -277,7 +277,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             onSubjectDetaching: OnSubjectDetaching);
         _subjectLoader = new OpcUaSubjectLoader(configuration, _ownership, this, logger);
         _subscriptionHealthMonitor = new SubscriptionHealthMonitor(logger);
-        _opcUaPropertyWriter = new PropertyWriter(configuration, OpcUaNodeIdKey, logger);
+        _opcUaPropertyWriter = new OpcUaPropertyWriter(configuration, OpcUaNodeIdKey, logger);
     }
 
     private void OnSubjectDetaching(IInterceptorSubject subject)

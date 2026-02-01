@@ -28,7 +28,7 @@ internal class RemoteSyncManager : IAsyncDisposable
     private SubscriptionManager? _subscriptionManager;
 
     // Actor-style dispatcher for thread-safe, ordered change processing
-    private OpcUaServerChangeDispatcher? _changeDispatcher;
+    private OpcUaRemoteChangeDispatcher? _changeDispatcher;
 
     public RemoteSyncManager(
         OpcUaClientConfiguration configuration,
@@ -55,7 +55,7 @@ internal class RemoteSyncManager : IAsyncDisposable
         _isDisposed = isDisposed;
 
         // Create and start the dispatcher for thread-safe change processing
-        _changeDispatcher = new OpcUaServerChangeDispatcher(_logger, ProcessChangeAsync);
+        _changeDispatcher = new OpcUaRemoteChangeDispatcher(_logger, ProcessChangeAsync);
         _changeDispatcher.Start();
     }
 
@@ -80,7 +80,7 @@ internal class RemoteSyncManager : IAsyncDisposable
                     .ConfigureAwait(false);
                 break;
 
-            case OpcUaServerChangeDispatcher.PeriodicResyncRequest:
+            case OpcUaRemoteChangeDispatcher.PeriodicResyncRequest:
                 await processor.PerformFullResyncAsync(session, cancellationToken)
                     .ConfigureAwait(false);
                 break;

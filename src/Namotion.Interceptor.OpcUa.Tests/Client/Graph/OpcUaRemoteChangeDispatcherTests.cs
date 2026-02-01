@@ -4,16 +4,16 @@ using Namotion.Interceptor.OpcUa.Client.Graph;
 namespace Namotion.Interceptor.OpcUa.Tests.Client.Graph;
 
 /// <summary>
-/// Tests for OpcUaServerChangeDispatcher channel-based queue processing.
+/// Tests for OpcUaRemoteChangeDispatcher channel-based queue processing.
 /// </summary>
-public class OpcUaServerChangeDispatcherTests
+public class OpcUaRemoteChangeDispatcherTests
 {
     [Fact]
     public async Task EnqueueModelChange_ProcessedByConsumer()
     {
         // Arrange
         var processedChanges = new List<object>();
-        await using var dispatcher = new OpcUaServerChangeDispatcher(
+        await using var dispatcher = new OpcUaRemoteChangeDispatcher(
             NullLogger.Instance,
             async (change, cancellationToken) => processedChanges.Add(change));
 
@@ -37,7 +37,7 @@ public class OpcUaServerChangeDispatcherTests
     {
         // Arrange
         var processedCount = 0;
-        await using var dispatcher = new OpcUaServerChangeDispatcher(
+        await using var dispatcher = new OpcUaRemoteChangeDispatcher(
             NullLogger.Instance,
             async (change, cancellationToken) =>
             {
@@ -60,11 +60,11 @@ public class OpcUaServerChangeDispatcherTests
     {
         // Arrange
         var resyncCount = 0;
-        await using var dispatcher = new OpcUaServerChangeDispatcher(
+        await using var dispatcher = new OpcUaRemoteChangeDispatcher(
             NullLogger.Instance,
             async (change, cancellationToken) =>
             {
-                if (change is OpcUaServerChangeDispatcher.PeriodicResyncRequest)
+                if (change is OpcUaRemoteChangeDispatcher.PeriodicResyncRequest)
                 {
                     Interlocked.Increment(ref resyncCount);
                 }
@@ -85,7 +85,7 @@ public class OpcUaServerChangeDispatcherTests
     {
         // Arrange
         var processedOrder = new List<int>();
-        await using var dispatcher = new OpcUaServerChangeDispatcher(
+        await using var dispatcher = new OpcUaRemoteChangeDispatcher(
             NullLogger.Instance,
             async (change, cancellationToken) =>
             {
@@ -118,7 +118,7 @@ public class OpcUaServerChangeDispatcherTests
     {
         // Arrange
         var processedItems = new List<string>();
-        await using var dispatcher = new OpcUaServerChangeDispatcher(
+        await using var dispatcher = new OpcUaRemoteChangeDispatcher(
             NullLogger.Instance,
             async (change, cancellationToken) =>
             {
@@ -152,7 +152,7 @@ public class OpcUaServerChangeDispatcherTests
     {
         // Arrange
         var processedCount = 0;
-        var dispatcher = new OpcUaServerChangeDispatcher(
+        var dispatcher = new OpcUaRemoteChangeDispatcher(
             NullLogger.Instance,
             async (change, cancellationToken) =>
             {
