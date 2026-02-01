@@ -4,18 +4,18 @@ using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Opc.Ua;
 using Xunit.Abstractions;
 
-namespace Namotion.Interceptor.OpcUa.Tests.Integration;
+namespace Namotion.Interceptor.OpcUa.Tests.Integration.Graph;
 
 /// <summary>
 /// Configuration and helper tests for OPC UA server external node management.
 /// Integration tests are covered by OpcUaBidirectionalGraphTests (Client→Server sync).
 /// </summary>
 [Trait("Category", "Integration")]
-public class OpcUaServerExternalManagementTests
+public class ServerExternalManagementTests
 {
     private readonly ITestOutputHelper _output;
 
-    public OpcUaServerExternalManagementTests(ITestOutputHelper output)
+    public ServerExternalManagementTests(ITestOutputHelper output)
     {
         _output = output;
     }

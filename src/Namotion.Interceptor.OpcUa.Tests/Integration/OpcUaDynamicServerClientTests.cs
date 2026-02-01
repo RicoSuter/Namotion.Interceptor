@@ -15,15 +15,13 @@ public class OpcUaDynamicServerClientTests
 {
     public OpcUaDynamicServerClientTests(
         SharedOpcUaServerFixture serverFixture,
-        SharedOpcUaClientFixture clientFixture,
         ITestOutputHelper output)
-        : base(serverFixture, clientFixture, output)
+        : base(serverFixture, output)
     {
     }
 
     public override async Task InitializeAsync()
     {
-        // Dynamic client needs its own instance (not reused via SharedOpcUaClientFixture)
         Client = await ServerFixture.CreateDynamicClientAsync(Logger);
     }
 

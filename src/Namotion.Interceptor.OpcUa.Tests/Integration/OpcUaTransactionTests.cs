@@ -10,9 +10,8 @@ public class OpcUaTransactionTests : SharedServerTestBase
 {
     public OpcUaTransactionTests(
         SharedOpcUaServerFixture serverFixture,
-        SharedOpcUaClientFixture clientFixture,
         ITestOutputHelper output)
-        : base(serverFixture, clientFixture, output) { }
+        : base(serverFixture, output) { }
 
     [Fact]
     public async Task Transaction_CommitSingleProperty_ServerReceivesChangeOnlyAfterCommit()

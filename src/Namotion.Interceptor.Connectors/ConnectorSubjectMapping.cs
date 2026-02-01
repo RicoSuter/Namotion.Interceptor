@@ -113,6 +113,32 @@ public class ConnectorSubjectMapping<TExternalId> where TExternalId : notnull
     }
 
     /// <summary>
+    /// Updates the external identifier for a registered subject.
+    /// This is used when the external ID changes (e.g., collection item reindexing).
+    /// </summary>
+    /// <param name="subject">The subject to update.</param>
+    /// <param name="newExternalId">The new external identifier.</param>
+    /// <returns>True if the subject was found and updated, false otherwise.</returns>
+    public bool UpdateExternalId(IInterceptorSubject subject, TExternalId newExternalId)
+    {
+        lock (_lock)
+        {
+            if (!_subjectToId.TryGetValue(subject, out var entry))
+            {
+                return false;
+            }
+
+            // Remove old ID mapping
+            _idToSubject.Remove(entry.Id);
+
+            // Update to new ID
+            _subjectToId[subject] = (newExternalId, entry.RefCount);
+            _idToSubject[newExternalId] = subject;
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Clears all registered subjects and their mappings.
     /// </summary>
     public void Clear()

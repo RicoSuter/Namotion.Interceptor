@@ -10,13 +10,12 @@ namespace Namotion.Interceptor.OpcUa.Tests.Integration;
 /// Tests client→server sync for different data types.
 /// </summary>
 [Trait("Category", "Integration")]
-public class OpcUaDataTypesTests : SharedServerTestBase
+public class ValueSyncDataTypesTests : SharedServerTestBase
 {
-    public OpcUaDataTypesTests(
+    public ValueSyncDataTypesTests(
         SharedOpcUaServerFixture serverFixture,
-        SharedOpcUaClientFixture clientFixture,
         ITestOutputHelper output)
-        : base(serverFixture, clientFixture, output) { }
+        : base(serverFixture, output) { }
 
     [Fact]
     public async Task BooleanType_ClientToServer_ShouldSync()

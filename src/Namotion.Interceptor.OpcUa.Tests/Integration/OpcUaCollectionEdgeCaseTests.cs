@@ -13,9 +13,8 @@ public class OpcUaCollectionEdgeCaseTests : SharedServerTestBase
 {
     public OpcUaCollectionEdgeCaseTests(
         SharedOpcUaServerFixture serverFixture,
-        SharedOpcUaClientFixture clientFixture,
         ITestOutputHelper output)
-        : base(serverFixture, clientFixture, output) { }
+        : base(serverFixture, output) { }
 
     [Fact]
     public async Task EmptyArray_ServerToClient_ShouldSync()
