@@ -7,16 +7,14 @@ using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
 using Opc.Ua.Client;
 
-namespace Namotion.Interceptor.OpcUa.Client;
+namespace Namotion.Interceptor.OpcUa.Client.Graph;
 
 /// <summary>
 /// Processes OPC UA node changes (from ModelChangeEvents or periodic resync) to update the C# model.
 /// Compares remote address space with local model and creates/removes subjects as needed.
 /// </summary>
-internal class OpcUaNodeChangeProcessor
+internal class OpcUaGraphChangeProcessor
 {
-    //  TODO: Rename to OpcUaGraphChangeProcessor and move to /Client/Graph?
-
     private readonly OpcUaSubjectClientSource _source;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly OpcUaSubjectLoader _subjectLoader;
@@ -32,13 +30,13 @@ internal class OpcUaNodeChangeProcessor
     private static readonly TimeSpan RecentlyDeletedExpiry = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="OpcUaNodeChangeProcessor"/> class.
+    /// Initializes a new instance of the <see cref="OpcUaGraphChangeProcessor"/> class.
     /// </summary>
     /// <param name="source">The OPC UA client source.</param>
     /// <param name="configuration">The client configuration.</param>
     /// <param name="subjectLoader">The subject loader for creating new subjects.</param>
     /// <param name="logger">The logger.</param>
-    public OpcUaNodeChangeProcessor(
+    public OpcUaGraphChangeProcessor(
         OpcUaSubjectClientSource source,
         OpcUaClientConfiguration configuration,
         OpcUaSubjectLoader subjectLoader,
