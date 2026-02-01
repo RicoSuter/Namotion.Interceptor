@@ -30,6 +30,10 @@ internal class OpcUaGraphChangeProcessor
     private readonly Dictionary<NodeId, DateTime> _recentlyDeletedNodeIds = new();
     private static readonly TimeSpan RecentlyDeletedExpiry = TimeSpan.FromSeconds(30);
 
+    // Track whether we're currently processing a remote ModelChangeEvent
+    // When true, subject detachments should NOT trigger DeleteNodes calls back to the server
+    private volatile bool _isProcessingRemoteChange;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="OpcUaGraphChangeProcessor"/> class.
     /// </summary>
@@ -48,6 +52,13 @@ internal class OpcUaGraphChangeProcessor
         _subjectLoader = subjectLoader;
         _logger = logger;
     }
+
+    /// <summary>
+    /// Gets whether the processor is currently handling a remote change (ModelChangeEvent).
+    /// When true, subject detachments should NOT trigger DeleteNodes calls back to the server
+    /// because the deletion originated from the server.
+    /// </summary>
+    public bool IsProcessingRemoteChange => _isProcessingRemoteChange;
 
     /// <summary>
     /// Registers a subject with its NodeId for reverse lookup during node deletion events.
@@ -300,7 +311,12 @@ internal class OpcUaGraphChangeProcessor
                 var monitoredItems = await _subjectLoader.LoadSubjectAsync(
                     newSubject, remoteChild, session, cancellationToken).ConfigureAwait(false);
 
-                if (monitoredItems.Count > 0)
+                // Read values first to get the correct current state
+                await _source.ReadAndApplySubjectValuesAsync(newSubject, session, cancellationToken).ConfigureAwait(false);
+
+                // Only add monitored items if not processing a remote change
+                // to avoid stale subscription initial values overwriting the correct values
+                if (!_isProcessingRemoteChange && monitoredItems.Count > 0)
                 {
                     var sessionManager = _source.SessionManager;
                     if (sessionManager is not null)
@@ -309,8 +325,6 @@ internal class OpcUaGraphChangeProcessor
                             monitoredItems, session, cancellationToken).ConfigureAwait(false);
                     }
                 }
-
-                await _source.ReadAndApplySubjectValuesAsync(newSubject, session, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -329,6 +343,75 @@ internal class OpcUaGraphChangeProcessor
                 var newCollectionAfterRemoval = DefaultSubjectFactory.Instance.RemoveSubjectsFromCollection(
                     currentCollectionForRemoval, indicesToRemove.ToArray());
                 property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newCollectionAfterRemoval);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Processes a single collection item being added via NodeAdded event.
+    /// This is more reliable than re-browsing the container, which may not return new nodes immediately.
+    /// </summary>
+    private async Task ProcessCollectionItemAddedAsync(
+        RegisteredSubjectProperty property,
+        NodeId nodeId,
+        ReferenceDescription nodeDetails,
+        int index,
+        ISession session,
+        CancellationToken cancellationToken)
+    {
+        if (!property.IsSubjectCollection)
+        {
+            return;
+        }
+
+        // Check if this index already exists in the local collection
+        var localChildren = property.Children.ToList();
+        var localIndices = new HashSet<int>(localChildren.Where(c => c.Index is int).Select(c => (int)c.Index!));
+        if (localIndices.Contains(index))
+        {
+            return;
+        }
+
+        // Skip re-adding recently deleted items
+        if (_configuration.EnableRemoteNodeManagement && WasRecentlyDeleted(nodeId))
+        {
+            return;
+        }
+
+        // Create the subject for this node
+        var newSubject = await _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
+            property, nodeDetails, session, cancellationToken).ConfigureAwait(false);
+
+        RegisterSubjectNodeId(newSubject, nodeId);
+
+        // Add to collection - this attaches the subject to the parent which registers it
+        var currentCollection = property.GetValue() as IEnumerable<IInterceptorSubject?>;
+        if (currentCollection is null)
+        {
+            _logger.LogWarning(
+                "ProcessCollectionItemAddedAsync: Cannot add to collection property '{PropertyName}': value is not a collection.",
+                property.Name);
+            return;
+        }
+
+        var newCollection = DefaultSubjectFactory.Instance.AppendSubjectsToCollection(currentCollection, newSubject);
+        property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newCollection);
+
+        // Now load and set up monitoring - subject is now registered
+        var monitoredItems = await _subjectLoader.LoadSubjectAsync(
+            newSubject, nodeDetails, session, cancellationToken).ConfigureAwait(false);
+
+        // Read values first to get the correct current state
+        await _source.ReadAndApplySubjectValuesAsync(newSubject, session, cancellationToken).ConfigureAwait(false);
+
+        // Only add monitored items if not processing a remote change
+        if (!_isProcessingRemoteChange && monitoredItems.Count > 0)
+        {
+            var sessionManager = _source.SessionManager;
+            if (sessionManager is not null)
+            {
+                await sessionManager.AddMonitoredItemsAsync(
+                    monitoredItems, session, cancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -426,7 +509,12 @@ internal class OpcUaGraphChangeProcessor
                 var monitoredItems = await _subjectLoader.LoadSubjectAsync(
                     newSubject, remoteChild, session, cancellationToken).ConfigureAwait(false);
 
-                if (monitoredItems.Count > 0)
+                // Read values first to get the correct current state
+                await _source.ReadAndApplySubjectValuesAsync(newSubject, session, cancellationToken).ConfigureAwait(false);
+
+                // Only add monitored items if not processing a remote change
+                // to avoid stale subscription initial values overwriting the correct values
+                if (!_isProcessingRemoteChange && monitoredItems.Count > 0)
                 {
                     var sessionManager = _source.SessionManager;
                     if (sessionManager is not null)
@@ -435,8 +523,6 @@ internal class OpcUaGraphChangeProcessor
                             monitoredItems, session, cancellationToken).ConfigureAwait(false);
                     }
                 }
-
-                await _source.ReadAndApplySubjectValuesAsync(newSubject, session, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -489,7 +575,73 @@ internal class OpcUaGraphChangeProcessor
         var hasLocalValue = localSubject is not null;
         var hasRemoteValue = referenceNode is not null;
 
-        if (hasRemoteValue && !hasLocalValue)
+        // Check if the remote and local refer to the same node (for replacement detection)
+        var remoteNodeId = hasRemoteValue
+            ? ExpandedNodeId.ToNodeId(referenceNode!.NodeId, session.NamespaceUris)
+            : null;
+        NodeId? localNodeId = null;
+        if (hasLocalValue && _source.TryGetSubjectNodeId(localSubject!, out var existingNodeId))
+        {
+            localNodeId = existingNodeId;
+        }
+
+        var needsReplacement = hasRemoteValue && hasLocalValue &&
+            remoteNodeId is not null && localNodeId is not null &&
+            !remoteNodeId.Equals(localNodeId);
+
+        if (needsReplacement)
+        {
+            // Remote has a DIFFERENT value than local - this is a replacement
+            // First, unregister the old subject
+            if (localNodeId is not null)
+            {
+                UnregisterSubjectNodeId(localNodeId);
+            }
+
+            // Skip re-adding recently deleted items
+            if (_configuration.EnableRemoteNodeManagement && WasRecentlyDeleted(remoteNodeId!))
+            {
+                property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, null);
+                return;
+            }
+
+            // Create new subject for the replacement
+            var newSubject = await _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
+                property, referenceNode!, session, cancellationToken).ConfigureAwait(false);
+
+            RegisterSubjectNodeId(newSubject, remoteNodeId!);
+
+            // Set property value - this replaces the old subject and attaches the new one
+            property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newSubject);
+
+            // Now load and set up monitoring - subject is now registered
+            var monitoredItems = await _subjectLoader.LoadSubjectAsync(
+                newSubject, referenceNode!, session, cancellationToken).ConfigureAwait(false);
+
+            // Read values first to get the correct current state
+            try
+            {
+                await _source.ReadAndApplySubjectValuesAsync(newSubject, session, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to read initial values for replaced reference property '{PropertyName}'.", property.Name);
+            }
+
+            // IMPORTANT: Do NOT add monitored items here when processing remote changes.
+            // The subscription's "initial values" arrive asynchronously and would overwrite
+            // the correct values we just read. Future updates will come through ModelChangeEvents.
+            if (!_isProcessingRemoteChange && monitoredItems.Count > 0)
+            {
+                var sessionManager = _source.SessionManager;
+                if (sessionManager is not null)
+                {
+                    await sessionManager.AddMonitoredItemsAsync(
+                        monitoredItems, session, cancellationToken).ConfigureAwait(false);
+                }
+            }
+        }
+        else if (hasRemoteValue && !hasLocalValue)
         {
             // Skip re-adding recently deleted items
             if (_configuration.EnableRemoteNodeManagement)
@@ -509,23 +661,13 @@ internal class OpcUaGraphChangeProcessor
             RegisterSubjectNodeId(newSubject, nodeId);
 
             // Set property value FIRST - this attaches the subject to the parent which registers it
-            // The subject must be registered before LoadSubjectAsync can set up monitored items
             property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newSubject);
 
             // Now load and set up monitoring - subject is now registered
             var monitoredItems = await _subjectLoader.LoadSubjectAsync(
                 newSubject, referenceNode!, session, cancellationToken).ConfigureAwait(false);
 
-            if (monitoredItems.Count > 0)
-            {
-                var sessionManager = _source.SessionManager;
-                if (sessionManager is not null)
-                {
-                    await sessionManager.AddMonitoredItemsAsync(
-                        monitoredItems, session, cancellationToken).ConfigureAwait(false);
-                }
-            }
-
+            // Read values first to get the correct current state
             try
             {
                 await _source.ReadAndApplySubjectValuesAsync(newSubject, session, cancellationToken).ConfigureAwait(false);
@@ -533,6 +675,17 @@ internal class OpcUaGraphChangeProcessor
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Failed to read initial values for reference property '{PropertyName}'.", property.Name);
+            }
+
+            // IMPORTANT: Do NOT add monitored items here when processing remote changes.
+            if (!_isProcessingRemoteChange && monitoredItems.Count > 0)
+            {
+                var sessionManager = _source.SessionManager;
+                if (sessionManager is not null)
+                {
+                    await sessionManager.AddMonitoredItemsAsync(
+                        monitoredItems, session, cancellationToken).ConfigureAwait(false);
+                }
             }
         }
         else if (!hasRemoteValue && hasLocalValue)
@@ -554,32 +707,41 @@ internal class OpcUaGraphChangeProcessor
         ISession session,
         CancellationToken cancellationToken)
     {
-        // TODO: Do we need to run under _structureSemaphore here? also check other places which operate on nodes/structure whether they are correctly synchronized
-
-        foreach (var change in changes)
+        // Set flag to prevent DeleteNodes calls back to server for deletions that originated from the server
+        _isProcessingRemoteChange = true;
+        try
         {
-            var verb = (ModelChangeStructureVerbMask)change.Verb;
-            var affectedNodeId = change.Affected;
+            // TODO: Do we need to run under _structureSemaphore here? also check other places which operate on nodes/structure whether they are correctly synchronized
 
-            if (verb.HasFlag(ModelChangeStructureVerbMask.NodeAdded))
+            foreach (var change in changes)
             {
-                await ProcessNodeAddedAsync(affectedNodeId, session, cancellationToken).ConfigureAwait(false);
+                var verb = (ModelChangeStructureVerbMask)change.Verb;
+                var affectedNodeId = change.Affected;
+
+                if (verb.HasFlag(ModelChangeStructureVerbMask.NodeAdded))
+                {
+                    await ProcessNodeAddedAsync(affectedNodeId, session, cancellationToken).ConfigureAwait(false);
+                }
+                else if (verb.HasFlag(ModelChangeStructureVerbMask.NodeDeleted))
+                {
+                    // A node was deleted - find and clean up the corresponding subject
+                    ProcessNodeDeleted(affectedNodeId);
+                }
+                else if (verb.HasFlag(ModelChangeStructureVerbMask.ReferenceAdded))
+                {
+                    // A reference was added - might need to add to collection/dictionary
+                    await ProcessReferenceAddedAsync(affectedNodeId, session, cancellationToken).ConfigureAwait(false);
+                }
+                else if (verb.HasFlag(ModelChangeStructureVerbMask.ReferenceDeleted))
+                {
+                    // A reference was deleted
+                    await ProcessReferenceDeletedAsync(affectedNodeId, session, cancellationToken).ConfigureAwait(false);
+                }
             }
-            else if (verb.HasFlag(ModelChangeStructureVerbMask.NodeDeleted))
-            {
-                // A node was deleted - find and clean up the corresponding subject
-                ProcessNodeDeleted(affectedNodeId);
-            }
-            else if (verb.HasFlag(ModelChangeStructureVerbMask.ReferenceAdded))
-            {
-                // A reference was added - might need to add to collection/dictionary
-                await ProcessReferenceAddedAsync(affectedNodeId, session, cancellationToken).ConfigureAwait(false);
-            }
-            else if (verb.HasFlag(ModelChangeStructureVerbMask.ReferenceDeleted))
-            {
-                // A reference was deleted
-                await ProcessReferenceDeletedAsync(affectedNodeId, session, cancellationToken).ConfigureAwait(false);
-            }
+        }
+        finally
+        {
+            _isProcessingRemoteChange = false;
         }
     }
 
@@ -647,8 +809,6 @@ internal class OpcUaGraphChangeProcessor
                 // If the browse name matches the property name, this could be a new reference
                 if (browseName == propertyName)
                 {
-                    _logger.LogDebug("ProcessNodeAddedAsync: Found matching reference property '{PropertyName}' for node '{BrowseName}'.",
-                        propertyName, browseName);
                     // Get the parent's NodeId so we can browse for the reference
                     if (_source.TryGetSubjectNodeId(parentSubject, out var parentSubjectNodeId) && parentSubjectNodeId is not null)
                     {
@@ -665,28 +825,11 @@ internal class OpcUaGraphChangeProcessor
             }
 
             // Check if this is a collection item (pattern: PropertyName[index])
-            if (property.IsSubjectCollection && OpcUaBrowseHelper.TryParseCollectionIndex(browseName, propertyName, out _))
+            if (property.IsSubjectCollection && OpcUaBrowseHelper.TryParseCollectionIndex(browseName, propertyName, out var parsedIndex))
             {
-                if (_source.TryGetSubjectNodeId(parentSubject, out var parentSubjectNodeId) && parentSubjectNodeId is not null)
-                {
-                    // Check collection structure mode
-                    var nodeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(property);
-                    var collectionStructure = nodeConfiguration?.CollectionStructure ?? CollectionNodeStructure.Container;
-                    if (collectionStructure == CollectionNodeStructure.Flat)
-                    {
-                        // Flat mode: items are directly under the parent node
-                        await ProcessCollectionNodeChangesAsync(property, parentSubjectNodeId, session, cancellationToken).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        // Container mode: items are under a container folder
-                        var containerNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(session, parentSubjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
-                        if (containerNodeId is not null)
-                        {
-                            await ProcessCollectionNodeChangesAsync(property, containerNodeId, session, cancellationToken).ConfigureAwait(false);
-                        }
-                    }
-                }
+                // Directly add this item to the collection from the NodeAdded event
+                // This is more reliable than re-browsing, which may not return the new node immediately
+                await ProcessCollectionItemAddedAsync(property, nodeId, nodeDetails, parsedIndex, session, cancellationToken).ConfigureAwait(false);
                 return;
             }
 
@@ -749,26 +892,47 @@ internal class OpcUaGraphChangeProcessor
         }
         else if (parentProperty.IsSubjectCollection)
         {
-            // Remove from collection - find the index by matching the subject
+            // Capture existing subjects with their indices before removal
+            // We need this to update NodeId registrations after reindexing
+            var subjectsToReindex = new List<(IInterceptorSubject Subject, int OldIndex)>();
             var children = parentProperty.Children;
+            int? removedIndex = null;
+
             for (var i = 0; i < children.Length; i++)
             {
-                if (ReferenceEquals(children[i].Subject, deletedSubject) && children[i].Index is int index)
+                var child = children[i];
+                if (child.Index is not int idx)
                 {
-                    var currentCollectionValue = parentProperty.GetValue() as IEnumerable<IInterceptorSubject?>;
-                    if (currentCollectionValue is not null)
-                    {
-                        var newCollectionValue = DefaultSubjectFactory.Instance.RemoveSubjectsFromCollection(
-                            currentCollectionValue, index);
-                        parentProperty.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newCollectionValue);
-                    }
-                    else
-                    {
-                        _logger.LogWarning(
-                            "ProcessNodeDeleted: Could not remove subject from collection property '{PropertyName}': value is not a collection.",
-                            parentProperty.Name);
-                    }
-                    break;
+                    continue;
+                }
+
+                if (ReferenceEquals(child.Subject, deletedSubject))
+                {
+                    removedIndex = idx;
+                }
+                else if (child.Subject is not null)
+                {
+                    subjectsToReindex.Add((child.Subject, idx));
+                }
+            }
+
+            if (removedIndex is int removedIdx)
+            {
+                var currentCollectionValue = parentProperty.GetValue() as IEnumerable<IInterceptorSubject?>;
+                if (currentCollectionValue is not null)
+                {
+                    var newCollectionValue = DefaultSubjectFactory.Instance.RemoveSubjectsFromCollection(
+                        currentCollectionValue, removedIdx);
+                    parentProperty.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newCollectionValue);
+
+                    // Update NodeId registrations for items that got reindexed
+                    UpdateCollectionNodeIdRegistrationsAfterRemoval(parentProperty, subjectsToReindex, removedIdx);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "ProcessNodeDeleted: Could not remove subject from collection property '{PropertyName}': value is not a collection.",
+                        parentProperty.Name);
                 }
             }
         }
@@ -797,15 +961,66 @@ internal class OpcUaGraphChangeProcessor
         }
     }
 
+    /// <summary>
+    /// Updates NodeId registrations for collection items after one item is removed.
+    /// When an item is removed from a collection, remaining items get reindexed by the server
+    /// (e.g., [1] becomes [0]). This method updates the client's NodeId tracking to match.
+    /// </summary>
+    private void UpdateCollectionNodeIdRegistrationsAfterRemoval(
+        RegisteredSubjectProperty property,
+        List<(IInterceptorSubject Subject, int OldIndex)> subjectsWithOldIndices,
+        int removedIndex)
+    {
+        lock (_nodeIdToSubjectLock)
+        {
+            foreach (var (subject, oldIndex) in subjectsWithOldIndices)
+            {
+                // Only items after the removed index need reindexing
+                if (oldIndex <= removedIndex)
+                {
+                    continue;
+                }
+
+                var newIndex = oldIndex - 1;
+
+                if (_source.TryGetSubjectNodeId(subject, out var existingNodeId) && existingNodeId is not null)
+                {
+                    // Remove old registration
+                    _nodeIdToSubject.Remove(existingNodeId);
+
+                    // Construct new NodeId by replacing the index in the string representation
+                    var existingNodeIdStr = existingNodeId.ToString();
+                    var indexPattern = $"[{oldIndex}]";
+                    var newIndexPattern = $"[{newIndex}]";
+                    if (existingNodeIdStr.Contains(indexPattern))
+                    {
+                        var newNodeIdStr = existingNodeIdStr.Replace(indexPattern, newIndexPattern);
+                        var newNodeId = new NodeId(newNodeIdStr);
+
+                        // Register with new NodeId
+                        _nodeIdToSubject[newNodeId] = subject;
+
+                        // Update the subject's stored NodeId
+                        _source.SetSubjectNodeId(subject, newNodeId);
+                    }
+                }
+            }
+        }
+    }
+
     private async Task ProcessReferenceAddedAsync(NodeId childNodeId, ISession session, CancellationToken cancellationToken)
     {
         _logger.LogDebug("ProcessReferenceAddedAsync: Processing ReferenceAdded for NodeId {NodeId}", childNodeId);
 
         // Only handle if we track this child subject
-        if (!_nodeIdToSubject.TryGetValue(childNodeId, out var childSubject))
+        IInterceptorSubject? childSubject;
+        lock (_nodeIdToSubjectLock)
         {
-            _logger.LogDebug("ProcessReferenceAddedAsync: NodeId {NodeId} not found in tracked subjects", childNodeId);
-            return;
+            if (!_nodeIdToSubject.TryGetValue(childNodeId, out childSubject))
+            {
+                _logger.LogDebug("ProcessReferenceAddedAsync: NodeId {NodeId} not found in tracked subjects", childNodeId);
+                return;
+            }
         }
 
         _logger.LogDebug("ProcessReferenceAddedAsync: Found tracked subject {Type} for NodeId {NodeId}",
@@ -828,10 +1043,14 @@ internal class OpcUaGraphChangeProcessor
         _logger.LogDebug("ProcessReferenceDeleted: Processing ReferenceDeleted for NodeId {NodeId}", childNodeId);
 
         // Only handle if we track this child subject
-        if (!_nodeIdToSubject.TryGetValue(childNodeId, out var childSubject))
+        IInterceptorSubject? childSubject;
+        lock (_nodeIdToSubjectLock)
         {
-            _logger.LogDebug("ProcessReferenceDeleted: NodeId {NodeId} not found in tracked subjects", childNodeId);
-            return;
+            if (!_nodeIdToSubject.TryGetValue(childNodeId, out childSubject))
+            {
+                _logger.LogDebug("ProcessReferenceDeleted: NodeId {NodeId} not found in tracked subjects", childNodeId);
+                return;
+            }
         }
 
         _logger.LogDebug("ProcessReferenceDeleted: Found tracked subject {Type} for NodeId {NodeId}",

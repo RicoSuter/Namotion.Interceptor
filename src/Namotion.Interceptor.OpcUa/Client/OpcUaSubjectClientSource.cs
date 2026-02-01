@@ -120,15 +120,21 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             _structureLock.Release();
         }
 
-        // Delete remote node if enabled
+        // Delete remote node if enabled, BUT NOT if we're processing a remote change
+        // (i.e., the deletion originated from the server via ModelChangeEvent)
         if (nodeIdToDelete is not null && _configuration.EnableRemoteNodeManagement)
         {
-            _nodeChangeProcessor?.MarkRecentlyDeleted(nodeIdToDelete);
-
-            var session = _sessionManager?.CurrentSession;
-            if (session is not null && session.Connected)
+            // Skip DeleteNodes if this removal was triggered by a server-side ModelChangeEvent
+            var isProcessingRemoteChange = _nodeChangeProcessor?.IsProcessingRemoteChange ?? false;
+            if (!isProcessingRemoteChange)
             {
-                _ = TryDeleteRemoteNodeAsync(session, nodeIdToDelete, CancellationToken.None);
+                _nodeChangeProcessor?.MarkRecentlyDeleted(nodeIdToDelete);
+
+                var session = _sessionManager?.CurrentSession;
+                if (session is not null && session.Connected)
+                {
+                    _ = TryDeleteRemoteNodeAsync(session, nodeIdToDelete, CancellationToken.None);
+                }
             }
         }
     }
@@ -192,6 +198,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         if (isFirst)
         {
             _subjectMapping.Register(subject, nodeId);
+
+            // Register with the node change processor for reverse lookup during ModelChangeEvent processing
+            _nodeChangeProcessor?.RegisterSubjectNodeId(subject, nodeId);
         }
         return isFirst;
     }
@@ -205,6 +214,17 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     internal bool TryGetSubjectNodeId(IInterceptorSubject subject, out NodeId? nodeId)
     {
         return _subjectMapping.TryGetExternalId(subject, out nodeId);
+    }
+
+    /// <summary>
+    /// Updates the NodeId for a tracked subject.
+    /// This is used when collection items are reindexed after removal.
+    /// </summary>
+    /// <param name="subject">The subject to update.</param>
+    /// <param name="newNodeId">The new NodeId.</param>
+    internal void SetSubjectNodeId(IInterceptorSubject subject, NodeId newNodeId)
+    {
+        _subjectMapping.UpdateExternalId(subject, newNodeId);
     }
 
     /// <summary>

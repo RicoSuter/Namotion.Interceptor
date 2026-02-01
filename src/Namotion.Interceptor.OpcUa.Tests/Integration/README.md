@@ -8,13 +8,18 @@ There are two types of integration tests:
 
 ### 1. Shared Server Tests (Most Common)
 
-These tests share a single OPC UA server instance across all tests and reuse clients per test class. Use this pattern for most functional tests.
+These tests share a single OPC UA server instance across all tests, with a fresh client per test method. Use this pattern for most functional tests.
 
 **Base class:** `SharedServerTestBase`
 
 **Fixtures:**
 - `SharedOpcUaServerFixture` (assembly-level) - One server for all tests
-- `SharedOpcUaClientFixture` (class-level) - One client per test class
+
+**Configuration:**
+- `EnableLiveSync = true` (both server and client)
+- `EnableModelChangeEvents = true` (server emits structural change events)
+- `EnableExternalNodeManagement = true` (server accepts AddNodes/DeleteNodes from clients)
+- `EnableRemoteNodeManagement = true` (client can create/delete nodes on server)
 
 **Example:**
 ```csharp
@@ -23,33 +28,25 @@ public class MyNewTests : SharedServerTestBase
 {
     public MyNewTests(
         SharedOpcUaServerFixture serverFixture,
-        SharedOpcUaClientFixture clientFixture,
         ITestOutputHelper output)
-        : base(serverFixture, clientFixture, output) { }
+        : base(serverFixture, output) { }
 
     [Fact]
     public async Task MyTest()
     {
-        var serverArea = ServerFixture.ServerRoot.MyArea;
-        var clientArea = Client!.Root!.MyArea;
+        var serverArea = ServerFixture.ServerRoot.MyNewArea;
+        var clientArea = Client!.Root!.MyNewArea;
 
         // Test synchronization...
     }
 }
 ```
 
-**Existing shared server test classes:**
-- `OpcUaDataTypesTests` - Data type synchronization
-- `OpcUaReadWriteTests` - Basic read/write operations
-- `OpcUaNestedStructureTests` - Nested object synchronization
-- `OpcUaTransactionTests` - Transaction commit/rollback
-- `OpcUaCollectionEdgeCaseTests` - Array edge cases
-- `OpcUaMultiClientTests` - Multiple client scenarios
-- `OpcUaDynamicServerClientTests` - Dynamic property discovery
+### 2. Dedicated Server Tests (Special Config Tests)
 
-### 2. Dedicated Server Tests (Lifecycle Tests)
-
-These tests create their own server and client instances. Use this pattern when testing lifecycle scenarios like reconnection, stall detection, or server restarts.
+These tests create their own server and client instances. Use this pattern when testing:
+- **Lifecycle scenarios** (reconnection, stall detection, server restarts)
+- **Special configurations** (PeriodicResync mode, different timing configs)
 
 **No base class** - Implements `IAsyncLifetime` directly
 
@@ -90,10 +87,19 @@ public class MyLifecycleTests
 }
 ```
 
-**Existing dedicated server test classes:**
-- `OpcUaReconnectionTests` - Server restart recovery
-- `OpcUaStallDetectionTests` - Stall detection and recovery
-- `OpcUaConcurrencyTests` - Concurrent operations during reconnection
+## Test Organization
+
+### Test Naming Convention
+
+**IMPORTANT:** Each test class must have a corresponding test area in `SharedTestModel` with a 1:1 name mapping:
+
+| Test Class | Test Area |
+|------------|-----------|
+| `ServerToClientReferenceTests` | `ServerToClientReferenceTestArea` |
+| `ServerToClientCollectionTests` | `ServerToClientCollectionTestArea` |
+| `ValueSyncBasicTests` | `ValueSyncBasicTestArea` |
+
+This 1:1 naming prevents test interference by ensuring each test class operates on its own isolated data.
 
 ## Shared Test Model
 
@@ -104,14 +110,22 @@ The `SharedTestModel` class defines the data structure exposed by the shared ser
 ```
 SharedTestModel (Testing/SharedTestModel.cs)
 ├── Connected (bool)
-├── DataTypes (DataTypesTestArea)
-├── ReadWrite (ReadWriteTestArea)
-│   ├── BasicSync (BasicSyncArea)
-│   └── ArraySync (ArraySyncArea)
-├── Transactions (TransactionTestArea)
-├── Nested (NestedTestArea)
-├── Collections (CollectionsTestArea)
-└── MultiClient (MultiClientTestArea)
+├── ServerToClientReferenceTestArea
+├── ServerToClientCollectionTestArea
+│   ├── ContainerCollection (with container node)
+│   └── FlatCollection (no container node)
+├── ServerToClientDictionaryTestArea
+├── ServerToClientSharedSubjectTestArea
+├── ClientToServerReferenceTestArea
+├── ClientToServerCollectionTestArea
+│   ├── ContainerCollection
+│   └── FlatCollection
+├── ClientToServerDictionaryTestArea
+├── ClientToServerSharedSubjectTestArea
+├── ValueSyncBasicTestArea
+├── ValueSyncDataTypesTestArea
+├── ValueSyncNestedTestArea
+└── ... (other areas)
 ```
 
 ### Adding a New Test Area
@@ -137,7 +151,7 @@ public partial class MyNewTestArea
 }
 ```
 
-2. **Add to SharedTestModel**:
+2. **Add to SharedTestModel** (use the SAME name as your test class, minus "Tests"):
 
 ```csharp
 public partial class SharedTestModel
@@ -145,33 +159,39 @@ public partial class SharedTestModel
     public SharedTestModel()
     {
         // ... existing areas ...
-        MyNewArea = new MyNewTestArea();
+        MyNewTestArea = new MyNewTestArea();
     }
 
-    [Path("opc", "MyNewArea")]
-    public partial MyNewTestArea MyNewArea { get; set; }
+    [Path("opc", "MyNewTestArea")]
+    public partial MyNewTestArea MyNewTestArea { get; set; }
 }
 ```
 
-3. **Use in your test**:
+3. **Create your test class** with matching name:
 
 ```csharp
-[Fact]
-public async Task MyNewArea_ShouldSync()
+[Trait("Category", "Integration")]
+public class MyNewTests : SharedServerTestBase
 {
-    var serverArea = ServerFixture.ServerRoot.MyNewArea;
-    var clientArea = Client!.Root!.MyNewArea;
+    // ...
 
-    serverArea.Name = "Test";
-    await AsyncTestHelpers.WaitUntilAsync(
-        () => clientArea.Name == "Test",
-        timeout: TimeSpan.FromSeconds(30));
+    [Fact]
+    public async Task MyNewArea_ShouldSync()
+    {
+        var serverArea = ServerFixture.ServerRoot.MyNewTestArea;
+        var clientArea = Client!.Root!.MyNewTestArea;
+
+        serverArea.Name = "Test";
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => clientArea.Name == "Test",
+            timeout: TimeSpan.FromSeconds(30));
+    }
 }
 ```
 
 ## Test Isolation
 
-- **Shared server tests**: Each test class should use its own model area. Tests within a class share the same client, so ensure tests don't depend on specific initial state.
+- **Shared server tests**: Each test class MUST use its own test area (1:1 naming). Each test method gets a fresh client for isolation.
 - **Dedicated server tests**: Fully isolated - each test has its own server and client.
 
 ## Key Classes
@@ -179,8 +199,7 @@ public async Task MyNewArea_ShouldSync()
 | Class | Purpose |
 |-------|---------|
 | `SharedOpcUaServerFixture` | Assembly fixture managing shared server lifetime |
-| `SharedOpcUaClientFixture` | Class fixture managing per-class client reuse |
-| `SharedServerTestBase` | Base class for shared server tests |
+| `SharedServerTestBase` | Base class for shared server tests (fresh client per test) |
 | `OpcUaTestServer<T>` | Test server wrapper with start/stop/restart |
 | `OpcUaTestClient<T>` | Test client wrapper with diagnostics |
 | `OpcUaTestPortPool` | Port allocation for dedicated server tests |
@@ -194,7 +213,7 @@ public async Task MyNewArea_ShouldSync()
 dotnet test src/Namotion.Interceptor.OpcUa.Tests
 
 # Run specific test class
-dotnet test src/Namotion.Interceptor.OpcUa.Tests --filter "FullyQualifiedName~OpcUaDataTypesTests"
+dotnet test src/Namotion.Interceptor.OpcUa.Tests --filter "FullyQualifiedName~ServerToClientCollectionTests"
 
 # Run with verbose output
 dotnet test src/Namotion.Interceptor.OpcUa.Tests -v n
