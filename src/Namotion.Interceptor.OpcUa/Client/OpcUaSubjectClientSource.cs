@@ -290,7 +290,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     public async Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
     {
-        Reset();
+        await ResetAsync().ConfigureAwait(false);
 
         _propertyWriter = propertyWriter;
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
@@ -796,14 +796,17 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }
     }
 
-    private void Reset()
+    private async Task ResetAsync()
     {
         _isStarted = false;
         _structuralChangeProcessor = null;
 
         // Stop remote sync manager (handles periodic resync timer and ModelChangeEvent subscription)
-        _remoteSyncManager?.Reset();
-        _remoteSyncManager = null;
+        if (_remoteSyncManager is not null)
+        {
+            await _remoteSyncManager.ResetAsync().ConfigureAwait(false);
+            _remoteSyncManager = null;
+        }
 
         // Clear node change processor
         _nodeChangeProcessor?.Clear();
@@ -820,8 +823,11 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }
 
         // Stop remote sync manager first (handles periodic resync timer and ModelChangeEvent subscription)
-        _remoteSyncManager?.Dispose();
-        _remoteSyncManager = null;
+        if (_remoteSyncManager is not null)
+        {
+            await _remoteSyncManager.DisposeAsync().ConfigureAwait(false);
+            _remoteSyncManager = null;
+        }
 
         // Dispose session manager
         var sessionManager = _sessionManager;
