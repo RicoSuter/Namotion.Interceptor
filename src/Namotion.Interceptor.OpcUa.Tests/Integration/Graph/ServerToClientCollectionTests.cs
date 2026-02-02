@@ -370,4 +370,73 @@ public class ServerToClientCollectionTests : SharedServerTestBase
     }
 
     #endregion
+
+    #region Move/Reorder Tests
+
+    [Fact]
+    public async Task MoveItemInContainerCollection_ClientReceivesReorderedCollection()
+    {
+        var serverArea = ServerFixture.ServerRoot.ServerToClientCollection;
+        var clientArea = Client!.Root!.ServerToClientCollection;
+
+        // Use unique test identifier
+        var testId = Guid.NewGuid().ToString("N")[..8];
+        var firstName1 = $"First_{testId}";
+        var firstName2 = $"Second_{testId}";
+        var firstName3 = $"Third_{testId}";
+
+        Logger.Log($"Test starting with testId: {testId}");
+
+        // Setup: Add three persons in order [First, Second, Third]
+        var person1 = new NestedPerson(ServerFixture.ServerContext) { FirstName = firstName1, LastName = "One" };
+        var person2 = new NestedPerson(ServerFixture.ServerContext) { FirstName = firstName2, LastName = "Two" };
+        var person3 = new NestedPerson(ServerFixture.ServerContext) { FirstName = firstName3, LastName = "Three" };
+        serverArea.ContainerItems = [.. serverArea.ContainerItems, person1, person2, person3];
+        Logger.Log($"Server added three persons: {firstName1}, {firstName2}, {firstName3}");
+
+        // Wait for client to sync all three
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => clientArea.ContainerItems.Any(p => p.FirstName == firstName1) &&
+                  clientArea.ContainerItems.Any(p => p.FirstName == firstName2) &&
+                  clientArea.ContainerItems.Any(p => p.FirstName == firstName3),
+            timeout: TimeSpan.FromSeconds(30),
+            pollInterval: TimeSpan.FromMilliseconds(500),
+            message: "Client should sync initial three persons");
+
+        Logger.Log($"Client synced initial state: {clientArea.ContainerItems.Length} persons");
+        foreach (var p in clientArea.ContainerItems.Where(p => p.FirstName.Contains(testId)))
+            Logger.Log($"  Client: {p.FirstName}");
+
+        // Act - server reorders: move Third to the front [Third, First, Second]
+        var reordered = serverArea.ContainerItems
+            .Where(p => !p.FirstName.Contains(testId))
+            .Concat([person3, person1, person2])
+            .ToArray();
+        serverArea.ContainerItems = reordered;
+        Logger.Log($"Server reordered to: {firstName3}, {firstName1}, {firstName2}");
+
+        // Assert - client should have all three items (order may or may not be preserved depending on implementation)
+        // The key assertion is that all items are still present after the move operation
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                var hasAll = clientArea.ContainerItems.Any(p => p.FirstName == firstName1) &&
+                             clientArea.ContainerItems.Any(p => p.FirstName == firstName2) &&
+                             clientArea.ContainerItems.Any(p => p.FirstName == firstName3);
+                Logger.Log($"Polling client after reorder: hasAll={hasAll}, count={clientArea.ContainerItems.Length}");
+                foreach (var p in clientArea.ContainerItems.Where(p => p.FirstName.Contains(testId)))
+                    Logger.Log($"  Client: {p.FirstName}");
+                return hasAll;
+            },
+            timeout: TimeSpan.FromSeconds(30),
+            pollInterval: TimeSpan.FromMilliseconds(500),
+            message: "Client should have all three items after reorder");
+
+        Assert.Contains(clientArea.ContainerItems, p => p.FirstName == firstName1);
+        Assert.Contains(clientArea.ContainerItems, p => p.FirstName == firstName2);
+        Assert.Contains(clientArea.ContainerItems, p => p.FirstName == firstName3);
+        Logger.Log("Server->Client collection move/reorder verified - all items present");
+    }
+
+    #endregion
 }

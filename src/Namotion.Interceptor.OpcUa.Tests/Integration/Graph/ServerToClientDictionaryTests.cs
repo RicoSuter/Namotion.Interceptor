@@ -259,4 +259,74 @@ public class ServerToClientDictionaryTests : SharedServerTestBase
         Assert.Empty(clientArea.Items);
         Logger.Log("Test passed - all sequential operations synced correctly");
     }
+
+    [Fact]
+    public async Task ReplaceEntry_ClientReceivesChange()
+    {
+        var serverArea = ServerFixture.ServerRoot.ServerToClientDictionary;
+        var clientArea = Client!.Root!.ServerToClientDictionary;
+
+        // Use unique test identifier
+        var testId = Guid.NewGuid().ToString("N")[..8];
+        var testKey = $"replacekey_{testId}";
+        var firstName1 = $"Original_{testId}";
+        var firstName2 = $"Replaced_{testId}";
+
+        Logger.Log($"Test starting with key: '{testKey}', names: {firstName1} -> {firstName2}");
+
+        // Setup - server adds initial entry
+        var originalPerson = new NestedPerson(ServerFixture.ServerContext)
+        {
+            FirstName = firstName1,
+            LastName = "Original"
+        };
+        serverArea.Items = new Dictionary<string, NestedPerson>
+        {
+            [testKey] = originalPerson
+        };
+        Logger.Log($"Server added '{testKey}' with FirstName={firstName1}");
+
+        // Wait for client to sync initial entry
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                var person = clientArea.Items?.GetValueOrDefault(testKey);
+                Logger.Log($"Polling client for initial: {person?.FirstName ?? "null"}");
+                return person?.FirstName == firstName1;
+            },
+            timeout: TimeSpan.FromSeconds(30),
+            pollInterval: TimeSpan.FromMilliseconds(500),
+            message: "Client should sync initial dictionary entry");
+
+        Logger.Log($"Client synced initial entry: {clientArea.Items![testKey].FirstName}");
+
+        // Act - server replaces the value at the same key with a different subject
+        var replacementPerson = new NestedPerson(ServerFixture.ServerContext)
+        {
+            FirstName = firstName2,
+            LastName = "Replaced"
+        };
+        serverArea.Items = new Dictionary<string, NestedPerson>
+        {
+            [testKey] = replacementPerson
+        };
+        Logger.Log($"Server replaced '{testKey}' with FirstName={firstName2}");
+
+        // Assert - client receives the replacement
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                var person = clientArea.Items?.GetValueOrDefault(testKey);
+                Logger.Log($"Polling client for replacement: {person?.FirstName ?? "null"}");
+                return person?.FirstName == firstName2;
+            },
+            timeout: TimeSpan.FromSeconds(30),
+            pollInterval: TimeSpan.FromMilliseconds(500),
+            message: "Client should receive dictionary value replacement");
+
+        Assert.True(clientArea.Items?.ContainsKey(testKey));
+        Assert.Equal(firstName2, clientArea.Items![testKey].FirstName);
+        Assert.Equal("Replaced", clientArea.Items[testKey].LastName);
+        Logger.Log("Server->Client dictionary replace verified");
+    }
 }
