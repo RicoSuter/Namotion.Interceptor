@@ -75,7 +75,7 @@ internal class OpcUaServerGraphChangeReceiver
     {
         if (!_externalNodeValidator.IsEnabled)
         {
-            _logger.LogWarning("External AddNode rejected: EnableExternalNodeManagement is disabled.");
+            _logger.LogWarning("External AddNode rejected: EnableNodeManagement is disabled.");
             return (null, null);
         }
 
@@ -144,7 +144,7 @@ internal class OpcUaServerGraphChangeReceiver
     {
         if (!_externalNodeValidator.IsEnabled)
         {
-            _logger.LogWarning("External DeleteNode rejected: EnableExternalNodeManagement is disabled.");
+            _logger.LogWarning("External DeleteNode rejected: EnableNodeManagement is disabled.");
             return false;
         }
 

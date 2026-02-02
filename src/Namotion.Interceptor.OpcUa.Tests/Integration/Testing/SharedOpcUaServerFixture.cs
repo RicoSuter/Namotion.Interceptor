@@ -50,8 +50,8 @@ public class SharedOpcUaServerFixture : IAsyncLifetime
             certificateStoreBasePath: CertificateStorePath,
             configureServer: config =>
             {
-                config.EnableLiveSync = true;
-                config.EnableExternalNodeManagement = true;
+                config.EnableGraphChangePublishing = true;
+                config.EnableNodeManagement = true;
 
                 // Configure TypeRegistry so the server can create NestedPerson instances
                 // when clients send AddNodes requests with BaseObjectType (the default)

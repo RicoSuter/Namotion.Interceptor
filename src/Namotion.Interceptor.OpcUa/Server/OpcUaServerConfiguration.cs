@@ -74,25 +74,25 @@ public class OpcUaServerConfiguration
     public bool AutoAcceptUntrustedCertificates { get; set; }
 
     /// <summary>
-    /// Gets or sets a value indicating whether to enable live synchronization of structural changes.
-    /// When enabled, adding or removing subjects from collections or reference properties
-    /// will immediately create or delete nodes in the OPC UA address space.
+    /// Gets or sets a value indicating whether to enable publishing of graph changes to the OPC UA address space.
+    /// When enabled, adding or removing subjects from collections, references, or dictionaries
+    /// will immediately create or delete nodes in the OPC UA address space and emit ModelChangeEvents.
     /// Default is false for backward compatibility.
     /// </summary>
-    public bool EnableLiveSync { get; set; } = false;
+    public bool EnableGraphChangePublishing { get; set; } = false;
 
     /// <summary>
-    /// Gets or sets a value indicating whether to enable external node management via AddNodes/DeleteNodes.
+    /// Gets or sets a value indicating whether to enable node management via AddNodes/DeleteNodes services.
     /// When enabled, external OPC UA clients can create or delete nodes in the address space,
     /// and the changes will be reflected in the C# model.
     /// Requires a TypeRegistry to be configured to map TypeDefinitions to C# types.
     /// Default is false for security and backward compatibility.
     /// </summary>
-    public bool EnableExternalNodeManagement { get; set; } = false;
+    public bool EnableNodeManagement { get; set; } = false;
 
     /// <summary>
     /// Gets or sets the type registry for resolving TypeDefinition NodeIds to C# types.
-    /// Required when EnableExternalNodeManagement is true.
+    /// Required when EnableNodeManagement is true.
     /// </summary>
     public OpcUaTypeRegistry? TypeRegistry { get; set; }
 

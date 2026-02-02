@@ -25,7 +25,7 @@ internal class OpcUaClientGraphChangeReceiver
     private readonly ConnectorSubjectMapping<NodeId> _subjectMapping;
 
     // Track recently deleted NodeIds to prevent periodic resync from re-adding them
-    // This is needed when EnableRemoteNodeManagement is true - the client is the source of truth
+    // This is needed when EnableGraphChangePublishing is true - the client is the source of truth
     private readonly Dictionary<NodeId, DateTime> _recentlyDeletedNodeIds = new();
     private readonly Lock _recentlyDeletedLock = new();
     private static readonly TimeSpan RecentlyDeletedExpiry = TimeSpan.FromSeconds(30);
@@ -234,9 +234,9 @@ internal class OpcUaClientGraphChangeReceiver
             property.Name, string.Join(",", remoteIndices), string.Join(",", localIndices),
             string.Join(",", indicesToAdd), string.Join(",", indicesToRemove));
 
-        // When EnableRemoteNodeManagement is true and an item was recently deleted by the client,
+        // When EnableGraphChangePublishing is true and an item was recently deleted by the client,
         // skip re-adding it. The DeleteNodes call will eventually remove it from the server.
-        if (_configuration.EnableRemoteNodeManagement && indicesToAdd.Count > 0)
+        if (_configuration.EnableGraphChangePublishing && indicesToAdd.Count > 0)
         {
             var filteredIndicesToAdd = new List<int>();
             foreach (var index in indicesToAdd)
@@ -334,7 +334,7 @@ internal class OpcUaClientGraphChangeReceiver
         }
 
         // Skip re-adding recently deleted items
-        if (_configuration.EnableRemoteNodeManagement && WasRecentlyDeleted(nodeId))
+        if (_configuration.EnableGraphChangePublishing && WasRecentlyDeleted(nodeId))
         {
             return;
         }
@@ -415,9 +415,9 @@ internal class OpcUaClientGraphChangeReceiver
         var keysToAdd = remoteKeys.Except(localKeys).ToList();
         var keysToRemove = localKeys.Except(remoteKeys).ToList();
 
-        // When EnableRemoteNodeManagement is true and an item was recently deleted by the client,
+        // When EnableGraphChangePublishing is true and an item was recently deleted by the client,
         // skip re-adding it. The DeleteNodes call will eventually remove it from the server.
-        if (_configuration.EnableRemoteNodeManagement && keysToAdd.Count > 0)
+        if (_configuration.EnableGraphChangePublishing && keysToAdd.Count > 0)
         {
             var filteredKeysToAdd = new List<string>();
             foreach (var key in keysToAdd)
@@ -544,7 +544,7 @@ internal class OpcUaClientGraphChangeReceiver
             }
 
             // Skip re-adding recently deleted items
-            if (_configuration.EnableRemoteNodeManagement && WasRecentlyDeleted(remoteNodeId!))
+            if (_configuration.EnableGraphChangePublishing && WasRecentlyDeleted(remoteNodeId!))
             {
                 _graphChangeApplier.SetReference(property, null, _source);
                 return;
@@ -589,7 +589,7 @@ internal class OpcUaClientGraphChangeReceiver
         else if (hasRemoteValue && !hasLocalValue)
         {
             // Skip re-adding recently deleted items
-            if (_configuration.EnableRemoteNodeManagement)
+            if (_configuration.EnableGraphChangePublishing)
             {
                 var referenceNodeId = ExpandedNodeId.ToNodeId(referenceNode!.NodeId, session.NamespaceUris);
                 if (WasRecentlyDeleted(referenceNodeId))

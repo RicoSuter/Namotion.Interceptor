@@ -228,21 +228,14 @@ public class OpcUaClientConfiguration
     public string CertificateStoreBasePath { get; set; } = "pki";
 
     /// <summary>
-    /// Gets or sets whether to enable live synchronization of structural changes.
-    /// When enabled, adding or removing subjects from collections or reference properties
-    /// will immediately create or remove MonitoredItems for the affected subjects.
+    /// Gets or sets whether to enable publishing of graph changes to the server.
+    /// When enabled, adding or removing subjects from collections, references, or dictionaries
+    /// will create or remove nodes on the server via AddNodes/DeleteNodes services,
+    /// and create or remove MonitoredItems for the affected subjects.
+    /// This requires the server to support AddNodes/DeleteNodes services.
     /// Default is false for backward compatibility.
     /// </summary>
-    public bool EnableLiveSync { get; set; } = false;
-
-    /// <summary>
-    /// Gets or sets whether to enable remote node management via AddNodes/DeleteNodes.
-    /// When enabled and EnableLiveSync is true, structural changes in the C# model
-    /// will attempt to create or delete nodes on the OPC UA server.
-    /// This requires the server to support AddNodes/DeleteNodes services.
-    /// Default is false - changes only affect local MonitoredItems.
-    /// </summary>
-    public bool EnableRemoteNodeManagement { get; set; } = false;
+    public bool EnableGraphChangePublishing { get; set; } = false;
 
     /// <summary>
     /// Gets or sets the optional type registry for mapping C# types to OPC UA TypeDefinition NodeIds.
@@ -252,28 +245,28 @@ public class OpcUaClientConfiguration
     public OpcUaTypeRegistry? TypeRegistry { get; set; }
 
     /// <summary>
-    /// Gets or sets whether to enable subscription to ModelChangeEvents from the server.
+    /// Gets or sets whether to enable subscription to graph changes from the server.
     /// When enabled, the client will subscribe to GeneralModelChangeEventType events
-    /// on the Server node to detect structural changes made by other clients.
+    /// on the Server node to detect structural changes made by other clients or the server.
     /// Default is false.
     /// </summary>
-    public bool EnableModelChangeEvents { get; set; } = false;
+    public bool EnableGraphChangeSubscription { get; set; } = false;
 
     /// <summary>
-    /// Gets or sets whether to enable periodic resync of the address space structure.
+    /// Gets or sets whether to enable periodic browsing of the server's graph structure.
     /// When enabled, the client will periodically browse the server's address space
     /// and update the local model to reflect any structural changes.
     /// This is a fallback for servers that don't support ModelChangeEvents.
     /// Default is false.
     /// </summary>
-    public bool EnablePeriodicResync { get; set; } = false;
+    public bool EnablePeriodicGraphBrowsing { get; set; } = false;
 
     /// <summary>
-    /// Gets or sets the interval for periodic resync of the address space structure.
-    /// Only used when EnablePeriodicResync is true.
+    /// Gets or sets the interval for periodic graph browsing.
+    /// Only used when EnablePeriodicGraphBrowsing is true.
     /// Default is 30 seconds.
     /// </summary>
-    public TimeSpan PeriodicResyncInterval { get; set; } = TimeSpan.FromSeconds(30);
+    public TimeSpan PeriodicGraphBrowsingInterval { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Gets or sets the polling interval for items that don't support subscriptions.
@@ -564,11 +557,11 @@ public class OpcUaClientConfiguration
                 nameof(ReadAfterWriteBuffer));
         }
 
-        if (EnablePeriodicResync && PeriodicResyncInterval < TimeSpan.FromSeconds(1))
+        if (EnablePeriodicGraphBrowsing && PeriodicGraphBrowsingInterval < TimeSpan.FromSeconds(1))
         {
             throw new ArgumentException(
-                $"PeriodicResyncInterval must be at least 1 second when EnablePeriodicResync is true, got: {PeriodicResyncInterval.TotalSeconds}s",
-                nameof(PeriodicResyncInterval));
+                $"PeriodicGraphBrowsingInterval must be at least 1 second when EnablePeriodicGraphBrowsing is true, got: {PeriodicGraphBrowsingInterval.TotalSeconds}s",
+                nameof(PeriodicGraphBrowsingInterval));
         }
     }
 }

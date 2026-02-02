@@ -20,7 +20,7 @@ public class OpcUaClientRemoteSyncTests
     }
 
     [Fact]
-    public void Configuration_EnableModelChangeEvents_DefaultsFalse()
+    public void Configuration_EnableGraphChangeSubscription_DefaultsFalse()
     {
         // Arrange
         var configuration = new OpcUaClientConfiguration
@@ -32,11 +32,11 @@ public class OpcUaClientRemoteSyncTests
         };
 
         // Assert
-        Assert.False(configuration.EnableModelChangeEvents);
+        Assert.False(configuration.EnableGraphChangeSubscription);
     }
 
     [Fact]
-    public void Configuration_EnablePeriodicResync_DefaultsFalse()
+    public void Configuration_EnablePeriodicGraphBrowsing_DefaultsFalse()
     {
         // Arrange
         var configuration = new OpcUaClientConfiguration
@@ -48,11 +48,11 @@ public class OpcUaClientRemoteSyncTests
         };
 
         // Assert
-        Assert.False(configuration.EnablePeriodicResync);
+        Assert.False(configuration.EnablePeriodicGraphBrowsing);
     }
 
     [Fact]
-    public void Configuration_PeriodicResyncInterval_DefaultsTo30Seconds()
+    public void Configuration_PeriodicGraphBrowsingInterval_DefaultsTo30Seconds()
     {
         // Arrange
         var configuration = new OpcUaClientConfiguration
@@ -64,7 +64,7 @@ public class OpcUaClientRemoteSyncTests
         };
 
         // Assert
-        Assert.Equal(TimeSpan.FromSeconds(30), configuration.PeriodicResyncInterval);
+        Assert.Equal(TimeSpan.FromSeconds(30), configuration.PeriodicGraphBrowsingInterval);
     }
 
     [Fact]
@@ -77,19 +77,19 @@ public class OpcUaClientRemoteSyncTests
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaSubjectClientSource>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(new DefaultSubjectFactory()),
-            EnableModelChangeEvents = true,
-            EnablePeriodicResync = true,
-            PeriodicResyncInterval = TimeSpan.FromSeconds(5)
+            EnableGraphChangeSubscription = true,
+            EnablePeriodicGraphBrowsing = true,
+            PeriodicGraphBrowsingInterval = TimeSpan.FromSeconds(5)
         };
 
         // Assert
-        Assert.True(configuration.EnableModelChangeEvents);
-        Assert.True(configuration.EnablePeriodicResync);
-        Assert.Equal(TimeSpan.FromSeconds(5), configuration.PeriodicResyncInterval);
+        Assert.True(configuration.EnableGraphChangeSubscription);
+        Assert.True(configuration.EnablePeriodicGraphBrowsing);
+        Assert.Equal(TimeSpan.FromSeconds(5), configuration.PeriodicGraphBrowsingInterval);
     }
 
     [Fact]
-    public void Configuration_EnableLiveSync_DefaultsFalse()
+    public void Configuration_EnableGraphChangePublishing_DefaultsFalse()
     {
         // Arrange
         var configuration = new OpcUaClientConfiguration
@@ -101,27 +101,11 @@ public class OpcUaClientRemoteSyncTests
         };
 
         // Assert
-        Assert.False(configuration.EnableLiveSync);
+        Assert.False(configuration.EnableGraphChangePublishing);
     }
 
     [Fact]
-    public void Configuration_EnableRemoteNodeManagement_DefaultsFalse()
-    {
-        // Arrange
-        var configuration = new OpcUaClientConfiguration
-        {
-            ServerUrl = "opc.tcp://localhost:4840",
-            TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaSubjectClientSource>.Instance),
-            ValueConverter = new OpcUaValueConverter(),
-            SubjectFactory = new OpcUaSubjectFactory(new DefaultSubjectFactory())
-        };
-
-        // Assert
-        Assert.False(configuration.EnableRemoteNodeManagement);
-    }
-
-    [Fact]
-    public void Configuration_CanEnableAllLiveSyncOptions()
+    public void Configuration_CanEnableAllGraphSyncOptions()
     {
         // Arrange & Act
         var configuration = new OpcUaClientConfiguration
@@ -130,18 +114,16 @@ public class OpcUaClientRemoteSyncTests
             TypeResolver = new OpcUaTypeResolver(NullLogger<OpcUaSubjectClientSource>.Instance),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(new DefaultSubjectFactory()),
-            EnableLiveSync = true,
-            EnableRemoteNodeManagement = true,
-            EnableModelChangeEvents = true,
-            EnablePeriodicResync = true,
-            PeriodicResyncInterval = TimeSpan.FromSeconds(60)
+            EnableGraphChangePublishing = true,
+            EnableGraphChangeSubscription = true,
+            EnablePeriodicGraphBrowsing = true,
+            PeriodicGraphBrowsingInterval = TimeSpan.FromSeconds(60)
         };
 
         // Assert
-        Assert.True(configuration.EnableLiveSync);
-        Assert.True(configuration.EnableRemoteNodeManagement);
-        Assert.True(configuration.EnableModelChangeEvents);
-        Assert.True(configuration.EnablePeriodicResync);
-        Assert.Equal(TimeSpan.FromSeconds(60), configuration.PeriodicResyncInterval);
+        Assert.True(configuration.EnableGraphChangePublishing);
+        Assert.True(configuration.EnableGraphChangeSubscription);
+        Assert.True(configuration.EnablePeriodicGraphBrowsing);
+        Assert.Equal(TimeSpan.FromSeconds(60), configuration.PeriodicGraphBrowsingInterval);
     }
 }
