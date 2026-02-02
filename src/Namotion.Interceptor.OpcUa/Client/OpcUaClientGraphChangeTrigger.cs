@@ -92,7 +92,7 @@ internal class OpcUaClientGraphChangeTrigger : IAsyncDisposable
     /// </summary>
     public async Task SetupModelChangeEventSubscriptionAsync(Session session, CancellationToken cancellationToken)
     {
-        if (!_configuration.EnableModelChangeEvents)
+        if (!_configuration.EnableGraphChangeSubscription)
         {
             return;
         }
@@ -150,12 +150,12 @@ internal class OpcUaClientGraphChangeTrigger : IAsyncDisposable
     /// </summary>
     public void StartPeriodicResyncTimer()
     {
-        if (!_configuration.EnablePeriodicResync)
+        if (!_configuration.EnablePeriodicGraphBrowsing)
         {
             return;
         }
 
-        var interval = _configuration.PeriodicResyncInterval;
+        var interval = _configuration.PeriodicGraphBrowsingInterval;
         _periodicResyncTimer = new Timer(OnPeriodicResyncTimerCallback, null, interval, interval);
     }
 

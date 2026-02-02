@@ -7,8 +7,8 @@ using Xunit.Abstractions;
 namespace Namotion.Interceptor.OpcUa.Tests.Integration.Graph;
 
 /// <summary>
-/// Tests for periodic resync mode (polling-based structural change detection).
-/// Uses dedicated server/client instances with EnablePeriodicResync=true and EnableModelChangeEvents=false.
+/// Tests for periodic graph browsing mode (polling-based structural change detection).
+/// Uses dedicated server/client instances with EnablePeriodicGraphBrowsing=true and EnableGraphChangeSubscription=false.
 /// These tests verify that the client can detect structural changes by periodically re-browsing the server.
 /// </summary>
 [Trait("Category", "Integration")]
@@ -497,23 +497,23 @@ public class PeriodicResyncTests
     }
 
     /// <summary>
-    /// Configures the client for periodic resync mode (polling, no model change events).
+    /// Configures the client for periodic graph browsing mode (polling, no model change events).
     /// </summary>
     private static void ConfigurePeriodicResyncClient(OpcUaClientConfiguration config)
     {
-        config.EnableLiveSync = true;
-        config.EnableModelChangeEvents = false;  // Disable event-based detection
-        config.EnablePeriodicResync = true;      // Enable polling mode
-        config.PeriodicResyncInterval = TimeSpan.FromSeconds(1);
+        config.EnableGraphChangePublishing = true;
+        config.EnableGraphChangeSubscription = false;  // Disable event-based detection
+        config.EnablePeriodicGraphBrowsing = true;     // Enable polling mode
+        config.PeriodicGraphBrowsingInterval = TimeSpan.FromSeconds(1);
         config.BufferTime = TimeSpan.FromMilliseconds(50);
     }
 
     /// <summary>
-    /// Configures the server for live sync (structural change publishing).
+    /// Configures the server for graph change publishing (structural change publishing).
     /// </summary>
     private static void ConfigureLiveSyncServer(OpcUaServerConfiguration config)
     {
-        config.EnableLiveSync = true;
+        config.EnableGraphChangePublishing = true;
         config.BufferTime = TimeSpan.FromMilliseconds(50);
     }
 }

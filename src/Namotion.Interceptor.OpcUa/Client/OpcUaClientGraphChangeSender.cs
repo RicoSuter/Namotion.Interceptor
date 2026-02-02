@@ -11,7 +11,7 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// <summary>
 /// Processes structural property changes (add/remove subjects) for OPC UA client.
 /// Creates or removes MonitoredItems when the C# model changes.
-/// Optionally calls AddNodes/DeleteNodes on the server when EnableRemoteNodeManagement is enabled.
+/// Calls AddNodes/DeleteNodes on the server when EnableGraphChangePublishing is enabled.
 /// Note: Source filtering (loop prevention) is handled by ChangeQueueProcessor, not here.
 /// </summary>
 internal class OpcUaClientGraphChangeSender : GraphChangePublisher
@@ -104,8 +104,8 @@ internal class OpcUaClientGraphChangeSender : GraphChangePublisher
 
         if (childNodeRef is null)
         {
-            // Node not found on server - try to create it if remote node management is enabled
-            if (_configuration.EnableRemoteNodeManagement)
+            // Node not found on server - create it via AddNodes
+            if (_configuration.EnableGraphChangePublishing)
             {
                 childNodeRef = await TryCreateRemoteNodeAsync(session, parentNodeId, property, subject, index, CancellationToken.None).ConfigureAwait(false);
                 wasCreatedRemotely = childNodeRef is not null;
@@ -131,7 +131,7 @@ internal class OpcUaClientGraphChangeSender : GraphChangePublisher
 
         // Write property values - either for newly created nodes OR when reusing existing nodes
         // (existing nodes may have stale data from previous operations)
-        if (_configuration.EnableRemoteNodeManagement)
+        if (_configuration.EnableGraphChangePublishing)
         {
             await WriteInitialPropertyValuesAsync(subject, session, CancellationToken.None).ConfigureAwait(false);
         }

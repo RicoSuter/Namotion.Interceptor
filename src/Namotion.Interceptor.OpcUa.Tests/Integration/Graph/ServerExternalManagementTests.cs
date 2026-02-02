@@ -21,7 +21,7 @@ public class ServerExternalManagementTests
     }
 
     [Fact]
-    public void EnableExternalNodeManagement_DefaultsToFalse()
+    public void EnableNodeManagement_DefaultsToFalse()
     {
         // Arrange & Act
         var configuration = new OpcUaServerConfiguration
@@ -30,7 +30,7 @@ public class ServerExternalManagementTests
         };
 
         // Assert
-        Assert.False(configuration.EnableExternalNodeManagement);
+        Assert.False(configuration.EnableNodeManagement);
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public class ServerExternalManagementTests
     }
 
     [Fact]
-    public void Configuration_CanEnableExternalNodeManagement()
+    public void Configuration_CanEnableNodeManagement()
     {
         // Arrange
         var typeRegistry = new OpcUaTypeRegistry();
@@ -175,12 +175,12 @@ public class ServerExternalManagementTests
         var configuration = new OpcUaServerConfiguration
         {
             ValueConverter = new OpcUaValueConverter(),
-            EnableExternalNodeManagement = true,
+            EnableNodeManagement = true,
             TypeRegistry = typeRegistry
         };
 
         // Assert
-        Assert.True(configuration.EnableExternalNodeManagement);
+        Assert.True(configuration.EnableNodeManagement);
         Assert.NotNull(configuration.TypeRegistry);
     }
 
@@ -205,7 +205,7 @@ public class ServerExternalManagementTests
         var configuration = new OpcUaServerConfiguration
         {
             ValueConverter = new OpcUaValueConverter(),
-            EnableExternalNodeManagement = true
+            EnableNodeManagement = true
         };
         var helper = new OpcUaServerExternalNodeValidator(configuration, NullLogger.Instance);
 
@@ -220,7 +220,7 @@ public class ServerExternalManagementTests
         var configuration = new OpcUaServerConfiguration
         {
             ValueConverter = new OpcUaValueConverter(),
-            EnableExternalNodeManagement = false
+            EnableNodeManagement = false
         };
         var helper = new OpcUaServerExternalNodeValidator(configuration, NullLogger.Instance);
 
@@ -248,7 +248,7 @@ public class ServerExternalManagementTests
         var configuration = new OpcUaServerConfiguration
         {
             ValueConverter = new OpcUaValueConverter(),
-            EnableExternalNodeManagement = false
+            EnableNodeManagement = false
         };
         var helper = new OpcUaServerExternalNodeValidator(configuration, NullLogger.Instance);
 
@@ -280,7 +280,7 @@ public class ServerExternalManagementTests
         var configuration = new OpcUaServerConfiguration
         {
             ValueConverter = new OpcUaValueConverter(),
-            EnableExternalNodeManagement = true,
+            EnableNodeManagement = true,
             TypeRegistry = typeRegistry
         };
         var helper = new OpcUaServerExternalNodeValidator(configuration, NullLogger.Instance);
@@ -317,7 +317,7 @@ public class ServerExternalManagementTests
         var configuration = new OpcUaServerConfiguration
         {
             ValueConverter = new OpcUaValueConverter(),
-            EnableExternalNodeManagement = true,
+            EnableNodeManagement = true,
             TypeRegistry = typeRegistry
         };
         var helper = new OpcUaServerExternalNodeValidator(configuration, NullLogger.Instance);
@@ -347,7 +347,7 @@ public class ServerExternalManagementTests
         var configuration = new OpcUaServerConfiguration
         {
             ValueConverter = new OpcUaValueConverter(),
-            EnableExternalNodeManagement = true,
+            EnableNodeManagement = true,
             TypeRegistry = null // No registry
         };
         var helper = new OpcUaServerExternalNodeValidator(configuration, NullLogger.Instance);
@@ -377,7 +377,7 @@ public class ServerExternalManagementTests
         var configuration = new OpcUaServerConfiguration
         {
             ValueConverter = new OpcUaValueConverter(),
-            EnableExternalNodeManagement = true
+            EnableNodeManagement = true
         };
         var helper = new OpcUaServerExternalNodeValidator(configuration, NullLogger.Instance);
 
@@ -399,5 +399,5 @@ public class ServerExternalManagementTests
     }
 
     // Note: Integration tests for external AddNodes/DeleteNodes are covered by
-    // OpcUaBidirectionalGraphTests (Client→Server tests with EnableRemoteNodeManagement).
+    // OpcUaBidirectionalGraphTests (Client→Server tests with EnableGraphChangePublishing).
 }

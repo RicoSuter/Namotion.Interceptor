@@ -174,7 +174,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                     await application.StartAsync(server).ConfigureAwait(false);
 
                     // Create graph change sender for live sync if enabled
-                    if (_configuration.EnableLiveSync && server.NodeManager is not null)
+                    if (_configuration.EnableGraphChangePublishing && server.NodeManager is not null)
                     {
                         _graphChangeSender = new OpcUaServerGraphChangeSender(
                             server.NodeManager);

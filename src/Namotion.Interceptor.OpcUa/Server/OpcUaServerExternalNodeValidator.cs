@@ -31,7 +31,7 @@ public class OpcUaServerExternalNodeValidator
     /// <summary>
     /// Checks if external node management is enabled.
     /// </summary>
-    public bool IsEnabled => _configuration.EnableExternalNodeManagement;
+    public bool IsEnabled => _configuration.EnableNodeManagement;
 
     /// <summary>
     /// Validates an AddNodes request and returns the resolved C# type if successful.
@@ -48,9 +48,9 @@ public class OpcUaServerExternalNodeValidator
         results = new AddNodesResultCollection();
         var validatedItems = new List<(AddNodesItem, Type)>();
 
-        if (!_configuration.EnableExternalNodeManagement)
+        if (!_configuration.EnableNodeManagement)
         {
-            _logger.LogWarning("AddNodes request rejected: EnableExternalNodeManagement is disabled.");
+            _logger.LogWarning("AddNodes request rejected: EnableNodeManagement is disabled.");
 
             foreach (var nodeToAdd in nodesToAdd)
             {
@@ -123,9 +123,9 @@ public class OpcUaServerExternalNodeValidator
     {
         results = new StatusCodeCollection();
 
-        if (!_configuration.EnableExternalNodeManagement)
+        if (!_configuration.EnableNodeManagement)
         {
-            _logger.LogWarning("DeleteNodes request rejected: EnableExternalNodeManagement is disabled.");
+            _logger.LogWarning("DeleteNodes request rejected: EnableNodeManagement is disabled.");
 
             foreach (var nodeToDelete in nodesToDelete)
             {

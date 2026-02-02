@@ -120,7 +120,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
         // Delete remote node if enabled, BUT NOT if the change originated from this source
         // (i.e., the deletion was triggered by processing a server-side ModelChangeEvent)
-        if (nodeIdToDelete is not null && _configuration.EnableRemoteNodeManagement)
+        if (nodeIdToDelete is not null && _configuration.EnableGraphChangePublishing)
         {
             // Skip DeleteNodes if the change source in the current context is this client source.
             // When processing ModelChangeEvents, GraphChangeApplier.SetReference is called with this source,
@@ -348,7 +348,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }
 
         // Create graph change sender if live sync is enabled
-        if (_configuration.EnableLiveSync)
+        if (_configuration.EnableGraphChangePublishing)
         {
             _graphChangeSender = new OpcUaClientGraphChangeSender(
                 this,
@@ -358,7 +358,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }
 
         // Create node change processor for remote sync features
-        if (_configuration.EnableModelChangeEvents || _configuration.EnablePeriodicResync)
+        if (_configuration.EnableGraphChangeSubscription || _configuration.EnablePeriodicGraphBrowsing)
         {
             _nodeChangeProcessor = new OpcUaClientGraphChangeReceiver(
                 this,

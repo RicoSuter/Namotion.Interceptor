@@ -577,6 +577,54 @@ Configure monitored item behavior at global or per-property level:
 
 All settings can be overridden per-property using `[OpcUaNode]` attribute.
 
+## Graph Change Synchronization
+
+By default, graph structure is static:
+- **Client**: Reads the server's graph once at startup
+- **Server**: Exposes the local C# model; external changes are not accepted
+
+To enable runtime graph changes, configure the options below.
+
+### Server → Client
+
+When the server's C# model changes (subjects added/removed from collections, references, or dictionaries), clients can receive these changes through two mechanisms:
+
+**Event-based (recommended):**
+- Server: `EnableGraphChangePublishing = true` - emits ModelChangeEvents
+- Client: `EnableGraphChangeSubscription = true` - subscribes to events
+
+**Polling-based (fallback for servers without event support):**
+- Client: `EnablePeriodicGraphBrowsing = true` - periodically browses server
+- Client: `PeriodicGraphBrowsingInterval = TimeSpan.FromSeconds(30)` - browse interval
+
+### Client → Server
+
+When the client's C# model changes, the server can accept these changes:
+
+- Client: `EnableGraphChangePublishing = true` - calls AddNodes/DeleteNodes
+- Server: `EnableNodeManagement = true` - accepts the requests
+- Server: `TypeRegistry = ...` - required to map TypeDefinitions to C# types
+
+### Configuration Reference
+
+**Client options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `EnableGraphChangePublishing` | `false` | Sync C# changes to server (MonitoredItems + AddNodes/DeleteNodes) |
+| `EnableGraphChangeSubscription` | `false` | Subscribe to server's ModelChangeEvents |
+| `EnablePeriodicGraphBrowsing` | `false` | Periodically browse server for structural changes |
+| `PeriodicGraphBrowsingInterval` | 30s | Interval between periodic browse operations |
+| `TypeRegistry` | `null` | Maps C# types to OPC UA TypeDefinition NodeIds |
+
+**Server options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `EnableGraphChangePublishing` | `false` | Sync C# changes to OPC UA address space |
+| `EnableNodeManagement` | `false` | Accept AddNodes/DeleteNodes from clients |
+| `TypeRegistry` | `null` | Maps OPC UA TypeDefinitions to C# types (required when `EnableNodeManagement = true`) |
+
 ## Lifecycle Management
 
 ### Automatic Cleanup on Subject Detach
@@ -585,14 +633,14 @@ When subjects are detached from the object graph (removed from collections, set 
 
 **Server behavior:**
 - When a subject is detached, its corresponding entries in `CustomNodeManager._subjects` are removed
-- The OPC UA node remains in the address space until server restart (OPC UA SDK limitation)
+- When `EnableGraphChangePublishing = true`, OPC UA nodes are also removed from the address space and ModelChangeEvents are emitted
 - Local tracking is cleaned up immediately to prevent memory leaks
 
 **Client behavior:**
 - When a subject is detached, monitored items in `SubscriptionManager._monitoredItems` are removed
 - Polling items in `PollingManager._pollingItems` are also cleaned up
 - Property data (OPC UA node IDs) associated with the subject is cleared
-- OPC UA subscription items remain on the server until session ends
+- When `EnableGraphChangePublishing = true`, DeleteNodes is called on the server
 - Cleanup is skipped during reconnection to avoid interfering with subscription transfer
 
 **Thread safety:**
@@ -600,9 +648,4 @@ When subjects are detached from the object graph (removed from collections, set 
 - Handlers use `ConcurrentDictionary.TryRemove` for safe concurrent modification
 - Event handlers are designed to be fast and exception-free
 
-**What this does NOT do:**
-- Does NOT dynamically add new subjects to OPC UA after initialization
-- Does NOT update the OPC UA address space when subjects are attached
-- New subjects added after startup require a restart to appear in OPC UA
-
-This minimal lifecycle integration prevents memory leaks in long-running services with dynamic object graphs.
+This lifecycle integration prevents memory leaks in long-running services with dynamic object graphs.

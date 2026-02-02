@@ -16,10 +16,9 @@ These tests share a single OPC UA server instance across all tests, with a fresh
 - `SharedOpcUaServerFixture` (assembly-level) - One server for all tests
 
 **Configuration:**
-- `EnableLiveSync = true` (both server and client)
-- `EnableModelChangeEvents = true` (server emits structural change events)
-- `EnableExternalNodeManagement = true` (server accepts AddNodes/DeleteNodes from clients)
-- `EnableRemoteNodeManagement = true` (client can create/delete nodes on server)
+- `EnableGraphChangePublishing = true` (both server and client)
+- `EnableGraphChangeSubscription = true` (client subscribes to server's ModelChangeEvents)
+- `EnableNodeManagement = true` (server accepts AddNodes/DeleteNodes from clients)
 
 **Example:**
 ```csharp

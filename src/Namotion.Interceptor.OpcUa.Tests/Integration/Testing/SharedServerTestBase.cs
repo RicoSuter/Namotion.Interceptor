@@ -45,9 +45,8 @@ public abstract class SharedServerTestBase : IAsyncLifetime,
     /// </summary>
     protected virtual void ConfigureClient(OpcUaClientConfiguration config)
     {
-        config.EnableLiveSync = true;
-        config.EnableModelChangeEvents = true;
-        config.EnableRemoteNodeManagement = true;
+        config.EnableGraphChangePublishing = true;
+        config.EnableGraphChangeSubscription = true;
     }
 }
 
