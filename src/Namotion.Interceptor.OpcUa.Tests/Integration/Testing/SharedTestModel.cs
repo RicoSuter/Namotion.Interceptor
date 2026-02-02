@@ -23,11 +23,9 @@ public partial class SharedTestModel
         ServerToClientReference = new ServerToClientReferenceTestArea();
         ServerToClientCollection = new ServerToClientCollectionTestArea();
         ServerToClientDictionary = new ServerToClientDictionaryTestArea();
-        ServerToClientSharedSubject = new ServerToClientSharedSubjectTestArea();
         ClientToServerReference = new ClientToServerReferenceTestArea();
         ClientToServerCollection = new ClientToServerCollectionTestArea();
         ClientToServerDictionary = new ClientToServerDictionaryTestArea();
-        ClientToServerSharedSubject = new ClientToServerSharedSubjectTestArea();
     }
 
     [Path("opc", "Connected")]
@@ -63,9 +61,6 @@ public partial class SharedTestModel
     [Path("opc", "ServerToClientDictionary")]
     public partial ServerToClientDictionaryTestArea ServerToClientDictionary { get; set; }
 
-    [Path("opc", "ServerToClientSharedSubject")]
-    public partial ServerToClientSharedSubjectTestArea ServerToClientSharedSubject { get; set; }
-
     [Path("opc", "ClientToServerReference")]
     public partial ClientToServerReferenceTestArea ClientToServerReference { get; set; }
 
@@ -74,9 +69,6 @@ public partial class SharedTestModel
 
     [Path("opc", "ClientToServerDictionary")]
     public partial ClientToServerDictionaryTestArea ClientToServerDictionary { get; set; }
-
-    [Path("opc", "ClientToServerSharedSubject")]
-    public partial ClientToServerSharedSubjectTestArea ClientToServerSharedSubject { get; set; }
 }
 
 /// <summary>
@@ -452,27 +444,6 @@ public partial class ServerToClientDictionaryTestArea
 }
 
 /// <summary>
-/// Test area for ServerToClientSharedSubjectTests.
-/// </summary>
-[InterceptorSubject]
-public partial class ServerToClientSharedSubjectTestArea
-{
-    public ServerToClientSharedSubjectTestArea()
-    {
-        PrimaryItems = [];
-        SecondaryItems = [];
-    }
-
-    /// <summary>First collection for shared subject testing.</summary>
-    [OpcUaReference("HasComponent", CollectionStructure = CollectionNodeStructure.Container)]
-    public partial NestedPerson[] PrimaryItems { get; set; }
-
-    /// <summary>Second collection for shared subject testing.</summary>
-    [OpcUaReference("HasComponent", CollectionStructure = CollectionNodeStructure.Container)]
-    public partial NestedPerson[] SecondaryItems { get; set; }
-}
-
-/// <summary>
 /// Test area for ClientToServerReferenceTests.
 /// </summary>
 [InterceptorSubject]
@@ -519,23 +490,4 @@ public partial class ClientToServerDictionaryTestArea
 
     [Path("opc", "Items")]
     public partial Dictionary<string, NestedPerson>? Items { get; set; }
-}
-
-/// <summary>
-/// Test area for ClientToServerSharedSubjectTests.
-/// </summary>
-[InterceptorSubject]
-public partial class ClientToServerSharedSubjectTestArea
-{
-    public ClientToServerSharedSubjectTestArea()
-    {
-        PrimaryItems = [];
-        SecondaryItems = [];
-    }
-
-    [OpcUaReference("HasComponent", CollectionStructure = CollectionNodeStructure.Container)]
-    public partial NestedPerson[] PrimaryItems { get; set; }
-
-    [OpcUaReference("HasComponent", CollectionStructure = CollectionNodeStructure.Container)]
-    public partial NestedPerson[] SecondaryItems { get; set; }
 }

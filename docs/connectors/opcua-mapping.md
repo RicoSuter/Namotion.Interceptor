@@ -1,186 +1,191 @@
 # OPC UA Mapping Guide
 
-This document describes how to map C# object models to OPC UA address spaces using Namotion.Interceptor's OPC UA integration.
+This guide explains how to map C# object models to OPC UA address spaces using Namotion.Interceptor's OPC UA integration.
 
-## Overview
+## Introduction
 
-The OPC UA mapping system translates between:
-- **C# classes** → OPC UA Object/Variable Nodes
-- **C# properties** → OPC UA Variable Nodes (Properties or DataVariables)
+### Server vs Client
 
-## Server vs Client
+The same mapping attributes work for both scenarios:
 
-The same mapping attributes work for both server and client:
+- **Server**: Creates OPC UA nodes in the address space based on your C# model
+- **Client**: Discovers OPC UA nodes and maps them to your C# properties
 
-- **Server**: Creates OPC UA nodes in the address space based on C# model
-- **Client**: Discovers OPC UA nodes and maps them to C# properties
+### Configuration Resolution
 
-Some configuration applies only to one side:
-- `SamplingInterval`, `QueueSize`, `DataChangeTrigger` - Client monitoring
-- `EventNotifier`, `ModellingRule` - Server node structure
+Configuration is resolved by merging multiple sources. Higher priority sources override lower ones:
 
-## Scope and Limitations
+| Priority | Source | Description |
+|----------|--------|-------------|
+| 1 (highest) | Fluent configuration | Runtime overrides via `FluentOpcUaNodeMapper` |
+| 2 | Property-level `[OpcUaNode]` | Instance-specific settings |
+| 3 | Class-level `[OpcUaNode]` | Type defaults (TypeDefinition, NodeClass) |
+| 4 (fallback) | Property name | BrowseName defaults to C# property name |
 
-This mapping system is designed for **instance mapping** - creating Object and Variable nodes in an OPC UA address space from C# object models. It supports:
-
-- **Object Nodes**: From C# classes decorated with `[InterceptorSubject]`
-- **Variable Nodes**: From C# properties (primitives, arrays, or `[OpcUaValue]` classes)
-
-It does **not** support creating new type definitions (ObjectTypes, VariableTypes, DataTypes). Type definitions are referenced via the `TypeDefinition` configuration property but must either:
-- Exist as built-in OPC UA types (e.g., `FolderType`, `BaseDataVariableType`)
-- Be loaded from NodeSet XML files via `OpcUaServerConfiguration.LoadPredefinedNodes()`
-
-For scenarios requiring custom type definitions, create them in companion specification NodeSet files and load them at server startup.
-
-## Core Concepts
-
-### OPC UA Address Space Basics
-
-An OPC UA address space consists of:
-- **Nodes** - Objects, Variables, Methods, Types, etc.
-- **References** - Directed edges connecting nodes (HasComponent, HasProperty, etc.)
-- **Attributes** - Metadata on nodes (BrowseName, DisplayName, Value, etc.)
-
-### Mapping Model
+**Example:**
 
 ```
-C# Model                          OPC UA Address Space
-─────────────────────────         ────────────────────────────────
-class Machine                 →   ObjectNode (type: MachineType)
-├── property Motor1           →   ├── ObjectNode via HasComponent
-│   ├── property Speed        →   │   └── VariableNode via HasProperty
-│   └── property Temp         →   │   └── VariableNode via HasProperty
-└── property SerialNumber     →   └── VariableNode via HasProperty
+Class attribute:    { TypeDefinition: "MotorType" }
+Property attribute: { BrowseName: "MainMotor", SamplingInterval: 100 }
+Fluent config:      { SamplingInterval: 50 }
+
+Result: { TypeDefinition: "MotorType", BrowseName: "MainMotor", SamplingInterval: 50 }
 ```
 
-## Attributes
+Each field is resolved independently - a source only overrides fields it explicitly sets.
 
-### OpcUaNodeAttribute
+### Key Concept: BrowseName Lives on the Node
 
-Defines node metadata. Can be applied to classes (type-level defaults) or properties (instance-specific overrides).
+In OPC UA, the **BrowseName is an attribute of the Node**, not the Reference. This differs from typical object-oriented thinking:
 
-```csharp
-[AttributeUsage(AttributeTargets.Class | AttributeTargets.Property)]
-public class OpcUaNodeAttribute : Attribute
-{
-    // Constructor - BrowseName is required, namespace defaults to null
-    public OpcUaNodeAttribute(string browseName, string? browseNamespaceUri = null);
+| Model | Name Location |
+|-------|---------------|
+| Typical OO | Property name (on the reference) |
+| OPC UA | BrowseName (on the node itself) |
 
-    // Node identification (from constructor)
-    public string BrowseName { get; }
-    public string? BrowseNamespaceUri { get; }
+When two references point to the same node, they both show the same BrowseName. This matters for [Shared References](#shared-references).
 
-    // Node identification (optional overrides)
-    public string? NodeIdentifier { get; init; }      // Property-level only
-    public string? NodeNamespaceUri { get; init; }
+---
 
-    // Display
-    public string? DisplayName { get; init; }
-    public string? Description { get; init; }
+## Attributes Quick Reference
 
-    // Type definition
-    public string? TypeDefinition { get; init; }
-    public string? TypeDefinitionNamespace { get; init; }
+| Attribute | Target | Purpose |
+|-----------|--------|---------|
+| `[OpcUaNode]` | Class or Property | BrowseName, TypeDefinition, NodeClass, monitoring settings |
+| `[OpcUaReference]` | Property | Reference type (HasComponent, HasProperty), collection structure |
+| `[OpcUaValue]` | Property | Marks the primary value for Variable nodes |
+| `[PropertyAttribute]` | Property | Attaches property as child of another variable |
 
-    // NodeClass override
-    public OpcUaNodeClass NodeClass { get; init; } = OpcUaNodeClass.Auto;
+---
 
-    // DataType override (when C# type is object or doesn't map directly)
-    // Examples: "Double", "Int32", "NodeId", "LocalizedText"
-    public string? DataType { get; init; }
+## Mapping Scenarios
 
-    // Client monitoring
-    public int SamplingInterval { get; init; }        // int.MinValue = not set; 0 = exception-based
-    public uint QueueSize { get; init; }              // uint.MaxValue = not set; set explicitly with SamplingInterval=0
-    public DiscardOldestMode DiscardOldest { get; init; }
-    public DataChangeTrigger DataChangeTrigger { get; init; }
-    public DeadbandType DeadbandType { get; init; }
-    public double DeadbandValue { get; init; }        // NaN = not set
+### Simple Properties
 
-    // Server
-    public ModellingRule ModellingRule { get; init; }
-    public byte EventNotifier { get; init; }
-}
-```
-
-**Resolution order:**
-1. Class-level `[OpcUaNode]` - defaults for the type
-2. Property-level `[OpcUaNode]` - overrides for specific instance
-3. Property name - fallback for BrowseName
-
-### OpcUaReferenceAttribute
-
-Defines the reference (edge) from parent to this node.
-
-```csharp
-[AttributeUsage(AttributeTargets.Property)]
-public class OpcUaReferenceAttribute : Attribute
-{
-    public OpcUaReferenceAttribute(string referenceType = "HasProperty");
-
-    public string ReferenceType { get; }           // e.g., "HasComponent", "HasProperty"
-    public string? ItemReferenceType { get; init; } // For collection/dictionary items
-}
-```
-
-**Default:** `"HasProperty"` - override explicitly when needed.
-
-### OpcUaValueAttribute
-
-Marks the property that holds the main value for a VariableNode class.
-
-```csharp
-[AttributeUsage(AttributeTargets.Property)]
-public class OpcUaValueAttribute : Attribute { }
-```
-
-Used when a class represents a complex VariableType (like AnalogSignalVariableType) where the class has child properties but also a primary value.
-
-## Common Patterns
-
-### Basic Object with Properties
+Primitive C# properties map to OPC UA Variable nodes.
 
 ```csharp
 [InterceptorSubject]
-[OpcUaNode("Identification",
-    TypeDefinition = "MachineIdentificationType",
-    TypeDefinitionNamespace = "http://opcfoundation.org/UA/Machinery/")]
-public partial class Identification
-{
-    // Default reference is HasProperty - no attribute needed
-    public partial string? Manufacturer { get; set; }
-    public partial string? SerialNumber { get; set; }
-    public partial string? ProductInstanceUri { get; set; }
-}
-```
-
-**Produces:**
-```
-Identification (ObjectNode, type: MachineIdentificationType)
-├── Manufacturer (VariableNode via HasProperty)
-├── SerialNumber (VariableNode via HasProperty)
-└── ProductInstanceUri (VariableNode via HasProperty)
-```
-
-### Object Composition with HasComponent
-
-For structural composition (parent "contains" child), use `HasComponent`:
-
-```csharp
-[InterceptorSubject]
-[OpcUaNode("Machine", TypeDefinition = "MachineType")]
 public partial class Machine
 {
-    // Child object - use HasComponent for structural containment
-    [OpcUaReference("HasComponent")]
-    public partial Motor Motor1 { get; set; }
+    public partial double Speed { get; set; }
+    public partial string? Status { get; set; }
+    public partial bool IsRunning { get; set; }
+}
+```
 
-    // Simple property - HasProperty is default
-    public partial string? SerialNumber { get; set; }
+```
+Machine
+├── Speed (HasProperty) = 100.0
+├── Status (HasProperty) = "Running"
+└── IsRunning (HasProperty) = true
+```
+
+The BrowseName defaults to the C# property name. Override it with `[OpcUaNode]`:
+
+```csharp
+[OpcUaNode("CurrentSpeed")]
+public partial double Speed { get; set; }
+```
+
+**Primitive Arrays**
+
+Arrays of primitives (e.g., `double[]`, `string[]`) map to a single Variable node with an array value - they do NOT create multiple child nodes:
+
+```csharp
+[InterceptorSubject]
+public partial class Machine
+{
+    public partial double[] Temperatures { get; set; }
+}
+```
+
+```
+Machine
+└── Temperatures (HasProperty) = [25.5, 26.0, 24.8]  // Single node with array value
+```
+
+This is different from [Collections](#collections---container-structure) of objects, which create multiple child nodes.
+
+**Monitoring Settings (Client)**
+
+Configure how the OPC UA client monitors value changes:
+
+```csharp
+[OpcUaNode(SamplingInterval = 100, DeadbandType = DeadbandType.Absolute, DeadbandValue = 0.5)]
+public partial double Temperature { get; set; }
+```
+
+| Setting | Description |
+|---------|-------------|
+| `SamplingInterval` | Milliseconds between samples; 0 = exception-based (immediate) |
+| `QueueSize` | Buffer size for monitored items |
+| `DeadbandType` | None, Absolute, or Percent |
+| `DeadbandValue` | Threshold for deadband filtering |
+| `DataChangeTrigger` | Status, StatusValue, or StatusValueTimestamp |
+
+**Additional Settings**
+
+| Setting | Description |
+|---------|-------------|
+| `TypeDefinition` | OPC UA type (e.g., "AnalogItemType") |
+| `DisplayName` | Localized display name |
+| `Description` | Human-readable description |
+| `DataType` | Override C# type mapping (e.g., "Double", "NodeId") |
+| `ModellingRule` | Server: Mandatory, Optional, etc. |
+
+---
+
+### Property Attributes
+
+Attach metadata properties as children of another Variable node using `[PropertyAttribute]`.
+
+Use this when you need OPC UA standard properties (like `EURange`, `EngineeringUnits`) on a simple property without creating a separate class.
+
+```csharp
+[InterceptorSubject]
+public partial class Machine
+{
+    [OpcUaNode("Temperature", TypeDefinition = "AnalogItemType")]
+    public partial double Temperature { get; set; }
+
+    [PropertyAttribute(nameof(Temperature), "EngineeringUnits")]
+    public partial string? Temperature_Unit { get; set; }
+
+    [PropertyAttribute(nameof(Temperature), "EURange")]
+    public partial Range? Temperature_Range { get; set; }
+}
+```
+
+```
+Machine
+└── Temperature (HasProperty, AnalogItemType) = 25.5
+    ├── EngineeringUnits (HasProperty) = "°C"
+    └── EURange (HasProperty) = { Low: -40, High: 85 }
+```
+
+The C# property name (`Temperature_Unit`) is just a convention - the OPC UA BrowseName comes from the `[PropertyAttribute]` parameter.
+
+**When to use PropertyAttribute vs Value Classes:**
+
+- **PropertyAttribute**: Adding a few metadata properties to a simple value
+- **Value Classes**: Reusable pattern with multiple properties (see [Value Classes](#value-classes))
+
+---
+
+### Object References
+
+Object properties create OPC UA Object nodes with a reference from the parent.
+
+```csharp
+[InterceptorSubject]
+public partial class Machine
+{
+    [OpcUaReference("HasComponent")]
+    public partial Motor Motor { get; set; }
 }
 
 [InterceptorSubject]
-[OpcUaNode("Motor", TypeDefinition = "MotorType")]
 public partial class Motor
 {
     public partial double Speed { get; set; }
@@ -188,218 +193,359 @@ public partial class Motor
 }
 ```
 
-**Produces:**
 ```
-Machine (ObjectNode, type: MachineType)
-├── Motor1 (ObjectNode via HasComponent, type: MotorType)
-│   ├── Speed (VariableNode via HasProperty)
-│   └── Temperature (VariableNode via HasProperty)
-└── SerialNumber (VariableNode via HasProperty)
+Machine
+└── Motor (HasComponent) ──► Object "Motor"
+    ├── Speed (HasProperty)
+    └── Temperature (HasProperty)
 ```
 
-### HasAddIn Reference (Companion Specs)
+**Custom BrowseName**
 
-Machinery and other companion specs use `HasAddIn` for optional add-in components:
+Override the BrowseName with `[OpcUaNode]` on the property:
+
+```csharp
+[OpcUaReference("HasComponent")]
+[OpcUaNode("MainMotor")]
+public partial Motor Motor1 { get; set; }
+
+[OpcUaReference("HasComponent")]
+[OpcUaNode("AuxiliaryMotor")]
+public partial Motor Motor2 { get; set; }
+```
+
+```
+Machine
+├── MainMotor (HasComponent)
+└── AuxiliaryMotor (HasComponent)
+```
+
+**Nullable References**
+
+Nullable properties (`Motor?`) work the same way - if the value is `null`, no OPC UA node is created for that property.
+
+```csharp
+[OpcUaReference("HasComponent")]
+public partial Motor? OptionalMotor { get; set; }
+```
+
+**Reference Types**
+
+The `[OpcUaReference]` attribute specifies how the parent references the child node:
+
+| Reference Type | Use Case |
+|----------------|----------|
+| `HasProperty` | Simple characteristics, metadata (default for primitive properties) |
+| `HasComponent` | Structural containment, child objects |
+| `HasAddIn` | Optional add-in components (Machinery spec) |
+| `Organizes` | Folder-style organization |
+
+```csharp
+[OpcUaReference("HasComponent")]
+public partial Motor Motor { get; set; }
+
+[OpcUaReference("HasAddIn")]
+public partial Identification? Identification { get; set; }
+
+[OpcUaReference("Organizes")]
+public partial Folder Components { get; set; }
+```
+
+**Custom Reference Types**
+
+Use custom or companion-spec reference types by specifying the namespace:
+
+```csharp
+[OpcUaReference("MyCustomReference", ReferenceTypeNamespace = "http://example.com/")]
+public partial Device Device { get; set; }
+```
+
+---
+
+### Collections - Container Structure
+
+Arrays and lists of objects create multiple child nodes under a container folder (default behavior).
 
 ```csharp
 [InterceptorSubject]
 public partial class Machine
 {
+    [OpcUaReference("HasComponent")]
+    public partial Motor[] Motors { get; set; }
+}
+```
+
+```csharp
+machine.Motors = [new Motor(), new Motor(), new Motor()];
+```
+
+```
+Machine
+└── Motors (HasComponent, FolderType)          // Container node
+    ├── Motors[0] (HasComponent) ──► Object
+    ├── Motors[1] (HasComponent) ──► Object
+    └── Motors[2] (HasComponent) ──► Object
+```
+
+**BrowseName for Items**: `PropertyName[index]` (e.g., `Motors[0]`, `Motors[1]`)
+
+**Customize Item Reference Type**
+
+Use `ItemReferenceType` to specify a different reference type for the items:
+
+```csharp
+[OpcUaReference("Organizes", ItemReferenceType = "HasComponent")]
+[OpcUaNode("Motors", TypeDefinition = "FolderType")]
+public partial Motor[] Motors { get; set; }
+```
+
+```
+Machine
+└── Motors (Organizes, FolderType)
+    ├── Motors[0] (HasComponent)
+    ├── Motors[1] (HasComponent)
+    └── Motors[2] (HasComponent)
+```
+
+**Limitation**: The same instance cannot appear at multiple indices - it would create conflicting BrowseNames.
+
+---
+
+### Collections - Flat Structure
+
+Place collection items directly under the parent node (no container folder).
+
+```csharp
+[InterceptorSubject]
+public partial class Machine
+{
+    [OpcUaReference("HasComponent", CollectionStructure = CollectionNodeStructure.Flat)]
+    public partial Motor[] Motors { get; set; }
+}
+```
+
+```
+Machine
+├── Motors[0] (HasComponent) ──► Object
+├── Motors[1] (HasComponent) ──► Object
+└── Motors[2] (HasComponent) ──► Object
+```
+
+Use flat structure when:
+- The container folder adds unnecessary hierarchy
+- You want items as direct siblings of other properties
+
+---
+
+### Dictionaries
+
+Dictionaries create child nodes using the dictionary key as the BrowseName.
+
+```csharp
+[InterceptorSubject]
+public partial class Machine
+{
+    [OpcUaReference("Organizes", ItemReferenceType = "HasComponent")]
+    [OpcUaNode("Motors", TypeDefinition = "FolderType")]
+    public partial Dictionary<string, Motor> Motors { get; set; }
+}
+```
+
+```csharp
+machine.Motors["Pump1"] = new Motor();
+machine.Motors["Pump2"] = new Motor();
+machine.Motors["MainDrive"] = new Motor();
+```
+
+```
+Machine
+└── Motors (Organizes, FolderType)
+    ├── Pump1 (HasComponent) ──► Object
+    ├── Pump2 (HasComponent) ──► Object
+    └── MainDrive (HasComponent) ──► Object
+```
+
+**Key Advantage**: Dictionary keys become meaningful BrowseNames instead of numeric indices.
+
+**Limitation**: The same instance cannot appear under multiple keys - it would create conflicting BrowseNames.
+
+---
+
+### Value Classes
+
+Classes that map to OPC UA **Variable nodes** with both a value and child properties.
+
+Use this pattern when modeling OPC UA VariableTypes like `AnalogSignalVariableType` where the node has a primary value AND metadata properties.
+
+```csharp
+[InterceptorSubject]
+[OpcUaNode(NodeClass = OpcUaNodeClass.Variable)]
+public partial class AnalogSignal
+{
+    [OpcUaValue]
+    public partial double Value { get; set; }
+
+    public partial string? EngineeringUnits { get; set; }
+    public partial double? MinValue { get; set; }
+    public partial double? MaxValue { get; set; }
+}
+
+[InterceptorSubject]
+public partial class Machine
+{
+    [OpcUaReference("HasComponent")]
+    public partial AnalogSignal Temperature { get; set; }
+}
+```
+
+```
+Machine
+└── Temperature (HasComponent) ──► VariableNode "Temperature"
+    ├── Value = 25.5                    // The Variable's value attribute
+    ├── EngineeringUnits (HasProperty) = "°C"
+    ├── MinValue (HasProperty) = -40.0
+    └── MaxValue (HasProperty) = 85.0
+```
+
+**Key points:**
+
+- `[OpcUaValue]` marks which property provides the Variable node's Value attribute
+- `NodeClass = OpcUaNodeClass.Variable` on the class makes it a VariableNode instead of ObjectNode
+- Other properties become `HasProperty` children of the VariableNode
+
+**When to use Value Classes vs PropertyAttribute:**
+
+- **Value Classes**: Reusable pattern, multiple instances with same structure
+- **PropertyAttribute**: One-off metadata on a single property
+
+---
+
+### Shared References
+
+When the same C# object instance is referenced from multiple properties, only **one OPC UA node** is created with multiple references pointing to it.
+
+**BrowseName Resolution for Shared Instances**
+
+The BrowseName is determined by the **first property** that references the instance during loading. You have two options:
+
+| Approach | Behavior | Predictability |
+|----------|----------|----------------|
+| Class-level `[OpcUaNode]` | All references use the class-defined name | Predictable (recommended) |
+| Property-level `[OpcUaNode]` | First property encountered wins | Depends on load order |
+
+**Recommended: Class-level BrowseName**
+
+```csharp
+[InterceptorSubject]
+[OpcUaNode("Identification")]  // BrowseName defined on class - predictable
+public partial class MachineIdentification
+{
+    public partial string? Manufacturer { get; set; }
+    public partial string? SerialNumber { get; set; }
+}
+
+[InterceptorSubject]
+public partial class Machine
+{
     [OpcUaReference("HasAddIn")]
-    [OpcUaNode("Identification", "http://opcfoundation.org/UA/DI/")]
-    public partial Identification Identification { get; set; }
+    public partial MachineIdentification Identification { get; set; }
 
     [OpcUaReference("HasComponent")]
     public partial MachineryBuildingBlocks MachineryBuildingBlocks { get; set; }
 }
-```
-
-### Collections with Organizes
-
-For folder-style organization:
-
-```csharp
-[InterceptorSubject]
-public partial class Machine
-{
-    // Folder organizing process values
-    [OpcUaReference("Organizes", ItemReferenceType = "HasComponent")]
-    [OpcUaNode("Monitoring", TypeDefinition = "FolderType")]
-    public partial IReadOnlyDictionary<string, ProcessValueType> Monitoring { get; set; }
-}
-```
-
-**Produces:**
-```
-Machine (ObjectNode)
-└── Monitoring (FolderType via Organizes)
-    ├── Temperature (ObjectNode via HasComponent)
-    ├── Pressure (ObjectNode via HasComponent)
-    └── Flow (ObjectNode via HasComponent)
-```
-
-### Complex VariableNode (VariableType with Children)
-
-When a class represents a VariableType (not ObjectType), the node is a Variable that has a value AND child properties:
-
-```csharp
-[InterceptorSubject]
-[OpcUaNode("AnalogSignalVariable",
-    TypeDefinition = "AnalogSignalVariableType",
-    TypeDefinitionNamespace = "http://opcfoundation.org/UA/PADIM/",
-    NodeClass = OpcUaNodeClass.Variable)]  // Force VariableNode
-public partial class AnalogSignalVariable
-{
-    // The primary value of this VariableNode
-    [OpcUaNode("ActualValue")]
-    [OpcUaValue]
-    public partial double ActualValue { get; set; }
-
-    // Child properties (standard OPC UA metadata)
-    [OpcUaNode("EURange")]
-    public partial Range? EURange { get; set; }
-
-    [OpcUaNode("EngineeringUnits")]
-    public partial EUInformation? EngineeringUnits { get; set; }
-}
 
 [InterceptorSubject]
-public partial class Sensor
-{
-    // Reference to VariableNode - use HasComponent (not HasProperty)
-    // because this is a DataVariable, not a simple Property
-    [OpcUaReference("HasComponent")]
-    public partial AnalogSignalVariable Temperature { get; set; }
-}
-```
-
-**Produces:**
-```
-Sensor (ObjectNode)
-└── Temperature (VariableNode via HasComponent, type: AnalogSignalVariableType)
-    ├── Value = ActualValue (the Variable's value attribute)
-    ├── EURange (VariableNode via HasProperty)
-    └── EngineeringUnits (VariableNode via HasProperty)
-```
-
-### Property Attributes (Metadata on Variables)
-
-For adding standard OPC UA metadata (EURange, EngineeringUnits) to simple properties, use `[PropertyAttribute]`. Properties marked with this attribute are created as HasProperty subnodes of their parent variable node, matching OPC UA semantics where attributes belong to the variable they describe.
-
-```csharp
-[InterceptorSubject]
-public partial class TemperatureSensor
-{
-    [OpcUaNode("Value", TypeDefinition = "AnalogItemType")]
-    public partial double Value { get; set; }
-
-    // Property attributes become HasProperty children of Value
-    [PropertyAttribute(nameof(Value), "EURange")]
-    [OpcUaNode("EURange")]
-    public partial Range? Value_EURange { get; set; }
-
-    [PropertyAttribute(nameof(Value), "EngineeringUnits")]
-    [OpcUaNode("EngineeringUnits")]
-    public partial EUInformation? Value_EngineeringUnits { get; set; }
-}
-```
-
-**Produces:**
-```
-TemperatureSensor (ObjectNode)
-└── Value (VariableNode, type: AnalogItemType)
-    ├── EURange (VariableNode via HasProperty)
-    └── EngineeringUnits (VariableNode via HasProperty)
-```
-
-Note: The C# property names (e.g., `Value_EURange`) are just convention - the OPC UA browse names come from the `[Path]` or `[OpcUaNode]` attributes. Attributes can be nested (attributes on attributes) for complex metadata hierarchies.
-
-### Same Instance, Multiple References
-
-When the same C# object is referenced from multiple places, only one OPC UA node is created:
-
-```csharp
-var identification = new Identification { Manufacturer = "Acme" };
-
-var machine = new Machine
-{
-    // Primary reference - defines NodeId
-    Identification = identification,
-
-    MachineryBuildingBlocks = new MachineryBuildingBlocks
-    {
-        // Secondary reference - just an edge to existing node
-        Identification = identification
-    }
-};
-```
-
-```csharp
-public partial class Machine
-{
-    [OpcUaReference("HasAddIn")]
-    [OpcUaNode("Identification", NodeIdentifier = "Identification")]  // Explicit NodeId
-    public partial Identification Identification { get; set; }
-}
-
 public partial class MachineryBuildingBlocks
 {
     [OpcUaReference("HasAddIn")]
-    [OpcUaNode("Identification")]  // No NodeIdentifier - references existing node
-    public partial Identification Identification { get; set; }
+    public partial MachineIdentification? Identification { get; set; }
 }
 ```
 
-> **Note:** Processing order is non-deterministic when multiple properties reference the same object. Duplicate node metadata on all properties to ensure consistent behavior.
-
-### Different NodeIds for Same Type
-
-Different instances of the same type get different NodeIds:
+**Alternative: Property-level BrowseName (first wins)**
 
 ```csharp
 [InterceptorSubject]
+public partial class MachineIdentification
+{
+    public partial string? Manufacturer { get; set; }
+}
+
+[InterceptorSubject]
 public partial class Machine
 {
-    [OpcUaReference("HasComponent")]
-    [OpcUaNode("MainMotor", NodeIdentifier = "MainMotor")]
-    public partial Motor Motor1 { get; set; }
+    [OpcUaReference("HasAddIn")]
+    [OpcUaNode("Identification")]  // If loaded first, this name wins
+    public partial MachineIdentification Identification { get; set; }
 
     [OpcUaReference("HasComponent")]
-    [OpcUaNode("AuxMotor", NodeIdentifier = "AuxMotor")]
-    public partial Motor Motor2 { get; set; }
+    public partial MachineryBuildingBlocks MachineryBuildingBlocks { get; set; }
+}
+
+[InterceptorSubject]
+public partial class MachineryBuildingBlocks
+{
+    [OpcUaReference("HasAddIn")]
+    [OpcUaNode("Identification")]  // Ignored if Machine.Identification loaded first (if redefined, ensure it uses same BrowseName)
+    public partial MachineIdentification? Identification { get; set; }
 }
 ```
 
-## Fluent Configuration
-
-For runtime configuration without attributes.
-
-**Important:** Fluent configuration is **property-level only**. It configures specific property instances (e.g., `Motor1.Speed` vs `Motor2.Speed`), not type-level defaults.
-
-For **class-level configuration** (TypeDefinition, NodeClass that applies to all instances of a type), use:
-- `[OpcUaNode]` attribute on the class, OR
-- Composite mapper with `AttributeOpcUaNodeMapper` to pick up class attributes
+**Usage:**
 
 ```csharp
-// Class-level: Use attributes (applies to ALL Motor instances)
-[OpcUaNode("Motor", TypeDefinition = "MotorType")]
-public partial class Motor { ... }
-
-// Instance-level: Use fluent (different config per instance)
-var mapper = new FluentOpcUaNodeMapper<Machine>()
-    .Map(m => m.Motor1, m => m.BrowseName("MainMotor").SamplingInterval(50))
-    .Map(m => m.Motor2, m => m.BrowseName("AuxMotor").SamplingInterval(100));
-
-// Combine both: Fluent overrides, attributes provide defaults
-var config = new OpcUaClientConfiguration
-{
-    NodeMapper = new CompositeNodeMapper(
-        mapper,                          // Instance overrides
-        new AttributeOpcUaNodeMapper())  // Class-level defaults
-};
+var identification = new MachineIdentification { Manufacturer = "Acme" };
+machine.Identification = identification;
+machine.MachineryBuildingBlocks.Identification = identification;  // Same instance!
 ```
 
-### Basic Fluent Example
+```
+Machine
+├── Identification (HasAddIn) ──────────────────┐
+└── MachineryBuildingBlocks (HasComponent)      │
+    └── Identification (HasAddIn) ──────────────┴──► Single Node "Identification"
+                                                     └── Manufacturer (HasProperty)
+```
+
+**Why class-level is recommended**: It ensures consistent BrowseName regardless of which property is processed first. With property-level only, the name depends on load order, which may vary.
+
+**Not supported for collections/dictionaries**: The same instance cannot appear at multiple indices or keys because each position requires a unique BrowseName.
+
+---
+
+### Additional References
+
+Add non-hierarchical references (e.g., `HasInterface`, `HasTypeDefinition`) that don't affect the containment hierarchy.
+
+Use fluent configuration to add additional references:
+
+```csharp
+var mapper = new FluentOpcUaNodeMapper<Machine>()
+    .Map(m => m.Motor, motor => motor
+        .ReferenceType("HasComponent")
+        .AdditionalReference(
+            referenceType: "HasInterface",
+            targetNodeId: "IVendorNameplateType",
+            targetNamespaceUri: "http://opcfoundation.org/UA/DI/",
+            isForward: true));
+```
+
+```
+Machine
+└── Motor (HasComponent) ──► Object "Motor"
+         (HasInterface) ──► IVendorNameplateType
+```
+
+**Common use cases:**
+
+- `HasInterface` - Declare that a node implements an interface type
+- Custom references from companion specifications
+
+---
+
+## Fluent Configuration
+
+Configure mapping at runtime without attributes using `FluentOpcUaNodeMapper`.
 
 ```csharp
 var mapper = new FluentOpcUaNodeMapper<Machine>()
@@ -407,33 +553,33 @@ var mapper = new FluentOpcUaNodeMapper<Machine>()
         .BrowseName("MainDriveMotor")
         .ReferenceType("HasComponent")
         .Map(m => m.Speed, speed => speed
-            .BrowseName("Speed")
-            .SamplingInterval(50))
-        .Map(m => m.Temperature, temp => temp
-            .SamplingInterval(500)))
+            .SamplingInterval(50)))
     .Map(m => m.Motor2, motor => motor
         .BrowseName("AuxMotor")
-        .ReferenceType("HasComponent")
-        .Map(m => m.Speed, speed => speed
-            .SamplingInterval(100)));
-
-var config = new OpcUaClientConfiguration
-{
-    ServerUrl = "opc.tcp://localhost:4840",
-    NodeMapper = new CompositeNodeMapper(
-        mapper,                              // Fluent config takes priority
-        new AttributeOpcUaNodeMapper(),      // Then attributes
-        new PathProviderOpcUaNodeMapper(DefaultPathProvider.Instance))  // Fallback
-};
+        .ReferenceType("HasComponent"));
 ```
 
-### Reusable Configuration
+**Nested Configuration**
+
+Configure child properties using nested `.Map()` calls:
+
+```csharp
+.Map(m => m.Motor, motor => motor
+    .BrowseName("Motor")
+    .Map(m => m.Speed, speed => speed
+        .SamplingInterval(100)
+        .DeadbandType(DeadbandType.Absolute)
+        .DeadbandValue(0.5)))
+```
+
+**Reusable Configuration**
+
+Create extension methods for common patterns:
 
 ```csharp
 public static class MotorMappingExtensions
 {
-    public static IPropertyBuilder<Motor> ConfigureMotor<TBuilder>(
-        this IPropertyBuilder<Motor> builder)
+    public static IPropertyBuilder<Motor> ConfigureMotor(this IPropertyBuilder<Motor> builder)
     {
         return builder
             .ReferenceType("HasComponent")
@@ -444,81 +590,86 @@ public static class MotorMappingExtensions
 
 // Usage
 var mapper = new FluentOpcUaNodeMapper<Machine>()
-    .Map(m => m.Motor1, motor => motor
-        .BrowseName("MainMotor")
-        .ConfigureMotor())
-    .Map(m => m.Motor2, motor => motor
-        .BrowseName("AuxMotor")
-        .ConfigureMotor());
+    .Map(m => m.Motor1, motor => motor.BrowseName("MainMotor").ConfigureMotor())
+    .Map(m => m.Motor2, motor => motor.BrowseName("AuxMotor").ConfigureMotor());
 ```
 
-### Additional References
+**CompositeNodeMapper**
 
-Add non-hierarchical references (e.g., `HasInterface`) using `.AdditionalReference()`:
+Combine multiple mappers with "last wins" semantics:
 
 ```csharp
-var mapper = new FluentOpcUaNodeMapper<Machine>()
-    .Map(m => m.Motor1, motor => motor
-        .BrowseName("MainMotor")
-        .ReferenceType("HasComponent")
-        // Add HasInterface reference to IVendorNameplateType
-        .AdditionalReference(
-            referenceType: "HasInterface",
-            targetNodeId: "IVendorNameplateType",
-            targetNamespaceUri: "http://opcfoundation.org/UA/DI/",
-            isForward: true)
-        // Multiple additional references can be added
-        .AdditionalReference(
-            referenceType: "HasTypeDefinition",
-            targetNodeId: "MotorType",
-            targetNamespaceUri: "http://example.org/Machinery/"));
+var config = new OpcUaClientConfiguration
+{
+    ServerUrl = "opc.tcp://localhost:4840",
+    NodeMapper = new CompositeNodeMapper(
+        new PathProviderOpcUaNodeMapper(DefaultPathProvider.Instance),  // Fallback
+        new AttributeOpcUaNodeMapper(),                                  // Attributes
+        fluentMapper)                                                    // Highest priority
+};
 ```
 
-The `AdditionalReference` method parameters:
-- `referenceType`: The reference type name (e.g., "HasInterface", "Organizes")
-- `targetNodeId`: The identifier of the target node
-- `targetNamespaceUri`: Optional namespace URI for the target node (uses default namespace if null)
-- `isForward`: Direction of the reference (default: `true`)
+The last mapper in the list has highest priority for any field it sets.
 
-## Composite Mappers
+---
 
-Multiple mappers can be combined with "last wins" merge semantics. Later mappers override earlier ones:
+## Troubleshooting
+
+### BrowseName Not What Expected
+
+**Check the resolution order** (highest priority first):
+
+1. Fluent configuration
+2. Property-level `[OpcUaNode]`
+3. Class-level `[OpcUaNode]`
+4. Property name
+
+**Common causes:**
+
+- Property-level attribute overrides class-level
+- Fluent config overrides all attributes
+- Forgot to add attribute entirely
+
+### Collection Items Have Wrong Names
+
+Collection items use the pattern `PropertyName[index]` (e.g., `Motors[0]`).
+
+**Class-level BrowseName is ignored** for collection items by design. The class-level `[OpcUaNode]` sets type defaults but not the item BrowseName.
+
+For custom item names, use a Dictionary instead of an array.
+
+### Node Not Appearing
+
+**Check if property is included:**
+
+- PathProvider might be filtering it out
+- Property type might not be recognized as a subject
+
+**For object references:**
+
+- Ensure the property type has `[InterceptorSubject]`
+- Add `[OpcUaReference]` to specify reference type
+
+### Shared Instance Creates Multiple Nodes
+
+For predictable shared references, add **class-level** `[OpcUaNode]`:
 
 ```csharp
-var mapper = new CompositeNodeMapper(
-    new PathProviderOpcUaNodeMapper(pathProvider),  // Base - fallback names
-    new AttributeOpcUaNodeMapper(),                  // Override - attributes
-    fluentMapper);                                   // Final - runtime overrides
+[InterceptorSubject]
+[OpcUaNode("SharedName")]  // Recommended for predictable sharing
+public partial class SharedClass { }
 ```
 
-**Merge example (last wins):**
-```
-PathProvider: { BrowseName: "speed" }
-Attribute:    { BrowseName: "Speed", SamplingInterval: 100 }
-Fluent:       { SamplingInterval: 50 }
+Without this, the BrowseName depends on which property is loaded first. If using property-level `[OpcUaNode]`, ensure all properties referencing the same instance use the same BrowseName.
 
-Result: { BrowseName: "Speed", SamplingInterval: 50 }
-         ↑ Attribute wins (later)  ↑ Fluent wins (latest)
-```
+---
 
-**Note on ReferenceType defaults:** `PathProviderOpcUaNodeMapper` returns `null` for `ReferenceType` on non-attribute properties, allowing later mappers to specify it. `AttributeOpcUaNodeMapper` uses `"HasProperty"` as the default when `[OpcUaReference]` is not specified. This design allows the composite chain to resolve defaults correctly.
+## Complete Example
 
-## Standard Reference Types
-
-| Reference Type | Use Case |
-|----------------|----------|
-| `HasProperty` | Simple characteristics, metadata (default) |
-| `HasComponent` | Structural containment, child objects |
-| `HasAddIn` | Optional add-in components (Machinery) |
-| `Organizes` | Folder-style organization |
-| `HasInterface` | Type implements interface |
-| `HasEventSource` | Event subscription chains |
-
-## OPC UA Companion Spec Support
-
-### Machinery (OPC 40001)
+A complete example implementing OPC UA Machinery (OPC 40001) and PADIM (OPC 30385) companion specifications.
 
 ```csharp
+// Machinery-compliant Machine with Identification pattern
 [InterceptorSubject]
 [OpcUaNode("Machine",
     TypeDefinition = "MachineType",
@@ -526,24 +677,42 @@ Result: { BrowseName: "Speed", SamplingInterval: 50 }
 public partial class Machine
 {
     [OpcUaReference("HasAddIn")]
-    [OpcUaNode("Identification", "http://opcfoundation.org/UA/DI/")]
     public partial MachineIdentification Identification { get; set; }
 
     [OpcUaReference("HasComponent")]
-    [OpcUaNode("MachineryBuildingBlocks")]
     public partial MachineryBuildingBlocks MachineryBuildingBlocks { get; set; }
+
+    [OpcUaReference("HasComponent")]
+    public partial Dictionary<string, AnalogSignal> ProcessValues { get; set; }
 }
-```
 
-### PADIM (OPC 30385)
+// Shared Identification - same instance appears in multiple places
+[InterceptorSubject]
+[OpcUaNode("Identification",
+    TypeDefinition = "MachineIdentificationType",
+    TypeDefinitionNamespace = "http://opcfoundation.org/UA/Machinery/")]
+public partial class MachineIdentification
+{
+    public partial string? Manufacturer { get; set; }
+    public partial string? SerialNumber { get; set; }
+    public partial string? ProductInstanceUri { get; set; }
+}
 
-```csharp
+[InterceptorSubject]
+[OpcUaNode("MachineryBuildingBlocks")]
+public partial class MachineryBuildingBlocks
+{
+    [OpcUaReference("HasAddIn")]
+    public partial MachineIdentification? Identification { get; set; }
+}
+
+// PADIM-compliant AnalogSignal as a VariableNode
 [InterceptorSubject]
 [OpcUaNode(
     TypeDefinition = "AnalogSignalVariableType",
     TypeDefinitionNamespace = "http://opcfoundation.org/UA/PADIM/",
     NodeClass = OpcUaNodeClass.Variable)]
-public partial class AnalogSignalVariable
+public partial class AnalogSignal
 {
     [OpcUaValue]
     public partial double ActualValue { get; set; }
@@ -553,97 +722,73 @@ public partial class AnalogSignalVariable
 }
 ```
 
-## Limitations
-
-The following OPC UA features are not yet supported but can be added in future versions without structural changes to the mapping model:
-
-### Methods
-
-OPC UA Methods (callable operations) are not currently supported. Future implementation could use:
+**Usage:**
 
 ```csharp
-// Potential future syntax
-[OpcUaMethod]
-public partial Task<int> Start(int speed, CancellationToken ct);
-```
-
-Methods would map to:
-- Method NodeClass with Executable/UserExecutable attributes
-- InputArguments and OutputArguments as HasProperty children
-
-### Events
-
-OPC UA Events (notifications) are partially supported:
-- `EventNotifier` attribute exists for marking event-producing nodes
-- Full event type definitions and `GeneratesEvent` references not yet supported
-
-Future implementation could use:
-
-```csharp
-// Potential future syntax
-[OpcUaEventType(TypeDefinition = "AlarmEventType")]
-public partial class MachineAlarm
+var identification = new MachineIdentification(context)
 {
-    public partial string Message { get; set; }
-    public partial int Severity { get; set; }
-}
+    Manufacturer = "Acme Corp",
+    SerialNumber = "SN-12345"
+};
 
-[OpcUaNode(EventNotifier = 1)]  // SubscribeToEvents
-[OpcUaGeneratesEvent(typeof(MachineAlarm))]
-public partial class Machine { ... }
+var machine = new Machine(context)
+{
+    Identification = identification,
+    MachineryBuildingBlocks = new MachineryBuildingBlocks(context)
+    {
+        Identification = identification  // Same instance - shared reference
+    },
+    ProcessValues = new Dictionary<string, AnalogSignal>
+    {
+        ["Temperature"] = new AnalogSignal(context) { ActualValue = 25.5 },
+        ["Pressure"] = new AnalogSignal(context) { ActualValue = 101.3 }
+    }
+};
 ```
 
-### AccessLevel Configuration
+**Resulting OPC UA Structure:**
 
-`AccessLevel` and `UserAccessLevel` are auto-detected from C# property definitions:
-- Read-only properties (`get` only) → `CurrentRead`
-- Read-write properties (`get`/`set`) → `CurrentReadOrWrite`
-
-Explicit AccessLevel configuration (e.g., making a writable C# property read-only in OPC UA, or adding `HistoryRead` flag) is not yet supported.
-
-### Security Attributes
-
-The following security-related attributes are not supported:
-- `WriteMask` / `UserWriteMask` - Attribute-level write permissions
-- `RolePermissions` / `UserRolePermissions` - Role-based access control
-- `AccessRestrictions` - Security restrictions
-
-### History
-
-`Historizing` attribute and historical data access require a full history server implementation and are out of scope.
-
-### Views
-
-OPC UA Views (filtered address space subsets) are not supported.
-
-### Fluent Class-Level Configuration
-
-The fluent mapper (`FluentOpcUaNodeMapper<T>`) only supports property-level configuration. For class-level defaults (TypeDefinition, NodeClass), use `[OpcUaNode]` attributes on classes combined with `CompositeNodeMapper`.
-
-## Future Extensibility
-
-The following features can be added in future versions **without breaking changes** to the current mapping model:
-
-### Type Definition Creation
-
-Creating new OPC UA ObjectTypes/VariableTypes in the address space (not just referencing existing ones). Could add:
-- `IOpcUaTypeMapper` interface for type-level mapping
-- `[OpcUaObjectType]` / `[OpcUaVariableType]` attributes for explicit type definitions
-- HasSubtype hierarchy generation from C# class inheritance
-
-### Structural Synchronization
-
-Dynamic address space sync when C# objects attach/detach at runtime (see PR #121):
-- Uses `IOpcUaNodeMapper.TryGetConfiguration()` to get node configuration
-- Creates/removes nodes dynamically via `CustomNodeManager`
-- Fires ModelChangeEvents for client notification
-
-### Interface Support
-
-Explicit HasInterface references:
-```csharp
-// Potential future syntax
-[OpcUaInterface("IVendorNameplateType", "http://opcfoundation.org/UA/DI/")]
-public partial class MachineIdentification { ... }
+```
+Machine (MachineType)
+├── Identification (HasAddIn) ─────────────────┐
+├── MachineryBuildingBlocks (HasComponent)     │
+│   └── Identification (HasAddIn) ─────────────┴──► MachineIdentificationType
+│                                                   ├── Manufacturer = "Acme Corp"
+│                                                   ├── SerialNumber = "SN-12345"
+│                                                   └── ProductInstanceUri
+└── ProcessValues (HasComponent, FolderType)
+    ├── Temperature (HasComponent) ──► AnalogSignalVariableType
+    │   ├── ActualValue = 25.5
+    │   ├── EURange
+    │   └── EngineeringUnits
+    └── Pressure (HasComponent) ──► AnalogSignalVariableType
+        ├── ActualValue = 101.3
+        ├── EURange
+        └── EngineeringUnits
 ```
 
+---
+
+## Scope and Limitations
+
+This mapping system is designed for **instance mapping** - creating Object and Variable nodes from C# object models.
+
+### Supported
+
+- Object Nodes from `[InterceptorSubject]` classes
+- Variable Nodes from properties or `[OpcUaValue]` classes
+- References: HasProperty, HasComponent, HasAddIn, Organizes, custom types
+- Collections: Arrays/Lists with Container or Flat structure
+- Dictionaries: String-keyed with container structure
+- Sharing: Same instance referenced from multiple properties
+
+### Not Supported
+
+| Feature | Description |
+|---------|-------------|
+| Type Definitions | Creating new ObjectTypes, VariableTypes. Use built-in types or load from NodeSet XML. |
+| Methods | OPC UA callable operations |
+| Events | Full event type definitions |
+| AccessLevel Override | Auto-detected from C# property (read-only vs read-write) |
+| History | Historizing attribute and historical data access |
+| Collection/Dictionary Sharing | Same instance at multiple indices/keys |

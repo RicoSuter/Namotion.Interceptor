@@ -1,3 +1,4 @@
+using System.Collections;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Attributes;
@@ -379,9 +380,35 @@ internal class OpcUaGraphChangeProcessor
                     {
                         // Use BrowseName as the dictionary key
                         var key = browseName.Name;
+
+                        // Create a new dictionary to trigger change tracking via SetValue
+                        // Direct mutation (dict[key] = subject) doesn't trigger Registry tracking
+                        var dictType = currentValue.GetType();
+                        if (dictType.IsGenericType && dictType.GetGenericTypeDefinition() == typeof(Dictionary<,>))
+                        {
+                            var keyType = dictType.GetGenericArguments()[0];
+                            var dictValueType = dictType.GetGenericArguments()[1];
+                            var newDictType = typeof(Dictionary<,>).MakeGenericType(keyType, dictValueType);
+
+                            if (Activator.CreateInstance(newDictType) is IDictionary newDict)
+                            {
+                                foreach (DictionaryEntry entry in dict)
+                                {
+                                    newDict[entry.Key] = entry.Value;
+                                }
+                                newDict[key] = subject;
+                                property.SetValue(newDict);
+                                _logger.LogDebug(
+                                    "External AddNode: Added subject to dictionary property '{PropertyName}' with key '{Key}'.",
+                                    property.Name, key);
+                                return (property, key);
+                            }
+                        }
+
+                        // Fallback for non-generic dictionaries - direct mutation
                         dict[key] = subject;
                         _logger.LogDebug(
-                            "External AddNode: Added subject to dictionary property '{PropertyName}' with key '{Key}'.",
+                            "External AddNode: Added subject to dictionary property '{PropertyName}' with key '{Key}' (fallback).",
                             property.Name, key);
                         return (property, key);
                     }

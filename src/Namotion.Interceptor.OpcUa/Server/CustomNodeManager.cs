@@ -420,9 +420,10 @@ internal class CustomNodeManager : CustomNodeManager2
     }
 
     /// <summary>
-    /// Re-indexes collection BrowseNames after an item has been removed.
+    /// Re-indexes collection BrowseNames and NodeIds after an item has been removed.
     /// Updates all remaining items to have sequential indices starting from 0.
     /// This ensures BrowseNames like "People[0]", "People[1]" remain contiguous.
+    /// Also updates the NodeIds (which are path-based) to prevent conflicts when new items are added.
     /// </summary>
     /// <param name="property">The collection property whose children should be re-indexed.</param>
     public void ReindexCollectionBrowseNames(RegisteredSubjectProperty property)
@@ -441,21 +442,69 @@ internal class CustomNodeManager : CustomNodeManager2
                 return;
             }
 
+            // Determine the parent path for building new NodeIds
+            var parentSubject = property.Parent.Subject;
+            string parentPath;
+            if (ReferenceEquals(parentSubject, _subject))
+            {
+                parentPath = _configuration.RootName is not null
+                    ? _configuration.RootName + PathDelimiter
+                    : string.Empty;
+            }
+            else if (_subjectRefCounter.TryGetData(parentSubject, out var parentNode) && parentNode is not null)
+            {
+                parentPath = parentNode.NodeId.Identifier is string stringId
+                    ? stringId + PathDelimiter
+                    : string.Empty;
+            }
+            else
+            {
+                _logger.LogWarning("Cannot reindex: parent node not found for property '{PropertyName}'.", property.Name);
+                return;
+            }
+
             var children = property.Children.ToList();
             for (var i = 0; i < children.Count; i++)
             {
-                if (_subjectRefCounter.TryGetData(children[i].Subject, out var nodeState) && nodeState is not null)
+                var subject = children[i].Subject;
+                if (_subjectRefCounter.TryGetData(subject, out var nodeState) && nodeState is not null)
                 {
                     var newBrowseName = new QualifiedName($"{propertyName}[{i}]", NamespaceIndex);
+                    var browseNameChanged = !nodeState.BrowseName.Equals(newBrowseName);
 
-                    // Only update if the BrowseName has actually changed
-                    if (!nodeState.BrowseName.Equals(newBrowseName))
+                    // Calculate new NodeId path - same for both Flat and Container modes
+                    // (the difference is only the OPC UA parent node, not the NodeId path)
+                    var newPath = $"{parentPath}{propertyName}[{i}]";
+                    var newNodeId = new NodeId(newPath, NamespaceIndex);
+                    var nodeIdChanged = !nodeState.NodeId.Equals(newNodeId);
+
+                    if (browseNameChanged || nodeIdChanged)
                     {
-                        nodeState.BrowseName = newBrowseName;
+                        var oldNodeId = nodeState.NodeId;
+
+                        // Update BrowseName
+                        if (browseNameChanged)
+                        {
+                            nodeState.BrowseName = newBrowseName;
+                        }
+
+                        // Update NodeId - this is critical for preventing conflicts
+                        if (nodeIdChanged)
+                        {
+                            // Update the PredefinedNodes dictionary (keyed by NodeId)
+                            var predefinedNodes = GetPredefinedNodes();
+                            if (predefinedNodes.ContainsKey(oldNodeId))
+                            {
+                                predefinedNodes.Remove(oldNodeId);
+                                nodeState.NodeId = newNodeId;
+                                predefinedNodes[newNodeId] = nodeState;
+                                // Note: ref counter doesn't need update - it uses subject as key, not NodeId
+                            }
+                        }
 
                         _logger.LogDebug(
-                            "Re-indexed collection item BrowseName to '{BrowseName}'.",
-                            newBrowseName);
+                            "Re-indexed collection item: BrowseName='{BrowseName}', NodeId='{OldNodeId}' -> '{NewNodeId}'.",
+                            newBrowseName, oldNodeId, newNodeId);
                     }
                 }
             }

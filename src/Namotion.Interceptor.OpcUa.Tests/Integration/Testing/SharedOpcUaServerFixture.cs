@@ -195,13 +195,11 @@ public class SharedOpcUaServerFixture : IAsyncLifetime
         root.ServerToClientReference = new ServerToClientReferenceTestArea(context);
         root.ServerToClientCollection = new ServerToClientCollectionTestArea(context);
         root.ServerToClientDictionary = new ServerToClientDictionaryTestArea(context);
-        root.ServerToClientSharedSubject = new ServerToClientSharedSubjectTestArea(context);
 
         // Initialize ClientToServer test areas (structural sync tests - client to server direction)
         root.ClientToServerReference = new ClientToServerReferenceTestArea(context);
         root.ClientToServerCollection = new ClientToServerCollectionTestArea(context);
         root.ClientToServerDictionary = new ClientToServerDictionaryTestArea(context);
-        root.ClientToServerSharedSubject = new ClientToServerSharedSubjectTestArea(context);
     }
 
     /// <summary>
