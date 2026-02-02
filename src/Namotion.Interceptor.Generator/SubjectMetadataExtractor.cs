@@ -241,8 +241,7 @@ internal static class SubjectMetadataExtractor
 
                 // Check if property has a default implementation
                 // A property has a default implementation if its getter is not abstract
-                var hasDefaultImplementation = property.GetMethod != null && !property.GetMethod.IsAbstract;
-
+                var hasDefaultImplementation = property.GetMethod is { IsAbstract: false };
                 if (!hasDefaultImplementation)
                 {
                     continue;
@@ -255,7 +254,7 @@ internal static class SubjectMetadataExtractor
                 var interfaceTypeName = interfaceType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
 
                 var hasGetter = property.GetMethod != null;
-                var hasSetter = property.SetMethod != null && !property.SetMethod.IsInitOnly;
+                var hasSetter = property.SetMethod is { IsInitOnly: false };
                 var hasInit = property.SetMethod?.IsInitOnly == true;
 
                 // Interface default properties cannot be partial, virtual is implicit
@@ -435,7 +434,7 @@ internal static class SubjectMetadataExtractor
         return null;
     }
 
-    private static string? GetFullTypeName(ITypeSymbol typeSymbol)
+    private static string GetFullTypeName(ITypeSymbol typeSymbol)
     {
         if (typeSymbol is INamedTypeSymbol { IsGenericType: true } namedTypeSymbol)
         {
