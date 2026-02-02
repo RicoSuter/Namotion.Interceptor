@@ -747,15 +747,19 @@ internal class OpcUaGraphChangeProcessor
 
     private async Task ProcessNodeAddedAsync(NodeId nodeId, ISession session, CancellationToken cancellationToken)
     {
+        _logger.LogDebug("ProcessNodeAdded: Processing NodeId {NodeId}.", nodeId);
+
         var nodeDetails = await OpcUaBrowseHelper.ReadNodeDetailsAsync(session, nodeId, cancellationToken).ConfigureAwait(false);
         if (nodeDetails is null)
         {
+            _logger.LogDebug("ProcessNodeAdded: Could not read node details for {NodeId}.", nodeId);
             return;
         }
 
         var directParentNodeId = await OpcUaBrowseHelper.FindParentNodeIdAsync(session, nodeId, cancellationToken).ConfigureAwait(false);
         if (directParentNodeId is null)
         {
+            _logger.LogDebug("ProcessNodeAdded: Could not find parent for {NodeId}.", nodeId);
             return;
         }
 
@@ -784,12 +788,14 @@ internal class OpcUaGraphChangeProcessor
 
         if (parentSubject is null)
         {
+            _logger.LogDebug("ProcessNodeAdded: Could not find parent subject for {NodeId} (searched up to {ParentNodeId}).", nodeId, currentNodeId);
             return;
         }
 
         var registeredParent = parentSubject.TryGetRegisteredSubject();
         if (registeredParent is null)
         {
+            _logger.LogDebug("ProcessNodeAdded: Parent subject not registered for {NodeId}.", nodeId);
             return;
         }
 
@@ -841,12 +847,24 @@ internal class OpcUaGraphChangeProcessor
                     var containerNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(session, parentSubjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
                     if (containerNodeId is not null && containerNodeId.Equals(directParentNodeId))
                     {
+                        _logger.LogDebug("ProcessNodeAdded: Processing dictionary item {BrowseName} for property {PropertyName}.", browseName, propertyName);
                         await ProcessDictionaryNodeChangesAsync(property, containerNodeId, session, cancellationToken).ConfigureAwait(false);
                         return;
                     }
+                    else
+                    {
+                        _logger.LogDebug("ProcessNodeAdded: Dictionary container mismatch for {NodeId}. Expected {Expected}, got {Actual}.",
+                            nodeId, directParentNodeId, containerNodeId);
+                    }
+                }
+                else
+                {
+                    _logger.LogDebug("ProcessNodeAdded: Could not get parent NodeId for dictionary property {PropertyName}.", propertyName);
                 }
             }
         }
+
+        _logger.LogDebug("ProcessNodeAdded: No matching property found for {NodeId} with BrowseName {BrowseName}.", nodeId, browseName);
     }
 
     private void ProcessNodeDeleted(NodeId nodeId)

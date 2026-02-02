@@ -67,25 +67,22 @@ public class ClientToServerReferenceTests : SharedServerTestBase
         Logger.Log($"Client Person before: {clientArea.Person?.FirstName ?? "null"}");
         Logger.Log($"Server Person before: {serverArea.Person?.FirstName ?? "null"}");
 
-        // First, ensure there's a reference to clear
-        // If client already has a Person, we'll use that; otherwise assign one
-        if (clientArea.Person == null)
+        // Always set up a fresh reference with unique ID for this test
+        var setupId = Guid.NewGuid().ToString("N")[..8];
+        var firstName = $"ToClear_{setupId}";
+        clientArea.Person = new NestedPerson(Client!.Context)
         {
-            var setupId = Guid.NewGuid().ToString("N")[..8];
-            clientArea.Person = new NestedPerson(Client!.Context)
-            {
-                FirstName = $"ToClear_{setupId}",
-                LastName = "Person"
-            };
-            Logger.Log($"Client Person assigned for setup: {clientArea.Person.FirstName}");
+            FirstName = firstName,
+            LastName = "Person"
+        };
+        Logger.Log($"Client Person assigned for setup: {firstName}");
 
-            // Wait for server to receive the setup reference
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => serverArea.Person != null,
-                timeout: TimeSpan.FromSeconds(30),
-                pollInterval: TimeSpan.FromMilliseconds(500),
-                message: "Server should receive setup reference from client");
-        }
+        // Wait for server to receive the setup reference with our specific ID
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverArea.Person?.FirstName == firstName,
+            timeout: TimeSpan.FromSeconds(30),
+            pollInterval: TimeSpan.FromMilliseconds(500),
+            message: $"Server should receive setup reference '{firstName}' from client");
 
         Logger.Log($"Before clear - Client: {clientArea.Person?.FirstName ?? "null"}, Server: {serverArea.Person?.FirstName ?? "null"}");
 
