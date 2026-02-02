@@ -18,11 +18,25 @@ public static class DerivedPropertyChangeHandlerExtensions
         property.GetOrAddPropertyData(UsedByPropertiesKey, static () => new DerivedPropertyDependencies());
 
     /// <summary>
+    /// Tries to get backward dependencies without allocating if not present.
+    /// Returns null if no dependencies have been registered.
+    /// </summary>
+    internal static DerivedPropertyDependencies? TryGetUsedByProperties(this PropertyReference property) =>
+        property.TryGetPropertyData(UsedByPropertiesKey, out var value) ? value as DerivedPropertyDependencies : null;
+
+    /// <summary>
     /// Gets forward dependencies: Which properties this derived property depends on.
     /// Example: FullName.GetRequiredProperties() includes FirstName and LastName.
     /// </summary>
     public static DerivedPropertyDependencies GetRequiredProperties(this PropertyReference property) =>
         property.GetOrAddPropertyData(RequiredPropertiesKey, static () => new DerivedPropertyDependencies());
+
+    /// <summary>
+    /// Tries to get forward dependencies without allocating if not present.
+    /// Returns null if no dependencies have been registered.
+    /// </summary>
+    internal static DerivedPropertyDependencies? TryGetRequiredProperties(this PropertyReference property) =>
+        property.TryGetPropertyData(RequiredPropertiesKey, out var value) ? value as DerivedPropertyDependencies : null;
 
     /// <summary>
     /// Gets the cached last known value of a derived property.

@@ -49,7 +49,40 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// <inheritdoc />
     public void DetachProperty(SubjectPropertyLifecycleChange change)
     {
-        // No cleanup needed - dependencies are managed per-property
+        var property = change.Property;
+
+        // Case 1: This is a derived property being detached.
+        // Remove it from all its dependencies' UsedByProperties to break backward refs.
+        if (property.Metadata.IsDerived)
+        {
+            var requiredProps = property.TryGetRequiredProperties();
+            if (requiredProps is not null)
+            {
+                foreach (ref readonly var dependency in requiredProps.Items)
+                {
+                    // Use TryGet to avoid allocating on dependencies that have no UsedByProperties
+                    dependency.TryGetUsedByProperties()?.Remove(property);
+                }
+            }
+        }
+
+        // Case 2: This property (source or derived) might be used by derived properties on OTHER subjects.
+        // Remove this property from those derived properties' RequiredProperties to prevent memory leaks.
+        //
+        // Performance note: We intentionally DON'T clear this property's UsedByProperties for two reasons:
+        // 1. Detached subjects have their context/fallback removed, so recalculation won't affect the live graph
+        // 2. The stale entries will be GC'd along with the detached subject - no memory leak
+        // This avoids the overhead of iterating and removing from potentially many derived properties.
+        var usedByProps = property.TryGetUsedByProperties();
+        if (usedByProps is null || usedByProps.Count == 0)
+        {
+            return; // No dependencies to clean up - fast path, no allocation
+        }
+
+        foreach (ref readonly var derivedProp in usedByProps.Items)
+        {
+            derivedProp.TryGetRequiredProperties()?.Remove(property);
+        }
     }
 
     /// <inheritdoc />
@@ -86,11 +119,14 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
 
         // Check this first as it's more likely to early-exit than transaction check
-        var usedByProperties = context.Property.GetUsedByProperties().Items;
-        if (usedByProperties.Length == 0)
+        // Use TryGet to avoid allocating DerivedPropertyDependencies for properties with no dependents
+        var usedByProps = context.Property.TryGetUsedByProperties();
+        if (usedByProps is null || usedByProps.Count == 0)
         {
             return;
         }
+
+        var usedByProperties = usedByProps.Items;
 
         // Skip derived property recalculation during transaction capture
         if (SubjectTransaction.HasActiveTransaction &&
