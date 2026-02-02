@@ -118,13 +118,16 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             _structureLock.Release();
         }
 
-        // Delete remote node if enabled, BUT NOT if we're processing a remote change
-        // (i.e., the deletion originated from the server via ModelChangeEvent)
+        // Delete remote node if enabled, BUT NOT if the change originated from this source
+        // (i.e., the deletion was triggered by processing a server-side ModelChangeEvent)
         if (nodeIdToDelete is not null && _configuration.EnableRemoteNodeManagement)
         {
-            // Skip DeleteNodes if this removal was triggered by a server-side ModelChangeEvent
-            var isProcessingRemoteChange = _nodeChangeProcessor?.IsProcessingRemoteChange ?? false;
-            if (!isProcessingRemoteChange)
+            // Skip DeleteNodes if the change source in the current context is this client source.
+            // When processing ModelChangeEvents, GraphChangeApplier.SetReference is called with this source,
+            // which sets SubjectChangeContext.Current.Source. User code setting properties directly has null source.
+            var currentChangeSource = SubjectChangeContext.Current.Source;
+            var isFromThisSource = currentChangeSource is not null && ReferenceEquals(currentChangeSource, this);
+            if (!isFromThisSource)
             {
                 _nodeChangeProcessor?.MarkRecentlyDeleted(nodeIdToDelete);
 
