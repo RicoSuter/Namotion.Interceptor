@@ -30,8 +30,8 @@ internal class OpcUaClientGraphChangeReceiver
     private readonly Lock _recentlyDeletedLock = new();
     private static readonly TimeSpan RecentlyDeletedExpiry = TimeSpan.FromSeconds(30);
 
-    // Track whether we're currently processing a remote ModelChangeEvent
-    // When true, subject detachments should NOT trigger DeleteNodes calls back to the server
+    // Track whether we're currently processing a remote ModelChangeEvent.
+    // Used to prevent adding monitored items during remote change processing.
     private volatile bool _isProcessingRemoteChange;
 
     /// <summary>
@@ -56,13 +56,6 @@ internal class OpcUaClientGraphChangeReceiver
         _logger = logger;
         _graphChangeApplier = new GraphChangeApplier();
     }
-
-    /// <summary>
-    /// Gets whether the processor is currently handling a remote change (ModelChangeEvent).
-    /// When true, subject detachments should NOT trigger DeleteNodes calls back to the server
-    /// because the deletion originated from the server.
-    /// </summary>
-    public bool IsProcessingRemoteChange => _isProcessingRemoteChange;
 
     /// <summary>
     /// Clears all recently deleted NodeIds tracking.
