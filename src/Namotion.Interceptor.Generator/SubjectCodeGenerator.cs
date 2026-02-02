@@ -291,24 +291,15 @@ internal static class SubjectCodeGenerator
             var accessorText = property.HasInit ? "init" : "set";
             var setterModifiers = property.SetterAccessModifier is not null ? $"{property.SetterAccessModifier} " : "";
 
-            // Determine how to call RaisePropertyChanged
-            // - [InterceptorSubject] base or own implementation: direct call to protected method
-            // - Manual IRaisePropertyChanged base: interface cast
-            var raisePropertyChangedCall = metadata is { BaseClassHasInpc: true, BaseClassTypeName: not null }
-                ? $"((IRaisePropertyChanged)this).RaisePropertyChanged(nameof({property.Name}))"
-                : $"RaisePropertyChanged(nameof({property.Name}))";
-
-            // Actually, looking at the original code more carefully:
-            // HasInterceptorSubjectAttribute(baseClass) => direct call
-            // baseClassHasInpc but not HasInterceptorSubjectAttribute => interface cast
-            // Own implementation => direct call
-            // Since we don't have HasInterceptorSubjectAttribute info separately, we'll use BaseClassHasInpc
-            // When BaseClassHasInpc is true AND BaseClassTypeName exists, it could be either case
-            // The safest approach: if no base class, direct call; otherwise interface cast when baseClassHasInpc
-            if (metadata.BaseClassTypeName is null)
-            {
-                raisePropertyChangedCall = $"RaisePropertyChanged(nameof({property.Name}))";
-            }
+            // Determine how to call RaisePropertyChanged:
+            // - [InterceptorSubject] base: direct call to inherited protected method (fastest)
+            // - Manual IRaisePropertyChanged base: interface cast (rare case)
+            // - Own implementation: direct call to own method (fastest)
+            var raisePropertyChangedCall = metadata.BaseClassHasInterceptorSubject
+                ? $"RaisePropertyChanged(nameof({property.Name}))"
+                : metadata.BaseClassHasInpc
+                    ? $"((IRaisePropertyChanged)this).RaisePropertyChanged(nameof({property.Name}))"
+                    : $"RaisePropertyChanged(nameof({property.Name}))";
 
             builder.AppendLine($"            {setterModifiers}{accessorText}");
             builder.AppendLine("            {");
