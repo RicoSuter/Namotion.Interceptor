@@ -23,6 +23,7 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
     private readonly ConnectorReferenceCounter<NodeState> _subjectRefCounter = new();
+    private readonly ConnectorSubjectMapping<NodeId> _subjectMapping = new();
     private readonly OpcUaServerGraphChangePublisher _modelChangePublisher;
 
     public CustomNodeManager(
@@ -40,17 +41,19 @@ internal class CustomNodeManager : CustomNodeManager2
         _logger = logger;
         _nodeFactory = new OpcUaNodeFactory(logger);
         _modelChangePublisher = new OpcUaServerGraphChangePublisher(logger);
-        _nodeCreator = new OpcUaServerNodeCreator(this, configuration, _nodeFactory, source, _subjectRefCounter, _modelChangePublisher, logger);
+        _nodeCreator = new OpcUaServerNodeCreator(this, configuration, _nodeFactory, source, _subjectRefCounter, _subjectMapping, _modelChangePublisher, logger);
 
         var externalNodeValidator = new OpcUaServerExternalNodeValidator(configuration, logger);
         _graphChangeProcessor = new OpcUaServerGraphChangeReceiver(
             _subject,
             _configuration,
             _subjectRefCounter,
+            _subjectMapping,
             externalNodeValidator,
             FindNodeInAddressSpace,
             CreateSubjectNode,
             () => NamespaceIndex,
+            source,
             _logger);
     }
 
@@ -79,7 +82,7 @@ internal class CustomNodeManager : CustomNodeManager2
             }
         }
 
-        foreach (var (subject, _) in _subjectRefCounter.GetAllEntries())
+        foreach (var subject in _subjectMapping.GetAllSubjects())
         {
             var registeredSubject = subject.TryGetRegisteredSubject();
             if (registeredSubject != null)
@@ -156,6 +159,9 @@ internal class CustomNodeManager : CustomNodeManager2
 
             if (isLast && nodeState is not null)
             {
+                // Unregister from subject mapping
+                _subjectMapping.Unregister(subject, out _);
+
                 var registeredSubject = subject.TryGetRegisteredSubject();
 
                 // Remove variable nodes for this subject's properties
@@ -498,6 +504,8 @@ internal class CustomNodeManager : CustomNodeManager2
                                 nodeState.NodeId = newNodeId;
                                 predefinedNodes[newNodeId] = nodeState;
                                 // Note: ref counter doesn't need update - it uses subject as key, not NodeId
+                                // Update the subject mapping for O(1) bidirectional lookup
+                                _subjectMapping.UpdateExternalId(subject, newNodeId);
                             }
                         }
 

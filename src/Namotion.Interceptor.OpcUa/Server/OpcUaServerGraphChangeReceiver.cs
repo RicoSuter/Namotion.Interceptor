@@ -20,41 +20,45 @@ internal class OpcUaServerGraphChangeReceiver
     private readonly OpcUaServerConfiguration _configuration;
     private readonly IOpcUaNodeMapper _nodeMapper;
     private readonly ConnectorReferenceCounter<NodeState> _subjectRefCounter;
-    private readonly OpcUaServerExternalNodeValidator _externalNodeManagementHelper;
+    private readonly ConnectorSubjectMapping<NodeId> _subjectMapping;
+    private readonly OpcUaServerExternalNodeValidator _externalNodeValidator;
     private readonly Func<NodeId, NodeState?> _findNode;
     private readonly Action<RegisteredSubjectProperty, IInterceptorSubject, object?> _createSubjectNode;
     private readonly Func<ushort> _getNamespaceIndex;
     private readonly ILogger _logger;
-
-    // Mapping from NodeId to externally added subjects
-    private readonly Dictionary<NodeId, IInterceptorSubject> _externallyAddedSubjects = new();
-    private readonly Lock _externallyAddedSubjectsLock = new();
+    private readonly object _source;
+    private readonly GraphChangeApplier _graphChangeApplier;
 
     public OpcUaServerGraphChangeReceiver(
         IInterceptorSubject rootSubject,
         OpcUaServerConfiguration configuration,
         ConnectorReferenceCounter<NodeState> subjectRefCounter,
-        OpcUaServerExternalNodeValidator externalNodeManagementHelper,
+        ConnectorSubjectMapping<NodeId> subjectMapping,
+        OpcUaServerExternalNodeValidator externalNodeValidator,
         Func<NodeId, NodeState?> findNode,
         Action<RegisteredSubjectProperty, IInterceptorSubject, object?> createSubjectNode,
         Func<ushort> getNamespaceIndex,
+        object source,
         ILogger logger)
     {
         _rootSubject = rootSubject;
         _configuration = configuration;
         _nodeMapper = configuration.NodeMapper;
         _subjectRefCounter = subjectRefCounter;
-        _externalNodeManagementHelper = externalNodeManagementHelper;
+        _subjectMapping = subjectMapping;
+        _externalNodeValidator = externalNodeValidator;
         _findNode = findNode;
         _createSubjectNode = createSubjectNode;
         _getNamespaceIndex = getNamespaceIndex;
+        _source = source;
         _logger = logger;
+        _graphChangeApplier = new GraphChangeApplier();
     }
 
     /// <summary>
     /// Gets whether external node management is enabled for this server.
     /// </summary>
-    public bool IsEnabled => _externalNodeManagementHelper.IsEnabled;
+    public bool IsEnabled => _externalNodeValidator.IsEnabled;
 
     /// <summary>
     /// Adds a subject from an external AddNodes request.
@@ -69,7 +73,7 @@ internal class OpcUaServerGraphChangeReceiver
         QualifiedName browseName,
         NodeId parentNodeId)
     {
-        if (!_externalNodeManagementHelper.IsEnabled)
+        if (!_externalNodeValidator.IsEnabled)
         {
             _logger.LogWarning("External AddNode rejected: EnableExternalNodeManagement is disabled.");
             return (null, null);
@@ -120,12 +124,7 @@ internal class OpcUaServerGraphChangeReceiver
         // Get the node that was created for this subject
         if (_subjectRefCounter.TryGetData(subject, out var nodeState) && nodeState is not null)
         {
-            // Track externally added subjects for later DeleteNode handling
-            lock (_externallyAddedSubjectsLock)
-            {
-                _externallyAddedSubjects[nodeState.NodeId] = subject;
-            }
-
+            // Subject is already tracked in _subjectMapping (registered when node was created)
             _logger.LogInformation(
                 "External AddNode: Created subject of type '{Type}' with node '{NodeId}'.",
                 csharpType.Name, nodeState.NodeId);
@@ -143,26 +142,14 @@ internal class OpcUaServerGraphChangeReceiver
     /// <returns>True if the subject was found and removed, false otherwise.</returns>
     public bool RemoveSubjectFromExternal(NodeId nodeId)
     {
-        if (!_externalNodeManagementHelper.IsEnabled)
+        if (!_externalNodeValidator.IsEnabled)
         {
             _logger.LogWarning("External DeleteNode rejected: EnableExternalNodeManagement is disabled.");
             return false;
         }
 
-        // Check if this node was externally added
-        IInterceptorSubject? externalSubject = null;
-        lock (_externallyAddedSubjectsLock)
-        {
-            _externallyAddedSubjects.TryGetValue(nodeId, out externalSubject);
-        }
-
-        if (externalSubject is null)
-        {
-            // Try to find the subject by its node
-            externalSubject = FindSubjectByNodeId(nodeId);
-        }
-
-        if (externalSubject is null)
+        // Use O(1) lookup from the shared mapping
+        if (!_subjectMapping.TryGetSubject(nodeId, out var subject) || subject is null)
         {
             _logger.LogWarning(
                 "External DeleteNode: No subject found for node '{NodeId}'.",
@@ -171,13 +158,8 @@ internal class OpcUaServerGraphChangeReceiver
         }
 
         // Remove the subject from the C# model
-        RemoveSubjectFromModel(externalSubject);
-
-        // Clean up tracking
-        lock (_externallyAddedSubjectsLock)
-        {
-            _externallyAddedSubjects.Remove(nodeId);
-        }
+        // (mapping cleanup happens automatically when the node is deleted via RemoveSubjectNodes)
+        RemoveSubjectFromModel(subject);
 
         _logger.LogDebug(
             "External DeleteNode: Removed subject for node '{NodeId}'.",
@@ -187,18 +169,12 @@ internal class OpcUaServerGraphChangeReceiver
     }
 
     /// <summary>
-    /// Finds a subject by its OPC UA NodeId.
+    /// Finds a subject by its OPC UA NodeId using O(1) lookup.
     /// </summary>
     public IInterceptorSubject? FindSubjectByNodeId(NodeId nodeId)
     {
-        foreach (var (subject, nodeState) in _subjectRefCounter.GetAllEntries())
-        {
-            if (nodeState.NodeId.Equals(nodeId))
-            {
-                return subject;
-            }
-        }
-        return null;
+        _subjectMapping.TryGetSubject(nodeId, out var subject);
+        return subject;
     }
 
     /// <summary>
@@ -227,17 +203,10 @@ internal class OpcUaServerGraphChangeReceiver
             parentSubject = _rootSubject;
         }
 
-        // Try to find parent subject from ref counter
+        // Try to find parent subject using O(1) lookup from mapping
         if (parentSubject is null)
         {
-            foreach (var (subj, nodeState) in _subjectRefCounter.GetAllEntries())
-            {
-                if (nodeState.NodeId.Equals(parentNodeId))
-                {
-                    parentSubject = subj;
-                    break;
-                }
-            }
+            _subjectMapping.TryGetSubject(parentNodeId, out parentSubject);
         }
 
         // If not found, check if parentNodeId is a container node (FolderType)
@@ -275,17 +244,10 @@ internal class OpcUaServerGraphChangeReceiver
                             parentSubject = _rootSubject;
                         }
 
-                        // Try to find container's parent in ref counter
+                        // Try to find container's parent using O(1) lookup from mapping
                         if (parentSubject is null)
                         {
-                            foreach (var (subj, nodeState) in _subjectRefCounter.GetAllEntries())
-                            {
-                                if (nodeState.NodeId.Equals(containerParentId))
-                                {
-                                    parentSubject = subj;
-                                    break;
-                                }
-                            }
+                            _subjectMapping.TryGetSubject(containerParentId, out parentSubject);
                         }
                     }
                 }
@@ -343,26 +305,12 @@ internal class OpcUaServerGraphChangeReceiver
                 var elementType = GetCollectionElementType(property.Type);
                 if (elementType is not null && elementType.IsAssignableFrom(subject.GetType()))
                 {
-                    var currentValue = property.GetValue();
+                    // Get current count before adding to determine the new index
+                    var currentCollection = property.GetValue() as IEnumerable<IInterceptorSubject?>;
+                    var addedIndex = currentCollection?.Count() ?? 0;
 
-                    // Handle arrays specially - they're fixed size, need to create new array
-                    if (property.Type.IsArray && currentValue is Array array)
+                    if (_graphChangeApplier.AddToCollection(property, subject, _source))
                     {
-                        var addedIndex = array.Length;
-                        var newArray = Array.CreateInstance(elementType, array.Length + 1);
-                        Array.Copy(array, newArray, array.Length);
-                        newArray.SetValue(subject, addedIndex);
-                        property.SetValue(newArray);
-                        _logger.LogDebug(
-                            "External AddNode: Added subject to array property '{PropertyName}' at index {Index}.",
-                            property.Name, addedIndex);
-                        return (property, addedIndex);
-                    }
-
-                    if (currentValue is System.Collections.IList list)
-                    {
-                        var addedIndex = list.Count;
-                        list.Add(subject);
                         _logger.LogDebug(
                             "External AddNode: Added subject to collection property '{PropertyName}' at index {Index}.",
                             property.Name, addedIndex);
@@ -375,40 +323,12 @@ internal class OpcUaServerGraphChangeReceiver
                 var valueType = GetDictionaryValueType(property.Type);
                 if (valueType is not null && valueType.IsAssignableFrom(subject.GetType()))
                 {
-                    var currentValue = property.GetValue();
-                    if (currentValue is System.Collections.IDictionary dict)
+                    // Use BrowseName as the dictionary key
+                    var key = browseName.Name;
+                    if (_graphChangeApplier.AddToDictionary(property, key, subject, _source))
                     {
-                        // Use BrowseName as the dictionary key
-                        var key = browseName.Name;
-
-                        // Create a new dictionary to trigger change tracking via SetValue
-                        // Direct mutation (dict[key] = subject) doesn't trigger Registry tracking
-                        var dictType = currentValue.GetType();
-                        if (dictType.IsGenericType && dictType.GetGenericTypeDefinition() == typeof(Dictionary<,>))
-                        {
-                            var keyType = dictType.GetGenericArguments()[0];
-                            var dictValueType = dictType.GetGenericArguments()[1];
-                            var newDictType = typeof(Dictionary<,>).MakeGenericType(keyType, dictValueType);
-
-                            if (Activator.CreateInstance(newDictType) is IDictionary newDict)
-                            {
-                                foreach (DictionaryEntry entry in dict)
-                                {
-                                    newDict[entry.Key] = entry.Value;
-                                }
-                                newDict[key] = subject;
-                                property.SetValue(newDict);
-                                _logger.LogDebug(
-                                    "External AddNode: Added subject to dictionary property '{PropertyName}' with key '{Key}'.",
-                                    property.Name, key);
-                                return (property, key);
-                            }
-                        }
-
-                        // Fallback for non-generic dictionaries - direct mutation
-                        dict[key] = subject;
                         _logger.LogDebug(
-                            "External AddNode: Added subject to dictionary property '{PropertyName}' with key '{Key}' (fallback).",
+                            "External AddNode: Added subject to dictionary property '{PropertyName}' with key '{Key}'.",
                             property.Name, key);
                         return (property, key);
                     }
@@ -425,11 +345,13 @@ internal class OpcUaServerGraphChangeReceiver
                 var propertyType = property.Type;
                 if (propertyType.IsAssignableFrom(subject.GetType()))
                 {
-                    property.SetValue(subject);
-                    _logger.LogDebug(
-                        "External AddNode: Set reference property '{PropertyName}' to subject.",
-                        property.Name);
-                    return (property, null);
+                    if (_graphChangeApplier.SetReference(property, subject, _source))
+                    {
+                        _logger.LogDebug(
+                            "External AddNode: Set reference property '{PropertyName}' to subject.",
+                            property.Name);
+                        return (property, null);
+                    }
                 }
             }
         }
@@ -534,87 +456,33 @@ internal class OpcUaServerGraphChangeReceiver
 
                 if (parentProperty.IsSubjectCollection)
                 {
-                    // Remove from collection - create new array/list without the subject
-                    var currentValue = parentProperty.GetValue();
-                    if (currentValue is System.Collections.IList list)
+                    if (_graphChangeApplier.RemoveFromCollection(parentProperty, subject, _source))
                     {
-                        // For arrays, we need to create a new array without the subject
-                        // because arrays have fixed size and Remove throws NotSupportedException
-                        var elementType = list.GetType().GetElementType() ??
-                            (list.GetType().IsGenericType ? list.GetType().GetGenericArguments()[0] : typeof(object));
-
-                        var newList = new List<object?>();
-                        foreach (var item in list)
-                        {
-                            if (!ReferenceEquals(item, subject))
-                            {
-                                newList.Add(item);
-                            }
-                        }
-
-                        // Create a new array of the same type
-                        var newArray = Array.CreateInstance(elementType, newList.Count);
-                        for (var i = 0; i < newList.Count; i++)
-                        {
-                            newArray.SetValue(newList[i], i);
-                        }
-
-                        parentProperty.SetValue(newArray);
                         _logger.LogDebug(
-                            "External DeleteNode: Removed subject from collection property '{PropertyName}'. Count: {OldCount} -> {NewCount}.",
-                            parentProperty.Name, list.Count, newArray.Length);
+                            "External DeleteNode: Removed subject from collection property '{PropertyName}'.",
+                            parentProperty.Name);
                     }
                 }
                 else if (parentProperty.IsSubjectDictionary)
                 {
-                    // Remove from dictionary using the tracked index
-                    // Must create a new dictionary and call SetValue to trigger change tracking
-                    var currentValue = parentProperty.GetValue();
-                    if (currentValue is System.Collections.IDictionary dict && parent.Index is not null)
+                    if (parent.Index is not null)
                     {
-                        var dictType = currentValue.GetType();
-                        if (dictType.IsGenericType && dictType.GetGenericTypeDefinition() == typeof(Dictionary<,>))
+                        if (_graphChangeApplier.RemoveFromDictionary(parentProperty, parent.Index, _source))
                         {
-                            // Create new dictionary without the removed key
-                            var keyType = dictType.GetGenericArguments()[0];
-                            var valueType = dictType.GetGenericArguments()[1];
-                            var newDictType = typeof(Dictionary<,>).MakeGenericType(keyType, valueType);
-                            var newDict = Activator.CreateInstance(newDictType) as System.Collections.IDictionary;
-
-                            if (newDict is not null)
-                            {
-                                var oldCount = dict.Count;
-                                foreach (System.Collections.DictionaryEntry entry in dict)
-                                {
-                                    if (!Equals(entry.Key, parent.Index))
-                                    {
-                                        newDict[entry.Key] = entry.Value;
-                                    }
-                                }
-
-                                parentProperty.SetValue(newDict);
-                                _logger.LogDebug(
-                                    "External DeleteNode: Removed subject from dictionary property '{PropertyName}' with key '{Key}'. Count: {OldCount} -> {NewCount}.",
-                                    parentProperty.Name, parent.Index, oldCount, newDict.Count);
-                            }
-                        }
-                        else
-                        {
-                            // Fallback for non-generic dictionaries - modify in-place
-                            dict.Remove(parent.Index);
                             _logger.LogDebug(
-                                "External DeleteNode: Removed subject from dictionary property '{PropertyName}' with key '{Key}' (in-place).",
+                                "External DeleteNode: Removed subject from dictionary property '{PropertyName}' with key '{Key}'.",
                                 parentProperty.Name, parent.Index);
                         }
                     }
                 }
                 else if (parentProperty.IsSubjectReference)
                 {
-                    // Set single reference to null
-                    parentProperty.SetValue(null);
-                    _logger.LogDebug(
-                        "External DeleteNode: Set reference property '{PropertyName}' to null.",
-                        parentProperty.Name);
+                    if (_graphChangeApplier.SetReference(parentProperty, null, _source))
+                    {
+                        _logger.LogDebug(
+                            "External DeleteNode: Set reference property '{PropertyName}' to null.",
+                            parentProperty.Name);
+                    }
                 }
             }
         }

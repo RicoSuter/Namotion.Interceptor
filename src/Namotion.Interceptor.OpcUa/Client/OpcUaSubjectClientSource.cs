@@ -196,9 +196,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         if (isFirst)
         {
             _subjectMapping.Register(subject, nodeId);
-
-            // Register with the node change processor for reverse lookup during ModelChangeEvent processing
-            _nodeChangeProcessor?.RegisterSubjectNodeId(subject, nodeId);
         }
         return isFirst;
     }
@@ -362,18 +359,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         {
             _nodeChangeProcessor = new OpcUaClientGraphChangeReceiver(
                 this,
+                _subjectMapping,
                 _configuration,
                 _subjectLoader,
                 _logger);
-
-            // Register all tracked subjects with the processor for reverse NodeId lookup
-            foreach (var subject in GetTrackedSubjects())
-            {
-                if (TryGetSubjectNodeId(subject, out var nodeId) && nodeId is not null)
-                {
-                    _nodeChangeProcessor.RegisterSubjectNodeId(subject, nodeId);
-                }
-            }
 
             // Create and initialize remote sync manager
             _graphChangeTrigger = new OpcUaClientGraphChangeTrigger(_configuration, _logger);
