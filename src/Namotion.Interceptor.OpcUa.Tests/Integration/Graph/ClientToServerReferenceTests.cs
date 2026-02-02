@@ -105,4 +105,67 @@ public class ClientToServerReferenceTests : SharedServerTestBase
         Assert.Null(serverArea.Person);
         Logger.Log("Test passed");
     }
+
+    [Fact]
+    public async Task ReplaceReference_ServerReceivesChange()
+    {
+        var clientArea = Client!.Root!.ClientToServerReference;
+        var serverArea = ServerFixture.ServerRoot.ClientToServerReference;
+
+        // Use unique test identifiers
+        var testId = Guid.NewGuid().ToString("N")[..8];
+        var firstName1 = $"Replace1_{testId}";
+        var firstName2 = $"Replace2_{testId}";
+
+        Logger.Log($"Test starting with unique firstNames: {firstName1}, {firstName2}");
+
+        // First, assign a reference
+        clientArea.Person = new NestedPerson(Client!.Context)
+        {
+            FirstName = firstName1,
+            LastName = "First"
+        };
+        Logger.Log($"Client assigned first person: {firstName1}");
+
+        // Wait for server to receive the assignment
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                var serverPerson = serverArea.Person;
+                Logger.Log($"Polling server for first person: {serverPerson?.FirstName ?? "null"}");
+                return serverPerson?.FirstName == firstName1;
+            },
+            timeout: TimeSpan.FromSeconds(30),
+            pollInterval: TimeSpan.FromMilliseconds(500),
+            message: "Server should receive first reference assignment");
+
+        Assert.NotNull(serverArea.Person);
+        Assert.Equal(firstName1, serverArea.Person.FirstName);
+        Logger.Log($"Server received first person: {firstName1}");
+
+        // Now replace the reference with a different person
+        clientArea.Person = new NestedPerson(Client!.Context)
+        {
+            FirstName = firstName2,
+            LastName = "Second"
+        };
+        Logger.Log($"Client replaced person with: {firstName2}");
+
+        // Wait for server to receive the replacement
+        await AsyncTestHelpers.WaitUntilAsync(
+            () =>
+            {
+                var serverPerson = serverArea.Person;
+                Logger.Log($"Polling server for replacement: {serverPerson?.FirstName ?? "null"}");
+                return serverPerson?.FirstName == firstName2;
+            },
+            timeout: TimeSpan.FromSeconds(30),
+            pollInterval: TimeSpan.FromMilliseconds(500),
+            message: "Server should receive reference replacement");
+
+        Assert.NotNull(serverArea.Person);
+        Assert.Equal(firstName2, serverArea.Person.FirstName);
+        Assert.Equal("Second", serverArea.Person.LastName);
+        Logger.Log("Test passed - reference replacement synced");
+    }
 }
