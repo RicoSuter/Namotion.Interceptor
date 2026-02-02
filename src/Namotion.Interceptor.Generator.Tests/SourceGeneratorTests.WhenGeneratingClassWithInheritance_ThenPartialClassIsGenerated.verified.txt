@@ -252,7 +252,7 @@ namespace YourDefaultNamespace
                 if (!cancel && SetPropertyValue(nameof(MainCourse), newValue, static (o) => ((Teacher)o)._MainCourse, static (o, v) => ((Teacher)o)._MainCourse = v))
                 {
                     OnMainCourseChanged(_MainCourse);
-                    ((IRaisePropertyChanged)this).RaisePropertyChanged(nameof(MainCourse));
+                    RaisePropertyChanged(nameof(MainCourse));
                 }
             }
         }

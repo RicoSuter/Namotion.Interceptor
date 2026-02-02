@@ -227,7 +227,7 @@ namespace YourDefaultNamespace
                 if (!cancel && SetPropertyValue(nameof(Name), newValue, static (o) => ((Person)o)._Name, static (o, v) => ((Person)o)._Name = v))
                 {
                     OnNameChanged(_Name);
-                    ((IRaisePropertyChanged)this).RaisePropertyChanged(nameof(Name));
+                    RaisePropertyChanged(nameof(Name));
                 }
             }
         }
@@ -252,7 +252,7 @@ namespace YourDefaultNamespace
                 if (!cancel && SetPropertyValue(nameof(Age), newValue, static (o) => ((Person)o)._Age, static (o, v) => ((Person)o)._Age = v))
                 {
                     OnAgeChanged(_Age);
-                    ((IRaisePropertyChanged)this).RaisePropertyChanged(nameof(Age));
+                    RaisePropertyChanged(nameof(Age));
                 }
             }
         }
@@ -378,7 +378,7 @@ namespace YourDefaultNamespace
                 if (!cancel && SetPropertyValue(nameof(Age), newValue, static (o) => ((Employee)o)._Age, static (o, v) => ((Employee)o)._Age = v))
                 {
                     OnAgeChanged(_Age);
-                    ((IRaisePropertyChanged)this).RaisePropertyChanged(nameof(Age));
+                    RaisePropertyChanged(nameof(Age));
                 }
             }
         }

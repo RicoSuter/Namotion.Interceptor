@@ -34,9 +34,10 @@ internal static class SubjectMetadataExtractor
                  ImplementsInterface(t, "Namotion.Interceptor.IInterceptorSubject")));
 
         var baseClassTypeName = baseClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        var baseClassHasInterceptorSubject = HasInterceptorSubjectAttribute(baseClass);
 
         // Check if base class has INotifyPropertyChanged
-        var baseClassHasInpc = HasInterceptorSubjectAttribute(baseClass) ||
+        var baseClassHasInpc = baseClassHasInterceptorSubject ||
             (classDeclaration.BaseList?.Types
                 .Select(t => semanticModel.GetTypeInfo(t.Type, cancellationToken).Type as INamedTypeSymbol)
                 .Any(t => t != null && ImplementsInterface(t, "Namotion.Interceptor.IRaisePropertyChanged")) ?? false);
@@ -71,6 +72,7 @@ internal static class SubjectMetadataExtractor
             needsGeneratedParameterlessConstructor,
             hasOrWillHaveParameterlessConstructor,
             baseClassTypeName,
+            baseClassHasInterceptorSubject,
             baseClassHasInpc,
             properties,
             methods);
