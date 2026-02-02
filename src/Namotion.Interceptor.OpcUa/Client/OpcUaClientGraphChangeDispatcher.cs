@@ -1,13 +1,13 @@
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 
-namespace Namotion.Interceptor.OpcUa.Client.Graph;
+namespace Namotion.Interceptor.OpcUa.Client;
 
 /// <summary>
 /// Actor-style dispatcher for OPC UA remote change events.
 /// Uses a single-consumer channel to ensure thread-safe, ordered processing.
 /// </summary>
-internal sealed class OpcUaRemoteChangeDispatcher : IAsyncDisposable
+internal sealed class OpcUaClientGraphChangeDispatcher : IAsyncDisposable
 {
     private readonly Channel<object> _channel;
     private readonly ILogger _logger;
@@ -22,11 +22,11 @@ internal sealed class OpcUaRemoteChangeDispatcher : IAsyncDisposable
     public sealed record PeriodicResyncRequest;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="OpcUaRemoteChangeDispatcher"/> class.
+    /// Initializes a new instance of the <see cref="OpcUaClientGraphChangeDispatcher"/> class.
     /// </summary>
     /// <param name="logger">Logger for diagnostic messages.</param>
     /// <param name="processChange">The callback to invoke for each queued change.</param>
-    public OpcUaRemoteChangeDispatcher(
+    public OpcUaClientGraphChangeDispatcher(
         ILogger logger,
         Func<object, CancellationToken, Task> processChange)
     {

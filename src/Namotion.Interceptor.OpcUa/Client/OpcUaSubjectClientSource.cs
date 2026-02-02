@@ -4,8 +4,6 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.OpcUa.Client.Resilience;
-using Namotion.Interceptor.OpcUa.Client.Graph;
-using Namotion.Interceptor.OpcUa.Graph;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
@@ -25,7 +23,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private readonly OpcUaClientConfiguration _configuration;
     private readonly OpcUaSubjectLoader _subjectLoader;
     private readonly SubscriptionHealthMonitor _subscriptionHealthMonitor;
-    private readonly OpcUaPropertyWriter _opcUaPropertyWriter;
+    private readonly OpcUaClientPropertyWriter _opcUaPropertyWriter;
 
     private volatile SessionManager? _sessionManager;
     private SubjectPropertyWriter? _propertyWriter;
@@ -37,9 +35,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private volatile bool _isStarted;
     private long _reconnectStartedTimestamp; // 0 = not reconnecting, otherwise Stopwatch timestamp when reconnection started (for stall detection)
-    private OpcUaClientStructuralChangeProcessor? _structuralChangeProcessor;
-    private OpcUaGraphChangeProcessor? _nodeChangeProcessor;
-    private RemoteSyncManager? _remoteSyncManager;
+    private OpcUaClientGraphChangeSender? _graphChangeSender;
+    private OpcUaClientGraphChangeReceiver? _nodeChangeProcessor;
+    private OpcUaClientGraphChangeTrigger? _graphChangeTrigger;
 
     // Diagnostics tracking - accessed from multiple threads via Diagnostics property
     private long _totalReconnectionAttempts;
@@ -64,7 +62,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     internal OpcUaSubjectLoader SubjectLoader => _subjectLoader;
 
-    internal OpcUaGraphChangeProcessor? NodeChangeProcessor => _nodeChangeProcessor;
+    internal OpcUaClientGraphChangeReceiver? NodeChangeProcessor => _nodeChangeProcessor;
 
     // Diagnostics accessors
     internal long TotalReconnectionAttempts => Interlocked.Read(ref _totalReconnectionAttempts);
@@ -297,7 +295,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             onSubjectDetaching: OnSubjectDetaching);
         _subjectLoader = new OpcUaSubjectLoader(configuration, _ownership, this, logger);
         _subscriptionHealthMonitor = new SubscriptionHealthMonitor(logger);
-        _opcUaPropertyWriter = new OpcUaPropertyWriter(configuration, OpcUaNodeIdKey, logger);
+        _opcUaPropertyWriter = new OpcUaClientPropertyWriter(configuration, OpcUaNodeIdKey, logger);
     }
 
     private void OnSubjectDetaching(IInterceptorSubject subject)
@@ -349,10 +347,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             _structureLock.Release();
         }
 
-        // Create structural change processor if live sync is enabled
+        // Create graph change sender if live sync is enabled
         if (_configuration.EnableLiveSync)
         {
-            _structuralChangeProcessor = new OpcUaClientStructuralChangeProcessor(
+            _graphChangeSender = new OpcUaClientGraphChangeSender(
                 this,
                 _configuration,
                 _subjectLoader,
@@ -362,7 +360,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         // Create node change processor for remote sync features
         if (_configuration.EnableModelChangeEvents || _configuration.EnablePeriodicResync)
         {
-            _nodeChangeProcessor = new OpcUaGraphChangeProcessor(
+            _nodeChangeProcessor = new OpcUaClientGraphChangeReceiver(
                 this,
                 _configuration,
                 _subjectLoader,
@@ -378,8 +376,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             }
 
             // Create and initialize remote sync manager
-            _remoteSyncManager = new RemoteSyncManager(_configuration, _logger);
-            _remoteSyncManager.Initialize(
+            _graphChangeTrigger = new OpcUaClientGraphChangeTrigger(_configuration, _logger);
+            _graphChangeTrigger.Initialize(
                 _nodeChangeProcessor,
                 _sessionManager.SubscriptionManager,
                 () => _sessionManager?.CurrentSession,
@@ -387,10 +385,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 () => Volatile.Read(ref _disposed) == 1);
 
             // Subscribe to ModelChangeEvents if enabled
-            await _remoteSyncManager.SetupModelChangeEventSubscriptionAsync(session, cancellationToken).ConfigureAwait(false);
+            await _graphChangeTrigger.SetupModelChangeEventSubscriptionAsync(session, cancellationToken).ConfigureAwait(false);
 
             // Start periodic resync timer if enabled
-            _remoteSyncManager.StartPeriodicResyncTimer();
+            _graphChangeTrigger.StartPeriodicResyncTimer();
         }
 
         _isStarted = true;
@@ -751,7 +749,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     {
         if (_configuration.RootName is not null)
         {
-            var references = await OpcUaBrowseHelper.BrowseNodeAsync(session, ObjectIds.ObjectsFolder, cancellationToken).ConfigureAwait(false);
+            var references = await OpcUaHelper.BrowseNodeAsync(session, ObjectIds.ObjectsFolder, cancellationToken).ConfigureAwait(false);
             return references.FirstOrDefault(reference => reference.BrowseName.Name == _configuration.RootName);
         }
 
@@ -778,10 +776,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             }
 
             // Process structural changes first if live sync is enabled
-            var structuralProcessor = _structuralChangeProcessor;
-            if (structuralProcessor is not null)
+            var graphChangeSender = _graphChangeSender;
+            if (graphChangeSender is not null)
             {
-                structuralProcessor.CurrentSession = session;
+                graphChangeSender.CurrentSession = session;
 
                 for (var i = 0; i < changes.Length; i++)
                 {
@@ -795,7 +793,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                     // Check if this is a structural change and process it
                     // Structural properties (IsSubjectReference, IsSubjectCollection, IsSubjectDictionary)
                     // are fully handled here - they don't have NodeIds so PropertyWriter will skip them
-                    await structuralProcessor
+                    await graphChangeSender
                         .ProcessPropertyChangeAsync(change, registeredProperty)
                         .ConfigureAwait(false);
                 }
@@ -819,13 +817,13 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private async Task ResetAsync()
     {
         _isStarted = false;
-        _structuralChangeProcessor = null;
+        _graphChangeSender = null;
 
         // Stop remote sync manager (handles periodic resync timer and ModelChangeEvent subscription)
-        if (_remoteSyncManager is not null)
+        if (_graphChangeTrigger is not null)
         {
-            await _remoteSyncManager.ResetAsync().ConfigureAwait(false);
-            _remoteSyncManager = null;
+            await _graphChangeTrigger.ResetAsync().ConfigureAwait(false);
+            _graphChangeTrigger = null;
         }
 
         // Clear node change processor
@@ -843,10 +841,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }
 
         // Stop remote sync manager first (handles periodic resync timer and ModelChangeEvent subscription)
-        if (_remoteSyncManager is not null)
+        if (_graphChangeTrigger is not null)
         {
-            await _remoteSyncManager.DisposeAsync().ConfigureAwait(false);
-            _remoteSyncManager = null;
+            await _graphChangeTrigger.DisposeAsync().ConfigureAwait(false);
+            _graphChangeTrigger = null;
         }
 
         // Dispose session manager

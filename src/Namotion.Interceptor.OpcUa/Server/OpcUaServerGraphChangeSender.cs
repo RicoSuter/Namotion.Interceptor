@@ -8,15 +8,15 @@ namespace Namotion.Interceptor.OpcUa.Server;
 /// Creates or removes nodes in the OPC UA address space when the C# model changes.
 /// Note: Source filtering (loop prevention) is handled by ChangeQueueProcessor, not here.
 /// </summary>
-internal class OpcUaServerStructuralChangeProcessor : StructuralChangeProcessor
+internal class OpcUaServerGraphChangeSender : GraphChangePublisher
 {
     private readonly CustomNodeManager _nodeManager;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="OpcUaServerStructuralChangeProcessor"/> class.
+    /// Initializes a new instance of the <see cref="OpcUaServerGraphChangeSender"/> class.
     /// </summary>
     /// <param name="nodeManager">The custom node manager for creating/removing nodes.</param>
-    public OpcUaServerStructuralChangeProcessor(CustomNodeManager nodeManager)
+    public OpcUaServerGraphChangeSender(CustomNodeManager nodeManager)
     {
         _nodeManager = nodeManager;
     }

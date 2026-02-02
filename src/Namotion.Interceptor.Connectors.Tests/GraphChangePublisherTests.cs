@@ -7,16 +7,16 @@ using Namotion.Interceptor.Tracking.Change;
 namespace Namotion.Interceptor.Connectors.Tests;
 
 /// <summary>
-/// Tests for StructuralChangeProcessor focusing on property change routing and subject lifecycle callbacks.
+/// Tests for GraphChangePublisher focusing on property change routing and subject lifecycle callbacks.
 /// Verifies correct branching on property type (reference, collection, dictionary) and loop prevention.
 /// </summary>
-public class StructuralChangeProcessorTests
+public class GraphChangePublisherTests
 {
     [Fact]
     public async Task ProcessPropertyChangeAsync_SubjectReference_CallsOnSubjectAdded()
     {
         // Arrange
-        var processor = new TestStructuralChangeProcessor();
+        var processor = new TestGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new Person(context);
         var child = new Person(context);
@@ -45,7 +45,7 @@ public class StructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_SubjectReference_CallsOnSubjectRemoved()
     {
         // Arrange
-        var processor = new TestStructuralChangeProcessor();
+        var processor = new TestGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new Person(context);
         var child = new Person(context);
@@ -74,7 +74,7 @@ public class StructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_SubjectReferenceReplacement_CallsBothAddedAndRemoved()
     {
         // Arrange
-        var processor = new TestStructuralChangeProcessor();
+        var processor = new TestGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new Person(context);
         var oldChild = new Person(context);
@@ -105,7 +105,7 @@ public class StructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_SameSubjectReference_NoCallbacks()
     {
         // Arrange
-        var processor = new TestStructuralChangeProcessor();
+        var processor = new TestGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new Person(context);
         var child = new Person(context);
@@ -133,7 +133,7 @@ public class StructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_NonStructuralProperty_ReturnsFalse()
     {
         // Arrange
-        var processor = new TestStructuralChangeProcessor();
+        var processor = new TestGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var person = new Person(context);
 
@@ -163,7 +163,7 @@ public class StructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_Collection_EmptyToPopulated_CallsOnSubjectAddedForEachItem()
     {
         // Arrange
-        var processor = new TestStructuralChangeProcessor();
+        var processor = new TestGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new CycleTestNode(context);
         var child1 = new CycleTestNode(context);
@@ -197,7 +197,7 @@ public class StructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_Collection_PopulatedToFewer_CallsOnSubjectRemovedForRemovedItems()
     {
         // Arrange
-        var processor = new TestStructuralChangeProcessor();
+        var processor = new TestGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new CycleTestNode(context);
         var child1 = new CycleTestNode(context);
@@ -232,7 +232,7 @@ public class StructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_Collection_AddAndRemoveInSingleChange_CallsBothCallbacks()
     {
         // Arrange
-        var processor = new TestStructuralChangeProcessor();
+        var processor = new TestGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new CycleTestNode(context);
         var child1 = new CycleTestNode(context);
@@ -271,7 +271,7 @@ public class StructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_Collection_PopulatedToEmpty_CallsOnSubjectRemovedForAllItems()
     {
         // Arrange
-        var processor = new TestStructuralChangeProcessor();
+        var processor = new TestGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new CycleTestNode(context);
         var child1 = new CycleTestNode(context);
@@ -305,7 +305,7 @@ public class StructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_Collection_NullToPopulated_CallsOnSubjectAddedForEachItem()
     {
         // Arrange
-        var processor = new TestStructuralChangeProcessor();
+        var processor = new TestGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new CycleTestNode(context);
         var child1 = new CycleTestNode(context);
@@ -341,7 +341,7 @@ public class StructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_Dictionary_EmptyToPopulated_CallsOnSubjectAddedWithKeys()
     {
         // Arrange
-        var processor = new TestStructuralChangeProcessor();
+        var processor = new TestGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new CycleTestNode(context);
         var child1 = new CycleTestNode(context);
@@ -382,7 +382,7 @@ public class StructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_Dictionary_PopulatedToFewer_CallsOnSubjectRemovedWithKeys()
     {
         // Arrange
-        var processor = new TestStructuralChangeProcessor();
+        var processor = new TestGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new CycleTestNode(context);
         var child1 = new CycleTestNode(context);
@@ -429,7 +429,7 @@ public class StructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_Dictionary_AddAndRemoveInSingleChange_CallsBothCallbacks()
     {
         // Arrange
-        var processor = new TestStructuralChangeProcessor();
+        var processor = new TestGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new CycleTestNode(context);
         var child1 = new CycleTestNode(context);
@@ -479,7 +479,7 @@ public class StructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_Dictionary_PopulatedToEmpty_CallsOnSubjectRemovedForAllItems()
     {
         // Arrange
-        var processor = new TestStructuralChangeProcessor();
+        var processor = new TestGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new CycleTestNode(context);
         var child1 = new CycleTestNode(context);
@@ -520,7 +520,7 @@ public class StructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_Dictionary_NullToPopulated_CallsOnSubjectAddedWithKeys()
     {
         // Arrange
-        var processor = new TestStructuralChangeProcessor();
+        var processor = new TestGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new CycleTestNode(context);
         var child1 = new CycleTestNode(context);
@@ -558,7 +558,7 @@ public class StructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_Dictionary_ValueReplacedAtSameKey_CallsBothAddedAndRemoved()
     {
         // Arrange
-        var processor = new TestStructuralChangeProcessor();
+        var processor = new TestGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new CycleTestNode(context);
         var child1 = new CycleTestNode(context);
@@ -603,7 +603,7 @@ public class StructuralChangeProcessorTests
 
     #endregion
 
-    private class TestStructuralChangeProcessor : StructuralChangeProcessor
+    private class TestGraphChangePublisher : GraphChangePublisher
     {
         public List<(RegisteredSubjectProperty Property, IInterceptorSubject Subject, object? Index)> AddedSubjects { get; } = new();
         public List<(RegisteredSubjectProperty Property, IInterceptorSubject Subject, object? Index)> RemovedSubjects { get; } = new();

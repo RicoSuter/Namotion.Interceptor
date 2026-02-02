@@ -21,7 +21,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
 
     private LifecycleInterceptor? _lifecycleInterceptor;
     private volatile OpcUaSubjectServer? _server;
-    private OpcUaServerStructuralChangeProcessor? _structuralChangeProcessor;
+    private OpcUaServerGraphChangeSender? _graphChangeSender;
     private int _consecutiveFailures;
     private OpcUaServerDiagnostics? _diagnostics;
     private DateTimeOffset? _startTime;
@@ -92,9 +92,9 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
             }
 
             // Process structural changes first when live sync is enabled
-            if (_structuralChangeProcessor is not null)
+            if (_graphChangeSender is not null)
             {
-                var handled = await _structuralChangeProcessor
+                var handled = await _graphChangeSender
                     .ProcessPropertyChangeAsync(change, registeredProperty)
                     .ConfigureAwait(false);
 
@@ -173,10 +173,10 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                     await application.CheckApplicationInstanceCertificatesAsync(true, ct: stoppingToken).ConfigureAwait(false);
                     await application.StartAsync(server).ConfigureAwait(false);
 
-                    // Create structural change processor for live sync if enabled
+                    // Create graph change sender for live sync if enabled
                     if (_configuration.EnableLiveSync && server.NodeManager is not null)
                     {
-                        _structuralChangeProcessor = new OpcUaServerStructuralChangeProcessor(
+                        _graphChangeSender = new OpcUaServerGraphChangeSender(
                             server.NodeManager);
                     }
 
@@ -193,7 +193,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                 }
                 finally
                 {
-                    _structuralChangeProcessor = null;
+                    _graphChangeSender = null;
                     _startTime = null;
                     var serverToClean = _server;
                     _server = null;

@@ -185,21 +185,21 @@ public class ServerExternalManagementTests
     }
 
     [Fact]
-    public void ExternalNodeManagementHelper_IsEnabled_ReturnsFalseByDefault()
+    public void OpcUaServerExternalNodeValidator_IsEnabled_ReturnsFalseByDefault()
     {
         // Arrange
         var configuration = new OpcUaServerConfiguration
         {
             ValueConverter = new OpcUaValueConverter()
         };
-        var helper = new ExternalNodeManagementHelper(configuration, NullLogger.Instance);
+        var helper = new OpcUaServerExternalNodeValidator(configuration, NullLogger.Instance);
 
         // Act & Assert
         Assert.False(helper.IsEnabled);
     }
 
     [Fact]
-    public void ExternalNodeManagementHelper_IsEnabled_ReturnsTrueWhenConfigured()
+    public void OpcUaServerExternalNodeValidator_IsEnabled_ReturnsTrueWhenConfigured()
     {
         // Arrange
         var configuration = new OpcUaServerConfiguration
@@ -207,14 +207,14 @@ public class ServerExternalManagementTests
             ValueConverter = new OpcUaValueConverter(),
             EnableExternalNodeManagement = true
         };
-        var helper = new ExternalNodeManagementHelper(configuration, NullLogger.Instance);
+        var helper = new OpcUaServerExternalNodeValidator(configuration, NullLogger.Instance);
 
         // Act & Assert
         Assert.True(helper.IsEnabled);
     }
 
     [Fact]
-    public void ExternalNodeManagementHelper_ValidateAddNodes_WhenDisabled_ReturnsBadServiceUnsupported()
+    public void OpcUaServerExternalNodeValidator_ValidateAddNodes_WhenDisabled_ReturnsBadServiceUnsupported()
     {
         // Arrange
         var configuration = new OpcUaServerConfiguration
@@ -222,7 +222,7 @@ public class ServerExternalManagementTests
             ValueConverter = new OpcUaValueConverter(),
             EnableExternalNodeManagement = false
         };
-        var helper = new ExternalNodeManagementHelper(configuration, NullLogger.Instance);
+        var helper = new OpcUaServerExternalNodeValidator(configuration, NullLogger.Instance);
 
         var nodesToAdd = new AddNodesItemCollection
         {
@@ -242,7 +242,7 @@ public class ServerExternalManagementTests
     }
 
     [Fact]
-    public void ExternalNodeManagementHelper_ValidateDeleteNodes_WhenDisabled_ReturnsBadServiceUnsupported()
+    public void OpcUaServerExternalNodeValidator_ValidateDeleteNodes_WhenDisabled_ReturnsBadServiceUnsupported()
     {
         // Arrange
         var configuration = new OpcUaServerConfiguration
@@ -250,7 +250,7 @@ public class ServerExternalManagementTests
             ValueConverter = new OpcUaValueConverter(),
             EnableExternalNodeManagement = false
         };
-        var helper = new ExternalNodeManagementHelper(configuration, NullLogger.Instance);
+        var helper = new OpcUaServerExternalNodeValidator(configuration, NullLogger.Instance);
 
         var nodesToDelete = new DeleteNodesItemCollection
         {
@@ -270,7 +270,7 @@ public class ServerExternalManagementTests
     }
 
     [Fact]
-    public void ExternalNodeManagementHelper_ValidateAddNodes_WhenEnabled_WithValidType_ReturnsGood()
+    public void OpcUaServerExternalNodeValidator_ValidateAddNodes_WhenEnabled_WithValidType_ReturnsGood()
     {
         // Arrange
         var typeRegistry = new OpcUaTypeRegistry();
@@ -283,7 +283,7 @@ public class ServerExternalManagementTests
             EnableExternalNodeManagement = true,
             TypeRegistry = typeRegistry
         };
-        var helper = new ExternalNodeManagementHelper(configuration, NullLogger.Instance);
+        var helper = new OpcUaServerExternalNodeValidator(configuration, NullLogger.Instance);
 
         var namespaceTable = new NamespaceTable();
         namespaceTable.Append("http://test/");
@@ -308,7 +308,7 @@ public class ServerExternalManagementTests
     }
 
     [Fact]
-    public void ExternalNodeManagementHelper_ValidateAddNodes_WhenEnabled_WithUnknownType_ReturnsBadTypeDefinitionInvalid()
+    public void OpcUaServerExternalNodeValidator_ValidateAddNodes_WhenEnabled_WithUnknownType_ReturnsBadTypeDefinitionInvalid()
     {
         // Arrange
         var typeRegistry = new OpcUaTypeRegistry();
@@ -320,7 +320,7 @@ public class ServerExternalManagementTests
             EnableExternalNodeManagement = true,
             TypeRegistry = typeRegistry
         };
-        var helper = new ExternalNodeManagementHelper(configuration, NullLogger.Instance);
+        var helper = new OpcUaServerExternalNodeValidator(configuration, NullLogger.Instance);
 
         var nodesToAdd = new AddNodesItemCollection
         {
@@ -341,7 +341,7 @@ public class ServerExternalManagementTests
     }
 
     [Fact]
-    public void ExternalNodeManagementHelper_ValidateAddNodes_WhenEnabled_WithNoTypeRegistry_ReturnsBadNotSupported()
+    public void OpcUaServerExternalNodeValidator_ValidateAddNodes_WhenEnabled_WithNoTypeRegistry_ReturnsBadNotSupported()
     {
         // Arrange
         var configuration = new OpcUaServerConfiguration
@@ -350,7 +350,7 @@ public class ServerExternalManagementTests
             EnableExternalNodeManagement = true,
             TypeRegistry = null // No registry
         };
-        var helper = new ExternalNodeManagementHelper(configuration, NullLogger.Instance);
+        var helper = new OpcUaServerExternalNodeValidator(configuration, NullLogger.Instance);
 
         var nodesToAdd = new AddNodesItemCollection
         {
@@ -371,7 +371,7 @@ public class ServerExternalManagementTests
     }
 
     [Fact]
-    public void ExternalNodeManagementHelper_ValidateDeleteNodes_WhenEnabled_ReturnsGood()
+    public void OpcUaServerExternalNodeValidator_ValidateDeleteNodes_WhenEnabled_ReturnsGood()
     {
         // Arrange
         var configuration = new OpcUaServerConfiguration
@@ -379,7 +379,7 @@ public class ServerExternalManagementTests
             ValueConverter = new OpcUaValueConverter(),
             EnableExternalNodeManagement = true
         };
-        var helper = new ExternalNodeManagementHelper(configuration, NullLogger.Instance);
+        var helper = new OpcUaServerExternalNodeValidator(configuration, NullLogger.Instance);
 
         var nodesToDelete = new DeleteNodesItemCollection
         {

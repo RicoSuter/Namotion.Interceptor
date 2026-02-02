@@ -7,13 +7,13 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
 
-namespace Namotion.Interceptor.OpcUa.Server.Graph;
+namespace Namotion.Interceptor.OpcUa.Server;
 
 /// <summary>
 /// Creates OPC UA nodes from model subjects and properties.
 /// Extracted from CustomNodeManager for better separation of concerns.
 /// </summary>
-internal class OpcUaNodeCreator
+internal class OpcUaServerNodeCreator
 {
     private const string PathDelimiter = ".";
 
@@ -23,16 +23,16 @@ internal class OpcUaNodeCreator
     private readonly OpcUaNodeFactory _nodeFactory;
     private readonly OpcUaSubjectServerBackgroundService _source;
     private readonly ConnectorReferenceCounter<NodeState> _subjectRefCounter;
-    private readonly OpcUaModelChangePublisher _modelChangePublisher;
+    private readonly OpcUaServerGraphChangePublisher _modelChangePublisher;
     private readonly ILogger _logger;
 
-    public OpcUaNodeCreator(
+    public OpcUaServerNodeCreator(
         CustomNodeManager nodeManager,
         OpcUaServerConfiguration configuration,
         OpcUaNodeFactory nodeFactory,
         OpcUaSubjectServerBackgroundService source,
         ConnectorReferenceCounter<NodeState> subjectRefCounter,
-        OpcUaModelChangePublisher modelChangePublisher,
+        OpcUaServerGraphChangePublisher modelChangePublisher,
         ILogger logger)
     {
         _nodeManager = nodeManager;

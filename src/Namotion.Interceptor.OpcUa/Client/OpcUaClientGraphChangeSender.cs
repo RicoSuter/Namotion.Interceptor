@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Attributes;
-using Namotion.Interceptor.OpcUa.Graph;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
@@ -15,7 +14,7 @@ namespace Namotion.Interceptor.OpcUa.Client;
 /// Optionally calls AddNodes/DeleteNodes on the server when EnableRemoteNodeManagement is enabled.
 /// Note: Source filtering (loop prevention) is handled by ChangeQueueProcessor, not here.
 /// </summary>
-internal class OpcUaClientStructuralChangeProcessor : StructuralChangeProcessor
+internal class OpcUaClientGraphChangeSender : GraphChangePublisher
 {
     private readonly OpcUaSubjectClientSource _source;
     private readonly OpcUaClientConfiguration _configuration;
@@ -23,13 +22,13 @@ internal class OpcUaClientStructuralChangeProcessor : StructuralChangeProcessor
     private readonly ILogger _logger;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="OpcUaClientStructuralChangeProcessor"/> class.
+    /// Initializes a new instance of the <see cref="OpcUaClientGraphChangeSender"/> class.
     /// </summary>
     /// <param name="source">The OPC UA client source for tracking subjects.</param>
     /// <param name="configuration">The client configuration.</param>
     /// <param name="subjectLoader">The subject loader for loading new subjects.</param>
     /// <param name="logger">The logger.</param>
-    public OpcUaClientStructuralChangeProcessor(
+    public OpcUaClientGraphChangeSender(
         OpcUaSubjectClientSource source,
         OpcUaClientConfiguration configuration,
         OpcUaSubjectLoader subjectLoader,
@@ -152,7 +151,7 @@ internal class OpcUaClientStructuralChangeProcessor : StructuralChangeProcessor
             return ObjectIds.ObjectsFolder;
         }
 
-        var references = await OpcUaBrowseHelper.BrowseNodeAsync(session, ObjectIds.ObjectsFolder, cancellationToken).ConfigureAwait(false);
+        var references = await OpcUaHelper.BrowseNodeAsync(session, ObjectIds.ObjectsFolder, cancellationToken).ConfigureAwait(false);
         foreach (var reference in references)
         {
             if (reference.BrowseName.Name == _configuration.RootName)
@@ -172,7 +171,7 @@ internal class OpcUaClientStructuralChangeProcessor : StructuralChangeProcessor
         object? index,
         CancellationToken cancellationToken)
     {
-        var references = await OpcUaBrowseHelper.BrowseNodeAsync(session, parentNodeId, cancellationToken).ConfigureAwait(false);
+        var references = await OpcUaHelper.BrowseNodeAsync(session, parentNodeId, cancellationToken).ConfigureAwait(false);
 
         // For collections, check the structure mode (default is Container for backward compatibility)
         if (property.IsSubjectCollection)
@@ -211,7 +210,7 @@ internal class OpcUaClientStructuralChangeProcessor : StructuralChangeProcessor
                     return null;
                 }
 
-                var containerChildren = await OpcUaBrowseHelper.BrowseNodeAsync(session, containerNodeId, cancellationToken).ConfigureAwait(false);
+                var containerChildren = await OpcUaHelper.BrowseNodeAsync(session, containerNodeId, cancellationToken).ConfigureAwait(false);
                 var expectedBrowseName = $"{propertyName}[{index}]";
 
                 foreach (var child in containerChildren)
@@ -246,7 +245,7 @@ internal class OpcUaClientStructuralChangeProcessor : StructuralChangeProcessor
             }
 
             // Browse container for specific item
-            var containerChildren = await OpcUaBrowseHelper.BrowseNodeAsync(session, containerNodeId, cancellationToken).ConfigureAwait(false);
+            var containerChildren = await OpcUaHelper.BrowseNodeAsync(session, containerNodeId, cancellationToken).ConfigureAwait(false);
             var expectedBrowseName = index.ToString();
 
             foreach (var child in containerChildren)
@@ -460,7 +459,7 @@ internal class OpcUaClientStructuralChangeProcessor : StructuralChangeProcessor
         string containerName,
         CancellationToken cancellationToken)
     {
-        var references = await OpcUaBrowseHelper.BrowseNodeAsync(session, parentNodeId, cancellationToken).ConfigureAwait(false);
+        var references = await OpcUaHelper.BrowseNodeAsync(session, parentNodeId, cancellationToken).ConfigureAwait(false);
         foreach (var reference in references)
         {
             if (reference.BrowseName.Name == containerName)
