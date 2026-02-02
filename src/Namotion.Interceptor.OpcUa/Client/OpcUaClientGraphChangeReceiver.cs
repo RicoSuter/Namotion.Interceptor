@@ -19,14 +19,15 @@ internal class OpcUaClientGraphChangeReceiver
     private readonly OpcUaClientConfiguration _configuration;
     private readonly OpcUaSubjectLoader _subjectLoader;
     private readonly ILogger _logger;
+    private readonly GraphChangeApplier _graphChangeApplier;
 
-    // Maps NodeId to subject for reverse lookup when processing node deletions
-    private readonly Dictionary<NodeId, IInterceptorSubject> _nodeIdToSubject = new();
-    private readonly Lock _nodeIdToSubjectLock = new();
+    // Shared mapping between subjects and NodeIds - owned by OpcUaSubjectClientSource
+    private readonly ConnectorSubjectMapping<NodeId> _subjectMapping;
 
     // Track recently deleted NodeIds to prevent periodic resync from re-adding them
     // This is needed when EnableRemoteNodeManagement is true - the client is the source of truth
     private readonly Dictionary<NodeId, DateTime> _recentlyDeletedNodeIds = new();
+    private readonly Lock _recentlyDeletedLock = new();
     private static readonly TimeSpan RecentlyDeletedExpiry = TimeSpan.FromSeconds(30);
 
     // Track whether we're currently processing a remote ModelChangeEvent
@@ -37,19 +38,23 @@ internal class OpcUaClientGraphChangeReceiver
     /// Initializes a new instance of the <see cref="OpcUaClientGraphChangeReceiver"/> class.
     /// </summary>
     /// <param name="source">The OPC UA client source.</param>
+    /// <param name="subjectMapping">The shared subject-to-NodeId mapping.</param>
     /// <param name="configuration">The client configuration.</param>
     /// <param name="subjectLoader">The subject loader for creating new subjects.</param>
     /// <param name="logger">The logger.</param>
     public OpcUaClientGraphChangeReceiver(
         OpcUaSubjectClientSource source,
+        ConnectorSubjectMapping<NodeId> subjectMapping,
         OpcUaClientConfiguration configuration,
         OpcUaSubjectLoader subjectLoader,
         ILogger logger)
     {
         _source = source;
+        _subjectMapping = subjectMapping;
         _configuration = configuration;
         _subjectLoader = subjectLoader;
         _logger = logger;
+        _graphChangeApplier = new GraphChangeApplier();
     }
 
     /// <summary>
@@ -60,38 +65,13 @@ internal class OpcUaClientGraphChangeReceiver
     public bool IsProcessingRemoteChange => _isProcessingRemoteChange;
 
     /// <summary>
-    /// Registers a subject with its NodeId for reverse lookup during node deletion events.
-    /// </summary>
-    /// <param name="subject">The subject to register.</param>
-    /// <param name="nodeId">The NodeId associated with the subject.</param>
-    public void RegisterSubjectNodeId(IInterceptorSubject subject, NodeId nodeId)
-    {
-        lock (_nodeIdToSubjectLock)
-        {
-            _nodeIdToSubject[nodeId] = subject;
-        }
-    }
-
-    /// <summary>
-    /// Unregisters a subject's NodeId mapping.
-    /// </summary>
-    /// <param name="nodeId">The NodeId to unregister.</param>
-    public void UnregisterSubjectNodeId(NodeId nodeId)
-    {
-        lock (_nodeIdToSubjectLock)
-        {
-            _nodeIdToSubject.Remove(nodeId);
-        }
-    }
-
-    /// <summary>
-    /// Clears all NodeId to subject mappings.
+    /// Clears all recently deleted NodeIds tracking.
+    /// Note: The subject mapping is shared and owned by OpcUaSubjectClientSource.
     /// </summary>
     public void Clear()
     {
-        lock (_nodeIdToSubjectLock)
+        lock (_recentlyDeletedLock)
         {
-            _nodeIdToSubject.Clear();
             _recentlyDeletedNodeIds.Clear();
         }
     }
@@ -102,7 +82,7 @@ internal class OpcUaClientGraphChangeReceiver
     /// <param name="nodeId">The NodeId that was deleted.</param>
     public void MarkRecentlyDeleted(NodeId nodeId)
     {
-        lock (_nodeIdToSubjectLock)
+        lock (_recentlyDeletedLock)
         {
             _recentlyDeletedNodeIds[nodeId] = DateTime.UtcNow;
         }
@@ -116,7 +96,7 @@ internal class OpcUaClientGraphChangeReceiver
     /// <returns>True if the NodeId was recently deleted, false otherwise.</returns>
     public bool WasRecentlyDeleted(NodeId nodeId)
     {
-        lock (_nodeIdToSubjectLock)
+        lock (_recentlyDeletedLock)
         {
             // Clean up expired entries
             var now = DateTime.UtcNow;
@@ -290,21 +270,17 @@ internal class OpcUaClientGraphChangeReceiver
                     property, remoteChild, session, cancellationToken).ConfigureAwait(false);
 
                 var nodeId = ExpandedNodeId.ToNodeId(remoteChild.NodeId, session.NamespaceUris);
-                RegisterSubjectNodeId(newSubject, nodeId);
+                _subjectMapping.Register(newSubject, nodeId);
 
                 // Add to collection FIRST - this attaches the subject to the parent which registers it
                 // The subject must be registered before LoadSubjectAsync can set up monitored items
-                var currentCollection = property.GetValue() as IEnumerable<IInterceptorSubject?>;
-                if (currentCollection is null)
+                if (!_graphChangeApplier.AddToCollection(property, newSubject, _source))
                 {
                     _logger.LogWarning(
                         "Cannot add to collection property '{PropertyName}': value is not a collection.",
                         property.Name);
                     continue;
                 }
-
-                var newCollection = DefaultSubjectFactory.Instance.AppendSubjectsToCollection(currentCollection, newSubject);
-                property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newCollection);
 
                 // Now load and set up monitoring - subject is now registered
                 var monitoredItems = await _subjectLoader.LoadSubjectAsync(
@@ -327,21 +303,14 @@ internal class OpcUaClientGraphChangeReceiver
             }
         }
 
-        // Process removals
-        if (indicesToRemove.Count > 0)
+        // Process removals (indices are already sorted descending, so removing from highest to lowest)
+        foreach (var index in indicesToRemove)
         {
-            var currentCollectionForRemoval = property.GetValue() as IEnumerable<IInterceptorSubject?>;
-            if (currentCollectionForRemoval is null)
+            if (!_graphChangeApplier.RemoveFromCollectionByIndex(property, index, _source))
             {
                 _logger.LogWarning(
-                    "Could not remove {RemovedCount} subjects from collection property '{PropertyName}': value is not a collection.",
-                    indicesToRemove.Count, property.Name);
-            }
-            else
-            {
-                var newCollectionAfterRemoval = DefaultSubjectFactory.Instance.RemoveSubjectsFromCollection(
-                    currentCollectionForRemoval, indicesToRemove.ToArray());
-                property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newCollectionAfterRemoval);
+                    "Could not remove subject at index {Index} from collection property '{PropertyName}': value is not a collection.",
+                    index, property.Name);
             }
         }
     }
@@ -381,20 +350,16 @@ internal class OpcUaClientGraphChangeReceiver
         var newSubject = await _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
             property, nodeDetails, session, cancellationToken).ConfigureAwait(false);
 
-        RegisterSubjectNodeId(newSubject, nodeId);
+        _subjectMapping.Register(newSubject, nodeId);
 
         // Add to collection - this attaches the subject to the parent which registers it
-        var currentCollection = property.GetValue() as IEnumerable<IInterceptorSubject?>;
-        if (currentCollection is null)
+        if (!_graphChangeApplier.AddToCollection(property, newSubject, _source))
         {
             _logger.LogWarning(
                 "ProcessCollectionItemAddedAsync: Cannot add to collection property '{PropertyName}': value is not a collection.",
                 property.Name);
             return;
         }
-
-        var newCollection = DefaultSubjectFactory.Instance.AppendSubjectsToCollection(currentCollection, newSubject);
-        property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newCollection);
 
         // Now load and set up monitoring - subject is now registered
         var monitoredItems = await _subjectLoader.LoadSubjectAsync(
@@ -486,22 +451,17 @@ internal class OpcUaClientGraphChangeReceiver
                     property, remoteChild, session, cancellationToken).ConfigureAwait(false);
 
                 var nodeId = ExpandedNodeId.ToNodeId(remoteChild.NodeId, session.NamespaceUris);
-                RegisterSubjectNodeId(newSubject, nodeId);
+                _subjectMapping.Register(newSubject, nodeId);
 
                 // Add to dictionary FIRST - this attaches the subject to the parent which registers it
                 // The subject must be registered before LoadSubjectAsync can set up monitored items
-                var currentDictionary = property.GetValue() as IDictionary;
-                if (currentDictionary is null)
+                if (!_graphChangeApplier.AddToDictionary(property, key, newSubject, _source))
                 {
                     _logger.LogWarning(
                         "Cannot add to dictionary property '{PropertyName}': value is not a dictionary.",
                         property.Name);
                     continue;
                 }
-
-                var newDictionary = DefaultSubjectFactory.Instance.AppendEntriesToDictionary(
-                    currentDictionary, new KeyValuePair<object, IInterceptorSubject>(key, newSubject));
-                property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newDictionary);
                 localChildren = property.Children.ToDictionary(c => c.Index?.ToString() ?? "", c => c.Subject);
 
                 // Now load and set up monitoring - subject is now registered
@@ -526,20 +486,13 @@ internal class OpcUaClientGraphChangeReceiver
         }
 
         // Process removals
-        if (keysToRemove.Count > 0)
+        foreach (var key in keysToRemove)
         {
-            var currentDictionaryForRemoval = property.GetValue() as IDictionary;
-            if (currentDictionaryForRemoval is null)
+            if (!_graphChangeApplier.RemoveFromDictionary(property, key, _source))
             {
                 _logger.LogWarning(
-                    "Could not remove {RemovedCount} entries from dictionary property '{PropertyName}': value is not a dictionary.",
-                    keysToRemove.Count, property.Name);
-            }
-            else
-            {
-                var newDictionaryAfterRemoval = DefaultSubjectFactory.Instance.RemoveEntriesFromDictionary(
-                    currentDictionaryForRemoval, keysToRemove.Cast<object>().ToArray());
-                property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newDictionaryAfterRemoval);
+                    "Could not remove entry with key '{Key}' from dictionary property '{PropertyName}': value is not a dictionary.",
+                    key, property.Name);
             }
         }
     }
@@ -594,13 +547,13 @@ internal class OpcUaClientGraphChangeReceiver
             // First, unregister the old subject
             if (localNodeId is not null)
             {
-                UnregisterSubjectNodeId(localNodeId);
+                _subjectMapping.TryUnregisterByExternalId(localNodeId, out _);
             }
 
             // Skip re-adding recently deleted items
             if (_configuration.EnableRemoteNodeManagement && WasRecentlyDeleted(remoteNodeId!))
             {
-                property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, null);
+                _graphChangeApplier.SetReference(property, null, _source);
                 return;
             }
 
@@ -608,10 +561,10 @@ internal class OpcUaClientGraphChangeReceiver
             var newSubject = await _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
                 property, referenceNode!, session, cancellationToken).ConfigureAwait(false);
 
-            RegisterSubjectNodeId(newSubject, remoteNodeId!);
+            _subjectMapping.Register(newSubject, remoteNodeId!);
 
             // Set property value - this replaces the old subject and attaches the new one
-            property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newSubject);
+            _graphChangeApplier.SetReference(property, newSubject, _source);
 
             // Now load and set up monitoring - subject is now registered
             var monitoredItems = await _subjectLoader.LoadSubjectAsync(
@@ -657,10 +610,10 @@ internal class OpcUaClientGraphChangeReceiver
                 property, referenceNode!, session, cancellationToken).ConfigureAwait(false);
 
             var nodeId = ExpandedNodeId.ToNodeId(referenceNode!.NodeId, session.NamespaceUris);
-            RegisterSubjectNodeId(newSubject, nodeId);
+            _subjectMapping.Register(newSubject, nodeId);
 
             // Set property value FIRST - this attaches the subject to the parent which registers it
-            property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newSubject);
+            _graphChangeApplier.SetReference(property, newSubject, _source);
 
             // Now load and set up monitoring - subject is now registered
             var monitoredItems = await _subjectLoader.LoadSubjectAsync(
@@ -692,9 +645,9 @@ internal class OpcUaClientGraphChangeReceiver
             // Remote has no value but local does - clear local
             if (_source.TryGetSubjectNodeId(localSubject!, out var oldNodeId) && oldNodeId is not null)
             {
-                UnregisterSubjectNodeId(oldNodeId);
+                _subjectMapping.TryUnregisterByExternalId(oldNodeId, out _);
             }
-            property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, null);
+            _graphChangeApplier.SetReference(property, null, _source);
         }
     }
 
@@ -769,12 +722,9 @@ internal class OpcUaClientGraphChangeReceiver
 
         for (var depth = 0; depth < maxDepth; depth++)
         {
-            lock (_nodeIdToSubjectLock)
+            if (_subjectMapping.TryGetSubject(currentNodeId, out parentSubject))
             {
-                if (_nodeIdToSubject.TryGetValue(currentNodeId, out parentSubject))
-                {
-                    break;
-                }
+                break;
             }
 
             var nextParentNodeId = await OpcUaHelper.FindParentNodeIdAsync(session, currentNodeId, cancellationToken).ConfigureAwait(false);
@@ -868,14 +818,7 @@ internal class OpcUaClientGraphChangeReceiver
 
     private void ProcessNodeDeleted(NodeId nodeId)
     {
-        IInterceptorSubject? deletedSubject = null;
-
-        lock (_nodeIdToSubjectLock)
-        {
-            _nodeIdToSubject.Remove(nodeId, out deletedSubject);
-        }
-
-        if (deletedSubject is null)
+        if (!_subjectMapping.TryUnregisterByExternalId(nodeId, out var deletedSubject) || deletedSubject is null)
         {
             _logger.LogDebug("ProcessNodeDeleted: NodeId {NodeId} not found in tracking.", nodeId);
             return;
@@ -905,7 +848,7 @@ internal class OpcUaClientGraphChangeReceiver
         if (parentProperty.IsSubjectReference)
         {
             // Clear the reference property
-            parentProperty.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, null);
+            _graphChangeApplier.SetReference(parentProperty, null, _source);
         }
         else if (parentProperty.IsSubjectCollection)
         {
@@ -935,13 +878,8 @@ internal class OpcUaClientGraphChangeReceiver
 
             if (removedIndex is int removedIdx)
             {
-                var currentCollectionValue = parentProperty.GetValue() as IEnumerable<IInterceptorSubject?>;
-                if (currentCollectionValue is not null)
+                if (_graphChangeApplier.RemoveFromCollectionByIndex(parentProperty, removedIdx, _source))
                 {
-                    var newCollectionValue = DefaultSubjectFactory.Instance.RemoveSubjectsFromCollection(
-                        currentCollectionValue, removedIdx);
-                    parentProperty.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newCollectionValue);
-
                     // Update NodeId registrations for items that got reindexed
                     UpdateCollectionNodeIdRegistrationsAfterRemoval(parentProperty, subjectsToReindex, removedIdx);
                 }
@@ -955,7 +893,7 @@ internal class OpcUaClientGraphChangeReceiver
         }
         else if (parentProperty.IsSubjectDictionary)
         {
-            // Remove from dictionary
+            // Remove from dictionary - find the key first
             if (parentProperty.GetValue() is IDictionary dictionary)
             {
                 object? keyToRemove = null;
@@ -970,9 +908,7 @@ internal class OpcUaClientGraphChangeReceiver
 
                 if (keyToRemove is not null)
                 {
-                    var newDictionaryValue = DefaultSubjectFactory.Instance.RemoveEntriesFromDictionary(
-                        dictionary, keyToRemove);
-                    parentProperty.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newDictionaryValue);
+                    _graphChangeApplier.RemoveFromDictionary(parentProperty, keyToRemove, _source);
                 }
             }
         }
@@ -988,38 +924,29 @@ internal class OpcUaClientGraphChangeReceiver
         List<(IInterceptorSubject Subject, int OldIndex)> subjectsWithOldIndices,
         int removedIndex)
     {
-        lock (_nodeIdToSubjectLock)
+        foreach (var (subject, oldIndex) in subjectsWithOldIndices)
         {
-            foreach (var (subject, oldIndex) in subjectsWithOldIndices)
+            // Only items after the removed index need reindexing
+            if (oldIndex <= removedIndex)
             {
-                // Only items after the removed index need reindexing
-                if (oldIndex <= removedIndex)
+                continue;
+            }
+
+            var newIndex = oldIndex - 1;
+
+            if (_subjectMapping.TryGetExternalId(subject, out var existingNodeId) && existingNodeId is not null)
+            {
+                // Construct new NodeId by replacing the index in the string representation
+                var existingNodeIdStr = existingNodeId.ToString();
+                var indexPattern = $"[{oldIndex}]";
+                var newIndexPattern = $"[{newIndex}]";
+                if (existingNodeIdStr.Contains(indexPattern))
                 {
-                    continue;
-                }
+                    var newNodeIdStr = existingNodeIdStr.Replace(indexPattern, newIndexPattern);
+                    var newNodeId = new NodeId(newNodeIdStr);
 
-                var newIndex = oldIndex - 1;
-
-                if (_source.TryGetSubjectNodeId(subject, out var existingNodeId) && existingNodeId is not null)
-                {
-                    // Remove old registration
-                    _nodeIdToSubject.Remove(existingNodeId);
-
-                    // Construct new NodeId by replacing the index in the string representation
-                    var existingNodeIdStr = existingNodeId.ToString();
-                    var indexPattern = $"[{oldIndex}]";
-                    var newIndexPattern = $"[{newIndex}]";
-                    if (existingNodeIdStr.Contains(indexPattern))
-                    {
-                        var newNodeIdStr = existingNodeIdStr.Replace(indexPattern, newIndexPattern);
-                        var newNodeId = new NodeId(newNodeIdStr);
-
-                        // Register with new NodeId
-                        _nodeIdToSubject[newNodeId] = subject;
-
-                        // Update the subject's stored NodeId
-                        _source.SetSubjectNodeId(subject, newNodeId);
-                    }
+                    // Update the mapping with the new NodeId (handles both directions atomically)
+                    _subjectMapping.UpdateExternalId(subject, newNodeId);
                 }
             }
         }
@@ -1030,14 +957,10 @@ internal class OpcUaClientGraphChangeReceiver
         _logger.LogDebug("ProcessReferenceAddedAsync: Processing ReferenceAdded for NodeId {NodeId}", childNodeId);
 
         // Only handle if we track this child subject
-        IInterceptorSubject? childSubject;
-        lock (_nodeIdToSubjectLock)
+        if (!_subjectMapping.TryGetSubject(childNodeId, out var childSubject) || childSubject is null)
         {
-            if (!_nodeIdToSubject.TryGetValue(childNodeId, out childSubject))
-            {
-                _logger.LogDebug("ProcessReferenceAddedAsync: NodeId {NodeId} not found in tracked subjects", childNodeId);
-                return;
-            }
+            _logger.LogDebug("ProcessReferenceAddedAsync: NodeId {NodeId} not found in tracked subjects", childNodeId);
+            return;
         }
 
         _logger.LogDebug("ProcessReferenceAddedAsync: Found tracked subject {Type} for NodeId {NodeId}",
@@ -1060,14 +983,10 @@ internal class OpcUaClientGraphChangeReceiver
         _logger.LogDebug("ProcessReferenceDeleted: Processing ReferenceDeleted for NodeId {NodeId}", childNodeId);
 
         // Only handle if we track this child subject
-        IInterceptorSubject? childSubject;
-        lock (_nodeIdToSubjectLock)
+        if (!_subjectMapping.TryGetSubject(childNodeId, out var childSubject) || childSubject is null)
         {
-            if (!_nodeIdToSubject.TryGetValue(childNodeId, out childSubject))
-            {
-                _logger.LogDebug("ProcessReferenceDeleted: NodeId {NodeId} not found in tracked subjects", childNodeId);
-                return;
-            }
+            _logger.LogDebug("ProcessReferenceDeleted: NodeId {NodeId} not found in tracked subjects", childNodeId);
+            return;
         }
 
         _logger.LogDebug("ProcessReferenceDeleted: Found tracked subject {Type} for NodeId {NodeId}",
@@ -1165,8 +1084,7 @@ internal class OpcUaClientGraphChangeReceiver
 
             if (childRefNodeId is not null && childRefNodeId.Equals(childNodeId))
             {
-                var now = DateTimeOffset.UtcNow;
-                property.SetValueFromSource(_source, now, now, childSubject);
+                _graphChangeApplier.SetReference(property, childSubject, _source);
                 _logger.LogDebug(
                     "ReferenceAdded: Set {ParentType}.{Property} = {ChildType}",
                     trackedSubject.GetType().Name,
@@ -1188,8 +1106,7 @@ internal class OpcUaClientGraphChangeReceiver
             if (refNodeId is null || !refNodeId.Equals(childNodeId))
             {
                 // Reference no longer exists on server - remove it
-                var now = DateTimeOffset.UtcNow;
-                property.SetValueFromSource(_source, now, now, null);
+                _graphChangeApplier.SetReference(property, null, _source);
                 _logger.LogDebug(
                     "ReferenceDeleted: Cleared {ParentType}.{Property}",
                     trackedSubject.GetType().Name,
@@ -1293,12 +1210,8 @@ internal class OpcUaClientGraphChangeReceiver
             if (childInContainer is not null)
             {
                 // Add to collection
-                var currentCollection = property.GetValue() as IEnumerable<IInterceptorSubject?>;
-                if (currentCollection is not null)
+                if (_graphChangeApplier.AddToCollection(property, childSubject, _source))
                 {
-                    var newCollection = DefaultSubjectFactory.Instance.AppendSubjectsToCollection(
-                        currentCollection, childSubject);
-                    property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newCollection);
                     _logger.LogDebug(
                         "ReferenceAdded: Added {ChildType} to collection {ParentType}.{Property}",
                         childSubject.GetType().Name,
@@ -1312,24 +1225,13 @@ internal class OpcUaClientGraphChangeReceiver
             if (childInContainer is null)
             {
                 // Child no longer in this container - remove it from the local collection
-                for (var i = 0; i < children.Length; i++)
+                if (_graphChangeApplier.RemoveFromCollection(property, childSubject, _source))
                 {
-                    if (ReferenceEquals(children[i].Subject, childSubject) && children[i].Index is int index)
-                    {
-                        var currentCollection = property.GetValue() as IEnumerable<IInterceptorSubject?>;
-                        if (currentCollection is not null)
-                        {
-                            var newCollection = DefaultSubjectFactory.Instance.RemoveSubjectsFromCollection(
-                                currentCollection, index);
-                            property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newCollection);
-                            _logger.LogDebug(
-                                "ReferenceDeleted: Removed {ChildType} from collection {ParentType}.{Property}",
-                                childSubject.GetType().Name,
-                                trackedSubject.GetType().Name,
-                                property.Name);
-                        }
-                        break;
-                    }
+                    _logger.LogDebug(
+                        "ReferenceDeleted: Removed {ChildType} from collection {ParentType}.{Property}",
+                        childSubject.GetType().Name,
+                        trackedSubject.GetType().Name,
+                        property.Name);
                 }
             }
         }
@@ -1399,15 +1301,15 @@ internal class OpcUaClientGraphChangeReceiver
             if (childInContainer is null)
             {
                 // Child no longer in this container - remove it from the local dictionary
-                var newDictionary = DefaultSubjectFactory.Instance.RemoveEntriesFromDictionary(
-                    dictionary, childKey);
-                property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newDictionary);
-                _logger.LogDebug(
-                    "ReferenceDeleted: Removed {ChildType} from dictionary {ParentType}.{Property}[{Key}]",
-                    childSubject.GetType().Name,
-                    trackedSubject.GetType().Name,
-                    property.Name,
-                    childKey);
+                if (_graphChangeApplier.RemoveFromDictionary(property, childKey, _source))
+                {
+                    _logger.LogDebug(
+                        "ReferenceDeleted: Removed {ChildType} from dictionary {ParentType}.{Property}[{Key}]",
+                        childSubject.GetType().Name,
+                        trackedSubject.GetType().Name,
+                        property.Name,
+                        childKey);
+                }
             }
         }
         else
@@ -1432,13 +1334,8 @@ internal class OpcUaClientGraphChangeReceiver
             if (childInContainer is not null)
             {
                 var dictionaryKey = childInContainer.BrowseName.Name;
-                var currentDictionary = property.GetValue() as IDictionary;
-                if (currentDictionary is not null && dictionaryKey is not null)
+                if (dictionaryKey is not null && _graphChangeApplier.AddToDictionary(property, dictionaryKey, childSubject, _source))
                 {
-                    var newDictionary = DefaultSubjectFactory.Instance.AppendEntriesToDictionary(
-                        currentDictionary,
-                        new KeyValuePair<object, IInterceptorSubject>(dictionaryKey, childSubject));
-                    property.SetValueFromSource(_source, DateTimeOffset.UtcNow, null, newDictionary);
                     _logger.LogDebug(
                         "ReferenceAdded: Added {ChildType} to dictionary {ParentType}.{Property}[{Key}]",
                         childSubject.GetType().Name,

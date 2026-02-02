@@ -23,6 +23,7 @@ internal class OpcUaServerNodeCreator
     private readonly OpcUaNodeFactory _nodeFactory;
     private readonly OpcUaSubjectServerBackgroundService _source;
     private readonly ConnectorReferenceCounter<NodeState> _subjectRefCounter;
+    private readonly ConnectorSubjectMapping<NodeId> _subjectMapping;
     private readonly OpcUaServerGraphChangePublisher _modelChangePublisher;
     private readonly ILogger _logger;
 
@@ -32,6 +33,7 @@ internal class OpcUaServerNodeCreator
         OpcUaNodeFactory nodeFactory,
         OpcUaSubjectServerBackgroundService source,
         ConnectorReferenceCounter<NodeState> subjectRefCounter,
+        ConnectorSubjectMapping<NodeId> subjectMapping,
         OpcUaServerGraphChangePublisher modelChangePublisher,
         ILogger logger)
     {
@@ -41,6 +43,7 @@ internal class OpcUaServerNodeCreator
         _nodeFactory = nodeFactory;
         _source = source;
         _subjectRefCounter = subjectRefCounter;
+        _subjectMapping = subjectMapping;
         _modelChangePublisher = modelChangePublisher;
         _logger = logger;
     }
@@ -444,6 +447,9 @@ internal class OpcUaServerNodeCreator
 
         if (isFirst)
         {
+            // Register subject with mapping for O(1) bidirectional lookup
+            _subjectMapping.Register(subject, nodeState.NodeId);
+
             // First reference - recursively create child nodes
             CreateSubjectNodes(nodeState.NodeId, registeredSubject, path + PathDelimiter);
 
