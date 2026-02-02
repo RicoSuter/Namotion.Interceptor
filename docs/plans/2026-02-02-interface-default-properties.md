@@ -1,45 +1,70 @@
-# Interface Default Implementation Properties - Feature Plan
+# Interface Default Implementation Properties - Implementation Plan
 
-## Overview
+> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-Add support for interface default implementation properties to be automatically included in the generated property metadata (`DefaultProperties`), enabling full tracking, registry, and derived property handling for properties defined in interfaces with default implementations.
+**Goal:** Add support for interface default implementation properties to be automatically included in `DefaultProperties`, enabling tracking and derived property handling.
 
-**Depends on:** Issue #181 bug fix (see `2026-02-02-issue-181-initializer-bug-fix.md`)
+**Architecture:** Refactor the ~600-line generator into separate metadata extraction and code emission classes, then add interface property detection. Interface properties with default implementations (expression-bodied or with bodies) will be included in `DefaultProperties` with getter delegates.
 
-## Goals
+**Tech Stack:** C# 13, Roslyn Source Generators, xUnit, Verify (snapshot testing)
 
-1. Interface properties with default implementations are automatically registered in `DefaultProperties`
-2. `[Derived]` properties from interfaces work with dependency tracking
-3. All attributes from interface properties are preserved
-4. Generator code is refactored for maintainability
-5. Documentation explains supported scenarios
+---
 
-## Non-Goals
+## PR Summary
 
-- Generating property implementations (C# default impl handles this)
-- Supporting abstract interface properties (no implementation to call)
-- Modifying explicit interface implementation behavior (C# limitation)
+This PR adds support for C# interface default implementation properties in the source generator:
+
+- **Refactors** the generator into separate metadata extraction and code emission classes for maintainability
+- **Adds** automatic detection of interface properties with default implementations
+- **Includes** interface default properties in `DefaultProperties` with proper getter delegates
+- **Supports** `[Derived]` attribute on interface properties for dependency tracking
+- **Handles** interface hierarchies (inherited interfaces) and multiple interface implementations
+
+### Example
+
+```csharp
+public interface ITemperatureSensor
+{
+    double TemperatureCelsius { get; set; }
+
+    [Derived]
+    double TemperatureFahrenheit => TemperatureCelsius * 9 / 5 + 32;
+
+    [Derived]
+    bool IsFreezing => TemperatureCelsius <= 0;
+}
+
+[InterceptorSubject]
+public partial class TemperatureSensor : ITemperatureSensor
+{
+    public partial double TemperatureCelsius { get; set; }
+    // TemperatureFahrenheit and IsFreezing automatically appear in DefaultProperties
+}
+```
 
 ---
 
 ## Phase 1: Refactor Generator into Multiple Classes
 
-**Goal:** Split the 544-line generator into focused, maintainable classes.
+**Goal:** Split the generator into focused, maintainable classes without changing behavior.
 
-### Task 1.1: Create Model Classes
+### Task 1: Create Model Records
 
-**File:** `src/Namotion.Interceptor.Generator/Models/SubjectMetadata.cs`
+**Files:**
+- Create: `src/Namotion.Interceptor.Generator/Models/SubjectMetadata.cs`
+- Create: `src/Namotion.Interceptor.Generator/Models/PropertyMetadata.cs`
+- Create: `src/Namotion.Interceptor.Generator/Models/MethodMetadata.cs`
+
+**Step 1: Create the Models directory and SubjectMetadata.cs**
 
 ```csharp
 namespace Namotion.Interceptor.Generator.Models;
 
-/// <summary>
-/// Metadata about a class marked with [InterceptorSubject].
-/// </summary>
 internal sealed record SubjectMetadata(
     string ClassName,
     string NamespaceName,
     string FullTypeName,
+    string[] ContainingTypes,
     bool HasParameterlessConstructor,
     string? BaseClassTypeName,
     bool BaseClassHasInpc,
@@ -47,14 +72,11 @@ internal sealed record SubjectMetadata(
     IReadOnlyList<MethodMetadata> Methods);
 ```
 
-**File:** `src/Namotion.Interceptor.Generator/Models/PropertyMetadata.cs`
+**Step 2: Create PropertyMetadata.cs**
 
 ```csharp
 namespace Namotion.Interceptor.Generator.Models;
 
-/// <summary>
-/// Metadata about a property to be included in DefaultProperties.
-/// </summary>
 internal sealed record PropertyMetadata(
     string Name,
     string FullTypeName,
@@ -72,14 +94,11 @@ internal sealed record PropertyMetadata(
     string? SetterAccessModifier);
 ```
 
-**File:** `src/Namotion.Interceptor.Generator/Models/MethodMetadata.cs`
+**Step 3: Create MethodMetadata.cs**
 
 ```csharp
 namespace Namotion.Interceptor.Generator.Models;
 
-/// <summary>
-/// Metadata about an intercepted method.
-/// </summary>
 internal sealed record MethodMetadata(
     string Name,
     string FullMethodName,
@@ -89,297 +108,112 @@ internal sealed record MethodMetadata(
 internal sealed record ParameterMetadata(string Name, string Type);
 ```
 
-### Task 1.2: Create SubjectMetadataExtractor
+**Step 4: Build to verify no syntax errors**
 
-**File:** `src/Namotion.Interceptor.Generator/SubjectMetadataExtractor.cs`
+Run: `dotnet build src/Namotion.Interceptor.Generator`
+Expected: Build succeeded
 
-This class extracts all metadata from Roslyn symbols. Key responsibilities:
-- Extract class-level info (name, namespace, base class)
-- Extract properties from class declarations
-- **NEW**: Extract properties from interface default implementations
-- Extract intercepted methods
+**Step 5: Commit**
 
-```csharp
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Namotion.Interceptor.Generator.Models;
-
-namespace Namotion.Interceptor.Generator;
-
-internal static class SubjectMetadataExtractor
-{
-    private const string InterceptedMethodPostfix = "WithoutInterceptor";
-    private const string DerivedAttributeName = "Namotion.Interceptor.Attributes.DerivedAttribute";
-    private const string InterceptorSubjectAttributeName = "Namotion.Interceptor.Attributes.InterceptorSubjectAttribute";
-
-    public static SubjectMetadata? Extract(
-        ClassDeclarationSyntax classDeclaration,
-        INamedTypeSymbol typeSymbol,
-        SemanticModel semanticModel,
-        CancellationToken cancellationToken)
-    {
-        var className = classDeclaration.Identifier.ValueText;
-        var namespaceName = GetNamespace(classDeclaration);
-        var fullTypeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-
-        // Extract base class info
-        var (baseClassTypeName, baseClassHasInpc) = ExtractBaseClassInfo(classDeclaration, semanticModel);
-
-        // Extract properties from class
-        var classProperties = ExtractClassProperties(typeSymbol, semanticModel, cancellationToken);
-        var classPropertyNames = classProperties.Select(p => p.Name).ToHashSet();
-
-        // Extract properties from interface default implementations
-        var interfaceProperties = ExtractInterfaceDefaultProperties(typeSymbol, classPropertyNames, cancellationToken);
-
-        // Combine all properties
-        var allProperties = classProperties.Concat(interfaceProperties).ToList();
-
-        // Extract methods
-        var methods = ExtractMethods(typeSymbol, semanticModel, cancellationToken);
-
-        // Check for parameterless constructor
-        var hasParameterlessConstructor = HasParameterlessConstructor(typeSymbol, cancellationToken);
-
-        return new SubjectMetadata(
-            className,
-            namespaceName,
-            fullTypeName,
-            hasParameterlessConstructor,
-            baseClassTypeName,
-            baseClassHasInpc,
-            allProperties,
-            methods);
-    }
-
-    private static IReadOnlyList<PropertyMetadata> ExtractInterfaceDefaultProperties(
-        INamedTypeSymbol classSymbol,
-        HashSet<string> classPropertyNames,
-        CancellationToken cancellationToken)
-    {
-        var properties = new List<PropertyMetadata>();
-
-        // Walk all implemented interfaces (including inherited)
-        foreach (var iface in classSymbol.AllInterfaces)
-        {
-            foreach (var member in iface.GetMembers().OfType<IPropertySymbol>())
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                // Skip if class already declares this property
-                if (classPropertyNames.Contains(member.Name))
-                    continue;
-
-                // Check if property has default implementation (not abstract)
-                if (!HasDefaultImplementation(member))
-                    continue;
-
-                // Check if has [Derived] attribute
-                var isDerived = member.GetAttributes()
-                    .Any(a => a.AttributeClass?.ToDisplayString() == DerivedAttributeName);
-
-                var fullTypeName = member.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-
-                properties.Add(new PropertyMetadata(
-                    Name: member.Name,
-                    FullTypeName: fullTypeName,
-                    AccessModifier: "public", // Interface members are public
-                    IsPartial: false,
-                    IsVirtual: false,
-                    IsOverride: false,
-                    IsDerived: isDerived,
-                    IsRequired: false,
-                    HasGetter: member.GetMethod is not null,
-                    HasSetter: member.SetMethod is not null,
-                    HasInit: member.SetMethod?.IsInitOnly == true,
-                    IsFromInterface: true,
-                    GetterAccessModifier: null,
-                    SetterAccessModifier: null));
-            }
-        }
-
-        return properties;
-    }
-
-    private static bool HasDefaultImplementation(IPropertySymbol property)
-    {
-        // Property has default implementation if getter/setter is not abstract
-        return (property.GetMethod is { IsAbstract: false }) ||
-               (property.SetMethod is { IsAbstract: false });
-    }
-
-    // ... (move existing extraction methods here from InterceptorSubjectGenerator.cs)
-}
+```bash
+git add src/Namotion.Interceptor.Generator/Models/
+git commit -m "refactor: Add model records for generator metadata"
 ```
 
-### Task 1.3: Create SubjectCodeEmitter
+---
 
-**File:** `src/Namotion.Interceptor.Generator/SubjectCodeEmitter.cs`
+### Task 2: Run Existing Tests as Baseline
 
-This class generates code from metadata. No Roslyn dependencies - just string building from data.
+**Step 1: Run all generator tests to establish baseline**
 
-```csharp
-using System.Text;
-using Namotion.Interceptor.Generator.Models;
+Run: `dotnet test src/Namotion.Interceptor.Generator.Tests`
+Expected: All tests pass (save output for comparison)
 
-namespace Namotion.Interceptor.Generator;
+---
 
-internal static class SubjectCodeEmitter
-{
-    public static string Emit(SubjectMetadata metadata)
-    {
-        var sb = new StringBuilder();
+### Task 3: Create SubjectMetadataExtractor
 
-        EmitHeader(sb);
-        EmitNamespaceAndClassStart(sb, metadata);
-        EmitNotifyPropertyChanged(sb, metadata);
-        EmitContextAndProperties(sb, metadata);
-        EmitDefaultProperties(sb, metadata);
-        EmitConstructors(sb, metadata);
-        EmitPartialProperties(sb, metadata);
-        EmitMethods(sb, metadata);
-        EmitHelperMethods(sb, metadata);
-        EmitClassEnd(sb);
+**Files:**
+- Create: `src/Namotion.Interceptor.Generator/SubjectMetadataExtractor.cs`
+- Reference: `src/Namotion.Interceptor.Generator/InterceptorSubjectGenerator.cs` (extract from)
 
-        return sb.ToString();
-    }
+**Step 1: Create SubjectMetadataExtractor with class extraction logic**
 
-    private static void EmitDefaultProperties(StringBuilder sb, SubjectMetadata metadata)
-    {
-        var defaultPropertiesNewModifier = metadata.BaseClassTypeName is not null ? "new " : "";
+Extract the metadata gathering logic from `InterceptorSubjectGenerator.cs` into a new static class. This includes:
+- Namespace extraction
+- Base class detection
+- Property collection from class declarations
+- Method collection
+- Constructor detection
 
-        sb.AppendLine($"        public {defaultPropertiesNewModifier}static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties {{ get; }} =");
-        sb.AppendLine("            new Dictionary<string, SubjectPropertyMetadata>");
-        sb.AppendLine("            {");
+The extractor should return a `SubjectMetadata` record.
 
-        foreach (var property in metadata.Properties)
-        {
-            EmitPropertyMetadataEntry(sb, metadata.ClassName, property);
-        }
+**Step 2: Build to verify compilation**
 
-        sb.AppendLine("            }");
+Run: `dotnet build src/Namotion.Interceptor.Generator`
+Expected: Build succeeded
 
-        if (metadata.BaseClassTypeName is not null)
-        {
-            sb.AppendLine($"            .Concat({metadata.BaseClassTypeName}.DefaultProperties)");
-        }
+**Step 3: Commit**
 
-        sb.AppendLine("            .ToFrozenDictionary();");
-    }
-
-    private static void EmitPropertyMetadataEntry(StringBuilder sb, string className, PropertyMetadata property)
-    {
-        // Interface properties use reflection to get property info from the interface
-        // Class properties use the class type
-        var getterCode = property.HasGetter
-            ? $"(o) => (({className})o).{property.Name}"
-            : "null";
-        var setterCode = property.HasSetter && !property.IsFromInterface
-            ? $"(o, v) => (({className})o).{property.Name} = ({property.FullTypeName})v"
-            : "null";
-
-        // Interface default impl properties are NOT intercepted (no backing field)
-        // but they ARE tracked in the metadata
-        var isIntercepted = property.IsPartial && !property.IsFromInterface;
-
-        sb.AppendLine($@"                {{
-                    ""{property.Name}"",
-                    new SubjectPropertyMetadata(
-                        typeof({className}).GetProperty(nameof({property.Name}), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        {getterCode},
-                        {setterCode},
-                        isIntercepted: {(isIntercepted ? "true" : "false")},
-                        isDynamic: false)
-                }},");
-    }
-
-    // ... (move existing emit methods here)
-}
+```bash
+git add src/Namotion.Interceptor.Generator/SubjectMetadataExtractor.cs
+git commit -m "refactor: Extract metadata gathering into SubjectMetadataExtractor"
 ```
 
-### Task 1.4: Update InterceptorSubjectGenerator
+---
 
-**File:** `src/Namotion.Interceptor.Generator/InterceptorSubjectGenerator.cs`
+### Task 4: Create SubjectCodeEmitter
 
-Simplify to just pipeline orchestration:
+**Files:**
+- Create: `src/Namotion.Interceptor.Generator/SubjectCodeEmitter.cs`
+- Reference: `src/Namotion.Interceptor.Generator/InterceptorSubjectGenerator.cs` (extract from)
 
-```csharp
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.CodeAnalysis.Text;
-using System.Text;
+**Step 1: Create SubjectCodeEmitter with code generation logic**
 
-namespace Namotion.Interceptor.Generator;
+Extract the code generation logic from `InterceptorSubjectGenerator.cs` into a new static class. This class takes a `SubjectMetadata` and returns the generated C# code string.
 
-[Generator]
-public class InterceptorSubjectGenerator : IIncrementalGenerator
-{
-    public void Initialize(IncrementalGeneratorInitializationContext context)
-    {
-        var provider = context.SyntaxProvider
-            .CreateSyntaxProvider(
-                predicate: (node, _) => node is ClassDeclarationSyntax { AttributeLists.Count: > 0 },
-                transform: TransformToMetadata)
-            .Where(m => m is not null)
-            .Collect()
-            .SelectMany((items, _) => items
-                .GroupBy(x => x!.FullTypeName)
-                .Select(g => g.First()));
+**Step 2: Build to verify compilation**
 
-        context.RegisterSourceOutput(provider, GenerateSource);
-    }
+Run: `dotnet build src/Namotion.Interceptor.Generator`
+Expected: Build succeeded
 
-    private static SubjectMetadata? TransformToMetadata(
-        GeneratorSyntaxContext ctx,
-        CancellationToken ct)
-    {
-        var classDeclaration = (ClassDeclarationSyntax)ctx.Node;
-        var typeSymbol = ctx.SemanticModel.GetDeclaredSymbol(classDeclaration, ct);
+**Step 3: Commit**
 
-        if (typeSymbol is null || !HasInterceptorSubjectAttribute(typeSymbol))
-            return null;
-
-        return SubjectMetadataExtractor.Extract(
-            classDeclaration,
-            typeSymbol,
-            ctx.SemanticModel,
-            ct);
-    }
-
-    private static void GenerateSource(
-        SourceProductionContext spc,
-        SubjectMetadata? metadata)
-    {
-        if (metadata is null) return;
-
-        var fileName = $"{metadata.NamespaceName}.{metadata.ClassName}.g.cs";
-
-        try
-        {
-            var code = SubjectCodeEmitter.Emit(metadata);
-            spc.AddSource(fileName, SourceText.From(code, Encoding.UTF8));
-        }
-        catch (Exception ex)
-        {
-            spc.AddSource(fileName, SourceText.From($"/* {ex} */", Encoding.UTF8));
-        }
-    }
-
-    private static bool HasInterceptorSubjectAttribute(INamedTypeSymbol type)
-    {
-        return type.GetAttributes()
-            .Any(a => a.AttributeClass?.ToDisplayString() ==
-                "Namotion.Interceptor.Attributes.InterceptorSubjectAttribute");
-    }
-}
+```bash
+git add src/Namotion.Interceptor.Generator/SubjectCodeEmitter.cs
+git commit -m "refactor: Extract code generation into SubjectCodeEmitter"
 ```
 
-### Task 1.5: Add Snapshot Tests for Refactoring
+---
 
-Verify no behavior change by running existing snapshot tests and adding new ones.
+### Task 5: Update InterceptorSubjectGenerator to Use New Classes
 
-**Verification:** Run all generator tests - snapshots should match exactly.
+**Files:**
+- Modify: `src/Namotion.Interceptor.Generator/InterceptorSubjectGenerator.cs`
+
+**Step 1: Simplify InterceptorSubjectGenerator**
+
+Update the generator to:
+1. Use `SubjectMetadataExtractor.Extract()` to gather metadata
+2. Use `SubjectCodeEmitter.Emit()` to generate code
+3. Remove the extracted logic (now in separate classes)
+
+**Step 2: Build to verify compilation**
+
+Run: `dotnet build src/Namotion.Interceptor.Generator`
+Expected: Build succeeded
+
+**Step 3: Run all generator tests**
+
+Run: `dotnet test src/Namotion.Interceptor.Generator.Tests`
+Expected: All tests pass (same as baseline)
+
+**Step 4: Commit**
+
+```bash
+git add src/Namotion.Interceptor.Generator/InterceptorSubjectGenerator.cs
+git commit -m "refactor: Simplify generator to use extractor and emitter"
+```
 
 ---
 
@@ -387,53 +221,12 @@ Verify no behavior change by running existing snapshot tests and adding new ones
 
 **Goal:** Interface properties with default implementations appear in `DefaultProperties`.
 
-### Task 2.1: Create Test Models with Interface Default Implementations
+### Task 6: Write Failing Test for Basic Interface Default Property
 
-**File:** `src/Namotion.Interceptor.Generator.Tests/Models/IPersonInterface.cs`
+**Files:**
+- Create: `src/Namotion.Interceptor.Generator.Tests/InterfaceDefaultPropertyTests.cs`
 
-```csharp
-using Namotion.Interceptor.Attributes;
-
-namespace Namotion.Interceptor.Generator.Tests.Models;
-
-public interface IPersonInterface
-{
-    string FirstName { get; set; }
-    string LastName { get; set; }
-
-    [Derived]
-    string FullName => $"{FirstName} {LastName}";
-
-    string Greeting => $"Hello, {FirstName}!";
-}
-```
-
-**File:** `src/Namotion.Interceptor.Generator.Tests/Models/PersonWithInterfaceDefaults.cs`
-
-```csharp
-using Namotion.Interceptor.Attributes;
-
-namespace Namotion.Interceptor.Generator.Tests.Models;
-
-[InterceptorSubject]
-public partial class PersonWithInterfaceDefaults : IPersonInterface
-{
-    public partial string FirstName { get; set; }
-    public partial string LastName { get; set; }
-
-    // FullName and Greeting come from interface default implementation
-
-    public PersonWithInterfaceDefaults()
-    {
-        FirstName = string.Empty;
-        LastName = string.Empty;
-    }
-}
-```
-
-### Task 2.2: Create Generator Unit Tests
-
-**File:** `src/Namotion.Interceptor.Generator.Tests/InterfaceDefaultPropertyTests.cs`
+**Step 1: Create test file with first test**
 
 ```csharp
 using Microsoft.CodeAnalysis;
@@ -449,197 +242,23 @@ public class InterfaceDefaultPropertyTests
         const string source = @"
 using Namotion.Interceptor.Attributes;
 
-public interface IGreetable
+public interface ISensor
 {
-    string Name { get; set; }
-    string Greeting => $""Hello, {Name}!"";
+    double Value { get; set; }
+    string Status => Value > 0 ? ""Active"" : ""Inactive"";
 }
 
 [InterceptorSubject]
-public partial class Greeter : IGreetable
+public partial class Sensor : ISensor
 {
-    public partial string Name { get; set; }
+    public partial double Value { get; set; }
 }";
 
         var generated = GenerateCode(source);
         var generatedSource = generated.Single().SourceText.ToString();
 
-        // Assert Greeting is in DefaultProperties
-        Assert.Contains(@"""Greeting""", generatedSource);
-        return Verify(generatedSource).UseDirectory("Snapshots");
-    }
-
-    [Fact]
-    public Task InterfaceDerivedProperty_IncludedInDefaultProperties()
-    {
-        const string source = @"
-using Namotion.Interceptor.Attributes;
-
-public interface IPerson
-{
-    string FirstName { get; set; }
-    string LastName { get; set; }
-
-    [Derived]
-    string FullName => $""{FirstName} {LastName}"";
-}
-
-[InterceptorSubject]
-public partial class Person : IPerson
-{
-    public partial string FirstName { get; set; }
-    public partial string LastName { get; set; }
-}";
-
-        var generated = GenerateCode(source);
-        var generatedSource = generated.Single().SourceText.ToString();
-
-        Assert.Contains(@"""FullName""", generatedSource);
-        return Verify(generatedSource).UseDirectory("Snapshots");
-    }
-
-    [Fact]
-    public Task InterfaceHierarchy_AllPropertiesIncluded()
-    {
-        const string source = @"
-using Namotion.Interceptor.Attributes;
-
-public interface INameable
-{
-    string DisplayName => ""Unknown"";
-}
-
-public interface IPerson : INameable
-{
-    string FirstName { get; set; }
-    string FullName => FirstName;
-}
-
-[InterceptorSubject]
-public partial class Person : IPerson
-{
-    public partial string FirstName { get; set; }
-}";
-
-        var generated = GenerateCode(source);
-        var generatedSource = generated.Single().SourceText.ToString();
-
-        // Both DisplayName and FullName should be included
-        Assert.Contains(@"""DisplayName""", generatedSource);
-        Assert.Contains(@"""FullName""", generatedSource);
-        return Verify(generatedSource).UseDirectory("Snapshots");
-    }
-
-    [Fact]
-    public Task ClassOverridesInterfaceProperty_ClassWins()
-    {
-        const string source = @"
-using Namotion.Interceptor.Attributes;
-
-public interface IPerson
-{
-    string Name => ""Default"";
-}
-
-[InterceptorSubject]
-public partial class Person : IPerson
-{
-    // Class overrides interface default
-    public partial string Name { get; set; }
-}";
-
-        var generated = GenerateCode(source);
-        var generatedSource = generated.Single().SourceText.ToString();
-
-        // Name should be intercepted (from class), not from interface
-        Assert.Contains("isIntercepted: true", generatedSource);
-        return Verify(generatedSource).UseDirectory("Snapshots");
-    }
-
-    [Fact]
-    public Task MultipleInterfaces_AllPropertiesIncluded()
-    {
-        const string source = @"
-using Namotion.Interceptor.Attributes;
-
-public interface IHasFirstName
-{
-    string FirstName { get; set; }
-    string FirstGreeting => $""Hi {FirstName}"";
-}
-
-public interface IHasLastName
-{
-    string LastName { get; set; }
-    string LastGreeting => $""Hi {LastName}"";
-}
-
-[InterceptorSubject]
-public partial class Person : IHasFirstName, IHasLastName
-{
-    public partial string FirstName { get; set; }
-    public partial string LastName { get; set; }
-}";
-
-        var generated = GenerateCode(source);
-        var generatedSource = generated.Single().SourceText.ToString();
-
-        Assert.Contains(@"""FirstGreeting""", generatedSource);
-        Assert.Contains(@"""LastGreeting""", generatedSource);
-        return Verify(generatedSource).UseDirectory("Snapshots");
-    }
-
-    [Fact]
-    public void DiamondInheritance_HandledGracefully()
-    {
-        // C# resolves diamond inheritance for default implementations
-        // We just need to not crash and pick one
-        const string source = @"
-using Namotion.Interceptor.Attributes;
-
-public interface IBase
-{
-    string Shared => ""Base"";
-}
-
-public interface IA : IBase { }
-public interface IB : IBase { }
-
-[InterceptorSubject]
-public partial class Diamond : IA, IB
-{
-}";
-
-        // Should not throw
-        var generated = GenerateCode(source);
-        Assert.NotEmpty(generated);
-    }
-
-    [Fact]
-    public Task InterfacePropertyWithAttributes_AttributesPreserved()
-    {
-        const string source = @"
-using Namotion.Interceptor.Attributes;
-using System.ComponentModel.DataAnnotations;
-
-public interface IPerson
-{
-    string FirstName { get; set; }
-
-    [Derived]
-    string FullName => FirstName;
-}
-
-[InterceptorSubject]
-public partial class Person : IPerson
-{
-    public partial string FirstName { get; set; }
-}";
-
-        var generated = GenerateCode(source);
-        var generatedSource = generated.Single().SourceText.ToString();
-
-        return Verify(generatedSource).UseDirectory("Snapshots");
+        Assert.Contains(@"""Status""", generatedSource);
+        return Verify(generatedSource);
     }
 
     private static IEnumerable<GeneratedSourceResult> GenerateCode(string source)
@@ -666,306 +285,503 @@ public partial class Person : IPerson
 }
 ```
 
-### Task 2.3: Create Behavioral Tests
+**Step 2: Run test to verify it fails**
 
-**File:** `src/Namotion.Interceptor.Registry.Tests/InterfaceDefaultPropertyBehaviorTests.cs`
+Run: `dotnet test src/Namotion.Interceptor.Generator.Tests --filter InterfaceDefaultProperty_IncludedInDefaultProperties`
+Expected: FAIL - "Status" not found in generated source
+
+**Step 3: Commit failing test**
+
+```bash
+git add src/Namotion.Interceptor.Generator.Tests/InterfaceDefaultPropertyTests.cs
+git commit -m "test: Add failing test for interface default property support"
+```
+
+---
+
+### Task 7: Implement Interface Default Property Extraction
+
+**Files:**
+- Modify: `src/Namotion.Interceptor.Generator/SubjectMetadataExtractor.cs`
+
+**Step 1: Add ExtractInterfaceDefaultProperties method**
+
+Add logic to:
+1. Iterate through `typeSymbol.AllInterfaces`
+2. For each interface, get properties with default implementations
+3. Skip properties already declared in the class
+4. Create `PropertyMetadata` with `IsFromInterface = true`
+
+Key detection: A property has a default implementation if `property.GetMethod?.IsAbstract == false` or `property.SetMethod?.IsAbstract == false`.
+
+**Step 2: Update Extract method to include interface properties**
+
+Combine class properties with interface default properties.
+
+**Step 3: Build to verify compilation**
+
+Run: `dotnet build src/Namotion.Interceptor.Generator`
+Expected: Build succeeded
+
+---
+
+### Task 8: Update Code Emitter for Interface Properties
+
+**Files:**
+- Modify: `src/Namotion.Interceptor.Generator/SubjectCodeEmitter.cs`
+
+**Step 1: Update EmitPropertyMetadataEntry for interface properties**
+
+For interface properties:
+- `isIntercepted: false` (no backing field)
+- Getter delegates to the interface default implementation
+- Setter is null (interface default properties are typically read-only)
+
+**Step 2: Run the failing test**
+
+Run: `dotnet test src/Namotion.Interceptor.Generator.Tests --filter InterfaceDefaultProperty_IncludedInDefaultProperties`
+Expected: PASS
+
+**Step 3: Commit**
+
+```bash
+git add src/Namotion.Interceptor.Generator/
+git commit -m "feat: Add interface default property extraction and emission"
+```
+
+---
+
+### Task 9: Add Test for Derived Attribute on Interface Property
+
+**Files:**
+- Modify: `src/Namotion.Interceptor.Generator.Tests/InterfaceDefaultPropertyTests.cs`
+
+**Step 1: Add test for [Derived] attribute**
 
 ```csharp
-using System.Reactive.Concurrency;
-using System.Reactive.Linq;
-using Namotion.Interceptor.Registry.Tests.Models;
-using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Change;
+[Fact]
+public Task InterfaceDerivedProperty_IncludedInDefaultProperties()
+{
+    const string source = @"
+using Namotion.Interceptor.Attributes;
 
-namespace Namotion.Interceptor.Registry.Tests;
+public interface ITemperatureSensor
+{
+    double Celsius { get; set; }
+
+    [Derived]
+    double Fahrenheit => Celsius * 9 / 5 + 32;
+}
+
+[InterceptorSubject]
+public partial class TemperatureSensor : ITemperatureSensor
+{
+    public partial double Celsius { get; set; }
+}";
+
+    var generated = GenerateCode(source);
+    var generatedSource = generated.Single().SourceText.ToString();
+
+    Assert.Contains(@"""Fahrenheit""", generatedSource);
+    return Verify(generatedSource);
+}
+```
+
+**Step 2: Run test**
+
+Run: `dotnet test src/Namotion.Interceptor.Generator.Tests --filter InterfaceDerivedProperty_IncludedInDefaultProperties`
+Expected: PASS (should work with existing implementation)
+
+**Step 3: Commit**
+
+```bash
+git add src/Namotion.Interceptor.Generator.Tests/InterfaceDefaultPropertyTests.cs
+git commit -m "test: Add test for [Derived] attribute on interface properties"
+```
+
+---
+
+### Task 10: Add Test for Interface Hierarchy
+
+**Files:**
+- Modify: `src/Namotion.Interceptor.Generator.Tests/InterfaceDefaultPropertyTests.cs`
+
+**Step 1: Add test for inherited interfaces**
+
+```csharp
+[Fact]
+public Task InterfaceHierarchy_AllDefaultPropertiesIncluded()
+{
+    const string source = @"
+using Namotion.Interceptor.Attributes;
+
+public interface IBase
+{
+    string BaseStatus => ""Base"";
+}
+
+public interface IDerived : IBase
+{
+    double Value { get; set; }
+    string DerivedStatus => ""Derived"";
+}
+
+[InterceptorSubject]
+public partial class Implementation : IDerived
+{
+    public partial double Value { get; set; }
+}";
+
+    var generated = GenerateCode(source);
+    var generatedSource = generated.Single().SourceText.ToString();
+
+    Assert.Contains(@"""BaseStatus""", generatedSource);
+    Assert.Contains(@"""DerivedStatus""", generatedSource);
+    return Verify(generatedSource);
+}
+```
+
+**Step 2: Run test**
+
+Run: `dotnet test src/Namotion.Interceptor.Generator.Tests --filter InterfaceHierarchy_AllDefaultPropertiesIncluded`
+Expected: PASS (AllInterfaces includes inherited)
+
+**Step 3: Commit**
+
+```bash
+git add src/Namotion.Interceptor.Generator.Tests/InterfaceDefaultPropertyTests.cs
+git commit -m "test: Add test for interface hierarchy support"
+```
+
+---
+
+### Task 11: Add Test for Class Overriding Interface Property
+
+**Files:**
+- Modify: `src/Namotion.Interceptor.Generator.Tests/InterfaceDefaultPropertyTests.cs`
+
+**Step 1: Add test for class override**
+
+```csharp
+[Fact]
+public Task ClassOverridesInterfaceProperty_ClassWins()
+{
+    const string source = @"
+using Namotion.Interceptor.Attributes;
+
+public interface ISensor
+{
+    string Name => ""DefaultName"";
+}
+
+[InterceptorSubject]
+public partial class Sensor : ISensor
+{
+    public partial string Name { get; set; }
+}";
+
+    var generated = GenerateCode(source);
+    var generatedSource = generated.Single().SourceText.ToString();
+
+    // Name should be intercepted (from class), not from interface
+    Assert.Contains("isIntercepted: true", generatedSource);
+    return Verify(generatedSource);
+}
+```
+
+**Step 2: Run test**
+
+Run: `dotnet test src/Namotion.Interceptor.Generator.Tests --filter ClassOverridesInterfaceProperty_ClassWins`
+Expected: PASS (class properties collected first, interface skips existing)
+
+**Step 3: Commit**
+
+```bash
+git add src/Namotion.Interceptor.Generator.Tests/InterfaceDefaultPropertyTests.cs
+git commit -m "test: Add test for class overriding interface property"
+```
+
+---
+
+### Task 12: Add Test for Multiple Interfaces
+
+**Files:**
+- Modify: `src/Namotion.Interceptor.Generator.Tests/InterfaceDefaultPropertyTests.cs`
+
+**Step 1: Add test for multiple interfaces**
+
+```csharp
+[Fact]
+public Task MultipleInterfaces_AllDefaultPropertiesIncluded()
+{
+    const string source = @"
+using Namotion.Interceptor.Attributes;
+
+public interface IHasTemperature
+{
+    double Temperature { get; set; }
+    bool IsHot => Temperature > 30;
+}
+
+public interface IHasHumidity
+{
+    double Humidity { get; set; }
+    bool IsHumid => Humidity > 70;
+}
+
+[InterceptorSubject]
+public partial class WeatherStation : IHasTemperature, IHasHumidity
+{
+    public partial double Temperature { get; set; }
+    public partial double Humidity { get; set; }
+}";
+
+    var generated = GenerateCode(source);
+    var generatedSource = generated.Single().SourceText.ToString();
+
+    Assert.Contains(@"""IsHot""", generatedSource);
+    Assert.Contains(@"""IsHumid""", generatedSource);
+    return Verify(generatedSource);
+}
+```
+
+**Step 2: Run test**
+
+Run: `dotnet test src/Namotion.Interceptor.Generator.Tests --filter MultipleInterfaces_AllDefaultPropertiesIncluded`
+Expected: PASS
+
+**Step 3: Commit**
+
+```bash
+git add src/Namotion.Interceptor.Generator.Tests/InterfaceDefaultPropertyTests.cs
+git commit -m "test: Add test for multiple interface support"
+```
+
+---
+
+### Task 13: Add Diamond Inheritance Test
+
+**Files:**
+- Modify: `src/Namotion.Interceptor.Generator.Tests/InterfaceDefaultPropertyTests.cs`
+
+**Step 1: Add diamond inheritance test**
+
+```csharp
+[Fact]
+public void DiamondInheritance_HandledGracefully()
+{
+    const string source = @"
+using Namotion.Interceptor.Attributes;
+
+public interface IBase
+{
+    string Shared => ""Base"";
+}
+
+public interface IA : IBase { }
+public interface IB : IBase { }
+
+[InterceptorSubject]
+public partial class Diamond : IA, IB
+{
+}";
+
+    // Should not throw, and should include Shared once
+    var generated = GenerateCode(source);
+    var generatedSource = generated.Single().SourceText.ToString();
+
+    // Count occurrences of "Shared" in DefaultProperties
+    var count = System.Text.RegularExpressions.Regex.Matches(
+        generatedSource, @"""Shared""").Count;
+    Assert.Equal(1, count);
+}
+```
+
+**Step 2: Run test**
+
+Run: `dotnet test src/Namotion.Interceptor.Generator.Tests --filter DiamondInheritance_HandledGracefully`
+Expected: PASS (deduplicate by property name)
+
+If failing, update `ExtractInterfaceDefaultProperties` to track seen property names across all interfaces.
+
+**Step 3: Commit**
+
+```bash
+git add src/Namotion.Interceptor.Generator.Tests/InterfaceDefaultPropertyTests.cs
+git commit -m "test: Add diamond inheritance handling test"
+```
+
+---
+
+### Task 14: Create Behavioral Test Models
+
+**Files:**
+- Create: `src/Namotion.Interceptor.Generator.Tests/Models/ITemperatureSensorInterface.cs`
+- Create: `src/Namotion.Interceptor.Generator.Tests/Models/SensorWithInterfaceDefaults.cs`
+
+**Step 1: Create interface**
+
+```csharp
+using Namotion.Interceptor.Attributes;
+
+namespace Namotion.Interceptor.Generator.Tests.Models;
+
+public interface ITemperatureSensorInterface
+{
+    double TemperatureCelsius { get; set; }
+
+    [Derived]
+    double TemperatureFahrenheit => TemperatureCelsius * 9 / 5 + 32;
+
+    bool IsFreezing => TemperatureCelsius <= 0;
+}
+```
+
+**Step 2: Create implementing class**
+
+```csharp
+using Namotion.Interceptor.Attributes;
+
+namespace Namotion.Interceptor.Generator.Tests.Models;
+
+[InterceptorSubject]
+public partial class SensorWithInterfaceDefaults : ITemperatureSensorInterface
+{
+    public partial double TemperatureCelsius { get; set; }
+}
+```
+
+**Step 3: Build to verify generation works**
+
+Run: `dotnet build src/Namotion.Interceptor.Generator.Tests`
+Expected: Build succeeded
+
+**Step 4: Commit**
+
+```bash
+git add src/Namotion.Interceptor.Generator.Tests/Models/
+git commit -m "test: Add test models for interface default properties"
+```
+
+---
+
+### Task 15: Add Behavioral Tests
+
+**Files:**
+- Create: `src/Namotion.Interceptor.Generator.Tests/InterfaceDefaultPropertyBehaviorTests.cs`
+
+**Step 1: Create behavioral test file**
+
+```csharp
+using Namotion.Interceptor.Generator.Tests.Models;
+
+namespace Namotion.Interceptor.Generator.Tests;
 
 public class InterfaceDefaultPropertyBehaviorTests
 {
     [Fact]
-    public void InterfaceDefaultProperty_AppearsInRegistry()
+    public void InterfaceDefaultProperty_AppearsInDefaultProperties()
     {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry();
-
-        var person = new PersonWithInterfaceDefaults(context)
-        {
-            FirstName = "John",
-            LastName = "Doe"
-        };
-
-        // Act
-        var registered = person.TryGetRegisteredSubject();
-        var fullNameProperty = registered?.TryGetProperty("FullName");
+        // Arrange & Act
+        var properties = SensorWithInterfaceDefaults.DefaultProperties;
 
         // Assert
-        Assert.NotNull(fullNameProperty);
-        Assert.Equal("John Doe", fullNameProperty.GetValue());
+        Assert.True(properties.ContainsKey("TemperatureFahrenheit"));
+        Assert.True(properties.ContainsKey("IsFreezing"));
     }
 
     [Fact]
-    public void InterfaceDerivedProperty_TracksChanges()
+    public void InterfaceDefaultProperty_GetterWorks()
     {
         // Arrange
-        var changes = new List<SubjectPropertyChange>();
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithPropertyChangeObservable()
-            .WithDerivedPropertyChangeDetection()
-            .WithRegistry();
-
-        var person = new PersonWithInterfaceDefaults(context)
-        {
-            FirstName = "John",
-            LastName = "Doe"
-        };
-
-        context
-            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
-            .Where(c => c.Property.Name == "FullName")
-            .Subscribe(changes.Add);
+        var sensor = new SensorWithInterfaceDefaults { TemperatureCelsius = 25.0 };
+        var properties = SensorWithInterfaceDefaults.DefaultProperties;
 
         // Act
-        person.FirstName = "Jane";
+        var fahrenheitProp = properties["TemperatureFahrenheit"];
+        var value = fahrenheitProp.Getter!(sensor);
 
         // Assert
-        Assert.Contains(changes, c => c.GetNewValue<string>() == "Jane Doe");
+        Assert.Equal(77.0, value);
     }
 
     [Fact]
-    public void InterfaceDefaultProperty_InitializersAreCalled()
+    public void InterfaceDefaultProperty_IsNotIntercepted()
     {
-        // Arrange
-        var initializedProperties = new List<string>();
-        var initializer = new TestPropertyInitializer(p => initializedProperties.Add(p.Name));
-
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithRegistry()
-            .WithService<ISubjectPropertyInitializer>(initializer);
-
-        // Act
-        var person = new PersonWithInterfaceDefaults(context)
-        {
-            FirstName = "John",
-            LastName = "Doe"
-        };
+        // Arrange & Act
+        var fahrenheitProp = SensorWithInterfaceDefaults.DefaultProperties["TemperatureFahrenheit"];
 
         // Assert
-        Assert.Contains("FullName", initializedProperties);
-        Assert.Contains("Greeting", initializedProperties);
+        Assert.False(fahrenheitProp.IsIntercepted);
     }
 
-    private class TestPropertyInitializer : ISubjectPropertyInitializer
+    [Fact]
+    public void InterfaceDefaultProperty_SetterIsNull()
     {
-        private readonly Action<RegisteredSubjectProperty> _onInitialize;
+        // Arrange & Act
+        var fahrenheitProp = SensorWithInterfaceDefaults.DefaultProperties["TemperatureFahrenheit"];
 
-        public TestPropertyInitializer(Action<RegisteredSubjectProperty> onInitialize)
-            => _onInitialize = onInitialize;
-
-        public void InitializeProperty(RegisteredSubjectProperty property)
-            => _onInitialize(property);
+        // Assert
+        Assert.Null(fahrenheitProp.Setter);
     }
 }
+```
+
+**Step 2: Run tests**
+
+Run: `dotnet test src/Namotion.Interceptor.Generator.Tests --filter InterfaceDefaultPropertyBehaviorTests`
+Expected: All pass
+
+**Step 3: Commit**
+
+```bash
+git add src/Namotion.Interceptor.Generator.Tests/InterfaceDefaultPropertyBehaviorTests.cs
+git commit -m "test: Add behavioral tests for interface default properties"
 ```
 
 ---
 
-## Phase 3: Create Documentation
+## Phase 3: Final Verification
 
-**Goal:** Document what the generator supports and how it works.
+### Task 16: Run All Tests
 
-### Task 3.1: Create docs/generator.md
+**Step 1: Run complete test suite**
 
-**File:** `docs/generator.md`
+Run: `dotnet test src/Namotion.Interceptor.slnx`
+Expected: All tests pass
 
-```markdown
-# Source Generator Reference
+**Step 2: Update any failing snapshots if expected**
 
-The Namotion.Interceptor source generator automatically creates interception logic for classes marked with `[InterceptorSubject]`.
-
-## What Triggers Generation
-
-A class is processed when:
-1. It has the `[InterceptorSubject]` attribute (on any partial declaration)
-2. It is declared as `partial`
-
-## What Gets Generated
-
-For each `[InterceptorSubject]` class, the generator creates:
-
-### 1. IInterceptorSubject Implementation
-
-- Context field and property
-- Data dictionary for metadata storage
-- Properties dictionary accessor
-- `AddProperties()` method for dynamic property registration
-
-### 2. INotifyPropertyChanged Implementation
-
-- `PropertyChanged` event
-- `RaisePropertyChanged()` method
-- Inherited from base class if base has `[InterceptorSubject]`
-
-### 3. Static Property Metadata (DefaultProperties)
-
-A frozen dictionary containing metadata for all properties:
-- Properties declared as `partial` in the class
-- Properties with default implementations from interfaces
-
-### 4. Partial Property Implementations
-
-For each `partial` property:
-- Private backing field (`_PropertyName`)
-- Getter calling `GetPropertyValue<T>()`
-- Setter calling `SetPropertyValue<T>()`
-- Partial method hooks (`OnPropertyNameChanging`, `OnPropertyNameChanged`)
-
-### 5. Constructors
-
-- Parameterless constructor (if not defined)
-- Context constructor: `ClassName(IInterceptorSubjectContext context)`
-
-### 6. Intercepted Methods
-
-For methods ending with `WithoutInterceptor`:
-- Public wrapper method without the postfix
-- Calls through `InvokeMethod()` for interception
-
-## Supported Patterns
-
-### Partial Properties
-
-```csharp
-[InterceptorSubject]
-public partial class Person
-{
-    public partial string Name { get; set; }           // Standard
-    public virtual partial string Title { get; set; } // Virtual
-    public override partial string Title { get; set; } // Override
-    public required partial string Id { get; set; }   // Required
-    public partial string Code { get; init; }         // Init-only
-    protected partial int Age { get; set; }           // Non-public
-}
-```
-
-### Interface Default Implementations
-
-Properties with default implementations in interfaces are automatically included in `DefaultProperties`:
-
-```csharp
-public interface IPerson
-{
-    string FirstName { get; set; }
-    string LastName { get; set; }
-
-    [Derived]
-    string FullName => $"{FirstName} {LastName}";  // Included in DefaultProperties
-
-    string Greeting => $"Hello!";  // Also included
-}
-
-[InterceptorSubject]
-public partial class Person : IPerson
-{
-    public partial string FirstName { get; set; }
-    public partial string LastName { get; set; }
-    // FullName and Greeting automatically tracked
-}
-```
-
-Interface properties:
-- Are included in `DefaultProperties` with getters
-- Support `[Derived]` attribute for dependency tracking
-- Work with full interface hierarchy (inherited interfaces)
-- Are overridden by class declarations (class wins)
-
-### Inheritance
-
-```csharp
-[InterceptorSubject]
-public partial class Animal
-{
-    public virtual partial string Name { get; set; }
-}
-
-[InterceptorSubject]
-public partial class Dog : Animal
-{
-    public override partial string Name { get; set; }
-    public partial string Breed { get; set; }
-}
-```
-
-### Derived Properties
-
-```csharp
-[InterceptorSubject]
-public partial class Rectangle
-{
-    public partial double Width { get; set; }
-    public partial double Height { get; set; }
-
-    [Derived]
-    public double Area => Width * Height;
-}
-```
-
-## Limitations
-
-### Not Supported
-
-| Pattern | Reason | Alternative |
-|---------|--------|-------------|
-| Explicit interface implementation | C# doesn't allow `partial` on explicit impl | Use implicit implementation |
-| Abstract properties | Can't be partial | Use virtual |
-| Field initializers on partial properties | C# limitation | Initialize in constructor |
-
-### Interface Property Limitations
-
-- Interface properties are read-only in the tracking system (no setter delegation)
-- Abstract interface properties (without default impl) are not included
-- Explicit interface implementations cannot be partial
-
-## Troubleshooting
-
-### Property not appearing in DefaultProperties
-
-1. Check if property is `partial` (class properties) or has default implementation (interface properties)
-2. Check if class has `[InterceptorSubject]` attribute
-3. Check if class overrides interface property (class takes precedence)
-
-### Derived property not tracking changes
-
-1. Ensure `WithDerivedPropertyChangeDetection()` is configured on context
-2. Check if `[Derived]` attribute is on the property
-3. For interface properties, ensure the interface property has `[Derived]`
-```
-
-### Task 3.2: Update subject-guidelines.md
-
-Add a section about interface default implementations to the existing guidelines document.
+If snapshot tests fail due to expected changes, review and accept:
+Run: Review `.received.` files and rename to `.verified.` if correct
 
 ---
 
-## Phase 4: Final Verification
+### Task 17: Build and Verify Samples
 
-### Task 4.1: Run All Tests
+**Step 1: Build entire solution**
+
+Run: `dotnet build src/Namotion.Interceptor.slnx`
+Expected: Build succeeded
+
+**Step 2: Run console sample**
+
+Run: `dotnet run --project src/Namotion.Interceptor.SampleConsole`
+Expected: Runs without errors
+
+---
+
+### Task 18: Final Commit
+
+**Step 1: Review all changes**
+
+Run: `git status && git diff --stat`
+
+**Step 2: Create final commit if any uncommitted changes**
 
 ```bash
-dotnet test src/Namotion.Interceptor.slnx
-```
-
-### Task 4.2: Update Snapshots (if needed)
-
-Review any snapshot changes to ensure they're expected.
-
-### Task 4.3: Build and Verify Samples
-
-```bash
-dotnet build src/Namotion.Interceptor.slnx
-dotnet run --project src/Namotion.Interceptor.SampleConsole
+git add -A
+git commit -m "feat: Complete interface default property support"
 ```
 
 ---
@@ -974,10 +790,9 @@ dotnet run --project src/Namotion.Interceptor.SampleConsole
 
 | Phase | Tasks | Focus |
 |-------|-------|-------|
-| 1. Refactor | Split generator into 3 files + models | Maintainability |
-| 2. Interface Support | Add interface property extraction + tests | New feature |
-| 3. Documentation | Create docs/generator.md | User guidance |
-| 4. Verification | Run all tests, verify samples | Quality |
+| 1. Refactor | Tasks 1-5 | Split generator into models, extractor, emitter |
+| 2. Feature | Tasks 6-15 | Add interface property support with TDD |
+| 3. Verify | Tasks 16-18 | Run all tests, verify samples |
 
 ## Files to Create/Modify
 
@@ -988,11 +803,9 @@ dotnet run --project src/Namotion.Interceptor.SampleConsole
 - `src/Namotion.Interceptor.Generator/SubjectMetadataExtractor.cs`
 - `src/Namotion.Interceptor.Generator/SubjectCodeEmitter.cs`
 - `src/Namotion.Interceptor.Generator.Tests/InterfaceDefaultPropertyTests.cs`
-- `src/Namotion.Interceptor.Generator.Tests/Models/IPersonInterface.cs`
-- `src/Namotion.Interceptor.Generator.Tests/Models/PersonWithInterfaceDefaults.cs`
-- `src/Namotion.Interceptor.Registry.Tests/InterfaceDefaultPropertyBehaviorTests.cs`
-- `docs/generator.md`
+- `src/Namotion.Interceptor.Generator.Tests/InterfaceDefaultPropertyBehaviorTests.cs`
+- `src/Namotion.Interceptor.Generator.Tests/Models/ITemperatureSensorInterface.cs`
+- `src/Namotion.Interceptor.Generator.Tests/Models/SensorWithInterfaceDefaults.cs`
 
 **Modified Files:**
 - `src/Namotion.Interceptor.Generator/InterceptorSubjectGenerator.cs` (simplified)
-- `docs/subject-guidelines.md` (add interface section)
