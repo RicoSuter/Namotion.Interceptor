@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -12,8 +12,6 @@ namespace Namotion.Interceptor.Generator;
 [Generator]
 public class InterceptorSubjectGenerator : IIncrementalGenerator
 {
-    private const string InterceptedMethodPostfix = "WithoutInterceptor";
-    
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var classWithAttributeProvider = context.SyntaxProvider
@@ -24,12 +22,12 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                     var classDeclaration = (ClassDeclarationSyntax)ctx.Node;
 
                     var model = ctx.SemanticModel;
-                    
+
                     // Get the type symbol to access all partial declarations
                     var typeSymbol = model.GetDeclaredSymbol(classDeclaration, ct);
                     if (typeSymbol is null)
                         return null;
-                    
+
                     // Check if ANY partial declaration has the InterceptorSubjectAttribute
                     var hasAttributeInAnyPartial = typeSymbol.DeclaringSyntaxReferences
                         .Select(r => r.GetSyntax(ct))
@@ -39,69 +37,15 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                             var declarationModel = model.Compilation.GetSemanticModel(c.SyntaxTree);
                             return HasInterceptorSubjectAttribute(c, declarationModel, ct);
                         });
-                    
+
                     if (!hasAttributeInAnyPartial)
                         return null;
-                    
-                    // Collect all properties from all partial declarations
-                    var allProperties = typeSymbol.DeclaringSyntaxReferences
-                        .Select(r => r.GetSyntax(ct))
-                        .OfType<ClassDeclarationSyntax>()
-                        .SelectMany(c =>
-                        {
-                            var declarationModel = model.Compilation.GetSemanticModel(c.SyntaxTree);
-                            return c.Members
-                                .OfType<PropertyDeclarationSyntax>()
-                                .Select(p => new
-                                {
-                                    Property = p,
-                                    Type = declarationModel.GetTypeInfo(p.Type, ct),
-                                    AccessModifier = 
-                                        p.Modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword)) ? "public" :
-                                        p.Modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword)) ? "internal" :
-                                        p.Modifiers.Any(m => m.IsKind(SyntaxKind.ProtectedKeyword)) ? "protected" : 
-                                        "private",
 
-                                    IsPartial = p.Modifiers.Any(m => m.IsKind(SyntaxKind.PartialKeyword)),
-                                    IsVirtual = p.Modifiers.Any(m => m.IsKind(SyntaxKind.VirtualKeyword)),
-                                    IsOverride = p.Modifiers.Any(m => m.IsKind(SyntaxKind.OverrideKeyword)),
-                                    IsDerived = HasDerivedAttribute(p, declarationModel, ct),
-                                    IsRequired = p.Modifiers.Any(m => m.IsKind(SyntaxKind.RequiredKeyword)),
-                                    HasGetter = p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)) == true ||
-                                                p.ExpressionBody.IsKind(SyntaxKind.ArrowExpressionClause),
-                                    HasSetter = p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.SetAccessorDeclaration)) == true,
-                                    HasInit = p.AccessorList?.Accessors.Any(a => a.IsKind(SyntaxKind.InitAccessorDeclaration)) == true
-                                });
-                        })
-                        .ToArray();
-                    
-                    // Collect all methods from all partial declarations
-                    var allMethods = typeSymbol.DeclaringSyntaxReferences
-                        .Select(r => r.GetSyntax(ct))
-                        .OfType<ClassDeclarationSyntax>()
-                        .SelectMany(c =>
-                        {
-                            var declarationModel = model.Compilation.GetSemanticModel(c.SyntaxTree);
-                            return c.Members
-                                .OfType<MethodDeclarationSyntax>()
-                                .Where(p => p.Identifier.Text.EndsWith(InterceptedMethodPostfix))
-                                .Select(p => new
-                                {
-                                    Method = p,
-                                    ReturnType = p.ReturnType,
-                                    Parameters = p.ParameterList.Parameters,
-                                    SemanticModel = declarationModel
-                                });
-                        })
-                        .ToArray();
-                    
                     return new
                     {
                         Model = model,
                         ClassNode = classDeclaration,
-                        TypeSymbol = typeSymbol,
-                        Properties = allProperties,
-                        Methods = allMethods
+                        TypeSymbol = typeSymbol
                     };
                 })
             .Select((m, _) =>
@@ -117,13 +61,7 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                     m.Model,
                     m.ClassNode,
                     TypeSymbol = typeSymbol,
-                    TypeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
-                    AllClassDeclarations = typeSymbol.DeclaringSyntaxReferences
-                        .Select(r => r.GetSyntax())
-                        .OfType<ClassDeclarationSyntax>()
-                        .ToArray(),
-                    m.Properties,
-                    m.Methods
+                    TypeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
                 };
             })
             .Where(m => m is not null)
@@ -135,325 +73,29 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
         context.RegisterSourceOutput(classWithAttributeProvider, (spc, cls) =>
         {
             if (cls is null) return;
-            
-            var className = cls.ClassNode.Identifier.ValueText;
 
-            // Collect containing types for nested class support
-            var containingTypes = GetContainingTypes(cls.ClassNode);
-
-            // Walk up past containing types to find namespace
-            SyntaxNode? current = cls.ClassNode.Parent;
-            while (current is TypeDeclarationSyntax)
-                current = current.Parent;
-            var namespaceName = (current as NamespaceDeclarationSyntax)?.Name.ToString() ??
-                                (current as FileScopedNamespaceDeclarationSyntax)?.Name.ToString()
-                                ?? "YourDefaultNamespace";
-
-            // Include namespace and containing types in filename to avoid conflicts
-            var containingTypesPath = containingTypes.Length > 0
-                ? string.Join(".", containingTypes) + "."
-                : "";
-            var fileName = $"{namespaceName}.{containingTypesPath}{className}.g.cs";
-            
+            string fileName;
             try
             {
-                var semanticModel = cls.Model;
+                var metadata = SubjectMetadataExtractor.Extract(
+                    cls.TypeSymbol,
+                    cls.ClassNode,
+                    cls.Model,
+                    CancellationToken.None);
 
-                    var baseClass = cls.ClassNode.BaseList?.Types
-                        .Select(t => semanticModel.GetTypeInfo(t.Type).Type as INamedTypeSymbol)
-                        .FirstOrDefault(t => t != null &&
-                            (HasInterceptorSubjectAttribute(t) || // <= needed when partial class with IInterceptorSubject is not yet generated
-                             ImplementsInterface(t, "Namotion.Interceptor.IInterceptorSubject")));
+                fileName = SubjectCodeGenerator.GetFileName(metadata);
+                var generatedCode = SubjectCodeGenerator.Generate(metadata);
 
-                    var baseClassTypeName = baseClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-
-                    // Check if base class has INotifyPropertyChanged + IRaisePropertyChanged:
-                    // 1. Base class has [InterceptorSubject] attribute (will get both generated), OR
-                    // 2. Any base class implements IRaisePropertyChanged
-                    // When true, we use ((IRaisePropertyChanged)this).RaisePropertyChanged() to call the interface method,
-                    // which works whether the base implements it explicitly or implicitly.
-                    var baseClassHasInpc = HasInterceptorSubjectAttribute(baseClass) ||
-                        (cls.ClassNode.BaseList?.Types
-                            .Select(t => semanticModel.GetTypeInfo(t.Type).Type as INamedTypeSymbol)
-                            .Any(t => t != null && ImplementsInterface(t, "Namotion.Interceptor.IRaisePropertyChanged")) ?? false);
-
-
-                    var defaultPropertiesNewModifier = baseClass is not null ? "new " : string.Empty;
-
-                    var generatedCode = $@"// <auto-generated>
-//     This code was generated by Namotion.Interceptor.Generator
-// </auto-generated>
-
-using Namotion.Interceptor;
-using Namotion.Interceptor.Interceptors;
-
-using System;
-using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Collections.Frozen;
-using System.ComponentModel;
-using System.Linq;
-using System.Reflection;
-using System.Runtime.CompilerServices;
-using System.Text.Json.Serialization;
-
-#pragma warning disable CS8669
-#pragma warning disable CS0649
-#pragma warning disable CS0067
-
-namespace {namespaceName}
-{{
-{GenerateContainingTypeOpening(containingTypes)}    public partial class {className} : IInterceptorSubject{(baseClassHasInpc ? "" : ", INotifyPropertyChanged, IRaisePropertyChanged")}
-    {{
-        {(baseClassHasInpc ? "" : @"public event PropertyChangedEventHandler? PropertyChanged;
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        protected void RaisePropertyChanged(string propertyName) => PropertyChanged?.Invoke(this, PropertyChangedEventArgsCache.Get(propertyName));
-
-        void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);")}
-
-        private IInterceptorExecutor? _context;
-        private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
-
-        [JsonIgnore]
-        IInterceptorSubjectContext IInterceptorSubject.Context => _context ??= new InterceptorExecutor(this);
-
-        [JsonIgnore]
-        ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data {{ get; }} = new();
-
-        [JsonIgnore]
-        IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
-
-        [JsonIgnore]
-        object IInterceptorSubject.SyncRoot {{ get; }} = new object();
-
-        void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
-        {{
-            _properties = (_properties ?? DefaultProperties)
-                .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
-                .ToFrozenDictionary();
-        }}
-
-        public {defaultPropertiesNewModifier}static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties {{ get; }} =
-            new Dictionary<string, SubjectPropertyMetadata>
-            {{";
-                    foreach (var property in cls.Properties)
-                    {
-                        var fullyQualifiedName = property.Type.Type!.ToString();
-                        var propertyName = property.Property.Identifier.Value;
-
-                        generatedCode +=
-    $@"
-                {{
-                    ""{propertyName}"",       
-                    new SubjectPropertyMetadata(
-                        typeof({className}).GetProperty(nameof({propertyName}), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
-                        {(property.HasGetter ? ($"(o) => (({className})o).{propertyName}") : "null")}, 
-                        {(property.HasSetter ? ($"(o, v) => (({className})o).{propertyName} = ({fullyQualifiedName})v") : "null")}, 
-                        isIntercepted: {(property.IsPartial ? "true" : "false")},
-                        isDynamic: false)
-                }},";
-                    }
-
-                    generatedCode +=
-    $@"
-            }}
-            {( baseClassTypeName is not null ? $".Concat({baseClassTypeName}.DefaultProperties)" : string.Empty )}
-            .ToFrozenDictionary();
-";
-
-                    var firstConstructor = cls.AllClassDeclarations
-                        .SelectMany(c => c.Members)
-                        .FirstOrDefault(m => m.IsKind(SyntaxKind.ConstructorDeclaration))
-                        as ConstructorDeclarationSyntax;
-
-                    if (firstConstructor == null)
-                    {
-                        generatedCode +=
-    $@"
-        public {className}()
-        {{
-        }}
-";
-                    }
-
-                    if (firstConstructor == null ||
-                        firstConstructor.ParameterList.Parameters.Count == 0)
-                    {
-                        generatedCode +=
-    $@"
-        public {className}(IInterceptorSubjectContext context) : this()
-        {{
-            ((IInterceptorSubject)this).Context.AddFallbackContext(context);
-        }}
-";
-                    }
-
-                    foreach (var property in cls.Properties.Where(p => p.IsPartial))
-                    {
-                        var fullyQualifiedName = property.Type.Type!.ToString();
-                        var propertyName = property.Property.Identifier.Value;
-                        var propertyModifier = property.AccessModifier;
-
-                        // Build modifier string (virtual/override)
-                        var additionalModifiers = "";
-                        if (property.IsVirtual)
-                        {
-                            additionalModifiers = "virtual ";
-                        }
-                        else if (property.IsOverride)
-                        {
-                            additionalModifiers = "override ";
-                        }
-
-                        generatedCode +=
-    $@"
-        private {fullyQualifiedName} _{propertyName};
-
-        {propertyModifier} {(property.IsRequired ? "required " : "")}{additionalModifiers}partial {fullyQualifiedName} {propertyName}
-        {{";
-                        if (property.HasGetter)
-                        {
-                            var modifiers = string.Join(" ", property.Property.AccessorList?
-                                .Accessors.First(a => a.IsKind(SyntaxKind.GetAccessorDeclaration)).Modifiers.Select(m => m.Value) ?? []);
-
-                            generatedCode +=
-    $@"
-            {modifiers} get
-            {{
-                return GetPropertyValue<{fullyQualifiedName}>(nameof({propertyName}), static (o) => (({className})o)._{propertyName});
-            }}";
-
-                        }
-
-                        if (property.HasSetter || property.HasInit)
-                        {
-                            var accessor = property.Property.AccessorList?
-                                .Accessors.Single(a => a.IsKind(SyntaxKind.SetAccessorDeclaration) || a.IsKind(SyntaxKind.InitAccessorDeclaration))
-                                ?? throw new InvalidOperationException("Accessor not found.");
-
-                            var accessorText = accessor.IsKind(SyntaxKind.InitAccessorDeclaration) ? "init" : "set";
-                            var modifiers = string.Join(" ", accessor.Modifiers.Select(m => m.Value) ?? []);
-
-                            // Optimize RaisePropertyChanged call:
-                            // - [InterceptorSubject] base: direct call to inherited protected method (fastest)
-                            // - Manual IRaisePropertyChanged base: interface cast (rare case)
-                            // - Own implementation: direct call to own method (fastest)
-                            var raisePropertyChangedCall = HasInterceptorSubjectAttribute(baseClass)
-                                ? $"RaisePropertyChanged(nameof({propertyName}))"
-                                : baseClassHasInpc
-                                    ? $"((IRaisePropertyChanged)this).RaisePropertyChanged(nameof({propertyName}))"
-                                    : $"RaisePropertyChanged(nameof({propertyName}))";
-
-                            generatedCode +=
-    $@"
-            {modifiers} {accessorText}
-            {{
-                var newValue = value;
-                var cancel = false;
-                On{propertyName}Changing(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof({propertyName}), newValue, static (o) => (({className})o)._{propertyName}, static (o, v) => (({className})o)._{propertyName} = v))
-                {{
-                    On{propertyName}Changed(_{propertyName});
-                    {raisePropertyChangedCall};
-                }}
-            }}";
-                        }
-
-                        generatedCode +=
-    $@"
-        }}
-";
-                        // Generate partial method hooks for property
-                        if (property.HasSetter || property.HasInit)
-                        {
-                            generatedCode +=
-    $@"
-        partial void On{propertyName}Changing(ref {fullyQualifiedName} newValue, ref bool cancel);
-
-        partial void On{propertyName}Changed({fullyQualifiedName} newValue);
-";
-                        }
-                    }
-
-                    foreach (var method in cls.Methods)
-                    {
-                        var fullMethodName = method.Method.Identifier.Text;
-                        var methodName = fullMethodName.Substring(0, fullMethodName.Length - InterceptedMethodPostfix.Length);
-                        var returnType = GetFullTypeName(method.ReturnType, method.SemanticModel);
-                        var parameters = method.Parameters.Select(p => new
-                        {
-                            Name = p.Identifier.ValueText,
-                            Type = GetFullTypeName(p.Type, method.SemanticModel)
-                        }).ToList();
-
-                        var directParameterCode = string.Join(", ", parameters.Select((p, i) => $"({p.Type})p[{i}]!"));
-                        var invokeParameterCode = parameters.Any() ? ", " + string.Join(", ", parameters.Select(p => p.Name)) : string.Empty;
-
-                        if (returnType != "void")
-                        {
-                            generatedCode += 
-    $@"
-        public {returnType} {methodName}({string.Join(", ", parameters.Select(p => p.Type + " " + p.Name))})
-        {{
-            return ({returnType})InvokeMethod(""{methodName}"", static (s, p) => (({className})s).{fullMethodName}({directParameterCode}){invokeParameterCode})!;
-        }}
-";
-                        }
-                        else
-                        {
-                            generatedCode += 
-    $@"
-        public {returnType} {methodName}({string.Join(", ", parameters.Select(p => p.Type + " " + p.Name))})
-        {{
-            InvokeMethod(""{methodName}"", static (s, p) => {{ (({className})s).{fullMethodName}({directParameterCode}); return null; }}{invokeParameterCode});
-        }}
-";
-                        }
-                    }
-
-                    generatedCode +=
-    $@"
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
-        {{
-            return _context is not null ? _context.GetPropertyValue(propertyName, readValue)! : readValue(this)!;
-        }}
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
-        {{
-            if (_context is null)
-            {{
-                setValue(this, newValue);
-                return true;
-            }}
-            else
-            {{
-                return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
-            }}
-        }}
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private object? InvokeMethod(string methodName, Func<IInterceptorSubject, object?[], object?> invokeMethod, params object?[] parameters)
-        {{
-            return _context is not null ? _context.InvokeMethod(methodName, parameters, invokeMethod) : invokeMethod(this, parameters);
-        }}
-    }}
-{GenerateContainingTypeClosing(containingTypes)}}}
-";
-                    spc.AddSource(fileName, SourceText.From(generatedCode, Encoding.UTF8));
+                spc.AddSource(fileName, SourceText.From(generatedCode, Encoding.UTF8));
             }
             catch (Exception ex)
             {
+                // Fallback filename using available info
+                var className = cls.ClassNode.Identifier.ValueText;
+                fileName = $"{className}.g.cs";
                 spc.AddSource(fileName, SourceText.From($"/* {ex} */", Encoding.UTF8));
             }
         });
-    }
-
-    private bool HasDerivedAttribute(PropertyDeclarationSyntax property, SemanticModel semanticModel, CancellationToken ct)
-    {
-        return HasAttribute(property.AttributeLists, "Namotion.Interceptor.Attributes.DerivedAttribute", semanticModel, ct);
     }
 
     private bool HasInterceptorSubjectAttribute(ClassDeclarationSyntax classDeclaration, SemanticModel semanticModel, CancellationToken ct)
@@ -473,43 +115,6 @@ namespace {namespaceName}
 
         return hasAttribute;
     }
-    
-    private static bool HasInterceptorSubjectAttribute(INamedTypeSymbol? type)
-    {
-        if (type is null)
-        {
-            return false;
-        }
-
-        return type
-            .GetAttributes()
-            .Any(a => a.AttributeClass?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == 
-                "Namotion.Interceptor.Attributes.InterceptorSubjectAttribute");
-    }
-    
-    private bool ImplementsInterface(ITypeSymbol? type, string interfaceTypeName)
-    {
-        if (type is null)
-        {
-            return false;
-        }
-
-        if (type.TypeKind == TypeKind.Interface && 
-            type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == interfaceTypeName)
-        {
-            return true;
-        }
-
-        if (type
-            .AllInterfaces
-            .Any(i => i.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == interfaceTypeName))
-        {
-            return true;
-        }
-
-        return type.BaseType is { } baseType && 
-            ImplementsInterface(baseType, interfaceTypeName);
-    }
 
     private bool IsTypeOrInheritsFrom(ITypeSymbol? type, string fullTypeName)
     {
@@ -524,70 +129,5 @@ namespace {namespaceName}
         } while (type is not null);
 
         return false;
-    }
-
-    private string? GetFullTypeName(TypeSyntax? type, SemanticModel semanticModel)
-    {
-        if (type == null)
-            return null;
-
-        var typeInfo = semanticModel.GetTypeInfo(type);
-        var symbol = typeInfo.Type;
-        if (symbol != null)
-        {
-            return GetFullTypeName(symbol);
-        }
-
-        throw new InvalidOperationException("Unable to resolve type symbol.");
-    }
-
-    static string? GetFullTypeName(ITypeSymbol typeSymbol)
-    {
-        if (typeSymbol is INamedTypeSymbol { IsGenericType: true } namedTypeSymbol)
-        {
-            var genericArguments = string.Join(", ", namedTypeSymbol.TypeArguments.Select(GetFullTypeName));
-            return $"{namedTypeSymbol.ContainingNamespace}.{namedTypeSymbol.Name}<{genericArguments}>";
-        }
-
-        return typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-    }
-
-    private static string[] GetContainingTypes(SyntaxNode node)
-    {
-        var types = new System.Collections.Generic.List<string>();
-        var parent = node.Parent;
-        while (parent is TypeDeclarationSyntax typeDecl)
-        {
-            types.Insert(0, typeDecl.Identifier.ValueText);
-            parent = parent.Parent;
-        }
-        return types.ToArray();
-    }
-
-    private static string GenerateContainingTypeOpening(string[] containingTypes)
-    {
-        if (containingTypes.Length == 0)
-            return "";
-
-        var sb = new StringBuilder();
-        foreach (var type in containingTypes)
-        {
-            sb.AppendLine($"    partial class {type}");
-            sb.AppendLine("    {");
-        }
-        return sb.ToString();
-    }
-
-    private static string GenerateContainingTypeClosing(string[] containingTypes)
-    {
-        if (containingTypes.Length == 0)
-            return "";
-
-        var sb = new StringBuilder();
-        foreach (var _ in containingTypes)
-        {
-            sb.AppendLine("    }");
-        }
-        return sb.ToString();
     }
 }
