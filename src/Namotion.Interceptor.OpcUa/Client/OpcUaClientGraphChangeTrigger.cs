@@ -3,13 +3,13 @@ using Namotion.Interceptor.OpcUa.Client.Connection;
 using Opc.Ua;
 using Opc.Ua.Client;
 
-namespace Namotion.Interceptor.OpcUa.Client.Graph;
+namespace Namotion.Interceptor.OpcUa.Client;
 
 /// <summary>
 /// Manages remote sync: ModelChangeEvents subscription and periodic resync.
 /// Extracted from OpcUaSubjectClientSource.
 /// </summary>
-internal class RemoteSyncManager : IAsyncDisposable
+internal class OpcUaClientGraphChangeTrigger : IAsyncDisposable
 {
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
@@ -21,16 +21,16 @@ internal class RemoteSyncManager : IAsyncDisposable
     private MonitoredItem? _modelChangeEventItem;
 
     // Callbacks for event handling
-    private OpcUaGraphChangeProcessor? _nodeChangeProcessor;
+    private OpcUaClientGraphChangeReceiver? _nodeChangeProcessor;
     private Func<ISession?>? _getCurrentSession;
     private Func<bool>? _isStarted;
     private Func<bool>? _isDisposed;
     private SubscriptionManager? _subscriptionManager;
 
     // Actor-style dispatcher for thread-safe, ordered change processing
-    private OpcUaRemoteChangeDispatcher? _changeDispatcher;
+    private OpcUaClientGraphChangeDispatcher? _changeDispatcher;
 
-    public RemoteSyncManager(
+    public OpcUaClientGraphChangeTrigger(
         OpcUaClientConfiguration configuration,
         ILogger logger)
     {
@@ -42,7 +42,7 @@ internal class RemoteSyncManager : IAsyncDisposable
     /// Initializes the sync manager with the required callbacks and processors.
     /// </summary>
     public void Initialize(
-        OpcUaGraphChangeProcessor nodeChangeProcessor,
+        OpcUaClientGraphChangeReceiver nodeChangeProcessor,
         SubscriptionManager subscriptionManager,
         Func<ISession?> getCurrentSession,
         Func<bool> isStarted,
@@ -55,7 +55,7 @@ internal class RemoteSyncManager : IAsyncDisposable
         _isDisposed = isDisposed;
 
         // Create and start the dispatcher for thread-safe change processing
-        _changeDispatcher = new OpcUaRemoteChangeDispatcher(_logger, ProcessChangeAsync);
+        _changeDispatcher = new OpcUaClientGraphChangeDispatcher(_logger, ProcessChangeAsync);
         _changeDispatcher.Start();
     }
 
@@ -80,7 +80,7 @@ internal class RemoteSyncManager : IAsyncDisposable
                     .ConfigureAwait(false);
                 break;
 
-            case OpcUaRemoteChangeDispatcher.PeriodicResyncRequest:
+            case OpcUaClientGraphChangeDispatcher.PeriodicResyncRequest:
                 await processor.PerformFullResyncAsync(session, cancellationToken)
                     .ConfigureAwait(false);
                 break;

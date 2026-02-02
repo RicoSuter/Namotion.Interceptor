@@ -1,7 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Attributes;
-using Namotion.Interceptor.OpcUa.Graph;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
@@ -101,7 +100,7 @@ internal class OpcUaSubjectLoader
                 }
 
                 // Check for flat collection item (e.g., "Sensors[0]")
-                if (OpcUaBrowseHelper.TryParseCollectionIndex(dynamicPropertyName, out var baseName, out var collectionIndex))
+                if (OpcUaHelper.TryParseCollectionIndex(dynamicPropertyName, out var baseName, out var collectionIndex))
                 {
                     RegisteredSubjectProperty? flatProperty = null;
                     foreach (var childProperty in registeredSubject.Properties)

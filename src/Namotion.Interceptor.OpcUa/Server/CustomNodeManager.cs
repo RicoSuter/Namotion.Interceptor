@@ -2,7 +2,6 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Mapping;
-using Namotion.Interceptor.OpcUa.Server.Graph;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
@@ -19,12 +18,12 @@ internal class CustomNodeManager : CustomNodeManager2
     private readonly IOpcUaNodeMapper _nodeMapper;
     private readonly ILogger _logger;
     private readonly OpcUaNodeFactory _nodeFactory;
-    private readonly OpcUaNodeCreator _nodeCreator;
-    private readonly OpcUaGraphChangeProcessor _graphChangeProcessor;
+    private readonly OpcUaServerNodeCreator _nodeCreator;
+    private readonly OpcUaServerGraphChangeReceiver _graphChangeProcessor;
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
     private readonly ConnectorReferenceCounter<NodeState> _subjectRefCounter = new();
-    private readonly OpcUaModelChangePublisher _modelChangePublisher;
+    private readonly OpcUaServerGraphChangePublisher _modelChangePublisher;
 
     public CustomNodeManager(
         IInterceptorSubject subject,
@@ -40,15 +39,15 @@ internal class CustomNodeManager : CustomNodeManager2
         _nodeMapper = configuration.NodeMapper;
         _logger = logger;
         _nodeFactory = new OpcUaNodeFactory(logger);
-        _modelChangePublisher = new OpcUaModelChangePublisher(logger);
-        _nodeCreator = new OpcUaNodeCreator(this, configuration, _nodeFactory, source, _subjectRefCounter, _modelChangePublisher, logger);
+        _modelChangePublisher = new OpcUaServerGraphChangePublisher(logger);
+        _nodeCreator = new OpcUaServerNodeCreator(this, configuration, _nodeFactory, source, _subjectRefCounter, _modelChangePublisher, logger);
 
-        var externalNodeManagementHelper = new ExternalNodeManagementHelper(configuration, logger);
-        _graphChangeProcessor = new OpcUaGraphChangeProcessor(
+        var externalNodeValidator = new OpcUaServerExternalNodeValidator(configuration, logger);
+        _graphChangeProcessor = new OpcUaServerGraphChangeReceiver(
             _subject,
             _configuration,
             _subjectRefCounter,
-            externalNodeManagementHelper,
+            externalNodeValidator,
             FindNodeInAddressSpace,
             CreateSubjectNode,
             () => NamespaceIndex,

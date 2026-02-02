@@ -327,4 +327,76 @@ public class ConnectorSubjectMappingTests
         Assert.False(registry.TryGetExternalId(subject, out _));
         Assert.False(registry.TryGetSubject("node-1", out _));
     }
+
+    [Fact]
+    public void TryUnregisterByExternalId_RegisteredId_ReturnsTrueAndSubject()
+    {
+        // Arrange
+        var registry = new ConnectorSubjectMapping<string>();
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var subject = new Person(context);
+        registry.Register(subject, "node-1");
+
+        // Act
+        var found = registry.TryUnregisterByExternalId("node-1", out var result);
+
+        // Assert
+        Assert.True(found);
+        Assert.Same(subject, result);
+    }
+
+    [Fact]
+    public void TryUnregisterByExternalId_UnregisteredId_ReturnsFalse()
+    {
+        // Arrange
+        var registry = new ConnectorSubjectMapping<string>();
+
+        // Act
+        var found = registry.TryUnregisterByExternalId("node-1", out var result);
+
+        // Assert
+        Assert.False(found);
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void TryUnregisterByExternalId_MultipleReferences_DecrementsRefCount()
+    {
+        // Arrange
+        var registry = new ConnectorSubjectMapping<string>();
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var subject = new Person(context);
+        registry.Register(subject, "node-1");
+        registry.Register(subject, "node-1"); // Second reference
+
+        // Act
+        var found = registry.TryUnregisterByExternalId("node-1", out var result);
+
+        // Assert
+        Assert.True(found);
+        Assert.Same(subject, result);
+        // Mapping should still exist (ref count was > 1)
+        Assert.True(registry.TryGetExternalId(subject, out _));
+        Assert.True(registry.TryGetSubject("node-1", out _));
+    }
+
+    [Fact]
+    public void TryUnregisterByExternalId_LastReference_RemovesMapping()
+    {
+        // Arrange
+        var registry = new ConnectorSubjectMapping<string>();
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var subject = new Person(context);
+        registry.Register(subject, "node-1");
+
+        // Act
+        var found = registry.TryUnregisterByExternalId("node-1", out var result);
+
+        // Assert
+        Assert.True(found);
+        Assert.Same(subject, result);
+        // Mapping should be removed (ref count was 1)
+        Assert.False(registry.TryGetExternalId(subject, out _));
+        Assert.False(registry.TryGetSubject("node-1", out _));
+    }
 }

@@ -9,17 +9,17 @@ using Namotion.Interceptor.Tracking.Change;
 namespace Namotion.Interceptor.OpcUa.Tests.Server;
 
 /// <summary>
-/// Unit tests for <see cref="OpcUaServerStructuralChangeProcessor"/>.
-/// These tests verify the processor correctly delegates to CustomNodeManager methods.
+/// Unit tests for <see cref="OpcUaServerGraphChangeSender"/>.
+/// These tests verify the sender correctly delegates to CustomNodeManager methods.
 /// </summary>
-public class OpcUaServerStructuralChangeProcessorTests
+public class OpcUaServerGraphChangeSenderTests
 {
     private static readonly DateTimeOffset TestTimestamp = DateTimeOffset.UtcNow;
 
     /// <summary>
     /// A test structural change processor that records calls instead of using a real CustomNodeManager.
     /// </summary>
-    private class TestableStructuralChangeProcessor : StructuralChangeProcessor
+    private class TestableGraphChangePublisher : GraphChangePublisher
     {
         public List<(RegisteredSubjectProperty Property, IInterceptorSubject Subject, object? Index)> AddedSubjects { get; } = new();
         public List<(RegisteredSubjectProperty Property, IInterceptorSubject Subject, object? Index)> RemovedSubjects { get; } = new();
@@ -41,7 +41,7 @@ public class OpcUaServerStructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_SubjectAdded_CallsOnSubjectAdded()
     {
         // Arrange
-        var processor = new TestableStructuralChangeProcessor();
+        var processor = new TestableGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var root = new TestRoot(context);
         var person = new TestPerson(context);
@@ -72,7 +72,7 @@ public class OpcUaServerStructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_SubjectRemoved_CallsOnSubjectRemoved()
     {
         // Arrange
-        var processor = new TestableStructuralChangeProcessor();
+        var processor = new TestableGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var root = new TestRoot(context);
         var person = new TestPerson(context);
@@ -102,7 +102,7 @@ public class OpcUaServerStructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_ValueChange_ReturnsFalse()
     {
         // Arrange
-        var processor = new TestableStructuralChangeProcessor();
+        var processor = new TestableGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var root = new TestRoot(context);
 
@@ -130,7 +130,7 @@ public class OpcUaServerStructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_CollectionAdd_CallsOnSubjectAdded()
     {
         // Arrange
-        var processor = new TestableStructuralChangeProcessor();
+        var processor = new TestableGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var root = new TestRoot(context);
         var person1 = new TestPerson(context);
@@ -163,7 +163,7 @@ public class OpcUaServerStructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_CollectionRemove_CallsOnSubjectRemoved()
     {
         // Arrange
-        var processor = new TestableStructuralChangeProcessor();
+        var processor = new TestableGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var root = new TestRoot(context);
         var person1 = new TestPerson(context);
@@ -195,7 +195,7 @@ public class OpcUaServerStructuralChangeProcessorTests
     public async Task ProcessPropertyChangeAsync_DictionaryAdd_CallsOnSubjectAdded()
     {
         // Arrange
-        var processor = new TestableStructuralChangeProcessor();
+        var processor = new TestableGraphChangePublisher();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var root = new TestRoot(context);
         var person1 = new TestPerson(context);
@@ -225,16 +225,16 @@ public class OpcUaServerStructuralChangeProcessorTests
     }
 
     [Fact]
-    public void OpcUaServerStructuralChangeProcessor_Compiles_AndExtendsStructuralChangeProcessor()
+    public void OpcUaServerGraphChangeSender_Compiles_AndExtendsGraphChangePublisher()
     {
-        // This test verifies the actual OpcUaServerStructuralChangeProcessor can be instantiated
-        // and that it properly extends StructuralChangeProcessor
+        // This test verifies the actual OpcUaServerGraphChangeSender can be instantiated
+        // and that it properly extends GraphChangePublisher
 
         // Arrange & Act - just verify the class compiles and can be referenced
-        var processorType = typeof(OpcUaServerStructuralChangeProcessor);
+        var senderType = typeof(OpcUaServerGraphChangeSender);
 
         // Assert
-        Assert.NotNull(processorType);
-        Assert.True(processorType.IsAssignableTo(typeof(StructuralChangeProcessor)));
+        Assert.NotNull(senderType);
+        Assert.True(senderType.IsAssignableTo(typeof(GraphChangePublisher)));
     }
 }

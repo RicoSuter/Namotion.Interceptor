@@ -2,19 +2,18 @@ using System.Collections;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Attributes;
-using Namotion.Interceptor.OpcUa.Graph;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
 using Opc.Ua.Client;
 
-namespace Namotion.Interceptor.OpcUa.Client.Graph;
+namespace Namotion.Interceptor.OpcUa.Client;
 
 /// <summary>
-/// Processes OPC UA node changes (from ModelChangeEvents or periodic resync) to update the C# model.
+/// Receives and processes OPC UA node changes (from ModelChangeEvents or periodic resync) to update the C# model.
 /// Compares remote address space with local model and creates/removes subjects as needed.
 /// </summary>
-internal class OpcUaGraphChangeProcessor
+internal class OpcUaClientGraphChangeReceiver
 {
     private readonly OpcUaSubjectClientSource _source;
     private readonly OpcUaClientConfiguration _configuration;
@@ -35,13 +34,13 @@ internal class OpcUaGraphChangeProcessor
     private volatile bool _isProcessingRemoteChange;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="OpcUaGraphChangeProcessor"/> class.
+    /// Initializes a new instance of the <see cref="OpcUaClientGraphChangeReceiver"/> class.
     /// </summary>
     /// <param name="source">The OPC UA client source.</param>
     /// <param name="configuration">The client configuration.</param>
     /// <param name="subjectLoader">The subject loader for creating new subjects.</param>
     /// <param name="logger">The logger.</param>
-    public OpcUaGraphChangeProcessor(
+    public OpcUaClientGraphChangeReceiver(
         OpcUaSubjectClientSource source,
         OpcUaClientConfiguration configuration,
         OpcUaSubjectLoader subjectLoader,
@@ -187,7 +186,7 @@ internal class OpcUaGraphChangeProcessor
                     else
                     {
                         // Container mode: items are under a container folder
-                        var containerNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(session, subjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
+                        var containerNodeId = await OpcUaHelper.FindChildNodeIdAsync(session, subjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
                         if (containerNodeId is not null)
                         {
                             await ProcessCollectionNodeChangesAsync(property, containerNodeId, session, cancellationToken).ConfigureAwait(false);
@@ -196,7 +195,7 @@ internal class OpcUaGraphChangeProcessor
                 }
                 else if (property.IsSubjectDictionary)
                 {
-                    var containerNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(session, subjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
+                    var containerNodeId = await OpcUaHelper.FindChildNodeIdAsync(session, subjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
                     if (containerNodeId is not null)
                     {
                         await ProcessDictionaryNodeChangesAsync(property, containerNodeId, session, cancellationToken).ConfigureAwait(false);
@@ -229,7 +228,7 @@ internal class OpcUaGraphChangeProcessor
         }
 
         // Browse remote nodes
-        var remoteChildren = await OpcUaBrowseHelper.BrowseNodeAsync(session, containerNodeId, cancellationToken).ConfigureAwait(false);
+        var remoteChildren = await OpcUaHelper.BrowseNodeAsync(session, containerNodeId, cancellationToken).ConfigureAwait(false);
 
         _logger.LogDebug("Browse '{Container}' returned {Count} children: {Names}",
             containerNodeId, remoteChildren.Count,
@@ -245,7 +244,7 @@ internal class OpcUaGraphChangeProcessor
         foreach (var remoteChild in remoteChildren)
         {
             var browseName = remoteChild.BrowseName.Name;
-            if (OpcUaBrowseHelper.TryParseCollectionIndex(browseName, propertyName, out var index))
+            if (OpcUaHelper.TryParseCollectionIndex(browseName, propertyName, out var index))
             {
                 remoteByIndex[index] = remoteChild;
             }
@@ -435,7 +434,7 @@ internal class OpcUaGraphChangeProcessor
         }
 
         // Browse remote nodes
-        var remoteChildren = await OpcUaBrowseHelper.BrowseNodeAsync(session, containerNodeId, cancellationToken).ConfigureAwait(false);
+        var remoteChildren = await OpcUaHelper.BrowseNodeAsync(session, containerNodeId, cancellationToken).ConfigureAwait(false);
 
         // Get current local children
         var localChildren = property.Children.ToDictionary(c => c.Index?.ToString() ?? "", c => c.Subject);
@@ -566,7 +565,7 @@ internal class OpcUaGraphChangeProcessor
         }
 
         // Browse to find the reference node under the parent
-        var children = await OpcUaBrowseHelper.BrowseNodeAsync(session, parentNodeId, cancellationToken).ConfigureAwait(false);
+        var children = await OpcUaHelper.BrowseNodeAsync(session, parentNodeId, cancellationToken).ConfigureAwait(false);
         var referenceNode = children.FirstOrDefault(c => c.BrowseName.Name == propertyName);
 
         // Get current local value
@@ -749,14 +748,14 @@ internal class OpcUaGraphChangeProcessor
     {
         _logger.LogDebug("ProcessNodeAdded: Processing NodeId {NodeId}.", nodeId);
 
-        var nodeDetails = await OpcUaBrowseHelper.ReadNodeDetailsAsync(session, nodeId, cancellationToken).ConfigureAwait(false);
+        var nodeDetails = await OpcUaHelper.ReadNodeDetailsAsync(session, nodeId, cancellationToken).ConfigureAwait(false);
         if (nodeDetails is null)
         {
             _logger.LogDebug("ProcessNodeAdded: Could not read node details for {NodeId}.", nodeId);
             return;
         }
 
-        var directParentNodeId = await OpcUaBrowseHelper.FindParentNodeIdAsync(session, nodeId, cancellationToken).ConfigureAwait(false);
+        var directParentNodeId = await OpcUaHelper.FindParentNodeIdAsync(session, nodeId, cancellationToken).ConfigureAwait(false);
         if (directParentNodeId is null)
         {
             _logger.LogDebug("ProcessNodeAdded: Could not find parent for {NodeId}.", nodeId);
@@ -778,7 +777,7 @@ internal class OpcUaGraphChangeProcessor
                 }
             }
 
-            var nextParentNodeId = await OpcUaBrowseHelper.FindParentNodeIdAsync(session, currentNodeId, cancellationToken).ConfigureAwait(false);
+            var nextParentNodeId = await OpcUaHelper.FindParentNodeIdAsync(session, currentNodeId, cancellationToken).ConfigureAwait(false);
             if (nextParentNodeId is null)
             {
                 break;
@@ -831,7 +830,7 @@ internal class OpcUaGraphChangeProcessor
             }
 
             // Check if this is a collection item (pattern: PropertyName[index])
-            if (property.IsSubjectCollection && OpcUaBrowseHelper.TryParseCollectionIndex(browseName, propertyName, out var parsedIndex))
+            if (property.IsSubjectCollection && OpcUaHelper.TryParseCollectionIndex(browseName, propertyName, out var parsedIndex))
             {
                 // Directly add this item to the collection from the NodeAdded event
                 // This is more reliable than re-browsing, which may not return the new node immediately
@@ -844,7 +843,7 @@ internal class OpcUaGraphChangeProcessor
             {
                 if (_source.TryGetSubjectNodeId(parentSubject, out var parentSubjectNodeId) && parentSubjectNodeId is not null)
                 {
-                    var containerNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(session, parentSubjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
+                    var containerNodeId = await OpcUaHelper.FindChildNodeIdAsync(session, parentSubjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
                     if (containerNodeId is not null && containerNodeId.Equals(directParentNodeId))
                     {
                         _logger.LogDebug("ProcessNodeAdded: Processing dictionary item {BrowseName} for property {PropertyName}.", browseName, propertyName);
@@ -1161,7 +1160,7 @@ internal class OpcUaGraphChangeProcessor
                 return;
             }
 
-            var childRefNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(
+            var childRefNodeId = await OpcUaHelper.FindChildNodeIdAsync(
                 session, subjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
 
             if (childRefNodeId is not null && childRefNodeId.Equals(childNodeId))
@@ -1183,7 +1182,7 @@ internal class OpcUaGraphChangeProcessor
                 return;
             }
 
-            var refNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(
+            var refNodeId = await OpcUaHelper.FindChildNodeIdAsync(
                 session, subjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
 
             if (refNodeId is null || !refNodeId.Equals(childNodeId))
@@ -1217,7 +1216,7 @@ internal class OpcUaGraphChangeProcessor
             return subjectNodeId;
         }
 
-        return await OpcUaBrowseHelper.FindChildNodeIdAsync(
+        return await OpcUaHelper.FindChildNodeIdAsync(
             session, subjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
     }
 
@@ -1231,7 +1230,7 @@ internal class OpcUaGraphChangeProcessor
         ISession session,
         CancellationToken cancellationToken)
     {
-        var containerChildren = await OpcUaBrowseHelper.BrowseNodeAsync(
+        var containerChildren = await OpcUaHelper.BrowseNodeAsync(
             session, containerNodeId, cancellationToken).ConfigureAwait(false);
 
         foreach (var child in containerChildren)
@@ -1386,7 +1385,7 @@ internal class OpcUaGraphChangeProcessor
                 return;
             }
 
-            var containerNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(
+            var containerNodeId = await OpcUaHelper.FindChildNodeIdAsync(
                 session, subjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
 
             if (containerNodeId is null)
@@ -1419,7 +1418,7 @@ internal class OpcUaGraphChangeProcessor
                 return;
             }
 
-            var containerNodeId = await OpcUaBrowseHelper.FindChildNodeIdAsync(
+            var containerNodeId = await OpcUaHelper.FindChildNodeIdAsync(
                 session, subjectNodeId, propertyName, cancellationToken).ConfigureAwait(false);
 
             if (containerNodeId is null)

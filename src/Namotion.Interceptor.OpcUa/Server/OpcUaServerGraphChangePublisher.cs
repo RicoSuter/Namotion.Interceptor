@@ -2,19 +2,19 @@ using Microsoft.Extensions.Logging;
 using Opc.Ua;
 using Opc.Ua.Server;
 
-namespace Namotion.Interceptor.OpcUa.Server.Graph;
+namespace Namotion.Interceptor.OpcUa.Server;
 
 /// <summary>
 /// Queues and emits model change events.
 /// Extracted from CustomNodeManager for better separation of concerns.
 /// </summary>
-internal class OpcUaModelChangePublisher
+internal class OpcUaServerGraphChangePublisher
 {
     private readonly object _pendingModelChangesLock = new();
     private List<ModelChangeStructureDataType> _pendingModelChanges = new();
     private readonly ILogger _logger;
 
-    public OpcUaModelChangePublisher(ILogger logger)
+    public OpcUaServerGraphChangePublisher(ILogger logger)
     {
         _logger = logger;
     }

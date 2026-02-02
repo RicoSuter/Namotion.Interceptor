@@ -1,8 +1,8 @@
-using Namotion.Interceptor.OpcUa.Graph;
+using Namotion.Interceptor.OpcUa;
 
-namespace Namotion.Interceptor.OpcUa.Tests.Graph;
+namespace Namotion.Interceptor.OpcUa.Tests;
 
-public class OpcUaBrowseHelperTests
+public class OpcUaHelperTests
 {
     [Theory]
     [InlineData("Sensors[0]", "Sensors", 0, true)]
@@ -22,7 +22,7 @@ public class OpcUaBrowseHelperTests
         bool expectedResult)
     {
         // Act
-        var result = OpcUaBrowseHelper.TryParseCollectionIndex(input, out var baseName, out var index);
+        var result = OpcUaHelper.TryParseCollectionIndex(input, out var baseName, out var index);
 
         // Assert
         Assert.Equal(expectedResult, result);
@@ -44,7 +44,7 @@ public class OpcUaBrowseHelperTests
         bool expectedResult)
     {
         // Act
-        var result = OpcUaBrowseHelper.TryParseCollectionIndex(input, propertyName, out var index);
+        var result = OpcUaHelper.TryParseCollectionIndex(input, propertyName, out var index);
 
         // Assert
         Assert.Equal(expectedResult, result);

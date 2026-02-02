@@ -6,19 +6,19 @@ using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 using Opc.Ua.Client;
 
-namespace Namotion.Interceptor.OpcUa.Client.Graph;
+namespace Namotion.Interceptor.OpcUa.Client;
 
 /// <summary>
 /// Handles writing property changes to OPC UA server.
 /// Extracted from OpcUaSubjectClientSource.
 /// </summary>
-internal class OpcUaPropertyWriter
+internal class OpcUaClientPropertyWriter
 {
     private readonly OpcUaClientConfiguration _configuration;
     private readonly string _opcUaNodeIdKey;
     private readonly ILogger _logger;
 
-    public OpcUaPropertyWriter(
+    public OpcUaClientPropertyWriter(
         OpcUaClientConfiguration configuration,
         string opcUaNodeIdKey,
         ILogger logger)

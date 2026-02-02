@@ -12,17 +12,17 @@ namespace Namotion.Interceptor.OpcUa.Server;
 /// via the AddNode and DeleteNode methods. This class provides helper methods that
 /// can be used by a custom node manager to implement external node management.
 /// </summary>
-public class ExternalNodeManagementHelper
+public class OpcUaServerExternalNodeValidator
 {
     private readonly OpcUaServerConfiguration _configuration;
     private readonly ILogger _logger;
 
     /// <summary>
-    /// Initializes a new instance of the <see cref="ExternalNodeManagementHelper"/> class.
+    /// Initializes a new instance of the <see cref="OpcUaServerExternalNodeValidator"/> class.
     /// </summary>
     /// <param name="configuration">The server configuration.</param>
     /// <param name="logger">The logger.</param>
-    public ExternalNodeManagementHelper(OpcUaServerConfiguration configuration, ILogger logger)
+    public OpcUaServerExternalNodeValidator(OpcUaServerConfiguration configuration, ILogger logger)
     {
         _configuration = configuration;
         _logger = logger;

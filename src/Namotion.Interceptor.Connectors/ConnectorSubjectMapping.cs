@@ -101,6 +101,36 @@ public class ConnectorSubjectMapping<TExternalId> where TExternalId : notnull
     }
 
     /// <summary>
+    /// Unregisters by external ID and returns the subject.
+    /// Returns true if found and unregistered, false otherwise.
+    /// </summary>
+    /// <param name="externalId">The external ID to unregister.</param>
+    /// <param name="subject">The subject if found, null otherwise.</param>
+    /// <returns>True if found and unregistered, false otherwise.</returns>
+    public bool TryUnregisterByExternalId(TExternalId externalId, out IInterceptorSubject? subject)
+    {
+        lock (_lock)
+        {
+            if (!_idToSubject.TryGetValue(externalId, out subject))
+            {
+                return false;
+            }
+
+            var entry = _subjectToId[subject];
+            if (entry.RefCount == 1)
+            {
+                _subjectToId.Remove(subject);
+                _idToSubject.Remove(externalId);
+            }
+            else
+            {
+                _subjectToId[subject] = (entry.Id, entry.RefCount - 1);
+            }
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Gets all currently registered subjects.
     /// </summary>
     /// <returns>A list of all registered subjects.</returns>

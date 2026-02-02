@@ -1,15 +1,13 @@
 using Opc.Ua;
 using Opc.Ua.Client;
 
-namespace Namotion.Interceptor.OpcUa.Graph;
+namespace Namotion.Interceptor.OpcUa;
 
 /// <summary>
 /// Helper class for OPC UA browse operations.
 /// </summary>
-internal static class OpcUaBrowseHelper
+internal static class OpcUaHelper
 {
-    // TODO: Move to ../ (ie root of project), not only used by graph features/classes
-
     /// <summary>
     /// Finds a child node by browse name under a parent node.
     /// </summary>
@@ -108,7 +106,7 @@ internal static class OpcUaBrowseHelper
     public static bool TryParseCollectionIndex(string browseName, out string? baseName, out int index)
     {
         // TODO: Do we really need both overloads? Seems like a lot of duplication...
-        
+
         baseName = null;
         index = -1;
 

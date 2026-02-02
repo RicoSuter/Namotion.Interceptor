@@ -11,7 +11,7 @@ namespace Namotion.Interceptor.Connectors;
 /// Handles branching on property type and collection diffing.
 /// Note: Source filtering (loop prevention) is handled by ChangeQueueProcessor, not here.
 /// </summary>
-public abstract class StructuralChangeProcessor
+public abstract class GraphChangePublisher
 {
     private readonly CollectionDiffBuilder _diffBuilder = new();
 

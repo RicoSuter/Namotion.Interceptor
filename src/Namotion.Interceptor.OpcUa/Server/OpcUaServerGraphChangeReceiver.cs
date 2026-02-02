@@ -7,20 +7,20 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
 
-namespace Namotion.Interceptor.OpcUa.Server.Graph;
+namespace Namotion.Interceptor.OpcUa.Server;
 
 /// <summary>
 /// Processes external node management requests (AddNodes/DeleteNodes) from OPC UA clients.
 /// Handles the OPC UA -> Model direction for the server side.
 /// Symmetric with Client/Graph/OpcUaGraphChangeProcessor which handles OPC UA -> Model for clients.
 /// </summary>
-internal class OpcUaGraphChangeProcessor
+internal class OpcUaServerGraphChangeReceiver
 {
     private readonly IInterceptorSubject _rootSubject;
     private readonly OpcUaServerConfiguration _configuration;
     private readonly IOpcUaNodeMapper _nodeMapper;
     private readonly ConnectorReferenceCounter<NodeState> _subjectRefCounter;
-    private readonly ExternalNodeManagementHelper _externalNodeManagementHelper;
+    private readonly OpcUaServerExternalNodeValidator _externalNodeManagementHelper;
     private readonly Func<NodeId, NodeState?> _findNode;
     private readonly Action<RegisteredSubjectProperty, IInterceptorSubject, object?> _createSubjectNode;
     private readonly Func<ushort> _getNamespaceIndex;
@@ -30,11 +30,11 @@ internal class OpcUaGraphChangeProcessor
     private readonly Dictionary<NodeId, IInterceptorSubject> _externallyAddedSubjects = new();
     private readonly Lock _externallyAddedSubjectsLock = new();
 
-    public OpcUaGraphChangeProcessor(
+    public OpcUaServerGraphChangeReceiver(
         IInterceptorSubject rootSubject,
         OpcUaServerConfiguration configuration,
         ConnectorReferenceCounter<NodeState> subjectRefCounter,
-        ExternalNodeManagementHelper externalNodeManagementHelper,
+        OpcUaServerExternalNodeValidator externalNodeManagementHelper,
         Func<NodeId, NodeState?> findNode,
         Action<RegisteredSubjectProperty, IInterceptorSubject, object?> createSubjectNode,
         Func<ushort> getNamespaceIndex,
@@ -334,7 +334,7 @@ internal class OpcUaGraphChangeProcessor
                 if (containerPropertyName is null && collectionStructure == CollectionNodeStructure.Flat)
                 {
                     // In Flat mode, verify the browse name matches this property's pattern
-                    if (!Namotion.Interceptor.OpcUa.Graph.OpcUaBrowseHelper.TryParseCollectionIndex(browseName.Name, propertyName, out _))
+                    if (!OpcUaHelper.TryParseCollectionIndex(browseName.Name, propertyName, out _))
                     {
                         continue; // Browse name doesn't match this property's pattern
                     }
