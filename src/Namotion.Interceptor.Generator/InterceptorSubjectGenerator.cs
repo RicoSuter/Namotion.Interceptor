@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -19,9 +19,8 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                 predicate: (node, _) => node is ClassDeclarationSyntax { AttributeLists.Count: > 0 },
                 transform: (ctx, ct) =>
                 {
-                    var classDeclaration = (ClassDeclarationSyntax)ctx.Node;
-
                     var model = ctx.SemanticModel;
+                    var classDeclaration = (ClassDeclarationSyntax)ctx.Node;
 
                     // Get the type symbol to access all partial declarations
                     var typeSymbol = model.GetDeclaredSymbol(classDeclaration, ct);
@@ -38,28 +37,27 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                             return HasInterceptorSubjectAttribute(c, declarationModel, ct);
                         });
 
-                    if (!hasAttributeInAnyPartial)
-                        return null;
-
-                    return new
-                    {
-                        Model = model,
-                        ClassNode = classDeclaration,
-                        TypeSymbol = typeSymbol
-                    };
+                    return hasAttributeInAnyPartial
+                        ? new
+                        {
+                            Model = model,
+                            ClassNode = classDeclaration,
+                            TypeSymbol = typeSymbol
+                        }
+                        : null;
                 })
-            .Select((m, _) =>
+            .Select((tuple, _) =>
             {
-                if (m is null)
+                if (tuple is null)
                 {
                     return null;
                 }
 
-                var typeSymbol = m.TypeSymbol;
+                var typeSymbol = tuple.TypeSymbol;
                 return new
                 {
-                    m.Model,
-                    m.ClassNode,
+                    tuple.Model,
+                    tuple.ClassNode,
                     TypeSymbol = typeSymbol,
                     TypeName = typeSymbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)
                 };
