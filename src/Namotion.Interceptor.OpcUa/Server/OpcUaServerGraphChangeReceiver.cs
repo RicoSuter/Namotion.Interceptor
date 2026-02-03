@@ -1,4 +1,3 @@
-using System.Collections;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Attributes;
@@ -300,13 +299,19 @@ internal class OpcUaServerGraphChangeReceiver
                 }
 
                 var elementType = GetCollectionElementType(property.Type);
-                if (elementType is not null && elementType.IsAssignableFrom(subject.GetType()))
+                if (elementType is not null && elementType.IsInstanceOfType(subject))
                 {
                     // Get current count before adding to determine the new index
                     var currentCollection = property.GetValue() as IEnumerable<IInterceptorSubject?>;
                     var addedIndex = currentCollection?.Count() ?? 0;
 
-                    if (_graphChangeApplier.AddToCollection(property, subject, _source))
+                    // We already have the subject, use factory that returns it directly
+                    var addedSubject = _graphChangeApplier.AddToCollectionAsync(
+                        property,
+                        () => Task.FromResult(subject),
+                        _source).GetAwaiter().GetResult();
+
+                    if (addedSubject is not null)
                     {
                         _logger.LogDebug(
                             "External AddNode: Added subject to collection property '{PropertyName}' at index {Index}.",
@@ -318,11 +323,19 @@ internal class OpcUaServerGraphChangeReceiver
             else if (property.IsSubjectDictionary)
             {
                 var valueType = GetDictionaryValueType(property.Type);
-                if (valueType is not null && valueType.IsAssignableFrom(subject.GetType()))
+                if (valueType is not null && valueType.IsInstanceOfType(subject))
                 {
                     // Use BrowseName as the dictionary key
                     var key = browseName.Name;
-                    if (_graphChangeApplier.AddToDictionary(property, key, subject, _source))
+
+                    // We already have the subject, use factory that returns it directly
+                    var addedSubject = _graphChangeApplier.AddToDictionaryAsync(
+                        property,
+                        key,
+                        () => Task.FromResult(subject),
+                        _source).GetAwaiter().GetResult();
+
+                    if (addedSubject is not null)
                     {
                         _logger.LogDebug(
                             "External AddNode: Added subject to dictionary property '{PropertyName}' with key '{Key}'.",
@@ -340,9 +353,15 @@ internal class OpcUaServerGraphChangeReceiver
                 }
 
                 var propertyType = property.Type;
-                if (propertyType.IsAssignableFrom(subject.GetType()))
+                if (propertyType.IsInstanceOfType(subject))
                 {
-                    if (_graphChangeApplier.SetReference(property, subject, _source))
+                    // We already have the subject, use factory that returns it directly
+                    var setSubject = _graphChangeApplier.SetReferenceAsync(
+                        property,
+                        () => Task.FromResult(subject),
+                        _source).GetAwaiter().GetResult();
+
+                    if (setSubject is not null)
                     {
                         _logger.LogDebug(
                             "External AddNode: Set reference property '{PropertyName}' to subject.",
@@ -474,10 +493,10 @@ internal class OpcUaServerGraphChangeReceiver
                 }
                 else if (parentProperty.IsSubjectReference)
                 {
-                    if (_graphChangeApplier.SetReference(parentProperty, null, _source))
+                    if (_graphChangeApplier.RemoveReference(parentProperty, _source))
                     {
                         _logger.LogDebug(
-                            "External DeleteNode: Set reference property '{PropertyName}' to null.",
+                            "External DeleteNode: Cleared reference property '{PropertyName}'.",
                             parentProperty.Name);
                     }
                 }

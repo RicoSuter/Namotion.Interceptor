@@ -10,6 +10,7 @@ namespace Namotion.Interceptor.Connectors;
 /// - <see cref="GraphChangeApplier"/>: Receives external changes and applies them to the C# model (collections, references, dictionaries).
 ///
 /// All methods include a source parameter for loop prevention using SetValueFromSource on properties.
+/// Uses factory pattern for add operations to avoid creating subjects when validation fails.
 /// </summary>
 public class GraphChangeApplier
 {
@@ -25,28 +26,34 @@ public class GraphChangeApplier
     }
 
     /// <summary>
-    /// Adds a subject to a collection property.
+    /// Adds a subject to a collection property using a factory to create the subject only if validation passes.
     /// </summary>
     /// <param name="property">The collection property to add to.</param>
-    /// <param name="subject">The subject to add.</param>
+    /// <param name="subjectFactory">Factory function that creates the subject (only called if validation passes).</param>
     /// <param name="source">The source of the change (for loop prevention).</param>
-    /// <returns>True if the subject was added successfully, false otherwise.</returns>
-    public bool AddToCollection(RegisteredSubjectProperty property, IInterceptorSubject subject, object source)
+    /// <returns>The created subject if added successfully, null otherwise.</returns>
+    public async Task<IInterceptorSubject?> AddToCollectionAsync(
+        RegisteredSubjectProperty property,
+        Func<Task<IInterceptorSubject>> subjectFactory,
+        object source)
     {
         if (!property.IsSubjectCollection)
         {
-            return false;
+            return null;
         }
 
         var currentCollection = property.GetValue() as IEnumerable<IInterceptorSubject?>;
         if (currentCollection is null)
         {
-            return false;
+            return null;
         }
+
+        // Validation passed - now create the subject
+        var subject = await subjectFactory().ConfigureAwait(false);
 
         var newCollection = _subjectFactory.AppendSubjectsToCollection(currentCollection, subject);
         property.SetValueFromSource(source, DateTimeOffset.UtcNow, null, newCollection);
-        return true;
+        return subject;
     }
 
     /// <summary>
@@ -122,31 +129,38 @@ public class GraphChangeApplier
     }
 
     /// <summary>
-    /// Adds a subject to a dictionary property with the specified key.
+    /// Adds a subject to a dictionary property with the specified key using a factory to create the subject only if validation passes.
     /// </summary>
     /// <param name="property">The dictionary property to add to.</param>
     /// <param name="key">The key for the new entry.</param>
-    /// <param name="subject">The subject to add.</param>
+    /// <param name="subjectFactory">Factory function that creates the subject (only called if validation passes).</param>
     /// <param name="source">The source of the change (for loop prevention).</param>
-    /// <returns>True if the subject was added successfully, false otherwise.</returns>
-    public bool AddToDictionary(RegisteredSubjectProperty property, object key, IInterceptorSubject subject, object source)
+    /// <returns>The created subject if added successfully, null otherwise.</returns>
+    public async Task<IInterceptorSubject?> AddToDictionaryAsync(
+        RegisteredSubjectProperty property,
+        object key,
+        Func<Task<IInterceptorSubject>> subjectFactory,
+        object source)
     {
         if (!property.IsSubjectDictionary)
         {
-            return false;
+            return null;
         }
 
         var currentDictionary = property.GetValue() as IDictionary;
         if (currentDictionary is null)
         {
-            return false;
+            return null;
         }
+
+        // Validation passed - now create the subject
+        var subject = await subjectFactory().ConfigureAwait(false);
 
         var newDictionary = _subjectFactory.AppendEntriesToDictionary(
             currentDictionary,
             new KeyValuePair<object, IInterceptorSubject>(key, subject));
         property.SetValueFromSource(source, DateTimeOffset.UtcNow, null, newDictionary);
-        return true;
+        return subject;
     }
 
     /// <summary>
@@ -180,20 +194,43 @@ public class GraphChangeApplier
     }
 
     /// <summary>
-    /// Sets a reference property to the specified subject (or null to clear).
+    /// Sets a reference property to a subject using a factory to create the subject only if validation passes.
     /// </summary>
     /// <param name="property">The reference property to set.</param>
-    /// <param name="subject">The subject to set (or null to clear the reference).</param>
+    /// <param name="subjectFactory">Factory function that creates the subject (only called if validation passes).</param>
     /// <param name="source">The source of the change (for loop prevention).</param>
-    /// <returns>True if the reference was set successfully, false otherwise.</returns>
-    public bool SetReference(RegisteredSubjectProperty property, IInterceptorSubject? subject, object source)
+    /// <returns>The created subject if set successfully, null otherwise.</returns>
+    public async Task<IInterceptorSubject?> SetReferenceAsync(
+        RegisteredSubjectProperty property,
+        Func<Task<IInterceptorSubject>> subjectFactory,
+        object source)
+    {
+        if (!property.IsSubjectReference)
+        {
+            return null;
+        }
+
+        // Validation passed - now create the subject
+        var subject = await subjectFactory().ConfigureAwait(false);
+
+        property.SetValueFromSource(source, DateTimeOffset.UtcNow, null, subject);
+        return subject;
+    }
+
+    /// <summary>
+    /// Clears a reference property (sets it to null).
+    /// </summary>
+    /// <param name="property">The reference property to clear.</param>
+    /// <param name="source">The source of the change (for loop prevention).</param>
+    /// <returns>True if the reference was cleared successfully, false otherwise.</returns>
+    public bool RemoveReference(RegisteredSubjectProperty property, object source)
     {
         if (!property.IsSubjectReference)
         {
             return false;
         }
 
-        property.SetValueFromSource(source, DateTimeOffset.UtcNow, null, subject);
+        property.SetValueFromSource(source, DateTimeOffset.UtcNow, null, null);
         return true;
     }
 }

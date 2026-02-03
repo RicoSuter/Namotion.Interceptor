@@ -46,7 +46,11 @@ internal class OpcUaClientGraphChangeSender : GraphChangePublisher
     internal ISession? CurrentSession { get; set; }
 
     /// <inheritdoc />
-    protected override async Task OnSubjectAddedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index)
+    protected override async Task OnSubjectAddedAsync(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject subject,
+        object? index,
+        CancellationToken cancellationToken)
     {
         var session = CurrentSession;
         if (session is null)
@@ -80,7 +84,7 @@ internal class OpcUaClientGraphChangeSender : GraphChangePublisher
         {
             // Parent is root - browse from ObjectsFolder or RootName
             parentNodeId = _configuration.RootName is not null
-                ? await TryFindRootNodeIdAsync(session, CancellationToken.None).ConfigureAwait(false)
+                ? await TryFindRootNodeIdAsync(session, cancellationToken).ConfigureAwait(false)
                 : ObjectIds.ObjectsFolder;
         }
 
@@ -99,16 +103,13 @@ internal class OpcUaClientGraphChangeSender : GraphChangePublisher
             return;
         }
 
-        var childNodeRef = await TryFindChildNodeAsync(session, parentNodeId, property, propertyName, index, CancellationToken.None).ConfigureAwait(false);
-        var wasCreatedRemotely = false;
-
+        var childNodeRef = await TryFindChildNodeAsync(session, parentNodeId, property, propertyName, index, cancellationToken).ConfigureAwait(false);
         if (childNodeRef is null)
         {
             // Node not found on server - create it via AddNodes
             if (_configuration.EnableGraphChangePublishing)
             {
-                childNodeRef = await TryCreateRemoteNodeAsync(session, parentNodeId, property, subject, index, CancellationToken.None).ConfigureAwait(false);
-                wasCreatedRemotely = childNodeRef is not null;
+                childNodeRef = await TryCreateRemoteNodeAsync(session, parentNodeId, property, subject, index, cancellationToken).ConfigureAwait(false);
             }
 
             if (childNodeRef is null)
@@ -118,14 +119,13 @@ internal class OpcUaClientGraphChangeSender : GraphChangePublisher
         }
 
         // Load the subject and create MonitoredItems
-        var monitoredItems = await _subjectLoader.LoadSubjectAsync(subject, childNodeRef, session, CancellationToken.None).ConfigureAwait(false);
-
+        var monitoredItems = await _subjectLoader.LoadSubjectAsync(subject, childNodeRef, session, cancellationToken).ConfigureAwait(false);
         if (monitoredItems.Count > 0)
         {
             var sessionManager = _source.SessionManager;
             if (sessionManager is not null)
             {
-                await sessionManager.AddMonitoredItemsAsync(monitoredItems, session, CancellationToken.None).ConfigureAwait(false);
+                await sessionManager.AddMonitoredItemsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -133,12 +133,16 @@ internal class OpcUaClientGraphChangeSender : GraphChangePublisher
         // (existing nodes may have stale data from previous operations)
         if (_configuration.EnableGraphChangePublishing)
         {
-            await WriteInitialPropertyValuesAsync(subject, session, CancellationToken.None).ConfigureAwait(false);
+            await WriteInitialPropertyValuesAsync(subject, session, cancellationToken).ConfigureAwait(false);
         }
     }
 
     /// <inheritdoc />
-    protected override Task OnSubjectRemovedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index)
+    protected override Task OnSubjectRemovedAsync(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject subject,
+        object? index,
+        CancellationToken cancellationToken)
     {
         // Cleanup is handled by SourceOwnershipManager.OnSubjectDetaching callback in OpcUaSubjectClientSource
         return Task.CompletedTask;
@@ -337,7 +341,7 @@ internal class OpcUaClientGraphChangeSender : GraphChangePublisher
         }
 
         string browseName;
-        NodeId actualParentNodeId;
+        NodeId? actualParentNodeId;
 
         if (property.IsSubjectCollection)
         {
@@ -352,8 +356,8 @@ internal class OpcUaClientGraphChangeSender : GraphChangePublisher
             else
             {
                 // Container mode: parent is the container node
-                actualParentNodeId = await TryFindContainerNodeAsync(session, parentNodeId, propertyName, cancellationToken).ConfigureAwait(false);
-                if (NodeId.IsNull(actualParentNodeId))
+                actualParentNodeId = await OpcUaHelper.FindChildNodeIdAsync(session, parentNodeId, propertyName, cancellationToken).ConfigureAwait(false);
+                if (actualParentNodeId is null)
                 {
                     _logger.LogWarning(
                         "Cannot create remote node: container node '{PropertyName}' not found.",
@@ -366,8 +370,8 @@ internal class OpcUaClientGraphChangeSender : GraphChangePublisher
         else if (index is not null)
         {
             // For dictionaries: parent is the container node, browse name is the key
-            actualParentNodeId = await TryFindContainerNodeAsync(session, parentNodeId, propertyName, cancellationToken).ConfigureAwait(false);
-            if (NodeId.IsNull(actualParentNodeId))
+            actualParentNodeId = await OpcUaHelper.FindChildNodeIdAsync(session, parentNodeId, propertyName, cancellationToken).ConfigureAwait(false);
+            if (actualParentNodeId is null)
             {
                 _logger.LogWarning(
                     "Cannot create remote node: container node '{PropertyName}' not found.",
@@ -448,27 +452,6 @@ internal class OpcUaClientGraphChangeSender : GraphChangePublisher
         }
 
         return null;
-    }
-
-    /// <summary>
-    /// Finds a container node for collections/dictionaries.
-    /// </summary>
-    private async Task<NodeId> TryFindContainerNodeAsync(
-        ISession session,
-        NodeId parentNodeId,
-        string containerName,
-        CancellationToken cancellationToken)
-    {
-        var references = await OpcUaHelper.BrowseNodeAsync(session, parentNodeId, cancellationToken).ConfigureAwait(false);
-        foreach (var reference in references)
-        {
-            if (reference.BrowseName.Name == containerName)
-            {
-                return ExpandedNodeId.ToNodeId(reference.NodeId, session.NamespaceUris);
-            }
-        }
-
-        return NodeId.Null;
     }
 
     /// <summary>

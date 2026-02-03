@@ -99,7 +99,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private void RemoveItemsForSubject(IInterceptorSubject subject)
     {
         _structureLock.Wait();
-        NodeId? nodeIdToDelete = null;
+        NodeId? nodeIdToDelete;
         try
         {
             _subjectRegistry.Unregister(subject, out nodeIdToDelete, out _, out var isLast);
@@ -776,7 +776,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                     // Structural properties (IsSubjectReference, IsSubjectCollection, IsSubjectDictionary)
                     // are fully handled here - they don't have NodeIds so PropertyWriter will skip them
                     await graphChangeSender
-                        .ProcessPropertyChangeAsync(change, registeredProperty)
+                        .ProcessPropertyChangeAsync(change, registeredProperty, cancellationToken)
                         .ConfigureAwait(false);
                 }
             }

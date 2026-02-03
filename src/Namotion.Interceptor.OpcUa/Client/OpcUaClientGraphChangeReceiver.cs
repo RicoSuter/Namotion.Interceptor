@@ -52,6 +52,38 @@ internal class OpcUaClientGraphChangeReceiver
     }
 
     /// <summary>
+    /// Loads a subject's children, reads initial values, and adds monitored items if not processing remote changes.
+    /// </summary>
+    private async Task LoadAndMonitorSubjectAsync(
+        IInterceptorSubject subject,
+        ReferenceDescription nodeDetails,
+        ISession session,
+        CancellationToken cancellationToken)
+    {
+        var monitoredItems = await _subjectLoader.LoadSubjectAsync(
+            subject, nodeDetails, session, cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            await _source.ReadAndApplySubjectValuesAsync(subject, session, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Failed to read initial values for subject {Type}.", subject.GetType().Name);
+        }
+
+        if (!_isProcessingRemoteChange && monitoredItems.Count > 0)
+        {
+            var sessionManager = _source.SessionManager;
+            if (sessionManager is not null)
+            {
+                await sessionManager.AddMonitoredItemsAsync(
+                    monitoredItems, session, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    /// <summary>
     /// Clears local state. Note: The subject registry is shared and owned by OpcUaSubjectClientSource.
     /// </summary>
     public void Clear()
@@ -219,12 +251,18 @@ internal class OpcUaClientGraphChangeReceiver
         {
             if (remoteByIndex.TryGetValue(index, out var remoteChild))
             {
-                var newSubject = await _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
-                    property, remoteChild, session, cancellationToken).ConfigureAwait(false);
+                // Capture remoteChild for the factory closure
+                var capturedRemoteChild = remoteChild;
 
-                // Add to collection FIRST - this attaches the subject to the parent
+                // Add to collection using factory pattern - subject only created if validation passes
                 // LoadSubjectAsync will handle registration via TrackSubject
-                if (!_graphChangeApplier.AddToCollection(property, newSubject, _source))
+                var newSubject = await _graphChangeApplier.AddToCollectionAsync(
+                    property,
+                    () => _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
+                        property, capturedRemoteChild, session, cancellationToken),
+                    _source).ConfigureAwait(false);
+
+                if (newSubject is null)
                 {
                     _logger.LogWarning(
                         "Cannot add to collection property '{PropertyName}': value is not a collection.",
@@ -232,24 +270,8 @@ internal class OpcUaClientGraphChangeReceiver
                     continue;
                 }
 
-                // Now load and set up monitoring - subject is now registered
-                var monitoredItems = await _subjectLoader.LoadSubjectAsync(
-                    newSubject, remoteChild, session, cancellationToken).ConfigureAwait(false);
-
-                // Read values first to get the correct current state
-                await _source.ReadAndApplySubjectValuesAsync(newSubject, session, cancellationToken).ConfigureAwait(false);
-
-                // Only add monitored items if not processing a remote change
-                // to avoid stale subscription initial values overwriting the correct values
-                if (!_isProcessingRemoteChange && monitoredItems.Count > 0)
-                {
-                    var sessionManager = _source.SessionManager;
-                    if (sessionManager is not null)
-                    {
-                        await sessionManager.AddMonitoredItemsAsync(
-                            monitoredItems, session, cancellationToken).ConfigureAwait(false);
-                    }
-                }
+                // Load, read initial values, and set up monitoring
+                await LoadAndMonitorSubjectAsync(newSubject, remoteChild, session, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -296,13 +318,15 @@ internal class OpcUaClientGraphChangeReceiver
             return;
         }
 
-        // Create the subject for this node
-        var newSubject = await _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
-            property, nodeDetails, session, cancellationToken).ConfigureAwait(false);
-
-        // Add to collection - this attaches the subject to the parent
+        // Add to collection using factory pattern - subject only created if validation passes
         // LoadSubjectAsync will handle registration via TrackSubject
-        if (!_graphChangeApplier.AddToCollection(property, newSubject, _source))
+        var newSubject = await _graphChangeApplier.AddToCollectionAsync(
+            property,
+            () => _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
+                property, nodeDetails, session, cancellationToken),
+            _source).ConfigureAwait(false);
+
+        if (newSubject is null)
         {
             _logger.LogWarning(
                 "ProcessCollectionItemAddedAsync: Cannot add to collection property '{PropertyName}': value is not a collection.",
@@ -310,23 +334,8 @@ internal class OpcUaClientGraphChangeReceiver
             return;
         }
 
-        // Now load and set up monitoring - subject is now registered
-        var monitoredItems = await _subjectLoader.LoadSubjectAsync(
-            newSubject, nodeDetails, session, cancellationToken).ConfigureAwait(false);
-
-        // Read values first to get the correct current state
-        await _source.ReadAndApplySubjectValuesAsync(newSubject, session, cancellationToken).ConfigureAwait(false);
-
-        // Only add monitored items if not processing a remote change
-        if (!_isProcessingRemoteChange && monitoredItems.Count > 0)
-        {
-            var sessionManager = _source.SessionManager;
-            if (sessionManager is not null)
-            {
-                await sessionManager.AddMonitoredItemsAsync(
-                    monitoredItems, session, cancellationToken).ConfigureAwait(false);
-            }
-        }
+        // Load, read initial values, and set up monitoring
+        await LoadAndMonitorSubjectAsync(newSubject, nodeDetails, session, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -396,12 +405,20 @@ internal class OpcUaClientGraphChangeReceiver
         {
             if (remoteByKey.TryGetValue(key, out var remoteChild))
             {
-                var newSubject = await _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
-                    property, remoteChild, session, cancellationToken).ConfigureAwait(false);
+                // Capture variables for the factory closure
+                var capturedKey = key;
+                var capturedRemoteChild = remoteChild;
 
-                // Add to dictionary FIRST - this attaches the subject to the parent
+                // Add to dictionary using factory pattern - subject only created if validation passes
                 // LoadSubjectAsync will handle registration via TrackSubject
-                if (!_graphChangeApplier.AddToDictionary(property, key, newSubject, _source))
+                var newSubject = await _graphChangeApplier.AddToDictionaryAsync(
+                    property,
+                    capturedKey,
+                    () => _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
+                        property, capturedRemoteChild, session, cancellationToken),
+                    _source).ConfigureAwait(false);
+
+                if (newSubject is null)
                 {
                     _logger.LogWarning(
                         "Cannot add to dictionary property '{PropertyName}': value is not a dictionary.",
@@ -410,24 +427,8 @@ internal class OpcUaClientGraphChangeReceiver
                 }
                 localChildren = property.Children.ToDictionary(c => c.Index?.ToString() ?? "", c => c.Subject);
 
-                // Now load and set up monitoring - subject is now registered
-                var monitoredItems = await _subjectLoader.LoadSubjectAsync(
-                    newSubject, remoteChild, session, cancellationToken).ConfigureAwait(false);
-
-                // Read values first to get the correct current state
-                await _source.ReadAndApplySubjectValuesAsync(newSubject, session, cancellationToken).ConfigureAwait(false);
-
-                // Only add monitored items if not processing a remote change
-                // to avoid stale subscription initial values overwriting the correct values
-                if (!_isProcessingRemoteChange && monitoredItems.Count > 0)
-                {
-                    var sessionManager = _source.SessionManager;
-                    if (sessionManager is not null)
-                    {
-                        await sessionManager.AddMonitoredItemsAsync(
-                            monitoredItems, session, cancellationToken).ConfigureAwait(false);
-                    }
-                }
+                // Load, read initial values, and set up monitoring
+                await LoadAndMonitorSubjectAsync(newSubject, remoteChild, session, cancellationToken).ConfigureAwait(false);
             }
         }
 
@@ -499,44 +500,28 @@ internal class OpcUaClientGraphChangeReceiver
             // Skip re-adding recently deleted items
             if (_configuration.EnableGraphChangePublishing && WasRecentlyDeleted(remoteNodeId!))
             {
-                _graphChangeApplier.SetReference(property, null, _source);
+                _graphChangeApplier.RemoveReference(property, _source);
                 return;
             }
 
-            // Create new subject for the replacement
-            var newSubject = await _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
-                property, referenceNode!, session, cancellationToken).ConfigureAwait(false);
-
-            // Set property value - this replaces the old subject and attaches the new one
+            // Set reference using factory pattern - subject only created if validation passes
             // LoadSubjectAsync will handle registration via TrackSubject
-            _graphChangeApplier.SetReference(property, newSubject, _source);
+            var newSubject = await _graphChangeApplier.SetReferenceAsync(
+                property,
+                () => _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
+                    property, referenceNode!, session, cancellationToken),
+                _source).ConfigureAwait(false);
 
-            // Now load and set up monitoring - subject is now registered
-            var monitoredItems = await _subjectLoader.LoadSubjectAsync(
-                newSubject, referenceNode!, session, cancellationToken).ConfigureAwait(false);
-
-            // Read values first to get the correct current state
-            try
+            if (newSubject is null)
             {
-                await _source.ReadAndApplySubjectValuesAsync(newSubject, session, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to read initial values for replaced reference property '{PropertyName}'.", property.Name);
+                _logger.LogWarning(
+                    "Cannot set reference property '{PropertyName}': value is not a reference.",
+                    property.Name);
+                return;
             }
 
-            // IMPORTANT: Do NOT add monitored items here when processing remote changes.
-            // The subscription's "initial values" arrive asynchronously and would overwrite
-            // the correct values we just read. Future updates will come through ModelChangeEvents.
-            if (!_isProcessingRemoteChange && monitoredItems.Count > 0)
-            {
-                var sessionManager = _source.SessionManager;
-                if (sessionManager is not null)
-                {
-                    await sessionManager.AddMonitoredItemsAsync(
-                        monitoredItems, session, cancellationToken).ConfigureAwait(false);
-                }
-            }
+            // Load, read initial values, and set up monitoring
+            await LoadAndMonitorSubjectAsync(newSubject, referenceNode!, session, cancellationToken).ConfigureAwait(false);
         }
         else if (hasRemoteValue && !hasLocalValue)
         {
@@ -550,38 +535,24 @@ internal class OpcUaClientGraphChangeReceiver
                 }
             }
 
-            // Remote has value but local is null - create local subject
-            var newSubject = await _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
-                property, referenceNode!, session, cancellationToken).ConfigureAwait(false);
-
-            // Set property value FIRST - this attaches the subject to the parent
+            // Set reference using factory pattern - subject only created if validation passes
             // LoadSubjectAsync will handle registration via TrackSubject
-            _graphChangeApplier.SetReference(property, newSubject, _source);
+            var newSubject = await _graphChangeApplier.SetReferenceAsync(
+                property,
+                () => _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
+                    property, referenceNode!, session, cancellationToken),
+                _source).ConfigureAwait(false);
 
-            // Now load and set up monitoring - subject is now registered
-            var monitoredItems = await _subjectLoader.LoadSubjectAsync(
-                newSubject, referenceNode!, session, cancellationToken).ConfigureAwait(false);
-
-            // Read values first to get the correct current state
-            try
+            if (newSubject is null)
             {
-                await _source.ReadAndApplySubjectValuesAsync(newSubject, session, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to read initial values for reference property '{PropertyName}'.", property.Name);
+                _logger.LogWarning(
+                    "Cannot set reference property '{PropertyName}': value is not a reference.",
+                    property.Name);
+                return;
             }
 
-            // IMPORTANT: Do NOT add monitored items here when processing remote changes.
-            if (!_isProcessingRemoteChange && monitoredItems.Count > 0)
-            {
-                var sessionManager = _source.SessionManager;
-                if (sessionManager is not null)
-                {
-                    await sessionManager.AddMonitoredItemsAsync(
-                        monitoredItems, session, cancellationToken).ConfigureAwait(false);
-                }
-            }
+            // Load, read initial values, and set up monitoring
+            await LoadAndMonitorSubjectAsync(newSubject, referenceNode!, session, cancellationToken).ConfigureAwait(false);
         }
         else if (!hasRemoteValue && hasLocalValue)
         {
@@ -590,7 +561,7 @@ internal class OpcUaClientGraphChangeReceiver
             {
                 _subjectRegistry.UnregisterByExternalId(oldNodeId, out _, out _, out _);
             }
-            _graphChangeApplier.SetReference(property, null, _source);
+            _graphChangeApplier.RemoveReference(property, _source);
         }
     }
 
@@ -783,13 +754,27 @@ internal class OpcUaClientGraphChangeReceiver
             return;
         }
 
-        var parentProperty = parents[0].Property;
+        // Remove from ALL parents (node is deleted from address space)
+        // Multi-parent subjects (shared subjects) need to be cleaned up from all parent properties
+        foreach (var parent in parents)
+        {
+            RemoveSubjectFromParent(deletedSubject, parent.Property);
+        }
+    }
 
-        // Determine the type of parent property and remove accordingly
+    /// <summary>
+    /// Removes a subject from a parent property (reference, collection, or dictionary).
+    /// This helper handles all parent property types and is used by ProcessNodeDeleted
+    /// to clean up subjects from all their parents.
+    /// </summary>
+    /// <param name="subject">The subject to remove from the parent.</param>
+    /// <param name="parentProperty">The parent property to remove from.</param>
+    private void RemoveSubjectFromParent(IInterceptorSubject subject, RegisteredSubjectProperty parentProperty)
+    {
         if (parentProperty.IsSubjectReference)
         {
             // Clear the reference property
-            _graphChangeApplier.SetReference(parentProperty, null, _source);
+            _graphChangeApplier.RemoveReference(parentProperty, _source);
         }
         else if (parentProperty.IsSubjectCollection)
         {
@@ -807,7 +792,7 @@ internal class OpcUaClientGraphChangeReceiver
                     continue;
                 }
 
-                if (ReferenceEquals(child.Subject, deletedSubject))
+                if (ReferenceEquals(child.Subject, subject))
                 {
                     removedIndex = idx;
                 }
@@ -817,17 +802,17 @@ internal class OpcUaClientGraphChangeReceiver
                 }
             }
 
-            if (removedIndex is int removedIdx)
+            if (removedIndex is { } removedIdx)
             {
                 if (_graphChangeApplier.RemoveFromCollectionByIndex(parentProperty, removedIdx, _source))
                 {
                     // Update NodeId registrations for items that got reindexed
-                    UpdateCollectionNodeIdRegistrationsAfterRemoval(parentProperty, subjectsToReindex, removedIdx);
+                    UpdateCollectionNodeIdRegistrationsAfterRemoval(subjectsToReindex, removedIdx);
                 }
                 else
                 {
                     _logger.LogWarning(
-                        "ProcessNodeDeleted: Could not remove subject from collection property '{PropertyName}': value is not a collection.",
+                        "RemoveSubjectFromParent: Could not remove subject from collection property '{PropertyName}': value is not a collection.",
                         parentProperty.Name);
                 }
             }
@@ -840,7 +825,7 @@ internal class OpcUaClientGraphChangeReceiver
                 object? keyToRemove = null;
                 foreach (DictionaryEntry entry in dictionary)
                 {
-                    if (ReferenceEquals(entry.Value, deletedSubject))
+                    if (ReferenceEquals(entry.Value, subject))
                     {
                         keyToRemove = entry.Key;
                         break;
@@ -861,7 +846,6 @@ internal class OpcUaClientGraphChangeReceiver
     /// (e.g., [1] becomes [0]). This method updates the client's NodeId tracking to match.
     /// </summary>
     private void UpdateCollectionNodeIdRegistrationsAfterRemoval(
-        RegisteredSubjectProperty property,
         List<(IInterceptorSubject Subject, int OldIndex)> subjectsWithOldIndices,
         int removedIndex)
     {
@@ -1025,7 +1009,11 @@ internal class OpcUaClientGraphChangeReceiver
 
             if (childRefNodeId is not null && childRefNodeId.Equals(childNodeId))
             {
-                _graphChangeApplier.SetReference(property, childSubject, _source);
+                // We already have the subject, use factory that returns it directly
+                await _graphChangeApplier.SetReferenceAsync(
+                    property,
+                    () => Task.FromResult(childSubject),
+                    _source).ConfigureAwait(false);
                 _logger.LogDebug(
                     "ReferenceAdded: Set {ParentType}.{Property} = {ChildType}",
                     trackedSubject.GetType().Name,
@@ -1047,7 +1035,7 @@ internal class OpcUaClientGraphChangeReceiver
             if (refNodeId is null || !refNodeId.Equals(childNodeId))
             {
                 // Reference no longer exists on server - remove it
-                _graphChangeApplier.SetReference(property, null, _source);
+                _graphChangeApplier.RemoveReference(property, _source);
                 _logger.LogDebug(
                     "ReferenceDeleted: Cleared {ParentType}.{Property}",
                     trackedSubject.GetType().Name,
@@ -1150,8 +1138,13 @@ internal class OpcUaClientGraphChangeReceiver
         {
             if (childInContainer is not null)
             {
-                // Add to collection
-                if (_graphChangeApplier.AddToCollection(property, childSubject, _source))
+                // Add to collection - we already have the subject, use factory that returns it directly
+                var addedSubject = await _graphChangeApplier.AddToCollectionAsync(
+                    property,
+                    () => Task.FromResult(childSubject),
+                    _source).ConfigureAwait(false);
+
+                if (addedSubject is not null)
                 {
                     _logger.LogDebug(
                         "ReferenceAdded: Added {ChildType} to collection {ParentType}.{Property}",
@@ -1275,14 +1268,24 @@ internal class OpcUaClientGraphChangeReceiver
             if (childInContainer is not null)
             {
                 var dictionaryKey = childInContainer.BrowseName.Name;
-                if (dictionaryKey is not null && _graphChangeApplier.AddToDictionary(property, dictionaryKey, childSubject, _source))
+                if (dictionaryKey is not null)
                 {
-                    _logger.LogDebug(
-                        "ReferenceAdded: Added {ChildType} to dictionary {ParentType}.{Property}[{Key}]",
-                        childSubject.GetType().Name,
-                        trackedSubject.GetType().Name,
-                        property.Name,
-                        dictionaryKey);
+                    // Add to dictionary - we already have the subject, use factory that returns it directly
+                    var addedSubject = await _graphChangeApplier.AddToDictionaryAsync(
+                        property,
+                        dictionaryKey,
+                        () => Task.FromResult(childSubject),
+                        _source).ConfigureAwait(false);
+
+                    if (addedSubject is not null)
+                    {
+                        _logger.LogDebug(
+                            "ReferenceAdded: Added {ChildType} to dictionary {ParentType}.{Property}[{Key}]",
+                            childSubject.GetType().Name,
+                            trackedSubject.GetType().Name,
+                            property.Name,
+                            dictionaryKey);
+                    }
                 }
             }
         }

@@ -22,14 +22,22 @@ internal class OpcUaServerGraphChangeSender : GraphChangePublisher
     }
 
     /// <inheritdoc />
-    protected override Task OnSubjectAddedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index)
+    protected override Task OnSubjectAddedAsync(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject subject,
+        object? index,
+        CancellationToken cancellationToken)
     {
         _nodeManager.CreateSubjectNode(property, subject, index);
         return Task.CompletedTask;
     }
 
     /// <inheritdoc />
-    protected override Task OnSubjectRemovedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index)
+    protected override Task OnSubjectRemovedAsync(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject subject,
+        object? index,
+        CancellationToken cancellationToken)
     {
         _nodeManager.RemoveSubjectNodes(subject, property);
 
