@@ -9,11 +9,7 @@ public static class OpcUaTestPortPool
 {
     private const int BasePort = 4850;   // Avoid conflict with shared server on 4840
     private const int PoolSize = 100;    // Large pool to avoid port reuse
-#if DEBUG
-    private const int MaxParallel = 10;   // Limit parallel lifecycle tests to reduce resource contention
-#else 
     private const int MaxParallel = 2;   // Limit parallel lifecycle tests to reduce resource contention
-#endif
     private const int AcquisitionTimeoutMs = 15 * 60 * 1000; // 15 minutes
 
     private static readonly SemaphoreSlim Semaphore = new(MaxParallel, MaxParallel);
