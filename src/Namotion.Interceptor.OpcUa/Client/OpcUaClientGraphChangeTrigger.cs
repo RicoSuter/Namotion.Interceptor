@@ -120,7 +120,7 @@ internal class OpcUaClientGraphChangeTrigger : IAsyncDisposable
                 StartNodeId = ObjectIds.Server,
                 AttributeId = Opc.Ua.Attributes.EventNotifier,
                 SamplingInterval = 0,
-                QueueSize = 100,
+                QueueSize = 1_000,
                 DiscardOldest = true,
                 Filter = eventFilter
             };

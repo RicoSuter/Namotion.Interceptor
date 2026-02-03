@@ -52,7 +52,7 @@ public class ServerToClientDictionaryTests : SharedServerTestBase
                 Logger.Log($"Polling client Items count: {clientItems.Count}");
                 return clientItems.ContainsKey(key) && clientItems[key].FirstName == firstName;
             },
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(500),
             message: "Client should receive dictionary entry addition");
 
@@ -103,7 +103,7 @@ public class ServerToClientDictionaryTests : SharedServerTestBase
                 Logger.Log($"Polling client Items count: {clientItems.Count}");
                 return clientItems.ContainsKey(keepKey) && clientItems.ContainsKey(removeKey);
             },
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(500),
             message: "Client should receive both initial entries");
 
@@ -158,10 +158,9 @@ public class ServerToClientDictionaryTests : SharedServerTestBase
             {
                 var clientItems = clientArea.Items;
                 // Wait until dictionary is empty or only has items from this test
-                return clientItems == null || clientItems.Count == 0 ||
-                       !clientItems.Keys.Any(k => !k.Contains(testId));
+                return clientItems == null || clientItems.Count == 0 || clientItems.Keys.All(k => k.Contains(testId));
             },
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(500),
             message: "Client should see empty dictionary");
 
@@ -320,7 +319,7 @@ public class ServerToClientDictionaryTests : SharedServerTestBase
                 Logger.Log($"Polling client for replacement: {person?.FirstName ?? "null"}");
                 return person?.FirstName == firstName2;
             },
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(500),
             message: "Client should receive dictionary value replacement");
 

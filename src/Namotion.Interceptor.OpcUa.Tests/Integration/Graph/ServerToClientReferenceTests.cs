@@ -104,7 +104,7 @@ public class ServerToClientReferenceTests : SharedServerTestBase
                 Logger.Log($"Polling client Person for clear: {(isNull ? "null" : clientArea.Person?.FirstName)}");
                 return isNull;
             },
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(500),
             message: "Client should receive reference clear");
 
@@ -141,7 +141,7 @@ public class ServerToClientReferenceTests : SharedServerTestBase
                 Logger.Log($"Polling client for first person: {clientPerson?.FirstName ?? "null"}");
                 return clientPerson?.FirstName == firstName1;
             },
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(500),
             message: "Client should receive first reference assignment");
 

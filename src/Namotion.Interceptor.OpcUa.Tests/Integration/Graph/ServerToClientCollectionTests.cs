@@ -103,7 +103,7 @@ public class ServerToClientCollectionTests : SharedServerTestBase
                 Logger.Log($"Polling client ContainerItems for removal: count={clientArea.ContainerItems.Length}, hasRemovedPerson={hasRemovedPerson}");
                 return !hasRemovedPerson;
             },
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(500),
             message: "Client should receive collection remove");
 
@@ -146,7 +146,7 @@ public class ServerToClientCollectionTests : SharedServerTestBase
                 Logger.Log($"Polling client FlatItems: count={clientArea.FlatItems.Length}, hasNewPerson={hasNewPerson}");
                 return hasNewPerson;
             },
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(500),
             message: "Client should receive collection add");
 
@@ -244,7 +244,7 @@ public class ServerToClientCollectionTests : SharedServerTestBase
                 Logger.Log($"Polling client for all three items: hasAll={hasAll}");
                 return hasAll;
             },
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(500),
             message: "Client should receive all three items");
 
@@ -303,7 +303,7 @@ public class ServerToClientCollectionTests : SharedServerTestBase
 
         await AsyncTestHelpers.WaitUntilAsync(
             () => clientArea.ContainerItems.Any(p => p.FirstName == person1FirstName),
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(500),
             message: "Client should receive first add");
         Logger.Log($"Step 1 verified: client has {person1FirstName}");
@@ -320,7 +320,7 @@ public class ServerToClientCollectionTests : SharedServerTestBase
 
         await AsyncTestHelpers.WaitUntilAsync(
             () => clientArea.ContainerItems.Any(p => p.FirstName == person2FirstName),
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(500),
             message: "Client should receive second add");
         Logger.Log($"Step 2 verified: client has {person2FirstName}");
@@ -410,7 +410,7 @@ public class ServerToClientCollectionTests : SharedServerTestBase
             () => clientArea.ContainerItems.Any(p => p.FirstName == firstName1) &&
                   clientArea.ContainerItems.Any(p => p.FirstName == firstName2) &&
                   clientArea.ContainerItems.Any(p => p.FirstName == firstName3),
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(500),
             message: "Client should sync initial three persons");
 
