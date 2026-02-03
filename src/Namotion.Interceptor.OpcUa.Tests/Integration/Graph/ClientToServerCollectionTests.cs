@@ -94,8 +94,7 @@ public class ClientToServerCollectionTests : SharedServerTestBase
         var testId = Guid.NewGuid().ToString("N")[..8];
         var firstName = $"ContainerAdd_{testId}";
 
-        var initialServerCount = serverArea.ContainerItems.Length;
-        Logger.Log($"Initial state: server.ContainerItems.Length={initialServerCount}, client.ContainerItems.Length={clientArea.ContainerItems.Length}");
+        Logger.Log($"Initial state: server.ContainerItems.Length={serverArea.ContainerItems.Length}, client.ContainerItems.Length={clientArea.ContainerItems.Length}");
 
         // Act - client adds a person to container collection
         var newPerson = new NestedPerson(Client.Context)
@@ -106,15 +105,13 @@ public class ClientToServerCollectionTests : SharedServerTestBase
         clientArea.ContainerItems = [..clientArea.ContainerItems, newPerson];
         Logger.Log($"Client added person: {newPerson.FirstName} {newPerson.LastName}");
 
-        // Assert - server model should update
+        // Assert - server model should have our specific item (don't check count - other parallel tests may add items)
         await AsyncTestHelpers.WaitUntilAsync(
             () =>
             {
-                var serverCount = serverArea.ContainerItems.Length;
-                if (serverCount != initialServerCount + 1) return false;
-                var lastPerson = serverArea.ContainerItems.LastOrDefault();
-                var result = lastPerson?.FirstName == firstName;
-                Logger.Log($"Polling server ContainerItems: count={serverCount}, lastFirstName={lastPerson?.FirstName ?? "null"}");
+                var serverPerson = serverArea.ContainerItems.FirstOrDefault(p => p.FirstName == firstName);
+                var result = serverPerson != null && serverPerson.LastName == "Person";
+                Logger.Log($"Polling server ContainerItems: count={serverArea.ContainerItems.Length}, found={serverPerson != null}");
                 return result;
             },
             timeout: TimeSpan.FromSeconds(60),
@@ -122,9 +119,8 @@ public class ClientToServerCollectionTests : SharedServerTestBase
             message: "Server should receive client's container collection add with property values");
 
         Logger.Log($"After sync: server.ContainerItems.Length={serverArea.ContainerItems.Length}");
-        Assert.Equal(initialServerCount + 1, serverArea.ContainerItems.Length);
 
-        var serverPerson = serverArea.ContainerItems.LastOrDefault();
+        var serverPerson = serverArea.ContainerItems.FirstOrDefault(p => p.FirstName == firstName);
         Assert.NotNull(serverPerson);
         Assert.Equal(firstName, serverPerson.FirstName);
         Assert.Equal("Person", serverPerson.LastName);
@@ -192,8 +188,7 @@ public class ClientToServerCollectionTests : SharedServerTestBase
         var testId = Guid.NewGuid().ToString("N")[..8];
         var firstName = $"FlatAdd_{testId}";
 
-        var initialServerCount = serverArea.FlatItems.Length;
-        Logger.Log($"Initial state: server.FlatItems.Length={initialServerCount}, client.FlatItems.Length={clientArea.FlatItems.Length}");
+        Logger.Log($"Initial state: server.FlatItems.Length={serverArea.FlatItems.Length}, client.FlatItems.Length={clientArea.FlatItems.Length}");
 
         // Act - client adds a person to flat collection
         var newPerson = new NestedPerson(Client.Context)
@@ -204,15 +199,13 @@ public class ClientToServerCollectionTests : SharedServerTestBase
         clientArea.FlatItems = [..clientArea.FlatItems, newPerson];
         Logger.Log($"Client added person: {newPerson.FirstName} {newPerson.LastName}");
 
-        // Assert - server model should update
+        // Assert - server model should have our specific item (don't check count - other parallel tests may add items)
         await AsyncTestHelpers.WaitUntilAsync(
             () =>
             {
-                var serverCount = serverArea.FlatItems.Length;
-                if (serverCount != initialServerCount + 1) return false;
-                var lastPerson = serverArea.FlatItems.LastOrDefault();
-                var result = lastPerson?.FirstName == firstName;
-                Logger.Log($"Polling server FlatItems: count={serverCount}, lastFirstName={lastPerson?.FirstName ?? "null"}");
+                var serverPerson = serverArea.FlatItems.FirstOrDefault(p => p.FirstName == firstName);
+                var result = serverPerson != null && serverPerson.LastName == "Person";
+                Logger.Log($"Polling server FlatItems: count={serverArea.FlatItems.Length}, found={serverPerson != null}");
                 return result;
             },
             timeout: TimeSpan.FromSeconds(30),
@@ -220,9 +213,8 @@ public class ClientToServerCollectionTests : SharedServerTestBase
             message: "Server should receive client's flat collection add with property values");
 
         Logger.Log($"After sync: server.FlatItems.Length={serverArea.FlatItems.Length}");
-        Assert.Equal(initialServerCount + 1, serverArea.FlatItems.Length);
 
-        var serverPerson = serverArea.FlatItems.LastOrDefault();
+        var serverPerson = serverArea.FlatItems.FirstOrDefault(p => p.FirstName == firstName);
         Assert.NotNull(serverPerson);
         Assert.Equal(firstName, serverPerson.FirstName);
         Assert.Equal("Person", serverPerson.LastName);

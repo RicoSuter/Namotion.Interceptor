@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.OpcUa.Client;
+using Namotion.Interceptor.Testing;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 
@@ -27,7 +28,10 @@ public class OpcUaClientGraphChangeDispatcherTests
         dispatcher.EnqueueModelChange("change2");
 
         // Wait for processing
-        await Task.Delay(100);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => processedChanges.Count == 2,
+            timeout: TimeSpan.FromSeconds(30),
+            message: "Should process both changes");
 
         // Assert
         Assert.Equal(2, processedChanges.Count);
@@ -78,7 +82,10 @@ public class OpcUaClientGraphChangeDispatcherTests
 
         // Act
         dispatcher.EnqueuePeriodicResync();
-        await Task.Delay(100);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => resyncCount == 1,
+            timeout: TimeSpan.FromSeconds(30),
+            message: "Should process periodic resync request");
 
         // Assert
         Assert.Equal(1, resyncCount);
@@ -108,7 +115,10 @@ public class OpcUaClientGraphChangeDispatcherTests
             dispatcher.EnqueueModelChange(i);
         }
 
-        await Task.Delay(200);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => processedOrder.Count == 10,
+            timeout: TimeSpan.FromSeconds(30),
+            message: "Should process all 10 items");
 
         // Assert - should process in FIFO order
         Assert.Equal(10, processedOrder.Count);
@@ -145,7 +155,10 @@ public class OpcUaClientGraphChangeDispatcherTests
         dispatcher.EnqueueModelChange("error");
         dispatcher.EnqueueModelChange("third");
 
-        await Task.Delay(200);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => processedItems.Count == 2,
+            timeout: TimeSpan.FromSeconds(30),
+            message: "Should process first and third items, skipping error");
 
         // Assert - should process first and third, skipping the error
         Assert.Equal(2, processedItems.Count);

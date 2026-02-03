@@ -20,8 +20,8 @@ public class ClientToServerNestedPropertyTests : SharedServerTestBase
     [Fact]
     public async Task ModifyPropertyOnCollectionItem_ServerReceivesChange()
     {
-        var clientArea = Client!.Root!.ClientToServerCollection;
-        var serverArea = ServerFixture.ServerRoot.ClientToServerCollection;
+        var clientArea = Client!.Root!.ClientToServerNestedProperty;
+        var serverArea = ServerFixture.ServerRoot.ClientToServerNestedProperty;
 
         // Use unique test identifier
         var testId = Guid.NewGuid().ToString("N")[..8];
@@ -78,8 +78,8 @@ public class ClientToServerNestedPropertyTests : SharedServerTestBase
     [Fact]
     public async Task ModifyPropertyOnDictionaryItem_ServerReceivesChange()
     {
-        var clientArea = Client!.Root!.ClientToServerDictionary;
-        var serverArea = ServerFixture.ServerRoot.ClientToServerDictionary;
+        var clientArea = Client!.Root!.ClientToServerNestedProperty;
+        var serverArea = ServerFixture.ServerRoot.ClientToServerNestedProperty;
 
         // Use unique test identifier
         var testId = Guid.NewGuid().ToString("N")[..8];
@@ -138,8 +138,8 @@ public class ClientToServerNestedPropertyTests : SharedServerTestBase
     [Fact]
     public async Task ModifyPropertyOnReference_ServerReceivesChange()
     {
-        var clientArea = Client!.Root!.ClientToServerReference;
-        var serverArea = ServerFixture.ServerRoot.ClientToServerReference;
+        var clientArea = Client!.Root!.ClientToServerNestedProperty;
+        var serverArea = ServerFixture.ServerRoot.ClientToServerNestedProperty;
 
         // Use unique test identifier
         var testId = Guid.NewGuid().ToString("N")[..8];

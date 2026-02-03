@@ -191,15 +191,14 @@ public class SharedOpcUaServerFixture : IAsyncLifetime
             }
         };
 
-        // Initialize ServerToClient test areas (structural sync tests - server to client direction)
         root.ServerToClientReference = new ServerToClientReferenceTestArea(context);
         root.ServerToClientCollection = new ServerToClientCollectionTestArea(context);
         root.ServerToClientDictionary = new ServerToClientDictionaryTestArea(context);
-
-        // Initialize ClientToServer test areas (structural sync tests - client to server direction)
+        
         root.ClientToServerReference = new ClientToServerReferenceTestArea(context);
         root.ClientToServerCollection = new ClientToServerCollectionTestArea(context);
         root.ClientToServerDictionary = new ClientToServerDictionaryTestArea(context);
+        root.ClientToServerNestedProperty = new ClientToServerNestedPropertyTestArea(context);
     }
 
     /// <summary>
