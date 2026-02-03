@@ -40,42 +40,28 @@ namespace YourDefaultNamespace
         ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
 
         [JsonIgnore]
-        IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
+        global::System.Collections.Generic.IReadOnlyDictionary<string, global::Namotion.Interceptor.SubjectPropertyMetadata> global::Namotion.Interceptor.IInterceptorSubject.Properties =>
+            _properties ?? global::Namotion.Interceptor.SubjectPropertyMetadataCache.Get<TemperatureSensor>();
 
         [JsonIgnore]
         object IInterceptorSubject.SyncRoot { get; } = new object();
 
-        void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+        void global::Namotion.Interceptor.IInterceptorSubject.AddProperties(params global::System.Collections.Generic.IEnumerable<global::Namotion.Interceptor.SubjectPropertyMetadata> properties)
         {
-            _properties = (_properties ?? DefaultProperties)
-                .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+            _properties = (_properties ?? global::Namotion.Interceptor.SubjectPropertyMetadataCache.Get<TemperatureSensor>())
+                .Concat(properties.Select(p => new global::System.Collections.Generic.KeyValuePair<string, global::Namotion.Interceptor.SubjectPropertyMetadata>(p.Name, p)))
                 .ToFrozenDictionary();
         }
 
-        public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
-            new Dictionary<string, SubjectPropertyMetadata>
-            {
-                {
-                    "Celsius",
-                    new SubjectPropertyMetadata(
-                        typeof(TemperatureSensor).GetProperty(nameof(Celsius), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((TemperatureSensor)o).Celsius,
-                        (o, v) => ((TemperatureSensor)o).Celsius = (double)v,
-                        isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "Fahrenheit",
-                    new SubjectPropertyMetadata(
-                        typeof(global::ITemperatureSensor).GetProperty(nameof(global::ITemperatureSensor.Fahrenheit), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((global::ITemperatureSensor)o).Fahrenheit,
-                        null,
-                        isIntercepted: false,
-                        isDynamic: false)
-                },
-            }
-            .ToFrozenDictionary();
 
+        [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]
+        internal static (global::System.Func<global::Namotion.Interceptor.IInterceptorSubject, object?>?, global::System.Action<global::Namotion.Interceptor.IInterceptorSubject, object?>?)
+            __GetPropertyAccessors(string name) => name switch
+        {
+            "Celsius" => (static o => ((TemperatureSensor)o).Celsius, static (o, v) => ((TemperatureSensor)o).Celsius = (double)v!),
+            "Fahrenheit" => (static o => ((global::ITemperatureSensor)o).Fahrenheit, null),
+            _ => (null, null)
+        };
         public TemperatureSensor()
         {
         }
@@ -87,6 +73,7 @@ namespace YourDefaultNamespace
 
         private double _Celsius;
 
+        [global::Namotion.Interceptor.Attributes.Intercepted]
         public partial double Celsius
         {
             get
