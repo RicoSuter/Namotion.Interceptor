@@ -22,8 +22,7 @@ internal class OpcUaServerNodeCreator
     private readonly IOpcUaNodeMapper _nodeMapper;
     private readonly OpcUaNodeFactory _nodeFactory;
     private readonly OpcUaSubjectServerBackgroundService _source;
-    private readonly ConnectorReferenceCounter<NodeState> _subjectRefCounter;
-    private readonly ConnectorSubjectMapping<NodeId> _subjectMapping;
+    private readonly SubjectConnectorRegistry<NodeId, NodeState> _subjectRegistry;
     private readonly OpcUaServerGraphChangePublisher _modelChangePublisher;
     private readonly ILogger _logger;
 
@@ -32,8 +31,7 @@ internal class OpcUaServerNodeCreator
         OpcUaServerConfiguration configuration,
         OpcUaNodeFactory nodeFactory,
         OpcUaSubjectServerBackgroundService source,
-        ConnectorReferenceCounter<NodeState> subjectRefCounter,
-        ConnectorSubjectMapping<NodeId> subjectMapping,
+        SubjectConnectorRegistry<NodeId, NodeState> subjectRegistry,
         OpcUaServerGraphChangePublisher modelChangePublisher,
         ILogger logger)
     {
@@ -42,8 +40,7 @@ internal class OpcUaServerNodeCreator
         _nodeMapper = configuration.NodeMapper;
         _nodeFactory = nodeFactory;
         _source = source;
-        _subjectRefCounter = subjectRefCounter;
-        _subjectMapping = subjectMapping;
+        _subjectRegistry = subjectRegistry;
         _modelChangePublisher = modelChangePublisher;
         _logger = logger;
     }
@@ -433,23 +430,20 @@ internal class OpcUaServerNodeCreator
     {
         var registeredSubject = subject.TryGetRegisteredSubject() ?? throw new InvalidOperationException("Registered subject not found.");
 
-        var isFirst = _subjectRefCounter.IncrementAndCheckFirst(subject, () =>
-        {
-            // Create new node (only called on first reference, protected by _structureLock)
-            var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
-            var nodeId = _nodeFactory.GetNodeId(_nodeManager, nodeConfiguration, path);
-            var typeDefinitionId = GetTypeDefinitionIdForSubject(subject);
+        // Create new node (only called on first reference, protected by _structureLock)
+        var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
+        var nodeId = _nodeFactory.GetNodeId(_nodeManager, nodeConfiguration, path);
 
+        _subjectRegistry.Register(subject, nodeId, () =>
+        {
+            var typeDefinitionId = GetTypeDefinitionIdForSubject(subject);
             var node = _nodeFactory.CreateObjectNode(_nodeManager, parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId, nodeConfiguration);
             _nodeFactory.AddAdditionalReferences(_nodeManager, node, nodeConfiguration);
             return node;
-        }, out var nodeState);
+        }, out var nodeState, out var isFirstReference);
 
-        if (isFirst)
+        if (isFirstReference)
         {
-            // Register subject with mapping for O(1) bidirectional lookup
-            _subjectMapping.Register(subject, nodeState.NodeId);
-
             // First reference - recursively create child nodes
             CreateSubjectNodes(nodeState.NodeId, registeredSubject, path + PathDelimiter);
 

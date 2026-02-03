@@ -21,14 +21,8 @@ internal class OpcUaClientGraphChangeReceiver
     private readonly ILogger _logger;
     private readonly GraphChangeApplier _graphChangeApplier;
 
-    // Shared mapping between subjects and NodeIds - owned by OpcUaSubjectClientSource
-    private readonly ConnectorSubjectMapping<NodeId> _subjectMapping;
-
-    // Track recently deleted NodeIds to prevent periodic resync from re-adding them
-    // This is needed when EnableGraphChangePublishing is true - the client is the source of truth
-    private readonly Dictionary<NodeId, DateTime> _recentlyDeletedNodeIds = new();
-    private readonly Lock _recentlyDeletedLock = new();
-    private static readonly TimeSpan RecentlyDeletedExpiry = TimeSpan.FromSeconds(30);
+    // Shared registry between subjects and NodeIds - owned by OpcUaSubjectClientSource
+    private readonly OpcUaClientSubjectRegistry _subjectRegistry;
 
     // Track whether we're currently processing a remote ModelChangeEvent.
     // Used to prevent adding monitored items during remote change processing.
@@ -38,19 +32,19 @@ internal class OpcUaClientGraphChangeReceiver
     /// Initializes a new instance of the <see cref="OpcUaClientGraphChangeReceiver"/> class.
     /// </summary>
     /// <param name="source">The OPC UA client source.</param>
-    /// <param name="subjectMapping">The shared subject-to-NodeId mapping.</param>
+    /// <param name="subjectRegistry">The shared subject registry.</param>
     /// <param name="configuration">The client configuration.</param>
     /// <param name="subjectLoader">The subject loader for creating new subjects.</param>
     /// <param name="logger">The logger.</param>
     public OpcUaClientGraphChangeReceiver(
         OpcUaSubjectClientSource source,
-        ConnectorSubjectMapping<NodeId> subjectMapping,
+        OpcUaClientSubjectRegistry subjectRegistry,
         OpcUaClientConfiguration configuration,
         OpcUaSubjectLoader subjectLoader,
         ILogger logger)
     {
         _source = source;
-        _subjectMapping = subjectMapping;
+        _subjectRegistry = subjectRegistry;
         _configuration = configuration;
         _subjectLoader = subjectLoader;
         _logger = logger;
@@ -58,27 +52,11 @@ internal class OpcUaClientGraphChangeReceiver
     }
 
     /// <summary>
-    /// Clears all recently deleted NodeIds tracking.
-    /// Note: The subject mapping is shared and owned by OpcUaSubjectClientSource.
+    /// Clears local state. Note: The subject registry is shared and owned by OpcUaSubjectClientSource.
     /// </summary>
     public void Clear()
     {
-        lock (_recentlyDeletedLock)
-        {
-            _recentlyDeletedNodeIds.Clear();
-        }
-    }
-
-    /// <summary>
-    /// Marks a NodeId as recently deleted to prevent periodic resync from re-adding it.
-    /// </summary>
-    /// <param name="nodeId">The NodeId that was deleted.</param>
-    public void MarkRecentlyDeleted(NodeId nodeId)
-    {
-        lock (_recentlyDeletedLock)
-        {
-            _recentlyDeletedNodeIds[nodeId] = DateTime.UtcNow;
-        }
+        // Nothing to clear - registry is owned by OpcUaSubjectClientSource
     }
 
     /// <summary>
@@ -89,25 +67,7 @@ internal class OpcUaClientGraphChangeReceiver
     /// <returns>True if the NodeId was recently deleted, false otherwise.</returns>
     public bool WasRecentlyDeleted(NodeId nodeId)
     {
-        lock (_recentlyDeletedLock)
-        {
-            // Clean up expired entries
-            var now = DateTime.UtcNow;
-            var expiredKeys = new List<NodeId>();
-            foreach (var (key, deletedAt) in _recentlyDeletedNodeIds)
-            {
-                if (now - deletedAt > RecentlyDeletedExpiry)
-                {
-                    expiredKeys.Add(key);
-                }
-            }
-            foreach (var key in expiredKeys)
-            {
-                _recentlyDeletedNodeIds.Remove(key);
-            }
-
-            return _recentlyDeletedNodeIds.ContainsKey(nodeId);
-        }
+        return _subjectRegistry.WasRecentlyDeleted(nodeId);
     }
 
     /// <summary>
@@ -262,11 +222,8 @@ internal class OpcUaClientGraphChangeReceiver
                 var newSubject = await _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
                     property, remoteChild, session, cancellationToken).ConfigureAwait(false);
 
-                var nodeId = ExpandedNodeId.ToNodeId(remoteChild.NodeId, session.NamespaceUris);
-                _subjectMapping.Register(newSubject, nodeId);
-
-                // Add to collection FIRST - this attaches the subject to the parent which registers it
-                // The subject must be registered before LoadSubjectAsync can set up monitored items
+                // Add to collection FIRST - this attaches the subject to the parent
+                // LoadSubjectAsync will handle registration via TrackSubject
                 if (!_graphChangeApplier.AddToCollection(property, newSubject, _source))
                 {
                     _logger.LogWarning(
@@ -343,9 +300,8 @@ internal class OpcUaClientGraphChangeReceiver
         var newSubject = await _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
             property, nodeDetails, session, cancellationToken).ConfigureAwait(false);
 
-        _subjectMapping.Register(newSubject, nodeId);
-
-        // Add to collection - this attaches the subject to the parent which registers it
+        // Add to collection - this attaches the subject to the parent
+        // LoadSubjectAsync will handle registration via TrackSubject
         if (!_graphChangeApplier.AddToCollection(property, newSubject, _source))
         {
             _logger.LogWarning(
@@ -443,11 +399,8 @@ internal class OpcUaClientGraphChangeReceiver
                 var newSubject = await _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
                     property, remoteChild, session, cancellationToken).ConfigureAwait(false);
 
-                var nodeId = ExpandedNodeId.ToNodeId(remoteChild.NodeId, session.NamespaceUris);
-                _subjectMapping.Register(newSubject, nodeId);
-
-                // Add to dictionary FIRST - this attaches the subject to the parent which registers it
-                // The subject must be registered before LoadSubjectAsync can set up monitored items
+                // Add to dictionary FIRST - this attaches the subject to the parent
+                // LoadSubjectAsync will handle registration via TrackSubject
                 if (!_graphChangeApplier.AddToDictionary(property, key, newSubject, _source))
                 {
                     _logger.LogWarning(
@@ -540,7 +493,7 @@ internal class OpcUaClientGraphChangeReceiver
             // First, unregister the old subject
             if (localNodeId is not null)
             {
-                _subjectMapping.TryUnregisterByExternalId(localNodeId, out _);
+                _subjectRegistry.UnregisterByExternalId(localNodeId, out _, out _, out _);
             }
 
             // Skip re-adding recently deleted items
@@ -554,9 +507,8 @@ internal class OpcUaClientGraphChangeReceiver
             var newSubject = await _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
                 property, referenceNode!, session, cancellationToken).ConfigureAwait(false);
 
-            _subjectMapping.Register(newSubject, remoteNodeId!);
-
             // Set property value - this replaces the old subject and attaches the new one
+            // LoadSubjectAsync will handle registration via TrackSubject
             _graphChangeApplier.SetReference(property, newSubject, _source);
 
             // Now load and set up monitoring - subject is now registered
@@ -602,10 +554,8 @@ internal class OpcUaClientGraphChangeReceiver
             var newSubject = await _configuration.SubjectFactory.CreateSubjectForPropertyAsync(
                 property, referenceNode!, session, cancellationToken).ConfigureAwait(false);
 
-            var nodeId = ExpandedNodeId.ToNodeId(referenceNode!.NodeId, session.NamespaceUris);
-            _subjectMapping.Register(newSubject, nodeId);
-
-            // Set property value FIRST - this attaches the subject to the parent which registers it
+            // Set property value FIRST - this attaches the subject to the parent
+            // LoadSubjectAsync will handle registration via TrackSubject
             _graphChangeApplier.SetReference(property, newSubject, _source);
 
             // Now load and set up monitoring - subject is now registered
@@ -638,7 +588,7 @@ internal class OpcUaClientGraphChangeReceiver
             // Remote has no value but local does - clear local
             if (_source.TryGetSubjectNodeId(localSubject!, out var oldNodeId) && oldNodeId is not null)
             {
-                _subjectMapping.TryUnregisterByExternalId(oldNodeId, out _);
+                _subjectRegistry.UnregisterByExternalId(oldNodeId, out _, out _, out _);
             }
             _graphChangeApplier.SetReference(property, null, _source);
         }
@@ -656,8 +606,6 @@ internal class OpcUaClientGraphChangeReceiver
         _isProcessingRemoteChange = true;
         try
         {
-            // TODO: Do we need to run under _structureSemaphore here? also check other places which operate on nodes/structure whether they are correctly synchronized
-
             foreach (var change in changes)
             {
                 var verb = (ModelChangeStructureVerbMask)change.Verb;
@@ -715,7 +663,7 @@ internal class OpcUaClientGraphChangeReceiver
 
         for (var depth = 0; depth < maxDepth; depth++)
         {
-            if (_subjectMapping.TryGetSubject(currentNodeId, out parentSubject))
+            if (_subjectRegistry.TryGetSubject(currentNodeId, out parentSubject))
             {
                 break;
             }
@@ -811,7 +759,7 @@ internal class OpcUaClientGraphChangeReceiver
 
     private void ProcessNodeDeleted(NodeId nodeId)
     {
-        if (!_subjectMapping.TryUnregisterByExternalId(nodeId, out var deletedSubject) || deletedSubject is null)
+        if (!_subjectRegistry.UnregisterByExternalId(nodeId, out var deletedSubject, out _, out _) || deletedSubject is null)
         {
             _logger.LogDebug("ProcessNodeDeleted: NodeId {NodeId} not found in tracking.", nodeId);
             return;
@@ -927,7 +875,7 @@ internal class OpcUaClientGraphChangeReceiver
 
             var newIndex = oldIndex - 1;
 
-            if (_subjectMapping.TryGetExternalId(subject, out var existingNodeId) && existingNodeId is not null)
+            if (_subjectRegistry.TryGetExternalId(subject, out var existingNodeId) && existingNodeId is not null)
             {
                 // Construct new NodeId by replacing the index in the string representation
                 var existingNodeIdStr = existingNodeId.ToString();
@@ -939,7 +887,7 @@ internal class OpcUaClientGraphChangeReceiver
                     var newNodeId = new NodeId(newNodeIdStr);
 
                     // Update the mapping with the new NodeId (handles both directions atomically)
-                    _subjectMapping.UpdateExternalId(subject, newNodeId);
+                    _subjectRegistry.UpdateExternalId(subject, newNodeId);
                 }
             }
         }
@@ -950,7 +898,7 @@ internal class OpcUaClientGraphChangeReceiver
         _logger.LogDebug("ProcessReferenceAddedAsync: Processing ReferenceAdded for NodeId {NodeId}", childNodeId);
 
         // Only handle if we track this child subject
-        if (!_subjectMapping.TryGetSubject(childNodeId, out var childSubject) || childSubject is null)
+        if (!_subjectRegistry.TryGetSubject(childNodeId, out var childSubject) || childSubject is null)
         {
             _logger.LogDebug("ProcessReferenceAddedAsync: NodeId {NodeId} not found in tracked subjects", childNodeId);
             return;
@@ -976,7 +924,7 @@ internal class OpcUaClientGraphChangeReceiver
         _logger.LogDebug("ProcessReferenceDeleted: Processing ReferenceDeleted for NodeId {NodeId}", childNodeId);
 
         // Only handle if we track this child subject
-        if (!_subjectMapping.TryGetSubject(childNodeId, out var childSubject) || childSubject is null)
+        if (!_subjectRegistry.TryGetSubject(childNodeId, out var childSubject) || childSubject is null)
         {
             _logger.LogDebug("ProcessReferenceDeleted: NodeId {NodeId} not found in tracked subjects", childNodeId);
             return;

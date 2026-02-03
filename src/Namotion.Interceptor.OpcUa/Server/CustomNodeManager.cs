@@ -22,8 +22,7 @@ internal class CustomNodeManager : CustomNodeManager2
     private readonly OpcUaServerGraphChangeReceiver _graphChangeProcessor;
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
-    private readonly ConnectorReferenceCounter<NodeState> _subjectRefCounter = new();
-    private readonly ConnectorSubjectMapping<NodeId> _subjectMapping = new();
+    private readonly SubjectConnectorRegistry<NodeId, NodeState> _subjectRegistry = new();
     private readonly OpcUaServerGraphChangePublisher _modelChangePublisher;
 
     public CustomNodeManager(
@@ -41,14 +40,13 @@ internal class CustomNodeManager : CustomNodeManager2
         _logger = logger;
         _nodeFactory = new OpcUaNodeFactory(logger);
         _modelChangePublisher = new OpcUaServerGraphChangePublisher(logger);
-        _nodeCreator = new OpcUaServerNodeCreator(this, configuration, _nodeFactory, source, _subjectRefCounter, _subjectMapping, _modelChangePublisher, logger);
+        _nodeCreator = new OpcUaServerNodeCreator(this, configuration, _nodeFactory, source, _subjectRegistry, _modelChangePublisher, logger);
 
         var externalNodeValidator = new OpcUaServerExternalNodeValidator(configuration, logger);
         _graphChangeProcessor = new OpcUaServerGraphChangeReceiver(
             _subject,
             _configuration,
-            _subjectRefCounter,
-            _subjectMapping,
+            _subjectRegistry,
             externalNodeValidator,
             FindNodeInAddressSpace,
             CreateSubjectNode,
@@ -82,7 +80,7 @@ internal class CustomNodeManager : CustomNodeManager2
             }
         }
 
-        foreach (var subject in _subjectMapping.GetAllSubjects())
+        foreach (var subject in _subjectRegistry.GetAllSubjects())
         {
             var registeredSubject = subject.TryGetRegisteredSubject();
             if (registeredSubject != null)
@@ -147,11 +145,11 @@ internal class CustomNodeManager : CustomNodeManager2
         _structureLock.Wait();
         try
         {
-            // Get the node state BEFORE decrementing (needed for ReferenceDeleted when not last)
-            _subjectRefCounter.TryGetData(subject, out var existingNodeState);
+            // Get existing node state BEFORE unregistering
+            _subjectRegistry.TryGetData(subject, out var existingNodeState);
 
-            // Decrement reference count and check if this was the last reference
-            var isLast = _subjectRefCounter.DecrementAndCheckLast(subject, out var nodeState);
+            // Unregister and check if last
+            _subjectRegistry.Unregister(subject, out _, out var nodeState, out var isLast);
 
             _logger.LogDebug("RemoveSubjectNodes: subject={SubjectType}, isLast={IsLast}, hasNodeState={HasNodeState}, nodeId={NodeId}",
                 subject.GetType().Name, isLast, nodeState is not null || existingNodeState is not null,
@@ -159,9 +157,6 @@ internal class CustomNodeManager : CustomNodeManager2
 
             if (isLast && nodeState is not null)
             {
-                // Unregister from subject mapping
-                _subjectMapping.Unregister(subject, out _);
-
                 var registeredSubject = subject.TryGetRegisteredSubject();
 
                 // Remove variable nodes for this subject's properties
@@ -228,7 +223,7 @@ internal class CustomNodeManager : CustomNodeManager2
                 : ObjectIds.ObjectsFolder;
             parentNodeState = FindNodeInAddressSpace(rootNodeId);
         }
-        else if (!_subjectRefCounter.TryGetData(parentSubject, out parentNodeState) || parentNodeState is null)
+        else if (!_subjectRegistry.TryGetData(parentSubject, out parentNodeState) || parentNodeState is null)
         {
             _logger.LogDebug(
                 "RemoveReferenceFromParentProperty: Parent subject {ParentType} has no node state",
@@ -394,7 +389,7 @@ internal class CustomNodeManager : CustomNodeManager2
             }
 
             // Look up the parent subject's node
-            if (_subjectRefCounter.TryGetData(parentSubject, out var parentNodeState) && parentNodeState is not null)
+            if (_subjectRegistry.TryGetData(parentSubject, out var parentNodeState) && parentNodeState is not null)
             {
                 // For collection/dictionary items in Container mode, parent is the container node
                 if (isContainerMode)
@@ -456,7 +451,7 @@ internal class CustomNodeManager : CustomNodeManager2
                     ? _configuration.RootName + PathDelimiter
                     : string.Empty;
             }
-            else if (_subjectRefCounter.TryGetData(parentSubject, out var parentNode) && parentNode is not null)
+            else if (_subjectRegistry.TryGetData(parentSubject, out var parentNode) && parentNode is not null)
             {
                 parentPath = parentNode.NodeId.Identifier is string stringId
                     ? stringId + PathDelimiter
@@ -472,7 +467,7 @@ internal class CustomNodeManager : CustomNodeManager2
             for (var i = 0; i < children.Count; i++)
             {
                 var subject = children[i].Subject;
-                if (_subjectRefCounter.TryGetData(subject, out var nodeState) && nodeState is not null)
+                if (_subjectRegistry.TryGetData(subject, out var nodeState) && nodeState is not null)
                 {
                     var newBrowseName = new QualifiedName($"{propertyName}[{i}]", NamespaceIndex);
                     var browseNameChanged = !nodeState.BrowseName.Equals(newBrowseName);
@@ -503,9 +498,8 @@ internal class CustomNodeManager : CustomNodeManager2
                                 predefinedNodes.Remove(oldNodeId);
                                 nodeState.NodeId = newNodeId;
                                 predefinedNodes[newNodeId] = nodeState;
-                                // Note: ref counter doesn't need update - it uses subject as key, not NodeId
-                                // Update the subject mapping for O(1) bidirectional lookup
-                                _subjectMapping.UpdateExternalId(subject, newNodeId);
+                                // Update the registry's external ID mapping for O(1) bidirectional lookup
+                                _subjectRegistry.UpdateExternalId(subject, newNodeId);
                             }
                         }
 
@@ -553,7 +547,7 @@ internal class CustomNodeManager : CustomNodeManager2
                     parentPath = string.Empty;
                 }
             }
-            else if (parentSubject is not null && _subjectRefCounter.TryGetData(parentSubject, out var parentNode) && parentNode is not null)
+            else if (parentSubject is not null && _subjectRegistry.TryGetData(parentSubject, out var parentNode) && parentNode is not null)
             {
                 // Parent subject has an existing node
                 parentNodeId = parentNode.NodeId;
