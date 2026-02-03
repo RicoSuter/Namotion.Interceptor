@@ -253,6 +253,13 @@ public class OpcUaClientConfiguration
     public bool EnableGraphChangeSubscription { get; set; } = false;
 
     /// <summary>
+    /// Gets or sets the queue size for the ModelChangeEvent monitored item.
+    /// Larger values prevent event loss when many structural changes occur in parallel.
+    /// Default is 10000.
+    /// </summary>
+    public uint ModelChangeEventQueueSize { get; set; } = 10_000;
+
+    /// <summary>
     /// Gets or sets whether to enable periodic browsing of the server's graph structure.
     /// When enabled, the client will periodically browse the server's address space
     /// and update the local model to reflect any structural changes.

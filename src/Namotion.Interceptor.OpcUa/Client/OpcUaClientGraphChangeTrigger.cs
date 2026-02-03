@@ -120,7 +120,7 @@ internal class OpcUaClientGraphChangeTrigger : IAsyncDisposable
                 StartNodeId = ObjectIds.Server,
                 AttributeId = Opc.Ua.Attributes.EventNotifier,
                 SamplingInterval = 0,
-                QueueSize = 1_000,
+                QueueSize = _configuration.ModelChangeEventQueueSize,
                 DiscardOldest = true,
                 Filter = eventFilter
             };
@@ -204,15 +204,28 @@ internal class OpcUaClientGraphChangeTrigger : IAsyncDisposable
         var modelChangeItem = _modelChangeEventItem;
         if (modelChangeItem is null)
         {
+            _logger.LogDebug("OnEventNotificationReceived: _modelChangeEventItem is null, ignoring {EventCount} events.", notification.Events.Count);
             return;
         }
 
+        var expectedClientHandle = modelChangeItem.ClientHandle;
+        var matchedCount = 0;
+
         foreach (var eventFields in notification.Events)
         {
-            if (eventFields.ClientHandle == modelChangeItem.ClientHandle)
+            if (eventFields.ClientHandle == expectedClientHandle)
             {
+                matchedCount++;
                 OnModelChangeEventNotification(eventFields);
             }
+        }
+
+        if (matchedCount == 0 && notification.Events.Count > 0)
+        {
+            _logger.LogDebug("OnEventNotificationReceived: Received {EventCount} events but none matched ClientHandle {ExpectedHandle}. Received handles: [{ReceivedHandles}]",
+                notification.Events.Count,
+                expectedClientHandle,
+                string.Join(", ", notification.Events.Select(e => e.ClientHandle)));
         }
     }
 
