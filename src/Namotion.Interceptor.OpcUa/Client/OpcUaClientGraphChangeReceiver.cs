@@ -293,13 +293,22 @@ internal class OpcUaClientGraphChangeReceiver
             }
         }
 
-        // Process removals (indices are already sorted descending, so removing from highest to lowest)
+        // Process removals by subject reference (indices are NodeId indices, not model positions)
         foreach (var index in indicesToRemove)
         {
-            if (!_graphChangeApplier.RemoveFromCollectionByIndex(property, index, _source))
+            if (localByIndex.TryGetValue(index, out var subjectToRemove))
+            {
+                if (!_graphChangeApplier.RemoveFromCollection(property, subjectToRemove, _source))
+                {
+                    _logger.LogWarning(
+                        "Could not remove subject at NodeId index {Index} from collection property '{PropertyName}'.",
+                        index, property.Name);
+                }
+            }
+            else
             {
                 _logger.LogWarning(
-                    "Could not remove subject at index {Index} from collection property '{PropertyName}': value is not a collection.",
+                    "Could not find subject for NodeId index {Index} in collection property '{PropertyName}'.",
                     index, property.Name);
             }
         }
@@ -322,9 +331,23 @@ internal class OpcUaClientGraphChangeReceiver
             return;
         }
 
-        // Check if this index already exists in the local collection
+        // Check if this NodeId index already exists in the local collection
+        // Use actual NodeId indices, not registry list positions (child.Index)
         var localChildren = property.Children.ToList();
-        var localIndices = new HashSet<int>(localChildren.Where(c => c.Index is int).Select(c => (int)c.Index!));
+        var localIndices = new HashSet<int>();
+        foreach (var child in localChildren)
+        {
+            if (child.Subject is not null &&
+                _subjectRegistry.TryGetExternalId(child.Subject, out var childNodeId) &&
+                childNodeId is not null)
+            {
+                var childNodeIdStr = childNodeId.Identifier as string;
+                if (childNodeIdStr is not null && TryParseCollectionIndexFromNodeId(childNodeIdStr, out var nodeIdIndex))
+                {
+                    localIndices.Add(nodeIdIndex);
+                }
+            }
+        }
         if (localIndices.Contains(index))
         {
             return;
@@ -840,7 +863,9 @@ internal class OpcUaClientGraphChangeReceiver
 
             if (removedIndex is { } removedIdx)
             {
-                if (_graphChangeApplier.RemoveFromCollectionByIndex(parentProperty, removedIdx, _source))
+                // Use RemoveFromCollection by subject reference (not by index)
+                // because removedIdx is the NodeId index, not the list position
+                if (_graphChangeApplier.RemoveFromCollection(parentProperty, subject, _source))
                 {
                     // Update NodeId registrations for items that got reindexed
                     UpdateCollectionNodeIdRegistrationsAfterRemoval(subjectsToReindex, removedIdx);
@@ -848,7 +873,7 @@ internal class OpcUaClientGraphChangeReceiver
                 else
                 {
                     _logger.LogWarning(
-                        "RemoveSubjectFromParent: Could not remove subject from collection property '{PropertyName}': value is not a collection.",
+                        "RemoveSubjectFromParent: Could not remove subject from collection property '{PropertyName}'.",
                         parentProperty.Name);
                 }
             }
@@ -935,7 +960,7 @@ internal class OpcUaClientGraphChangeReceiver
         }
 
         var indexStr = nodeIdStr.Substring(lastBracketStart + 1, lastBracketEnd - lastBracketStart - 1);
-        return int.TryParse(indexStr, out index);
+        return int.TryParse(indexStr, out index) && index >= 0;
     }
 
     private async Task ProcessReferenceAddedAsync(NodeId childNodeId, ISession session, CancellationToken cancellationToken)
