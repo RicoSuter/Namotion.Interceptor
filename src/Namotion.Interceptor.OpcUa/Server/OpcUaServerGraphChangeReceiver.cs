@@ -19,8 +19,7 @@ internal class OpcUaServerGraphChangeReceiver
     private readonly IInterceptorSubject _rootSubject;
     private readonly OpcUaServerConfiguration _configuration;
     private readonly IOpcUaNodeMapper _nodeMapper;
-    private readonly ConnectorReferenceCounter<NodeState> _subjectRefCounter;
-    private readonly ConnectorSubjectMapping<NodeId> _subjectMapping;
+    private readonly SubjectConnectorRegistry<NodeId, NodeState> _subjectRegistry;
     private readonly OpcUaServerExternalNodeValidator _externalNodeValidator;
     private readonly Func<NodeId, NodeState?> _findNode;
     private readonly Action<RegisteredSubjectProperty, IInterceptorSubject, object?> _createSubjectNode;
@@ -32,8 +31,7 @@ internal class OpcUaServerGraphChangeReceiver
     public OpcUaServerGraphChangeReceiver(
         IInterceptorSubject rootSubject,
         OpcUaServerConfiguration configuration,
-        ConnectorReferenceCounter<NodeState> subjectRefCounter,
-        ConnectorSubjectMapping<NodeId> subjectMapping,
+        SubjectConnectorRegistry<NodeId, NodeState> subjectRegistry,
         OpcUaServerExternalNodeValidator externalNodeValidator,
         Func<NodeId, NodeState?> findNode,
         Action<RegisteredSubjectProperty, IInterceptorSubject, object?> createSubjectNode,
@@ -44,8 +42,7 @@ internal class OpcUaServerGraphChangeReceiver
         _rootSubject = rootSubject;
         _configuration = configuration;
         _nodeMapper = configuration.NodeMapper;
-        _subjectRefCounter = subjectRefCounter;
-        _subjectMapping = subjectMapping;
+        _subjectRegistry = subjectRegistry;
         _externalNodeValidator = externalNodeValidator;
         _findNode = findNode;
         _createSubjectNode = createSubjectNode;
@@ -122,7 +119,7 @@ internal class OpcUaServerGraphChangeReceiver
         _createSubjectNode(property, subject, index);
 
         // Get the node that was created for this subject
-        if (_subjectRefCounter.TryGetData(subject, out var nodeState) && nodeState is not null)
+        if (_subjectRegistry.TryGetData(subject, out var nodeState) && nodeState is not null)
         {
             // Subject is already tracked in _subjectMapping (registered when node was created)
             _logger.LogInformation(
@@ -148,8 +145,8 @@ internal class OpcUaServerGraphChangeReceiver
             return false;
         }
 
-        // Use O(1) lookup from the shared mapping
-        if (!_subjectMapping.TryGetSubject(nodeId, out var subject) || subject is null)
+        // Use O(1) lookup from the registry
+        if (!_subjectRegistry.TryGetSubject(nodeId, out var subject) || subject is null)
         {
             _logger.LogWarning(
                 "External DeleteNode: No subject found for node '{NodeId}'.",
@@ -173,7 +170,7 @@ internal class OpcUaServerGraphChangeReceiver
     /// </summary>
     public IInterceptorSubject? FindSubjectByNodeId(NodeId nodeId)
     {
-        _subjectMapping.TryGetSubject(nodeId, out var subject);
+        _subjectRegistry.TryGetSubject(nodeId, out var subject);
         return subject;
     }
 
@@ -206,7 +203,7 @@ internal class OpcUaServerGraphChangeReceiver
         // Try to find parent subject using O(1) lookup from mapping
         if (parentSubject is null)
         {
-            _subjectMapping.TryGetSubject(parentNodeId, out parentSubject);
+            _subjectRegistry.TryGetSubject(parentNodeId, out parentSubject);
         }
 
         // If not found, check if parentNodeId is a container node (FolderType)
@@ -247,7 +244,7 @@ internal class OpcUaServerGraphChangeReceiver
                         // Try to find container's parent using O(1) lookup from mapping
                         if (parentSubject is null)
                         {
-                            _subjectMapping.TryGetSubject(containerParentId, out parentSubject);
+                            _subjectRegistry.TryGetSubject(containerParentId, out parentSubject);
                         }
                     }
                 }

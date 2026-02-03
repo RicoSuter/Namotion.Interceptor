@@ -29,8 +29,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private SubjectPropertyWriter? _propertyWriter;
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
-    private readonly ConnectorReferenceCounter<List<MonitoredItem>> _subjectRefCounter = new();
-    private readonly ConnectorSubjectMapping<NodeId> _subjectMapping = new();
+    private readonly OpcUaClientSubjectRegistry _subjectRegistry = new();
 
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private volatile bool _isStarted;
@@ -103,12 +102,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         NodeId? nodeIdToDelete = null;
         try
         {
-            var isLast = _subjectRefCounter.DecrementAndCheckLast(subject, out _);
+            _subjectRegistry.Unregister(subject, out nodeIdToDelete, out _, out var isLast);
 
             if (isLast)
             {
-                _subjectMapping.Unregister(subject, out nodeIdToDelete);
-
                 _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
                 _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
             }
@@ -129,7 +126,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             var isFromThisSource = currentChangeSource is not null && ReferenceEquals(currentChangeSource, this);
             if (!isFromThisSource)
             {
-                _nodeChangeProcessor?.MarkRecentlyDeleted(nodeIdToDelete);
+                // Recently-deleted tracking is handled by _subjectRegistry.Unregister() above
 
                 var session = _sessionManager?.CurrentSession;
                 if (session is not null && session.Connected)
@@ -195,11 +192,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// <returns>True if this is the first reference (caller should create subscriptions), false otherwise.</returns>
     internal bool TrackSubject(IInterceptorSubject subject, NodeId nodeId, Func<List<MonitoredItem>> monitoredItemsFactory)
     {
-        var isFirst = _subjectRefCounter.IncrementAndCheckFirst(subject, monitoredItemsFactory, out _);
-        if (isFirst)
-        {
-            _subjectMapping.Register(subject, nodeId);
-        }
+        _subjectRegistry.Register(subject, nodeId, monitoredItemsFactory, out _, out var isFirst);
         return isFirst;
     }
 
@@ -211,7 +204,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// <returns>True if the subject is tracked, false otherwise.</returns>
     internal bool TryGetSubjectNodeId(IInterceptorSubject subject, out NodeId? nodeId)
     {
-        return _subjectMapping.TryGetExternalId(subject, out nodeId);
+        return _subjectRegistry.TryGetExternalId(subject, out nodeId);
     }
 
     /// <summary>
@@ -222,7 +215,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// <param name="newNodeId">The new NodeId.</param>
     internal void SetSubjectNodeId(IInterceptorSubject subject, NodeId newNodeId)
     {
-        _subjectMapping.UpdateExternalId(subject, newNodeId);
+        _subjectRegistry.UpdateExternalId(subject, newNodeId);
     }
 
     /// <summary>
@@ -233,7 +226,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// <returns>True if the subject is tracked, false otherwise.</returns>
     internal bool TryGetSubjectMonitoredItems(IInterceptorSubject subject, out List<MonitoredItem>? monitoredItems)
     {
-        return _subjectRefCounter.TryGetData(subject, out monitoredItems);
+        return _subjectRegistry.TryGetData(subject, out monitoredItems);
     }
 
     /// <summary>
@@ -243,10 +236,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// <param name="monitoredItem">The monitored item to add.</param>
     internal void AddMonitoredItemToSubject(IInterceptorSubject subject, MonitoredItem monitoredItem)
     {
-        if (_subjectRefCounter.TryGetData(subject, out var monitoredItems) && monitoredItems is not null)
-        {
-            monitoredItems.Add(monitoredItem);
-        }
+        _subjectRegistry.ModifyData(subject, monitoredItems => monitoredItems.Add(monitoredItem));
     }
 
     /// <summary>
@@ -256,7 +246,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// <returns>True if the subject is tracked, false otherwise.</returns>
     internal bool IsSubjectTracked(IInterceptorSubject subject)
     {
-        return _subjectRefCounter.TryGetData(subject, out _);
+        return _subjectRegistry.IsRegistered(subject);
     }
 
     /// <summary>
@@ -265,7 +255,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// <returns>All tracked subjects.</returns>
     internal IEnumerable<IInterceptorSubject> GetTrackedSubjects()
     {
-        return _subjectMapping.GetAllSubjects();
+        return _subjectRegistry.GetAllSubjects();
     }
 
     public OpcUaSubjectClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger logger)
@@ -362,7 +352,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         {
             _nodeChangeProcessor = new OpcUaClientGraphChangeReceiver(
                 this,
-                _subjectMapping,
+                _subjectRegistry,
                 _configuration,
                 _subjectLoader,
                 _logger);
@@ -866,8 +856,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             property.RemovePropertyData(OpcUaNodeIdKey);
         }
 
-        // Clear reference counter and NodeId mapping for fresh resync
-        _subjectRefCounter.Clear();
-        _subjectMapping.Clear();
+        // Clear registry for fresh resync
+        _subjectRegistry.Clear();
     }
 }
