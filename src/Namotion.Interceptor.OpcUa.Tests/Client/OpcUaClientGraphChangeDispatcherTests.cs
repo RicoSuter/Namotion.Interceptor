@@ -14,8 +14,11 @@ public class OpcUaClientGraphChangeDispatcherTests
         // Arrange
         var processedChanges = new List<object>();
         await using var dispatcher = new OpcUaClientGraphChangeDispatcher(
-            NullLogger.Instance,
-            async (change, cancellationToken) => processedChanges.Add(change));
+            NullLogger.Instance, (change, _) =>
+            {
+                processedChanges.Add(change);
+                return Task.CompletedTask;
+            });
 
         dispatcher.Start();
 
@@ -39,7 +42,7 @@ public class OpcUaClientGraphChangeDispatcherTests
         var processedCount = 0;
         await using var dispatcher = new OpcUaClientGraphChangeDispatcher(
             NullLogger.Instance,
-            async (change, cancellationToken) =>
+            async (_, cancellationToken) =>
             {
                 await Task.Delay(10, cancellationToken);
                 Interlocked.Increment(ref processedCount);
@@ -61,13 +64,14 @@ public class OpcUaClientGraphChangeDispatcherTests
         // Arrange
         var resyncCount = 0;
         await using var dispatcher = new OpcUaClientGraphChangeDispatcher(
-            NullLogger.Instance,
-            async (change, cancellationToken) =>
+            NullLogger.Instance, (change, _) =>
             {
                 if (change is OpcUaClientGraphChangeDispatcher.PeriodicResyncRequest)
                 {
                     Interlocked.Increment(ref resyncCount);
                 }
+
+                return Task.CompletedTask;
             });
 
         dispatcher.Start();
@@ -86,13 +90,14 @@ public class OpcUaClientGraphChangeDispatcherTests
         // Arrange
         var processedOrder = new List<int>();
         await using var dispatcher = new OpcUaClientGraphChangeDispatcher(
-            NullLogger.Instance,
-            async (change, cancellationToken) =>
+            NullLogger.Instance, (change, _) =>
             {
                 if (change is int value)
                 {
                     processedOrder.Add(value);
                 }
+
+                return Task.CompletedTask;
             });
 
         dispatcher.Start();
@@ -119,8 +124,7 @@ public class OpcUaClientGraphChangeDispatcherTests
         // Arrange
         var processedItems = new List<string>();
         await using var dispatcher = new OpcUaClientGraphChangeDispatcher(
-            NullLogger.Instance,
-            async (change, cancellationToken) =>
+            NullLogger.Instance, (change, _) =>
             {
                 if (change is string str)
                 {
@@ -130,6 +134,8 @@ public class OpcUaClientGraphChangeDispatcherTests
                     }
                     processedItems.Add(str);
                 }
+
+                return Task.CompletedTask;
             });
 
         dispatcher.Start();
@@ -153,10 +159,10 @@ public class OpcUaClientGraphChangeDispatcherTests
         // Arrange
         var processedCount = 0;
         var dispatcher = new OpcUaClientGraphChangeDispatcher(
-            NullLogger.Instance,
-            async (change, cancellationToken) =>
+            NullLogger.Instance, (_, _) =>
             {
                 Interlocked.Increment(ref processedCount);
+                return Task.CompletedTask;
             });
 
         dispatcher.Start();

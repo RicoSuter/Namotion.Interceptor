@@ -9,6 +9,7 @@ namespace Namotion.Interceptor.Connectors.Tests;
 /// <summary>
 /// Tests for GraphChangeApplier - the symmetric counterpart to GraphChangePublisher.
 /// Verifies correct application of external changes to collections, dictionaries, and references.
+/// Uses factory pattern for add operations to avoid creating subjects when validation fails.
 /// </summary>
 public class GraphChangeApplierTests
 {
@@ -17,7 +18,7 @@ public class GraphChangeApplierTests
     #region Collection Tests
 
     [Fact]
-    public void AddToCollection_WithValidCollection_AddsSubject()
+    public async Task AddToCollectionAsync_WithValidCollection_AddsSubject()
     {
         // Arrange
         var applier = new GraphChangeApplier();
@@ -29,35 +30,40 @@ public class GraphChangeApplierTests
         var property = registered.Properties.First(p => p.Name == nameof(CycleTestNode.Items));
 
         // Act
-        var result = applier.AddToCollection(property, child, _testSource);
+        var result = await applier.AddToCollectionAsync(property, () => Task.FromResult<IInterceptorSubject>(child), _testSource);
 
         // Assert
-        Assert.True(result);
+        Assert.Same(child, result);
         Assert.Single(parent.Items);
         Assert.Same(child, parent.Items[0]);
     }
 
     [Fact]
-    public void AddToCollection_WithNonCollectionProperty_ReturnsFalse()
+    public async Task AddToCollectionAsync_WithNonCollectionProperty_ReturnsNull()
     {
         // Arrange
         var applier = new GraphChangeApplier();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new CycleTestNode(context);
         var child = new CycleTestNode(context);
+        var factoryCalled = false;
 
         var registered = parent.TryGetRegisteredSubject()!;
         var property = registered.Properties.First(p => p.Name == nameof(CycleTestNode.Name));
 
         // Act
-        var result = applier.AddToCollection(property, child, _testSource);
+        var result = await applier.AddToCollectionAsync(
+            property,
+            () => { factoryCalled = true; return Task.FromResult<IInterceptorSubject>(child); },
+            _testSource);
 
         // Assert
-        Assert.False(result);
+        Assert.Null(result);
+        Assert.False(factoryCalled); // Factory should NOT be called when validation fails
     }
 
     [Fact]
-    public void AddToCollection_AppendsMultipleSubjects()
+    public async Task AddToCollectionAsync_AppendsMultipleSubjects()
     {
         // Arrange
         var applier = new GraphChangeApplier();
@@ -70,8 +76,8 @@ public class GraphChangeApplierTests
         var property = registered.Properties.First(p => p.Name == nameof(CycleTestNode.Items));
 
         // Act
-        applier.AddToCollection(property, child1, _testSource);
-        applier.AddToCollection(property, child2, _testSource);
+        await applier.AddToCollectionAsync(property, () => Task.FromResult<IInterceptorSubject>(child1), _testSource);
+        await applier.AddToCollectionAsync(property, () => Task.FromResult<IInterceptorSubject>(child2), _testSource);
 
         // Assert
         Assert.Equal(2, parent.Items.Count);
@@ -196,7 +202,7 @@ public class GraphChangeApplierTests
     #region Dictionary Tests
 
     [Fact]
-    public void AddToDictionary_WithValidDictionary_AddsEntry()
+    public async Task AddToDictionaryAsync_WithValidDictionary_AddsEntry()
     {
         // Arrange
         var applier = new GraphChangeApplier();
@@ -208,35 +214,41 @@ public class GraphChangeApplierTests
         var property = registered.Properties.First(p => p.Name == nameof(CycleTestNode.Lookup));
 
         // Act
-        var result = applier.AddToDictionary(property, "key1", child, _testSource);
+        var result = await applier.AddToDictionaryAsync(property, "key1", () => Task.FromResult<IInterceptorSubject>(child), _testSource);
 
         // Assert
-        Assert.True(result);
+        Assert.Same(child, result);
         Assert.Single(parent.Lookup);
         Assert.Same(child, parent.Lookup["key1"]);
     }
 
     [Fact]
-    public void AddToDictionary_WithNonDictionaryProperty_ReturnsFalse()
+    public async Task AddToDictionaryAsync_WithNonDictionaryProperty_ReturnsNull()
     {
         // Arrange
         var applier = new GraphChangeApplier();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new CycleTestNode(context);
         var child = new CycleTestNode(context);
+        var factoryCalled = false;
 
         var registered = parent.TryGetRegisteredSubject()!;
         var property = registered.Properties.First(p => p.Name == nameof(CycleTestNode.Name));
 
         // Act
-        var result = applier.AddToDictionary(property, "key1", child, _testSource);
+        var result = await applier.AddToDictionaryAsync(
+            property,
+            "key1",
+            () => { factoryCalled = true; return Task.FromResult<IInterceptorSubject>(child); },
+            _testSource);
 
         // Assert
-        Assert.False(result);
+        Assert.Null(result);
+        Assert.False(factoryCalled); // Factory should NOT be called when validation fails
     }
 
     [Fact]
-    public void AddToDictionary_AddsMultipleEntries()
+    public async Task AddToDictionaryAsync_AddsMultipleEntries()
     {
         // Arrange
         var applier = new GraphChangeApplier();
@@ -249,8 +261,8 @@ public class GraphChangeApplierTests
         var property = registered.Properties.First(p => p.Name == nameof(CycleTestNode.Lookup));
 
         // Act
-        applier.AddToDictionary(property, "key1", child1, _testSource);
-        applier.AddToDictionary(property, "key2", child2, _testSource);
+        await applier.AddToDictionaryAsync(property, "key1", () => Task.FromResult<IInterceptorSubject>(child1), _testSource);
+        await applier.AddToDictionaryAsync(property, "key2", () => Task.FromResult<IInterceptorSubject>(child2), _testSource);
 
         // Assert
         Assert.Equal(2, parent.Lookup.Count);
@@ -333,7 +345,7 @@ public class GraphChangeApplierTests
     #region Reference Tests
 
     [Fact]
-    public void SetReference_WithValidReferenceProperty_SetsSubject()
+    public async Task SetReferenceAsync_WithValidReferenceProperty_SetsSubject()
     {
         // Arrange
         var applier = new GraphChangeApplier();
@@ -345,15 +357,15 @@ public class GraphChangeApplierTests
         var property = registered.Properties.First(p => p.Name == nameof(CycleTestNode.Child));
 
         // Act
-        var result = applier.SetReference(property, child, _testSource);
+        var result = await applier.SetReferenceAsync(property, () => Task.FromResult<IInterceptorSubject>(child), _testSource);
 
         // Assert
-        Assert.True(result);
+        Assert.Same(child, result);
         Assert.Same(child, parent.Child);
     }
 
     [Fact]
-    public void SetReference_WithNull_ClearsReference()
+    public void RemoveReference_ClearsReference()
     {
         // Arrange
         var applier = new GraphChangeApplier();
@@ -366,7 +378,7 @@ public class GraphChangeApplierTests
         var property = registered.Properties.First(p => p.Name == nameof(CycleTestNode.Child));
 
         // Act
-        var result = applier.SetReference(property, null, _testSource);
+        var result = applier.RemoveReference(property, _testSource);
 
         // Assert
         Assert.True(result);
@@ -374,26 +386,31 @@ public class GraphChangeApplierTests
     }
 
     [Fact]
-    public void SetReference_WithNonReferenceProperty_ReturnsFalse()
+    public async Task SetReferenceAsync_WithNonReferenceProperty_ReturnsNull()
     {
         // Arrange
         var applier = new GraphChangeApplier();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new CycleTestNode(context);
         var child = new CycleTestNode(context);
+        var factoryCalled = false;
 
         var registered = parent.TryGetRegisteredSubject()!;
         var property = registered.Properties.First(p => p.Name == nameof(CycleTestNode.Name));
 
         // Act
-        var result = applier.SetReference(property, child, _testSource);
+        var result = await applier.SetReferenceAsync(
+            property,
+            () => { factoryCalled = true; return Task.FromResult<IInterceptorSubject>(child); },
+            _testSource);
 
         // Assert
-        Assert.False(result);
+        Assert.Null(result);
+        Assert.False(factoryCalled); // Factory should NOT be called when validation fails
     }
 
     [Fact]
-    public void SetReference_ReplacesExistingReference()
+    public async Task SetReferenceAsync_ReplacesExistingReference()
     {
         // Arrange
         var applier = new GraphChangeApplier();
@@ -407,46 +424,74 @@ public class GraphChangeApplierTests
         var property = registered.Properties.First(p => p.Name == nameof(CycleTestNode.Child));
 
         // Act
-        var result = applier.SetReference(property, child2, _testSource);
+        var result = await applier.SetReferenceAsync(property, () => Task.FromResult<IInterceptorSubject>(child2), _testSource);
 
         // Assert
-        Assert.True(result);
+        Assert.Same(child2, result);
         Assert.Same(child2, parent.Child);
     }
 
     [Fact]
-    public void SetReference_WithCollectionProperty_ReturnsFalse()
+    public async Task SetReferenceAsync_WithCollectionProperty_ReturnsNull()
     {
         // Arrange
         var applier = new GraphChangeApplier();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new CycleTestNode(context);
         var child = new CycleTestNode(context);
+        var factoryCalled = false;
 
         var registered = parent.TryGetRegisteredSubject()!;
         var property = registered.Properties.First(p => p.Name == nameof(CycleTestNode.Items));
 
         // Act
-        var result = applier.SetReference(property, child, _testSource);
+        var result = await applier.SetReferenceAsync(
+            property,
+            () => { factoryCalled = true; return Task.FromResult<IInterceptorSubject>(child); },
+            _testSource);
 
         // Assert
-        Assert.False(result);
+        Assert.Null(result);
+        Assert.False(factoryCalled);
     }
 
     [Fact]
-    public void SetReference_WithDictionaryProperty_ReturnsFalse()
+    public async Task SetReferenceAsync_WithDictionaryProperty_ReturnsNull()
     {
         // Arrange
         var applier = new GraphChangeApplier();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new CycleTestNode(context);
         var child = new CycleTestNode(context);
+        var factoryCalled = false;
 
         var registered = parent.TryGetRegisteredSubject()!;
         var property = registered.Properties.First(p => p.Name == nameof(CycleTestNode.Lookup));
 
         // Act
-        var result = applier.SetReference(property, child, _testSource);
+        var result = await applier.SetReferenceAsync(
+            property,
+            () => { factoryCalled = true; return Task.FromResult<IInterceptorSubject>(child); },
+            _testSource);
+
+        // Assert
+        Assert.Null(result);
+        Assert.False(factoryCalled);
+    }
+
+    [Fact]
+    public void RemoveReference_WithNonReferenceProperty_ReturnsFalse()
+    {
+        // Arrange
+        var applier = new GraphChangeApplier();
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var parent = new CycleTestNode(context);
+
+        var registered = parent.TryGetRegisteredSubject()!;
+        var property = registered.Properties.First(p => p.Name == nameof(CycleTestNode.Name));
+
+        // Act
+        var result = applier.RemoveReference(property, _testSource);
 
         // Assert
         Assert.False(result);
@@ -457,7 +502,7 @@ public class GraphChangeApplierTests
     #region Source Parameter Tests
 
     [Fact]
-    public void AddToCollection_UsesSourceForLoopPrevention()
+    public async Task AddToCollectionAsync_UsesSourceForLoopPrevention()
     {
         // Arrange
         var applier = new GraphChangeApplier();
@@ -477,7 +522,7 @@ public class GraphChangeApplierTests
             .Subscribe(change => changes.Add(change));
 
         // Act
-        applier.AddToCollection(property, child, customSource);
+        await applier.AddToCollectionAsync(property, () => Task.FromResult<IInterceptorSubject>(child), customSource);
 
         // Assert
         Assert.NotEmpty(changes);
@@ -486,7 +531,7 @@ public class GraphChangeApplierTests
     }
 
     [Fact]
-    public void SetReference_UsesSourceForLoopPrevention()
+    public async Task SetReferenceAsync_UsesSourceForLoopPrevention()
     {
         // Arrange
         var applier = new GraphChangeApplier();
@@ -506,7 +551,7 @@ public class GraphChangeApplierTests
             .Subscribe(change => changes.Add(change));
 
         // Act
-        applier.SetReference(property, child, customSource);
+        await applier.SetReferenceAsync(property, () => Task.FromResult<IInterceptorSubject>(child), customSource);
 
         // Assert
         Assert.NotEmpty(changes);
@@ -519,7 +564,7 @@ public class GraphChangeApplierTests
     #region Custom SubjectFactory Tests
 
     [Fact]
-    public void Constructor_WithCustomSubjectFactory_UsesCustomFactory()
+    public async Task Constructor_WithCustomSubjectFactory_UsesCustomFactory()
     {
         // Arrange
         var customFactory = new DefaultSubjectFactory();
@@ -532,18 +577,18 @@ public class GraphChangeApplierTests
         var property = registered.Properties.First(p => p.Name == nameof(CycleTestNode.Items));
 
         // Act
-        var result = applier.AddToCollection(property, child, _testSource);
+        var result = await applier.AddToCollectionAsync(property, () => Task.FromResult<IInterceptorSubject>(child), _testSource);
 
         // Assert
-        Assert.True(result);
+        Assert.NotNull(result);
         Assert.Single(parent.Items);
     }
 
     [Fact]
-    public void Constructor_WithNullSubjectFactory_UsesDefaultFactory()
+    public async Task Constructor_WithNullSubjectFactory_UsesDefaultFactory()
     {
         // Arrange
-        var applier = new GraphChangeApplier(null);
+        var applier = new GraphChangeApplier();
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var parent = new CycleTestNode(context);
         var child = new CycleTestNode(context);
@@ -552,11 +597,100 @@ public class GraphChangeApplierTests
         var property = registered.Properties.First(p => p.Name == nameof(CycleTestNode.Items));
 
         // Act
-        var result = applier.AddToCollection(property, child, _testSource);
+        var result = await applier.AddToCollectionAsync(property, () => Task.FromResult<IInterceptorSubject>(child), _testSource);
 
         // Assert
-        Assert.True(result);
+        Assert.NotNull(result);
         Assert.Single(parent.Items);
+    }
+
+    #endregion
+
+    #region Factory Pattern Tests
+
+    [Fact]
+    public async Task AddToCollectionAsync_FactoryNotCalledWhenValidationFails()
+    {
+        // Arrange
+        var applier = new GraphChangeApplier();
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var parent = new CycleTestNode(context);
+        var factoryCallCount = 0;
+
+        var registered = parent.TryGetRegisteredSubject()!;
+        // Use a non-collection property to trigger validation failure
+        var property = registered.Properties.First(p => p.Name == nameof(CycleTestNode.Name));
+
+        // Act
+        var result = await applier.AddToCollectionAsync(
+            property,
+            () =>
+            {
+                factoryCallCount++;
+                return Task.FromResult<IInterceptorSubject>(new CycleTestNode(context));
+            },
+            _testSource);
+
+        // Assert
+        Assert.Null(result);
+        Assert.Equal(0, factoryCallCount); // Factory should never be called
+    }
+
+    [Fact]
+    public async Task AddToDictionaryAsync_FactoryNotCalledWhenValidationFails()
+    {
+        // Arrange
+        var applier = new GraphChangeApplier();
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var parent = new CycleTestNode(context);
+        var factoryCallCount = 0;
+
+        var registered = parent.TryGetRegisteredSubject()!;
+        // Use a non-dictionary property to trigger validation failure
+        var property = registered.Properties.First(p => p.Name == nameof(CycleTestNode.Name));
+
+        // Act
+        var result = await applier.AddToDictionaryAsync(
+            property,
+            "key",
+            () =>
+            {
+                factoryCallCount++;
+                return Task.FromResult<IInterceptorSubject>(new CycleTestNode(context));
+            },
+            _testSource);
+
+        // Assert
+        Assert.Null(result);
+        Assert.Equal(0, factoryCallCount); // Factory should never be called
+    }
+
+    [Fact]
+    public async Task SetReferenceAsync_FactoryNotCalledWhenValidationFails()
+    {
+        // Arrange
+        var applier = new GraphChangeApplier();
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var parent = new CycleTestNode(context);
+        var factoryCallCount = 0;
+
+        var registered = parent.TryGetRegisteredSubject()!;
+        // Use a non-reference property to trigger validation failure
+        var property = registered.Properties.First(p => p.Name == nameof(CycleTestNode.Name));
+
+        // Act
+        var result = await applier.SetReferenceAsync(
+            property,
+            () =>
+            {
+                factoryCallCount++;
+                return Task.FromResult<IInterceptorSubject>(new CycleTestNode(context));
+            },
+            _testSource);
+
+        // Assert
+        Assert.Null(result);
+        Assert.Equal(0, factoryCallCount); // Factory should never be called
     }
 
     #endregion

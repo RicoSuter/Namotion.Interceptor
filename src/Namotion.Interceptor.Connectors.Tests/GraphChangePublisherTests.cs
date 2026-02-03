@@ -24,7 +24,7 @@ public class GraphChangePublisherTests
         var registered = parent.TryGetRegisteredSubject()!;
         var property = registered.Properties.First(p => p.Name == nameof(Person.Father));
 
-        var change = SubjectPropertyChange.Create<Person?>(
+        var change = SubjectPropertyChange.Create(
             property.Reference,
             source: null,
             changedTimestamp: DateTimeOffset.UtcNow,
@@ -53,7 +53,7 @@ public class GraphChangePublisherTests
         var registered = parent.TryGetRegisteredSubject()!;
         var property = registered.Properties.First(p => p.Name == nameof(Person.Father));
 
-        var change = SubjectPropertyChange.Create<Person?>(
+        var change = SubjectPropertyChange.Create(
             property.Reference,
             source: null,
             changedTimestamp: DateTimeOffset.UtcNow,
@@ -172,10 +172,9 @@ public class GraphChangePublisherTests
         var registered = parent.TryGetRegisteredSubject()!;
         var property = registered.Properties.First(p => p.Name == nameof(CycleTestNode.Items));
 
-        var oldCollection = Array.Empty<IInterceptorSubject>();
         var newCollection = new List<CycleTestNode> { child1, child2 };
 
-        var change = SubjectPropertyChange.Create<List<CycleTestNode>>(
+        var change = SubjectPropertyChange.Create(
             property.Reference,
             source: null,
             changedTimestamp: DateTimeOffset.UtcNow,
@@ -210,7 +209,7 @@ public class GraphChangePublisherTests
         var oldCollection = new List<CycleTestNode> { child1, child2, child3 };
         var newCollection = new List<CycleTestNode> { child1 };
 
-        var change = SubjectPropertyChange.Create<List<CycleTestNode>>(
+        var change = SubjectPropertyChange.Create(
             property.Reference,
             source: null,
             changedTimestamp: DateTimeOffset.UtcNow,
@@ -247,7 +246,7 @@ public class GraphChangePublisherTests
         var oldCollection = new List<CycleTestNode> { child1, child2 };
         var newCollection = new List<CycleTestNode> { child1, child3 };
 
-        var change = SubjectPropertyChange.Create<List<CycleTestNode>>(
+        var change = SubjectPropertyChange.Create(
             property.Reference,
             source: null,
             changedTimestamp: DateTimeOffset.UtcNow,
@@ -283,7 +282,7 @@ public class GraphChangePublisherTests
         var oldCollection = new List<CycleTestNode> { child1, child2 };
         var newCollection = new List<CycleTestNode>();
 
-        var change = SubjectPropertyChange.Create<List<CycleTestNode>>(
+        var change = SubjectPropertyChange.Create(
             property.Reference,
             source: null,
             changedTimestamp: DateTimeOffset.UtcNow,
@@ -317,7 +316,7 @@ public class GraphChangePublisherTests
         var newCollection = new List<CycleTestNode> { child1, child2 };
 
         // Create change with null old value (simulating null -> populated)
-        var change = SubjectPropertyChange.Create<List<CycleTestNode>?>(
+        var change = SubjectPropertyChange.Create(
             property.Reference,
             source: null,
             changedTimestamp: DateTimeOffset.UtcNow,
@@ -360,7 +359,7 @@ public class GraphChangePublisherTests
             ["key2"] = child2
         };
 
-        var change = SubjectPropertyChange.Create<Dictionary<string, CycleTestNode>>(
+        var change = SubjectPropertyChange.Create(
             property.Reference,
             source: null,
             changedTimestamp: DateTimeOffset.UtcNow,
@@ -407,7 +406,7 @@ public class GraphChangePublisherTests
             ["key1"] = child1
         };
 
-        var change = SubjectPropertyChange.Create<Dictionary<string, CycleTestNode>>(
+        var change = SubjectPropertyChange.Create(
             property.Reference,
             source: null,
             changedTimestamp: DateTimeOffset.UtcNow,
@@ -454,7 +453,7 @@ public class GraphChangePublisherTests
             ["key3"] = child3
         };
 
-        var change = SubjectPropertyChange.Create<Dictionary<string, CycleTestNode>>(
+        var change = SubjectPropertyChange.Create(
             property.Reference,
             source: null,
             changedTimestamp: DateTimeOffset.UtcNow,
@@ -498,7 +497,7 @@ public class GraphChangePublisherTests
 
         var newDictionary = new Dictionary<string, CycleTestNode>();
 
-        var change = SubjectPropertyChange.Create<Dictionary<string, CycleTestNode>>(
+        var change = SubjectPropertyChange.Create(
             property.Reference,
             source: null,
             changedTimestamp: DateTimeOffset.UtcNow,
@@ -536,7 +535,7 @@ public class GraphChangePublisherTests
         };
 
         // Create change with null old value
-        var change = SubjectPropertyChange.Create<Dictionary<string, CycleTestNode>?>(
+        var change = SubjectPropertyChange.Create(
             property.Reference,
             source: null,
             changedTimestamp: DateTimeOffset.UtcNow,
@@ -580,7 +579,7 @@ public class GraphChangePublisherTests
             ["key1"] = child2
         };
 
-        var change = SubjectPropertyChange.Create<Dictionary<string, CycleTestNode>>(
+        var change = SubjectPropertyChange.Create(
             property.Reference,
             source: null,
             changedTimestamp: DateTimeOffset.UtcNow,
@@ -608,13 +607,21 @@ public class GraphChangePublisherTests
         public List<(RegisteredSubjectProperty Property, IInterceptorSubject Subject, object? Index)> AddedSubjects { get; } = new();
         public List<(RegisteredSubjectProperty Property, IInterceptorSubject Subject, object? Index)> RemovedSubjects { get; } = new();
 
-        protected override Task OnSubjectAddedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index)
+        protected override Task OnSubjectAddedAsync(
+            RegisteredSubjectProperty property,
+            IInterceptorSubject subject,
+            object? index,
+            CancellationToken cancellationToken)
         {
             AddedSubjects.Add((property, subject, index));
             return Task.CompletedTask;
         }
 
-        protected override Task OnSubjectRemovedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index)
+        protected override Task OnSubjectRemovedAsync(
+            RegisteredSubjectProperty property,
+            IInterceptorSubject subject,
+            object? index,
+            CancellationToken cancellationToken)
         {
             RemovedSubjects.Add((property, subject, index));
             return Task.CompletedTask;

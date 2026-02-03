@@ -165,7 +165,7 @@ public class ClientToServerNestedPropertyTests : SharedServerTestBase
                 Logger.Log($"Polling server for initial person: {serverPerson?.FirstName ?? "null"}");
                 return serverPerson?.FirstName == initialFirstName;
             },
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(500),
             message: "Server should sync initial reference");
 

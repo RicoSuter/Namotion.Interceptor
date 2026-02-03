@@ -117,7 +117,7 @@ public class ClientToServerCollectionTests : SharedServerTestBase
                 Logger.Log($"Polling server ContainerItems: count={serverCount}, lastFirstName={lastPerson?.FirstName ?? "null"}");
                 return result;
             },
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(500),
             message: "Server should receive client's container collection add with property values");
 

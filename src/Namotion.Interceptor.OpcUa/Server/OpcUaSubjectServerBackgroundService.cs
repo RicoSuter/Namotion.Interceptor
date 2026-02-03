@@ -95,7 +95,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
             if (_graphChangeSender is not null)
             {
                 var handled = await _graphChangeSender
-                    .ProcessPropertyChangeAsync(change, registeredProperty)
+                    .ProcessPropertyChangeAsync(change, registeredProperty, cancellationToken)
                     .ConfigureAwait(false);
 
                 if (handled)

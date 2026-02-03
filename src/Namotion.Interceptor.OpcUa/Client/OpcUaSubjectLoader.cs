@@ -10,8 +10,6 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 internal class OpcUaSubjectLoader
 {
-    private const uint NodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object;
-
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
     private readonly SourceOwnershipManager _ownership;
@@ -68,7 +66,7 @@ internal class OpcUaSubjectLoader
             return;
         }
 
-        var nodeReferences = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
+        var nodeReferences = await OpcUaHelper.BrowseNodeAsync(session, nodeId, cancellationToken, _configuration.MaximumReferencesPerNode).ConfigureAwait(false);
 
         // Track which properties were matched to server nodes
         var claimedPropertyNames = new HashSet<string>();
@@ -262,7 +260,7 @@ internal class OpcUaSubjectLoader
             return;
 
         // Browse children of the variable node
-        var childNodes = await BrowseNodeAsync(parentNodeId, session, cancellationToken).ConfigureAwait(false);
+        var childNodes = await OpcUaHelper.BrowseNodeAsync(session, parentNodeId, cancellationToken, _configuration.MaximumReferencesPerNode).ConfigureAwait(false);
         var matchedNames = new HashSet<string>();
 
         // First pass: match known attributes from C# model
@@ -375,7 +373,7 @@ internal class OpcUaSubjectLoader
         HashSet<IInterceptorSubject> loadedSubjects,
         CancellationToken cancellationToken)
     {
-        var childNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken).ConfigureAwait(false);
+        var childNodes = await OpcUaHelper.BrowseNodeAsync(session, childNodeId, cancellationToken, _configuration.MaximumReferencesPerNode).ConfigureAwait(false);
         var childCount = childNodes.Count;
         var children = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>(childCount);
 
@@ -412,7 +410,7 @@ internal class OpcUaSubjectLoader
         HashSet<IInterceptorSubject> loadedSubjects,
         CancellationToken cancellationToken)
     {
-        var childNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken).ConfigureAwait(false);
+        var childNodes = await OpcUaHelper.BrowseNodeAsync(session, childNodeId, cancellationToken, _configuration.MaximumReferencesPerNode).ConfigureAwait(false);
         var existingChildren = property.Children.ToDictionary(c => c.Index!, c => c.Subject);
         var entries = new Dictionary<object, IInterceptorSubject>();
         var nodesByKey = new Dictionary<object, ReferenceDescription>();
@@ -449,9 +447,6 @@ internal class OpcUaSubjectLoader
 
     private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)
     {
-        var monitoredItem = MonitoredItemFactory.Create(_configuration, nodeId, property);
-        property.Reference.SetPropertyData(_source.OpcUaNodeIdKey, nodeId);
-
         if (!_ownership.ClaimSource(property.Reference))
         {
             _logger.LogError(
@@ -459,6 +454,9 @@ internal class OpcUaSubjectLoader
                 property.Subject.GetType().Name, property.Name);
             return;
         }
+
+        var monitoredItem = MonitoredItemFactory.Create(_configuration, nodeId, property);
+        property.Reference.SetPropertyData(_source.OpcUaNodeIdKey, nodeId);
 
         monitoredItems.Add(monitoredItem);
 
@@ -487,7 +485,7 @@ internal class OpcUaSubjectLoader
         }
 
         // Also load HasProperty children as regular variable nodes
-        var childNodes = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
+        var childNodes = await OpcUaHelper.BrowseNodeAsync(session, nodeId, cancellationToken, _configuration.MaximumReferencesPerNode).ConfigureAwait(false);
         foreach (var childNode in childNodes)
         {
             // Find matching property in child subject (excluding the value property)
@@ -507,65 +505,5 @@ internal class OpcUaSubjectLoader
                 }
             }
         }
-    }
-
-    private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
-        NodeId nodeId,
-        ISession session,
-        CancellationToken cancellationToken)
-    {
-        var browseDescriptions = new BrowseDescriptionCollection
-        {
-            new BrowseDescription
-            {
-                NodeId = nodeId,
-                BrowseDirection = BrowseDirection.Forward,
-                ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
-                IncludeSubtypes = true,
-                NodeClassMask = NodeClassMask,
-                ResultMask = (uint)BrowseResultMask.All
-            }
-        };
-
-        var results = new ReferenceDescriptionCollection();
-
-        var response = await session.BrowseAsync(
-            null,
-            null,
-            _configuration.MaximumReferencesPerNode,
-            browseDescriptions,
-            cancellationToken).ConfigureAwait(false);
-
-        if (response.Results.Count > 0 && StatusCode.IsGood(response.Results[0].StatusCode))
-        {
-            results.AddRange(response.Results[0].References);
-
-            var continuationPoint = response.Results[0].ContinuationPoint;
-            while (continuationPoint is { Length: > 0 })
-            {
-                var nextResponse = await session.BrowseNextAsync(
-                    null, false,
-                    [continuationPoint], cancellationToken).ConfigureAwait(false);
-
-                if (nextResponse.Results.Count > 0 && StatusCode.IsGood(nextResponse.Results[0].StatusCode))
-                {
-                    var r0 = nextResponse.Results[0];
-                    if (r0.References is { Count: > 0 } nextReferences)
-                    {
-                        foreach (var reference in nextReferences)
-                        {
-                            results.Add(reference);
-                        }
-                    }
-                    continuationPoint = r0.ContinuationPoint;
-                }
-                else
-                {
-                    break;
-                }
-            }
-        }
-
-        return results;
     }
 }

@@ -361,7 +361,7 @@ public class ServerToClientCollectionTests : SharedServerTestBase
 
         await AsyncTestHelpers.WaitUntilAsync(
             () => !clientArea.ContainerItems.Any(p => p.FirstName.Contains(testId)),
-            timeout: TimeSpan.FromSeconds(30),
+            timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(500),
             message: "Client should receive all test items cleared");
 

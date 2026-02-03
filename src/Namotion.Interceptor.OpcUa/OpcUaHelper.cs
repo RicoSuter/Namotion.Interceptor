@@ -204,20 +204,22 @@ internal static class OpcUaHelper
     }
 
     /// <summary>
-    /// Browses child nodes of a given node.
+    /// Browses child nodes of a given node, handling continuation points for paginated results.
     /// </summary>
     /// <param name="session">The OPC UA session.</param>
     /// <param name="nodeId">The node to browse.</param>
     /// <param name="cancellationToken">The cancellation token.</param>
+    /// <param name="maxReferencesPerNode">Maximum references per node (0 = use server default).</param>
     /// <returns>The collection of child references.</returns>
     public static async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
         ISession session,
         NodeId nodeId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        uint maxReferencesPerNode = 0)
     {
         const uint nodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object;
 
-        var browseDescription = new BrowseDescriptionCollection
+        var browseDescriptions = new BrowseDescriptionCollection
         {
             new BrowseDescription
             {
@@ -230,18 +232,45 @@ internal static class OpcUaHelper
             }
         };
 
+        var results = new ReferenceDescriptionCollection();
+
         var response = await session.BrowseAsync(
             null,
             null,
-            0,
-            browseDescription,
+            maxReferencesPerNode,
+            browseDescriptions,
             cancellationToken).ConfigureAwait(false);
 
         if (response.Results.Count > 0 && StatusCode.IsGood(response.Results[0].StatusCode))
         {
-            return response.Results[0].References;
+            results.AddRange(response.Results[0].References);
+
+            var continuationPoint = response.Results[0].ContinuationPoint;
+            while (continuationPoint is { Length: > 0 })
+            {
+                var nextResponse = await session.BrowseNextAsync(
+                    null, false,
+                    [continuationPoint], cancellationToken).ConfigureAwait(false);
+
+                if (nextResponse.Results.Count > 0 && StatusCode.IsGood(nextResponse.Results[0].StatusCode))
+                {
+                    var browseResult = nextResponse.Results[0];
+                    if (browseResult.References is { Count: > 0 } nextReferences)
+                    {
+                        foreach (var reference in nextReferences)
+                        {
+                            results.Add(reference);
+                        }
+                    }
+                    continuationPoint = browseResult.ContinuationPoint;
+                }
+                else
+                {
+                    break;
+                }
+            }
         }
 
-        return [];
+        return results;
     }
 }

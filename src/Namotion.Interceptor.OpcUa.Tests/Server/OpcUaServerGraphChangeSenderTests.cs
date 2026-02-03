@@ -24,13 +24,21 @@ public class OpcUaServerGraphChangeSenderTests
         public List<(RegisteredSubjectProperty Property, IInterceptorSubject Subject, object? Index)> AddedSubjects { get; } = new();
         public List<(RegisteredSubjectProperty Property, IInterceptorSubject Subject, object? Index)> RemovedSubjects { get; } = new();
 
-        protected override Task OnSubjectAddedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index)
+        protected override Task OnSubjectAddedAsync(
+            RegisteredSubjectProperty property,
+            IInterceptorSubject subject,
+            object? index,
+            CancellationToken cancellationToken)
         {
             AddedSubjects.Add((property, subject, index));
             return Task.CompletedTask;
         }
 
-        protected override Task OnSubjectRemovedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index)
+        protected override Task OnSubjectRemovedAsync(
+            RegisteredSubjectProperty property,
+            IInterceptorSubject subject,
+            object? index,
+            CancellationToken cancellationToken)
         {
             RemovedSubjects.Add((property, subject, index));
             return Task.CompletedTask;
@@ -49,7 +57,7 @@ public class OpcUaServerGraphChangeSenderTests
         var registeredSubject = root.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First(p => p.Name == nameof(TestRoot.Person));
 
-        var change = SubjectPropertyChange.Create<TestPerson?>(
+        var change = SubjectPropertyChange.Create(
             property.Reference,
             source: null,
             TestTimestamp,
@@ -80,7 +88,7 @@ public class OpcUaServerGraphChangeSenderTests
         var registeredSubject = root.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First(p => p.Name == nameof(TestRoot.Person));
 
-        var change = SubjectPropertyChange.Create<TestPerson?>(
+        var change = SubjectPropertyChange.Create(
             property.Reference,
             source: null,
             TestTimestamp,
@@ -139,9 +147,9 @@ public class OpcUaServerGraphChangeSenderTests
         var property = registeredSubject.Properties.First(p => p.Name == nameof(TestRoot.People));
 
         var oldCollection = Array.Empty<TestPerson>();
-        var newCollection = new TestPerson[] { person1 };
+        var newCollection = new[] { person1 };
 
-        var change = SubjectPropertyChange.Create<TestPerson[]>(
+        var change = SubjectPropertyChange.Create(
             property.Reference,
             source: null,
             TestTimestamp,
@@ -171,10 +179,10 @@ public class OpcUaServerGraphChangeSenderTests
         var registeredSubject = root.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First(p => p.Name == nameof(TestRoot.People));
 
-        var oldCollection = new TestPerson[] { person1 };
+        var oldCollection = new[] { person1 };
         var newCollection = Array.Empty<TestPerson>();
 
-        var change = SubjectPropertyChange.Create<TestPerson[]>(
+        var change = SubjectPropertyChange.Create(
             property.Reference,
             source: null,
             TestTimestamp,
@@ -206,7 +214,7 @@ public class OpcUaServerGraphChangeSenderTests
         var oldDictionary = new Dictionary<string, TestPerson>();
         var newDictionary = new Dictionary<string, TestPerson> { ["john"] = person1 };
 
-        var change = SubjectPropertyChange.Create<Dictionary<string, TestPerson>>(
+        var change = SubjectPropertyChange.Create(
             property.Reference,
             source: null,
             TestTimestamp,

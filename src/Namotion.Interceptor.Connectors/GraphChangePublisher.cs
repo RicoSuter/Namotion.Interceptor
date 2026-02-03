@@ -19,28 +19,30 @@ public abstract class GraphChangePublisher
     /// Process a property change, branching on property type.
     /// </summary>
     /// <returns>True if the change was processed as a structural change, false for value properties.</returns>
-    public async Task<bool> ProcessPropertyChangeAsync(SubjectPropertyChange change, RegisteredSubjectProperty property)
+    public async Task<bool> ProcessPropertyChangeAsync(
+        SubjectPropertyChange change,
+        RegisteredSubjectProperty property,
+        CancellationToken cancellationToken = default)
     {
-
         if (property.IsSubjectReference)
         {
             var oldSubject = change.TryGetOldValue<IInterceptorSubject?>(out var oldValue) ? oldValue : null;
             var newSubject = change.TryGetNewValue<IInterceptorSubject?>(out var newValue) ? newValue : null;
 
             if (oldSubject is not null && !ReferenceEquals(oldSubject, newSubject))
-                await OnSubjectRemovedAsync(property, oldSubject, index: null);
+                await OnSubjectRemovedAsync(property, oldSubject, index: null, cancellationToken);
             if (newSubject is not null && !ReferenceEquals(oldSubject, newSubject))
-                await OnSubjectAddedAsync(property, newSubject, index: null);
+                await OnSubjectAddedAsync(property, newSubject, index: null, cancellationToken);
 
             return true;
         }
         else if (property.IsSubjectCollection)
         {
             // TODO: Might need to support other collection types as well (need to check other places)
-            var oldCollection = change.TryGetOldValue<IReadOnlyList<IInterceptorSubject>>(out var oldList) && oldList is not null
+            var oldCollection = change.TryGetOldValue<IReadOnlyList<IInterceptorSubject>?>(out var oldList) && oldList is not null
                 ? oldList
                 : Array.Empty<IInterceptorSubject>();
-            var newCollection = change.TryGetNewValue<IReadOnlyList<IInterceptorSubject>>(out var newList) && newList is not null
+            var newCollection = change.TryGetNewValue<IReadOnlyList<IInterceptorSubject>?>(out var newList) && newList is not null
                 ? newList
                 : Array.Empty<IInterceptorSubject>();
 
@@ -53,7 +55,7 @@ public abstract class GraphChangePublisher
                 foreach (var operation in operations)
                 {
                     if (operation.Action == SubjectCollectionOperationType.Remove)
-                        await OnSubjectRemovedAsync(property, oldCollection[(int)operation.Index], operation.Index);
+                        await OnSubjectRemovedAsync(property, oldCollection[(int)operation.Index], operation.Index, cancellationToken);
                 }
             }
 
@@ -61,7 +63,7 @@ public abstract class GraphChangePublisher
             if (newItems is not null)
             {
                 foreach (var (index, subject) in newItems)
-                    await OnSubjectAddedAsync(property, subject, index);
+                    await OnSubjectAddedAsync(property, subject, index, cancellationToken);
             }
 
             // Reorders ignored - order is connector-specific (OPC UA: no-op)
@@ -83,14 +85,14 @@ public abstract class GraphChangePublisher
                 foreach (var key in removedKeys)
                 {
                     if (oldChildren.TryGetValue(key, out var subject))
-                        await OnSubjectRemovedAsync(property, subject, key);
+                        await OnSubjectRemovedAsync(property, subject, key, cancellationToken);
                 }
             }
 
             if (newItems is not null)
             {
                 foreach (var (key, subject) in newItems)
-                    await OnSubjectAddedAsync(property, (IInterceptorSubject)subject, key);
+                    await OnSubjectAddedAsync(property, (IInterceptorSubject)subject, key, cancellationToken);
             }
 
             return true;
@@ -105,11 +107,19 @@ public abstract class GraphChangePublisher
     /// <summary>
     /// Called when a subject is added to a property.
     /// </summary>
-    protected abstract Task OnSubjectAddedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index);
+    protected abstract Task OnSubjectAddedAsync(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject subject,
+        object? index,
+        CancellationToken cancellationToken);
 
     /// <summary>
     /// Called when a subject is removed from a property.
     /// </summary>
-    protected abstract Task OnSubjectRemovedAsync(RegisteredSubjectProperty property, IInterceptorSubject subject, object? index);
+    protected abstract Task OnSubjectRemovedAsync(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject subject,
+        object? index,
+        CancellationToken cancellationToken);
 
 }
