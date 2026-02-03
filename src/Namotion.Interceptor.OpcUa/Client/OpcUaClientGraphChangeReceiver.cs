@@ -652,6 +652,14 @@ internal class OpcUaClientGraphChangeReceiver
 
     private async Task ProcessNodeAddedAsync(NodeId nodeId, ISession session, CancellationToken cancellationToken)
     {
+        // Skip nodes that are already tracked - this handles the initial burst of events
+        // when connecting to a server with existing nodes
+        if (_subjectRegistry.TryGetSubject(nodeId, out _))
+        {
+            _logger.LogDebug("ProcessNodeAdded: Skipping already-tracked NodeId {NodeId}.", nodeId);
+            return;
+        }
+
         _logger.LogDebug("ProcessNodeAdded: Processing NodeId {NodeId}.", nodeId);
 
         var nodeDetails = await OpcUaHelper.ReadNodeDetailsAsync(session, nodeId, cancellationToken).ConfigureAwait(false);
