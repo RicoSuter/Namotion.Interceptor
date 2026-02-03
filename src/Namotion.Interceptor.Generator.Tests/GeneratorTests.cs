@@ -67,8 +67,8 @@ public class GeneratorTests
     public void WhenClassExistsInTwoNamespaces_ThenTheyAreSeparated()
     {
         // Arrange & Act & Assert
-        Assert.Equal(2, Models1.Calculator.DefaultProperties.Count);
-        Assert.Equal(2, Models2.Calculator.DefaultProperties.Count);
+        Assert.Equal(2, SubjectPropertyMetadataCache.Get<Models1.Calculator>().Count);
+        Assert.Equal(2, SubjectPropertyMetadataCache.Get<Models2.Calculator>().Count);
     }
     
     [Fact]

@@ -40,42 +40,28 @@ namespace YourDefaultNamespace
         ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
 
         [JsonIgnore]
-        IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
+        global::System.Collections.Generic.IReadOnlyDictionary<string, global::Namotion.Interceptor.SubjectPropertyMetadata> global::Namotion.Interceptor.IInterceptorSubject.Properties =>
+            _properties ?? global::Namotion.Interceptor.SubjectPropertyMetadataCache.Get<Sensor>();
 
         [JsonIgnore]
         object IInterceptorSubject.SyncRoot { get; } = new object();
 
-        void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+        void global::Namotion.Interceptor.IInterceptorSubject.AddProperties(params global::System.Collections.Generic.IEnumerable<global::Namotion.Interceptor.SubjectPropertyMetadata> properties)
         {
-            _properties = (_properties ?? DefaultProperties)
-                .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+            _properties = (_properties ?? global::Namotion.Interceptor.SubjectPropertyMetadataCache.Get<Sensor>())
+                .Concat(properties.Select(p => new global::System.Collections.Generic.KeyValuePair<string, global::Namotion.Interceptor.SubjectPropertyMetadata>(p.Name, p)))
                 .ToFrozenDictionary();
         }
 
-        public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
-            new Dictionary<string, SubjectPropertyMetadata>
-            {
-                {
-                    "Value",
-                    new SubjectPropertyMetadata(
-                        typeof(Sensor).GetProperty(nameof(Value), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((Sensor)o).Value,
-                        (o, v) => ((Sensor)o).Value = (double)v,
-                        isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "Status",
-                    new SubjectPropertyMetadata(
-                        typeof(global::ISensor).GetProperty(nameof(global::ISensor.Status), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((global::ISensor)o).Status,
-                        null,
-                        isIntercepted: false,
-                        isDynamic: false)
-                },
-            }
-            .ToFrozenDictionary();
 
+        [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]
+        internal static (global::System.Func<global::Namotion.Interceptor.IInterceptorSubject, object?>?, global::System.Action<global::Namotion.Interceptor.IInterceptorSubject, object?>?)
+            __GetPropertyAccessors(string name) => name switch
+        {
+            "Value" => (static o => ((Sensor)o).Value, static (o, v) => ((Sensor)o).Value = (double)v!),
+            "Status" => (static o => ((global::ISensor)o).Status, null),
+            _ => (null, null)
+        };
         public Sensor()
         {
         }
@@ -87,6 +73,7 @@ namespace YourDefaultNamespace
 
         private double _Value;
 
+        [global::Namotion.Interceptor.Attributes.Intercepted]
         public partial double Value
         {
             get

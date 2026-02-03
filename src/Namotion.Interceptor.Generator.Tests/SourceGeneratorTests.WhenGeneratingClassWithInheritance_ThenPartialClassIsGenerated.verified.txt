@@ -40,42 +40,28 @@ namespace YourDefaultNamespace
         ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
 
         [JsonIgnore]
-        IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
+        global::System.Collections.Generic.IReadOnlyDictionary<string, global::Namotion.Interceptor.SubjectPropertyMetadata> global::Namotion.Interceptor.IInterceptorSubject.Properties =>
+            _properties ?? global::Namotion.Interceptor.SubjectPropertyMetadataCache.Get<Person>();
 
         [JsonIgnore]
         object IInterceptorSubject.SyncRoot { get; } = new object();
 
-        void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+        void global::Namotion.Interceptor.IInterceptorSubject.AddProperties(params global::System.Collections.Generic.IEnumerable<global::Namotion.Interceptor.SubjectPropertyMetadata> properties)
         {
-            _properties = (_properties ?? DefaultProperties)
-                .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+            _properties = (_properties ?? global::Namotion.Interceptor.SubjectPropertyMetadataCache.Get<Person>())
+                .Concat(properties.Select(p => new global::System.Collections.Generic.KeyValuePair<string, global::Namotion.Interceptor.SubjectPropertyMetadata>(p.Name, p)))
                 .ToFrozenDictionary();
         }
 
-        public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
-            new Dictionary<string, SubjectPropertyMetadata>
-            {
-                {
-                    "FirstName",
-                    new SubjectPropertyMetadata(
-                        typeof(Person).GetProperty(nameof(FirstName), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((Person)o).FirstName,
-                        (o, v) => ((Person)o).FirstName = (string)v,
-                        isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "LastName",
-                    new SubjectPropertyMetadata(
-                        typeof(Person).GetProperty(nameof(LastName), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((Person)o).LastName,
-                        (o, v) => ((Person)o).LastName = (string)v,
-                        isIntercepted: true,
-                        isDynamic: false)
-                },
-            }
-            .ToFrozenDictionary();
 
+        [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]
+        internal static (global::System.Func<global::Namotion.Interceptor.IInterceptorSubject, object?>?, global::System.Action<global::Namotion.Interceptor.IInterceptorSubject, object?>?)
+            __GetPropertyAccessors(string name) => name switch
+        {
+            "FirstName" => (static o => ((Person)o).FirstName, static (o, v) => ((Person)o).FirstName = (string)v!),
+            "LastName" => (static o => ((Person)o).LastName, static (o, v) => ((Person)o).LastName = (string)v!),
+            _ => (null, null)
+        };
         public Person()
         {
         }
@@ -87,6 +73,7 @@ namespace YourDefaultNamespace
 
         private string _FirstName;
 
+        [global::Namotion.Interceptor.Attributes.Intercepted]
         public partial string FirstName
         {
             get
@@ -112,6 +99,7 @@ namespace YourDefaultNamespace
 
         private string _LastName;
 
+        [global::Namotion.Interceptor.Attributes.Intercepted]
         public partial string LastName
         {
             get
@@ -199,34 +187,27 @@ namespace YourDefaultNamespace
         ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
 
         [JsonIgnore]
-        IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
+        global::System.Collections.Generic.IReadOnlyDictionary<string, global::Namotion.Interceptor.SubjectPropertyMetadata> global::Namotion.Interceptor.IInterceptorSubject.Properties =>
+            _properties ?? global::Namotion.Interceptor.SubjectPropertyMetadataCache.Get<Teacher>();
 
         [JsonIgnore]
         object IInterceptorSubject.SyncRoot { get; } = new object();
 
-        void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+        void global::Namotion.Interceptor.IInterceptorSubject.AddProperties(params global::System.Collections.Generic.IEnumerable<global::Namotion.Interceptor.SubjectPropertyMetadata> properties)
         {
-            _properties = (_properties ?? DefaultProperties)
-                .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+            _properties = (_properties ?? global::Namotion.Interceptor.SubjectPropertyMetadataCache.Get<Teacher>())
+                .Concat(properties.Select(p => new global::System.Collections.Generic.KeyValuePair<string, global::Namotion.Interceptor.SubjectPropertyMetadata>(p.Name, p)))
                 .ToFrozenDictionary();
         }
 
-        public new static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
-            new Dictionary<string, SubjectPropertyMetadata>
-            {
-                {
-                    "MainCourse",
-                    new SubjectPropertyMetadata(
-                        typeof(Teacher).GetProperty(nameof(MainCourse), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((Teacher)o).MainCourse,
-                        (o, v) => ((Teacher)o).MainCourse = (string)v,
-                        isIntercepted: true,
-                        isDynamic: false)
-                },
-            }
-            .Concat(global::Person.DefaultProperties)
-            .ToFrozenDictionary();
 
+        [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]
+        internal static new (global::System.Func<global::Namotion.Interceptor.IInterceptorSubject, object?>?, global::System.Action<global::Namotion.Interceptor.IInterceptorSubject, object?>?)
+            __GetPropertyAccessors(string name) => name switch
+        {
+            "MainCourse" => (static o => ((Teacher)o).MainCourse, static (o, v) => ((Teacher)o).MainCourse = (string)v!),
+            _ => (null, null)
+        };
         public Teacher()
         {
         }
@@ -238,6 +219,7 @@ namespace YourDefaultNamespace
 
         private string _MainCourse;
 
+        [global::Namotion.Interceptor.Attributes.Intercepted]
         public partial string MainCourse
         {
             get

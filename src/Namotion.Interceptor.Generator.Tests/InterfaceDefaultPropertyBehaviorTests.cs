@@ -29,7 +29,7 @@ public class InterfaceDefaultPropertyBehaviorTests
         Assert.Equal(77.0, fahrenheitProp.GetValue());
 
         // Assert: default property metadata
-        var defaultProp = SensorWithInterfaceDefaults.DefaultProperties["TemperatureFahrenheit"];
+        var defaultProp = SubjectPropertyMetadataCache.Get<SensorWithInterfaceDefaults>()["TemperatureFahrenheit"];
         Assert.False(defaultProp.IsIntercepted);
         Assert.Null(defaultProp.SetValue);
     }
@@ -51,9 +51,9 @@ public class InterfaceDefaultPropertyBehaviorTests
         Assert.Contains("Value", propertyNames);
         Assert.Contains("Status", propertyNames);
 
-        var statusProp = SensorWithNestedInterface.DefaultProperties["Status"];
+        var statusProp = SubjectPropertyMetadataCache.Get<SensorWithNestedInterface>()["Status"];
         Assert.False(statusProp.IsIntercepted);
-        Assert.Equal("Active", statusProp.GetValue!(sensor));
+        Assert.Equal("Active", statusProp.GetValue?.Invoke(sensor));
     }
 
     [Fact]
@@ -73,9 +73,9 @@ public class InterfaceDefaultPropertyBehaviorTests
         Assert.Contains("Temperature", propertyNames);
         Assert.Contains("Label", propertyNames);
 
-        var labelProp = SensorWithWritableDefault.DefaultProperties["Label"];
+        var labelProp = SubjectPropertyMetadataCache.Get<SensorWithWritableDefault>()["Label"];
         Assert.False(labelProp.IsIntercepted);
-        Assert.Equal("Temp: 25", labelProp.GetValue!(sensor));
+        Assert.Equal("Temp: 25", labelProp.GetValue?.Invoke(sensor));
         Assert.Null(labelProp.SetValue);
     }
 
@@ -96,8 +96,8 @@ public class InterfaceDefaultPropertyBehaviorTests
         Assert.Contains("Id", propertyNames);
         Assert.Contains("DisplayId", propertyNames);
 
-        var displayIdProp = SensorWithInitOnly.DefaultProperties["DisplayId"];
+        var displayIdProp = SubjectPropertyMetadataCache.Get<SensorWithInitOnly>()["DisplayId"];
         Assert.False(displayIdProp.IsIntercepted);
-        Assert.Equal("ID: ABC123", displayIdProp.GetValue!(sensor));
+        Assert.Equal("ID: ABC123", displayIdProp.GetValue?.Invoke(sensor));
     }
 }
