@@ -26,6 +26,7 @@ public partial class SharedTestModel
         ClientToServerReference = new ClientToServerReferenceTestArea();
         ClientToServerCollection = new ClientToServerCollectionTestArea();
         ClientToServerDictionary = new ClientToServerDictionaryTestArea();
+        ClientToServerNestedProperty = new ClientToServerNestedPropertyTestArea();
     }
 
     [Path("opc", "Connected")]
@@ -69,6 +70,10 @@ public partial class SharedTestModel
 
     [Path("opc", "ClientToServerDictionary")]
     public partial ClientToServerDictionaryTestArea ClientToServerDictionary { get; set; }
+
+    // Dedicated area for ClientToServerNestedPropertyTests (isolated from other test classes)
+    [Path("opc", "ClientToServerNestedProperty")]
+    public partial ClientToServerNestedPropertyTestArea ClientToServerNestedProperty { get; set; }
 }
 
 /// <summary>
@@ -487,6 +492,29 @@ public partial class ClientToServerDictionaryTestArea
     {
         Items = new Dictionary<string, NestedPerson>();
     }
+
+    [Path("opc", "Items")]
+    public partial Dictionary<string, NestedPerson>? Items { get; set; }
+}
+
+/// <summary>
+/// Dedicated test area for ClientToServerNestedPropertyTests.
+/// Contains all property types needed for testing nested property changes.
+/// </summary>
+[InterceptorSubject]
+public partial class ClientToServerNestedPropertyTestArea
+{
+    public ClientToServerNestedPropertyTestArea()
+    {
+        ContainerItems = [];
+        Items = new Dictionary<string, NestedPerson>();
+    }
+
+    [Path("opc", "Person")]
+    public partial NestedPerson? Person { get; set; }
+
+    [OpcUaReference("HasComponent", CollectionStructure = CollectionNodeStructure.Container)]
+    public partial NestedPerson[] ContainerItems { get; set; }
 
     [Path("opc", "Items")]
     public partial Dictionary<string, NestedPerson>? Items { get; set; }

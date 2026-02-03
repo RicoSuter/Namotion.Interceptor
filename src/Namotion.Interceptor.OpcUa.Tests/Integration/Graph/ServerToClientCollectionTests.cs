@@ -353,14 +353,25 @@ public class ServerToClientCollectionTests : SharedServerTestBase
             message: "Client should receive third add");
         Logger.Log($"Step 4 verified: client has {person3FirstName}");
 
-        // Step 5: Clear test items
+        // Step 5: Clear all test items at once
         serverArea.ContainerItems = serverArea.ContainerItems
             .Where(p => !p.FirstName.Contains(testId))
             .ToArray();
         Logger.Log($"Step 5: Cleared all test items");
 
         await AsyncTestHelpers.WaitUntilAsync(
-            () => !clientArea.ContainerItems.Any(p => p.FirstName.Contains(testId)),
+            () =>
+            {
+                var remainingTestItems = clientArea.ContainerItems
+                    .Where(p => p.FirstName.Contains(testId))
+                    .Select(p => p.FirstName)
+                    .ToList();
+                if (remainingTestItems.Count > 0)
+                {
+                    Logger.Log($"Polling: still have {remainingTestItems.Count} test items: {string.Join(", ", remainingTestItems)}");
+                }
+                return remainingTestItems.Count == 0;
+            },
             timeout: TimeSpan.FromSeconds(60),
             pollInterval: TimeSpan.FromMilliseconds(500),
             message: "Client should receive all test items cleared");

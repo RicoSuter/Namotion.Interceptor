@@ -215,9 +215,27 @@ internal class OpcUaClientGraphChangeReceiver
             }
         }
 
-        // Find differences
+        // Find differences using actual NodeId indices (not registry list positions)
         var remoteIndices = new HashSet<int>(remoteByIndex.Keys);
-        var localIndices = new HashSet<int>(Enumerable.Range(0, localChildren.Count));
+        var localByIndex = new Dictionary<int, IInterceptorSubject>();
+        foreach (var child in localChildren)
+        {
+            if (child.Subject is null)
+            {
+                continue;
+            }
+
+            // Get actual index from the subject's NodeId, not from child.Index (which is list position)
+            if (_subjectRegistry.TryGetExternalId(child.Subject, out var childNodeId) && childNodeId is not null)
+            {
+                var childNodeIdStr = childNodeId.Identifier as string;
+                if (childNodeIdStr is not null && TryParseCollectionIndexFromNodeId(childNodeIdStr, out var nodeIdIndex))
+                {
+                    localByIndex[nodeIdIndex] = child.Subject;
+                }
+            }
+        }
+        var localIndices = new HashSet<int>(localByIndex.Keys);
 
         var indicesToAdd = remoteIndices.Except(localIndices).OrderBy(i => i).ToList();
         var indicesToRemove = localIndices.Except(remoteIndices).OrderByDescending(i => i).ToList();
@@ -758,7 +776,7 @@ internal class OpcUaClientGraphChangeReceiver
         // Multi-parent subjects (shared subjects) need to be cleaned up from all parent properties
         foreach (var parent in parents)
         {
-            RemoveSubjectFromParent(deletedSubject, parent.Property);
+            RemoveSubjectFromParent(deletedSubject, parent.Property, nodeId);
         }
     }
 
@@ -769,7 +787,8 @@ internal class OpcUaClientGraphChangeReceiver
     /// </summary>
     /// <param name="subject">The subject to remove from the parent.</param>
     /// <param name="parentProperty">The parent property to remove from.</param>
-    private void RemoveSubjectFromParent(IInterceptorSubject subject, RegisteredSubjectProperty parentProperty)
+    /// <param name="deletedNodeId">The NodeId of the deleted subject (needed because subject was already unregistered).</param>
+    private void RemoveSubjectFromParent(IInterceptorSubject subject, RegisteredSubjectProperty parentProperty, NodeId deletedNodeId)
     {
         if (parentProperty.IsSubjectReference)
         {
@@ -778,28 +797,45 @@ internal class OpcUaClientGraphChangeReceiver
         }
         else if (parentProperty.IsSubjectCollection)
         {
-            // Capture existing subjects with their indices before removal
+            // Capture existing subjects with their NodeId indices before removal
             // We need this to update NodeId registrations after reindexing
+            // IMPORTANT: We must use the actual NodeId index (from OPC UA), not the registry's
+            // list position (child.Index), because the registry uses list positions while
+            // NodeIds use the actual collection indices from the server.
             var subjectsToReindex = new List<(IInterceptorSubject Subject, int OldIndex)>();
             var children = parentProperty.Children;
             int? removedIndex = null;
 
-            for (var i = 0; i < children.Length; i++)
+            // Get the removed index from the deleted NodeId (the subject was already unregistered)
+            var deletedNodeIdStr = deletedNodeId.Identifier as string;
+            if (deletedNodeIdStr is not null && TryParseCollectionIndexFromNodeId(deletedNodeIdStr, out var deletedIndex))
             {
-                var child = children[i];
-                if (child.Index is not int idx)
+                removedIndex = deletedIndex;
+            }
+
+            // Collect OTHER subjects (not the deleted one) that may need NodeId reindexing
+            foreach (var child in children)
+            {
+                // Skip the deleted subject (we already got its index from deletedNodeId)
+                // Also skip null subjects
+                if (child.Subject is null || ReferenceEquals(child.Subject, subject))
                 {
                     continue;
                 }
 
-                if (ReferenceEquals(child.Subject, subject))
+                // Get the actual index from the NodeId, not from child.Index (which is list position)
+                if (!_subjectRegistry.TryGetExternalId(child.Subject, out var childNodeId) || childNodeId is null)
                 {
-                    removedIndex = idx;
+                    continue;
                 }
-                else if (child.Subject is not null)
+
+                var childNodeIdStr = childNodeId.Identifier as string;
+                if (childNodeIdStr is null || !TryParseCollectionIndexFromNodeId(childNodeIdStr, out var nodeIdIndex))
                 {
-                    subjectsToReindex.Add((child.Subject, idx));
+                    continue;
                 }
+
+                subjectsToReindex.Add((child.Subject, nodeIdIndex));
             }
 
             if (removedIndex is { } removedIdx)
@@ -875,6 +911,31 @@ internal class OpcUaClientGraphChangeReceiver
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Parses the collection index from a NodeId string like "Root.Collection[3]" or "Root.Collection[3].Property".
+    /// Returns the last bracketed index found in the path.
+    /// </summary>
+    private static bool TryParseCollectionIndexFromNodeId(string nodeIdStr, out int index)
+    {
+        index = -1;
+
+        // Find the last occurrence of [N] pattern
+        var lastBracketEnd = nodeIdStr.LastIndexOf(']');
+        if (lastBracketEnd == -1)
+        {
+            return false;
+        }
+
+        var lastBracketStart = nodeIdStr.LastIndexOf('[', lastBracketEnd);
+        if (lastBracketStart == -1 || lastBracketStart >= lastBracketEnd - 1)
+        {
+            return false;
+        }
+
+        var indexStr = nodeIdStr.Substring(lastBracketStart + 1, lastBracketEnd - lastBracketStart - 1);
+        return int.TryParse(indexStr, out index);
     }
 
     private async Task ProcessReferenceAddedAsync(NodeId childNodeId, ISession session, CancellationToken cancellationToken)
