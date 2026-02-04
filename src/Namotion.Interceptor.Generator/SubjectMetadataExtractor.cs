@@ -241,9 +241,10 @@ internal static class SubjectMetadataExtractor
                     continue;
                 }
 
-                // Check if property has a default implementation
-                // A property has a default implementation if its getter is not abstract
-                var hasDefaultImplementation = property.GetMethod is { IsAbstract: false };
+                // A property has a default implementation if any accessor is not abstract
+                var hasDefaultImplementation =
+                    property.GetMethod is { IsAbstract: false } ||
+                    property.SetMethod is { IsAbstract: false };
                 if (!hasDefaultImplementation)
                 {
                     continue;
