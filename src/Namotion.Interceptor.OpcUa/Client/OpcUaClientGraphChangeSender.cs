@@ -103,6 +103,11 @@ internal class OpcUaClientGraphChangeSender : GraphChangePublisher
             return;
         }
 
+        // Await any pending delete for this property slot before browsing.
+        // This prevents race conditions when replacing dictionary/collection entries
+        // where the delete is still in progress when the add starts.
+        await _source.AwaitPendingDeleteAsync(property.Reference, index).ConfigureAwait(false);
+
         var childNodeRef = await TryFindChildNodeAsync(session, parentNodeId, property, propertyName, index, cancellationToken).ConfigureAwait(false);
         if (childNodeRef is null)
         {

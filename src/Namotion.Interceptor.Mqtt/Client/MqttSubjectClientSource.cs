@@ -57,7 +57,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         _factory = new MqttClientFactory();
         _ownership = new SourceOwnershipManager(
             this,
-            onSubjectDetaching: CleanupTopicCachesForSubject);
+            onSubjectDetaching: change => CleanupTopicCachesForSubject(change.Subject));
 
         configuration.Validate();
     }
