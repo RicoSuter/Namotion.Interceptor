@@ -167,6 +167,9 @@ if ($LASTEXITCODE -ne 0) {
 # Restore stash before running benchmark (so uncommitted changes are included)
 Restore-Stash
 
+Write-Host "Waiting 5 seconds before running benchmark..."
+Start-Sleep -Seconds 5
+
 Write-Host "Running benchmark on $OriginalBranch (filter: $Filter)..."
 dotnet run --project $BenchmarkProject -c Release -- --filter "$Filter" --exporters markdown --join $JobArg
 if ($LASTEXITCODE -ne 0) {
