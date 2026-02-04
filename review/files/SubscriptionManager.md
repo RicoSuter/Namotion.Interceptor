@@ -4,6 +4,7 @@
 **Reviewer:** Claude
 **File:** `src/Namotion.Interceptor.OpcUa/Client/Connection/SubscriptionManager.cs`
 **Lines:** 556
+**Last Updated:** 2026-02-04
 
 ## Overview
 
@@ -32,7 +33,7 @@ OpcUaSubjectClientSource
                     └── Falls back to PollingManager for unsupported nodes
 ```
 
-**Instantiation:** Single creation point in `SessionManager.cs:110`
+**Instantiation:** Single creation point in `SessionManager.cs`
 
 **Key Integrations:**
 - `SubjectPropertyWriter` - applies property changes
@@ -42,31 +43,7 @@ OpcUaSubjectClientSource
 
 ### Correctness Issues
 
-**ISSUE 1: Potential race in `UpdateTransferredSubscriptions` (lines 354-375)**
-
-```csharp
-public void UpdateTransferredSubscriptions(IReadOnlyCollection<Subscription> transferredSubscriptions)
-{
-    var oldSubscriptions = _subscriptions.Keys.ToArray();
-    foreach (var subscription in transferredSubscriptions)
-    {
-        subscription.FastDataChangeCallback -= OnFastDataChange;  // Remove first
-        subscription.FastDataChangeCallback += OnFastDataChange;  // Then add
-        // ...
-        _subscriptions.TryAdd(subscription, 0);  // Add new
-    }
-
-    foreach (var oldSubscription in oldSubscriptions)
-    {
-        _subscriptions.TryRemove(oldSubscription, out _);  // Remove old
-        // ...
-    }
-}
-```
-
-The method adds new subscriptions before removing old ones. If the same subscription instance appears in both `transferredSubscriptions` and `_subscriptions` (common in subscription transfer), we briefly have duplicates. The callback `-=` then `+=` pattern is safe, but the logic could be clearer.
-
-**ISSUE 2: `AddMonitoredItemsAsync` inefficient item removal (lines 285-288, 343-346)**
+**ISSUE 1: O(n²) item removal in `AddMonitoredItemsAsync` (lines 285-288, 343-346)**
 
 ```csharp
 foreach (var item in itemsForThisSubscription)
@@ -75,7 +52,7 @@ foreach (var item in itemsForThisSubscription)
 }
 ```
 
-This is O(n²) for large lists. Should use a HashSet or process by index.
+This is O(n²) for large lists. Should use index-based removal or process items without intermediate list.
 
 ---
 
@@ -90,30 +67,9 @@ This is O(n²) for large lists. Should use a HashSet or process by index.
 | Subscription tracking | `ConcurrentDictionary<Subscription, byte>` | Correct |
 | Object pooling | `ObjectPool<List<PropertyUpdate>>` | Correct |
 
-### Thread Safety Issues
+### Thread Safety Notes
 
-**ISSUE 3: No synchronization in `CreateBatchedSubscriptionsAsync` (lines 64-139)**
-
-```csharp
-public async Task CreateBatchedSubscriptionsAsync(...)
-{
-    // Clear any existing subscriptions...
-    foreach (var oldSubscription in _subscriptions.Keys)
-    {
-        oldSubscription.FastDataChangeCallback -= OnFastDataChange;
-        // ...
-    }
-    _subscriptions.Clear();
-    _monitoredItems.Clear();
-
-    _shuttingDown = false;  // Reset AFTER clearing
-    // ...
-}
-```
-
-If this method is called concurrently (e.g., rapid reconnection), there's no protection. The comment mentions "defense-in-depth" but doesn't prevent concurrent calls from interleaving. Consider adding a `SemaphoreSlim` or ensuring single-threaded access via caller contract.
-
-**ISSUE 4: `RemoveItemsForSubject` iteration during modification (lines 473-482)**
+**Note: `RemoveItemsForSubject` iteration during modification (lines 473-482)**
 
 ```csharp
 public void RemoveItemsForSubject(IInterceptorSubject subject)
@@ -128,7 +84,7 @@ public void RemoveItemsForSubject(IInterceptorSubject subject)
 }
 ```
 
-While `ConcurrentDictionary` allows this, it's a code smell. The iteration may not see all items added during iteration, and may revisit some. For this use case (cleanup), it's acceptable but should be documented.
+While `ConcurrentDictionary` allows this pattern, it's worth noting that iteration may not see all items added during iteration. For this cleanup use case, this behavior is acceptable.
 
 ### Race Condition Risk: LOW
 
@@ -187,31 +143,11 @@ if (item.Handle is RegisteredSubjectProperty property)
 
 Extract to `RegisterMonitoredItem(MonitoredItem)`.
 
-**DUPLICATION 4: ApplyChangesAsync try-catch (3 occurrences)**
-
-```csharp
-try
-{
-    await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
-}
-catch (ServiceResultException sre)
-{
-    _logger.LogWarning(sre, "ApplyChanges failed...");
-}
-```
-
-Extract to `ApplyChangesWithLoggingAsync(Subscription, string context, CancellationToken)`.
-
 ### Cross-Class Duplication
 
 **With PollingManager.cs:**
 - `RemoveItemsForSubject` - identical pattern
 - Property update application via `_propertyWriter.Write` - similar pattern
-- Disposal with `Interlocked.Exchange` pattern
-
-**With SessionManager.cs:**
-- Disposal timeout handling pattern
-- Volatile/Interlocked patterns (inconsistent across classes)
 
 ---
 
@@ -226,9 +162,9 @@ Extract to `ApplyChangesWithLoggingAsync(Subscription, string context, Cancellat
 - Nullable reference types enabled
 - Uses `ValueTask` for `DisposeAsync`
 
-### Improvement Opportunities
+### Minor Improvement Opportunities
 
-**ISSUE 5: Magic number for object pool (line 18)**
+**Minor: Magic number for object pool (line 18)**
 
 ```csharp
 = new(() => new List<PropertyUpdate>(16));  // Why 16?
@@ -236,18 +172,13 @@ Extract to `ApplyChangesWithLoggingAsync(Subscription, string context, Cancellat
 
 Consider extracting to a named constant with documentation.
 
-**ISSUE 6: `byte` as dictionary value (line 28)**
+**Minor: `byte` as dictionary value (line 28)**
 
 ```csharp
 private readonly ConcurrentDictionary<Subscription, byte> _subscriptions = new();
 ```
 
-Modern C# has `ConcurrentHashSet` alternatives, but this pattern is acceptable. Could use `ConcurrentDictionary<Subscription, bool>` for clarity, or add a comment explaining the set-like usage.
-
-**ISSUE 7: Inconsistent null-conditional usage**
-
-Line 220: `EventNotificationReceived?.Invoke(notification);` - Good
-Line 428: `if (polledItems?.Count > 0 && _pollingManager != null)` - Mixed patterns
+This is a common pattern for set-like usage with ConcurrentDictionary. Could add a comment explaining the set-like usage for clarity.
 
 ---
 
@@ -373,16 +304,12 @@ Result: ~425 lines, within guidelines.
 
 | # | Issue | Severity | Type |
 |---|-------|----------|------|
-| 1 | Race in `UpdateTransferredSubscriptions` | Low | Correctness |
-| 2 | O(n²) item removal in `AddMonitoredItemsAsync` | Low | Performance |
-| 3 | No concurrency protection in `CreateBatchedSubscriptionsAsync` | Medium | Thread Safety |
-| 4 | Iteration during modification in `RemoveItemsForSubject` | Low | Code Smell |
-| 5 | Magic number for object pool size | Low | Maintainability |
-| 6 | Subscription creation duplication | Medium | DRY |
-| 7 | Callback registration duplication | Low | DRY |
-| 8 | ApplyChangesAsync try-catch duplication | Low | DRY |
-| 9 | No unit tests | High | Test Coverage |
-| 10 | SRP violation - too many responsibilities | Medium | Architecture |
+| 1 | O(n²) item removal in `AddMonitoredItemsAsync` | Low | Performance |
+| 2 | Subscription creation duplication | Medium | DRY |
+| 3 | Callback registration duplication | Low | DRY |
+| 4 | Monitored item registration duplication | Low | DRY |
+| 5 | No unit tests | High | Test Coverage |
+| 6 | SRP violation - too many responsibilities | Medium | Architecture |
 
 ---
 
@@ -396,14 +323,12 @@ Result: ~425 lines, within guidelines.
 ### Should Fix (Technical Debt)
 
 3. Fix O(n²) performance in `AddMonitoredItemsAsync`
-4. Add documentation comment for `RemoveItemsForSubject` thread-safety behavior
-5. Consider extracting `MonitoredItemRegistry` for testability
+4. Consider extracting `MonitoredItemRegistry` for testability
 
 ### Consider (Future Improvement)
 
-6. Add concurrency protection or caller contract documentation for `CreateBatchedSubscriptionsAsync`
-7. Standardize thread-safety patterns with `SessionManager` and `PollingManager`
-8. Extract common patterns to shared utilities across manager classes
+5. Standardize patterns with `SessionManager` and `PollingManager`
+6. Extract common patterns to shared utilities across manager classes
 
 ---
 

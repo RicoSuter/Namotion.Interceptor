@@ -3,7 +3,8 @@
 **Status:** ✅ Complete
 **Reviewer:** Claude
 **File:** `src/Namotion.Interceptor.OpcUa/Client/Polling/PollingManager.cs`
-**Lines:** 476
+**Lines:** 477
+**Last Updated:** 2026-02-04
 
 ## Overview
 
@@ -25,18 +26,19 @@
 - **Good resilience patterns**: Circuit breaker prevents resource exhaustion, session change detection resets state properly
 - **Efficient batching**: Uses `ArraySegment<T>` for zero-allocation batch processing
 - **Optimistic concurrency**: Uses `TryUpdate` pattern for safe concurrent modifications
+- **Thread-safe Start()**: Disposal check inside `_startLock` prevents race conditions
 
 ### Design Concerns
 
 **1. Code Duplication with ReadAfterWriteManager**
 
-Both classes share nearly identical patterns:
+Both classes share similar patterns:
 - CircuitBreaker initialization and usage
 - Session change detection logic
 - Batched `ReadValueIdCollection` + `session.ReadAsync()` pattern
 - Disposal patterns with CancellationTokenSource
 
-**ReadAfterWriteManager** (lines 287-305):
+**ReadAfterWriteManager** (lines 289-304):
 ```csharp
 var readValues = new ReadValueIdCollection(dueCount);
 for (var i = 0; i < dueCount; i++)
@@ -46,7 +48,7 @@ for (var i = 0; i < dueCount; i++)
 var response = await session.ReadAsync(..., readValues, cancellationToken);
 ```
 
-**PollingManager** (lines 340-357):
+**PollingManager** (lines 341-357):
 ```csharp
 var nodesToRead = new ReadValueIdCollection(batch.Count);
 foreach (var item in batch)
@@ -56,71 +58,41 @@ foreach (var item in batch)
 var response = await session.ReadAsync(..., nodesToRead, cancellationToken);
 ```
 
-**Recommendation**: Extract a shared `BatchedNodeReader` helper or base class.
+**Recommendation**: Consider extracting a shared `BatchedNodeReader` helper for consistency.
 
 **2. Timer Strategy Differs**
 
 - `PollingManager`: Uses `PeriodicTimer` (fixed interval, always running)
 - `ReadAfterWriteManager`: Uses `Timer` with dynamic rescheduling (event-driven)
 
-Both are valid for their use cases, but the inconsistency adds cognitive load.
+Both are valid for their use cases - `PeriodicTimer` is appropriate for continuous polling while `Timer` is better for on-demand scheduling.
 
 ## Thread Safety Analysis
 
 ### Overall Assessment: Good ✅
 
-The class demonstrates good thread-safety practices with some minor issues.
+The class demonstrates good thread-safety practices.
 
 ### Issues Identified
 
 | Issue | Severity | Location | Description |
 |-------|----------|----------|-------------|
-| Start/Dispose race | Low | Lines 113-132, 440-468 | Task could be created after disposal begins |
-| TOCTOU in AddItem | Low | Lines 138-162 | Item could be added to disposing manager |
-| Stale TryUpdate | Low | Lines 314-319 | `ResetPolledValues()` silent failure could leave stale cache |
-| Missing Volatile.Read | Very Low | Line 453 | `_pollingTask` null check should use Volatile.Read |
+| Inconsistent Volatile.Read | Very Low | Line 453 | `_pollingTask` check could use Volatile.Read for consistency |
 
 ### Details
 
-**1. Start/Dispose Race (Low)**
+**1. Inconsistent Volatile.Read (Very Low)**
 ```csharp
-// Start() at line 115-128
-lock (_startLock)
-{
-    if (Volatile.Read(ref _disposed) == 1)  // Thread B sets _disposed = 1 HERE
-        throw new ObjectDisposedException(...);
-    // ... creates task ...
-}
-```
-The `_startLock` is not acquired in `DisposeAsync()`, so disposal can interleave.
+// Line 453 in DisposeAsync:
+if (_pollingTask != null)
 
-**Recommendation**: Either acquire `_startLock` in `DisposeAsync()` or accept the benign race (task will be canceled anyway).
-
-**2. ResetPolledValues TryUpdate (Low)**
-```csharp
-// Line 317
-_pollingItems.TryUpdate(key, item with { LastValue = null }, item);
-// If TryUpdate fails, stale LastValue remains
-```
-
-**Recommendation**: Use `AddOrUpdate` to guarantee reset:
-```csharp
-_pollingItems.AddOrUpdate(
-    key,
-    item with { LastValue = null },
-    (_, existing) => existing with { LastValue = null }
-);
-```
-
-**3. Missing Volatile.Read (Very Low)**
-```csharp
-// Line 453 - should be:
+// vs Line 103, 121 use Volatile.Read:
 var task = Volatile.Read(ref _pollingTask);
-if (task != null)
-{
-    await task.WaitAsync(_configuration.PollingDisposalTimeout);
-}
 ```
+
+The plain null check at line 453 is safe because it's already guarded by `Interlocked.Exchange(ref _disposed, 1)`, but for consistency with other usages in the file, it could use `Volatile.Read`.
+
+**Note**: The `ResetPolledValues()` method at line 317 using `TryUpdate` is intentional - the comment explains that silent failure on concurrent removal is the desired behavior.
 
 ## Data Flow Analysis
 
@@ -170,14 +142,12 @@ if (task != null)
 
 ## SRP/SOLID Analysis
 
-### Single Responsibility: Mostly Good ✅
+### Single Responsibility: Good ✅
 
-The class has one clear purpose: poll OPC UA nodes. However, it contains several sub-responsibilities that could be extracted:
-
-1. **Timer management** - Start/Stop logic
-2. **Batch reading** - `ReadBatchAsync` could be a standalone utility
-3. **Value change detection** - `ValuesAreEqual` is generic
-4. **Session change detection** - Duplicated with ReadAfterWriteManager
+The class has one clear purpose: poll OPC UA nodes. Sub-responsibilities are appropriately encapsulated:
+- `PollingMetrics` for metrics tracking
+- `CircuitBreaker` for resilience
+- `SubjectPropertyWriter` for value application
 
 ### Open/Closed: Good ✅
 
@@ -196,7 +166,7 @@ Internal class, no interface needed.
 
 ## Test Coverage Assessment
 
-### Unit Tests: ⚠️ Insufficient
+### Unit Tests: Needs Work
 
 **PollingMetricsTests.cs** - Only tests the metrics helper class:
 - `InitialState_AllMetricsAreZero()`
@@ -215,9 +185,9 @@ Internal class, no interface needed.
 - Batch size boundary conditions
 - Slow poll detection
 
-### Integration Tests: ⚠️ Indirect
+### Integration Tests: Indirect Coverage
 
-No integration tests specifically enable `EnablePollingFallback = true` and simulate subscription failures. The polling fallback path is not exercised in CI.
+No integration tests specifically enable `EnablePollingFallback = true` and simulate subscription failures.
 
 **Recommendation**: Add integration test that:
 1. Configures a server node to reject subscriptions
@@ -230,14 +200,11 @@ No integration tests specifically enable `EnablePollingFallback = true` and simu
 - Uses `record struct` for `PollingItem` (line 471)
 - Uses `Lock` class instead of `object` for locking (line 31)
 - Uses `PeriodicTimer` for modern async timer pattern
-- Uses `Volatile` and `Interlocked` correctly (mostly)
+- Uses `Volatile` and `Interlocked` correctly
 - Uses `ConfigureAwait(false)` consistently
 - Uses collection expressions where appropriate
 - Uses `ArraySegment<T>` to avoid allocations
-
-### Could Improve
-- Line 453: Plain `null` check instead of `Volatile.Read`
-- Could use `required` properties in configuration
+- Proper disposal pattern with `Interlocked.Exchange`
 
 ## Dead Code / Unused Code
 
@@ -245,8 +212,8 @@ None found. All public methods are called from `SubscriptionManager` or `Session
 
 ## Potential Simplifications
 
-### 1. Extract BatchedNodeReader
-~50 lines of duplication with `ReadAfterWriteManager` could be extracted:
+### 1. Extract BatchedNodeReader (Low Priority)
+Similar read patterns exist in `ReadAfterWriteManager`. Could potentially extract:
 ```csharp
 internal static class BatchedNodeReader
 {
@@ -256,30 +223,18 @@ internal static class BatchedNodeReader
         CancellationToken ct);
 }
 ```
-
-### 2. Extract SessionChangeDetector
-Session change detection with value reset is duplicated:
-```csharp
-internal class SessionChangeDetector
-{
-    public bool DetectChange(ISession? current);
-    public event Action? OnSessionChanged;
-}
-```
-
-### 3. Consider IAsyncEnumerable
-The polling loop could yield results as `IAsyncEnumerable<PropertyUpdate>` for cleaner composition, though current design is simpler.
+However, the current implementation is clear and the duplication is minimal.
 
 ## Summary
 
 | Aspect | Rating | Notes |
 |--------|--------|-------|
 | Architecture | ✅ Good | Clean design, proper separation |
-| Thread Safety | ✅ Good | Minor issues, no critical problems |
+| Thread Safety | ✅ Good | No critical issues, proper use of Volatile/Interlocked |
 | Test Coverage | ⚠️ Needs Work | No direct unit tests for PollingManager |
-| Code Duplication | ⚠️ Moderate | ~100 lines shared with ReadAfterWriteManager |
+| Code Duplication | ✅ Acceptable | Similar patterns exist but duplication is minimal |
 | Modern C# | ✅ Good | Uses modern patterns correctly |
-| SOLID | ✅ Good | Minor SRP improvements possible |
+| SOLID | ✅ Good | Clean separation of concerns |
 | Dead Code | ✅ None | All code is used |
 
 ## Recommendations
@@ -288,10 +243,5 @@ The polling loop could yield results as `IAsyncEnumerable<PropertyUpdate>` for c
 1. **Add unit tests** for `PollingManager` core functionality (Start, AddItem, RemoveItem, circuit breaker)
 2. **Add integration test** that exercises polling fallback path
 
-### Medium Priority
-3. **Fix Volatile.Read** missing at line 453
-4. **Fix ResetPolledValues** to use `AddOrUpdate` instead of `TryUpdate`
-
-### Low Priority (Future)
-5. **Extract BatchedNodeReader** to reduce duplication with ReadAfterWriteManager
-6. **Consider SessionChangeDetector** abstraction if more consumers emerge
+### Low Priority
+3. **Consistency**: Consider using `Volatile.Read` at line 453 for consistency with other usages (very minor)

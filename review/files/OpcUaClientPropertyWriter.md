@@ -3,7 +3,7 @@
 **File:** `src/Namotion.Interceptor.OpcUa/Client/OpcUaClientPropertyWriter.cs`
 **Status:** Complete
 **Reviewer:** Claude (Multi-Agent)
-**Date:** 2026-02-02
+**Date:** 2026-02-04
 **Lines:** 221
 
 ---
@@ -20,7 +20,7 @@ Handles writing property changes to OPC UA server. Extracted from OpcUaSubjectCl
 SubjectPropertyChange[]
         │
         ▼
-OpcUaSubjectClientSource.WriteChangesAsync() (line 795)
+OpcUaSubjectClientSource.WriteChangesAsync() (line 781)
         │
         ▼
 OpcUaClientPropertyWriter.WriteChangesAsync()
@@ -80,7 +80,7 @@ The class delegates session thread-safety to the OPC UA SDK and property access 
 - Lines 83-98: `IsTransientWriteError` classifies permanent vs transient errors
 - Lines 212-214: Structured logging with counts
 - Lines 217-219: Distinguishes partial vs complete failure
-- Transport exceptions handled by caller (`OpcUaSubjectClientSource` lines 762-806)
+- Transport exceptions handled by caller (`OpcUaSubjectClientSource` lines 781-827)
 
 ### SOLID Compliance - GOOD
 
@@ -108,7 +108,7 @@ writeValues.Add(new WriteValue
 });
 ```
 
-**OpcUaClientGraphChangeSender.cs (lines 537-547):** Nearly identical pattern with `DateTime.UtcNow` instead.
+**OpcUaClientGraphChangeSender.cs (lines 525-533):** Nearly identical pattern with `DateTime.UtcNow` instead.
 
 **Impact:** Moderate - if WriteValue format changes, both locations need updates.
 
@@ -118,7 +118,7 @@ writeValues.Add(new WriteValue
 
 The extraction from `OpcUaSubjectClientSource` was clean:
 - No remnant write logic in source class
-- Properly delegates at line 795
+- Properly delegates at line 816
 
 ---
 
@@ -179,6 +179,7 @@ The extraction from `OpcUaSubjectClientSource` was clean:
 1. **Extract WriteValue creation** to shared factory to eliminate duplication with `OpcUaClientGraphChangeSender`
 2. **Add unit tests for `TryGetWritableNodeId`** edge cases
 3. **Consider adding debug logging** for individual property writes (currently only logs batch summary)
+4. **Simplify `ProcessWriteResults` correlation logic:** Currently re-scans all changes with `TryGetWritableNodeId` to correlate results. Could track original indices during `CreateWriteValuesCollection` instead of re-filtering. Low priority since this only affects the failure path.
 
 ### No Action Required
 

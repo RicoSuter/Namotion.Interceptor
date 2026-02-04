@@ -3,8 +3,8 @@
 **File:** `src/Namotion.Interceptor.OpcUa/Server/OpcUaServerNodeCreator.cs`
 **Status:** Complete
 **Reviewer:** Claude
-**Date:** 2026-02-02
-**Lines:** ~479
+**Date:** 2026-02-04
+**Lines:** ~473
 
 ---
 
@@ -16,12 +16,12 @@
 
 1. **Node Creation**: Creates OPC UA nodes (Variables, Objects, Folders) from model properties
 2. **Collection Handling**: Creates container nodes for collections (Container/Flat modes) and dictionary properties
-3. **Reference Counting**: Uses `ConnectorReferenceCounter` to handle shared subjects across multiple parents
-4. **Subject Registration**: Registers subjects with `ConnectorSubjectMapping` for O(1) bidirectional lookup
+3. **Reference Counting**: Uses `SubjectConnectorRegistry` to handle shared subjects across multiple parents
+4. **Subject Registration**: Registers subjects with `SubjectConnectorRegistry` for O(1) bidirectional lookup
 5. **ModelChangeEvent Publishing**: Queues node/reference add events via `OpcUaServerGraphChangePublisher`
 6. **Value Change Handling**: Subscribes to `StateChanged` events for bidirectional value sync
 
-### Dependencies (8 injected)
+### Dependencies (7 injected)
 
 | Dependency | Purpose |
 |------------|---------|
@@ -29,8 +29,7 @@
 | `OpcUaServerConfiguration` | Configuration and node mapper |
 | `OpcUaNodeFactory` | Low-level OPC UA node creation |
 | `OpcUaSubjectServerBackgroundService` | Source for property updates |
-| `ConnectorReferenceCounter<NodeState>` | Reference counting for shared subjects |
-| `ConnectorSubjectMapping<NodeId>` | Bidirectional subject-to-NodeId mapping |
+| `SubjectConnectorRegistry<NodeId, NodeState>` | Unified registry with reference counting and bidirectional mapping |
 | `OpcUaServerGraphChangePublisher` | Batches ModelChangeEvents |
 | `ILogger` | Logging |
 
@@ -40,7 +39,7 @@
 
 ### Issue 1: Memory Leak - StateChanged Event Handlers Never Unsubscribed (CRITICAL)
 
-**Location:** Lines 367-381
+**Location:** Lines 364-378
 
 ```csharp
 variableNode.StateChanged += (_, _, changes) =>
@@ -70,9 +69,11 @@ variableNode.StateChanged += (_, _, changes) =>
 
 3. **ClearPropertyData is insufficient**: `CustomNodeManager.ClearPropertyData()` removes the variableNode from storage but does NOT unsubscribe the event handlers.
 
-4. **Recursive creation amplifies the problem**: `CreateAttributeNodes` (lines 279-302) recursively creates attribute nodes, each with its own `StateChanged` handler.
+4. **Recursive creation amplifies the problem**: `CreateAttributeNodes` (lines 276-299) recursively creates attribute nodes, each with its own `StateChanged` handler.
 
 5. **Server restart loop compounds leaks**: The `OpcUaSubjectServerBackgroundService.ExecuteServerLoopAsync` restarts the server on failure. Each restart creates new handlers without cleaning up old ones.
+
+**Note:** `CustomNodeManager.RemoveSubjectNodes` now calls `DeleteNode` which may help with cleanup, but the `StateChanged` handler is not explicitly unsubscribed.
 
 **Impact:**
 
@@ -103,7 +104,7 @@ variableNode.StateChanged += WeakEventHandler.Create<NodeStateChangedEventArgs>(
 
 ### Issue 2: Recursive Attribute Nodes with No Depth Limit (Important)
 
-**Location:** Lines 299-300
+**Location:** Lines 296-297
 
 ```csharp
 // Recursive: attributes can have attributes
@@ -138,20 +139,19 @@ public void CreateAttributeNodes(NodeState parentNode, RegisteredSubjectProperty
 
 | Method | Lock Acquired | NodeCreator Methods Called |
 |--------|---------------|----------------------------|
-| `CreateAddressSpace` (112-134) | Yes | `CreateSubjectNodes` |
-| `CreateSubjectNode` (534-617) | Yes | `CreateCollectionChildNode`, `CreateDictionaryChildNode`, `CreateSubjectReferenceNode`, `GetOrCreateContainerNode` |
+| `CreateAddressSpace` (104-131) | Yes | `CreateSubjectNodes` |
+| `CreateSubjectNode` (564-622) | Yes | `CreateCollectionChildNode`, `CreateDictionaryChildNode`, `CreateSubjectReferenceNode`, `GetOrCreateContainerNode` |
 
 **Thread-Safe Components:**
 
-- `ConnectorReferenceCounter`: Uses `Lock` internally
-- `ConnectorSubjectMapping`: Uses `Lock` internally
+- `SubjectConnectorRegistry`: Uses `Lock` internally for all operations
 - `OpcUaNodeFactory`: Stateless, thread-safe
 
 **Assessment:** Thread safety is **adequate** when called from locked contexts. Direct external calls would not be safe.
 
 ### Issue 3: Lock Inside StateChanged Handler (Moderate)
 
-**Location:** Lines 373-377
+**Location:** Lines 370-374
 
 ```csharp
 lock (variableNode)
@@ -169,9 +169,11 @@ lock (variableNode)
 
 ## Code Quality Analysis
 
-### Issue 4: 8 Constructor Dependencies (Moderate)
+### ~~Issue 4: 8 Constructor Dependencies~~ (FIXED)
 
-**Location:** Lines 30-49
+**Previously:** 8 dependencies including separate `ConnectorReferenceCounter` and `ConnectorSubjectMapping`.
+
+**Now:** 7 dependencies (lines 29-46). The `ConnectorReferenceCounter` and `ConnectorSubjectMapping` have been combined into a single `SubjectConnectorRegistry<NodeId, NodeState>` which provides unified reference counting and bidirectional mapping.
 
 ```csharp
 public OpcUaServerNodeCreator(
@@ -179,22 +181,16 @@ public OpcUaServerNodeCreator(
     OpcUaServerConfiguration configuration,
     OpcUaNodeFactory nodeFactory,
     OpcUaSubjectServerBackgroundService source,
-    ConnectorReferenceCounter<NodeState> subjectRefCounter,
-    ConnectorSubjectMapping<NodeId> subjectMapping,
+    SubjectConnectorRegistry<NodeId, NodeState> subjectRegistry,
     OpcUaServerGraphChangePublisher modelChangePublisher,
     ILogger logger)
 ```
 
-**Analysis:** 8 dependencies is high but justified:
-- Each dependency has a distinct responsibility
-- No dependency group could be combined into a facade without losing cohesion
-- The class was already extracted from `CustomNodeManager` to reduce that class's complexity
+**Verdict:** Good refactoring. Dependency count is now reasonable.
 
-**Verdict:** Acceptable given the domain complexity.
+### Issue 4: Null-Forgiving Operator on child.Index (Moderate)
 
-### Issue 5: Null-Forgiving Operator on child.Index (Moderate)
-
-**Location:** Lines 215, 225
+**Location:** Lines 212, 222
 
 ```csharp
 CreateCollectionChildNode(property, child.Subject, child.Index!, propertyName, parentPath, parentNodeId, nodeConfiguration);
@@ -215,10 +211,10 @@ foreach (var child in children)
 }
 ```
 
-### Issue 6: Inconsistent Container Mode Handling (Minor)
+### Issue 5: Inconsistent Container Mode Handling (Minor)
 
-**Collections:** Support both Container and Flat modes (lines 209-227)
-**Dictionaries:** Only Container mode (lines 241)
+**Collections:** Support both Container and Flat modes (lines 207-224)
+**Dictionaries:** Only Container mode (lines 238)
 
 This asymmetry may be intentional (dictionaries always need containers?) but is not documented.
 
@@ -239,30 +235,36 @@ This asymmetry may be intentional (dictionaries always need containers?) but is 
 
 ### CreateChildObject: The Key Integration Point
 
-**Location:** Lines 428-468
+**Location:** Lines 425-462
 
 This method is the **only server-side point** that:
-1. Increments reference count
-2. Registers subject with mapping
-3. Recursively creates child nodes
-4. Queues ModelChangeEvents
+1. Registers subject with registry (handles reference counting atomically)
+2. Recursively creates child nodes
+3. Queues ModelChangeEvents
 
 ```csharp
-var isFirst = _subjectRefCounter.IncrementAndCheckFirst(subject, () => { createNode }, out var nodeState);
-if (isFirst)
+_subjectRegistry.Register(subject, nodeId, () =>
 {
-    _subjectMapping.Register(subject, nodeState.NodeId);
+    var typeDefinitionId = GetTypeDefinitionIdForSubject(subject);
+    var node = _nodeFactory.CreateObjectNode(_nodeManager, parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId, nodeConfiguration);
+    _nodeFactory.AddAdditionalReferences(_nodeManager, node, nodeConfiguration);
+    return node;
+}, out var nodeState, out var isFirstReference);
+
+if (isFirstReference)
+{
     CreateSubjectNodes(nodeState.NodeId, registeredSubject, path + PathDelimiter);
     _modelChangePublisher.QueueChange(nodeState.NodeId, ModelChangeStructureVerbMask.NodeAdded);
 }
 else
 {
+    var parentNode = _nodeManager.FindNode(parentNodeId);
     parentNode.AddReference(referenceTypeId ?? ReferenceTypeIds.HasComponent, false, nodeState.NodeId);
     _modelChangePublisher.QueueChange(nodeState.NodeId, ModelChangeStructureVerbMask.ReferenceAdded);
 }
 ```
 
-**Design Quality:** Good - centralized integration point prevents scattered registration logic.
+**Design Quality:** Good - centralized integration point prevents scattered registration logic. Now uses unified `SubjectConnectorRegistry.Register` for atomic registration with reference counting.
 
 ---
 
@@ -287,9 +289,9 @@ else
 
 | Candidate | Lines | Benefit | Cost |
 |-----------|-------|---------|------|
-| VariableNodeConfigurator | 329-384 | Isolates value binding | Low benefit, adds indirection |
-| AttributeNodeCreator | 279-324 | Separates attribute handling | Breaks cohesion with parent node creation |
-| SharedSubjectHandler | 428-468 | Isolates reference counting | Already well-encapsulated |
+| VariableNodeConfigurator | 326-381 | Isolates value binding | Low benefit, adds indirection |
+| AttributeNodeCreator | 276-321 | Separates attribute handling | Breaks cohesion with parent node creation |
+| SharedSubjectHandler | 425-462 | Isolates reference counting | Already well-encapsulated |
 
 **Verdict:** Current structure is appropriate. Extraction would add complexity without proportional benefit.
 
@@ -313,13 +315,13 @@ else
 ### Coverage Gaps
 
 1. **No unit tests for edge cases:**
-   - Null/empty dictionary keys (line 178-184)
+   - Null/empty dictionary keys (lines 176-182)
    - Deeply nested attributes
    - Reference counting with shared subjects
 
 2. **No tests for error paths:**
-   - What if `TryGetRegisteredSubject()` returns null (line 434)?
-   - What if `FindNode()` returns null for parent (line 462)?
+   - What if `TryGetRegisteredSubject()` returns null (line 431)?
+   - What if `FindNode()` returns null for parent (line 456)?
 
 3. **No memory leak verification tests**
 
@@ -340,7 +342,7 @@ else
 
 3. **Replace lock(variableNode)** with dedicated lock object (Issue 3)
 
-4. **Add null validation for collection child.Index** (Issue 5)
+4. **Add null validation for collection child.Index** (Issue 4)
 
 5. **Add unit tests** for:
    - Edge cases (null keys, missing nodes)
@@ -349,7 +351,7 @@ else
 
 ### Suggestions (Nice to Have)
 
-6. **Document why dictionaries don't support Flat mode** (Issue 6)
+6. **Document why dictionaries don't support Flat mode** (Issue 5)
 
 7. **Add XML documentation** to all public methods
 
@@ -367,13 +369,15 @@ else
 
 3. **Centralized integration point in CreateChildObject** - Single location for registration, reference counting, and event queuing
 
-4. **Proper use of reference counting** - `IncrementAndCheckFirst` pattern correctly handles shared subjects
+4. **Proper use of reference counting** - Uses `SubjectConnectorRegistry.Register` with atomic registration and reference counting
 
 5. **Container/Flat mode support for collections** - Flexible configuration without code duplication
 
 6. **Comprehensive logging** - Debug-level logs throughout for troubleshooting
 
 7. **ConfigureAwait not needed** - Server-side code doesn't need ConfigureAwait(false)
+
+8. **Unified registry** - Replaced separate `ConnectorReferenceCounter` and `ConnectorSubjectMapping` with single `SubjectConnectorRegistry` for cleaner API
 
 ---
 
@@ -385,6 +389,5 @@ else
 | `CustomNodeManager.cs` | Parent class that instantiates and uses this |
 | `OpcUaNodeFactory.cs` | Dependency for SDK node creation |
 | `OpcUaSubjectServerBackgroundService.cs` | Source for property updates |
-| `ConnectorReferenceCounter.cs` | Reference counting utility |
-| `ConnectorSubjectMapping.cs` | Bidirectional mapping utility |
+| `SubjectConnectorRegistry.cs` | Unified reference counting and bidirectional mapping |
 | `OpcUaServerGraphChangePublisher.cs` | ModelChangeEvent batching |

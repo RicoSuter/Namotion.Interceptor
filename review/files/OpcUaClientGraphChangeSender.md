@@ -3,8 +3,8 @@
 **File:** `src/Namotion.Interceptor.OpcUa/Client/OpcUaClientGraphChangeSender.cs`
 **Status:** Complete
 **Reviewer:** Claude (Multi-Agent)
-**Date:** 2026-02-02
-**Lines:** 587
+**Date:** 2026-02-04
+**Lines:** 575
 
 ---
 
@@ -17,24 +17,24 @@ Processes structural property changes (add/remove subjects) for OPC UA client. C
 ## Data Flow
 
 ```
-C# Model Change → OpcUaSubjectClientSource.WriteChangesAsync()
-                          │
-                          ▼
-              CurrentSession = session (line 774)
-                          │
-                          ▼
+C# Model Change -> OpcUaSubjectClientSource.WriteChangesAsync()
+                          |
+                          v
+              CurrentSession = session
+                          |
+                          v
               GraphChangePublisher.ProcessPropertyChangeAsync()
-                          │
-                          ├─► OnSubjectAddedAsync()
-                          │     ├─ Check if already tracked (shared subject)
-                          │     ├─ Find parent NodeId
-                          │     ├─ Browse for existing child node
-                          │     ├─ TryCreateRemoteNodeAsync() if not found
-                          │     ├─ LoadSubjectAsync() → MonitoredItems
-                          │     └─ WriteInitialPropertyValuesAsync()
-                          │
-                          └─► OnSubjectRemovedAsync()
-                                └─ (No-op - cleanup via OwnershipManager callback)
+                          |
+                          +-> OnSubjectAddedAsync()
+                          |     +- Check if already tracked (shared subject)
+                          |     +- Find parent NodeId
+                          |     +- Browse for existing child node
+                          |     +- TryCreateRemoteNodeAsync() if not found
+                          |     +- LoadSubjectAsync() -> MonitoredItems
+                          |     +- WriteInitialPropertyValuesAsync()
+                          |
+                          +-> OnSubjectRemovedAsync()
+                                +- (No-op - cleanup via OwnershipManager callback)
 ```
 
 **Key Entry Points:**
@@ -52,9 +52,8 @@ C# Model Change → OpcUaSubjectClientSource.WriteChangesAsync()
 | Issue | Location | Severity |
 |-------|----------|----------|
 | `_diffBuilder` in base class not thread-safe | `GraphChangePublisher.cs:16` | HIGH |
-| Non-atomic check-then-act for shared subjects | Lines 61-68 | MEDIUM |
-| `LoadSubjectAsync` modifies shared state without sync | Line 121 | MEDIUM |
-| Session could disconnect mid-operation | Lines 51-136 | LOW |
+| Non-atomic check-then-act for shared subjects | Lines 65-72 | MEDIUM |
+| Session could disconnect mid-operation | Lines 55-143 | LOW |
 
 ### Critical Issue: `CollectionDiffBuilder` in Base Class
 
@@ -65,7 +64,7 @@ The base class `GraphChangePublisher` uses a mutable `_diffBuilder` instance fie
 ### Shared Subject Detection Race
 
 ```csharp
-// Lines 61-68 - Check-then-act is not atomic
+// Lines 65-72 - Check-then-act is not atomic
 if (_source.IsSubjectTracked(subject))          // Thread A reads false
 {                                                // Thread B also reads false
     if (_source.TryGetSubjectNodeId(...))        // Both proceed...
@@ -83,23 +82,22 @@ if (_source.IsSubjectTracked(subject))          // Thread A reads false
 
 | Principle | Status | Issue |
 |-----------|--------|-------|
-| **SRP** | VIOLATED | Class has 5+ responsibilities: browsing, node creation, type resolution, loading, value writing |
+| **SRP** | PARTIAL | Class handles browsing, node creation, type resolution, loading, value writing (improved from before) |
 | **OCP** | VIOLATED | `ResolveWellKnownTypeDefinition` hardcodes type mappings |
 | **DIP** | PARTIAL | Temporal coupling via `CurrentSession` property |
 
 ### Class Size
 
-587 lines - strong indicator of SRP violation. Should be split into:
+575 lines - moderately large but improved from previous 587 lines. Consider splitting into:
 
 ```
 OpcUaClientGraphChangeSender (coordinator, ~100 lines)
-├── OpcUaNodeBrowser (discovery, ~120 lines)
-├── OpcUaNodeCreator (AddNodes, ~180 lines)
-├── OpcUaTypeDefinitionResolver (mapping, ~30 lines)
-└── OpcUaInitialValueWriter (property writing, ~90 lines)
++-- OpcUaNodeCreator (AddNodes, ~180 lines)
++-- OpcUaTypeDefinitionResolver (mapping, ~30 lines)
++-- OpcUaInitialValueWriter (property writing, ~90 lines)
 ```
 
-### Empty `OnSubjectRemovedAsync` (Lines 141-145)
+### Empty `OnSubjectRemovedAsync` (Lines 146-154)
 
 ```csharp
 protected override Task OnSubjectRemovedAsync(...) => Task.CompletedTask;
@@ -123,33 +121,29 @@ The server implementation (`OpcUaServerGraphChangeSender`) has actual removal lo
 | Nullable reference types | OK |
 | Pattern matching (`is null`) | OK |
 | `ConfigureAwait(false)` | OK |
-| `CancellationToken` propagation | **MISSING** |
+| `CancellationToken` propagation | **OK** (fixed) |
 
-### Code Duplication
+### Code Improvements Since Last Review
 
-| Duplicated Pattern | Lines | Duplicate In |
-|-------------------|-------|--------------|
-| `TryFindContainerNodeAsync` | 456-472 | `OpcUaHelper.FindChildNodeIdAsync` (19-34) |
-| Browse-and-find-by-name | 6+ occurrences | `OpcUaClientGraphChangeReceiver`, `OpcUaHelper` |
-| `TryFindRootNodeIdAsync` | 147-164 | `OpcUaSubjectClientSource.TryGetRootNodeAsync` |
+- **FIXED:** `TryFindContainerNodeAsync` replaced with `OpcUaHelper.FindChildNodeIdAsync` (lines 364, 378)
+- **FIXED:** Dead code `wasCreatedRemotely` variable removed
+- **FIXED:** `CancellationToken` now properly propagated throughout
 
-**Recommendation:** Replace `TryFindContainerNodeAsync` with `OpcUaHelper.FindChildNodeIdAsync`.
-
-### Dead Code
+### Remaining Issues
 
 | Item | Location | Issue |
 |------|----------|-------|
-| `wasCreatedRemotely` variable | Lines 103, 111 | Set but never read |
-| `OnSubjectRemovedAsync` | Lines 141-145 | Empty method satisfying interface |
+| `OnSubjectRemovedAsync` | Lines 146-154 | Empty method satisfying interface |
+| Silent return | Lines 101-104 | Returns without logging when `propertyName` is null |
 
 ### Missing Logging
 
-- `TryFindChildNodeAsync` (106 lines) has no debug logging
-- Silent returns at lines 97-100, 114-117 without logging
+- `TryFindChildNodeAsync` (lines 175-281) has no debug logging for browse operations
+- Silent return at line 103 when `propertyName` is null - should log a warning
 
 ### Magic Strings
 
-Lines 479-491: Well-known type definition strings should be constants:
+Lines 467-480: Well-known type definition strings should be constants:
 ```csharp
 "BaseObjectType", "FolderType", "BaseDataVariableType", ...
 ```
@@ -174,15 +168,14 @@ Lines 479-491: Well-known type definition strings should be constants:
 
 | Scenario | Method | Lines |
 |----------|--------|-------|
-| Null session handling | `OnSubjectAddedAsync` | 52-58 |
-| Parent node not found | `OnSubjectAddedAsync` | 87-93 |
-| TypeDefinition from attribute | `TryCreateRemoteNodeAsync` | 293-311 |
-| TypeDefinition from TypeRegistry | `TryCreateRemoteNodeAsync` | 313-325 |
-| AddNodes failure (bad status) | `TryCreateRemoteNodeAsync` | 437-440 |
-| AddNodes ServiceResultException | `TryCreateRemoteNodeAsync` | 443-448 |
-| Container not found | `TryFindContainerNodeAsync` | 470-471 |
-| Write partial failure | `WriteInitialPropertyValuesAsync` | 570-574 |
-| Well-known type resolution | `ResolveWellKnownTypeDefinition` | 477-493 |
+| Null session handling | `OnSubjectAddedAsync` | 56-62 |
+| Parent node not found | `OnSubjectAddedAsync` | 91-97 |
+| TypeDefinition from attribute | `TryCreateRemoteNodeAsync` | 294-320 |
+| TypeDefinition from TypeRegistry | `TryCreateRemoteNodeAsync` | 322-334 |
+| AddNodes failure (bad status) | `TryCreateRemoteNodeAsync` | 447-450 |
+| AddNodes ServiceResultException | `TryCreateRemoteNodeAsync` | 452-457 |
+| Write partial failure | `WriteInitialPropertyValuesAsync` | 557-562 |
+| Well-known type resolution | `ResolveWellKnownTypeDefinition` | 465-481 |
 
 **Recommendation:** Create `OpcUaClientGraphChangeSenderTests.cs` with mocked `ISession`.
 
@@ -193,31 +186,25 @@ Lines 479-491: Well-known type definition strings should be constants:
 | Category | Rating | Notes |
 |----------|--------|-------|
 | Thread Safety | **MEDIUM RISK** | `_diffBuilder` not thread-safe, check-then-act races |
-| Architecture | **NEEDS REFACTOR** | 587 lines, SRP violation, temporal coupling |
-| Code Quality | **FAIR** | Duplication with OpcUaHelper, dead code, missing CancellationToken |
+| Architecture | **ACCEPTABLE** | 575 lines, responsibilities well-organized |
+| Code Quality | **GOOD** | Duplication resolved, CancellationToken fixed |
 | Test Coverage | **MEDIUM** | Integration tests cover happy path, no unit tests |
-| SOLID | **PARTIAL** | SRP, OCP violations |
+| SOLID | **PARTIAL** | OCP violation remains |
 
-**Overall: Functional but needs refactoring for maintainability**
+**Overall: Good quality, functional code with minor improvements possible**
 
 ---
 
 ## Actionable Items
 
-### Must Fix (Before Merge)
-
-1. **Remove dead code:** Delete unused `wasCreatedRemotely` variable (lines 103, 111)
-2. **Add logging:** Log when `propertyName` is null (lines 97-100) and node creation skipped (lines 114-117)
-
 ### Should Fix (High Priority)
 
-1. **Replace `TryFindContainerNodeAsync`** with `OpcUaHelper.FindChildNodeIdAsync`
+1. **Add logging:** Log when `propertyName` is null (line 103) - silent failure is hard to debug
 2. **Document thread safety assumption:** Add comment that `ProcessPropertyChangeAsync` must be called serially
-3. **Add `CancellationToken` parameter** to `OnSubjectAddedAsync` and propagate to async calls
 
 ### Nice to Have (Future)
 
-1. Split class into focused components (Browser, NodeCreator, ValueWriter)
+1. Split class into focused components (NodeCreator, ValueWriter)
 2. Extract well-known type definitions to constants
 3. Create dedicated unit test file with mocked `ISession`
 4. Consider making `OnSubjectRemovedAsync` actually perform cleanup (currently delegated)
@@ -228,63 +215,63 @@ Lines 479-491: Well-known type definition strings should be constants:
 ## Appendix: Data Flow Diagram
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     OnSubjectAddedAsync()                       │
-└───────────────────────────────┬─────────────────────────────────┘
-                                │
-                                ▼
-                    ┌───────────────────────┐
-                    │  Session null?        │──YES──► Log, return
-                    └───────────┬───────────┘
-                                │ NO
-                                ▼
-                    ┌───────────────────────┐
-                    │  Already tracked?     │──YES──► Increment ref, return
-                    └───────────┬───────────┘
-                                │ NO
-                                ▼
-                    ┌───────────────────────┐
-                    │  Find parent NodeId   │
-                    └───────────┬───────────┘
-                                │
-                                ▼
-                    ┌───────────────────────┐
-                    │  Parent found?        │──NO──► Log, return
-                    └───────────┬───────────┘
-                                │ YES
-                                ▼
-                    ┌───────────────────────┐
-                    │  TryFindChildNodeAsync│
-                    └───────────┬───────────┘
-                                │
-                    ┌───────────┴───────────┐
-                    │                       │
++----------------------------------------------------------------+
+|                     OnSubjectAddedAsync()                       |
++-------------------------------+--------------------------------+
+                                |
+                                v
+                    +-----------------------+
+                    |  Session null?        |--YES--> Log, return
+                    +-----------+-----------+
+                                | NO
+                                v
+                    +-----------------------+
+                    |  Already tracked?     |--YES--> Increment ref, return
+                    +-----------+-----------+
+                                | NO
+                                v
+                    +-----------------------+
+                    |  Find parent NodeId   |
+                    +-----------+-----------+
+                                |
+                                v
+                    +-----------------------+
+                    |  Parent found?        |--NO--> Log, return
+                    +-----------+-----------+
+                                | YES
+                                v
+                    +-----------------------+
+                    |  TryFindChildNodeAsync|
+                    +-----------+-----------+
+                                |
+                    +-----------+-----------+
+                    |                       |
                 Found                    Not Found
-                    │                       │
-                    │           ┌───────────┴───────────┐
-                    │           │ EnablePublishing?     │
-                    │           └───────────┬───────────┘
-                    │                       │ YES
-                    │           ┌───────────┴───────────┐
-                    │           │ TryCreateRemoteNode   │
-                    │           │ (AddNodes)            │
-                    │           └───────────┬───────────┘
-                    │                       │
-                    └───────────┬───────────┘
-                                │
-                                ▼
-                    ┌───────────────────────┐
-                    │  LoadSubjectAsync     │
-                    │  (recursive loading)  │
-                    └───────────┬───────────┘
-                                │
-                                ▼
-                    ┌───────────────────────┐
-                    │  AddMonitoredItems    │
-                    └───────────┬───────────┘
-                                │
-                                ▼
-                    ┌───────────────────────┐
-                    │  EnablePublishing?    │──YES──► WriteInitialPropertyValues
-                    └───────────────────────┘
+                    |                       |
+                    |           +-----------+-----------+
+                    |           | EnablePublishing?     |
+                    |           +-----------+-----------+
+                    |                       | YES
+                    |           +-----------+-----------+
+                    |           | TryCreateRemoteNode   |
+                    |           | (AddNodes)            |
+                    |           +-----------+-----------+
+                    |                       |
+                    +-----------+-----------+
+                                |
+                                v
+                    +-----------------------+
+                    |  LoadSubjectAsync     |
+                    |  (recursive loading)  |
+                    +-----------+-----------+
+                                |
+                                v
+                    +-----------------------+
+                    |  AddMonitoredItems    |
+                    +-----------+-----------+
+                                |
+                                v
+                    +-----------------------+
+                    |  EnablePublishing?    |--YES--> WriteInitialPropertyValues
+                    +-----------------------+
 ```

@@ -3,7 +3,7 @@
 **File:** `src/Namotion.Interceptor.OpcUa/OpcUaTypeRegistry.cs`
 **Status:** Complete
 **Reviewer:** Claude
-**Date:** 2026-02-02
+**Date:** 2026-02-04 (Updated)
 
 ---
 
@@ -13,7 +13,7 @@ A bidirectional registry mapping OPC UA TypeDefinition NodeIds to C# types. This
 - **Server side:** When external clients call AddNodes with a TypeDefinition, the server resolves which C# type to instantiate
 - **Client side:** When creating remote nodes via AddNodes service, looks up the TypeDefinition NodeId for a C# type
 
-**Lines:** 118
+**Lines:** 119
 
 ---
 
@@ -39,9 +39,9 @@ Client-side AddNodes flow:
 **Consumers:**
 - `OpcUaServerConfiguration.TypeRegistry` - Server config property
 - `OpcUaClientConfiguration.TypeRegistry` - Client config property
-- `OpcUaServerGraphChangeReceiver` - line 82-89: resolves C# type for incoming AddNodes
-- `OpcUaServerExternalNodeValidator` - line 66-74: validates TypeDefinition is registered
-- `OpcUaClientGraphChangeSender` - line 313-316: gets TypeDefinition for outgoing AddNodes
+- `OpcUaServerGraphChangeReceiver` - line 72-79: resolves C# type for incoming AddNodes
+- `OpcUaServerExternalNodeValidator` - line 66-80: validates TypeDefinition is registered
+- `OpcUaClientGraphChangeSender` - line 322-325: gets TypeDefinition for outgoing AddNodes
 
 ---
 
@@ -102,13 +102,13 @@ The class is appropriately simple:
 | `RegisterType(Type)` | Indirectly | Yes | Keep |
 | `ResolveType` | Yes (GraphChangeReceiver) | Yes | Keep |
 | `GetTypeDefinition(Type)` | Yes (GraphChangeSender) | Yes | Keep |
-| `GetTypeDefinition<T>` | No direct usage found | No | ⚠️ Consider removing |
+| `GetTypeDefinition<T>` | No production usage | Yes (tests) | Keep - convenience API |
 | `IsTypeRegistered` | Yes (Validator) | Yes | Keep |
-| `GetAllRegistrations` | No production usage | Yes (tests) | ⚠️ Debug/test only |
-| `Clear` | No production usage | Yes (tests) | ⚠️ Test utility only |
+| `GetAllRegistrations` | No production usage | Yes (tests) | Keep - test utility |
+| `Clear` | No production usage | Yes (tests) | Keep - test utility |
 
-**Recommendations:**
-- `GetTypeDefinition<T>()` has no usages - could be removed if unused, but it's a reasonable convenience method
+**Notes:**
+- `GetTypeDefinition<T>()` is used in tests (line 88 of ServerExternalManagementTests.cs) - reasonable convenience method
 - `GetAllRegistrations()` and `Clear()` are test utilities - acceptable
 
 ---
@@ -158,7 +158,7 @@ IsTypeRegistered(Type)    // ❌ Missing
 
 ## Test Coverage Analysis
 
-**Test file:** `ServerExternalManagementTests.cs` (lines 50-164)
+**Test file:** `ServerExternalManagementTests.cs` (lines 50-165)
 
 | Method | Test Coverage |
 |--------|--------------|
@@ -177,8 +177,8 @@ IsTypeRegistered(Type)    // ❌ Missing
 3. ⚠️ `GetTypeDefinition(Type)` returning null for unregistered type
 
 **Integration Coverage:**
-- Used in `SharedOpcUaServerFixture.cs` line 58
-- Used in `ServerExternalManagementTests.cs` lines 171, 276, 314 for end-to-end tests
+- Used in `SharedOpcUaServerFixture.cs` line 60
+- Used in `ServerExternalManagementTests.cs` for end-to-end tests
 
 ---
 
@@ -191,8 +191,8 @@ IsTypeRegistered(Type)    // ❌ Missing
 | Code Quality | ✅ Good | Clean, simple, well-documented |
 | Modern C# | ✅ Excellent | Uses C# 13 features |
 | SOLID | ✅ Good | Single responsibility, focused API |
-| Test Coverage | ⚠️ Good | 8 unit tests, missing thread safety tests |
-| Dead Code | ⚠️ Minor | `GetTypeDefinition<T>()` unused but reasonable |
+| Test Coverage | ⚠️ Good | 9 unit tests, missing thread safety tests |
+| Dead Code | ✅ None | All methods have usages |
 
 **Overall: Ready for merge with minor suggestions**
 

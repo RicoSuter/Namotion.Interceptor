@@ -1,10 +1,10 @@
 # OpcUaSubjectServer.cs - Code Review
 
 **File:** `src/Namotion.Interceptor.OpcUa/Server/OpcUaSubjectServer.cs`
-**Status:** Complete
+**Status:** Good
 **Reviewer:** Claude
-**Date:** 2026-02-02
-**Lines:** ~267
+**Date:** 2026-02-04
+**Lines:** ~265
 
 ---
 
@@ -27,11 +27,15 @@
 ```
 OpcUaSubjectServer : StandardServer
 ├── Constructor (4 params)
+├── Fields
+│   └── _externalRequestLock (SemaphoreSlim for request serialization)
 ├── Properties
 │   └── NodeManager (delegate to factory)
 ├── Public Methods
 │   ├── ClearPropertyData() - delegate
 │   └── RemoveSubjectNodes() - delegate
+├── Private Methods
+│   └── TryGetNodeManagerForExternalRequest() - validation helper
 ├── Override Methods
 │   ├── OnServerStarted() - session event subscriptions
 │   ├── Dispose() - cleanup handlers
@@ -44,8 +48,8 @@ OpcUaSubjectServer : StandardServer
 | Aspect | Assessment |
 |--------|------------|
 | Single Responsibility | **GOOD** - Server entry point only |
-| Lines of Code | **GOOD** - 267 lines, appropriate size |
-| Complexity | **MODERATE** - AddNodes/DeleteNodes have similar patterns |
+| Lines of Code | **GOOD** - 265 lines, appropriate size |
+| Thread Safety | **GOOD** - Uses SemaphoreSlim for request serialization |
 | Delegation | **GOOD** - Properly delegates to CustomNodeManager |
 
 ### 2.3 Does This Class Make Sense?
@@ -55,74 +59,47 @@ OpcUaSubjectServer : StandardServer
 - Overrides service methods for custom behavior
 - Delegates heavy lifting to `CustomNodeManager`
 
-**Alternative considered:** Inline into `CustomNodeManager` - would violate separation of concerns and make CustomNodeManager even larger.
-
 ---
 
 ## 3. Thread Safety Analysis
 
-### 3.1 Risk Level: **CRITICAL** (Inherited from OpcUaServerGraphChangeReceiver)
+### 3.1 Risk Level: **LOW** (Fixed)
 
-### 3.2 Critical Issues Found
+The class now uses `_externalRequestLock` (SemaphoreSlim) to serialize external requests.
 
-**Issue #1: No Synchronization for AddNodesAsync/DeleteNodesAsync**
+### 3.2 Current Implementation
 
 ```csharp
-// Lines 90-184: AddNodesAsync
-foreach (var item in nodesToAdd)
+private readonly SemaphoreSlim _externalRequestLock = new(1, 1);
+
+await _externalRequestLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+try
 {
-    var (subject, nodeState) = nodeManager.AddSubjectFromExternal(...);  // NO LOCK
+    // Process items
 }
-nodeManager.FlushModelChangeEvents();  // NO LOCK
-```
-
-Multiple OPC UA clients can call `AddNodesAsync` and `DeleteNodesAsync` concurrently. The OPC UA SDK uses a thread pool for client requests - no serialization is provided.
-
-**Issue #2: TOCTOU with NodeManager Property**
-
-```csharp
-// Lines 101-116
-var nodeManager = NodeManager;
-if (nodeManager is null) { ... return error; }
-// ... later ...
-nodeManager.AddSubjectFromExternal(...);  // Could be disposed between check and use
-```
-
-Low probability but possible race with server shutdown.
-
-**Issue #3: Collection Index Race (via AddSubjectFromExternal)**
-
-The underlying `AddSubjectFromExternal` has a race condition:
-```csharp
-var addedIndex = currentCollection?.Count() ?? 0;  // Read count
-// Another thread could modify collection here
-if (_graphChangeApplier.AddToCollection(...))  // Use stale index
-```
-
-This can result in duplicate BrowseName indices: `[0], [1], [1]`
-
-### 3.3 Recommended Fix
-
-Add serialization at this level since it's the entry point:
-
-```csharp
-private readonly SemaphoreSlim _requestLock = new(1, 1);
-
-public override async Task<AddNodesResponse> AddNodesAsync(...)
+finally
 {
-    await _requestLock.WaitAsync(cancellationToken);
-    try
-    {
-        // existing logic
-    }
-    finally
-    {
-        _requestLock.Release();
-    }
+    _externalRequestLock.Release();
 }
 ```
 
-Or coordinate with `CustomNodeManager._structureLock`.
+### 3.3 Remaining Minor Issue
+
+**Issue: TOCTOU with NodeManager Property (LOW severity)**
+
+```csharp
+var (nodeManager, errorCode) = TryGetNodeManagerForExternalRequest("AddNodes");
+if (nodeManager is null) { return early; }
+
+await _externalRequestLock.WaitAsync(cancellationToken);  // Lock acquired AFTER null check
+```
+
+The validation happens before the lock is acquired. During server shutdown, `nodeManager` could theoretically become unavailable between the check and actual use. However:
+- The `nodeManager` reference is captured locally
+- The probability is very low (only during shutdown)
+- The worst case is a logged error, not data corruption
+
+**Recommendation:** Could move the validation inside the lock, but current approach is acceptable.
 
 ---
 
@@ -145,94 +122,39 @@ Or coordinate with `CustomNodeManager._structureLock`.
 | File-scoped namespace | **YES** |
 | Nullable reference types | **YES** - Proper use of `?` |
 | Pattern matching | **YES** - `is not null` checks |
-| Target-typed new | **NO** - Uses explicit types |
+| Async/await | **YES** - Proper async implementation |
+| ConfigureAwait(false) | **YES** - Used appropriately |
 
 ### 4.3 Code Issues Found
 
-**Issue 1: Duplicate Pattern in AddNodesAsync/DeleteNodesAsync**
-
-Both methods follow identical structure:
-```csharp
-// Lines 96-116 / 196-216: Validation
-ValidateRequest(requestHeader);
-var results = new ...Collection();
-if (nodeManager is null) { return error; }
-if (!nodeManager.IsExternalNodeManagementEnabled) { return error; }
-
-// Lines 138-173 / 238-254: Processing
-foreach (var item in items) { try/catch process }
-
-// Lines 176 / 257: Flush
-nodeManager.FlushModelChangeEvents();
-
-// Lines 178-184 / 259-265: Return
-return Task.FromResult(new Response {...});
-```
-
-**Recommendation:** Extract shared boilerplate to helper method.
-
-**Issue 2: Synchronous Task.FromResult Usage**
+**Issue 1: SemaphoreSlim Not Disposed (MEDIUM)**
 
 ```csharp
-public override Task<AddNodesResponse> AddNodesAsync(...)
+private readonly SemaphoreSlim _externalRequestLock = new(1, 1);
+
+protected override void Dispose(bool disposing)
 {
-    // All synchronous code
-    return Task.FromResult(...);  // No await
+    // _externalRequestLock is not disposed
 }
 ```
 
-The method signature is async but implementation is sync. This is intentional for the SDK but could be misleading.
+The `SemaphoreSlim` should be disposed in the `Dispose` method.
 
-**Issue 3: Missing Request Cancellation Support**
+**Issue 2: Some Remaining Duplication Between AddNodesAsync/DeleteNodesAsync (LOW)**
 
-```csharp
-public override Task<AddNodesResponse> AddNodesAsync(
-    ...,
-    CancellationToken cancellationToken)  // Never used
-{
-    // cancellationToken is ignored
-}
-```
+Both methods share similar structure:
+- Validation via `TryGetNodeManagerForExternalRequest`
+- Lock acquisition pattern
+- Error handling in foreach loop
+- Flush and return
 
-Long-running batch operations won't respect cancellation.
+The `TryGetNodeManagerForExternalRequest` helper reduces duplication, but a generic processing helper could further reduce it. This is a minor improvement opportunity.
 
 ---
 
-## 5. Code Duplication Analysis (via Explore Agent)
+## 5. Test Coverage Analysis
 
-### 5.1 Patterns Shared with Client
-
-| Pattern | Server | Client | Lines |
-|---------|--------|--------|-------|
-| Session event handlers | OpcUaSubjectServer:38-84 | OpcUaSubjectClientSource | ~50 |
-| Configuration creation | OpcUaServerConfiguration | OpcUaClientConfiguration | ~300 |
-| Diagnostics wrapper | OpcUaServerDiagnostics | OpcUaClientDiagnostics | ~150 |
-| Async lifecycle | OpcUaSubjectServerBackgroundService | OpcUaSubjectClientSource | ~200 |
-
-### 5.2 Internal Duplication
-
-**AddNodesAsync/DeleteNodesAsync share ~80% structure:**
-
-| Section | AddNodesAsync | DeleteNodesAsync |
-|---------|---------------|------------------|
-| Validation | Lines 96-116 | Lines 196-216 |
-| Processing loop | Lines 138-173 | Lines 238-254 |
-| Flush & return | Lines 176-184 | Lines 257-265 |
-
-**Recommendation:** Extract to helper:
-```csharp
-private Task<TResponse> ProcessExternalRequestAsync<TItem, TResult, TResponse>(
-    RequestHeader requestHeader,
-    ICollection<TItem> items,
-    Func<TItem, TResult> processItem,
-    Func<ICollection<TResult>, TResponse> createResponse)
-```
-
----
-
-## 6. Test Coverage Analysis (via Explore Agent)
-
-### 6.1 Coverage Summary
+### 5.1 Coverage Summary
 
 | Test Type | Count | Status |
 |-----------|-------|--------|
@@ -240,157 +162,91 @@ private Task<TResponse> ProcessExternalRequestAsync<TItem, TResult, TResponse>(
 | Configuration Tests | 19 | Good |
 | Integration Tests | ~20 | Good |
 
-### 6.2 Integration Test Coverage
+### 5.2 Integration Test Coverage
 
 Tests in `ClientToServer*Tests.cs` exercise the server indirectly:
 - `AddToContainerCollection_ServerReceivesChange()`
 - `RemoveFromContainerCollection_ServerReceivesChange()`
 - Dictionary and reference tests
 
-### 6.3 Coverage Gaps
+### 5.3 Coverage Gaps
 
 | Gap | Severity |
 |-----|----------|
-| Direct AddNodesAsync unit tests | **HIGH** |
-| Direct DeleteNodesAsync unit tests | **HIGH** |
-| NodeManager null handling | **MEDIUM** |
-| Request cancellation behavior | **LOW** |
-| Concurrent request handling | **HIGH** |
+| Direct AddNodesAsync unit tests | **MEDIUM** |
+| Direct DeleteNodesAsync unit tests | **MEDIUM** |
+| NodeManager null handling | **LOW** |
 
 ---
 
-## 7. Event Handler Management
+## 6. Event Handler Management
 
-### 7.1 Current Implementation
+### 6.1 Current Implementation
 
 ```csharp
-// Lines 38-64: OnServerStarted
-// Unsubscribe existing → Create new → Subscribe
+// Lines 39-65: OnServerStarted
+// Unsubscribe existing -> Create new -> Subscribe
 
-// Lines 66-84: Dispose
-// Unsubscribe all → Set _server = null
+// Lines 67-85: Dispose
+// Unsubscribe all -> Set _server = null
 ```
 
-### 7.2 Assessment
+### 6.2 Assessment
 
 **Good:** Properly cleans up handlers on restart
 **Good:** Uses null checks before unsubscribe
 **Good:** Stores handler references for cleanup
 
-**Minor:** Could use `EventHandlerManager<T>` utility pattern
-
 ---
 
-## 8. Recommendations
+## 7. Recommendations
 
-### 8.1 Critical (Must Fix)
+### 7.1 Medium Priority (Should Fix)
 
 | Issue | Recommendation |
 |-------|----------------|
-| **Race conditions** | Add `_requestLock` or coordinate with `_structureLock` |
-| **No cancellation support** | Pass `CancellationToken` through processing loop |
+| SemaphoreSlim not disposed | Add `_externalRequestLock.Dispose()` in `Dispose(bool)` |
 
-### 8.2 High Priority (Should Fix)
-
-| Issue | Recommendation |
-|-------|----------------|
-| Duplicate code in AddNodes/DeleteNodes | Extract shared processing helper |
-| No direct unit tests | Add tests for error paths and edge cases |
-
-### 8.3 Medium Priority (Consider)
+### 7.2 Low Priority (Consider)
 
 | Issue | Recommendation |
 |-------|----------------|
-| TOCTOU with NodeManager | Add null-check inside processing loop |
-| Event handler pattern | Extract to reusable utility |
+| Remaining code duplication | Could extract generic processing helper |
+| Direct unit tests | Add tests for error paths and edge cases |
+| TOCTOU with NodeManager | Could move validation inside lock |
 
 ---
 
-## 9. Proposed Refactoring
-
-### 9.1 Add Request Serialization
-
-```csharp
-private readonly SemaphoreSlim _externalRequestLock = new(1, 1);
-
-public override async Task<AddNodesResponse> AddNodesAsync(...)
-{
-    await _externalRequestLock.WaitAsync(cancellationToken);
-    try
-    {
-        return ProcessAddNodesCore(...);
-    }
-    finally
-    {
-        _externalRequestLock.Release();
-    }
-}
-```
-
-### 9.2 Extract Shared Processing
-
-```csharp
-private TResponse ProcessExternalRequest<TItem, TResult, TResponse>(
-    RequestHeader requestHeader,
-    IList<TItem> items,
-    Func<string> disabledMessage,
-    Func<TResult> createDisabledResult,
-    Func<CustomNodeManager, TItem, TResult> processItem,
-    Func<List<TResult>, DiagnosticInfoCollection, TResponse> createResponse)
-{
-    ValidateRequest(requestHeader);
-    var results = new List<TResult>();
-    var diagnosticInfos = new DiagnosticInfoCollection();
-
-    var nodeManager = NodeManager;
-    if (nodeManager is null || !nodeManager.IsExternalNodeManagementEnabled)
-    {
-        foreach (var _ in items) results.Add(createDisabledResult());
-        return createResponse(results, diagnosticInfos);
-    }
-
-    foreach (var item in items)
-    {
-        try { results.Add(processItem(nodeManager, item)); }
-        catch { results.Add(createDisabledResult()); }
-    }
-
-    nodeManager.FlushModelChangeEvents();
-    return createResponse(results, diagnosticInfos);
-}
-```
-
----
-
-## 10. Summary
+## 8. Summary
 
 ### Strengths
 - Clean separation - delegates to CustomNodeManager
 - Proper event handler lifecycle management
-- Reasonable size (267 lines)
+- Reasonable size (265 lines)
 - Good use of OPC UA SDK patterns
+- Thread-safe with SemaphoreSlim serialization
+- Proper async/await implementation with ConfigureAwait
+- Cancellation token properly used
 
 ### Issues Found
 
 | Severity | Issue |
 |----------|-------|
-| **CRITICAL** | Race conditions - concurrent AddNodes/DeleteNodes |
-| **HIGH** | Duplicate code between AddNodes/DeleteNodes |
-| **HIGH** | No direct unit tests |
-| **MEDIUM** | Cancellation token ignored |
-| **LOW** | TOCTOU with NodeManager property |
+| **MEDIUM** | SemaphoreSlim not disposed |
+| **LOW** | Some remaining code duplication |
+| **LOW** | TOCTOU with NodeManager (minor, edge case only) |
 
 ### Verdict
 
-**NEEDS WORK** - The class design is sound but has critical thread safety issues inherited from the lack of synchronization for external node management. The server is the natural place to add request serialization since it's the entry point for OPC UA client requests.
+**GOOD** - The class is well-designed with proper thread safety. The critical issues from the previous review have been addressed. Only minor cleanup items remain.
 
 ---
 
-## 11. Action Items
+## 9. Action Items
 
-1. [ ] **CRITICAL**: Add request serialization (SemaphoreSlim) for AddNodes/DeleteNodes
-2. [ ] **HIGH**: Extract shared processing pattern to reduce duplication
-3. [ ] **HIGH**: Add direct unit tests for error handling paths
-4. [ ] **MEDIUM**: Support cancellation token in processing loops
-5. [ ] **MEDIUM**: Add concurrent request integration tests
-6. [ ] **LOW**: Consider extracting event handler management pattern
+1. [x] ~~**CRITICAL**: Add request serialization (SemaphoreSlim) for AddNodes/DeleteNodes~~ DONE
+2. [x] ~~**HIGH**: Extract shared validation to helper method~~ DONE (TryGetNodeManagerForExternalRequest)
+3. [x] ~~**MEDIUM**: Support cancellation token in processing loops~~ DONE
+4. [ ] **MEDIUM**: Dispose `_externalRequestLock` in Dispose method
+5. [ ] **LOW**: Consider extracting generic processing helper to reduce remaining duplication
+6. [ ] **LOW**: Add direct unit tests for error handling paths

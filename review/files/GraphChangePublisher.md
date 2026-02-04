@@ -1,10 +1,10 @@
 # Code Review: GraphChangePublisher.cs
 
 **File:** `src/Namotion.Interceptor.Connectors/GraphChangePublisher.cs`
-**Lines:** ~115
+**Lines:** ~125
 **Status:** Complete
 **Reviewer:** Claude
-**Date:** 2026-02-02
+**Date:** 2026-02-04 (Updated)
 
 ---
 
@@ -229,9 +229,9 @@ This would:
 
 #### Issue 4: TODOs in Code (LOW)
 
-**Location:** Lines 39, 67-68
+**Location:** Lines 41, 69-70
 ```csharp
-// TODO: Might need to support other collection types
+// TODO: Might need to support other collection types as well (need to check other places)
 // TODO: Support reordering for connectors which need this?
 ```
 
@@ -239,14 +239,23 @@ This would:
 
 #### Issue 5: Unnecessary Dictionary Allocation (LOW)
 
-**Location:** Line 75
+**Location:** Line 77
 ```csharp
-var newDictionary = change.TryGetNewValue<IDictionary>(out var newDict)
-    ? newDict
-    : new Dictionary<object, object>(); // Unnecessary allocation
+var newDictionary = change.TryGetNewValue<IDictionary>(out var newDict) ? newDict : new Dictionary<object, object>();
 ```
 
 **Recommendation:** Use static empty dictionary or handle null explicitly
+
+#### Issue 6: Unnecessary ToDictionary Allocation (LOW)
+
+**Location:** Line 82
+```csharp
+var oldChildren = property.Children.ToDictionary(child => child.Index!, child => child.Subject);
+```
+
+**Problem:** Creates a new dictionary allocation on every dictionary property change processing.
+
+**Recommendation:** Consider caching or restructuring to avoid allocation per call. Alternatively, iterate over `property.Children` directly when checking `removedKeys`.
 
 ---
 
@@ -330,8 +339,9 @@ var newDictionary = change.TryGetNewValue<IDictionary>(out var newDict)
 
 ### Nice to Have
 
-5. **Use static empty dictionary** (line 75)
+5. **Use static empty dictionary** (line 77)
 6. **Add pooling** to match `SubjectItemsUpdateFactory`
+7. **Avoid ToDictionary allocation** (line 82) - iterate directly instead
 
 ---
 

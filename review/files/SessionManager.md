@@ -2,8 +2,9 @@
 
 **Status**: Complete
 **Reviewer**: Claude
+**Last Updated**: 2026-02-04
 **File**: `src/Namotion.Interceptor.OpcUa/Client/Connection/SessionManager.cs`
-**Lines**: 562
+**Lines**: 563
 
 ## Summary
 
@@ -69,11 +70,15 @@ identity: new UserIdentity(), // TODO: configuration.GetIdentity() default imple
 **Impact**: User authentication not configurable. Should be addressed or removed.
 **Recommendation**: Either implement `configuration.GetIdentity()` or remove the TODO if not planned.
 
-### Issue 2: Inconsistent Lock Type
+### Issue 2: Inconsistent Lock Type (Line 26)
 ```csharp
-private readonly object _reconnectingLock = new();  // Line 26
+private readonly object _reconnectingLock = new();
 ```
-Other managers in the codebase use C# 13 `Lock` type (e.g., PollingManager, ReadAfterWriteManager).
+Other managers in the codebase use C# 13 `Lock` type:
+- `PollingManager.cs`: `private readonly Lock _startLock = new();`
+- `ReadAfterWriteManager.cs`: `private readonly Lock _lock = new();`
+- `OpcUaTypeRegistry.cs`: `private readonly Lock _lock = new();`
+
 **Recommendation**: Migrate to `Lock _reconnectingLock = new();` for consistency and potential performance benefits.
 
 ### Issue 3: Risky Sync Dispose Pattern (Lines 547-561)
@@ -270,14 +275,14 @@ public class SessionManagerTests
 
 ## Summary of Issues
 
-| Severity | Issue | Action |
-|----------|-------|--------|
-| **Low** | TODO comment for user identity | Implement or remove |
-| **Low** | Inconsistent lock type (`object` vs `Lock`) | Migrate to C# 13 `Lock` |
-| **Medium** | Risky sync `Dispose()` with fire-and-forget | Reconsider pattern |
-| **Low** | Dense single-line try-catch blocks | Extract helper method |
-| **Medium** | Code duplication (disposed flag, timeout disposal) | Extract shared utilities |
-| **High** | No direct unit tests | Create SessionManagerTests.cs |
+| Severity | Issue | Line(s) | Status |
+|----------|-------|---------|--------|
+| **Low** | TODO comment for user identity | 163 | Open |
+| **Low** | Inconsistent lock type (`object` vs `Lock`) | 26 | Open |
+| **Medium** | Risky sync `Dispose()` with fire-and-forget | 547-561 | Open |
+| **Low** | Dense single-line try-catch blocks | 497, 501, 504, 508, 515, 535 | Open |
+| **Medium** | Code duplication (disposed flag, timeout disposal) | Multiple files | Open |
+| **High** | No direct unit tests | N/A | Open |
 
 ---
 
@@ -287,7 +292,7 @@ public class SessionManagerTests
 1. **Add unit tests** for SessionManager (critical gap)
 
 ### Should Fix
-2. **Standardize to C# 13 `Lock`** for consistency with PollingManager/ReadAfterWriteManager
+2. **Standardize to C# 13 `Lock`** for consistency with PollingManager/ReadAfterWriteManager/OpcUaTypeRegistry
 3. **Extract disposal helper** to reduce code duplication across managers
 4. **Address TODO** for user identity configuration
 
