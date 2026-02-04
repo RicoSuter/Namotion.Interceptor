@@ -30,6 +30,9 @@ namespace YourDefaultNamespace
 
         void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);
 
+        private static readonly global::System.Collections.Generic.IReadOnlyDictionary<string, global::Namotion.Interceptor.SubjectPropertyMetadata> __defaultProperties =
+            global::Namotion.Interceptor.SubjectPropertyMetadataCache.Get<WeatherStation>();
+
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
@@ -41,14 +44,14 @@ namespace YourDefaultNamespace
 
         [JsonIgnore]
         global::System.Collections.Generic.IReadOnlyDictionary<string, global::Namotion.Interceptor.SubjectPropertyMetadata> global::Namotion.Interceptor.IInterceptorSubject.Properties =>
-            _properties ?? global::Namotion.Interceptor.SubjectPropertyMetadataCache.Get<WeatherStation>();
+            _properties ?? __defaultProperties;
 
         [JsonIgnore]
         object IInterceptorSubject.SyncRoot { get; } = new object();
 
         void global::Namotion.Interceptor.IInterceptorSubject.AddProperties(params global::System.Collections.Generic.IEnumerable<global::Namotion.Interceptor.SubjectPropertyMetadata> properties)
         {
-            _properties = (_properties ?? global::Namotion.Interceptor.SubjectPropertyMetadataCache.Get<WeatherStation>())
+            _properties = (_properties ?? __defaultProperties)
                 .Concat(properties.Select(p => new global::System.Collections.Generic.KeyValuePair<string, global::Namotion.Interceptor.SubjectPropertyMetadata>(p.Name, p)))
                 .ToFrozenDictionary();
         }

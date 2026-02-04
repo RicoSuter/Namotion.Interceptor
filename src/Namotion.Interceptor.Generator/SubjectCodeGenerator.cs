@@ -135,6 +135,9 @@ internal static class SubjectCodeGenerator
     private static void EmitInterceptorSubjectImplementation(StringBuilder builder, SubjectMetadata metadata)
     {
         builder.Append($$"""
+                    private static readonly global::System.Collections.Generic.IReadOnlyDictionary<string, global::Namotion.Interceptor.SubjectPropertyMetadata> __defaultProperties =
+                        global::Namotion.Interceptor.SubjectPropertyMetadataCache.Get<{{metadata.ClassName}}>();
+
                     private IInterceptorExecutor? _context;
                     private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
@@ -146,14 +149,14 @@ internal static class SubjectCodeGenerator
 
                     [JsonIgnore]
                     global::System.Collections.Generic.IReadOnlyDictionary<string, global::Namotion.Interceptor.SubjectPropertyMetadata> global::Namotion.Interceptor.IInterceptorSubject.Properties =>
-                        _properties ?? global::Namotion.Interceptor.SubjectPropertyMetadataCache.Get<{{metadata.ClassName}}>();
+                        _properties ?? __defaultProperties;
 
                     [JsonIgnore]
                     object IInterceptorSubject.SyncRoot { get; } = new object();
 
                     void global::Namotion.Interceptor.IInterceptorSubject.AddProperties(params global::System.Collections.Generic.IEnumerable<global::Namotion.Interceptor.SubjectPropertyMetadata> properties)
                     {
-                        _properties = (_properties ?? global::Namotion.Interceptor.SubjectPropertyMetadataCache.Get<{{metadata.ClassName}}>())
+                        _properties = (_properties ?? __defaultProperties)
                             .Concat(properties.Select(p => new global::System.Collections.Generic.KeyValuePair<string, global::Namotion.Interceptor.SubjectPropertyMetadata>(p.Name, p)))
                             .ToFrozenDictionary();
                     }
