@@ -930,17 +930,14 @@ internal class OpcUaClientGraphChangeReceiver
 
             if (_subjectRegistry.TryGetExternalId(subject, out var existingNodeId) && existingNodeId is not null)
             {
-                // Construct new NodeId by replacing the index in the string representation
-                var existingNodeIdStr = existingNodeId.ToString();
-                var indexPattern = $"[{oldIndex}]";
-                var newIndexPattern = $"[{newIndex}]";
-                if (existingNodeIdStr.Contains(indexPattern))
-                {
-                    var newNodeIdStr = existingNodeIdStr.Replace(indexPattern, newIndexPattern);
-                    var newNodeId = new NodeId(newNodeIdStr);
+                // Reindex only the first occurrence to avoid corrupting nested collection indices
+                var newNodeIdStr = OpcUaHelper.ReindexFirstCollectionIndex(
+                    existingNodeId.ToString(), oldIndex, newIndex);
 
+                if (newNodeIdStr is not null)
+                {
                     // Update the mapping with the new NodeId (handles both directions atomically)
-                    _subjectRegistry.UpdateExternalId(subject, newNodeId);
+                    _subjectRegistry.UpdateExternalId(subject, new NodeId(newNodeIdStr));
                 }
             }
         }

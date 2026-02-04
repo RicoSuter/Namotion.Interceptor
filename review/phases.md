@@ -138,9 +138,9 @@ Files in `src/Namotion.Interceptor.OpcUa/Client/`:
 
 ## Phase 4: Server Layer Cleanup
 
-**Status:** Not Started
+**Status:** ✅ COMPLETE
 **Priority:** High
-**Estimated Scope:** 8 issues
+**Design Document:** `docs/plans/2026-02-04-phase4-server-layer-cleanup.md`
 
 ### Scope
 Files in `src/Namotion.Interceptor.OpcUa/Server/`:
@@ -179,9 +179,9 @@ Files in `src/Namotion.Interceptor.OpcUa/Server/`:
 
 ## Phase 5: Shared Utilities & Final Polish
 
-**Status:** Not Started
+**Status:** ✅ COMPLETE
 **Priority:** Medium
-**Estimated Scope:** 8 issues
+**Design Document:** `docs/plans/2026-02-04-phase5-utilities-cleanup.md`
 
 ### Scope
 - `OpcUaHelper.cs`
@@ -235,21 +235,21 @@ Issues discovered during regression review after completing Phases 1-3.
 
 ### Potential Thread Safety Issues
 
-| ID | Issue | Location | Severity |
-|----|-------|----------|----------|
-| R.2 | Missing `_structureLock` in `WriteChangesAsync` - concurrent modifications possible | `OpcUaSubjectClientSource:750-797` | HIGH |
-| R.3 | Nested lock risk: `_structureLock` → registry `Lock` ordering | `RemoveItemsForSubject:101-115` | MEDIUM |
-| R.4 | TOCTOU race: `TryGetExternalId` then `UpdateExternalId` not atomic | `OpcUaClientGraphChangeReceiver:931-943` | MEDIUM |
-| R.5 | `_isProcessingRemoteChange` volatile without proper synchronization | `OpcUaClientGraphChangeReceiver:29,75` | MEDIUM |
-| R.6 | Collection reindexing string replace corrupts nested paths | `OpcUaClientGraphChangeReceiver:935-940` | MEDIUM |
-| R.7 | `CurrentSession` property unsynchronized across threads | `OpcUaClientGraphChangeSender:55,764` | MEDIUM |
-| R.8 | `ModifyData` callback executes inside lock - deadlock risk if callback acquires locks | `SubjectConnectorRegistry:276-287` | MEDIUM |
+| ID | Issue | Location | Severity | Status |
+|----|-------|----------|----------|--------|
+| R.2 | Missing `_structureLock` in `WriteChangesAsync` | `OpcUaSubjectClientSource:750-797` | HIGH | ❌ FALSE POSITIVE - WriteRetryQueue handles failures, eventual consistency maintained |
+| R.3 | Nested lock risk: `_structureLock` → registry `Lock` ordering | `RemoveItemsForSubject:101-115` | MEDIUM | ❌ FALSE POSITIVE - Lock ordering is consistent, no reverse acquisition |
+| R.4 | TOCTOU race: `TryGetExternalId` then `UpdateExternalId` not atomic | `OpcUaClientGraphChangeReceiver:931-943` | MEDIUM | ❌ FALSE POSITIVE - OpcUaClientGraphChangeDispatcher serializes all change events |
+| R.5 | `_isProcessingRemoteChange` volatile without proper synchronization | `OpcUaClientGraphChangeReceiver:29,75` | MEDIUM | ❌ FALSE POSITIVE - volatile sufficient for simple boolean coordination |
+| R.6 | Collection reindexing string replace corrupts nested paths | `OpcUaClientGraphChangeReceiver:935-940` | MEDIUM | ✅ FIXED - Added `OpcUaHelper.ReindexFirstCollectionIndex` (TDD) |
+| R.7 | `CurrentSession` property unsynchronized across threads | `OpcUaClientGraphChangeSender:55,764` | MEDIUM | ❌ FALSE POSITIVE - ChangeQueueProcessor serializes via `_flushGate`, recoverable if triggered |
+| R.8 | `ModifyData` callback executes inside lock - deadlock risk | `SubjectConnectorRegistry:276-287` | MEDIUM | ❌ FALSE POSITIVE - All actual callbacks are simple list operations |
 
 ### Design Improvements Identified
 
-| ID | Issue | Location | Severity |
-|----|-------|----------|----------|
-| R.9 | `SourceOwnershipManager.onSubjectDetaching` discards `Property` and `Index` from `SubjectLifecycleChange` | `SourceOwnershipManager:109` | DESIGN |
+| ID | Issue | Location | Severity | Status |
+|----|-------|----------|----------|--------|
+| R.9 | `SourceOwnershipManager.onSubjectDetaching` discards `Property` and `Index` | `SourceOwnershipManager:109` | DESIGN | ❌ ALREADY FIXED - `SubjectLifecycleChange` now contains `Property` and `Index` |
 
 ---
 
@@ -260,10 +260,10 @@ Issues discovered during regression review after completing Phases 1-3.
 | 1. Thread Safety | ✅ COMPLETE | 6 | 6 | Unified registry, single lock |
 | 2. Connector Layer | ✅ COMPLETE | 4 | 4 | Factory pattern, CancellationToken |
 | 3. Client Layer | ✅ COMPLETE | 10 | 10 | Helpers extracted, pagination fixed |
-| 4. Server Layer | Not Started | 8 | 0 | |
-| 5. Utilities | Partial | 8 | 1 | BrowseNodeAsync pagination fixed in Phase 3 |
-| **Post-Phase 3** | **In Progress** | **9** | **1** | **R.1 FIXED, 8 remaining (7 potential + 1 design)** |
-| **Total** | | **45** | **21** | |
+| 4. Server Layer | ✅ COMPLETE | 9 | 9 | Atomic methods, async fixes, simplified constructors |
+| 5. Utilities | ✅ COMPLETE | 8 | 3 | 5 false positives, 3 fixed (TryParse, pagination, TODO) |
+| Post-Phase 3 | ✅ COMPLETE | 9 | 2 | R.1, R.6 fixed; 7 false positives (R.2-R.5, R.7-R.9) |
+| **Total** | | **46** | **34** | |
 
 ---
 
