@@ -20,9 +20,7 @@ internal class OpcUaServerGraphChangeReceiver
     private readonly IOpcUaNodeMapper _nodeMapper;
     private readonly SubjectConnectorRegistry<NodeId, NodeState> _subjectRegistry;
     private readonly OpcUaServerExternalNodeValidator _externalNodeValidator;
-    private readonly Func<NodeId, NodeState?> _findNode;
-    private readonly Action<RegisteredSubjectProperty, IInterceptorSubject, object?> _createSubjectNode;
-    private readonly Func<ushort> _getNamespaceIndex;
+    private readonly CustomNodeManager _nodeManager;
     private readonly ILogger _logger;
     private readonly object _source;
     private readonly GraphChangeApplier _graphChangeApplier;
@@ -32,9 +30,7 @@ internal class OpcUaServerGraphChangeReceiver
         OpcUaServerConfiguration configuration,
         SubjectConnectorRegistry<NodeId, NodeState> subjectRegistry,
         OpcUaServerExternalNodeValidator externalNodeValidator,
-        Func<NodeId, NodeState?> findNode,
-        Action<RegisteredSubjectProperty, IInterceptorSubject, object?> createSubjectNode,
-        Func<ushort> getNamespaceIndex,
+        CustomNodeManager nodeManager,
         object source,
         ILogger logger)
     {
@@ -43,9 +39,7 @@ internal class OpcUaServerGraphChangeReceiver
         _nodeMapper = configuration.NodeMapper;
         _subjectRegistry = subjectRegistry;
         _externalNodeValidator = externalNodeValidator;
-        _findNode = findNode;
-        _createSubjectNode = createSubjectNode;
-        _getNamespaceIndex = getNamespaceIndex;
+        _nodeManager = nodeManager;
         _source = source;
         _logger = logger;
         _graphChangeApplier = new GraphChangeApplier();
@@ -64,7 +58,7 @@ internal class OpcUaServerGraphChangeReceiver
     /// <param name="browseName">The BrowseName for the new node.</param>
     /// <param name="parentNodeId">The parent node's NodeId.</param>
     /// <returns>The created subject and its node, or null if creation failed.</returns>
-    public (IInterceptorSubject? Subject, NodeState? Node) AddSubjectFromExternal(
+    public async Task<(IInterceptorSubject? Subject, NodeState? Node)> AddSubjectFromExternalAsync(
         NodeId typeDefinitionId,
         QualifiedName browseName,
         NodeId parentNodeId)
@@ -102,7 +96,7 @@ internal class OpcUaServerGraphChangeReceiver
         }
 
         // Find the parent property and add the subject to it
-        var addResult = TryAddSubjectToParent(subject, parentNodeId, browseName);
+        var addResult = await TryAddSubjectToParentAsync(subject, parentNodeId, browseName).ConfigureAwait(false);
         if (addResult.Property is null)
         {
             _logger.LogWarning(
@@ -115,7 +109,7 @@ internal class OpcUaServerGraphChangeReceiver
         var index = addResult.Index;
 
         // Create the OPC UA node
-        _createSubjectNode(property, subject, index);
+        _nodeManager.CreateSubjectNode(property, subject, index);
 
         // Get the node that was created for this subject
         if (_subjectRegistry.TryGetData(subject, out var nodeState) && nodeState is not null)
@@ -165,90 +159,15 @@ internal class OpcUaServerGraphChangeReceiver
     }
 
     /// <summary>
-    /// Finds a subject by its OPC UA NodeId using O(1) lookup.
-    /// </summary>
-    public IInterceptorSubject? FindSubjectByNodeId(NodeId nodeId)
-    {
-        _subjectRegistry.TryGetSubject(nodeId, out var subject);
-        return subject;
-    }
-
-    /// <summary>
     /// Tries to add a subject to its parent property based on the parent node.
     /// Returns the property and index used for adding, or (null, null) on failure.
     /// </summary>
-    private (RegisteredSubjectProperty? Property, object? Index) TryAddSubjectToParent(IInterceptorSubject subject, NodeId parentNodeId, QualifiedName browseName)
+    private async Task<(RegisteredSubjectProperty? Property, object? Index)> TryAddSubjectToParentAsync(
+        IInterceptorSubject subject,
+        NodeId parentNodeId,
+        QualifiedName browseName)
     {
-        var namespaceIndex = _getNamespaceIndex();
-
-        // Find the parent subject
-        IInterceptorSubject? parentSubject = null;
-        string? containerPropertyName = null;
-
-        // Check if parent is the root
-        if (_configuration.RootName is not null)
-        {
-            var rootNodeId = new NodeId(_configuration.RootName, namespaceIndex);
-            if (parentNodeId.Equals(rootNodeId))
-            {
-                parentSubject = _rootSubject;
-            }
-        }
-        else if (parentNodeId.Equals(ObjectIds.ObjectsFolder))
-        {
-            parentSubject = _rootSubject;
-        }
-
-        // Try to find parent subject using O(1) lookup from mapping
-        if (parentSubject is null)
-        {
-            _subjectRegistry.TryGetSubject(parentNodeId, out parentSubject);
-        }
-
-        // If not found, check if parentNodeId is a container node (FolderType)
-        // Container nodes are created for collections/dictionaries and their parent is the actual subject
-        if (parentSubject is null)
-        {
-            var containerNode = _findNode(parentNodeId);
-            if (containerNode is FolderState folderState)
-            {
-                // Container node found - get the container's browse name (this is the property name)
-                containerPropertyName = folderState.BrowseName?.Name;
-
-                // Find the parent of the container by parsing the path-based NodeId
-                // Container node IDs are path-based like "Root.PropertyName" - the parent is "Root"
-                if (containerNode.NodeId.IdType == IdType.String &&
-                    containerNode.NodeId.Identifier is string nodePath &&
-                    !string.IsNullOrEmpty(nodePath))
-                {
-                    var lastDotIndex = nodePath.LastIndexOf('.');
-                    if (lastDotIndex > 0)
-                    {
-                        var containerParentId = new NodeId(nodePath.Substring(0, lastDotIndex), containerNode.NodeId.NamespaceIndex);
-
-                        // Check if container's parent is root
-                        if (_configuration.RootName is not null)
-                        {
-                            var rootNodeId = new NodeId(_configuration.RootName, namespaceIndex);
-                            if (containerParentId.Equals(rootNodeId))
-                            {
-                                parentSubject = _rootSubject;
-                            }
-                        }
-                        else if (containerParentId.Equals(ObjectIds.ObjectsFolder))
-                        {
-                            parentSubject = _rootSubject;
-                        }
-
-                        // Try to find container's parent using O(1) lookup from mapping
-                        if (parentSubject is null)
-                        {
-                            _subjectRegistry.TryGetSubject(containerParentId, out parentSubject);
-                        }
-                    }
-                }
-            }
-        }
+        var (parentSubject, containerPropertyName) = ResolveParentSubject(parentNodeId);
 
         if (parentSubject is null)
         {
@@ -258,116 +177,126 @@ internal class OpcUaServerGraphChangeReceiver
             return (null, null);
         }
 
-        // Find a suitable collection or reference property on the parent
         var registeredParent = parentSubject.TryGetRegisteredSubject();
         if (registeredParent is null)
         {
             return (null, null);
         }
 
+        return await TryAddToMatchingPropertyAsync(registeredParent, subject, containerPropertyName, browseName).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Resolves the parent subject and container property name from a parent NodeId.
+    /// Handles root subjects, direct lookups, and container folder indirection.
+    /// </summary>
+    private (IInterceptorSubject? Parent, string? ContainerPropertyName) ResolveParentSubject(NodeId parentNodeId)
+    {
+        var namespaceIndex = _nodeManager.NamespaceIndex;
+
+        // Check if parent is the root
+        if (_configuration.RootName is not null)
+        {
+            var rootNodeId = new NodeId(_configuration.RootName, namespaceIndex);
+            if (parentNodeId.Equals(rootNodeId))
+            {
+                return (_rootSubject, null);
+            }
+        }
+        else if (parentNodeId.Equals(ObjectIds.ObjectsFolder))
+        {
+            return (_rootSubject, null);
+        }
+
+        // Try to find parent subject using O(1) lookup from mapping
+        if (_subjectRegistry.TryGetSubject(parentNodeId, out var parentSubject) && parentSubject is not null)
+        {
+            return (parentSubject, null);
+        }
+
+        // Check if parentNodeId is a container node (FolderType)
+        // Container nodes are created for collections/dictionaries and their parent is the actual subject
+        var containerNode = _nodeManager.FindNode(parentNodeId);
+        if (containerNode is FolderState folderState)
+        {
+            var containerPropertyName = folderState.BrowseName?.Name;
+
+            // Find the parent of the container by parsing the path-based NodeId
+            if (containerNode.NodeId.IdType == IdType.String &&
+                containerNode.NodeId.Identifier is string nodePath &&
+                !string.IsNullOrEmpty(nodePath))
+            {
+                var lastDotIndex = nodePath.LastIndexOf('.');
+                if (lastDotIndex > 0)
+                {
+                    var containerParentId = new NodeId(nodePath.Substring(0, lastDotIndex), containerNode.NodeId.NamespaceIndex);
+
+                    // Check if container's parent is root
+                    if (_configuration.RootName is not null)
+                    {
+                        var rootNodeId = new NodeId(_configuration.RootName, namespaceIndex);
+                        if (containerParentId.Equals(rootNodeId))
+                        {
+                            return (_rootSubject, containerPropertyName);
+                        }
+                    }
+                    else if (containerParentId.Equals(ObjectIds.ObjectsFolder))
+                    {
+                        return (_rootSubject, containerPropertyName);
+                    }
+
+                    // Try to find container's parent using O(1) lookup from mapping
+                    if (_subjectRegistry.TryGetSubject(containerParentId, out parentSubject) && parentSubject is not null)
+                    {
+                        return (parentSubject, containerPropertyName);
+                    }
+                }
+            }
+        }
+
+        return (null, null);
+    }
+
+    /// <summary>
+    /// Iterates through parent properties to find one that can accept the subject.
+    /// Delegates to type-specific helpers for collection, dictionary, and reference properties.
+    /// </summary>
+    private async Task<(RegisteredSubjectProperty? Property, object? Index)> TryAddToMatchingPropertyAsync(
+        RegisteredSubject registeredParent,
+        IInterceptorSubject subject,
+        string? containerPropertyName,
+        QualifiedName browseName)
+    {
         foreach (var property in registeredParent.Properties)
         {
-            // If we know the container property name, skip properties that don't match
             var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
             if (containerPropertyName is not null && propertyName != containerPropertyName)
             {
                 continue;
             }
 
-            // Check if this property can accept the subject type
             if (property.IsSubjectCollection)
             {
-                // For Flat mode collections, the browse name should match pattern "PropertyName[index]"
-                // Check if this browse name matches this property's pattern
-                var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
-                var collectionStructure = nodeConfiguration?.CollectionStructure ?? CollectionNodeStructure.Container;
-
-                if (containerPropertyName is null && collectionStructure == CollectionNodeStructure.Container)
+                var result = await TryAddToCollectionAsync(property, subject, containerPropertyName, browseName, propertyName).ConfigureAwait(false);
+                if (result.Property is not null)
                 {
-                    // Container mode requires coming through a container folder
-                    // If containerPropertyName is null, we're not coming through a container folder
-                    continue;
-                }
-
-                if (containerPropertyName is null && collectionStructure == CollectionNodeStructure.Flat)
-                {
-                    // In Flat mode, verify the browse name matches this property's pattern
-                    if (!OpcUaHelper.TryParseCollectionIndex(browseName.Name, propertyName, out _))
-                    {
-                        continue; // Browse name doesn't match this property's pattern
-                    }
-                }
-
-                var elementType = GetCollectionElementType(property.Type);
-                if (elementType is not null && elementType.IsInstanceOfType(subject))
-                {
-                    // Get current count before adding to determine the new index
-                    var currentCollection = property.GetValue() as IEnumerable<IInterceptorSubject?>;
-                    var addedIndex = currentCollection?.Count() ?? 0;
-
-                    // We already have the subject, use factory that returns it directly
-                    var addedSubject = _graphChangeApplier.AddToCollectionAsync(
-                        property,
-                        () => Task.FromResult(subject),
-                        _source).GetAwaiter().GetResult();
-
-                    if (addedSubject is not null)
-                    {
-                        _logger.LogDebug(
-                            "External AddNode: Added subject to collection property '{PropertyName}' at index {Index}.",
-                            property.Name, addedIndex);
-                        return (property, addedIndex);
-                    }
+                    return result;
                 }
             }
             else if (property.IsSubjectDictionary)
             {
-                var valueType = GetDictionaryValueType(property.Type);
-                if (valueType is not null && valueType.IsInstanceOfType(subject))
+                var result = await TryAddToDictionaryAsync(property, subject, browseName).ConfigureAwait(false);
+                if (result.Property is not null)
                 {
-                    // Use BrowseName as the dictionary key
-                    var key = browseName.Name;
-
-                    // We already have the subject, use factory that returns it directly
-                    var addedSubject = _graphChangeApplier.AddToDictionaryAsync(
-                        property,
-                        key,
-                        () => Task.FromResult(subject),
-                        _source).GetAwaiter().GetResult();
-
-                    if (addedSubject is not null)
-                    {
-                        _logger.LogDebug(
-                            "External AddNode: Added subject to dictionary property '{PropertyName}' with key '{Key}'.",
-                            property.Name, key);
-                        return (property, key);
-                    }
+                    return result;
                 }
             }
-            else if (property.IsSubjectReference && property.GetValue() is null)
+            else if (property.IsSubjectReference)
             {
-                // For reference properties, the browse name must match the property name exactly
-                if (containerPropertyName is null && browseName.Name != propertyName)
+                var result = await TrySetReferenceAsync(property, subject, containerPropertyName, browseName, propertyName).ConfigureAwait(false);
+                if (result.Property is not null)
                 {
-                    continue; // Browse name doesn't match this property
-                }
-
-                var propertyType = property.Type;
-                if (propertyType.IsInstanceOfType(subject))
-                {
-                    // We already have the subject, use factory that returns it directly
-                    var setSubject = _graphChangeApplier.SetReferenceAsync(
-                        property,
-                        () => Task.FromResult(subject),
-                        _source).GetAwaiter().GetResult();
-
-                    if (setSubject is not null)
-                    {
-                        _logger.LogDebug(
-                            "External AddNode: Set reference property '{PropertyName}' to subject.",
-                            property.Name);
-                        return (property, null);
-                    }
+                    return result;
                 }
             }
         }
@@ -375,6 +304,135 @@ internal class OpcUaServerGraphChangeReceiver
         _logger.LogWarning(
             "External AddNode: No suitable property found on parent to accept subject of type '{Type}'.",
             subject.GetType().Name);
+        return (null, null);
+    }
+
+    /// <summary>
+    /// Tries to add a subject to a collection property.
+    /// </summary>
+    private async Task<(RegisteredSubjectProperty? Property, object? Index)> TryAddToCollectionAsync(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject subject,
+        string? containerPropertyName,
+        QualifiedName browseName,
+        string? propertyName)
+    {
+        var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(property);
+        var collectionStructure = nodeConfiguration?.CollectionStructure ?? CollectionNodeStructure.Container;
+
+        // Container mode requires coming through a container folder
+        if (containerPropertyName is null && collectionStructure == CollectionNodeStructure.Container)
+        {
+            return (null, null);
+        }
+
+        // In Flat mode, verify the browse name matches this property's pattern
+        if (containerPropertyName is null && collectionStructure == CollectionNodeStructure.Flat)
+        {
+            if (!OpcUaHelper.TryParseCollectionIndex(browseName.Name, propertyName, out _))
+            {
+                return (null, null);
+            }
+        }
+
+        var elementType = GetCollectionElementType(property.Type);
+        if (elementType is null || !elementType.IsInstanceOfType(subject))
+        {
+            return (null, null);
+        }
+
+        var currentCollection = property.GetValue() as IEnumerable<IInterceptorSubject?>;
+        var addedIndex = currentCollection?.Count() ?? 0;
+
+        var addedSubject = await _graphChangeApplier.AddToCollectionAsync(
+            property,
+            () => Task.FromResult(subject),
+            _source).ConfigureAwait(false);
+
+        if (addedSubject is not null)
+        {
+            _logger.LogDebug(
+                "External AddNode: Added subject to collection property '{PropertyName}' at index {Index}.",
+                property.Name, addedIndex);
+            return (property, addedIndex);
+        }
+
+        return (null, null);
+    }
+
+    /// <summary>
+    /// Tries to add a subject to a dictionary property.
+    /// </summary>
+    private async Task<(RegisteredSubjectProperty? Property, object? Index)> TryAddToDictionaryAsync(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject subject,
+        QualifiedName browseName)
+    {
+        var valueType = GetDictionaryValueType(property.Type);
+        if (valueType is null || !valueType.IsInstanceOfType(subject))
+        {
+            return (null, null);
+        }
+
+        var key = browseName.Name;
+
+        var addedSubject = await _graphChangeApplier.AddToDictionaryAsync(
+            property,
+            key,
+            () => Task.FromResult(subject),
+            _source).ConfigureAwait(false);
+
+        if (addedSubject is not null)
+        {
+            _logger.LogDebug(
+                "External AddNode: Added subject to dictionary property '{PropertyName}' with key '{Key}'.",
+                property.Name, key);
+            return (property, key);
+        }
+
+        return (null, null);
+    }
+
+    /// <summary>
+    /// Tries to set a subject reference property.
+    /// </summary>
+    private async Task<(RegisteredSubjectProperty? Property, object? Index)> TrySetReferenceAsync(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject subject,
+        string? containerPropertyName,
+        QualifiedName browseName,
+        string? propertyName)
+    {
+        // Reference must be null to set it
+        if (property.GetValue() is not null)
+        {
+            return (null, null);
+        }
+
+        // Browse name must match property name exactly (unless coming through container)
+        if (containerPropertyName is null && browseName.Name != propertyName)
+        {
+            return (null, null);
+        }
+
+        if (!property.Type.IsInstanceOfType(subject))
+        {
+            return (null, null);
+        }
+
+        var setSubject = await _graphChangeApplier.SetReferenceAsync(
+            property,
+            () => Task.FromResult(subject),
+            _source).ConfigureAwait(false);
+
+        if (setSubject is not null)
+        {
+            _logger.LogDebug(
+                "External AddNode: Set reference property '{PropertyName}' to subject.",
+                property.Name);
+            return (property, null);
+        }
+
         return (null, null);
     }
 
@@ -412,35 +470,13 @@ internal class OpcUaServerGraphChangeReceiver
     }
 
     /// <summary>
-    /// Creates a subject instance from a C# type using the subject's context.
+    /// Creates a subject instance from a C# type using the configured SubjectFactory.
     /// </summary>
     private IInterceptorSubject? CreateSubjectFromExternalNode(Type csharpType)
     {
         try
         {
-            // Create a new subject instance using the shared context
-            var constructor = csharpType.GetConstructor([typeof(IInterceptorSubjectContext)]);
-            if (constructor is not null)
-            {
-                var subject = (IInterceptorSubject)constructor.Invoke([_rootSubject.Context]);
-                return subject;
-            }
-
-            // Try parameterless constructor
-            constructor = csharpType.GetConstructor(Type.EmptyTypes);
-            if (constructor is not null)
-            {
-                _logger.LogWarning(
-                    "External AddNode: Type '{Type}' only has parameterless constructor. " +
-                    "Subject will not be tracked by the interceptor context.",
-                    csharpType.Name);
-                return (IInterceptorSubject)constructor.Invoke(null);
-            }
-
-            _logger.LogError(
-                "External AddNode: Type '{Type}' has no suitable constructor.",
-                csharpType.Name);
-            return null;
+            return _configuration.SubjectFactory.CreateSubject(csharpType, _rootSubject.Context);
         }
         catch (Exception ex)
         {
