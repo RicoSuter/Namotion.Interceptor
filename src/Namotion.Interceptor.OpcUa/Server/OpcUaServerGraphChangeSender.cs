@@ -39,15 +39,8 @@ internal class OpcUaServerGraphChangeSender : GraphChangePublisher
         object? index,
         CancellationToken cancellationToken)
     {
-        _nodeManager.RemoveSubjectNodes(subject, property);
-
-        // Re-index collection BrowseNames after removal to maintain contiguous indices
-        // This ensures BrowseNames like "People[0]", "People[1]" remain sequential
-        if (property.IsSubjectCollection)
-        {
-            _nodeManager.ReindexCollectionBrowseNames(property);
-        }
-
+        // Use atomic method to prevent race conditions between removal and reindexing
+        _nodeManager.RemoveSubjectNodesAndReindex(subject, property);
         return Task.CompletedTask;
     }
 }

@@ -83,10 +83,18 @@ public static class SubjectFactoryExtensions
         return (T)newDictionary;
     }
 
+    /// <summary>
+    /// Creates a subject of the specified type using the service provider from the context.
+    /// </summary>
+    public static IInterceptorSubject CreateSubject(this ISubjectFactory factory, Type type, IInterceptorSubjectContext context)
+    {
+        var serviceProvider = context.TryGetService<IServiceProvider>();
+        return factory.CreateSubject(type, serviceProvider);
+    }
+
     public static IInterceptorSubject CreateSubjectForReferenceProperty(this ISubjectFactory subjectFactory, RegisteredSubjectProperty property)
     {
-        var serviceProvider = property.Parent.Subject.Context.TryGetService<IServiceProvider>();
-        return subjectFactory.CreateSubject(property.Type, serviceProvider);
+        return subjectFactory.CreateSubject(property.Type, property.Parent.Subject.Context);
     }
 
     public static IInterceptorSubject CreateSubjectForCollectionOrDictionaryProperty(this ISubjectFactory subjectFactory, RegisteredSubjectProperty property)
@@ -107,9 +115,8 @@ public static class SubjectFactoryExtensions
             itemType = property.Type.GenericTypeArguments[0];
         }
 
-        var serviceProvider = property.Parent.Subject.Context.TryGetService<IServiceProvider>();
         return subjectFactory.CreateSubject(
             itemType ?? throw new InvalidOperationException("Unknown collection element type"),
-            serviceProvider);
+            property.Parent.Subject.Context);
     }
 }

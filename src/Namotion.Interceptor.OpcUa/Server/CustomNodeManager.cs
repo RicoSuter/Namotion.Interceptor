@@ -48,9 +48,7 @@ internal class CustomNodeManager : CustomNodeManager2
             _configuration,
             _subjectRegistry,
             externalNodeValidator,
-            FindNodeInAddressSpace,
-            CreateSubjectNode,
-            () => NamespaceIndex,
+            this,
             source,
             _logger);
     }
@@ -145,59 +143,90 @@ internal class CustomNodeManager : CustomNodeManager2
         _structureLock.Wait();
         try
         {
-            // Get existing node state BEFORE unregistering
-            _subjectRegistry.TryGetData(subject, out var existingNodeState);
+            RemoveSubjectNodesCore(subject, sourceProperty);
+        }
+        finally
+        {
+            _structureLock.Release();
+        }
+    }
 
-            // Unregister and check if last
-            _subjectRegistry.Unregister(subject, out _, out var nodeState, out var isLast);
-
-            _logger.LogDebug("RemoveSubjectNodes: subject={SubjectType}, isLast={IsLast}, hasNodeState={HasNodeState}, nodeId={NodeId}",
-                subject.GetType().Name, isLast, nodeState is not null || existingNodeState is not null,
-                (nodeState ?? existingNodeState)?.NodeId?.ToString() ?? "null");
-
-            if (isLast && nodeState is not null)
+    /// <summary>
+    /// Removes subject nodes and re-indexes collection BrowseNames atomically under a single lock.
+    /// This prevents race conditions between removal and reindexing when handling concurrent requests.
+    /// </summary>
+    /// <param name="subject">The subject being removed.</param>
+    /// <param name="property">The property from which the subject is being removed.</param>
+    public void RemoveSubjectNodesAndReindex(IInterceptorSubject subject, RegisteredSubjectProperty property)
+    {
+        _structureLock.Wait();
+        try
+        {
+            RemoveSubjectNodesCore(subject, property);
+            if (property.IsSubjectCollection)
             {
-                var registeredSubject = subject.TryGetRegisteredSubject();
-
-                // Remove variable nodes for this subject's properties
-                if (registeredSubject != null)
-                {
-                    foreach (var property in registeredSubject.Properties)
-                    {
-                        if (property.Reference.TryGetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, out var node)
-                            && node is BaseDataVariableState variableNode)
-                        {
-                            DeleteNode(SystemContext, variableNode.NodeId);
-                            property.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
-                        }
-                    }
-                }
-
-                // Remove object node and its references
-                RemoveNodeAndReferences(subject, nodeState);
-
-                // Queue model change event for node deletion
-                _modelChangePublisher.QueueChange(nodeState.NodeId, ModelChangeStructureVerbMask.NodeDeleted);
-            }
-            else if (!isLast && existingNodeState is not null)
-            {
-                // Shared subject: removed from one parent but still exists in others
-                // Remove the reference from the specific parent container
-                if (sourceProperty is not null)
-                {
-                    RemoveReferenceFromParentProperty(sourceProperty, existingNodeState);
-                }
-
-                // Send ReferenceDeleted so clients know to remove from their collections
-                _logger.LogDebug(
-                    "RemoveSubjectNodes: Shared subject {SubjectType} removed from one parent, sending ReferenceDeleted for NodeId {NodeId}",
-                    subject.GetType().Name, existingNodeState.NodeId);
-                _modelChangePublisher.QueueChange(existingNodeState.NodeId, ModelChangeStructureVerbMask.ReferenceDeleted);
+                ReindexCollectionBrowseNamesCore(property);
             }
         }
         finally
         {
             _structureLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Core implementation of RemoveSubjectNodes. Must be called while holding _structureLock.
+    /// </summary>
+    private void RemoveSubjectNodesCore(IInterceptorSubject subject, RegisteredSubjectProperty? sourceProperty)
+    {
+        // Get existing node state BEFORE unregistering
+        _subjectRegistry.TryGetData(subject, out var existingNodeState);
+
+        // Unregister and check if last
+        _subjectRegistry.Unregister(subject, out _, out var nodeState, out var isLast);
+
+        _logger.LogDebug("RemoveSubjectNodes: subject={SubjectType}, isLast={IsLast}, hasNodeState={HasNodeState}, nodeId={NodeId}",
+            subject.GetType().Name, isLast, nodeState is not null || existingNodeState is not null,
+            (nodeState ?? existingNodeState)?.NodeId?.ToString() ?? "null");
+
+        if (isLast && nodeState is not null)
+        {
+            var registeredSubject = subject.TryGetRegisteredSubject();
+
+            // Remove variable nodes for this subject's properties
+            if (registeredSubject != null)
+            {
+                foreach (var property in registeredSubject.Properties)
+                {
+                    if (property.Reference.TryGetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, out var node)
+                        && node is BaseDataVariableState variableNode)
+                    {
+                        DeleteNode(SystemContext, variableNode.NodeId);
+                        property.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
+                    }
+                }
+            }
+
+            // Remove object node and its references
+            RemoveNodeAndReferences(subject, nodeState);
+
+            // Queue model change event for node deletion
+            _modelChangePublisher.QueueChange(nodeState.NodeId, ModelChangeStructureVerbMask.NodeDeleted);
+        }
+        else if (!isLast && existingNodeState is not null)
+        {
+            // Shared subject: removed from one parent but still exists in others
+            // Remove the reference from the specific parent container
+            if (sourceProperty is not null)
+            {
+                RemoveReferenceFromParentProperty(sourceProperty, existingNodeState);
+            }
+
+            // Send ReferenceDeleted so clients know to remove from their collections
+            _logger.LogDebug(
+                "RemoveSubjectNodes: Shared subject {SubjectType} removed from one parent, sending ReferenceDeleted for NodeId {NodeId}",
+                subject.GetType().Name, existingNodeState.NodeId);
+            _modelChangePublisher.QueueChange(existingNodeState.NodeId, ModelChangeStructureVerbMask.ReferenceDeleted);
         }
     }
 
@@ -355,6 +384,10 @@ internal class CustomNodeManager : CustomNodeManager2
     private NodeId? GetParentNodeId(IInterceptorSubject subject)
     {
         var registered = subject.TryGetRegisteredSubject();
+        // Note: Taking Parents[0] is safe here because this method is only called
+        // when removing the last reference (isLast=true). At that point, the
+        // SubjectRegistry has already processed all previous parent removals,
+        // leaving exactly one parent in the array - the current one being removed.
         if (registered?.Parents.Length > 0)
         {
             var parentProperty = registered.Parents[0].Property;
@@ -420,99 +453,104 @@ internal class CustomNodeManager : CustomNodeManager2
     }
 
     /// <summary>
+    /// Gets the parent NodeId and path for a given parent subject.
+    /// Centralizes the logic for determining where to attach child nodes.
+    /// </summary>
+    /// <param name="parentSubject">The parent subject to look up.</param>
+    /// <returns>The parent NodeId and path prefix, or (null, empty) if parent not found.</returns>
+    private (NodeId? ParentNodeId, string ParentPath) GetParentNodeIdAndPath(IInterceptorSubject parentSubject)
+    {
+        if (ReferenceEquals(parentSubject, _subject))
+        {
+            if (_configuration.RootName is not null)
+            {
+                return (new NodeId(_configuration.RootName, NamespaceIndex),
+                        _configuration.RootName + PathDelimiter);
+            }
+
+            return (ObjectIds.ObjectsFolder, string.Empty);
+        }
+
+        if (_subjectRegistry.TryGetData(parentSubject, out var parentNode) && parentNode is not null)
+        {
+            var path = parentNode.NodeId.Identifier is string stringId
+                ? stringId + PathDelimiter
+                : string.Empty;
+            return (parentNode.NodeId, path);
+        }
+
+        return (null, string.Empty);
+    }
+
+    /// <summary>
     /// Re-indexes collection BrowseNames and NodeIds after an item has been removed.
     /// Updates all remaining items to have sequential indices starting from 0.
     /// This ensures BrowseNames like "People[0]", "People[1]" remain contiguous.
     /// Also updates the NodeIds (which are path-based) to prevent conflicts when new items are added.
+    /// Must be called while holding _structureLock.
     /// </summary>
     /// <param name="property">The collection property whose children should be re-indexed.</param>
-    public void ReindexCollectionBrowseNames(RegisteredSubjectProperty property)
+    private void ReindexCollectionBrowseNamesCore(RegisteredSubjectProperty property)
     {
-        if (!property.IsSubjectCollection)
+        var propertyName = property.ResolvePropertyName(_nodeMapper);
+        if (propertyName is null)
         {
             return;
         }
 
-        _structureLock.Wait();
-        try
+        var parentSubject = property.Parent.Subject;
+        var (parentNodeId, parentPath) = GetParentNodeIdAndPath(parentSubject);
+        if (parentNodeId is null)
         {
-            var propertyName = property.ResolvePropertyName(_nodeMapper);
-            if (propertyName is null)
-            {
-                return;
-            }
+            _logger.LogWarning("Cannot reindex: parent node not found for property '{PropertyName}'.", property.Name);
+            return;
+        }
 
-            // Determine the parent path for building new NodeIds
-            var parentSubject = property.Parent.Subject;
-            string parentPath;
-            if (ReferenceEquals(parentSubject, _subject))
+        var children = property.Children.ToList();
+        for (var i = 0; i < children.Count; i++)
+        {
+            var subject = children[i].Subject;
+            if (_subjectRegistry.TryGetData(subject, out var nodeState) && nodeState is not null)
             {
-                parentPath = _configuration.RootName is not null
-                    ? _configuration.RootName + PathDelimiter
-                    : string.Empty;
-            }
-            else if (_subjectRegistry.TryGetData(parentSubject, out var parentNode) && parentNode is not null)
-            {
-                parentPath = parentNode.NodeId.Identifier is string stringId
-                    ? stringId + PathDelimiter
-                    : string.Empty;
-            }
-            else
-            {
-                _logger.LogWarning("Cannot reindex: parent node not found for property '{PropertyName}'.", property.Name);
-                return;
-            }
+                var newBrowseName = new QualifiedName($"{propertyName}[{i}]", NamespaceIndex);
+                var browseNameChanged = !nodeState.BrowseName.Equals(newBrowseName);
 
-            var children = property.Children.ToList();
-            for (var i = 0; i < children.Count; i++)
-            {
-                var subject = children[i].Subject;
-                if (_subjectRegistry.TryGetData(subject, out var nodeState) && nodeState is not null)
+                // Calculate new NodeId path - same for both Flat and Container modes
+                // (the difference is only the OPC UA parent node, not the NodeId path)
+                var newPath = $"{parentPath}{propertyName}[{i}]";
+                var newNodeId = new NodeId(newPath, NamespaceIndex);
+                var nodeIdChanged = !nodeState.NodeId.Equals(newNodeId);
+
+                if (browseNameChanged || nodeIdChanged)
                 {
-                    var newBrowseName = new QualifiedName($"{propertyName}[{i}]", NamespaceIndex);
-                    var browseNameChanged = !nodeState.BrowseName.Equals(newBrowseName);
+                    var oldNodeId = nodeState.NodeId;
 
-                    // Calculate new NodeId path - same for both Flat and Container modes
-                    // (the difference is only the OPC UA parent node, not the NodeId path)
-                    var newPath = $"{parentPath}{propertyName}[{i}]";
-                    var newNodeId = new NodeId(newPath, NamespaceIndex);
-                    var nodeIdChanged = !nodeState.NodeId.Equals(newNodeId);
-
-                    if (browseNameChanged || nodeIdChanged)
+                    // Update BrowseName
+                    if (browseNameChanged)
                     {
-                        var oldNodeId = nodeState.NodeId;
-
-                        // Update BrowseName
-                        if (browseNameChanged)
-                        {
-                            nodeState.BrowseName = newBrowseName;
-                        }
-
-                        // Update NodeId - this is critical for preventing conflicts
-                        if (nodeIdChanged)
-                        {
-                            // Update the PredefinedNodes dictionary (keyed by NodeId)
-                            var predefinedNodes = GetPredefinedNodes();
-                            if (predefinedNodes.ContainsKey(oldNodeId))
-                            {
-                                predefinedNodes.Remove(oldNodeId);
-                                nodeState.NodeId = newNodeId;
-                                predefinedNodes[newNodeId] = nodeState;
-                                // Update the registry's external ID mapping for O(1) bidirectional lookup
-                                _subjectRegistry.UpdateExternalId(subject, newNodeId);
-                            }
-                        }
-
-                        _logger.LogDebug(
-                            "Re-indexed collection item: BrowseName='{BrowseName}', NodeId='{OldNodeId}' -> '{NewNodeId}'.",
-                            newBrowseName, oldNodeId, newNodeId);
+                        nodeState.BrowseName = newBrowseName;
                     }
+
+                    // Update NodeId - this is critical for preventing conflicts
+                    if (nodeIdChanged)
+                    {
+                        // Update the PredefinedNodes dictionary (keyed by NodeId)
+                        var predefinedNodes = GetPredefinedNodes();
+                        if (predefinedNodes.ContainsKey(oldNodeId))
+                        {
+                            predefinedNodes.Remove(oldNodeId);
+                            nodeState.NodeId = newNodeId;
+                            predefinedNodes[newNodeId] = nodeState;
+                            // Update the registry's external ID mapping for O(1) bidirectional lookup
+                            _subjectRegistry.UpdateExternalId(subject, newNodeId);
+                        }
+                    }
+
+                    _logger.LogDebug(
+                        "Re-indexed collection item: BrowseName='{BrowseName}', NodeId='{OldNodeId}' -> '{NewNodeId}'.",
+                        newBrowseName, oldNodeId, newNodeId);
                 }
             }
-        }
-        finally
-        {
-            _structureLock.Release();
         }
     }
 
@@ -528,37 +566,10 @@ internal class CustomNodeManager : CustomNodeManager2
         _structureLock.Wait();
         try
         {
-            // Find parent subject's node to determine where to attach the new node
             var parentSubject = property.Parent.Subject;
-            NodeId parentNodeId;
-            string parentPath;
-
-            if (ReferenceEquals(parentSubject, _subject))
+            var (parentNodeId, parentPath) = GetParentNodeIdAndPath(parentSubject);
+            if (parentNodeId is null)
             {
-                // Parent is the root subject
-                if (_configuration.RootName is not null)
-                {
-                    parentNodeId = new NodeId(_configuration.RootName, NamespaceIndex);
-                    parentPath = _configuration.RootName + PathDelimiter;
-                }
-                else
-                {
-                    parentNodeId = ObjectIds.ObjectsFolder;
-                    parentPath = string.Empty;
-                }
-            }
-            else if (parentSubject is not null && _subjectRegistry.TryGetData(parentSubject, out var parentNode) && parentNode is not null)
-            {
-                // Parent subject has an existing node
-                parentNodeId = parentNode.NodeId;
-                // Extract path from NodeId if it's a string identifier
-                parentPath = parentNode.NodeId.Identifier is string stringId
-                    ? stringId + PathDelimiter
-                    : string.Empty;
-            }
-            else
-            {
-                // Parent node not found - can't create child node
                 _logger.LogWarning(
                     "Cannot create node for subject on property '{PropertyName}': parent node not found.",
                     property.Name);
@@ -620,11 +631,11 @@ internal class CustomNodeManager : CustomNodeManager2
     /// <param name="browseName">The BrowseName for the new node.</param>
     /// <param name="parentNodeId">The parent node's NodeId.</param>
     /// <returns>The created subject and its node, or null if creation failed.</returns>
-    public (IInterceptorSubject? Subject, NodeState? Node) AddSubjectFromExternal(
+    public Task<(IInterceptorSubject? Subject, NodeState? Node)> AddSubjectFromExternalAsync(
         NodeId typeDefinitionId,
         QualifiedName browseName,
         NodeId parentNodeId)
-        => _graphChangeProcessor.AddSubjectFromExternal(typeDefinitionId, browseName, parentNodeId);
+        => _graphChangeProcessor.AddSubjectFromExternalAsync(typeDefinitionId, browseName, parentNodeId);
 
     /// <summary>
     /// Removes a subject based on its NodeId from an external DeleteNodes request.

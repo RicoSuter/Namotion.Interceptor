@@ -8,6 +8,7 @@ internal class OpcUaSubjectServer : StandardServer
 {
     private readonly ILogger _logger;
     private readonly CustomNodeManagerFactory _nodeManagerFactory;
+    private readonly SemaphoreSlim _externalRequestLock = new(1, 1);
 
     private IServerInternal? _server;
     private SessionEventHandler? _sessionCreatedHandler;
@@ -83,11 +84,29 @@ internal class OpcUaSubjectServer : StandardServer
         base.Dispose(disposing);
     }
 
+    private (CustomNodeManager? NodeManager, StatusCode? ErrorCode) TryGetNodeManagerForExternalRequest(string operationName)
+    {
+        var nodeManager = NodeManager;
+        if (nodeManager is null)
+        {
+            _logger.LogWarning("{Operation}: NodeManager is not available.", operationName);
+            return (null, StatusCodes.BadNotSupported);
+        }
+
+        if (!nodeManager.IsExternalNodeManagementEnabled)
+        {
+            _logger.LogWarning("{Operation}: External node management is disabled.", operationName);
+            return (null, StatusCodes.BadServiceUnsupported);
+        }
+
+        return (nodeManager, null);
+    }
+
     /// <summary>
     /// Handles the AddNodes service request asynchronously.
     /// Creates subjects in the C# model based on the TypeDefinition and creates corresponding OPC UA nodes.
     /// </summary>
-    public override Task<AddNodesResponse> AddNodesAsync(
+    public override async Task<AddNodesResponse> AddNodesAsync(
         SecureChannelContext secureChannelContext,
         RequestHeader requestHeader,
         AddNodesItemCollection nodesToAdd,
@@ -98,96 +117,86 @@ internal class OpcUaSubjectServer : StandardServer
         var results = new AddNodesResultCollection();
         var diagnosticInfos = new DiagnosticInfoCollection();
 
-        var nodeManager = NodeManager;
+        var (nodeManager, errorCode) = TryGetNodeManagerForExternalRequest("AddNodes");
         if (nodeManager is null)
         {
-            _logger.LogWarning("AddNodes: NodeManager is not available.");
-            foreach (var item in nodesToAdd)
+            foreach (var _ in nodesToAdd)
             {
-                results.Add(new AddNodesResult { StatusCode = StatusCodes.BadNotSupported });
+                results.Add(new AddNodesResult { StatusCode = errorCode!.Value });
             }
 
-            return Task.FromResult(new AddNodesResponse
+            return new AddNodesResponse
             {
                 ResponseHeader = CreateResponse(requestHeader, StatusCodes.Good),
                 Results = results,
                 DiagnosticInfos = diagnosticInfos
-            });
+            };
         }
 
-        // Check if external management is enabled at NodeManager level
-        if (!nodeManager.IsExternalNodeManagementEnabled)
+        await _externalRequestLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            _logger.LogWarning("AddNodes: External node management is disabled.");
+            var namespaceTable = _server?.NamespaceUris ?? new NamespaceTable();
+
+            // Process each item
             foreach (var item in nodesToAdd)
             {
-                results.Add(new AddNodesResult { StatusCode = StatusCodes.BadServiceUnsupported });
+                try
+                {
+                    var typeDefinitionId = ExpandedNodeId.ToNodeId(item.TypeDefinition, namespaceTable);
+                    var parentNodeId = ExpandedNodeId.ToNodeId(item.ParentNodeId, namespaceTable);
+                    var browseName = item.BrowseName ?? new QualifiedName("Unknown", nodeManager.NamespaceIndexes[0]);
+
+                    // Use the CustomNodeManager's async AddSubjectFromExternal method
+                    var (subject, nodeState) = await nodeManager.AddSubjectFromExternalAsync(
+                        typeDefinitionId,
+                        browseName,
+                        parentNodeId).ConfigureAwait(false);
+
+                    if (subject is not null && nodeState is not null)
+                    {
+                        results.Add(new AddNodesResult
+                        {
+                            StatusCode = StatusCodes.Good,
+                            AddedNodeId = nodeState.NodeId
+                        });
+                    }
+                    else
+                    {
+                        results.Add(new AddNodesResult
+                        {
+                            StatusCode = StatusCodes.BadTypeDefinitionInvalid
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "AddNodes: Failed to process item '{BrowseName}'.", item.BrowseName?.Name);
+                    results.Add(new AddNodesResult { StatusCode = StatusCodes.BadUnexpectedError });
+                }
             }
 
-            return Task.FromResult(new AddNodesResponse
-            {
-                ResponseHeader = CreateResponse(requestHeader, StatusCodes.Good),
-                Results = results,
-                DiagnosticInfos = diagnosticInfos
-            });
+            // Flush model change events
+            nodeManager.FlushModelChangeEvents();
         }
-
-        var namespaceTable = _server?.NamespaceUris ?? new NamespaceTable();
-
-        // Process each item
-        foreach (var item in nodesToAdd)
+        finally
         {
-            try
-            {
-                var typeDefinitionId = ExpandedNodeId.ToNodeId(item.TypeDefinition, namespaceTable);
-                var parentNodeId = ExpandedNodeId.ToNodeId(item.ParentNodeId, namespaceTable);
-                var browseName = item.BrowseName ?? new QualifiedName("Unknown", nodeManager.NamespaceIndexes[0]);
-
-                // Use the CustomNodeManager's existing AddSubjectFromExternal method
-                var (subject, nodeState) = nodeManager.AddSubjectFromExternal(
-                    typeDefinitionId,
-                    browseName,
-                    parentNodeId);
-
-                if (subject is not null && nodeState is not null)
-                {
-                    results.Add(new AddNodesResult
-                    {
-                        StatusCode = StatusCodes.Good,
-                        AddedNodeId = nodeState.NodeId
-                    });
-                }
-                else
-                {
-                    results.Add(new AddNodesResult
-                    {
-                        StatusCode = StatusCodes.BadTypeDefinitionInvalid
-                    });
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "AddNodes: Failed to process item '{BrowseName}'.", item.BrowseName?.Name);
-                results.Add(new AddNodesResult { StatusCode = StatusCodes.BadUnexpectedError });
-            }
+            _externalRequestLock.Release();
         }
 
-        // Flush model change events
-        nodeManager.FlushModelChangeEvents();
-
-        return Task.FromResult(new AddNodesResponse
+        return new AddNodesResponse
         {
             ResponseHeader = CreateResponse(requestHeader, StatusCodes.Good),
             Results = results,
             DiagnosticInfos = diagnosticInfos
-        });
+        };
     }
 
     /// <summary>
     /// Handles the DeleteNodes service request asynchronously.
     /// Removes subjects from the C# model and removes corresponding OPC UA nodes.
     /// </summary>
-    public override Task<DeleteNodesResponse> DeleteNodesAsync(
+    public override async Task<DeleteNodesResponse> DeleteNodesAsync(
         SecureChannelContext secureChannelContext,
         RequestHeader requestHeader,
         DeleteNodesItemCollection nodesToDelete,
@@ -198,69 +207,59 @@ internal class OpcUaSubjectServer : StandardServer
         var results = new StatusCodeCollection();
         var diagnosticInfos = new DiagnosticInfoCollection();
 
-        var nodeManager = NodeManager;
+        var (nodeManager, errorCode) = TryGetNodeManagerForExternalRequest("DeleteNodes");
         if (nodeManager is null)
         {
-            _logger.LogWarning("DeleteNodes: NodeManager is not available.");
-            foreach (var item in nodesToDelete)
+            foreach (var _ in nodesToDelete)
             {
-                results.Add(StatusCodes.BadNotSupported);
+                results.Add(errorCode!.Value);
             }
 
-            return Task.FromResult(new DeleteNodesResponse
+            return new DeleteNodesResponse
             {
                 ResponseHeader = CreateResponse(requestHeader, StatusCodes.Good),
                 Results = results,
                 DiagnosticInfos = diagnosticInfos
-            });
+            };
         }
 
-        // Check if external management is enabled at NodeManager level
-        if (!nodeManager.IsExternalNodeManagementEnabled)
+        await _externalRequestLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            _logger.LogWarning("DeleteNodes: External node management is disabled.");
+            var namespaceTable = _server?.NamespaceUris ?? new NamespaceTable();
+
+            // Delete each node
             foreach (var item in nodesToDelete)
             {
-                results.Add(StatusCodes.BadServiceUnsupported);
+                try
+                {
+                    var nodeId = ExpandedNodeId.ToNodeId(item.NodeId, namespaceTable);
+
+                    // Use the CustomNodeManager's existing RemoveSubjectFromExternal method
+                    var success = nodeManager.RemoveSubjectFromExternal(nodeId);
+
+                    results.Add(success ? StatusCodes.Good : StatusCodes.BadNodeIdUnknown);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "DeleteNodes: Failed to delete node '{NodeId}'.", item.NodeId);
+                    results.Add(StatusCodes.BadUnexpectedError);
+                }
             }
 
-            return Task.FromResult(new DeleteNodesResponse
-            {
-                ResponseHeader = CreateResponse(requestHeader, StatusCodes.Good),
-                Results = results,
-                DiagnosticInfos = diagnosticInfos
-            });
+            // Flush model change events
+            nodeManager.FlushModelChangeEvents();
         }
-
-        var namespaceTable = _server?.NamespaceUris ?? new NamespaceTable();
-
-        // Delete each node
-        foreach (var item in nodesToDelete)
+        finally
         {
-            try
-            {
-                var nodeId = ExpandedNodeId.ToNodeId(item.NodeId, namespaceTable);
-
-                // Use the CustomNodeManager's existing RemoveSubjectFromExternal method
-                var success = nodeManager.RemoveSubjectFromExternal(nodeId);
-
-                results.Add(success ? StatusCodes.Good : StatusCodes.BadNodeIdUnknown);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "DeleteNodes: Failed to delete node '{NodeId}'.", item.NodeId);
-                results.Add(StatusCodes.BadUnexpectedError);
-            }
+            _externalRequestLock.Release();
         }
 
-        // Flush model change events
-        nodeManager.FlushModelChangeEvents();
-
-        return Task.FromResult(new DeleteNodesResponse
+        return new DeleteNodesResponse
         {
             ResponseHeader = CreateResponse(requestHeader, StatusCodes.Good),
             Results = results,
             DiagnosticInfos = diagnosticInfos
-        });
+        };
     }
 }

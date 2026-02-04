@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
@@ -95,6 +96,12 @@ public class OpcUaServerConfiguration
     /// Required when EnableNodeManagement is true.
     /// </summary>
     public OpcUaTypeRegistry? TypeRegistry { get; set; }
+
+    /// <summary>
+    /// Gets or sets the factory used to create subject instances from external AddNodes requests.
+    /// Defaults to <see cref="DefaultSubjectFactory.Instance"/>.
+    /// </summary>
+    public ISubjectFactory SubjectFactory { get; set; } = DefaultSubjectFactory.Instance;
 
     /// <summary>
     /// Gets or sets the base path for certificate stores.
