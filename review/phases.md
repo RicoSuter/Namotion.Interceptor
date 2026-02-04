@@ -217,6 +217,42 @@ Files in `src/Namotion.Interceptor.OpcUa/Server/`:
 
 ---
 
+## Post-Phase 3 Review Findings (2026-02-04)
+
+Issues discovered during regression review after completing Phases 1-3.
+
+### Confirmed Regression
+
+| ID | Issue | Location | Severity | Status |
+|----|-------|----------|----------|--------|
+| R.1 | **Dictionary replacement race condition** - delete is fire-and-forget, add races ahead and finds stale node, writes fail with BadNodeIdUnknown | `OpcUaSubjectClientSource:134`, `OpcUaClientGraphChangeSender:106` | **CRITICAL** | ✅ FIXED |
+
+**Root Cause:** `_ = TryDeleteRemoteNodeAsync(...)` doesn't await. New subject's `OnSubjectAddedAsync` browses and finds old node before delete completes.
+
+**Fix:** Track pending deletes by `(Property, Index)` key; await before browsing. Requires changing `SourceOwnershipManager.onSubjectDetaching` callback from `Action<IInterceptorSubject>` to `Action<SubjectLifecycleChange>` to preserve context.
+
+**Design:** See `docs/plans/2026-02-04-dictionary-replacement-race-fix.md`
+
+### Potential Thread Safety Issues
+
+| ID | Issue | Location | Severity |
+|----|-------|----------|----------|
+| R.2 | Missing `_structureLock` in `WriteChangesAsync` - concurrent modifications possible | `OpcUaSubjectClientSource:750-797` | HIGH |
+| R.3 | Nested lock risk: `_structureLock` → registry `Lock` ordering | `RemoveItemsForSubject:101-115` | MEDIUM |
+| R.4 | TOCTOU race: `TryGetExternalId` then `UpdateExternalId` not atomic | `OpcUaClientGraphChangeReceiver:931-943` | MEDIUM |
+| R.5 | `_isProcessingRemoteChange` volatile without proper synchronization | `OpcUaClientGraphChangeReceiver:29,75` | MEDIUM |
+| R.6 | Collection reindexing string replace corrupts nested paths | `OpcUaClientGraphChangeReceiver:935-940` | MEDIUM |
+| R.7 | `CurrentSession` property unsynchronized across threads | `OpcUaClientGraphChangeSender:55,764` | MEDIUM |
+| R.8 | `ModifyData` callback executes inside lock - deadlock risk if callback acquires locks | `SubjectConnectorRegistry:276-287` | MEDIUM |
+
+### Design Improvements Identified
+
+| ID | Issue | Location | Severity |
+|----|-------|----------|----------|
+| R.9 | `SourceOwnershipManager.onSubjectDetaching` discards `Property` and `Index` from `SubjectLifecycleChange` | `SourceOwnershipManager:109` | DESIGN |
+
+---
+
 ## Progress Tracking
 
 | Phase | Status | Issues | Resolved | Notes |
@@ -226,7 +262,8 @@ Files in `src/Namotion.Interceptor.OpcUa/Server/`:
 | 3. Client Layer | ✅ COMPLETE | 10 | 10 | Helpers extracted, pagination fixed |
 | 4. Server Layer | Not Started | 8 | 0 | |
 | 5. Utilities | Partial | 8 | 1 | BrowseNodeAsync pagination fixed in Phase 3 |
-| **Total** | | **36** | **21** | |
+| **Post-Phase 3** | **In Progress** | **9** | **1** | **R.1 FIXED, 8 remaining (7 potential + 1 design)** |
+| **Total** | | **45** | **21** | |
 
 ---
 
