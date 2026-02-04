@@ -58,16 +58,15 @@ namespace TestNamespace
             new Dictionary<string, SubjectPropertyMetadata>
             {
                 {
-                    "Name",       
+                    "Name",
                     new SubjectPropertyMetadata(
-                        typeof(NestedSubject).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
-                        (o) => ((NestedSubject)o).Name, 
-                        (o, v) => ((NestedSubject)o).Name = (string)v, 
+                        typeof(NestedSubject).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((NestedSubject)o).Name,
+                        (o, v) => ((NestedSubject)o).Name = (string)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
             }
-            
             .ToFrozenDictionary();
 
         public NestedSubject()
@@ -83,11 +82,11 @@ namespace TestNamespace
 
         public partial string Name
         {
-             get
+            get
             {
                 return GetPropertyValue<string>(nameof(Name), static (o) => ((NestedSubject)o)._Name);
             }
-             set
+            set
             {
                 var newValue = value;
                 var cancel = false;

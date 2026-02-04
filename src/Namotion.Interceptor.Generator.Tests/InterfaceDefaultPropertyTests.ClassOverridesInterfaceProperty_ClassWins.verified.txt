@@ -21,7 +21,7 @@ using System.Text.Json.Serialization;
 
 namespace YourDefaultNamespace
 {
-    public partial class SampleSubject : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+    public partial class Sensor : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
     {
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -56,68 +56,25 @@ namespace YourDefaultNamespace
             new Dictionary<string, SubjectPropertyMetadata>
             {
                 {
-                    "Value",
-                    new SubjectPropertyMetadata(
-                        typeof(SampleSubject).GetProperty(nameof(Value), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((SampleSubject)o).Value,
-                        (o, v) => ((SampleSubject)o).Value = (int)v,
-                        isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
                     "Name",
                     new SubjectPropertyMetadata(
-                        typeof(SampleSubject).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((SampleSubject)o).Name,
-                        (o, v) => ((SampleSubject)o).Name = (string)v,
+                        typeof(Sensor).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((Sensor)o).Name,
+                        (o, v) => ((Sensor)o).Name = (string)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "Hidden",
-                    new SubjectPropertyMetadata(
-                        typeof(SampleSubject).GetProperty(nameof(Hidden), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((SampleSubject)o).Hidden,
-                        (o, v) => ((SampleSubject)o).Hidden = (string)v,
-                        isIntercepted: false,
                         isDynamic: false)
                 },
             }
             .ToFrozenDictionary();
 
-        public SampleSubject()
+        public Sensor()
         {
         }
 
-        public SampleSubject(IInterceptorSubjectContext context) : this()
+        public Sensor(IInterceptorSubjectContext context) : this()
         {
             ((IInterceptorSubject)this).Context.AddFallbackContext(context);
         }
-
-        private int _Value;
-
-        public partial int Value
-        {
-            get
-            {
-                return GetPropertyValue<int>(nameof(Value), static (o) => ((SampleSubject)o)._Value);
-            }
-            set
-            {
-                var newValue = value;
-                var cancel = false;
-                OnValueChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Value), newValue, static (o) => ((SampleSubject)o)._Value, static (o, v) => ((SampleSubject)o)._Value = v))
-                {
-                    OnValueChanged(_Value);
-                    RaisePropertyChanged(nameof(Value));
-                }
-            }
-        }
-
-        partial void OnValueChanging(ref int newValue, ref bool cancel);
-
-        partial void OnValueChanged(int newValue);
 
         private string _Name;
 
@@ -125,14 +82,14 @@ namespace YourDefaultNamespace
         {
             get
             {
-                return GetPropertyValue<string>(nameof(Name), static (o) => ((SampleSubject)o)._Name);
+                return GetPropertyValue<string>(nameof(Name), static (o) => ((Sensor)o)._Name);
             }
             set
             {
                 var newValue = value;
                 var cancel = false;
                 OnNameChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Name), newValue, static (o) => ((SampleSubject)o)._Name, static (o, v) => ((SampleSubject)o)._Name = v))
+                if (!cancel && SetPropertyValue(nameof(Name), newValue, static (o) => ((Sensor)o)._Name, static (o, v) => ((Sensor)o)._Name = v))
                 {
                     OnNameChanged(_Name);
                     RaisePropertyChanged(nameof(Name));

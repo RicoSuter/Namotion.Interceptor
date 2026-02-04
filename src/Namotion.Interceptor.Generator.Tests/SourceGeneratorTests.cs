@@ -147,6 +147,48 @@ namespace TestNamespace
         return Verify(generatedSource);
     }
 
+    [Fact]
+    public Task WhenGeneratingClassWithProtectedInternalProperty_ThenPropertyCorrectlyGenerated()
+    {
+        // Arrange
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+
+[InterceptorSubject]
+public partial class SampleSubject
+{
+    protected internal partial string Name { get; set; }
+}";
+
+        // Act
+        var generated = GeneratedSourceCode(source);
+
+        // Assert
+        var generatedSource = generated.Single().SourceText.ToString();
+        return Verify(generatedSource);
+    }
+
+    [Fact]
+    public Task WhenGeneratingClassWithPrivateProtectedProperty_ThenPropertyCorrectlyGenerated()
+    {
+        // Arrange
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+
+[InterceptorSubject]
+public partial class SampleSubject
+{
+    private protected partial string Name { get; set; }
+}";
+
+        // Act
+        var generated = GeneratedSourceCode(source);
+
+        // Assert
+        var generatedSource = generated.Single().SourceText.ToString();
+        return Verify(generatedSource);
+    }
+
     private static IEnumerable<GeneratedSourceResult> GeneratedSourceCode(string source)
     {
         var syntaxTree = CSharpSyntaxTree.ParseText(source);
