@@ -31,7 +31,7 @@ internal static class SubjectMetadataExtractor
             .Select(t => semanticModel.GetTypeInfo(t.Type, cancellationToken).Type as INamedTypeSymbol)
             .FirstOrDefault(t => t != null &&
                 (HasInterceptorSubjectAttribute(t) ||
-                 ImplementsInterface(t, "Namotion.Interceptor.IInterceptorSubject")));
+                 ImplementsInterface(t, KnownTypes.IInterceptorSubject)));
 
         var baseClassTypeName = baseClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
         var baseClassHasInterceptorSubject = HasInterceptorSubjectAttribute(baseClass);
@@ -40,7 +40,7 @@ internal static class SubjectMetadataExtractor
         var baseClassHasInpc = baseClassHasInterceptorSubject ||
             (classDeclaration.BaseList?.Types
                 .Select(t => semanticModel.GetTypeInfo(t.Type, cancellationToken).Type as INamedTypeSymbol)
-                .Any(t => t != null && ImplementsInterface(t, "Namotion.Interceptor.IRaisePropertyChanged")) ?? false);
+                .Any(t => t != null && ImplementsInterface(t, KnownTypes.IRaisePropertyChanged)) ?? false);
 
         // Collect all partial class declarations
         var allClassDeclarations = typeSymbol.DeclaringSyntaxReferences
@@ -267,7 +267,7 @@ internal static class SubjectMetadataExtractor
                     IsPartial: false,
                     IsVirtual: true,  // Interface default implementations are implicitly virtual
                     IsOverride: false,
-                    IsDerived: true,  // Default implementations are essentially derived properties
+                    IsDerived: HasDerivedAttribute(property),
                     IsRequired: false,
                     hasGetter,
                     hasSetter,
@@ -328,13 +328,20 @@ internal static class SubjectMetadataExtractor
 
     private static string GetAccessModifier(SyntaxTokenList modifiers)
     {
-        if (modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword)))
-            return "public";
-        if (modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword)))
-            return "internal";
-        if (modifiers.Any(m => m.IsKind(SyntaxKind.ProtectedKeyword)))
-            return "protected";
-        return "private";
+        var hasPublic = modifiers.Any(m => m.IsKind(SyntaxKind.PublicKeyword));
+        var hasProtected = modifiers.Any(m => m.IsKind(SyntaxKind.ProtectedKeyword));
+        var hasInternal = modifiers.Any(m => m.IsKind(SyntaxKind.InternalKeyword));
+        var hasPrivate = modifiers.Any(m => m.IsKind(SyntaxKind.PrivateKeyword));
+
+        return (hasPublic, hasProtected, hasInternal, hasPrivate) switch
+        {
+            (true, _, _, _) => "public",
+            (_, true, true, _) => "protected internal",
+            (_, true, _, true) => "private protected",
+            (_, true, _, _) => "protected",
+            (_, _, true, _) => "internal",
+            _ => "private"
+        };
     }
 
     private static string? GetAccessorModifier(AccessorListSyntax? accessorList, SyntaxKind accessorKind)
@@ -356,18 +363,14 @@ internal static class SubjectMetadataExtractor
 
     private static bool HasDerivedAttribute(PropertyDeclarationSyntax property, SemanticModel semanticModel, CancellationToken cancellationToken)
     {
-        return HasAttribute(property.AttributeLists, "Namotion.Interceptor.Attributes.DerivedAttribute", semanticModel, cancellationToken);
+        return SymbolExtensions.HasAttribute(property.AttributeLists, KnownTypes.DerivedAttribute, semanticModel, cancellationToken);
     }
 
-    private static bool HasAttribute(SyntaxList<AttributeListSyntax> attributeLists, string baseTypeName, SemanticModel semanticModel, CancellationToken cancellationToken)
+    private static bool HasDerivedAttribute(IPropertySymbol property)
     {
-        return attributeLists
-            .SelectMany(al => al.Attributes)
-            .Any(attribute =>
-            {
-                var attributeType = semanticModel.GetTypeInfo(attribute, cancellationToken).Type as INamedTypeSymbol;
-                return attributeType is not null && IsTypeOrInheritsFrom(attributeType, baseTypeName);
-            });
+        return property.GetAttributes()
+            .Any(a => a.AttributeClass?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) ==
+                KnownTypes.DerivedAttribute);
     }
 
     private static bool HasInterceptorSubjectAttribute(INamedTypeSymbol? type)
@@ -380,7 +383,7 @@ internal static class SubjectMetadataExtractor
         return type
             .GetAttributes()
             .Any(a => a.AttributeClass?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) ==
-                "Namotion.Interceptor.Attributes.InterceptorSubjectAttribute");
+                KnownTypes.InterceptorSubjectAttribute);
     }
 
     private static bool ImplementsInterface(ITypeSymbol? type, string interfaceTypeName)
@@ -402,21 +405,6 @@ internal static class SubjectMetadataExtractor
         }
 
         return type.BaseType is { } baseType && ImplementsInterface(baseType, interfaceTypeName);
-    }
-
-    private static bool IsTypeOrInheritsFrom(ITypeSymbol? type, string fullTypeName)
-    {
-        while (type is not null)
-        {
-            if (type.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == fullTypeName)
-            {
-                return true;
-            }
-
-            type = type.BaseType;
-        }
-
-        return false;
     }
 
     private static string? GetFullTypeName(TypeSyntax? type, SemanticModel semanticModel)

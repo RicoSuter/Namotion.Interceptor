@@ -177,8 +177,9 @@ internal static class SubjectCodeGenerator
                 var getterLambda = property.HasGetter
                     ? $"(o) => (({property.InterfaceTypeName})o).{property.Name}"
                     : "null";
-                // Interface default properties are read-only (no setter)
-                var setterLambda = "null";
+                var setterLambda = property.HasSetter
+                    ? $"(o, v) => (({property.InterfaceTypeName})o).{property.Name} = ({property.FullTypeName})v"
+                    : "null";
 
                 builder.AppendLine("                {");
                 builder.AppendLine($"                    \"{property.Name}\",");
