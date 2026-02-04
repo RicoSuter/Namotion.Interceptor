@@ -1,7 +1,69 @@
-using Namotion.Interceptor.Generator.Tests.Models;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 
 namespace Namotion.Interceptor.Generator.Tests;
+
+#region Test Interfaces and Classes
+
+public interface ITemperatureSensorInterface
+{
+    double TemperatureCelsius { get; set; }
+
+    [Derived]
+    double TemperatureFahrenheit => TemperatureCelsius * 9 / 5 + 32;
+
+    bool IsFreezing => TemperatureCelsius <= 0;
+}
+
+[InterceptorSubject]
+public partial class SensorWithInterfaceDefaults : ITemperatureSensorInterface
+{
+    public partial double TemperatureCelsius { get; set; }
+}
+
+public partial class NestedInterfaceContainer
+{
+    public interface INestedSensor
+    {
+        double Value { get; set; }
+
+        string Status => Value > 0 ? "Active" : "Inactive";
+    }
+}
+
+[InterceptorSubject]
+public partial class SensorWithNestedInterface : NestedInterfaceContainer.INestedSensor
+{
+    public partial double Value { get; set; }
+}
+
+public interface IWritableDefaultInterface
+{
+    double Temperature { get; set; }
+
+    string Label { get => $"Temp: {Temperature}"; set { } }
+}
+
+[InterceptorSubject]
+public partial class SensorWithWritableDefault : IWritableDefaultInterface
+{
+    public partial double Temperature { get; set; }
+}
+
+public interface IInitOnlyInterface
+{
+    string Id { get; init; }
+
+    string DisplayId => $"ID: {Id}";
+}
+
+[InterceptorSubject]
+public partial class SensorWithInitOnly : IInitOnlyInterface
+{
+    public partial string Id { get; init; }
+}
+
+#endregion
 
 public class InterfaceDefaultPropertyBehaviorTests
 {
@@ -76,7 +138,7 @@ public class InterfaceDefaultPropertyBehaviorTests
         var labelProp = SensorWithWritableDefault.DefaultProperties["Label"];
         Assert.False(labelProp.IsIntercepted);
         Assert.Equal("Temp: 25", labelProp.GetValue!(sensor));
-        Assert.Null(labelProp.SetValue);
+        Assert.NotNull(labelProp.SetValue); // Interface default setters are now supported
     }
 
     [Fact]

@@ -79,7 +79,7 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                     cls.TypeSymbol,
                     cls.ClassNode,
                     cls.Model,
-                    CancellationToken.None);
+                    spc.CancellationToken);
 
                 fileName = SubjectCodeGenerator.GetFileName(metadata);
                 var generatedCode = SubjectCodeGenerator.Generate(metadata);
@@ -96,36 +96,8 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
         });
     }
 
-    private bool HasInterceptorSubjectAttribute(ClassDeclarationSyntax classDeclaration, SemanticModel semanticModel, CancellationToken ct)
+    private static bool HasInterceptorSubjectAttribute(ClassDeclarationSyntax classDeclaration, SemanticModel semanticModel, CancellationToken ct)
     {
-        return HasAttribute(classDeclaration.AttributeLists, "Namotion.Interceptor.Attributes.InterceptorSubjectAttribute", semanticModel, ct);
-    }
-
-    private bool HasAttribute(SyntaxList<AttributeListSyntax> attributeLists, string baseTypeName, SemanticModel semanticModel, CancellationToken ct)
-    {
-        var hasAttribute = attributeLists
-            .SelectMany(al => al.Attributes)
-            .Any(attr =>
-            {
-                var attributeType = semanticModel.GetTypeInfo(attr, ct).Type as INamedTypeSymbol;
-                return attributeType is not null && IsTypeOrInheritsFrom(attributeType, baseTypeName);
-            });
-
-        return hasAttribute;
-    }
-
-    private bool IsTypeOrInheritsFrom(ITypeSymbol? type, string fullTypeName)
-    {
-        do
-        {
-            if (type?.ToDisplayString(SymbolDisplayFormat.CSharpErrorMessageFormat) == fullTypeName)
-            {
-                return true;
-            }
-
-            type = type?.BaseType;
-        } while (type is not null);
-
-        return false;
+        return SymbolExtensions.HasAttribute(classDeclaration.AttributeLists, KnownTypes.InterceptorSubjectAttribute, semanticModel, ct);
     }
 }

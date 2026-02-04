@@ -175,6 +175,30 @@ public partial class Diamond : IA, IB
         Assert.Equal(1, count);
     }
 
+    [Fact]
+    public void GenericInterface_DefaultPropertyIncluded()
+    {
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+
+public interface ISensor<T>
+{
+    T Value { get; set; }
+    string TypeName => typeof(T).Name;
+}
+
+[InterceptorSubject]
+public partial class IntSensor : ISensor<int>
+{
+    public partial int Value { get; set; }
+}";
+
+        var generated = GenerateCode(source);
+        var generatedSource = generated.Single().SourceText.ToString();
+
+        Assert.Contains(@"""TypeName""", generatedSource);
+    }
+
     private static IEnumerable<GeneratedSourceResult> GenerateCode(string source)
     {
         var syntaxTree = CSharpSyntaxTree.ParseText(source);
