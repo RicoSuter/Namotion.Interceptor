@@ -3,22 +3,22 @@
 **Status:** Complete
 **Reviewer:** Claude
 **File:** `src/Namotion.Interceptor.OpcUa/Server/OpcUaServerGraphChangePublisher.cs`
-**Lines:** 95
+**Lines:** 96
 
 ## Overview
 
 `OpcUaServerGraphChangePublisher` queues and emits OPC UA `GeneralModelChangeEvent`s for structural changes (node/reference additions and deletions). It batches multiple changes into single events for efficiency.
 
 ### Usage Sites
-- **Instantiation:** `CustomNodeManager.cs:43`
+- **Instantiation:** `CustomNodeManager.cs:42`
 - **QueueChange() calls:**
-  - `CustomNodeManager.cs:185` (NodeDeleted)
-  - `CustomNodeManager.cs:200` (ReferenceDeleted)
-  - `OpcUaServerNodeCreator.cs:457` (NodeAdded)
-  - `OpcUaServerNodeCreator.cs:466` (ReferenceAdded)
-- **Flush() calls:**
-  - `OpcUaSubjectServer.cs:176` (after AddNodes)
-  - `OpcUaSubjectServer.cs:257` (after DeleteNodes)
+  - `CustomNodeManager.cs:214` (NodeDeleted)
+  - `CustomNodeManager.cs:229` (ReferenceDeleted)
+  - `OpcUaServerNodeCreator.cs:451` (NodeAdded)
+  - `OpcUaServerNodeCreator.cs:460` (ReferenceAdded)
+- **Flush() calls (via FlushModelChangeEvents):**
+  - `OpcUaSubjectServer.cs:180` (after AddNodes)
+  - `OpcUaSubjectServer.cs:251` (after DeleteNodes)
   - `OpcUaSubjectServerBackgroundService.cs:129` (after property changes)
 
 ---
@@ -56,13 +56,13 @@ try
 }
 catch (Exception ex)
 {
-    _logger.LogWarning(ex, "Failed to emit GeneralModelChangeEvent...");
-    // ⚠️ Changes in changesToEmit are PERMANENTLY LOST
+    _logger.LogWarning(ex, "Failed to emit GeneralModelChangeEvent. Continuing without event notification.");
+    // Changes in changesToEmit are PERMANENTLY LOST
 }
 ```
 
 **Problem:** If `server.ReportEvent()` throws an exception:
-1. Changes were already removed from `_pendingModelChanges` (atomic swap at line 62-63)
+1. Changes were already removed from `_pendingModelChanges` (atomic swap at lines 62-63)
 2. No requeue mechanism exists
 3. Clients will never be notified of these structural changes
 4. Silent data loss with only a warning log
@@ -72,7 +72,7 @@ catch (Exception ex)
 Changes queued: [A, B, C, D, E]
 Flush() called:
   1. Swap: changesToEmit = [A, B, C, D, E], _pendingModelChanges = []
-  2. ReportEvent() throws → CHANGES LOST FOREVER
+  2. ReportEvent() throws -> CHANGES LOST FOREVER
   3. Future Flush() only emits NEW changes, not lost ones
 ```
 
@@ -173,12 +173,32 @@ EventSeverity.Medium,
 
 **Recommendation:** Consider making severity configurable or variable based on change type.
 
+### 6. No Parameter Validation (LOW)
+
+**Location:** Line 50
+
+```csharp
+public void Flush(IServerInternal server, ISystemContext systemContext)
+```
+
+**Problem:** No null checks for `server` or `systemContext` parameters. While callers currently pass valid values (inherited from base OPC UA SDK classes), any null value would cause `NullReferenceException` which would be silently swallowed by the catch block.
+
+**Recommendation:** Add explicit null checks with `ArgumentNullException` or use nullable annotations:
+```csharp
+public void Flush(IServerInternal server, ISystemContext systemContext)
+{
+    ArgumentNullException.ThrowIfNull(server);
+    ArgumentNullException.ThrowIfNull(systemContext);
+    // ...
+}
+```
+
 ---
 
 ## Code Quality Assessment
 
 ### Modern C# Best Practices: PASS
-- Uses `object` lock (could use C# 13 `Lock` for consistency with other classes)
+- Uses `object` lock (line 13) - could use C# 13 `Lock` for consistency with other classes
 - Proper exception handling with logging
 - Clean separation from `CustomNodeManager`
 
@@ -212,7 +232,7 @@ EventSeverity.Medium,
 
 **NO - Current separation is appropriate:**
 - Single Responsibility preserved
-- `CustomNodeManager` already 649 lines
+- `CustomNodeManager` already 653 lines
 - Easy to test in isolation (once tests are added)
 - Clear API boundary for event management
 
@@ -270,6 +290,7 @@ EventSeverity.Medium,
 | **MEDIUM** | AffectedType always null | Pass TypeDefinitionId to QueueChange |
 | **MEDIUM** | Non-deterministic ordering | Prevent concurrent Flush calls |
 | **LOW** | Hardcoded severity | Consider making configurable |
+| **LOW** | No parameter validation | Add null checks for server/systemContext |
 | **LOW** | Uses `object` lock | Consider C# 13 `Lock` for consistency |
 
 ---

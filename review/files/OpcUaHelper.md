@@ -1,10 +1,10 @@
 # Code Review: OpcUaHelper.cs
 
 **File:** `src/Namotion.Interceptor.OpcUa/OpcUaHelper.cs`
-**Lines:** ~247
+**Lines:** ~325
 **Status:** Complete
 **Reviewer:** Claude
-**Date:** 2026-02-02
+**Date:** 2026-02-04
 
 ---
 
@@ -18,10 +18,11 @@
 | `FindChildNodeIdAsync` | 19-34 | Find child node by browse name |
 | `FindParentNodeIdAsync` | 43-54 | Find parent via inverse references |
 | `ReadNodeDetailsAsync` | 63-96 | Read node attributes (BrowseName, DisplayName, NodeClass) |
-| `TryParseCollectionIndex` (overload 1) | 106-135 | Parse "Name[index]" → baseName + index |
-| `TryParseCollectionIndex` (overload 2) | 144-168 | Validate "Name[index]" with expected name |
-| `BrowseInverseReferencesAsync` | 177-204 | Browse parent references |
-| `BrowseNodeAsync` | 213-246 | Browse child references |
+| `TryParseCollectionIndex` (overload 1) | 106-133 | Parse "Name[index]" → baseName + index |
+| `TryParseCollectionIndex` (overload 2) | 143-158 | Validate "Name[index]" with expected name (delegates to overload 1) |
+| `ReindexFirstCollectionIndex` | 169-189 | Reindex first occurrence of collection index in NodeId string |
+| `BrowseInverseReferencesAsync` | 198-252 | Browse parent references with pagination |
+| `BrowseNodeAsync` | 262-323 | Browse child references with pagination |
 
 ---
 
@@ -68,44 +69,7 @@ var children = await session.BrowseNodeAsync(nodeId, ct);
 
 ## CRITICAL ISSUES
 
-### Issue 1: Missing Pagination/Continuation Point Handling (HIGH)
-
-**Location:** Lines 195-196, 233-238
-
-**Problem:** OPC UA browse can return partial results with continuation points. `BrowseNodeAsync` and `BrowseInverseReferencesAsync` don't handle pagination.
-
-**Compare with OpcUaSubjectLoader.cs (lines 512-570):**
-```csharp
-// OpcUaSubjectLoader handles pagination:
-continuationPoint = response.Results[0].ContinuationPoint;
-while (continuationPoint is { Length: > 0 })
-{
-    // ... call BrowseNextAsync to get remaining results
-}
-```
-
-**Impact:** If a node has many children, only the first batch is returned, causing data loss.
-
-**Recommendation:** Add continuation point handling or document the limitation.
-
----
-
-### Issue 2: No Exception Handling (HIGH)
-
-**Location:** All async methods (lines 25, 48, 75-80, 195-196, 233-238)
-
-**Problem:** No try-catch around session operations. Compare with callers:
-- `OpcUaClientGraphChangeSender.cs:443` - catches `ServiceResultException`
-- `OpcUaSubjectClientSource.cs:180` - catches `ServiceResultException`
-- `OpcUaTypeResolver.cs:102-105` - catches `Exception`
-
-**Impact:** Session disconnection during browse propagates uncaught exceptions.
-
-**Recommendation:** Add consistent exception handling or document that callers must handle exceptions.
-
----
-
-### Issue 3: Unsafe Null Cast (MEDIUM)
+### Issue 1: Unsafe Null Cast (MEDIUM)
 
 **Location:** Line 91
 
@@ -124,62 +88,48 @@ NodeClass = response.Results[2].Value is int nodeClass
 
 ---
 
-## CODE DUPLICATION ISSUES
+### Issue 2: No Exception Handling (LOW)
 
-### Issue 4: TryParseCollectionIndex Overload Duplication (MEDIUM)
+**Location:** All async methods
 
-**Location:** Lines 106-135 and 144-168
+**Problem:** No try-catch around session operations. Callers handle exceptions inconsistently:
+- `OpcUaClientGraphChangeSender.cs` - catches `ServiceResultException`
+- `OpcUaSubjectClientSource.cs` - catches `ServiceResultException`
+- `OpcUaTypeResolver.cs` - catches `Exception`
 
-**TODO in code (line 108):**
-```csharp
-// TODO: Do we really need both overloads? Seems like a lot of duplication...
-```
+**Impact:** Session disconnection during browse propagates uncaught exceptions.
 
-**Analysis:** Both overloads contain identical parsing logic (~40% duplicated).
+**Note:** This follows the "let it throw" pattern where low-level utilities don't catch exceptions. This is acceptable if documented.
 
-**Recommendation:** Consolidate:
-```csharp
-public static bool TryParseCollectionIndex(
-    string browseName, string? propertyName, out int index)
-{
-    if (!TryParseCollectionIndex(browseName, out var baseName, out index))
-        return false;
-    return baseName == propertyName;
-}
-```
+**Recommendation:** Add XML doc noting that callers must handle `ServiceResultException`.
 
 ---
 
-### Issue 5: BrowseNodeAsync / BrowseInverseReferencesAsync Duplication (MEDIUM)
+## CODE DUPLICATION ISSUES
 
-**Location:** Lines 177-204 and 213-246
+### Issue 3: BrowseNodeAsync / BrowseInverseReferencesAsync Duplication (MEDIUM)
 
-**Problem:** 80% identical code - only `BrowseDirection` differs.
+**Location:** Lines 198-252 and 262-323
+
+**Problem:** ~85% identical code - only `BrowseDirection` and `NodeClassMask` specification differ.
 
 **Recommendation:** Extract shared helper:
 ```csharp
 private static async Task<ReferenceDescriptionCollection> BrowseAsync(
-    ISession session, NodeId nodeId, BrowseDirection direction, CancellationToken ct)
+    ISession session, NodeId nodeId, BrowseDirection direction,
+    CancellationToken ct, uint maxReferencesPerNode = 0)
 {
-    // Shared implementation
+    // Shared implementation with pagination
 }
 
 public static Task<ReferenceDescriptionCollection> BrowseNodeAsync(...)
-    => BrowseAsync(session, nodeId, BrowseDirection.Forward, ct);
+    => BrowseAsync(session, nodeId, BrowseDirection.Forward, ct, maxReferencesPerNode);
 
 public static Task<ReferenceDescriptionCollection> BrowseInverseReferencesAsync(...)
     => BrowseAsync(session, nodeId, BrowseDirection.Inverse, ct);
 ```
 
----
-
-### Issue 6: Duplicate Browse Logic in OpcUaSubjectLoader (MEDIUM)
-
-**Location:** `OpcUaSubjectLoader.cs` lines 512-568
-
-**Problem:** Contains a private `BrowseNodeAsync` that duplicates `OpcUaHelper.BrowseNodeAsync` but WITH pagination.
-
-**Recommendation:** Enhance `OpcUaHelper.BrowseNodeAsync` to support pagination, then delete duplicate.
+**Note:** Minor difference - `BrowseNodeAsync` accepts `maxReferencesPerNode` parameter while `BrowseInverseReferencesAsync` does not.
 
 ---
 
@@ -189,25 +139,25 @@ public static Task<ReferenceDescriptionCollection> BrowseInverseReferencesAsync(
 
 | Method | Calls | Primary Users |
 |--------|-------|---------------|
-| `BrowseNodeAsync` | 13 | OpcUaClientGraphChangeReceiver, OpcUaClientGraphChangeSender |
+| `BrowseNodeAsync` | 13+ | OpcUaClientGraphChangeReceiver, OpcUaClientGraphChangeSender, OpcUaSubjectLoader |
 | `FindChildNodeIdAsync` | 6 | OpcUaClientGraphChangeReceiver |
 | `TryParseCollectionIndex` (both) | 4 | OpcUaSubjectLoader, OpcUaClientGraphChangeReceiver, OpcUaServerGraphChangeReceiver |
 | `FindParentNodeIdAsync` | 2 | OpcUaClientGraphChangeReceiver |
 | `ReadNodeDetailsAsync` | 1 | OpcUaClientGraphChangeReceiver |
+| `ReindexFirstCollectionIndex` | TBD | New method for collection reindexing |
 | `BrowseInverseReferencesAsync` | 0 | Only called internally by FindParentNodeIdAsync |
 
-### Duplicate Patterns Not Using OpcUaHelper
+### Consolidation Status (Previously Identified)
 
-**cleanup.md mentions these should be consolidated:**
+1. **`OpcUaClientGraphChangeSender.TryFindChildNodeAsync`** - **RESOLVED**
+   - Now properly delegates to `OpcUaHelper.BrowseNodeAsync`
+   - Provides higher-level logic for collections/containers (legitimate abstraction)
 
-1. **`OpcUaClientGraphChangeSender.TryFindChildNodeAsync`** (lines 166-272)
-   - Re-implements browse and search logic
-   - Should use `OpcUaHelper.FindChildNodeIdAsync` instead
-   - **~100 lines could be reduced**
+2. **`OpcUaSubjectLoader.BrowseNodeAsync`** - **RESOLVED**
+   - Duplicate removed; now uses `OpcUaHelper.BrowseNodeAsync` throughout
 
-2. **`OpcUaSubjectLoader.BrowseNodeAsync`** (lines 512-568)
-   - Duplicates OpcUaHelper but adds pagination
-   - Should be consolidated
+3. **`TryParseCollectionIndex` overloads** - **RESOLVED**
+   - Second overload now delegates to first (proper consolidation)
 
 ---
 
@@ -229,6 +179,7 @@ public static Task<ReferenceDescriptionCollection> BrowseInverseReferencesAsync(
 |--------|------------|-------------------|
 | `TryParseCollectionIndex` (overload 1) | ✅ 9 test cases | Implicit |
 | `TryParseCollectionIndex` (overload 2) | ✅ 3 test cases | Implicit |
+| `ReindexFirstCollectionIndex` | ✅ 2 test cases | Implicit |
 | `FindChildNodeIdAsync` | ❌ None | ✅ Exercised in receivers |
 | `FindParentNodeIdAsync` | ❌ None | ✅ Exercised in receivers |
 | `ReadNodeDetailsAsync` | ❌ None | ✅ Exercised in receivers |
@@ -276,12 +227,12 @@ public static Task<ReferenceDescriptionCollection> BrowseInverseReferencesAsync(
 
 | Category | Rating | Notes |
 |----------|--------|-------|
-| Correctness | ⚠️ Issues | Missing pagination, unsafe cast |
-| Architecture | ⚠️ Needs Work | Should be extension methods |
+| Correctness | ⚠️ Minor Issue | Unsafe cast on line 91 |
+| Architecture | ⚠️ Acceptable | Static helper class (could be extension methods) |
 | Thread Safety | ✅ Good | Stateless, pure functions |
 | Test Coverage | ⚠️ Partial | Good for parsing, none for async |
-| Code Quality | ⚠️ Duplication | TODO acknowledged, 2 consolidation opportunities |
-| Error Handling | ❌ Missing | No exception handling |
+| Code Quality | ⚠️ Duplication | Browse methods ~85% identical |
+| Error Handling | ✅ Acceptable | "Let it throw" pattern (callers handle) |
 
 ---
 
@@ -289,47 +240,44 @@ public static Task<ReferenceDescriptionCollection> BrowseInverseReferencesAsync(
 
 ### Must Fix (HIGH)
 
-1. **Add pagination support** to `BrowseNodeAsync` and `BrowseInverseReferencesAsync`
-   - Nodes with many children return incomplete results
-   - **Effort:** ~30 minutes
-
-2. **Fix unsafe cast on line 91**
+1. **Fix unsafe cast on line 91**
    - Add null check before casting NodeClass
    - **Effort:** ~5 minutes
 
-3. **Add exception handling** or document that callers must handle `ServiceResultException`
-   - **Effort:** ~15 minutes
-
 ### Should Fix (MEDIUM)
 
-4. **Consolidate TryParseCollectionIndex overloads** (resolve TODO on line 108)
-   - **Effort:** ~15 minutes
-
-5. **Extract shared BrowseAsync helper** to reduce Browse/BrowseInverse duplication
+2. **Extract shared BrowseAsync helper** to reduce Browse/BrowseInverse duplication
+   - ~85% code overlap between the two browse methods
    - **Effort:** ~20 minutes
-
-6. **Consolidate OpcUaSubjectLoader.BrowseNodeAsync** into OpcUaHelper
-   - **Effort:** ~30 minutes
 
 ### Consider (LOW)
 
-7. **Convert to extension methods** on `ISession`
+3. **Convert to extension methods** on `ISession`
    - Aligns with codebase patterns (25+ extension classes)
    - **Effort:** ~1 hour (all call sites need updating)
 
-8. **Add unit tests for async methods** with mocked ISession
+4. **Add unit tests for async methods** with mocked ISession
    - **Effort:** ~2 hours
 
-9. **Consolidate OpcUaClientGraphChangeSender.TryFindChildNodeAsync**
-   - Should delegate to OpcUaHelper.FindChildNodeIdAsync
-   - **Effort:** ~1 hour
+5. **Add XML doc noting exception handling responsibility**
+   - Document that callers must handle `ServiceResultException`
+   - **Effort:** ~10 minutes
 
 ---
 
 ## Related Files
 
-- `OpcUaSubjectLoader.cs` - Contains duplicate BrowseNodeAsync with pagination
-- `OpcUaClientGraphChangeSender.cs` - Contains TryFindChildNodeAsync that should use helper
+- `OpcUaSubjectLoader.cs` - Uses BrowseNodeAsync (previously had duplicate, now consolidated)
+- `OpcUaClientGraphChangeSender.cs` - Uses BrowseNodeAsync via TryFindChildNodeAsync
 - `OpcUaClientGraphChangeReceiver.cs` - Primary consumer of helper methods
 - `OpcUaServerGraphChangeReceiver.cs` - Uses TryParseCollectionIndex
 - `OpcUaHelperTests.cs` - Unit tests for parsing methods
+
+---
+
+## Change History
+
+| Date | Changes |
+|------|---------|
+| 2026-02-04 | Updated: Pagination now implemented in both browse methods. TryParseCollectionIndex overloads consolidated. OpcUaSubjectLoader duplicate removed. Reduced from 9 recommendations to 5. |
+| 2026-02-02 | Initial review |

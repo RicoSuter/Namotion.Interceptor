@@ -3,7 +3,8 @@
 **Status:** Complete
 **Reviewer:** Claude
 **File:** `src/Namotion.Interceptor.Connectors/WriteRetryQueue.cs`
-**Lines:** 184
+**Lines:** 185
+**Last Updated:** 2026-02-04
 
 ## Overview
 
@@ -120,7 +121,7 @@ private void RequeueChanges(ImmutableArray<SubjectPropertyChange> changes)
 
 ## Issues & Concerns
 
-### Issue 1: RequeueChanges Can Exceed MaxQueueSize (Minor)
+### Issue 1: RequeueChanges Can Exceed MaxQueueSize (Minor - By Design)
 
 **Location:** Line 172
 
@@ -128,11 +129,11 @@ private void RequeueChanges(ImmutableArray<SubjectPropertyChange> changes)
 _pendingWrites.InsertRange(0, changes);
 ```
 
+**Status:** Open (documented as intentional behavior)
+
 **Problem:** When failed changes are re-queued, the queue can temporarily exceed `maxQueueSize`. The next `Enqueue` call will correct this by dropping oldest items.
 
-**Impact:** Low - temporary overage, self-correcting behavior
-
-**Recommendation:** This is likely intentional to avoid data loss on transient failures. Document this behavior.
+**Impact:** Low - temporary overage, self-correcting behavior. This is intentional to preserve failed writes on transient failures.
 
 ### Issue 2: Dispose Loses Pending Items (Minor)
 
@@ -142,33 +143,18 @@ _pendingWrites.InsertRange(0, changes);
 public void Dispose()
 {
     _flushSemaphore.Dispose();
-    // _pendingWrites not cleared or logged
 }
 ```
 
-**Problem:** When disposed, pending writes are silently lost.
+**Status:** Open
+
+**Problem:** When disposed, pending writes are silently lost with no logging.
 
 **Recommendation:** Consider logging a warning if there are pending items:
 ```csharp
 if (_count > 0)
     _logger.LogWarning("Disposing WriteRetryQueue with {Count} pending writes.", _count);
 ```
-
-### Issue 3: No Visibility Into Dropped Items (Minor)
-
-**Location:** Lines 77-83
-
-The log message indicates items were dropped, but there's no way for callers to react to this (e.g., metrics, alerts).
-
-**Recommendation:** Consider adding an event or callback for dropped items if observability is needed.
-
-### Issue 4: Scratch Buffer Never Shrinks (Trivial)
-
-**Location:** Lines 119-124
-
-The scratch buffer grows up to `MaxBatchSize` (1024) but never shrinks back. For a long-running service, this is fine - memory is stable after warmup.
-
-**Impact:** Negligible (~8KB max for 1024 items)
 
 ---
 
@@ -181,6 +167,7 @@ The scratch buffer grows up to `MaxBatchSize` (1024) but never shrinks back. For
 | `Lock` class (C# 13) | Thread synchronization | 16 |
 | Collection expression `[]` | List initialization | 14 |
 | `ArgumentOutOfRangeException.ThrowIfNegative` | Guard clause | 38 |
+| `ArgumentNullException.ThrowIfNull` | Guard clause | 39 |
 | `PoolingAsyncValueTaskMethodBuilder` | Allocation reduction | 90 |
 | File-scoped namespace | Clean syntax | 6 |
 | `Volatile.Read/Write` | Memory ordering | 29, 34, 74, 144, 173 |
@@ -231,8 +218,7 @@ The scratch buffer grows up to `MaxBatchSize` (1024) but never shrinks back. For
 
 | Gap | Description |
 |-----|-------------|
-| Dispose behavior | No test verifies disposal cleans up semaphore |
-| Requeue + capacity | No test for requeue exceeding maxQueueSize then Enqueue |
+| Dispose behavior | No test verifies disposal cleans up semaphore or logs pending items |
 | Partial batch failure | No test where some items succeed, others fail |
 | Concurrent Enqueue + Flush | Could add stress test |
 
@@ -242,7 +228,7 @@ The scratch buffer grows up to `MaxBatchSize` (1024) but never shrinks back. For
 
 ### Current Complexity: Low ✅
 
-At 184 lines, this class is appropriately sized. The complexity is justified:
+At 185 lines, this class is appropriately sized. The complexity is justified:
 - Ring buffer logic needs careful implementation
 - Batch processing requires loop with early exit
 - Thread safety requires multiple synchronization primitives
@@ -316,11 +302,11 @@ No - the logic is complex enough to warrant a dedicated class. Inlining into `Su
 
 ### Issues to Address
 
-| Priority | Issue | Action |
+| Priority | Issue | Status |
 |----------|-------|--------|
-| Low | Dispose loses pending items silently | Add warning log |
-| Low | RequeueChanges can exceed capacity | Document behavior |
-| Low | Missing disposal test | Add test |
+| Low | Dispose loses pending items silently | Open - Add warning log |
+| Low | RequeueChanges can exceed capacity | Documented as intentional |
+| Low | Missing disposal test | Open - Add test |
 
 ### Final Verdict
 
@@ -333,6 +319,5 @@ The class is well-designed, thread-safe, and correctly implemented. Minor improv
 ## Recommended Actions
 
 1. [ ] Add logging in Dispose if pending items exist
-2. [ ] Add XML doc clarifying requeue capacity behavior
-3. [ ] Add test for Dispose cleanup
-4. [ ] Consider adding test for partial batch failure scenario
+2. [ ] Add test for Dispose cleanup
+3. [ ] Consider adding test for partial batch failure scenario

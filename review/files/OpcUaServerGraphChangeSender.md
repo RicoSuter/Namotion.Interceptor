@@ -1,10 +1,10 @@
 # Code Review: OpcUaServerGraphChangeSender.cs
 
 **File:** `src/Namotion.Interceptor.OpcUa/Server/OpcUaServerGraphChangeSender.cs`
-**Lines:** 45
+**Lines:** 46
 **Status:** Complete
 **Reviewer:** Claude
-**Date:** 2026-02-02
+**Date:** 2026-02-04
 
 ---
 
@@ -21,7 +21,7 @@ internal class OpcUaServerGraphChangeSender : GraphChangePublisher
         => { _nodeManager.CreateSubjectNode(...); return Task.CompletedTask; }
 
     protected override Task OnSubjectRemovedAsync(...)
-        => { _nodeManager.RemoveSubjectNodes(...); _nodeManager.ReindexCollectionBrowseNames(...); }
+        => { _nodeManager.RemoveSubjectNodesAndReindex(subject, property); return Task.CompletedTask; }
 }
 ```
 
@@ -37,10 +37,10 @@ The class is functionally correct, but its existence is a symptom of the archite
 
 ### Asymmetry with OpcUaClientGraphChangeSender
 
-| Aspect | Server (45 lines) | Client (588 lines) |
+| Aspect | Server (46 lines) | Client (588 lines) |
 |--------|-------------------|-------------------|
 | Add operation | 1 method call | 8 complex operations |
-| Remove operation | 2 method calls | No-op (delegated elsewhere) |
+| Remove operation | 1 method call (atomic) | No-op (delegated elsewhere) |
 | Why small | Direct in-process control | Must query/modify remote server |
 
 **The asymmetry is JUSTIFIED:**
@@ -58,7 +58,7 @@ internal class OpcUaServerGraphChangeSender : GraphChangePublisher { ... }
 // Recommended (Interface - can be inline or simple class)
 var handler = new DelegateGraphChangeHandler(
     (p, s, i) => { nodeManager.CreateSubjectNode(p, s, i); return Task.CompletedTask; },
-    (p, s, i) => { nodeManager.RemoveSubjectNodes(s, p); ... });
+    (p, s, i) => { nodeManager.RemoveSubjectNodesAndReindex(s, p); return Task.CompletedTask; });
 _graphChangeProcessor = new GraphChangePublisher(handler);
 ```
 
@@ -66,58 +66,9 @@ _graphChangeProcessor = new GraphChangePublisher(handler);
 
 ---
 
-## CRITICAL ISSUES
+## ISSUES
 
-### Issue 1: Race Condition Between Remove and Reindex (CRITICAL)
-
-**Location:** Lines 32-41
-
-```csharp
-protected override Task OnSubjectRemovedAsync(...)
-{
-    _nodeManager.RemoveSubjectNodes(subject, property);  // Lock acquired, then released
-
-    if (property.IsSubjectCollection)
-    {
-        _nodeManager.ReindexCollectionBrowseNames(property);  // Lock acquired AGAIN
-    }
-    return Task.CompletedTask;
-}
-```
-
-**Problem:** Two separate lock acquisitions create a race window:
-
-```
-T1: RemoveSubjectNodes() releases _structureLock
-T2: [WINDOW] Another thread could call CreateSubjectNode() or RemoveSubjectNodes()
-T3: ReindexCollectionBrowseNames() acquires _structureLock
-T4: Reindexing operates on potentially STALE child list
-```
-
-**Potential Consequences:**
-- BrowseName sequence could become non-contiguous: `People[0], People[1], People[3]`
-- New node added between operations might get overwritten
-
-**Recommendation:** Create atomic method in CustomNodeManager:
-```csharp
-public void RemoveSubjectNodesAndReindex(
-    IInterceptorSubject subject,
-    RegisteredSubjectProperty property)
-{
-    _structureLock.Wait();
-    try
-    {
-        RemoveSubjectNodesCore(subject, property);  // Private, no lock
-        if (property.IsSubjectCollection)
-            ReindexCollectionBrowseNamesCore(property);  // Private, no lock
-    }
-    finally { _structureLock.Release(); }
-}
-```
-
----
-
-### Issue 2: Parent Class Not Thread-Safe (HIGH)
+### Issue 1: Parent Class Not Thread-Safe (HIGH)
 
 **Location:** Inherited from `GraphChangePublisher`
 
@@ -129,9 +80,9 @@ The parent class has a shared `CollectionDiffBuilder _diffBuilder` instance with
 
 ---
 
-### Issue 3: No Error Handling (MEDIUM)
+### Issue 2: No Error Handling (MEDIUM)
 
-**Location:** Lines 25-28, 32-43
+**Location:** Lines 30-33, 36-45
 
 ```csharp
 protected override Task OnSubjectAddedAsync(...)
@@ -141,7 +92,7 @@ protected override Task OnSubjectAddedAsync(...)
 }
 ```
 
-**Problem:** If `CreateSubjectNode` throws, exception propagates to background service.
+**Problem:** If `CreateSubjectNode` or `RemoveSubjectNodesAndReindex` throws, exception propagates to background service.
 
 **Recommendation:** Add try-catch with logging, or document that caller must handle exceptions.
 
@@ -210,8 +161,7 @@ if (handled) { /* skip value processing */ }
 | `OpcUaServerGraphChangeSender` | ⚠️ Relies on parent | No additional state |
 | `GraphChangePublisher._diffBuilder` | ❌ Not thread-safe | Assumes sequential calls |
 | `CustomNodeManager.CreateSubjectNode` | ✅ Protected | Uses `_structureLock` |
-| `CustomNodeManager.RemoveSubjectNodes` | ✅ Protected | Uses `_structureLock` |
-| `Remove-then-Reindex sequence` | ❌ **Race condition** | Two separate lock acquisitions |
+| `CustomNodeManager.RemoveSubjectNodesAndReindex` | ✅ Protected | Atomic operation under single lock |
 
 ---
 
@@ -220,13 +170,13 @@ if (handled) { /* skip value processing */ }
 ### Strengths
 1. **Clean delegation**: All complexity in CustomNodeManager
 2. **Clear documentation**: XML docs explain purpose
-3. **Minimal footprint**: Only 45 lines
+3. **Minimal footprint**: Only 46 lines
 4. **Correct async pattern**: Uses `Task.CompletedTask` for sync operations
+5. **Atomic removal**: Uses `RemoveSubjectNodesAndReindex` for thread-safe removal
 
 ### Weaknesses
 1. **Exists due to inheritance**: Would be unnecessary with interface composition
-2. **Race condition in removal**: Two-step lock acquisition
-3. **No error handling**: Exceptions propagate uncaught
+2. **No error handling**: Exceptions propagate uncaught
 
 ---
 
@@ -246,9 +196,9 @@ if (handled) { /* skip value processing */ }
 
 | Category | Rating | Notes |
 |----------|--------|-------|
-| Correctness | ⚠️ Issue | Race condition in remove-then-reindex |
+| Correctness | ✅ Good | Atomic removal operation prevents race conditions |
 | Architecture | ⚠️ Needs Work | Exists only due to Template Method pattern |
-| Thread Safety | ⚠️ Fragile | Race window, relies on parent's sequential assumption |
+| Thread Safety | ⚠️ Relies on parent | Parent class `_diffBuilder` not thread-safe |
 | Test Coverage | ✅ Excellent | Unit + integration tests cover all paths |
 | Code Quality | ✅ Good | Clean, minimal, well-documented |
 
@@ -256,29 +206,22 @@ if (handled) { /* skip value processing */ }
 
 ## Recommendations
 
-### Must Fix (CRITICAL)
-
-1. **Fix race condition in removal sequence**
-   - Create atomic `RemoveSubjectNodesAndReindex` in CustomNodeManager
-   - Single lock acquisition for both operations
-   - **Effort:** ~30 minutes
-
 ### Should Consider (MEDIUM)
 
-2. **Refactor with GraphChangePublisher** (per GraphChangePublisher review)
+1. **Refactor with GraphChangePublisher** (per GraphChangePublisher review)
    - When GraphChangePublisher moves to interface composition
    - This class can be eliminated or simplified to handler
    - **Effort:** Part of GraphChangePublisher refactoring
 
-3. **Add error handling**
+2. **Add error handling**
    - Wrap CustomNodeManager calls in try-catch
    - Log and handle gracefully
    - **Effort:** ~15 minutes
 
 ### Documentation (LOW)
 
-4. **Document the asymmetry with client**
-   - Explain why server is 45 lines vs client's 588 lines
+3. **Document the asymmetry with client**
+   - Explain why server is 46 lines vs client's 588 lines
    - Clarify that removal cleanup is done differently
    - **Effort:** ~10 minutes
 

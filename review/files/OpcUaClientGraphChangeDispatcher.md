@@ -3,8 +3,8 @@
 **File:** `src/Namotion.Interceptor.OpcUa/Client/OpcUaClientGraphChangeDispatcher.cs`
 **Status:** Complete
 **Reviewer:** Claude
-**Date:** 2026-02-02
-**Lines:** ~126
+**Date:** 2026-02-04
+**Lines:** ~127
 
 ---
 
@@ -174,15 +174,26 @@ public sealed record PeriodicResyncMessage : DispatcherMessage;
 private readonly Channel<DispatcherMessage> _channel;
 ```
 
-### Issue 3: CancelAsync vs Cancel (Modern C#)
+### Issue 3: Redundant CancelAsync After Consumer Completion
 
-**Location:** Line 89
+**Location:** Lines 84-89
 
 ```csharp
+if (_consumerTask is not null)
+{
+    await _consumerTask.ConfigureAwait(false);
+}
+
 await (_cancellationTokenSource?.CancelAsync() ?? Task.CompletedTask);
 ```
 
-**Good:** Uses `CancelAsync()` (async cancellation, .NET 8+) rather than blocking `Cancel()`.
+**Problem:** The `CancelAsync()` call comes after awaiting the consumer task completion. At this point, the consumer has already exited (either by draining all items or observing channel completion). The cancellation is effectively dead code.
+
+**Expected flow:** Complete channel -> consumer drains and exits -> cancel (but consumer already finished)
+
+**Recommendation:** Either:
+1. Remove the cancellation entirely (channel completion is sufficient)
+2. Or cancel _before_ completing the channel for immediate termination semantics
 
 ### Code Quality: Excellent
 
@@ -248,6 +259,18 @@ Used indirectly through `OpcUaClientGraphChangeTrigger` in:
 2. **No test for concurrent EnqueueModelChange calls** (though channel handles this)
 3. **No test for StopAsync during active processing**
 
+### Test Quality Issue
+
+**File:** `OpcUaClientGraphChangeDispatcherTests.cs`, line 188
+
+```csharp
+Assert.True(processedCount >= 0); // May or may not have processed depending on timing
+```
+
+**Problem:** This assertion always passes (count can never be negative). The test `DisposeAsync_StopsProcessing` doesn't verify meaningful behavior. Should either:
+- Wait for processing and assert `processedCount == 1`
+- Or verify that disposal completes without hanging
+
 ---
 
 ## Comparison with Server Side
@@ -290,9 +313,7 @@ Used indirectly through `OpcUaClientGraphChangeTrigger` in:
 
 4. **Consider typed messages** if more message types are added
 
-5. **Add XML documentation** for `PeriodicResyncRequest` explaining its purpose
-
-6. **Add configuration** for queue size limit:
+5. **Add configuration** for queue size limit:
    ```csharp
    public int DispatcherQueueSize { get; set; } = 1000;
    ```
@@ -314,6 +335,8 @@ Used indirectly through `OpcUaClientGraphChangeTrigger` in:
 6. **Graceful shutdown** - drains queue before completing
 
 7. **Modern C# usage** - `CancelAsync()`, `await foreach`, `ConfigureAwait(false)`
+
+8. **Good XML documentation** - `PeriodicResyncRequest` now has documentation explaining its purpose
 
 ---
 
