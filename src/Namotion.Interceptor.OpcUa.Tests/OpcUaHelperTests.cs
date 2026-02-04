@@ -53,4 +53,42 @@ public class OpcUaHelperTests
             Assert.Equal(expectedIndex, index);
         }
     }
+
+    [Theory]
+    [InlineData("Root.Collection[2]", 2, 1, "Root.Collection[1]")]
+    [InlineData("Root.Collection[5]", 5, 4, "Root.Collection[4]")]
+    [InlineData("ns=2;s=Root.Items[3]", 3, 2, "ns=2;s=Root.Items[2]")]
+    // Key bug case: nested collections with same index - should only replace FIRST occurrence
+    [InlineData("Root.Collection[2].Items[2]", 2, 1, "Root.Collection[1].Items[2]")]
+    [InlineData("Root.Collection[2].Nested[2].Deep[2]", 2, 1, "Root.Collection[1].Nested[2].Deep[2]")]
+    // Different indices - no replacement needed for inner
+    [InlineData("Root.Collection[3].Items[2]", 3, 2, "Root.Collection[2].Items[2]")]
+    public void ReindexFirstCollectionIndex_ReplacesOnlyFirstOccurrence(
+        string nodeIdStr,
+        int oldIndex,
+        int newIndex,
+        string expected)
+    {
+        // Act
+        var result = OpcUaHelper.ReindexFirstCollectionIndex(nodeIdStr, oldIndex, newIndex);
+
+        // Assert
+        Assert.Equal(expected, result);
+    }
+
+    [Theory]
+    [InlineData("Root.Collection[1]", 2, 1)] // Index not found
+    [InlineData("Root.Property", 0, 1)] // No brackets
+    [InlineData("", 0, 1)] // Empty string
+    public void ReindexFirstCollectionIndex_ReturnsNull_WhenIndexNotFound(
+        string nodeIdStr,
+        int oldIndex,
+        int newIndex)
+    {
+        // Act
+        var result = OpcUaHelper.ReindexFirstCollectionIndex(nodeIdStr, oldIndex, newIndex);
+
+        // Assert
+        Assert.Null(result);
+    }
 }
