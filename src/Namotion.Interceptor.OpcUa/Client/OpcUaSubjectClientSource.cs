@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -7,6 +8,7 @@ using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -30,6 +32,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
     private readonly OpcUaClientSubjectRegistry _subjectRegistry = new();
+    private readonly ConcurrentDictionary<(PropertyReference?, object?), Task> _pendingDeletes = new();
 
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private volatile bool _isStarted;
@@ -96,7 +99,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
     }
 
-    private void RemoveItemsForSubject(IInterceptorSubject subject)
+    private void RemoveItemsForSubject(IInterceptorSubject subject, PropertyReference? property, object? index)
     {
         _structureLock.Wait();
         NodeId? nodeIdToDelete;
@@ -131,7 +134,19 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 var session = _sessionManager?.CurrentSession;
                 if (session is not null && session.Connected)
                 {
-                    _ = TryDeleteRemoteNodeAsync(session, nodeIdToDelete, CancellationToken.None);
+                    var deleteTask = TryDeleteRemoteNodeAsync(session, nodeIdToDelete, CancellationToken.None);
+
+                    // Track pending delete by semantic key (property + index) to allow
+                    // OnSubjectAddedAsync to await completion before browsing for new nodes.
+                    // This prevents race conditions when replacing dictionary/collection entries.
+                    if (property is not null)
+                    {
+                        var key = ((PropertyReference?)property, index);
+                        _pendingDeletes[key] = deleteTask;
+                        _ = deleteTask.ContinueWith(
+                            _ => _pendingDeletes.TryRemove(key, out Task? _),
+                            TaskContinuationOptions.ExecuteSynchronously);
+                    }
                 }
             }
         }
@@ -179,6 +194,22 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             _logger.LogWarning(ex,
                 "DeleteNodes service call failed for '{NodeId}'.",
                 nodeId);
+        }
+    }
+
+    /// <summary>
+    /// Awaits any pending delete operation for the given property and index.
+    /// Used by GraphChangeSender to ensure deletes complete before adds.
+    /// This prevents race conditions when replacing dictionary/collection entries.
+    /// </summary>
+    /// <param name="property">The parent property reference.</param>
+    /// <param name="index">The dictionary key or collection index.</param>
+    internal async Task AwaitPendingDeleteAsync(PropertyReference? property, object? index)
+    {
+        var key = (property, index);
+        if (_pendingDeletes.TryGetValue(key, out var deleteTask))
+        {
+            await deleteTask.ConfigureAwait(false);
         }
     }
 
@@ -288,9 +319,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         _opcUaPropertyWriter = new OpcUaClientPropertyWriter(configuration, OpcUaNodeIdKey, logger);
     }
 
-    private void OnSubjectDetaching(IInterceptorSubject subject)
+    private void OnSubjectDetaching(SubjectLifecycleChange change)
     {
-        RemoveItemsForSubject(subject);
+        RemoveItemsForSubject(change.Subject, change.Property, change.Index);
     }
 
     /// <inheritdoc />

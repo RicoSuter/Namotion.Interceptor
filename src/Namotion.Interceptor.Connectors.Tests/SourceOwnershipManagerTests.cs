@@ -144,7 +144,7 @@ public class SourceOwnershipManagerTests
         var detachedSubjects = new List<IInterceptorSubject>();
         var (lifecycleInterceptor, manager) = CreateSourceWithManager(
             onReleasing: p => releasedProperties.Add(p),
-            onSubjectDetaching: s => detachedSubjects.Add(s));
+            onSubjectDetaching: change => detachedSubjects.Add(change.Subject));
 
         // Create subjects and properties (subjects need Data for PropertyReference to work)
         var subject1Mock = new Mock<IInterceptorSubject>();
@@ -217,7 +217,7 @@ public class SourceOwnershipManagerTests
     private static (LifecycleInterceptor Lifecycle, SourceOwnershipManager Manager) CreateSourceWithManager(
         LifecycleInterceptor? lifecycleInterceptor = null,
         Action<PropertyReference>? onReleasing = null,
-        Action<IInterceptorSubject>? onSubjectDetaching = null)
+        Action<SubjectLifecycleChange>? onSubjectDetaching = null)
     {
         lifecycleInterceptor ??= new LifecycleInterceptor();
 

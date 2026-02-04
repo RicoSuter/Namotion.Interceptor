@@ -17,7 +17,7 @@ public class SourceOwnershipManager : IDisposable
 {
     private readonly ISubjectSource _source;
     private readonly Action<PropertyReference>? _onReleasing;
-    private readonly Action<IInterceptorSubject>? _onSubjectDetaching;
+    private readonly Action<SubjectLifecycleChange>? _onSubjectDetaching;
     private readonly HashSet<PropertyReference> _properties = [];
     private readonly Lock _lock = new();
     private readonly LifecycleInterceptor _lifecycle;
@@ -29,7 +29,7 @@ public class SourceOwnershipManager : IDisposable
     /// </summary>
     /// <param name="source">The source that owns the properties.</param>
     /// <param name="onReleasing">Optional callback invoked before a property is released.</param>
-    /// <param name="onSubjectDetaching">Optional callback invoked before a subject's properties are released due to detachment.</param>
+    /// <param name="onSubjectDetaching">Optional callback invoked before a subject's properties are released due to detachment. Provides full lifecycle context including the parent property and index.</param>
     /// <exception cref="InvalidOperationException">
     /// Thrown when the source's context does not have a <see cref="LifecycleInterceptor"/> configured.
     /// Call <c>WithLifecycle()</c> on the context to enable lifecycle tracking.
@@ -37,7 +37,7 @@ public class SourceOwnershipManager : IDisposable
     public SourceOwnershipManager(
         ISubjectSource source,
         Action<PropertyReference>? onReleasing = null,
-        Action<IInterceptorSubject>? onSubjectDetaching = null)
+        Action<SubjectLifecycleChange>? onSubjectDetaching = null)
     {
         _source = source ?? throw new ArgumentNullException(nameof(source));
         _onReleasing = onReleasing;
@@ -106,7 +106,7 @@ public class SourceOwnershipManager : IDisposable
 
     private void OnSubjectDetaching(SubjectLifecycleChange change)
     {
-        _onSubjectDetaching?.Invoke(change.Subject);
+        _onSubjectDetaching?.Invoke(change);
 
         lock (_lock)
         {
