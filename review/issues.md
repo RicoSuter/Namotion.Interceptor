@@ -1,272 +1,243 @@
-# PR #121 Review: Outstanding Issues
+# PR Review: Consolidated Issues
 
 **Branch:** `feature/opc-ua-full-sync`
-**Generated:** 2026-02-04
-**Source:** Automated review of 24 files in `review/files/`
-
----
-
-## Critical Issues (Must Fix)
-
-### 1. CustomNodeManager.ClearPropertyData - No Lock Protection
-**File:** `CustomNodeManager.cs:69-92`
-**Severity:** CRITICAL
-**Type:** Race Condition
-
-`ClearPropertyData()` iterates over `_subjectRegistry.GetAllSubjects()` and root subject properties without holding `_structureLock`. Concurrent structural changes can cause collection-modified exceptions or stale data processing.
-
-**Fix:** Acquire `_structureLock` before iterating.
-
----
-
-### 2. OpcUaServerNodeCreator - StateChanged Memory Leak
-**File:** `OpcUaServerNodeCreator.cs:364-378`
-**Severity:** CRITICAL
-**Type:** Memory Leak
-
-StateChanged event handlers are subscribed but never unsubscribed. Nodes remain in memory indefinitely even after removal from the address space.
-
-**Fix:** Implement `IDisposable` pattern or explicit unsubscription in `RemoveSubjectNodes`.
-
----
-
-### 3. OpcUaServerGraphChangePublisher - Lost Updates on Exception
-**File:** `OpcUaServerGraphChangePublisher.cs:66-93`
-**Severity:** CRITICAL
-**Type:** Data Loss
-
-When `ReportEvent` throws, the swapped-out `changesToEmit` list is permanently lost. Clients never receive notification of those changes.
-
-**Fix:** Either re-queue failed changes or use a more robust emission pattern.
-
----
-
-### 4. GraphChangePublisher._diffBuilder Not Thread-Safe
-**File:** `GraphChangePublisher.cs:16`
-**Severity:** HIGH
-**Type:** Race Condition
-
-The shared mutable `CollectionDiffBuilder _diffBuilder` field has no synchronization. Concurrent calls to `ProcessPropertyChangeAsync` cause internal state corruption.
-
-**Affects:** `OpcUaClientGraphChangeSender`, `OpcUaServerGraphChangeSender`
-
-**Fix:** Make `_diffBuilder` a local variable or add synchronization.
-
----
-
-## High Priority Issues
-
-### 5. OpcUaServerGraphChangeReceiver - Thread Safety
-**File:** `OpcUaServerGraphChangeReceiver.cs`
-**Severity:** HIGH (downgraded from CRITICAL)
-
-Model modifications via `GraphChangeApplier` happen before `_structureLock` is acquired. Partial fix implemented but race window remains.
-
----
-
-### 6. OpcUaSubjectLoader - AddMonitoredItemToSubject Not Thread-Safe
-**File:** `OpcUaSubjectLoader.cs:466`
-**Severity:** MEDIUM-HIGH
-
-The method modifies subject data without proper synchronization.
-
----
-
-### 7. OpcUaClientGraphChangeSender - Non-Atomic Shared Subject Check
-**File:** `OpcUaClientGraphChangeSender.cs:65-72`
-**Severity:** MEDIUM
-
-Check-then-act pattern for shared subjects is not atomic.
-
----
-
-## Medium Priority Issues
-
-### 8. CustomNodeManager - Synchronous Lock Acquisition
-**File:** `CustomNodeManager.cs`
-**Severity:** MEDIUM
-
-All locked methods use blocking `.Wait()` instead of `.WaitAsync()`. Can cause thread pool starvation under high load.
-
----
-
-### 9. OpcUaServerGraphChangeReceiver - TOCTOU in RemoveSubjectFromExternal
-**File:** `OpcUaServerGraphChangeReceiver.cs:142-152`
-**Severity:** MEDIUM
-
-Time-of-check-time-of-use vulnerability in removal logic.
-
----
-
-### 10. OpcUaServerGraphChangeReceiver - Collection Index Race
-**File:** `OpcUaServerGraphChangeReceiver.cs:344-345`
-**Severity:** MEDIUM
-
-Reads `currentCollection?.Count()` before adding to the collection - index could be stale.
-
----
-
-### 11. OpcUaServerNodeCreator - Recursive Attributes No Depth Limit
-**File:** `OpcUaServerNodeCreator.cs:296-297`
-**Severity:** MEDIUM
-
-Recursive attribute node creation has no depth limit, could cause stack overflow with circular references.
-
----
-
-### 12. SessionManager - Risky Sync Dispose Pattern
-**File:** `SessionManager.cs:547-561`
-**Severity:** MEDIUM
-
-Fire-and-forget pattern in synchronous Dispose could lose pending operations.
-
----
-
-### 13. SubscriptionManager - O(n²) Item Removal
-**File:** `SubscriptionManager.cs:285-288, 343-346`
-**Severity:** MEDIUM (Performance)
-
-```csharp
-foreach (var item in itemsForThisSubscription)
-{
-    itemsToAdd.Remove(item);  // O(n) removal in a loop
-}
-```
-
----
-
-## Low Priority Issues
-
-### 14. OpcUaSubjectClientSource - Mixed Sync/Async Lock
-**File:** `OpcUaSubjectClientSource.cs`
-**Severity:** LOW
-
-`RemoveItemsForSubject` uses synchronous `Wait()` while other methods use `WaitAsync()`.
-
----
-
-### 15. SessionManager - Inconsistent Lock Type
-**File:** `SessionManager.cs:26`
-**Severity:** LOW
-
-Uses `object` for locking instead of C# 13 `Lock` type used elsewhere in codebase.
-
----
-
-### 16. OpcUaServerNodeCreator - Lock on Public Object
-**File:** `OpcUaServerNodeCreator.cs:370-374`
-**Severity:** LOW
-
-Locking on `variableNode` which is a public SDK object - external code could also lock on it.
-
----
-
-### 17. Magic Numbers Undocumented
-**Files:** Multiple
-**Severity:** LOW
-
-- `DefaultChunkSize = 512` (WriteRetryQueue)
-- `maxDepth = 10` (OpcUaClientGraphChangeReceiver, OpcUaSubjectLoader)
-
----
-
-### 18. OpcUaClientGraphChangeDispatcher - Redundant CancelAsync
-**File:** `OpcUaClientGraphChangeDispatcher.cs`
-**Severity:** LOW
-
-`StopAsync` calls `CancelAsync()` after consumer task completion - effectively dead code.
-
----
-
-## Dead Code / Premature Abstraction
-
-### 19. OpcUaServerExternalNodeValidator - Unused Methods
-**File:** `OpcUaServerExternalNodeValidator.cs`
-**Severity:** LOW (Cleanup)
-
-`ValidateAddNodes()` and `ValidateDeleteNodes()` are never called in production code. Only `IsEnabled` property is used. The validation logic is duplicated in `OpcUaServerGraphChangeReceiver`.
-
-**Recommendation:** Either use the validator or remove it.
-
----
-
-### 20. ConnectorSubjectMapping - Obsolete File
-**File:** `ConnectorSubjectMapping.cs`
-**Severity:** LOW (Cleanup)
-
-Class still exists but functionality merged into `SubjectConnectorRegistry`. Review file should be renamed/merged.
-
----
-
-## Pattern/Style Issues (Nice to Have)
-
-### 21. OpcUaHelper - Should Be Extension Methods
-**File:** `OpcUaHelper.cs`
-**Severity:** STYLE
-
-Codebase uses extension methods extensively (25+ classes) but OpcUaHelper uses static methods. Convert to `ISession` extension methods for consistency.
-
-```csharp
-// Current
-var children = await OpcUaHelper.BrowseNodeAsync(session, nodeId, ct);
-
-// Recommended
-var children = await session.BrowseNodeAsync(nodeId, ct);
-```
-
----
-
-### 22. GraphChangePublisher - Wrong Design Pattern
-**File:** `GraphChangePublisher.cs`
-**Severity:** STYLE
-
-Uses Template Method inheritance pattern, but codebase strongly prefers composition over inheritance (see `IWriteInterceptor`, `IReadInterceptor`, `ChangeQueueProcessor`).
-
----
-
-## Test Coverage Gaps
-
-| File | Missing Tests |
-|------|---------------|
-| OpcUaServerGraphChangeReceiver | No unit tests |
-| OpcUaServerNodeCreator | No unit tests |
-| PollingManager | Core functionality, polling fallback |
-| SessionManager | No direct unit tests |
-| SubscriptionManager | Concurrent access, subscription transfer |
-| WriteRetryQueue | Disposal, partial batch failure |
-
----
-
-## Files Approved (No Issues)
-
-| File | Status |
-|------|--------|
-| GraphChangeApplier.cs | APPROVED |
-| OpcUaClientPropertyWriter.cs | APPROVED |
-| OpcUaTypeRegistry.cs | APPROVED |
+**Last Updated:** 2026-02-04
+**Status:** ✅ PLANNED - Ready for implementation
 
 ---
 
 ## Summary
 
-| Priority | Count |
-|----------|-------|
-| Critical | 4 |
-| High | 3 |
-| Medium | 6 |
-| Low | 5 |
-| Dead Code | 2 |
-| Style | 2 |
-| **Total** | **22** |
+| Priority | Identified | Real | False Positive | Action |
+|----------|------------|------|----------------|--------|
+| Critical | 3 | 2 | 1 | 2 to fix, 1 comment only |
+| High | 3 | 1 | 2 | 1 to fix |
+| Feature Gap | 1 | 1 | 0 | 1 to fix + test |
+| Medium | 6 | 6 | 0 | 6 to fix |
+| Low | 5 | 5 | 0 | 5 to fix |
+| Style | 6 | 2 | 4 | 2 to fix, 4 skip |
+| **Total** | **24** | **17** | **7** | |
 
 ---
 
-## Recommended Fix Order
+## Critical Issues
 
-1. **Critical race conditions** (#1, #4) - Can cause data corruption
-2. **Memory leak** (#2) - Causes gradual degradation
-3. **Data loss** (#3) - Silent failures
-4. **High priority thread safety** (#5, #6, #7)
-5. **Performance** (#13)
-6. **Cleanup dead code** (#19, #20)
-7. **Style consistency** (#21, #22)
+### C1. CustomNodeManager.ClearPropertyData - No Lock Protection
+**File:** `src/Namotion.Interceptor.OpcUa/Server/CustomNodeManager.cs:69-93`
+**Status:** ✅ PLANNED - REAL
+
+Wrap method body with `_structureLock.Wait()` / `Release()` in try/finally.
+
+---
+
+### C2. OpcUaServerNodeCreator - StateChanged Memory Leak
+**File:** `src/Namotion.Interceptor.OpcUa/Server/OpcUaServerNodeCreator.cs:364-378`
+**Status:** ✅ PLANNED - FALSE POSITIVE (comment only)
+
+**Analysis:** Node and handler are GC'd together. After removal, nothing externally references the node. Server restart discards entire object graph.
+
+**Action:** Add clarifying comment for future reviewers.
+
+---
+
+### C3. OpcUaServerGraphChangePublisher - Lost Updates on Exception
+**File:** `src/Namotion.Interceptor.OpcUa/Server/OpcUaServerGraphChangePublisher.cs:90-93`
+**Status:** ✅ PLANNED - REAL (logging improvement)
+
+**Analysis:** Requeueing adds complexity; server restart clears queue anyway.
+
+**Action:** Improve log message to be honest about loss.
+
+---
+
+## High Priority Issues
+
+### H1. OpcUaServerGraphChangeReceiver - Model Modified Before Lock
+**File:** `src/Namotion.Interceptor.OpcUa/Server/OpcUaServerGraphChangeReceiver.cs`
+**Status:** ✅ PLANNED - FALSE POSITIVE
+
+**Analysis:** `_externalRequestLock` at `OpcUaSubjectServer` level already serializes all external AddNodes/DeleteNodes operations.
+
+---
+
+### H2. OpcUaServerGraphChangeReceiver - TOCTOU in RemoveSubjectFromExternal
+**File:** `src/Namotion.Interceptor.OpcUa/Server/OpcUaServerGraphChangeReceiver.cs:133-159`
+**Status:** ✅ PLANNED - FALSE POSITIVE
+
+**Analysis:** Same as H1 - `DeleteNodesAsync` acquires `_externalRequestLock`.
+
+---
+
+### H3. OpcUaServerGraphChangeReceiver - Collection Index Race
+**File:** `src/Namotion.Interceptor.OpcUa/Server/OpcUaServerGraphChangeReceiver.cs:344-357`
+**Status:** ✅ PLANNED - REAL
+
+**Fix:** Remove pre-computed index, return `null` and let `CreateSubjectNode` compute from `property.Children.Length - 1`.
+
+---
+
+## Feature Gap
+
+### F1. Deep Nested Object Creation (Client → Server)
+**File:** `src/Namotion.Interceptor.OpcUa/Client/OpcUaClientGraphChangeSender.cs`
+**Status:** ✅ PLANNED - REAL
+
+**Root Cause:** `OnSubjectAddedAsync` creates only immediate node; nested reference properties are skipped.
+
+**Fix:** Add recursion at end of `OnSubjectAddedAsync` to process nested references.
+
+**Test:** Add `AssignReferenceWithNestedObject_ServerReceivesBothLevels` to `ClientToServerNestedPropertyTests.cs`.
+
+---
+
+## Medium Priority Issues
+
+### M1. OpcUaServerNodeCreator - Recursive Attributes No Depth Limit
+**File:** `src/Namotion.Interceptor.OpcUa/Server/OpcUaServerNodeCreator.cs:296-297`
+**Status:** ✅ PLANNED
+
+**Fix:** Add `int depth = 0` parameter with max depth check.
+
+---
+
+### M2. SessionManager - Fire-and-Forget Dispose
+**File:** `src/Namotion.Interceptor.OpcUa/Client/Connection/SessionManager.cs:547-561`
+**Status:** ✅ PLANNED
+
+**Fix:** Add XML comment documenting the limitation.
+
+---
+
+### M3. OpcUaSubjectClientSource - Mixed Sync/Async Lock
+**File:** `src/Namotion.Interceptor.OpcUa/Client/OpcUaSubjectClientSource.cs:102-119`
+**Status:** ✅ PLANNED
+
+**Fix:** Add comment explaining sync is required due to sync callback context.
+
+---
+
+### M4. OpcUaServerNodeCreator - Lock on Public Object
+**File:** `src/Namotion.Interceptor.OpcUa/Server/OpcUaServerNodeCreator.cs:370`
+**Status:** ✅ PLANNED
+
+**Fix:** Add comment documenting why locking on node is acceptable.
+
+---
+
+### M5. OpcUaHelper - Duplicate Browse Continuation Logic
+**File:** `src/Namotion.Interceptor.OpcUa/OpcUaHelper.cs:198-252 vs 262-323`
+**Status:** ✅ PLANNED
+
+**Fix:** Extract common `BrowseWithContinuationAsync` helper method.
+
+---
+
+### M6. OpcUaServerExternalNodeValidator - Unused Validation Methods
+**File:** `src/Namotion.Interceptor.OpcUa/Server/OpcUaServerExternalNodeValidator.cs`
+**Status:** ✅ PLANNED
+
+**Fix:** Add XML comment marking as reserved for future integration.
+
+---
+
+## Low Priority Issues
+
+### L1. SubscriptionManager - O(n²) Item Removal
+**File:** `src/Namotion.Interceptor.OpcUa/Client/Connection/SubscriptionManager.cs:285-288, 343-346`
+**Status:** ✅ PLANNED
+
+**Fix:** Use `HashSet` for processed items lookup.
+
+---
+
+### L2. Magic Number: maxDepth = 10
+**File:** `src/Namotion.Interceptor.OpcUa/Client/OpcUaClientGraphChangeReceiver.cs:682`
+**Status:** ✅ PLANNED
+
+**Fix:** Extract to named constant with comment.
+
+---
+
+### L3. OpcUaServerNodeCreator - Null-Forgiving on child.Index
+**File:** `src/Namotion.Interceptor.OpcUa/Server/OpcUaServerNodeCreator.cs:212, 222`
+**Status:** ✅ PLANNED
+
+**Fix:** Add null check with warning log.
+
+---
+
+### L4. OpcUaServerGraphChangePublisher - AffectedType Always Null
+**File:** `src/Namotion.Interceptor.OpcUa/Server/OpcUaServerGraphChangePublisher.cs:36`
+**Status:** ✅ PLANNED (optional)
+
+**Fix:** Pass TypeDefinitionId through `QueueChange()` method signature.
+
+---
+
+### L5. Inconsistent Path Delimiter Usage
+**File:** `src/Namotion.Interceptor.OpcUa/Server/CustomNodeManager.cs`
+**Status:** ✅ PLANNED
+
+**Fix:** Replace hardcoded `"."` with `PathDelimiter` constant.
+
+---
+
+## Style/Cleanup Issues
+
+### S1. OpcUaHelper - Should Be Extension Methods
+**File:** `src/Namotion.Interceptor.OpcUa/OpcUaHelper.cs`
+**Status:** ⏭️ SKIP - Larger refactor, not blocking
+
+---
+
+### S2. GraphChangePublisher - Template Method Pattern
+**File:** `src/Namotion.Interceptor.Connectors/GraphChangePublisher.cs`
+**Status:** ⏭️ SKIP - Design discussion, not blocking
+
+---
+
+### S3. Unresolved TODO Comments
+**Status:** ⏭️ SKIP per user request - unrelated to PR
+
+---
+
+### S4. Large Classes
+**Status:** ⏭️ SKIP - Observation only, not blocking
+
+---
+
+### S5. Unused Dictionary Allocation
+**File:** `src/Namotion.Interceptor.Connectors/GraphChangePublisher.cs:77`
+**Status:** ✅ PLANNED
+
+**Fix:** Use static empty dictionary.
+
+---
+
+### S6. ToDictionary Allocation Per Call
+**File:** `src/Namotion.Interceptor.Connectors/GraphChangePublisher.cs:82`
+**Status:** ✅ PLANNED
+
+**Fix:** Iterate directly instead of creating dictionary.
+
+---
+
+## Implementation Order
+
+1. **C1** - Lock protection
+2. **C2** - Add comment
+3. **C3** - Improve log message
+4. **H3** - Remove stale index
+5. **F1** - Deep nested sync + test
+6. **M1-M6** - Medium fixes
+7. **L1-L5** - Low fixes
+8. **S5-S6** - Style fixes
+
+---
+
+## Verification
+
+After all fixes:
+1. `dotnet build src/Namotion.Interceptor.slnx` - should compile
+2. `dotnet test src/Namotion.Interceptor.slnx` - all tests pass
+3. New test `AssignReferenceWithNestedObject_ServerReceivesBothLevels` passes
