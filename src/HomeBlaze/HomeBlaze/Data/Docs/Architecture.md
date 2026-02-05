@@ -2,6 +2,24 @@
 
 This document describes the modular architecture for HomeBlaze v2.
 
+## Summary
+
+HomeBlaze is a modular home automation platform built on **Namotion.Interceptor** for property interception and change tracking. The architecture separates concerns into abstraction layers, domain services, storage, and UI projects—allowing headless deployment, custom UI frameworks, or the full Blazor application.
+
+**Key concepts:**
+- **Subjects**: Intercepted objects with tracked properties (`[Configuration]`, `[State]`, `[Derived]`)
+- **Operations**: Executable methods exposed via `[Operation]` attribute
+- **Components**: Blazor UI (Widget, Edit, Page) auto-discovered via `[SubjectComponent]`
+- **Context**: `IInterceptorSubjectContext` wires up all interceptors via `SubjectContextFactory`
+
+**Quick reference:**
+| Layer | Projects | Use Case |
+|-------|----------|----------|
+| Abstractions | `*.Abstractions` | Interfaces, attributes, contracts |
+| Services | `HomeBlaze.Services` | Headless apps, APIs |
+| Storage | `HomeBlaze.Storage` | File-based persistence |
+| UI | `HomeBlaze.Host` | Full Blazor application |
+
 ## Design Goals
 
 1. **Modularity**: Each project can be used independently
@@ -15,35 +33,43 @@ This document describes the modular architecture for HomeBlaze v2.
 Arrows point from user to used (consumer -> dependency):
 
 ```
-                    HomeBlaze
-                        |
-                        v
-                  HomeBlaze.Host
-                        |
-          +-------------+-------------+
-          |                           |
-          v                           v
-  HomeBlaze.Storage.Blazor      HomeBlaze.Host.Services
-          |                           |
-          +-----------+---------------+
-                      |
-                      v
-              HomeBlaze.Storage
-                      |
-                      v
-              HomeBlaze.Services
-                  (+ SubjectComponentRegistry)
-                      |
-    +-----------------+------------------+
-    |                 |                  |
-    v                 v                  v
-HomeBlaze.     HomeBlaze.        HomeBlaze.
-Storage.Abs.   Components.Abs.   Abstractions
-    |                 |                  |
-    +-----------------+------------------+
-                      |
-                      v
-             Namotion.Interceptor.*
+                          HomeBlaze
+                              |
+              +---------------+---------------+
+              |                               |
+              v                               v
+        HomeBlaze.Host              HomeBlaze.Servers.OpcUa.Blazor
+              |                               |
+  +-----------+-----------+                   v
+  |                       |           HomeBlaze.Servers.OpcUa
+  v                       v                   |
+HomeBlaze.          HomeBlaze.                |
+Storage.Blazor      Host.Services             |
+  |                       |                   |
+  +-----------+-----------+-------------------+
+              |
+              v
+      HomeBlaze.Storage
+              |
+      +-------+-------+
+      |               |
+      v               v
+HomeBlaze.      HomeBlaze.Samples
+Services              |
+      |               |
+      +-------+-------+
+              |
++-------------+-------------+
+|             |             |
+v             v             v
+HomeBlaze.  HomeBlaze.    HomeBlaze.
+Storage.    Components.   Abstractions
+Abs.        Abs.                |
+|             |                 |
++-------------+-----------------+
+              |
+              v
+     Namotion.Interceptor.*
 ```
 
 ## Project Overview
@@ -56,21 +82,23 @@ Storage.Abs.   Components.Abs.   Abstractions
 | `HomeBlaze.Services` | Microsoft.NET.Sdk | Backend domain services (no UI) |
 | `HomeBlaze.Host.Services` | Microsoft.NET.Sdk | UI-agnostic services (no MudBlazor) |
 | `HomeBlaze.Storage` | Microsoft.NET.Sdk | File storage domain logic (no UI) |
-| `HomeBlaze.Components` | Microsoft.NET.Sdk.Razor | Shared UI components (no MudBlazor) |
+| `HomeBlaze.Components` | Microsoft.NET.Sdk.Razor | Shared UI components (MudBlazor) |
 | `HomeBlaze.Storage.Blazor` | Microsoft.NET.Sdk.Razor | Storage UI (Monaco editor, icons) |
 | `HomeBlaze.Host` | Microsoft.NET.Sdk.Razor | Blazor application host (MudBlazor) |
+| `HomeBlaze.Samples` | Microsoft.NET.Sdk | Sample subjects (Motor, etc.) |
+| `HomeBlaze.Servers.OpcUa` | Microsoft.NET.Sdk | OPC UA server integration |
+| `HomeBlaze.Servers.OpcUa.Blazor` | Microsoft.NET.Sdk.Razor | OPC UA UI components |
 | `HomeBlaze` | Microsoft.NET.Sdk.Web | Minimal host (Program.cs only) |
 
 ## Test Projects
 
 | Project | Tests For |
 |---------|-----------|
-| `HomeBlaze.Services.Tests` | HomeBlaze.Services (+ SubjectComponentRegistry) |
+| `HomeBlaze.Services.Tests` | HomeBlaze.Services |
 | `HomeBlaze.Host.Services.Tests` | HomeBlaze.Host.Services |
 | `HomeBlaze.Storage.Tests` | HomeBlaze.Storage |
+| `HomeBlaze.Storage.Blazor.Tests` | HomeBlaze.Storage.Blazor |
 | `HomeBlaze.E2E.Tests` | End-to-end Playwright tests |
-
----
 
 ## Abstraction Projects
 
@@ -88,8 +116,6 @@ Storage.Abs.   Components.Abs.   Abstractions
 **Dependencies**: `Namotion.Interceptor`
 
 **Use when**: Any subject needing display metadata.
-
----
 
 ### HomeBlaze.Storage.Abstractions
 
@@ -109,8 +135,6 @@ Storage.Abs.   Components.Abs.   Abstractions
 
 **Use when**: Building storage backends or configurable subjects.
 
----
-
 ### HomeBlaze.Components.Abstractions
 
 **Purpose**: UI component system contracts.
@@ -126,8 +150,6 @@ Storage.Abs.   Components.Abs.   Abstractions
 **Dependencies**: `Namotion.Interceptor`
 
 **Use when**: Building UI components for subjects.
-
----
 
 ## Service Projects
 
@@ -151,7 +173,22 @@ Storage.Abs.   Components.Abs.   Abstractions
 
 **Use when**: Building headless applications or APIs.
 
----
+### Subject Context Factory
+
+`SubjectContextFactory.Create()` configures the `IInterceptorSubjectContext` with all services required for HomeBlaze subjects:
+
+| Method | Purpose                                                                       |
+|--------|-------------------------------------------------------------------------------|
+| `WithFullPropertyTracking()` | Equality checks, change detection, derived property updates                   |
+| `WithReadPropertyRecorder()` | Tracks which properties are read (for derived property detection)             |
+| `WithRegistry()` | Object graph navigation and querying                                          |
+| `WithParents()` | Track parent-child relationships                                              |
+| `WithLifecycle()` | Attach/detach callbacks with `IsFirstAttach`/`IsFinalDetach`                  |
+| `WithDataAnnotationValidation()` | DataAnnotation validation on property changes                                 |
+| `WithHostedServices()` | Auto-start/stop `BackgroundService` subjects                                  |
+| `MethodPropertyInitializer` | Virtual properties for `[Operation]` and `[Query]` methods |
+
+This ensures consistent behavior across all subjects. For details on each service, see the [Namotion.Interceptor documentation](../../../docs/).
 
 ### HomeBlaze.Host.Services
 
@@ -166,8 +203,6 @@ Storage.Abs.   Components.Abs.   Abstractions
 **Dependencies**: `HomeBlaze.Services`
 
 **Use when**: Building any UI framework integration.
-
----
 
 ## Storage Projects
 
@@ -185,8 +220,6 @@ Storage.Abs.   Components.Abs.   Abstractions
 
 **Use when**: Adding file storage to any application.
 
----
-
 ### HomeBlaze.Storage.Blazor
 
 **Purpose**: UI components for file storage.
@@ -200,19 +233,15 @@ Storage.Abs.   Components.Abs.   Abstractions
 
 **Use when**: Building Blazor apps with file editing.
 
----
-
 ## UI Projects
 
 ### HomeBlaze.Components
 
-**Purpose**: Shared UI components without MudBlazor.
+**Purpose**: Shared UI components with MudBlazor.
 
-**Dependencies**: `HomeBlaze.Services`, `HomeBlaze.Components.Abstractions`
+**Dependencies**: `HomeBlaze.Services`, `HomeBlaze.Abstractions`, `HomeBlaze.Components.Abstractions`, `MudBlazor`
 
-**Use when**: Building cross-framework UI components.
-
----
+**Use when**: Building reusable Blazor UI components.
 
 ### HomeBlaze.Host
 
@@ -229,8 +258,6 @@ Storage.Abs.   Components.Abs.   Abstractions
 
 **Use when**: Building Blazor applications.
 
----
-
 ### HomeBlaze (Host)
 
 **Purpose**: Minimal web host composing all modules.
@@ -244,7 +271,33 @@ Storage.Abs.   Components.Abs.   Abstractions
 
 **Use when**: Running the full application.
 
----
+### HomeBlaze.Samples
+
+**Purpose**: Sample subject implementations for demonstration and testing.
+
+**Contents**:
+- `Motor` - Simulated motor with speed, temperature, status
+- Sample subjects showing all HomeBlaze patterns
+
+**Dependencies**: `HomeBlaze.Abstractions`, `HomeBlaze.Components.Abstractions`, `HomeBlaze.Storage.Abstractions`, `Namotion.Interceptor.*`
+
+**Use when**: Learning HomeBlaze patterns or testing.
+
+### HomeBlaze.Servers.OpcUa
+
+**Purpose**: OPC UA server integration for industrial automation.
+
+**Dependencies**: `HomeBlaze.Abstractions`, `HomeBlaze.Services`, `Namotion.Interceptor.OpcUa`
+
+**Use when**: Exposing subjects via OPC UA protocol.
+
+### HomeBlaze.Servers.OpcUa.Blazor
+
+**Purpose**: UI components for OPC UA server configuration.
+
+**Dependencies**: `HomeBlaze.Servers.OpcUa`, `HomeBlaze.Components`, `MudBlazor`
+
+**Use when**: Adding OPC UA server UI to Blazor applications.
 
 ## Service Registration
 
@@ -255,17 +308,19 @@ services.AddHomeBlazeServices();
 // HomeBlaze.Host.Services - UI services (also calls AddHomeBlazeServices)
 services.AddHomeBlazeHostServices();
 
+// HomeBlaze.Storage.Blazor - Storage services
+services.AddHomeBlazeStorage();
+
 // HomeBlaze.Host - Full Blazor host (also calls AddHomeBlazeHostServices)
 services.AddHomeBlazeHost();
 ```
 
 | Method | Services |
 |--------|----------|
-| `AddHomeBlazeServices()` | `TypeProvider`, `SubjectTypeRegistry`, `ConfigurableSubjectSerializer`, `SubjectPathResolver`, `RootManager` |
-| `AddHomeBlazeHostServices()` | `SubjectComponentRegistry`, `NavigationItemResolver`, `DeveloperModeService` |
+| `AddHomeBlazeServices()` | `TypeProvider`, `SubjectTypeRegistry`, `IInterceptorSubjectContext`, `SubjectFactory`, `ConfigurableSubjectSerializer`, `RootManager`, `SubjectPathResolver`, `DeveloperModeService`, `ISubjectMethodInvoker` |
+| `AddHomeBlazeHostServices()` | `SubjectComponentRegistry`, `NavigationItemResolver` |
+| `AddHomeBlazeStorage()` | `MarkdownContentParser`, `ISubjectSetupService` |
 | `AddHomeBlazeHost()` | MudBlazor services + all above |
-
----
 
 ## Usage Scenarios
 
@@ -293,8 +348,6 @@ Reference: HomeBlaze (host project)
 ```
 - Complete application with all features
 
----
-
 ## Extension Points
 
 ### Adding Custom Subjects
@@ -314,19 +367,19 @@ Reference: HomeBlaze (host project)
 2. Add subjects and components
 3. Reference from host project
 
----
-
 ## Subject Component System
 
 Subjects can have associated UI components for different purposes. The system automatically discovers and renders the appropriate component based on subject type.
 
 ### Component Types
 
-| Type | Purpose | Interface |
-|------|---------|-----------|
+| Type     | Purpose                                  | Interface |
+|----------|------------------------------------------|-----------|
 | `Widget` | Inline visualization (e.g., in markdown) | `ISubjectComponent` |
-| `Edit` | Configuration editor dialog | `ISubjectEditComponent` |
-| `Page` | Full-page view | `ISubjectComponent` |
+| `Edit`   | Configuration editor dialog              | `ISubjectEditComponent` |
+| `Page`   | Full-page view                           | `ISubjectComponent` |
+
+**Note:** For creation wizards, the framework uses `Edit` components with `IsCreating=true`. Use `ISubjectEditComponent.IsCreating` to differentiate creation vs editing behavior.
 
 ### Registering Components
 
@@ -364,3 +417,68 @@ The component automatically:
 - Looks up the registered component from `SubjectComponentRegistry`
 - Renders via `DynamicComponent`
 - Shows a warning alert if no component is registered
+
+---
+
+## Design Notes
+
+### Why Namotion.Interceptor?
+
+HomeBlaze uses **Namotion.Interceptor** for property interception instead of traditional `INotifyPropertyChanged` or proxy-based approaches:
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| Manual INPC | Full control | Boilerplate, error-prone |
+| Fody/PostSharp | Zero boilerplate | Build-time weaving complexity |
+| Castle DynamicProxy | Runtime flexibility | Reflection overhead, proxy types |
+| **Source Generation** | Zero reflection, AOT-friendly | Requires C# 13 partial properties |
+
+The source generator approach provides:
+- **Compile-time safety**: Errors caught during build
+- **Zero runtime reflection**: Optimal performance, AOT-compatible
+- **Derived property tracking**: Automatic dependency detection via `WithReadPropertyRecorder()`
+- **Extensible middleware**: Chain of `IReadInterceptor`/`IWriteInterceptor`
+
+### Abstraction Layering
+
+The three abstraction projects split concerns by domain:
+
+```
+HomeBlaze.Abstractions          → Display metadata (ITitleProvider, IIconProvider)
+HomeBlaze.Storage.Abstractions  → Persistence ([Configuration], IConfigurableSubject)
+HomeBlaze.Components.Abstractions → UI contracts ([SubjectComponent], ISubjectEditComponent)
+```
+
+This allows:
+- Storage backends without UI dependencies
+- Custom UI frameworks without storage coupling
+- Headless services with only core abstractions
+
+### Service Registration Cascade
+
+The `AddHomeBlaze*` methods cascade to avoid duplicate registrations:
+
+```
+AddHomeBlazeHost()
+    └─→ AddHomeBlazeHostServices()
+            └─→ AddHomeBlazeServices()
+```
+
+Call only the highest-level method needed for your scenario.
+
+### Component Discovery
+
+UI components use assembly scanning with `[SubjectComponent]` attributes rather than manual registration:
+
+- **Pros**: Zero configuration, automatic discovery, type-safe
+- **Cons**: Slightly slower startup (mitigated by caching in `SubjectComponentRegistry`)
+
+The registry caches component lookups by subject type and component type, so runtime resolution is O(1) after initial scan.
+
+### BackgroundService Integration
+
+Subjects extending `BackgroundService` are automatically started/stopped via `WithHostedServices()`. This integrates with .NET's hosting model:
+
+- Services start when attached to the context
+- Services stop gracefully via `CancellationToken`
+- Lifecycle callbacks (`IsFirstAttach`/`IsFinalDetach`) handle setup/teardown
