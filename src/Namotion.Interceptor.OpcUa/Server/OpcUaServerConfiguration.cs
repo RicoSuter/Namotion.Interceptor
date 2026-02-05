@@ -1,4 +1,5 @@
-﻿using Namotion.Interceptor.Registry.Paths;
+using Namotion.Interceptor.OpcUa.Mapping;
+using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 using Opc.Ua.Configuration;
 using Opc.Ua.Export;
@@ -7,72 +8,76 @@ namespace Namotion.Interceptor.OpcUa.Server;
 
 public class OpcUaServerConfiguration
 {
+    private static readonly IOpcUaNodeMapper DefaultNodeMapper = new CompositeNodeMapper(
+        new PathProviderOpcUaNodeMapper(new AttributeBasedPathProvider("opc")),
+        new AttributeOpcUaNodeMapper());
+
     /// <summary>
     /// Gets the optional root folder name to create under the Objects folder for organizing server nodes.
     /// If not specified, nodes are created directly under the ObjectsFolder.
     /// </summary>
-    public string? RootName { get; init; }
-    
+    public string? RootName { get; set; }
+
     /// <summary>
     /// Gets the OPC UA server application name used for identification and certificate generation.
     /// Default is "Namotion.Interceptor.Server".
     /// </summary>
-    public string ApplicationName { get; init; } = "Namotion.Interceptor.Server";
+    public string ApplicationName { get; set; } = "Namotion.Interceptor.Server";
 
     /// <summary>
     /// Gets the primary namespace URI for the OPC UA server used to identify custom nodes.
     /// Default is "http://namotion.com/Interceptor/".
     /// </summary>
-    public string NamespaceUri { get; init; } = "http://namotion.com/Interceptor/";
-    
-    /// <summary>
-    /// Gets the path provider used to map between OPC UA node browse names and C# property names.
-    /// This provider determines which properties are included and how their names are translated.
-    /// </summary>
-    public required PathProviderBase PathProvider { get; init; }
+    public string NamespaceUri { get; set; } = "http://namotion.com/Interceptor/";
 
     /// <summary>
     /// Gets the value converter used to convert between OPC UA node values and C# property values.
     /// Handles type conversions such as decimal to double for OPC UA compatibility.
     /// </summary>
-    public required OpcUaValueConverter ValueConverter { get; init; }
+    public required OpcUaValueConverter ValueConverter { get; set; }
+
+    /// <summary>
+    /// Maps C# properties to OPC UA nodes.
+    /// Defaults to composite of PathProviderOpcUaNodeMapper (with "opc" source) and AttributeOpcUaNodeMapper.
+    /// </summary>
+    public IOpcUaNodeMapper NodeMapper { get; init; } = DefaultNodeMapper;
 
     /// <summary>
     /// Gets or sets a value indicating whether to clean up old certificates from the
     /// application certificate store on connect. Defaults to true.
     /// </summary>
-    public bool CleanCertificateStore { get; init; } = true;
+    public bool CleanCertificateStore { get; set; } = true;
 
     /// <summary>
     /// Gets or sets the time window to buffer incoming changes (default: 8ms).
     /// </summary>
-    public TimeSpan? BufferTime { get; init; }
+    public TimeSpan? BufferTime { get; set; } = TimeSpan.FromMilliseconds(8);
 
     /// <summary>
     /// Gets or sets the base address for the OPC UA server.
     /// Default is "opc.tcp://localhost:4840/".
     /// </summary>
-    public string BaseAddress { get; init; } = "opc.tcp://localhost:4840/";
+    public string BaseAddress { get; set; } = "opc.tcp://localhost:4840/";
 
     /// <summary>
     /// Gets or sets the telemetry context for OPC UA operations.
     /// Defaults to NullTelemetryContext for minimal overhead.
     /// For DI integration, use DefaultTelemetry.Create(builder => builder.Services.AddSingleton(loggerFactory)).
     /// </summary>
-    public ITelemetryContext TelemetryContext { get; init; } = NullTelemetryContext.Instance;
+    public ITelemetryContext TelemetryContext { get; set; } = NullTelemetryContext.Instance;
 
     /// <summary>
     /// Gets or sets a value indicating whether to automatically accept untrusted certificates.
     /// Should only be set to true for testing or development scenarios.
     /// Default is false for security.
     /// </summary>
-    public bool AutoAcceptUntrustedCertificates { get; init; } = false;
+    public bool AutoAcceptUntrustedCertificates { get; set; }
 
     /// <summary>
     /// Gets or sets the base path for certificate stores.
     /// Default is "pki". Change this to isolate certificate stores for parallel test execution.
     /// </summary>
-    public string CertificateStoreBasePath { get; init; } = "pki";
+    public string CertificateStoreBasePath { get; set; } = "pki";
 
     /// <summary>
     /// Creates and configures an OPC UA application instance for the server.
@@ -191,7 +196,6 @@ public class OpcUaServerConfiguration
             TraceConfiguration = new TraceConfiguration
             {
                 OutputFilePath = "Logs/OpcUaServer.log",
-                TraceMasks = 519, // Security, errors, service result exceptions & trace
                 DeleteOnLoad = true
             },
             CertificateValidator = new CertificateValidator(TelemetryContext)

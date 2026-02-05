@@ -244,7 +244,7 @@ Namotion.Interceptor is designed to be extended:
 | Package | Description | Documentation |
 |---------|-------------|---------------|
 | **Namotion.Interceptor** | Property interception with compile-time source generation | [Interceptors](docs/interceptor.md) |
-| **Namotion.Interceptor.Generator** | Source generator for `[InterceptorSubject]` classes (add as analyzer) | |
+| **Namotion.Interceptor.Generator** | Source generator for `[InterceptorSubject]` classes (add as analyzer) | [Generator](docs/generator.md) |
 
 ### Foundation
 

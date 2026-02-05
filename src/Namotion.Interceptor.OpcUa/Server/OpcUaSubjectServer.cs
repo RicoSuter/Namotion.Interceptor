@@ -15,7 +15,7 @@ internal class OpcUaSubjectServer : StandardServer
     public OpcUaSubjectServer(IInterceptorSubject subject, OpcUaSubjectServerBackgroundService source, OpcUaServerConfiguration configuration, ILogger logger)
     {
         _logger = logger;
-        _nodeManagerFactory = new CustomNodeManagerFactory(subject, source, configuration);
+        _nodeManagerFactory = new CustomNodeManagerFactory(subject, source, configuration, logger);
         AddNodeManager(_nodeManagerFactory);
     }
 
