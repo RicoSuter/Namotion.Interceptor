@@ -23,6 +23,7 @@ public class WebSocketSubjectHandler
     private readonly ILogger _logger;
     private readonly ISubjectUpdateProcessor[] _processors;
     private readonly ConcurrentDictionary<string, WebSocketClientConnection> _connections = new();
+    private readonly object _applyUpdateLock = new();
     private int _connectionCount;
 
     public IInterceptorSubjectContext Context { get; }
@@ -136,9 +137,12 @@ public class WebSocketSubjectHandler
             try
             {
                 var factory = _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance;
-                using (SubjectChangeContext.WithSource(this))
+                lock (_applyUpdateLock)
                 {
-                    _subject.ApplySubjectUpdate(update, factory);
+                    using (SubjectChangeContext.WithSource(this))
+                    {
+                        _subject.ApplySubjectUpdate(update, factory);
+                    }
                 }
             }
             catch (Exception ex)
