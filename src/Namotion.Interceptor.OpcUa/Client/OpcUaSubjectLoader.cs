@@ -60,15 +60,15 @@ internal class OpcUaSubjectLoader
         }
 
         var nodeId = ExpandedNodeId.ToNodeId(node.NodeId, session.NamespaceUris);
-        var nodeRefs = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
+        var nodeReferences = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
         
-        for (var index = 0; index < nodeRefs.Count; index++)
+        for (var index = 0; index < nodeReferences.Count; index++)
         {
-            var nodeRef = nodeRefs[index];
-            var property = FindSubjectProperty(registeredSubject, nodeRef, session);
+            var nodeReference = nodeReferences[index];
+            var property = await FindSubjectPropertyAsync(registeredSubject, nodeReference, session, cancellationToken).ConfigureAwait(false);
             if (property is null)
             {
-                var dynamicPropertyName = nodeRef.BrowseName.Name;
+                var dynamicPropertyName = nodeReference.BrowseName.Name;
 
                 var propertyExists = false;
                 foreach (var childProperty in registeredSubject.Properties)
@@ -86,7 +86,7 @@ internal class OpcUaSubjectLoader
                 }
 
                 var addAsDynamic = _configuration.ShouldAddDynamicProperty is not null &&
-                    await _configuration.ShouldAddDynamicProperty(nodeRef, cancellationToken).ConfigureAwait(false);
+                    await _configuration.ShouldAddDynamicProperty(nodeReference, cancellationToken).ConfigureAwait(false);
 
                 if (!addAsDynamic)
                 {
@@ -94,12 +94,12 @@ internal class OpcUaSubjectLoader
                 }
 
                 // Infer CLR type from OPC UA variable metadata if possible
-                var inferredType = await _configuration.TypeResolver.TryGetTypeForNodeAsync(session, nodeRef, cancellationToken).ConfigureAwait(false);
+                var inferredType = await _configuration.TypeResolver.TryGetTypeForNodeAsync(session, nodeReference, cancellationToken).ConfigureAwait(false);
                 if (inferredType is null)
                 {
                     _logger.LogWarning(
                         "Could not infer type for dynamic property '{PropertyName}' (NodeId: {NodeId}). Skipping property.",
-                        dynamicPropertyName, nodeRef.NodeId);
+                        dynamicPropertyName, nodeReference.NodeId);
 
                     continue;
                 }
@@ -110,24 +110,26 @@ internal class OpcUaSubjectLoader
                     inferredType,
                     _ => value,
                     (_, o) => value = o,
-                    new OpcUaNodeAttribute(
-                        nodeRef.BrowseName.Name,
-                        nodeRef.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(nodeRef.NodeId.NamespaceIndex),
-                        connectorName: null)
-                    {
-                        NodeIdentifier = nodeRef.NodeId.Identifier.ToString(),
-                        NodeNamespaceUri = nodeRef.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(nodeRef.NodeId.NamespaceIndex)
-                    });
+                    CreateDynamicNodeAttribute(nodeReference, session));
             }
 
-            var propertyName = property.ResolvePropertyName(_configuration.PathProvider);
-            if (propertyName is not null && _configuration.PathProvider.IsPropertyIncluded(property))
+            var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
+            if (propertyName is not null)
             {
-                var childNodeId = ExpandedNodeId.ToNodeId(nodeRef.NodeId, session.NamespaceUris);
+                var childNodeId = ExpandedNodeId.ToNodeId(nodeReference.NodeId, session.NamespaceUris);
 
                 if (property.IsSubjectReference)
                 {
-                    await LoadSubjectReferenceAsync(property, node, nodeRef, subject, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
+                    // Check if this should be treated as a VariableNode
+                    var nodeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(property);
+                    if (nodeConfiguration?.NodeClass == Mapping.OpcUaNodeClass.Variable)
+                    {
+                        await LoadVariableNodeForSubjectAsync(property, childNodeId, session, monitoredItems, cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await LoadSubjectReferenceAsync(property, nodeReference, subject, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
+                    }
                 }
                 else if (property.IsSubjectCollection)
                 {
@@ -135,18 +137,115 @@ internal class OpcUaSubjectLoader
                 }
                 else if (property.IsSubjectDictionary)
                 {
-                    // TODO: Implement dictionary support
+                    await LoadSubjectDictionaryAsync(property, childNodeId, monitoredItems, session, loadedSubjects, cancellationToken).ConfigureAwait(false);
                 }
                 else
                 {
                     MonitorValueNode(childNodeId, property, monitoredItems);
+                    var visitedNodes = new HashSet<NodeId>();
+                    await LoadAttributeNodesAsync(property, childNodeId, session, monitoredItems, visitedNodes, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
     }
 
+    private async Task LoadAttributeNodesAsync(
+        RegisteredSubjectProperty property,
+        NodeId parentNodeId,
+        ISession session,
+        List<MonitoredItem> monitoredItems,
+        HashSet<NodeId> visitedNodes,
+        CancellationToken cancellationToken)
+    {
+        // Guard against cycles in OPC UA hierarchy
+        if (!visitedNodes.Add(parentNodeId))
+            return;
+
+        // Browse children of the variable node
+        var childNodes = await BrowseNodeAsync(parentNodeId, session, cancellationToken).ConfigureAwait(false);
+        var matchedNames = new HashSet<string>();
+
+        // First pass: match known attributes from C# model
+        foreach (var attribute in property.Attributes)
+        {
+            var attributeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(attribute);
+            if (attributeConfiguration is null)
+                continue;
+
+            var attributeBrowseName = attributeConfiguration.BrowseName ?? attribute.BrowseName;
+            ReferenceDescription? matchingNode = null;
+            foreach (var childNode in childNodes)
+            {
+                if (childNode.BrowseName.Name == attributeBrowseName)
+                {
+                    matchingNode = childNode;
+                    break;
+                }
+            }
+
+            if (matchingNode is null)
+                continue;
+
+            matchedNames.Add(attributeBrowseName);
+            var attributeNodeId = ExpandedNodeId.ToNodeId(matchingNode.NodeId, session.NamespaceUris);
+            MonitorValueNode(attributeNodeId, attribute, monitoredItems);
+
+            // Recursive: attributes can have attributes
+            await LoadAttributeNodesAsync(attribute, attributeNodeId, session, monitoredItems, visitedNodes, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Second pass: add dynamic attributes (same pattern as ShouldAddDynamicProperty)
+        foreach (var childNode in childNodes)
+        {
+            if (childNode.NodeClass != NodeClass.Variable)
+                continue;
+
+            var browseName = childNode.BrowseName.Name;
+            if (matchedNames.Contains(browseName))
+                continue;
+
+            var addAsDynamic = _configuration.ShouldAddDynamicAttribute is not null &&
+                await _configuration.ShouldAddDynamicAttribute(childNode, cancellationToken).ConfigureAwait(false);
+            if (!addAsDynamic)
+                continue;
+
+            var inferredType = await _configuration.TypeResolver.TryGetTypeForNodeAsync(session, childNode, cancellationToken).ConfigureAwait(false);
+            if (inferredType is null)
+            {
+                _logger.LogWarning(
+                    "Could not infer type for dynamic attribute '{AttributeName}' on property '{PropertyName}' (NodeId: {NodeId}). Skipping attribute.",
+                    browseName, property.Name, childNode.NodeId);
+                continue;
+            }
+
+            // Same closure pattern as dynamic properties
+            object? value = null;
+            var dynamicAttribute = property.AddAttribute(
+                browseName,
+                inferredType,
+                _ => value,
+                (_, o) => value = o,
+                CreateDynamicNodeAttribute(childNode, session));
+
+            var attributeNodeId = ExpandedNodeId.ToNodeId(childNode.NodeId, session.NamespaceUris);
+            MonitorValueNode(attributeNodeId, dynamicAttribute, monitoredItems);
+
+            // Recursive with cycle detection
+            await LoadAttributeNodesAsync(dynamicAttribute, attributeNodeId, session, monitoredItems, visitedNodes, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private static OpcUaNodeAttribute CreateDynamicNodeAttribute(ReferenceDescription nodeReference, ISession session)
+    {
+        var namespaceUri = nodeReference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(nodeReference.NodeId.NamespaceIndex);
+        return new OpcUaNodeAttribute(nodeReference.BrowseName.Name, namespaceUri)
+        {
+            NodeIdentifier = nodeReference.NodeId.Identifier.ToString(),
+            NodeNamespaceUri = namespaceUri
+        };
+    }
+
     private async Task LoadSubjectReferenceAsync(RegisteredSubjectProperty property,
-        ReferenceDescription node,
         ReferenceDescription nodeReference,
         IInterceptorSubject subject,
         ISession session,
@@ -157,7 +256,7 @@ internal class OpcUaSubjectLoader
         var existingSubject = property.Children.SingleOrDefault();
         if (existingSubject.Subject is not null)
         {
-            await LoadSubjectAsync(existingSubject.Subject, node, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
+            await LoadSubjectAsync(existingSubject.Subject, nodeReference, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -205,34 +304,52 @@ internal class OpcUaSubjectLoader
         }
     }
 
-    private RegisteredSubjectProperty? FindSubjectProperty(RegisteredSubject registeredSubject, ReferenceDescription nodeRef, ISession session)
+    private async Task LoadSubjectDictionaryAsync(
+        RegisteredSubjectProperty property,
+        NodeId childNodeId,
+        List<MonitoredItem> monitoredItems,
+        ISession session,
+        HashSet<IInterceptorSubject> loadedSubjects,
+        CancellationToken cancellationToken)
     {
-        var nodeIdString = nodeRef.NodeId.Identifier.ToString();
-        var nodeNamespaceUri = nodeRef.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(nodeRef.NodeId.NamespaceIndex);
-        
-        var properties = registeredSubject.Properties;
-        foreach (var property in properties)
-        {
-            var opcUaNodeAttribute = property.TryGetOpcUaNodeAttribute();
-            if (opcUaNodeAttribute is not null && opcUaNodeAttribute.NodeIdentifier == nodeIdString)
-            {
-                var propertyNodeNamespaceUri = opcUaNodeAttribute.NodeNamespaceUri
-                    ?? _configuration.DefaultNamespaceUri
-                    ?? throw new InvalidOperationException("No default namespace URI configured.");
+        var childNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken).ConfigureAwait(false);
+        var existingChildren = property.Children.ToDictionary(c => c.Index!, c => c.Subject);
+        var entries = new Dictionary<object, IInterceptorSubject>();
+        var nodesByKey = new Dictionary<object, ReferenceDescription>();
 
-                if (propertyNodeNamespaceUri == nodeNamespaceUri)
-                {
-                    return property;
-                }
-            }
+        foreach (var childNode in childNodes)
+        {
+            var key = childNode.BrowseName.Name; // Use BrowseName as dictionary key
+            var childSubject = existingChildren.GetValueOrDefault(key)
+                ?? DefaultSubjectFactory.Instance.CreateCollectionSubject(property, key);
+            entries[key] = childSubject;
+            nodesByKey[key] = childNode;
         }
 
-        return _configuration.PathProvider.TryGetPropertyFromSegment(registeredSubject, nodeRef.BrowseName.Name);
+        var dictionary = DefaultSubjectFactory.Instance.CreateSubjectDictionary(property.Type, entries);
+        property.SetValueFromSource(_source, null, null, dictionary);
+
+        foreach (var entry in entries)
+        {
+            var childNode = nodesByKey[entry.Key];
+            await LoadSubjectAsync(entry.Value, childNode, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<RegisteredSubjectProperty?> FindSubjectPropertyAsync(
+        RegisteredSubject registeredSubject,
+        ReferenceDescription nodeReference,
+        ISession session,
+        CancellationToken cancellationToken)
+    {
+        // Use NodeMapper for property lookup (supports attributes, path provider, and fluent config)
+        return await _configuration.NodeMapper.TryGetPropertyAsync(
+            registeredSubject, nodeReference, session, cancellationToken).ConfigureAwait(false);
     }
 
     private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)
     {
-        var monitoredItem = _configuration.CreateMonitoredItem(nodeId, property);
+        var monitoredItem = MonitoredItemFactory.Create(_configuration, nodeId, property);
         property.Reference.SetPropertyData(_source.OpcUaNodeIdKey, nodeId);
 
         if (!_ownership.ClaimSource(property.Reference))
@@ -244,6 +361,49 @@ internal class OpcUaSubjectLoader
         }
 
         monitoredItems.Add(monitoredItem);
+    }
+
+    private async Task LoadVariableNodeForSubjectAsync(
+        RegisteredSubjectProperty property,
+        NodeId nodeId,
+        ISession session,
+        List<MonitoredItem> monitoredItems,
+        CancellationToken cancellationToken)
+    {
+        var childSubject = property.Children.SingleOrDefault().Subject?.TryGetRegisteredSubject();
+        if (childSubject == null)
+        {
+            return;
+        }
+
+        // Find [OpcUaValue] property and monitor the node for it
+        var valueProperty = childSubject.TryGetValueProperty(_configuration.NodeMapper);
+        if (valueProperty != null)
+        {
+            MonitorValueNode(nodeId, valueProperty, monitoredItems);
+        }
+
+        // Also load HasProperty children as regular variable nodes
+        var childNodes = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
+        foreach (var childNode in childNodes)
+        {
+            // Find matching property in child subject (excluding the value property)
+            foreach (var childProperty in childSubject.Properties)
+            {
+                if (childProperty == valueProperty)
+                {
+                    continue; // Skip the value property
+                }
+
+                var childPropertyName = childProperty.ResolvePropertyName(_configuration.NodeMapper);
+                if (childPropertyName == childNode.BrowseName.Name)
+                {
+                    var childNodeId = ExpandedNodeId.ToNodeId(childNode.NodeId, session.NamespaceUris);
+                    MonitorValueNode(childNodeId, childProperty, monitoredItems);
+                    break;
+                }
+            }
+        }
     }
 
     private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
@@ -273,7 +433,7 @@ internal class OpcUaSubjectLoader
             browseDescriptions,
             cancellationToken).ConfigureAwait(false);
 
-        if (response.Results.Count > 0)
+        if (response.Results.Count > 0 && StatusCode.IsGood(response.Results[0].StatusCode))
         {
             results.AddRange(response.Results[0].References);
 
@@ -284,7 +444,7 @@ internal class OpcUaSubjectLoader
                     null, false,
                     [continuationPoint], cancellationToken).ConfigureAwait(false);
 
-                if (nextResponse.Results.Count > 0)
+                if (nextResponse.Results.Count > 0 && StatusCode.IsGood(nextResponse.Results[0].StatusCode))
                 {
                     var r0 = nextResponse.Results[0];
                     if (r0.References is { Count: > 0 } nextReferences)

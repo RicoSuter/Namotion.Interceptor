@@ -223,16 +223,13 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
             }
 
             // Build configuration with defaults
-            var pathProvider = DefaultPathProvider.Instance;
             var defaults = new OpcUaServerConfiguration
             {
-                PathProvider = pathProvider,
                 ValueConverter = new OpcUaValueConverter()
             };
 
             var configuration = new OpcUaServerConfiguration
             {
-                PathProvider = pathProvider,
                 ValueConverter = new OpcUaValueConverter(),
                 ApplicationName = ApplicationName ?? defaults.ApplicationName,
                 NamespaceUri = NamespaceUri ?? defaults.NamespaceUri,

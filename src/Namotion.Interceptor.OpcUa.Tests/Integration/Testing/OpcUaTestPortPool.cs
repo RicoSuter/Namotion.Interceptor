@@ -2,21 +2,22 @@ namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 
 /// <summary>
 /// Manages a pool of ports for parallel OPC UA integration tests.
-/// Tests acquire a port at startup and release it when done.
-/// If all ports are in use, tests wait up to 30 seconds before timing out.
+/// Uses round-robin port assignment to avoid port reuse within a test run,
+/// preventing TIME_WAIT socket issues.
 /// </summary>
 public static class OpcUaTestPortPool
 {
-    private const int BasePort = 4840;
-    private const int PoolSize = 20;
-    private const int AcquisitionTimeoutMs = 30_000; // 30 seconds
+    private const int BasePort = 4850;   // Avoid conflict with shared server on 4840
+    private const int PoolSize = 100;    // Large pool to avoid port reuse
+    private const int MaxParallel = 2;   // Limit parallel lifecycle tests to reduce resource contention
+    private const int AcquisitionTimeoutMs = 15 * 60 * 1000; // 15 minutes
 
-    private static readonly SemaphoreSlim _semaphore = new(PoolSize, PoolSize);
-    private static readonly bool[] _usedPorts = new bool[PoolSize];
-    private static readonly object _lock = new();
+    private static readonly SemaphoreSlim Semaphore = new(MaxParallel, MaxParallel);
+    private static int _nextPortIndex = -1;
 
     /// <summary>
-    /// Acquires a port from the pool. Times out after 30 seconds if all ports are in use.
+    /// Acquires a port from the pool using round-robin assignment.
+    /// Limits concurrent tests to MaxParallel.
     /// </summary>
     /// <returns>A PortLease that must be disposed when the test is done.</returns>
     public static async Task<PortLease> AcquireAsync(CancellationToken cancellationToken = default)
@@ -26,42 +27,26 @@ public static class OpcUaTestPortPool
 
         try
         {
-            await _semaphore.WaitAsync(cts.Token).ConfigureAwait(false);
+            await Semaphore.WaitAsync(cts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             throw new TimeoutException(
                 $"Failed to acquire port from pool within {AcquisitionTimeoutMs}ms. " +
-                $"All {PoolSize} ports may be in use. Ensure tests dispose their PortLease properly.");
+                $"All {MaxParallel} parallel slots may be in use. Ensure tests dispose their PortLease properly.");
         }
 
-        lock (_lock)
-        {
-            for (var i = 0; i < PoolSize; i++)
-            {
-                if (!_usedPorts[i])
-                {
-                    _usedPorts[i] = true;
-                    return new PortLease(BasePort + i, i);
-                }
-            }
-        }
-
-        // Should never happen since semaphore controls access
-        _semaphore.Release();
-        throw new InvalidOperationException("No ports available despite semaphore grant.");
+        // Round-robin port assignment - each test gets a unique port
+        var index = Interlocked.Increment(ref _nextPortIndex) % PoolSize;
+        return new PortLease(BasePort + index);
     }
 
     /// <summary>
-    /// Releases a port back to the pool.
+    /// Releases a parallel slot back to the pool.
     /// </summary>
-    internal static void Release(int index)
+    internal static void Release()
     {
-        lock (_lock)
-        {
-            _usedPorts[index] = false;
-        }
-        _semaphore.Release();
+        Semaphore.Release();
     }
 }
 
@@ -71,7 +56,6 @@ public static class OpcUaTestPortPool
 /// </summary>
 public sealed class PortLease : IDisposable
 {
-    private readonly int _index;
     private bool _disposed;
 
     public int Port { get; }
@@ -85,10 +69,9 @@ public sealed class PortLease : IDisposable
     /// </summary>
     public string CertificateStoreBasePath => $"pki-{Port}";
 
-    internal PortLease(int port, int index)
+    internal PortLease(int port)
     {
         Port = port;
-        _index = index;
     }
 
     public void Dispose()
@@ -96,11 +79,8 @@ public sealed class PortLease : IDisposable
         if (!_disposed)
         {
             _disposed = true;
-
-            // Clean up certificate store to prevent disk accumulation
             CleanupCertificateStore();
-
-            OpcUaTestPortPool.Release(_index);
+            OpcUaTestPortPool.Release();
         }
     }
 
@@ -116,7 +96,7 @@ public sealed class PortLease : IDisposable
         }
         catch
         {
-            // Ignore cleanup failures - directory may be locked by OS
+            // Ignore cleanup failures - OS may lock directory
             // This is non-critical as each test uses isolated directories
         }
     }

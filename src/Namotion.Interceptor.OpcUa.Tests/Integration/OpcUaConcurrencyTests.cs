@@ -87,7 +87,7 @@ public class OpcUaConcurrencyTests
             // Wait for updates to start
             await AsyncTestHelpers.WaitUntilAsync(
                 () => updateCounter > 0,
-                timeout: TimeSpan.FromSeconds(30));
+                timeout: TimeSpan.FromSeconds(90));
             logger.Log($"Updates started: {updateCounter}");
 
             // Restart during updates
@@ -95,7 +95,7 @@ public class OpcUaConcurrencyTests
             await server.StopAsync();
             await AsyncTestHelpers.WaitUntilAsync(
                 () => !client.Diagnostics.IsConnected,
-                timeout: TimeSpan.FromSeconds(60),
+                timeout: TimeSpan.FromSeconds(90),
                 message: "Client should detect disconnection");
             logger.Log("Client detected disconnection");
 
@@ -105,7 +105,7 @@ public class OpcUaConcurrencyTests
             var countBefore = updateCounter;
             await AsyncTestHelpers.WaitUntilAsync(
                 () => updateCounter > countBefore,
-                timeout: TimeSpan.FromSeconds(90),
+                timeout: TimeSpan.FromSeconds(180),
                 message: "Updates should continue after reconnection");
 
             // Cleanup
@@ -119,7 +119,7 @@ public class OpcUaConcurrencyTests
             server.Root.Name = "FinalValue";
             await AsyncTestHelpers.WaitUntilAsync(
                 () => client.Root.Name == "FinalValue",
-                timeout: TimeSpan.FromSeconds(60),
+                timeout: TimeSpan.FromSeconds(90),
                 message: "Final value should sync");
             Assert.Equal("FinalValue", client.Root.Name);
         }

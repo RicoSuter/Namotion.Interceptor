@@ -85,18 +85,23 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
                 {
                     ServerUrl = serverUrl,
                     RootName = "Root",
-                    PathProvider = new AttributeBasedPathProvider("opc"),
                     TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
                     ValueConverter = new OpcUaValueConverter(),
                     SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
                     TelemetryContext = telemetryContext,
+
                     ReconnectInterval = TimeSpan.FromSeconds(5),
                     ReconnectHandlerTimeout = TimeSpan.FromSeconds(5),
-                    SessionTimeout = TimeSpan.FromSeconds(5),
-                    SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(5),
-                    KeepAliveInterval = TimeSpan.FromSeconds(5),
-                    OperationTimeout = TimeSpan.FromSeconds(5),
                     MaxReconnectDuration = TimeSpan.FromSeconds(15),
+                    SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(5),
+                    
+                    // SessionTimeout must be >= server's MinSessionTimeout (10s), use 30s for margin
+                    SessionTimeout = TimeSpan.FromSeconds(30),
+                    KeepAliveInterval = TimeSpan.FromSeconds(5),
+                    OperationTimeout = TimeSpan.FromSeconds(30),
+                    
+                    BufferTime = TimeSpan.FromMilliseconds(100),
+
                     CertificateStoreBasePath = certificateStoreBasePath ?? "pki"
                 };
 
@@ -122,13 +127,19 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         await _host.StartAsync();
         _logger.Log($"Client host started in {sw.ElapsedMilliseconds}ms");
 
-        // Wait for client to connect using active waiting
-        // Use 60s timeout to allow for resource contention during parallel test execution
+        // First wait for OPC UA infrastructure (subscriptions set up) - this is reliable
+        // because it's based on actual OPC UA state, not property propagation
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Diagnostics?.MonitoredItemCount > 0,
+            timeout: TimeSpan.FromSeconds(60),
+            message: "Client failed to create subscriptions");
+
+        // Then wait actual connected
+        // WaitUntilAsync includes memory barrier to ensure visibility across threads
         await AsyncTestHelpers.WaitUntilAsync(
             () => Root != null && isConnected(Root),
             timeout: TimeSpan.FromSeconds(60),
-            pollInterval: TimeSpan.FromMilliseconds(200),
-            message: "Client failed to connect to server");
+            message: "Client failed to sync initial property values");
 
         sw.Stop();
         _logger.Log($"Client connected in {sw.ElapsedMilliseconds}ms total");
@@ -142,13 +153,16 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
             var sw = System.Diagnostics.Stopwatch.StartNew();
             try
             {
-                await host.StopAsync(TimeSpan.FromSeconds(5));
+                await host.StopAsync(TimeSpan.FromMinutes(5));
             }
             finally
             {
                 host.Dispose();
-                Diagnostics = null;
             }
+
+            // Wait for OPC UA session to fully close
+            await Task.Delay(250);
+
             sw.Stop();
             _logger.Log($"Client stopped in {sw.ElapsedMilliseconds}ms");
         }
@@ -166,8 +180,12 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
             var host = Interlocked.Exchange(ref _host, null);
             if (host != null)
             {
-                await host.StopAsync(TimeSpan.FromSeconds(5));
+                await host.StopAsync(TimeSpan.FromMinutes(5));
                 host.Dispose();
+
+                // Wait for OPC UA session to fully close
+                await Task.Delay(250);
+
                 _logger.Log("Client disposed");
             }
         }

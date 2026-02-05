@@ -160,6 +160,27 @@ public partial class Dog : Animal
 }
 ```
 
+### Interface Default Properties
+
+Interface default implementations are automatically included in property tracking. Mark computed properties with `[Derived]` for change notification:
+
+```csharp
+public interface ITemperatureSensor
+{
+    double Celsius { get; set; }
+
+    [Derived]
+    double Fahrenheit => Celsius * 9.0 / 5.0 + 32;
+}
+
+[InterceptorSubject]
+public partial class Sensor : ITemperatureSensor
+{
+    public partial double Celsius { get; set; }
+    // Fahrenheit is automatically tracked from the interface
+}
+```
+
 ### Required and Init
 
 ```csharp

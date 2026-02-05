@@ -65,7 +65,7 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     /// When true, uses a simulation driver instead of real hardware.
     /// Enables GPIO functionality on non-Pi platforms for testing/development.
     /// </summary>
-    [State(IsSignal = true)]
+    [State(IsDiscrete = true)]
     [Configuration]
     public partial bool UseSimulation { get; set; }
 
@@ -85,7 +85,7 @@ public partial class GpioSubject : BackgroundService, IConfigurableSubject, IHos
     /// <summary>
     /// Current status of the GPIO controller.
     /// </summary>
-    [State(IsSignal = true)]
+    [State(IsDiscrete = true)]
     public partial ServiceStatus Status { get; set; }
 
     /// <summary>

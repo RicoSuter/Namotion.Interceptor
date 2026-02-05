@@ -45,8 +45,15 @@ if ($GitStatus) {
     if ($Stash) {
         $script:StashedFileCount = ($GitStatus -split "`n").Count
         Write-Host "Stashing $($script:StashedFileCount) uncommitted file(s)..."
-        git stash push -m "benchmark-script-auto-stash" --quiet
-        $script:DidStash = $true
+        git stash push -u -m "benchmark-script-auto-stash" --quiet
+        # Verify stash was actually created
+        $stashList = git stash list
+        if ($stashList -match "benchmark-script-auto-stash") {
+            $script:DidStash = $true
+        } else {
+            Write-Host "No changes were stashed (files may already be committed or ignored)."
+            $script:DidStash = $false
+        }
     } else {
         Write-Error "Uncommitted changes detected. Please commit or stash before running benchmarks, or use -Stash option."
         exit 1
@@ -62,8 +69,24 @@ function Restore-OriginalBranch {
 # Helper function to restore stashed changes
 function Restore-Stash {
     if ($script:DidStash) {
-        Write-Host "Restoring $($script:StashedFileCount) stashed file(s)..."
-        git stash pop --quiet
+        # Find our specific stash by message
+        $stashList = git stash list
+        $stashIndex = $null
+        $index = 0
+        foreach ($line in $stashList -split "`n") {
+            if ($line -match "benchmark-script-auto-stash") {
+                $stashIndex = $index
+                break
+            }
+            $index++
+        }
+
+        if ($null -ne $stashIndex) {
+            Write-Host "Restoring $($script:StashedFileCount) stashed file(s) from stash@{$stashIndex}..."
+            git stash pop "stash@{$stashIndex}" --quiet
+        } else {
+            Write-Warning "Could not find benchmark stash to restore. Manual recovery may be needed."
+        }
     }
 }
 
@@ -143,6 +166,9 @@ if ($LASTEXITCODE -ne 0) {
 
 # Restore stash before running benchmark (so uncommitted changes are included)
 Restore-Stash
+
+Write-Host "Waiting 5 seconds before running benchmark..."
+Start-Sleep -Seconds 5
 
 Write-Host "Running benchmark on $OriginalBranch (filter: $Filter)..."
 dotnet run --project $BenchmarkProject -c Release -- --filter "$Filter" --exporters markdown --join $JobArg
