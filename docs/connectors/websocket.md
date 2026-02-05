@@ -136,6 +136,11 @@ builder.Services.AddWebSocketSubjectServer<Device>(configuration =>
     configuration.BufferTime = TimeSpan.FromMilliseconds(8);  // Batch updates
     configuration.WriteBatchSize = 1000;    // Max properties per message
 
+    // Connection limits
+    configuration.MaxConnections = 1000;    // Default: 1000
+    configuration.MaxMessageSize = 10 * 1024 * 1024;  // Default: 10 MB
+    configuration.HelloTimeout = TimeSpan.FromSeconds(10);  // Default: 10s
+
     // Path mapping
     configuration.PathProvider = new AttributeBasedPathProvider("ws");
 
@@ -155,6 +160,8 @@ builder.Services.AddWebSocketSubjectClientSource<Device>(configuration =>
     // Connection
     configuration.ServerUri = new Uri("ws://localhost:8080/ws");  // Required
     configuration.ConnectTimeout = TimeSpan.FromSeconds(30);      // Default: 30s
+    configuration.ReceiveTimeout = TimeSpan.FromSeconds(60);      // Default: 60s
+    configuration.MaxMessageSize = 10 * 1024 * 1024;             // Default: 10 MB
 
     // Reconnection settings
     configuration.ReconnectDelay = TimeSpan.FromSeconds(5);       // Initial delay
@@ -340,6 +347,10 @@ The protocol is designed for future enhancements:
 - **MessagePack support**: `format` field in Hello/Welcome enables negotiation for 3-4x smaller payloads
 - **Commands/RPC**: Message types 4-5 reserved for invoking methods on subjects
 - **Subscriptions**: Message types 6-7 reserved for subscribing to specific subjects/properties
+- **Message compression**: Per-message or per-frame compression to reduce bandwidth
+- **Authentication/authorization hooks**: Token-based auth during handshake or per-message access control
+- **Diagnostic counters**: Connection metrics, reconnection attempts, message throughput tracking
+- **Application-level ping/pong**: Heartbeat messages beyond Kestrel's KeepAliveInterval for proxy-friendly keep-alive
 
 ## Benchmark Results
 
