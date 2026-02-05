@@ -323,10 +323,9 @@ Tiered error handling preserves connections when possible:
 
 ## Thread Safety
 
-The library ensures thread-safe operations:
-- Property operations are thread-safe
-- Multiple clients can connect and receive broadcasts concurrently
-- Write operations use atomic updates
+**Server side**: Incoming updates from multiple clients are applied in serialized order. Each message is fully applied before the next one starts, ensuring no interleaving of property writes from different clients. Individual property writes use last-write-wins semantics. Multiple clients can connect and receive broadcasts concurrently.
+
+**Client side**: Updates received from the server are not serialized with local property changes. If the application writes to a property while the client is applying an incoming server update, the two may race. In practice this is rarely an issue because property ownership is typically split (the server owns some properties, the client owns others).
 
 ## Target Use Cases
 
