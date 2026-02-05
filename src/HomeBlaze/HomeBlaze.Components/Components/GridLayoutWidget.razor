@@ -1,0 +1,229 @@
+@using HomeBlaze.Components.Dialogs
+@using Namotion.Interceptor.Tracking.Parent
+
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(GridLayout))]
+@implements ISubjectComponent
+
+@inject IDialogService DialogService
+@inject SubjectFactory SubjectFactory
+@inject SubjectComponentRegistry ComponentRegistry
+@inject RootManager RootManager
+
+<div class="grid-layout-container"
+     style="display: grid;
+            grid-template-rows: repeat(@(Grid?.Rows ?? 1), 1fr);
+            grid-template-columns: repeat(@(Grid?.Columns ?? 1), 1fr);
+            gap: 8px;
+            width: 100%;
+            min-height: 400px;
+            position: relative;">
+
+    @* Layout edit button - top right of container *@
+    @if (IsEditing)
+    {
+        <MudIconButton Icon="@Icons.Material.Filled.Settings"
+                       Size="Size.Small"
+                       Color="Color.Primary"
+                       Class="layout-edit-button"
+                       title="Edit Layout"
+                       OnClick="EditLayout" />
+    }
+
+    @* Render cells *@
+    @if (Grid?.Cells != null)
+    {
+        foreach (var cell in Grid.Cells)
+        {
+            <div class="grid-cell @(IsEditing ? "editing" : "")" style="@GetCellStyle(cell)">
+                <div class="grid-cell-content">
+                    <SubjectComponent Subject="@cell.Child"
+                                      Type="SubjectComponentType.Widget">
+                        <ActionButtons>
+                            <MudIconButton Icon="@Icons.Material.Filled.Settings"
+                                           Size="Size.Small"
+                                           title="Edit Cell"
+                                           OnClick="() => EditCell(cell)" />
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete"
+                                           Size="Size.Small"
+                                           Color="Color.Error"
+                                           title="Delete"
+                                           OnClick="() => DeleteCell(cell)" />
+                        </ActionButtons>
+                    </SubjectComponent>
+                </div>
+            </div>
+        }
+    }
+
+    @* Render empty cells for adding in edit mode *@
+    @if (IsEditing)
+    {
+        @foreach (var (row, col) in GetEmptyCellPositions())
+        {
+            <div class="grid-cell empty"
+                 style="grid-row: @(row + 1); grid-column: @(col + 1);"
+                 @onclick="() => AddCellAt(row, col)">
+                <MudIcon Icon="@Icons.Material.Filled.Add"
+                         Color="Color.Default"
+                         Class="add-icon" />
+            </div>
+        }
+    }
+</div>
+
+<style>
+    .grid-layout-container {
+        background: rgba(0,0,0,0.02);
+        border: 1px dashed rgba(128,128,128,0.3);
+        padding: 8px;
+    }
+
+    .layout-edit-button {
+        position: absolute;
+        top: -36px;
+        right: 4px;
+        z-index: 20;
+        background: rgba(255,255,255,0.9);
+        border-radius: 4px;
+    }
+
+    .grid-cell {
+        background: var(--mud-palette-surface);
+        border: 1px solid rgba(128,128,128,0.2);
+        border-radius: 4px;
+        min-height: 100px;
+        overflow: hidden;
+    }
+
+    /* In edit mode: disable widget interaction */
+    .grid-cell.editing {
+        border: 2px dashed var(--mud-palette-primary);
+    }
+
+    .grid-cell.editing .grid-cell-content {
+        pointer-events: none;  /* Disable all widget interaction */
+    }
+
+    .grid-cell-content {
+        width: 100%;
+        height: 100%;
+    }
+
+    .grid-cell.empty {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        border-style: dashed;
+    }
+
+    .grid-cell.empty:hover {
+        background: rgba(var(--mud-palette-primary-rgb), 0.1);
+    }
+
+    .add-icon {
+        opacity: 0.5;
+    }
+</style>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [CascadingParameter(Name = "IsEditing")]
+    public bool IsEditing { get; set; }
+
+    private GridLayout? Grid => Subject as GridLayout;
+
+    private string GetCellStyle(GridCell cell)
+    {
+        var styles = new List<string>();
+
+        if (cell.Row.HasValue)
+            styles.Add($"grid-row: {cell.Row.Value + 1} / span {cell.RowSpan}");
+
+        if (cell.Column.HasValue)
+            styles.Add($"grid-column: {cell.Column.Value + 1} / span {cell.ColumnSpan}");
+
+        return string.Join("; ", styles);
+    }
+
+    private IEnumerable<(int row, int col)> GetEmptyCellPositions()
+    {
+        if (Grid == null) yield break;
+
+        var occupied = new HashSet<(int, int)>();
+
+        // Mark all occupied cells (accounting for spans)
+        foreach (var cell in Grid.Cells)
+        {
+            if (!cell.Row.HasValue || !cell.Column.HasValue) continue;
+
+            for (int r = 0; r < cell.RowSpan; r++)
+            {
+                for (int c = 0; c < cell.ColumnSpan; c++)
+                {
+                    occupied.Add((cell.Row.Value + r, cell.Column.Value + c));
+                }
+            }
+        }
+
+        // Return unoccupied positions
+        for (int r = 0; r < Grid.Rows; r++)
+        {
+            for (int c = 0; c < Grid.Columns; c++)
+            {
+                if (!occupied.Contains((r, c)))
+                    yield return (r, c);
+            }
+        }
+    }
+
+    private async Task AddCellAt(int row, int column)
+    {
+        await SubjectSetupDialog.ShowAsync(DialogService, subject =>
+        {
+            if (Grid == null) return;
+
+            var cell = SubjectFactory.CreateSubject<GridCell>();
+            cell.Row = row;
+            cell.Column = column;
+            cell.Child = subject;
+
+            // Replace list to trigger property setter and parent tracking
+            Grid.Cells = [.. Grid.Cells, cell];
+        });
+    }
+
+    private async Task EditLayout()
+    {
+        if (Grid == null) return;
+        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Grid, "Edit Grid Layout");
+    }
+
+    private async Task EditCell(GridCell cell)
+    {
+        await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, cell, "Edit Cell");
+    }
+
+    private async Task DeleteCell(GridCell cell)
+    {
+        if (Grid == null) return;
+
+        var confirmed = await DialogService.ShowMessageBox(
+            "Delete Cell",
+            "Are you sure you want to delete this cell?",
+            yesText: "Delete",
+            cancelText: "Cancel");
+
+        if (confirmed == true)
+        {
+            // Replace list to trigger property setter and parent tracking
+            Grid.Cells = Grid.Cells.Where(c => c != cell).ToList();
+
+            // Persist the change
+            var configurationWriter = Grid.TryFindFirstParent<IConfigurationWriter>() ?? RootManager;
+            await configurationWriter.WriteConfigurationAsync(Grid, CancellationToken.None);
+        }
+    }
+}

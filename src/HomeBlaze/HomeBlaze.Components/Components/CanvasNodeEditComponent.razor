@@ -1,0 +1,112 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(CanvasNode))]
+@implements ISubjectEditComponent
+@implements IDisposable
+
+<MudForm>
+    <MudGrid>
+        <MudItem xs="6">
+            <MudNumericField @bind-Value="_x"
+                             Label="X Position"
+                             Adornment="Adornment.End"
+                             AdornmentText="px" />
+        </MudItem>
+        <MudItem xs="6">
+            <MudNumericField @bind-Value="_y"
+                             Label="Y Position"
+                             Adornment="Adornment.End"
+                             AdornmentText="px" />
+        </MudItem>
+        <MudItem xs="6">
+            <MudNumericField @bind-Value="_width"
+                             Label="Width"
+                             Min="50"
+                             Adornment="Adornment.End"
+                             AdornmentText="px" />
+        </MudItem>
+        <MudItem xs="6">
+            <MudNumericField @bind-Value="_height"
+                             Label="Height"
+                             Min="50"
+                             Adornment="Adornment.End"
+                             AdornmentText="px" />
+        </MudItem>
+    </MudGrid>
+
+    <MudDivider Class="my-4" />
+
+    <MudText Typo="Typo.subtitle2" Class="mb-2">Child Widget</MudText>
+    @if (Node?.Child != null)
+    {
+        <MudAlert Severity="Severity.Info" Dense="true">
+            @Node.Child.GetType().Name
+        </MudAlert>
+    }
+    else
+    {
+        <MudAlert Severity="Severity.Warning" Dense="true">
+            No child widget assigned
+        </MudAlert>
+    }
+</MudForm>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private CanvasNode? Node => Subject as CanvasNode;
+
+    private int _x, _y, _width, _height;
+    private int _originalX, _originalY, _originalWidth, _originalHeight;
+
+    public bool IsValid => _width >= 50 && _height >= 50;
+    public bool IsDirty => _x != _originalX || _y != _originalY
+                        || _width != _originalWidth || _height != _originalHeight;
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        if (Node != null)
+        {
+            _x = Node.X;
+            _y = Node.Y;
+            _width = Node.Width;
+            _height = Node.Height;
+
+            _originalX = _x;
+            _originalY = _y;
+            _originalWidth = _width;
+            _originalHeight = _height;
+        }
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Node != null)
+        {
+            Node.X = _x;
+            Node.Y = _y;
+            Node.Width = _width;
+            Node.Height = _height;
+
+            _originalX = _x;
+            _originalY = _y;
+            _originalWidth = _width;
+            _originalHeight = _height;
+
+            IsDirtyChanged?.Invoke(false);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        IsValidChanged = null;
+        IsDirtyChanged = null;
+    }
+}

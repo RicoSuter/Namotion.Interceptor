@@ -1,0 +1,77 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(GridLayout))]
+@implements ISubjectEditComponent
+@implements IDisposable
+
+<MudForm>
+    <MudNumericField @bind-Value="_rows"
+                     Label="Rows"
+                     Min="1"
+                     Max="20"
+                     Class="mb-4" />
+
+    <MudNumericField @bind-Value="_columns"
+                     Label="Columns"
+                     Min="1"
+                     Max="20"
+                     Class="mb-4" />
+
+    <MudText Typo="Typo.body2" Class="mud-text-secondary">
+        Cells: @(Grid?.Cells?.Count ?? 0)
+    </MudText>
+</MudForm>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private GridLayout? Grid => Subject as GridLayout;
+
+    private int _rows;
+    private int _columns;
+
+    private int _originalRows;
+    private int _originalColumns;
+
+    public bool IsValid => _rows >= 1 && _columns >= 1;
+    public bool IsDirty => _rows != _originalRows || _columns != _originalColumns;
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        if (Grid != null)
+        {
+            _rows = Grid.Rows;
+            _columns = Grid.Columns;
+
+            _originalRows = _rows;
+            _originalColumns = _columns;
+        }
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Grid != null)
+        {
+            Grid.Rows = _rows;
+            Grid.Columns = _columns;
+
+            _originalRows = _rows;
+            _originalColumns = _columns;
+
+            IsDirtyChanged?.Invoke(false);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        IsValidChanged = null;
+        IsDirtyChanged = null;
+    }
+}
