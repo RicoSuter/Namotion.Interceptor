@@ -111,7 +111,7 @@ public static class WebSocketSubjectExtensions
 
     /// <summary>
     /// Adds a WebSocket subject handler for embedding in an existing ASP.NET application.
-    /// Call MapWebSocketSubject to map the endpoint after building the app.
+    /// Call MapWebSocketSubjectHandler to map the endpoint after building the app.
     /// </summary>
     public static IServiceCollection AddWebSocketSubjectHandler<TSubject>(
         this IServiceCollection services,
@@ -125,7 +125,7 @@ public static class WebSocketSubjectExtensions
 
     /// <summary>
     /// Adds a WebSocket subject handler with custom subject selector.
-    /// Call MapWebSocketSubject to map the endpoint after building the app.
+    /// Call MapWebSocketSubjectHandler to map the endpoint after building the app.
     /// </summary>
     public static IServiceCollection AddWebSocketSubjectHandler(
         this IServiceCollection services,
@@ -165,11 +165,11 @@ public static class WebSocketSubjectExtensions
     ///
     /// var app = builder.Build();
     /// app.UseWebSockets();
-    /// app.MapWebSocketSubject("/ws");
+    /// app.MapWebSocketSubjectHandler("/ws");
     /// app.Run();
     /// </code>
     /// </example>
-    public static IEndpointRouteBuilder MapWebSocketSubject(
+    public static IEndpointRouteBuilder MapWebSocketSubjectHandler(
         this IEndpointRouteBuilder endpoints,
         string path = "/ws")
     {

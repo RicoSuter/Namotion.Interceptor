@@ -6,8 +6,10 @@ using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.WebSocket.Tests.Integration;
 
+/// <summary>
+/// Integration tests for the standalone WebSocket server (AddWebSocketSubjectServer).
+/// </summary>
 [Trait("Category", "Integration")]
-[Collection("WebSocket Integration")]
 public class WebSocketServerClientTests
 {
     private readonly ITestOutputHelper _output;
@@ -20,14 +22,16 @@ public class WebSocketServerClientTests
     [Fact]
     public async Task ServerWriteProperty_ShouldUpdateClient()
     {
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketTestServer<TestRoot>(_output);
         await using var client = new WebSocketTestClient<TestRoot>(_output);
 
         await server.StartAsync(
             context => new TestRoot(context),
-            (_, root) => root.Name = "Initial");
+            (_, root) => root.Name = "Initial",
+            port: portLease.Port);
 
-        await client.StartAsync(context => new TestRoot(context));
+        await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
 
         // Wait for initial sync
         await Task.Delay(500);
@@ -43,11 +47,12 @@ public class WebSocketServerClientTests
     [Fact]
     public async Task ClientWriteProperty_ShouldUpdateServer()
     {
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketTestServer<TestRoot>(_output);
         await using var client = new WebSocketTestClient<TestRoot>(_output);
 
-        await server.StartAsync(context => new TestRoot(context));
-        await client.StartAsync(context => new TestRoot(context));
+        await server.StartAsync(context => new TestRoot(context), port: portLease.Port);
+        await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
 
         // Client updates property
         client.Root!.Name = "Updated from Client";
@@ -59,11 +64,12 @@ public class WebSocketServerClientTests
     [Fact]
     public async Task NumericProperty_ShouldSyncBidirectionally()
     {
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketTestServer<TestRoot>(_output);
         await using var client = new WebSocketTestClient<TestRoot>(_output);
 
-        await server.StartAsync(context => new TestRoot(context));
-        await client.StartAsync(context => new TestRoot(context));
+        await server.StartAsync(context => new TestRoot(context), port: portLease.Port);
+        await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
 
         // Server updates
         server.Root!.Number = 123.45m;
@@ -79,13 +85,14 @@ public class WebSocketServerClientTests
     [Fact]
     public async Task MultipleClients_ShouldAllReceiveUpdates()
     {
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketTestServer<TestRoot>(_output);
         await using var client1 = new WebSocketTestClient<TestRoot>(_output);
         await using var client2 = new WebSocketTestClient<TestRoot>(_output);
 
-        await server.StartAsync(context => new TestRoot(context));
-        await client1.StartAsync(context => new TestRoot(context));
-        await client2.StartAsync(context => new TestRoot(context));
+        await server.StartAsync(context => new TestRoot(context), port: portLease.Port);
+        await client1.StartAsync(context => new TestRoot(context), port: portLease.Port);
+        await client2.StartAsync(context => new TestRoot(context), port: portLease.Port);
 
         server.Root!.Name = "Broadcast Test";
         await Task.Delay(500);
@@ -97,14 +104,16 @@ public class WebSocketServerClientTests
     [Fact]
     public async Task ServerRestart_WithDisconnectionWait_ClientRecovers()
     {
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketTestServer<TestRoot>(_output);
         await using var client = new WebSocketTestClient<TestRoot>(_output);
 
         await server.StartAsync(
             context => new TestRoot(context),
-            (_, root) => root.Name = "Initial");
+            (_, root) => root.Name = "Initial",
+            port: portLease.Port);
 
-        await client.StartAsync(context => new TestRoot(context));
+        await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
 
         // Wait for initial sync
         await Task.Delay(500);
@@ -139,14 +148,16 @@ public class WebSocketServerClientTests
     [Fact]
     public async Task ServerRestart_Instant_ClientRecovers()
     {
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketTestServer<TestRoot>(_output);
         await using var client = new WebSocketTestClient<TestRoot>(_output);
 
         await server.StartAsync(
             context => new TestRoot(context),
-            (_, root) => root.Name = "Initial");
+            (_, root) => root.Name = "Initial",
+            port: portLease.Port);
 
-        await client.StartAsync(context => new TestRoot(context));
+        await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
 
         // Wait for initial sync
         await Task.Delay(500);
@@ -174,6 +185,7 @@ public class WebSocketServerClientTests
     [Fact]
     public async Task ServerRestart_WithCollectionItems_AllPropertiesResync()
     {
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketTestServer<TestRoot>(_output);
         await using var client = new WebSocketTestClient<TestRoot>(_output);
 
@@ -189,9 +201,10 @@ public class WebSocketServerClientTests
                     new TestItem(context) { Label = "Item2", Value = 20 },
                     new TestItem(context) { Label = "Item3", Value = 30 }
                 ];
-            });
+            },
+            port: portLease.Port);
 
-        await client.StartAsync(context => new TestRoot(context));
+        await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
 
         // Wait for initial sync
         await AsyncTestHelpers.WaitUntilAsync(

@@ -13,7 +13,7 @@ namespace Namotion.Interceptor.WebSocket.Server;
 /// <summary>
 /// Standalone WebSocket server that exposes subject updates to connected clients.
 /// Uses Kestrel for cross-platform support without elevation.
-/// For embedding in an existing ASP.NET app, use MapWebSocketSubject extension instead.
+/// For embedding in an existing ASP.NET app, use MapWebSocketSubjectHandler extension instead.
 /// </summary>
 public class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
 {
