@@ -1,23 +1,106 @@
+using System.Collections;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Connectors;
 
 public static class SubjectFactoryExtensions
 {
-    public static IInterceptorSubject CreateSubject(this ISubjectFactory subjectFactory, RegisteredSubjectProperty property)
+    /// <summary>
+    /// Appends subjects to an existing collection, returning a new collection of the same type.
+    /// </summary>
+    public static T AppendSubjectsToCollection<T>(
+        this ISubjectFactory factory,
+        T existingCollection,
+        params IInterceptorSubject[] subjectsToAppend)
+        where T : IEnumerable<IInterceptorSubject?>
     {
-        var serviceProvider = property.Parent.Subject.Context.TryGetService<IServiceProvider>();
-        return subjectFactory.CreateSubject(property.Type, serviceProvider);
+        var propertyType = existingCollection.GetType();
+        var combined = existingCollection.Concat(subjectsToAppend);
+        return (T)factory.CreateSubjectCollection(propertyType, combined);
     }
 
-    public static IInterceptorSubject CreateCollectionSubject(this ISubjectFactory subjectFactory, RegisteredSubjectProperty property, object? index)
+    /// <summary>
+    /// Removes subjects at specified indices from a collection, returning a new collection of the same type.
+    /// </summary>
+    public static T RemoveSubjectsFromCollection<T>(
+        this ISubjectFactory factory,
+        T existingCollection,
+        params int[] indicesToRemove)
+        where T : IEnumerable<IInterceptorSubject?>
+    {
+        var propertyType = existingCollection.GetType();
+        var toRemove = new HashSet<int>(indicesToRemove);
+        var filtered = existingCollection.Where((_, index) => !toRemove.Contains(index));
+        return (T)factory.CreateSubjectCollection(propertyType, filtered);
+    }
+
+    /// <summary>
+    /// Appends entries to an existing dictionary, returning a new dictionary of the same type.
+    /// </summary>
+    public static T AppendEntriesToDictionary<T>(
+        this ISubjectFactory factory,
+        T existingDictionary,
+        params KeyValuePair<object, IInterceptorSubject>[] entriesToAdd)
+        where T : IDictionary
+    {
+        var dictionaryType = existingDictionary.GetType();
+        var newDictionary = (IDictionary)Activator.CreateInstance(dictionaryType)!;
+
+        foreach (DictionaryEntry entry in existingDictionary)
+        {
+            newDictionary[entry.Key] = entry.Value;
+        }
+
+        foreach (var entry in entriesToAdd)
+        {
+            newDictionary[entry.Key] = entry.Value;
+        }
+
+        return (T)newDictionary;
+    }
+
+    /// <summary>
+    /// Removes entries by key from a dictionary, returning a new dictionary of the same type.
+    /// </summary>
+    public static T RemoveEntriesFromDictionary<T>(
+        this ISubjectFactory factory,
+        T existingDictionary,
+        params object[] keysToRemove)
+        where T : IDictionary
+    {
+        var dictionaryType = existingDictionary.GetType();
+        var newDictionary = (IDictionary)Activator.CreateInstance(dictionaryType)!;
+        var removeSet = new HashSet<object>(keysToRemove);
+
+        foreach (DictionaryEntry entry in existingDictionary)
+        {
+            if (!removeSet.Contains(entry.Key))
+            {
+                newDictionary[entry.Key] = entry.Value;
+            }
+        }
+
+        return (T)newDictionary;
+    }
+
+    /// <summary>
+    /// Creates a subject of the specified type using the service provider from the context.
+    /// </summary>
+    public static IInterceptorSubject CreateSubject(this ISubjectFactory factory, Type type, IInterceptorSubjectContext context)
+    {
+        var serviceProvider = context.TryGetService<IServiceProvider>();
+        return factory.CreateSubject(type, serviceProvider);
+    }
+
+    public static IInterceptorSubject CreateSubjectForReferenceProperty(this ISubjectFactory subjectFactory, RegisteredSubjectProperty property)
+    {
+        return subjectFactory.CreateSubject(property.Type, property.Parent.Subject.Context);
+    }
+
+    public static IInterceptorSubject CreateSubjectForCollectionOrDictionaryProperty(this ISubjectFactory subjectFactory, RegisteredSubjectProperty property)
     {
         Type? itemType;
-        if (index is null)
-        {
-            itemType = property.Type;
-        }
-        else if (property.Type.IsArray)
+        if (property.Type.IsArray)
         {
             itemType = property.Type.GetElementType();
         }
@@ -32,9 +115,8 @@ public static class SubjectFactoryExtensions
             itemType = property.Type.GenericTypeArguments[0];
         }
 
-        var serviceProvider = property.Parent.Subject.Context.TryGetService<IServiceProvider>();
         return subjectFactory.CreateSubject(
             itemType ?? throw new InvalidOperationException("Unknown collection element type"),
-            serviceProvider);
+            property.Parent.Subject.Context);
     }
 }

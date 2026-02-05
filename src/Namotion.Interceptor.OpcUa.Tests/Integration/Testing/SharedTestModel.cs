@@ -19,6 +19,14 @@ public partial class SharedTestModel
         DataTypes = new DataTypesTestArea();
         Collections = new CollectionsTestArea();
         MultiClient = new MultiClientTestArea();
+        ClientToServerSync = new ClientToServerSyncTestArea();
+        ServerToClientReference = new ServerToClientReferenceTestArea();
+        ServerToClientCollection = new ServerToClientCollectionTestArea();
+        ServerToClientDictionary = new ServerToClientDictionaryTestArea();
+        ClientToServerReference = new ClientToServerReferenceTestArea();
+        ClientToServerCollection = new ClientToServerCollectionTestArea();
+        ClientToServerDictionary = new ClientToServerDictionaryTestArea();
+        ClientToServerNestedProperty = new ClientToServerNestedPropertyTestArea();
     }
 
     [Path("opc", "Connected")]
@@ -41,6 +49,31 @@ public partial class SharedTestModel
 
     [Path("opc", "MultiClient")]
     public partial MultiClientTestArea MultiClient { get; set; }
+
+    [Path("opc", "ClientToServerSync")]
+    public partial ClientToServerSyncTestArea ClientToServerSync { get; set; }
+
+    [Path("opc", "ServerToClientReference")]
+    public partial ServerToClientReferenceTestArea ServerToClientReference { get; set; }
+
+    [Path("opc", "ServerToClientCollection")]
+    public partial ServerToClientCollectionTestArea ServerToClientCollection { get; set; }
+
+    [Path("opc", "ServerToClientDictionary")]
+    public partial ServerToClientDictionaryTestArea ServerToClientDictionary { get; set; }
+
+    [Path("opc", "ClientToServerReference")]
+    public partial ClientToServerReferenceTestArea ClientToServerReference { get; set; }
+
+    [Path("opc", "ClientToServerCollection")]
+    public partial ClientToServerCollectionTestArea ClientToServerCollection { get; set; }
+
+    [Path("opc", "ClientToServerDictionary")]
+    public partial ClientToServerDictionaryTestArea ClientToServerDictionary { get; set; }
+
+    // Dedicated area for ClientToServerNestedPropertyTests (isolated from other test classes)
+    [Path("opc", "ClientToServerNestedProperty")]
+    public partial ClientToServerNestedPropertyTestArea ClientToServerNestedProperty { get; set; }
 }
 
 /// <summary>
@@ -337,4 +370,152 @@ public partial class MultiClientTestArea
 
     [Path("opc", "LastWriter")]
     public partial string? LastWriter { get; set; }
+}
+
+/// <summary>
+/// Test area for client-to-server synchronization tests.
+/// Contains nested subjects for testing value sync on existing subjects.
+/// </summary>
+[InterceptorSubject]
+public partial class ClientToServerSyncTestArea
+{
+    public ClientToServerSyncTestArea()
+    {
+        Person = new NestedPerson();
+        Sensor = new NestedSensor();
+    }
+
+    /// <summary>Person reference for testing property value sync on nested objects.</summary>
+    [Path("opc", "Person")]
+    public partial NestedPerson Person { get; set; }
+
+    /// <summary>OpcUaValue pattern sensor for testing value sync.</summary>
+    [OpcUaNode("Sensor")]
+    [OpcUaReference("HasComponent")]
+    public partial NestedSensor? Sensor { get; set; }
+}
+
+/// <summary>
+/// Test area for ServerToClientReferenceTests.
+/// </summary>
+[InterceptorSubject]
+public partial class ServerToClientReferenceTestArea
+{
+    public ServerToClientReferenceTestArea()
+    {
+        Person = null;
+    }
+
+    /// <summary>Reference property for testing assign/clear.</summary>
+    [Path("opc", "Person")]
+    public partial NestedPerson? Person { get; set; }
+}
+
+/// <summary>
+/// Test area for ServerToClientCollectionTests.
+/// </summary>
+[InterceptorSubject]
+public partial class ServerToClientCollectionTestArea
+{
+    public ServerToClientCollectionTestArea()
+    {
+        ContainerItems = [];
+        FlatItems = [];
+    }
+
+    /// <summary>Collection with container node (default).</summary>
+    [OpcUaReference("HasComponent", CollectionStructure = CollectionNodeStructure.Container)]
+    public partial NestedPerson[] ContainerItems { get; set; }
+
+    /// <summary>Collection without container node (flat).</summary>
+    [OpcUaReference("HasComponent", CollectionStructure = CollectionNodeStructure.Flat)]
+    public partial NestedPerson[] FlatItems { get; set; }
+}
+
+/// <summary>
+/// Test area for ServerToClientDictionaryTests.
+/// </summary>
+[InterceptorSubject]
+public partial class ServerToClientDictionaryTestArea
+{
+    public ServerToClientDictionaryTestArea()
+    {
+        Items = new Dictionary<string, NestedPerson>();
+    }
+
+    /// <summary>Dictionary property for testing add/remove.</summary>
+    [Path("opc", "Items")]
+    public partial Dictionary<string, NestedPerson>? Items { get; set; }
+}
+
+/// <summary>
+/// Test area for ClientToServerReferenceTests.
+/// </summary>
+[InterceptorSubject]
+public partial class ClientToServerReferenceTestArea
+{
+    public ClientToServerReferenceTestArea()
+    {
+        Person = null;
+    }
+
+    [Path("opc", "Person")]
+    public partial NestedPerson? Person { get; set; }
+}
+
+/// <summary>
+/// Test area for ClientToServerCollectionTests.
+/// </summary>
+[InterceptorSubject]
+public partial class ClientToServerCollectionTestArea
+{
+    public ClientToServerCollectionTestArea()
+    {
+        ContainerItems = [];
+        FlatItems = [];
+    }
+
+    [OpcUaReference("HasComponent", CollectionStructure = CollectionNodeStructure.Container)]
+    public partial NestedPerson[] ContainerItems { get; set; }
+
+    [OpcUaReference("HasComponent", CollectionStructure = CollectionNodeStructure.Flat)]
+    public partial NestedPerson[] FlatItems { get; set; }
+}
+
+/// <summary>
+/// Test area for ClientToServerDictionaryTests.
+/// </summary>
+[InterceptorSubject]
+public partial class ClientToServerDictionaryTestArea
+{
+    public ClientToServerDictionaryTestArea()
+    {
+        Items = new Dictionary<string, NestedPerson>();
+    }
+
+    [Path("opc", "Items")]
+    public partial Dictionary<string, NestedPerson>? Items { get; set; }
+}
+
+/// <summary>
+/// Dedicated test area for ClientToServerNestedPropertyTests.
+/// Contains all property types needed for testing nested property changes.
+/// </summary>
+[InterceptorSubject]
+public partial class ClientToServerNestedPropertyTestArea
+{
+    public ClientToServerNestedPropertyTestArea()
+    {
+        ContainerItems = [];
+        Items = new Dictionary<string, NestedPerson>();
+    }
+
+    [Path("opc", "Person")]
+    public partial NestedPerson? Person { get; set; }
+
+    [OpcUaReference("HasComponent", CollectionStructure = CollectionNodeStructure.Container)]
+    public partial NestedPerson[] ContainerItems { get; set; }
+
+    [Path("opc", "Items")]
+    public partial Dictionary<string, NestedPerson>? Items { get; set; }
 }

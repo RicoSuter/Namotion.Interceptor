@@ -375,7 +375,7 @@ public static class PathExtensions
 
             if (nextSubject is null && subjectFactory is not null)
             {
-                nextSubject = subjectFactory.CreateSubject(registeredProperty);
+                nextSubject = subjectFactory.CreateSubjectForReferenceProperty(registeredProperty);
                 registeredProperty.SetValue(nextSubject);
             }
         }

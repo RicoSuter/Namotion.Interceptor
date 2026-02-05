@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -7,6 +8,7 @@ using Namotion.Interceptor.OpcUa.Client.Resilience;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -23,14 +25,21 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private readonly OpcUaClientConfiguration _configuration;
     private readonly OpcUaSubjectLoader _subjectLoader;
     private readonly SubscriptionHealthMonitor _subscriptionHealthMonitor;
+    private readonly OpcUaClientPropertyWriter _opcUaPropertyWriter;
 
     private volatile SessionManager? _sessionManager;
     private SubjectPropertyWriter? _propertyWriter;
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
+    private readonly OpcUaClientSubjectRegistry _subjectRegistry = new();
+    private readonly ConcurrentDictionary<(PropertyReference?, object?), Task> _pendingDeletes = new();
+
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private volatile bool _isStarted;
     private long _reconnectStartedTimestamp; // 0 = not reconnecting, otherwise Stopwatch timestamp when reconnection started (for stall detection)
+    private OpcUaClientGraphChangeSender? _graphChangeSender;
+    private OpcUaClientGraphChangeReceiver? _nodeChangeProcessor;
+    private OpcUaClientGraphChangeTrigger? _graphChangeTrigger;
 
     // Diagnostics tracking - accessed from multiple threads via Diagnostics property
     private long _totalReconnectionAttempts;
@@ -52,6 +61,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     internal SessionManager? SessionManager => _sessionManager;
 
     internal SourceOwnershipManager Ownership => _ownership;
+
+    internal OpcUaSubjectLoader SubjectLoader => _subjectLoader;
+
+    internal OpcUaClientGraphChangeReceiver? NodeChangeProcessor => _nodeChangeProcessor;
 
     // Diagnostics accessors
     internal long TotalReconnectionAttempts => Interlocked.Read(ref _totalReconnectionAttempts);
@@ -86,18 +99,194 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
     }
 
-    private void RemoveItemsForSubject(IInterceptorSubject subject)
+    private void RemoveItemsForSubject(IInterceptorSubject subject, PropertyReference? property, object? index)
     {
         _structureLock.Wait();
+        NodeId? nodeIdToDelete;
         try
         {
-            _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
-            _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
+            _subjectRegistry.Unregister(subject, out nodeIdToDelete, out _, out var isLast);
+
+            if (isLast)
+            {
+                _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
+                _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
+            }
         }
         finally
         {
             _structureLock.Release();
         }
+
+        // Delete remote node if enabled, BUT NOT if the change originated from this source
+        // (i.e., the deletion was triggered by processing a server-side ModelChangeEvent)
+        if (nodeIdToDelete is not null && _configuration.EnableGraphChangePublishing)
+        {
+            // Skip DeleteNodes if the change source in the current context is this client source.
+            // When processing ModelChangeEvents, GraphChangeApplier.SetReference is called with this source,
+            // which sets SubjectChangeContext.Current.Source. User code setting properties directly has null source.
+            var currentChangeSource = SubjectChangeContext.Current.Source;
+            var isFromThisSource = currentChangeSource is not null && ReferenceEquals(currentChangeSource, this);
+            if (!isFromThisSource)
+            {
+                // Recently-deleted tracking is handled by _subjectRegistry.Unregister() above
+
+                var session = _sessionManager?.CurrentSession;
+                if (session is not null && session.Connected)
+                {
+                    var deleteTask = TryDeleteRemoteNodeAsync(session, nodeIdToDelete, CancellationToken.None);
+
+                    // Track pending delete by semantic key (property + index) to allow
+                    // OnSubjectAddedAsync to await completion before browsing for new nodes.
+                    // This prevents race conditions when replacing dictionary/collection entries.
+                    if (property is not null)
+                    {
+                        var key = ((PropertyReference?)property, index);
+                        _pendingDeletes[key] = deleteTask;
+                        _ = deleteTask.ContinueWith(
+                            _ => _pendingDeletes.TryRemove(key, out Task? _),
+                            TaskContinuationOptions.ExecuteSynchronously);
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Attempts to delete a remote node on the OPC UA server via DeleteNodes service.
+    /// </summary>
+    private async Task TryDeleteRemoteNodeAsync(ISession session, NodeId nodeId, CancellationToken cancellationToken)
+    {
+        var deleteNodesItem = new DeleteNodesItem
+        {
+            NodeId = nodeId,
+            DeleteTargetReferences = true
+        };
+
+        var nodesToDelete = new DeleteNodesItemCollection { deleteNodesItem };
+
+        try
+        {
+            var response = await session.DeleteNodesAsync(
+                null,
+                nodesToDelete,
+                cancellationToken).ConfigureAwait(false);
+
+            if (response.Results.Count > 0)
+            {
+                var result = response.Results[0];
+                if (StatusCode.IsGood(result))
+                {
+                    _logger.LogDebug(
+                        "Deleted remote node '{NodeId}'.",
+                        nodeId);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "DeleteNodes failed for '{NodeId}': {StatusCode}.",
+                        nodeId, result);
+                }
+            }
+        }
+        catch (ServiceResultException ex)
+        {
+            _logger.LogWarning(ex,
+                "DeleteNodes service call failed for '{NodeId}'.",
+                nodeId);
+        }
+    }
+
+    /// <summary>
+    /// Awaits any pending delete operation for the given property and index.
+    /// Used by GraphChangeSender to ensure deletes complete before adds.
+    /// This prevents race conditions when replacing dictionary/collection entries.
+    /// </summary>
+    /// <param name="property">The parent property reference.</param>
+    /// <param name="index">The dictionary key or collection index.</param>
+    internal async Task AwaitPendingDeleteAsync(PropertyReference? property, object? index)
+    {
+        var key = (property, index);
+        if (_pendingDeletes.TryGetValue(key, out var deleteTask))
+        {
+            await deleteTask.ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Tracks a subject with its associated monitored items and NodeId.
+    /// Uses reference counting - only creates monitored items on first reference.
+    /// </summary>
+    /// <param name="subject">The subject to track.</param>
+    /// <param name="nodeId">The OPC UA NodeId for this subject.</param>
+    /// <param name="monitoredItemsFactory">Factory to create monitored items on first reference.</param>
+    /// <returns>True if this is the first reference (caller should create subscriptions), false otherwise.</returns>
+    internal bool TrackSubject(IInterceptorSubject subject, NodeId nodeId, Func<List<MonitoredItem>> monitoredItemsFactory)
+    {
+        _subjectRegistry.Register(subject, nodeId, monitoredItemsFactory, out _, out var isFirst);
+        return isFirst;
+    }
+
+    /// <summary>
+    /// Gets the NodeId for a tracked subject.
+    /// </summary>
+    /// <param name="subject">The subject to look up.</param>
+    /// <param name="nodeId">The NodeId if found.</param>
+    /// <returns>True if the subject is tracked, false otherwise.</returns>
+    internal bool TryGetSubjectNodeId(IInterceptorSubject subject, out NodeId? nodeId)
+    {
+        return _subjectRegistry.TryGetExternalId(subject, out nodeId);
+    }
+
+    /// <summary>
+    /// Updates the NodeId for a tracked subject.
+    /// This is used when collection items are reindexed after removal.
+    /// </summary>
+    /// <param name="subject">The subject to update.</param>
+    /// <param name="newNodeId">The new NodeId.</param>
+    internal void SetSubjectNodeId(IInterceptorSubject subject, NodeId newNodeId)
+    {
+        _subjectRegistry.UpdateExternalId(subject, newNodeId);
+    }
+
+    /// <summary>
+    /// Gets the monitored items for a tracked subject.
+    /// </summary>
+    /// <param name="subject">The subject to look up.</param>
+    /// <param name="monitoredItems">The monitored items if found.</param>
+    /// <returns>True if the subject is tracked, false otherwise.</returns>
+    internal bool TryGetSubjectMonitoredItems(IInterceptorSubject subject, out List<MonitoredItem>? monitoredItems)
+    {
+        return _subjectRegistry.TryGetData(subject, out monitoredItems);
+    }
+
+    /// <summary>
+    /// Adds a monitored item to a subject's tracked list.
+    /// </summary>
+    /// <param name="subject">The subject that owns this monitored item.</param>
+    /// <param name="monitoredItem">The monitored item to add.</param>
+    internal void AddMonitoredItemToSubject(IInterceptorSubject subject, MonitoredItem monitoredItem)
+    {
+        _subjectRegistry.ModifyData(subject, monitoredItems => monitoredItems.Add(monitoredItem));
+    }
+
+    /// <summary>
+    /// Checks if a subject is already tracked by the reference counter.
+    /// </summary>
+    /// <param name="subject">The subject to check.</param>
+    /// <returns>True if the subject is tracked, false otherwise.</returns>
+    internal bool IsSubjectTracked(IInterceptorSubject subject)
+    {
+        return _subjectRegistry.IsRegistered(subject);
+    }
+
+    /// <summary>
+    /// Gets all tracked subjects.
+    /// </summary>
+    /// <returns>All tracked subjects.</returns>
+    internal IEnumerable<IInterceptorSubject> GetTrackedSubjects()
+    {
+        return _subjectRegistry.GetAllSubjects();
     }
 
     public OpcUaSubjectClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger logger)
@@ -127,11 +316,12 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             onSubjectDetaching: OnSubjectDetaching);
         _subjectLoader = new OpcUaSubjectLoader(configuration, _ownership, this, logger);
         _subscriptionHealthMonitor = new SubscriptionHealthMonitor(logger);
+        _opcUaPropertyWriter = new OpcUaClientPropertyWriter(configuration, OpcUaNodeIdKey, logger);
     }
 
-    private void OnSubjectDetaching(IInterceptorSubject subject)
+    private void OnSubjectDetaching(SubjectLifecycleChange change)
     {
-        RemoveItemsForSubject(subject);
+        RemoveItemsForSubject(change.Subject, change.Property, change.Index);
     }
 
     /// <inheritdoc />
@@ -139,7 +329,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     public async Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
     {
-        Reset();
+        await ResetAsync().ConfigureAwait(false);
 
         _propertyWriter = propertyWriter;
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
@@ -176,6 +366,42 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         finally
         {
             _structureLock.Release();
+        }
+
+        // Create graph change sender if live sync is enabled
+        if (_configuration.EnableGraphChangePublishing)
+        {
+            _graphChangeSender = new OpcUaClientGraphChangeSender(
+                this,
+                _configuration,
+                _subjectLoader,
+                _logger);
+        }
+
+        // Create node change processor for remote sync features
+        if (_configuration.EnableGraphChangeSubscription || _configuration.EnablePeriodicGraphBrowsing)
+        {
+            _nodeChangeProcessor = new OpcUaClientGraphChangeReceiver(
+                this,
+                _subjectRegistry,
+                _configuration,
+                _subjectLoader,
+                _logger);
+
+            // Create and initialize remote sync manager
+            _graphChangeTrigger = new OpcUaClientGraphChangeTrigger(_configuration, _logger);
+            _graphChangeTrigger.Initialize(
+                _nodeChangeProcessor,
+                _sessionManager.SubscriptionManager,
+                () => _sessionManager?.CurrentSession,
+                () => _isStarted,
+                () => Volatile.Read(ref _disposed) == 1);
+
+            // Subscribe to ModelChangeEvents if enabled
+            await _graphChangeTrigger.SetupModelChangeEventSubscriptionAsync(session, cancellationToken).ConfigureAwait(false);
+
+            // Start periodic resync timer if enabled
+            _graphChangeTrigger.StartPeriodicResyncTimer();
         }
 
         _isStarted = true;
@@ -235,7 +461,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             }
         }
 
-        _logger.LogInformation("Successfully read {Count} OPC UA nodes from server.", itemCount);
         return () =>
         {
             foreach (var (property, dataValue) in result)
@@ -243,8 +468,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
                 property.SetValueFromSource(this, dataValue.SourceTimestamp, null, value);
             }
-
-            _logger.LogInformation("Updated {Count} properties with OPC UA node values.", itemCount);
         };
     }
 
@@ -257,7 +480,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         var result = new List<(RegisteredSubjectProperty, NodeId)>();
         foreach (var property in _ownership.Properties)
         {
-            if (property.TryGetPropertyData(OpcUaNodeIdKey, out var nodeIdObj) && 
+            if (property.TryGetPropertyData(OpcUaNodeIdKey, out var nodeIdObj) &&
                 nodeIdObj is NodeId nodeId &&
                 property.GetRegisteredProperty() is { } registeredProperty)
             {
@@ -265,6 +488,68 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             }
         }
         return result;
+    }
+
+    /// <summary>
+    /// Reads and applies initial values for a newly created subject's properties.
+    /// Called after dynamically creating a subject (e.g., for reference properties or collection items).
+    /// </summary>
+    /// <param name="subject">The subject whose properties should be read.</param>
+    /// <param name="session">The OPC UA session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    internal async Task ReadAndApplySubjectValuesAsync(IInterceptorSubject subject, ISession session, CancellationToken cancellationToken)
+    {
+        var registeredSubject = subject.TryGetRegisteredSubject();
+        if (registeredSubject is null)
+        {
+            _logger.LogWarning("Cannot read values: subject {Type} is not registered.", subject.GetType().Name);
+            return;
+        }
+
+        // Collect properties with NodeIds for this subject
+        var propertiesWithNodeIds = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
+        foreach (var property in registeredSubject.Properties)
+        {
+            if (property.Reference.TryGetPropertyData(OpcUaNodeIdKey, out var nodeIdObj) &&
+                nodeIdObj is NodeId nodeId)
+            {
+                propertiesWithNodeIds.Add((property, nodeId));
+            }
+        }
+
+        if (propertiesWithNodeIds.Count == 0)
+        {
+            return;
+        }
+
+        var readValues = new ReadValueIdCollection(propertiesWithNodeIds.Count);
+        foreach (var (_, nodeId) in propertiesWithNodeIds)
+        {
+            readValues.Add(new ReadValueId
+            {
+                NodeId = nodeId,
+                AttributeId = Opc.Ua.Attributes.Value
+            });
+        }
+
+        var readResponse = await session.ReadAsync(
+            requestHeader: null,
+            maxAge: 0,
+            timestampsToReturn: TimestampsToReturn.Source,
+            readValues,
+            cancellationToken).ConfigureAwait(false);
+
+        var resultCount = Math.Min(readResponse.Results.Count, propertiesWithNodeIds.Count);
+        for (var i = 0; i < resultCount; i++)
+        {
+            if (StatusCode.IsGood(readResponse.Results[i].StatusCode))
+            {
+                var dataValue = readResponse.Results[i];
+                var property = propertiesWithNodeIds[i].Property;
+                var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
+                property.SetValueFromSource(this, dataValue.SourceTimestamp, null, value);
+            }
+        }
     }
 
     /// <summary>
@@ -477,7 +762,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     {
         if (_configuration.RootName is not null)
         {
-            var references = await BrowseNodeAsync(session, ObjectIds.ObjectsFolder, cancellationToken).ConfigureAwait(false);
+            var references = await OpcUaHelper.BrowseNodeAsync(session, ObjectIds.ObjectsFolder, cancellationToken).ConfigureAwait(false);
             return references.FirstOrDefault(reference => reference.BrowseName.Name == _configuration.RootName);
         }
 
@@ -503,17 +788,35 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 return WriteResult.Failure(changes, new InvalidOperationException("OPC UA session is not connected."));
             }
 
-            var writeValues = CreateWriteValuesCollection(changes);
-            if (writeValues.Count is 0)
+            // Process structural changes first if live sync is enabled
+            var graphChangeSender = _graphChangeSender;
+            if (graphChangeSender is not null)
             {
-                return WriteResult.Success;
+                graphChangeSender.CurrentSession = session;
+
+                for (var i = 0; i < changes.Length; i++)
+                {
+                    var change = changes.Span[i];
+                    var registeredProperty = change.Property.TryGetRegisteredProperty();
+                    if (registeredProperty is null)
+                    {
+                        continue;
+                    }
+
+                    // Check if this is a structural change and process it
+                    // Structural properties (IsSubjectReference, IsSubjectCollection, IsSubjectDictionary)
+                    // are fully handled here - they don't have NodeIds so PropertyWriter will skip them
+                    await graphChangeSender
+                        .ProcessPropertyChangeAsync(change, registeredProperty, cancellationToken)
+                        .ConfigureAwait(false);
+                }
             }
 
-            var writeResponse = await session.WriteAsync(requestHeader: null, writeValues, cancellationToken).ConfigureAwait(false);
-            var result = ProcessWriteResults(writeResponse.Results, changes);
+            // Delegate actual OPC UA write to PropertyWriter
+            var result = await _opcUaPropertyWriter.WriteChangesAsync(changes, session, cancellationToken).ConfigureAwait(false);
             if (result.IsFullySuccessful || result.IsPartialFailure)
             {
-                NotifyPropertiesWritten(changes);
+                _opcUaPropertyWriter.NotifyPropertiesWritten(changes, _sessionManager?.ReadAfterWriteManager);
             }
 
             return result;
@@ -524,181 +827,22 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }
     }
 
-    /// <summary>
-    /// Processes write results. Zero-allocation on success path.
-    /// </summary>
-    private WriteResult ProcessWriteResults(StatusCodeCollection results, ReadOnlyMemory<SubjectPropertyChange> allChanges)
-    {
-        // Fast path: check if all succeeded (common case)
-        var failureCount = 0;
-        for (var i = 0; i < results.Count; i++)
-        {
-            if (!StatusCode.IsGood(results[i]))
-            {
-                failureCount++;
-            }
-        }
-
-        if (failureCount == 0)
-        {
-            return WriteResult.Success;
-        }
-
-        // Failure case: re-scan to collect failed changes
-        var failedChanges = new List<SubjectPropertyChange>(failureCount);
-        var transientCount = 0;
-        var resultIndex = 0;
-        var span = allChanges.Span;
-        for (var i = 0; i < span.Length && resultIndex < results.Count; i++)
-        {
-            var change = span[i];
-            if (!TryGetWritableNodeId(change, out _, out _))
-                continue;
-
-            if (!StatusCode.IsGood(results[resultIndex]))
-            {
-                failedChanges.Add(change);
-                if (IsTransientWriteError(results[resultIndex]))
-                    transientCount++;
-            }
-            resultIndex++;
-        }
-
-        var successCount = results.Count - failedChanges.Count;
-        var permanentCount = failedChanges.Count - transientCount;
-
-        _logger.LogWarning(
-            "OPC UA write batch partial failure: {SuccessCount} succeeded, {TransientCount} transient, {PermanentCount} permanent out of {TotalCount}.",
-            successCount, transientCount, permanentCount, results.Count);
-
-        var error = new OpcUaWriteException(transientCount, permanentCount, results.Count);
-        return successCount > 0
-            ? WriteResult.PartialFailure(failedChanges.ToArray(), error)
-            : WriteResult.Failure(failedChanges.ToArray(), error);
-    }
-
-    private bool TryGetWritableNodeId(SubjectPropertyChange change, out NodeId nodeId, out RegisteredSubjectProperty registeredProperty)
-    {
-        nodeId = null!;
-        registeredProperty = null!;
-
-        if (!change.Property.TryGetPropertyData(OpcUaNodeIdKey, out var value) || value is not NodeId id)
-        {
-            return false;
-        }
-
-        if (change.Property.TryGetRegisteredProperty() is not { HasSetter: true } property)
-        {
-            return false;
-        }
-
-        nodeId = id;
-        registeredProperty = property;
-        return true;
-    }
-
-    private WriteValueCollection CreateWriteValuesCollection(ReadOnlyMemory<SubjectPropertyChange> changes)
-    {
-        var span = changes.Span;
-        var writeValues = new WriteValueCollection(span.Length);
-
-        for (var i = 0; i < span.Length; i++)
-        {
-            var change = span[i];
-
-            if (!TryGetWritableNodeId(change, out var nodeId, out var registeredProperty))
-            {
-                continue;
-            }
-
-            var convertedValue = _configuration.ValueConverter.ConvertToNodeValue(
-                change.GetNewValue<object?>(),
-                registeredProperty);
-
-            writeValues.Add(new WriteValue
-            {
-                NodeId = nodeId,
-                AttributeId = Opc.Ua.Attributes.Value,
-                Value = new DataValue
-                {
-                    Value = convertedValue,
-                    StatusCode = StatusCodes.Good,
-                    SourceTimestamp = change.ChangedTimestamp.UtcDateTime
-                }
-            });
-        }
-
-        return writeValues;
-    }
-
-    /// <summary>
-    /// Notifies ReadAfterWriteManager that properties were written.
-    /// Schedules read-after-writes for properties where SamplingInterval=0 was revised to non-zero.
-    /// </summary>
-    private void NotifyPropertiesWritten(ReadOnlyMemory<SubjectPropertyChange> changes)
-    {
-        var manager = _sessionManager?.ReadAfterWriteManager;
-        if (manager is null)
-        {
-            return;
-        }
-
-        var span = changes.Span;
-        for (var i = 0; i < span.Length; i++)
-        {
-            if (span[i].Property.TryGetPropertyData(OpcUaNodeIdKey, out var nodeIdObj) &&
-                nodeIdObj is NodeId nodeId)
-            {
-                manager.OnPropertyWritten(nodeId);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Determines if a write failure status code represents a transient error that should be retried.
-    /// Returns true for transient errors (connectivity, timeouts, server load), false for permanent errors.
-    /// </summary>
-    internal static bool IsTransientWriteError(StatusCode statusCode)
-    {
-        // Permanent design-time errors: Don't retry
-        if (statusCode == StatusCodes.BadNodeIdUnknown ||
-            statusCode == StatusCodes.BadAttributeIdInvalid ||
-            statusCode == StatusCodes.BadTypeMismatch ||
-            statusCode == StatusCodes.BadWriteNotSupported ||
-            statusCode == StatusCodes.BadUserAccessDenied ||
-            statusCode == StatusCodes.BadNotWritable)
-        {
-            return false;
-        }
-
-        // Transient connectivity/server errors: Retry
-        return StatusCode.IsBad(statusCode);
-    }
-
-    private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
-        Session session,
-        NodeId nodeId,
-        CancellationToken cancellationToken)
-    {
-        const uint nodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object;
-
-        var (_, _, nodeProperties, _) = await session.BrowseAsync(
-            requestHeader: null,
-            view: null,
-            [nodeId],
-            maxResultsToReturn: 0u,
-            BrowseDirection.Forward,
-            ReferenceTypeIds.HierarchicalReferences,
-            includeSubtypes: true,
-            nodeClassMask,
-            cancellationToken).ConfigureAwait(false);
-
-        return nodeProperties[0];
-    }
-
-    private void Reset()
+    private async Task ResetAsync()
     {
         _isStarted = false;
+        _graphChangeSender = null;
+
+        // Stop remote sync manager (handles periodic resync timer and ModelChangeEvent subscription)
+        if (_graphChangeTrigger is not null)
+        {
+            await _graphChangeTrigger.ResetAsync().ConfigureAwait(false);
+            _graphChangeTrigger = null;
+        }
+
+        // Clear node change processor
+        _nodeChangeProcessor?.Clear();
+        _nodeChangeProcessor = null;
+
         CleanupPropertyData();
     }
 
@@ -709,12 +853,24 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             return; // Already disposed
         }
 
+        // Stop remote sync manager first (handles periodic resync timer and ModelChangeEvent subscription)
+        if (_graphChangeTrigger is not null)
+        {
+            await _graphChangeTrigger.DisposeAsync().ConfigureAwait(false);
+            _graphChangeTrigger = null;
+        }
+
+        // Dispose session manager
         var sessionManager = _sessionManager;
         if (sessionManager is not null)
         {
             await sessionManager.DisposeAsync().ConfigureAwait(false);
             _sessionManager = null;
         }
+
+        // Clear node change processor
+        _nodeChangeProcessor?.Clear();
+        _nodeChangeProcessor = null;
 
         // Clean up property data to prevent memory leaks
         // This ensures that property data associated with this OpcUaNodeIdKey is cleared
@@ -730,5 +886,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         {
             property.RemovePropertyData(OpcUaNodeIdKey);
         }
+
+        // Clear registry for fresh resync
+        _subjectRegistry.Clear();
     }
 }

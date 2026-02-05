@@ -1,5 +1,6 @@
+using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.Registry;
-using Xunit;
+using Opc.Ua;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 
@@ -13,12 +14,7 @@ public class SharedOpcUaServerFixture : IAsyncLifetime
     private const string CertificateStorePath = "pki-shared";
 
     private OpcUaTestServer<SharedTestModel>? _server;
-    private readonly TestLogger _logger;
-
-    public SharedOpcUaServerFixture()
-    {
-        _logger = new TestLogger(new NullTestOutputHelper());
-    }
+    private readonly TestLogger _logger = new(new NullTestOutputHelper());
 
     /// <summary>
     /// A no-op test output helper for when no output is available (like in fixture initialization).
@@ -35,6 +31,11 @@ public class SharedOpcUaServerFixture : IAsyncLifetime
     public SharedTestModel ServerRoot => _server?.Root ?? throw new InvalidOperationException("Server not started");
 
     /// <summary>
+    /// The server's interceptor subject context for creating new instances.
+    /// </summary>
+    public IInterceptorSubjectContext ServerContext => _server?.Context ?? throw new InvalidOperationException("Server not started");
+
+    /// <summary>
     /// The OPC UA server endpoint URL.
     /// </summary>
     public string ServerUrl => $"opc.tcp://localhost:{Port}";
@@ -46,7 +47,18 @@ public class SharedOpcUaServerFixture : IAsyncLifetime
             createRoot: context => new SharedTestModel(context),
             initializeDefaults: InitializeTestData,
             baseAddress: $"opc.tcp://localhost:{Port}/",
-            certificateStoreBasePath: CertificateStorePath);
+            certificateStoreBasePath: CertificateStorePath,
+            configureServer: config =>
+            {
+                config.EnableGraphChangePublishing = true;
+                config.EnableNodeManagement = true;
+
+                // Configure TypeRegistry so the server can create NestedPerson instances
+                // when clients send AddNodes requests with BaseObjectType (the default)
+                var typeRegistry = new OpcUaTypeRegistry();
+                typeRegistry.RegisterType<NestedPerson>(ObjectTypeIds.BaseObjectType);
+                config.TypeRegistry = typeRegistry;
+            });
     }
 
     private void InitializeTestData(IInterceptorSubjectContext context, SharedTestModel root)
@@ -159,15 +171,45 @@ public class SharedOpcUaServerFixture : IAsyncLifetime
             Counter = 0,
             LastWriter = null
         };
+
+        // Initialize ClientToServerSync test area
+        root.ClientToServerSync = new ClientToServerSyncTestArea(context)
+        {
+            Person = new NestedPerson(context)
+            {
+                FirstName = "SyncTest",
+                LastName = "Person",
+                Scores = [90.0, 95.0],
+                Address = new NestedAddress(context) { City = "SyncCity", ZipCode = "11111" }
+            },
+            Sensor = new NestedSensor(context)
+            {
+                Value = 50.0,
+                Unit = "°C",
+                MinValue = 0.0,
+                MaxValue = 100.0
+            }
+        };
+
+        root.ServerToClientReference = new ServerToClientReferenceTestArea(context);
+        root.ServerToClientCollection = new ServerToClientCollectionTestArea(context);
+        root.ServerToClientDictionary = new ServerToClientDictionaryTestArea(context);
+        
+        root.ClientToServerReference = new ClientToServerReferenceTestArea(context);
+        root.ClientToServerCollection = new ClientToServerCollectionTestArea(context);
+        root.ClientToServerDictionary = new ClientToServerDictionaryTestArea(context);
+        root.ClientToServerNestedProperty = new ClientToServerNestedPropertyTestArea(context);
     }
 
     /// <summary>
     /// Creates a new client connected to the shared server.
     /// Each test should create its own client for isolation.
     /// </summary>
-    public async Task<OpcUaTestClient<SharedTestModel>> CreateClientAsync(TestLogger logger)
+    public async Task<OpcUaTestClient<SharedTestModel>> CreateClientAsync(
+        TestLogger logger,
+        Action<OpcUaClientConfiguration>? configureClient = null)
     {
-        var client = new OpcUaTestClient<SharedTestModel>(logger);
+        var client = new OpcUaTestClient<SharedTestModel>(logger, configureClient);
         await client.StartAsync(
             createRoot: context => new SharedTestModel(context),
             isConnected: root => root.Connected,

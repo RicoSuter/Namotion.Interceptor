@@ -1,0 +1,46 @@
+using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Registry.Abstractions;
+
+namespace Namotion.Interceptor.OpcUa.Server;
+
+/// <summary>
+/// Processes structural property changes (add/remove subjects) for OPC UA server.
+/// Creates or removes nodes in the OPC UA address space when the C# model changes.
+/// Note: Source filtering (loop prevention) is handled by ChangeQueueProcessor, not here.
+/// </summary>
+internal class OpcUaServerGraphChangeSender : GraphChangePublisher
+{
+    private readonly CustomNodeManager _nodeManager;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="OpcUaServerGraphChangeSender"/> class.
+    /// </summary>
+    /// <param name="nodeManager">The custom node manager for creating/removing nodes.</param>
+    public OpcUaServerGraphChangeSender(CustomNodeManager nodeManager)
+    {
+        _nodeManager = nodeManager;
+    }
+
+    /// <inheritdoc />
+    protected override Task OnSubjectAddedAsync(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject subject,
+        object? index,
+        CancellationToken cancellationToken)
+    {
+        _nodeManager.CreateSubjectNode(property, subject, index);
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    protected override Task OnSubjectRemovedAsync(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject subject,
+        object? index,
+        CancellationToken cancellationToken)
+    {
+        // Use atomic method to prevent race conditions between removal and reindexing
+        _nodeManager.RemoveSubjectNodesAndReindex(subject, property);
+        return Task.CompletedTask;
+    }
+}

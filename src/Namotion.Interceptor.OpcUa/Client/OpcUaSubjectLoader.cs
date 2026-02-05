@@ -10,8 +10,6 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 internal class OpcUaSubjectLoader
 {
-    private const uint NodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object;
-
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
     private readonly SourceOwnershipManager _ownership;
@@ -60,8 +58,22 @@ internal class OpcUaSubjectLoader
         }
 
         var nodeId = ExpandedNodeId.ToNodeId(node.NodeId, session.NamespaceUris);
-        var nodeReferences = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
-        
+
+        // Track subject with reference counter - only process on first reference
+        var isFirstReference = _source.TrackSubject(subject, nodeId, () => []);
+        if (!isFirstReference)
+        {
+            return;
+        }
+
+        var nodeReferences = await OpcUaHelper.BrowseNodeAsync(session, nodeId, cancellationToken, _configuration.MaximumReferencesPerNode).ConfigureAwait(false);
+
+        // Track which properties were matched to server nodes
+        var claimedPropertyNames = new HashSet<string>();
+
+        // Accumulate flat collection items for batch processing
+        var flatCollectionItems = new Dictionary<RegisteredSubjectProperty, List<(int Index, ReferenceDescription Node)>>();
+
         for (var index = 0; index < nodeReferences.Count; index++)
         {
             var nodeReference = nodeReferences[index];
@@ -83,6 +95,37 @@ internal class OpcUaSubjectLoader
                 if (propertyExists)
                 {
                     continue;
+                }
+
+                // Check for flat collection item (e.g., "Sensors[0]")
+                if (OpcUaHelper.TryParseCollectionIndex(dynamicPropertyName, out var baseName, out var collectionIndex))
+                {
+                    RegisteredSubjectProperty? flatProperty = null;
+                    foreach (var childProperty in registeredSubject.Properties)
+                    {
+                        var propertyBrowseName = childProperty.ResolvePropertyName(_configuration.NodeMapper);
+                        if (propertyBrowseName == baseName && childProperty.IsSubjectCollection)
+                        {
+                            var nodeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(childProperty);
+                            if (nodeConfiguration?.CollectionStructure == CollectionNodeStructure.Flat)
+                            {
+                                flatProperty = childProperty;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (flatProperty is not null)
+                    {
+                        // Accumulate flat collection items for batch processing
+                        if (!flatCollectionItems.TryGetValue(flatProperty, out var items))
+                        {
+                            items = new List<(int Index, ReferenceDescription Node)>();
+                            flatCollectionItems[flatProperty] = items;
+                        }
+                        items.Add((collectionIndex, nodeReference));
+                        continue;
+                    }
                 }
 
                 var addAsDynamic = _configuration.ShouldAddDynamicProperty is not null &&
@@ -116,10 +159,14 @@ internal class OpcUaSubjectLoader
             var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
             if (propertyName is not null)
             {
+                claimedPropertyNames.Add(property.Name);
                 var childNodeId = ExpandedNodeId.ToNodeId(nodeReference.NodeId, session.NamespaceUris);
 
                 if (property.IsSubjectReference)
                 {
+                    // Claim ownership of structural property so changes flow through ChangeQueueProcessor
+                    _ownership.ClaimSource(property.Reference);
+
                     // Check if this should be treated as a VariableNode
                     var nodeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(property);
                     if (nodeConfiguration?.NodeClass == Mapping.OpcUaNodeClass.Variable)
@@ -133,10 +180,16 @@ internal class OpcUaSubjectLoader
                 }
                 else if (property.IsSubjectCollection)
                 {
+                    // Claim ownership of structural property so changes flow through ChangeQueueProcessor
+                    _ownership.ClaimSource(property.Reference);
+
                     await LoadSubjectCollectionAsync(property, childNodeId, monitoredItems, session, loadedSubjects, cancellationToken).ConfigureAwait(false);
                 }
                 else if (property.IsSubjectDictionary)
                 {
+                    // Claim ownership of structural property so changes flow through ChangeQueueProcessor
+                    _ownership.ClaimSource(property.Reference);
+
                     await LoadSubjectDictionaryAsync(property, childNodeId, monitoredItems, session, loadedSubjects, cancellationToken).ConfigureAwait(false);
                 }
                 else
@@ -145,6 +198,51 @@ internal class OpcUaSubjectLoader
                     var visitedNodes = new HashSet<NodeId>();
                     await LoadAttributeNodesAsync(property, childNodeId, session, monitoredItems, visitedNodes, cancellationToken).ConfigureAwait(false);
                 }
+            }
+        }
+
+        // Process accumulated flat collection items (sorted by index)
+        foreach (var (flatProperty, items) in flatCollectionItems)
+        {
+            claimedPropertyNames.Add(flatProperty.Name);
+            _ownership.ClaimSource(flatProperty.Reference);
+
+            // Sort by index and load each item
+            var sortedItems = items.OrderBy(i => i.Index).ToList();
+            var children = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>(sortedItems.Count);
+
+            for (var i = 0; i < sortedItems.Count; i++)
+            {
+                var (_, itemNode) = sortedItems[i];
+                var childSubject = DefaultSubjectFactory.Instance.CreateSubjectForCollectionOrDictionaryProperty(flatProperty);
+                childSubject.Context.AddFallbackContext(subject.Context);
+                children.Add((itemNode, childSubject));
+            }
+
+            // Create and set the collection
+            var collection = DefaultSubjectFactory.Instance
+                .CreateSubjectCollection(flatProperty.Type, children.Select(c => c.Subject));
+            flatProperty.SetValueFromSource(_source, null, null, collection);
+
+            // Load each child subject
+            foreach (var (childNode, childSubject) in children)
+            {
+                await LoadSubjectAsync(childSubject, childNode, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        // Second pass: claim ownership of structural properties that weren't matched to server nodes
+        // This enables Client → Server sync for new nodes that don't exist on the server yet
+        foreach (var property in registeredSubject.Properties)
+        {
+            if (claimedPropertyNames.Contains(property.Name))
+            {
+                continue;
+            }
+
+            if (property.IsSubjectReference || property.IsSubjectCollection || property.IsSubjectDictionary)
+            {
+                _ownership.ClaimSource(property.Reference);
             }
         }
     }
@@ -162,7 +260,7 @@ internal class OpcUaSubjectLoader
             return;
 
         // Browse children of the variable node
-        var childNodes = await BrowseNodeAsync(parentNodeId, session, cancellationToken).ConfigureAwait(false);
+        var childNodes = await OpcUaHelper.BrowseNodeAsync(session, parentNodeId, cancellationToken, _configuration.MaximumReferencesPerNode).ConfigureAwait(false);
         var matchedNames = new HashSet<string>();
 
         // First pass: match known attributes from C# model
@@ -261,7 +359,7 @@ internal class OpcUaSubjectLoader
         else
         {
             // Create new subject instance
-            var newSubject = await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeReference, session, cancellationToken).ConfigureAwait(false);
+            var newSubject = await _configuration.SubjectFactory.CreateSubjectForPropertyAsync(property, nodeReference, session, cancellationToken).ConfigureAwait(false);
             newSubject.Context.AddFallbackContext(subject.Context);
             await LoadSubjectAsync(newSubject, nodeReference, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
             property.SetValueFromSource(_source, null, null, newSubject);
@@ -275,18 +373,18 @@ internal class OpcUaSubjectLoader
         HashSet<IInterceptorSubject> loadedSubjects,
         CancellationToken cancellationToken)
     {
-        var childNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken).ConfigureAwait(false);
+        var childNodes = await OpcUaHelper.BrowseNodeAsync(session, childNodeId, cancellationToken, _configuration.MaximumReferencesPerNode).ConfigureAwait(false);
         var childCount = childNodes.Count;
         var children = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>(childCount);
-        
+
         // Convert to array once to avoid multiple enumerations
         var existingChildren = property.Children.ToArray();
-        
+
         for (var i = 0; i < childCount; i++)
         {
             var childNode = childNodes[i];
             var childSubject = i < existingChildren.Length ? existingChildren[i].Subject : null;
-            childSubject ??= DefaultSubjectFactory.Instance.CreateCollectionSubject(property, i);
+            childSubject ??= DefaultSubjectFactory.Instance.CreateSubjectForCollectionOrDictionaryProperty(property);
 
             children.Add((childNode, childSubject));
         }
@@ -312,7 +410,7 @@ internal class OpcUaSubjectLoader
         HashSet<IInterceptorSubject> loadedSubjects,
         CancellationToken cancellationToken)
     {
-        var childNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken).ConfigureAwait(false);
+        var childNodes = await OpcUaHelper.BrowseNodeAsync(session, childNodeId, cancellationToken, _configuration.MaximumReferencesPerNode).ConfigureAwait(false);
         var existingChildren = property.Children.ToDictionary(c => c.Index!, c => c.Subject);
         var entries = new Dictionary<object, IInterceptorSubject>();
         var nodesByKey = new Dictionary<object, ReferenceDescription>();
@@ -321,7 +419,7 @@ internal class OpcUaSubjectLoader
         {
             var key = childNode.BrowseName.Name; // Use BrowseName as dictionary key
             var childSubject = existingChildren.GetValueOrDefault(key)
-                ?? DefaultSubjectFactory.Instance.CreateCollectionSubject(property, key);
+                ?? DefaultSubjectFactory.Instance.CreateSubjectForCollectionOrDictionaryProperty(property);
             entries[key] = childSubject;
             nodesByKey[key] = childNode;
         }
@@ -349,9 +447,6 @@ internal class OpcUaSubjectLoader
 
     private void MonitorValueNode(NodeId nodeId, RegisteredSubjectProperty property, List<MonitoredItem> monitoredItems)
     {
-        var monitoredItem = MonitoredItemFactory.Create(_configuration, nodeId, property);
-        property.Reference.SetPropertyData(_source.OpcUaNodeIdKey, nodeId);
-
         if (!_ownership.ClaimSource(property.Reference))
         {
             _logger.LogError(
@@ -360,7 +455,13 @@ internal class OpcUaSubjectLoader
             return;
         }
 
+        var monitoredItem = MonitoredItemFactory.Create(_configuration, nodeId, property);
+        property.Reference.SetPropertyData(_source.OpcUaNodeIdKey, nodeId);
+
         monitoredItems.Add(monitoredItem);
+
+        // Also track the monitored item with its owning subject for reference counting
+        _source.AddMonitoredItemToSubject(property.Reference.Subject, monitoredItem);
     }
 
     private async Task LoadVariableNodeForSubjectAsync(
@@ -384,7 +485,7 @@ internal class OpcUaSubjectLoader
         }
 
         // Also load HasProperty children as regular variable nodes
-        var childNodes = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
+        var childNodes = await OpcUaHelper.BrowseNodeAsync(session, nodeId, cancellationToken, _configuration.MaximumReferencesPerNode).ConfigureAwait(false);
         foreach (var childNode in childNodes)
         {
             // Find matching property in child subject (excluding the value property)
@@ -404,65 +505,5 @@ internal class OpcUaSubjectLoader
                 }
             }
         }
-    }
-
-    private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
-        NodeId nodeId,
-        ISession session,
-        CancellationToken cancellationToken)
-    {
-        var browseDescriptions = new BrowseDescriptionCollection
-        {
-            new BrowseDescription
-            {
-                NodeId = nodeId,
-                BrowseDirection = BrowseDirection.Forward,
-                ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
-                IncludeSubtypes = true,
-                NodeClassMask = NodeClassMask,
-                ResultMask = (uint)BrowseResultMask.All
-            }
-        };
-
-        var results = new ReferenceDescriptionCollection();
-
-        var response = await session.BrowseAsync(
-            null,
-            null,
-            _configuration.MaximumReferencesPerNode,
-            browseDescriptions,
-            cancellationToken).ConfigureAwait(false);
-
-        if (response.Results.Count > 0 && StatusCode.IsGood(response.Results[0].StatusCode))
-        {
-            results.AddRange(response.Results[0].References);
-
-            var continuationPoint = response.Results[0].ContinuationPoint;
-            while (continuationPoint is { Length: > 0 })
-            {
-                var nextResponse = await session.BrowseNextAsync(
-                    null, false,
-                    [continuationPoint], cancellationToken).ConfigureAwait(false);
-
-                if (nextResponse.Results.Count > 0 && StatusCode.IsGood(nextResponse.Results[0].StatusCode))
-                {
-                    var r0 = nextResponse.Results[0];
-                    if (r0.References is { Count: > 0 } nextReferences)
-                    {
-                        foreach (var reference in nextReferences)
-                        {
-                            results.Add(reference);
-                        }
-                    }
-                    continuationPoint = r0.ContinuationPoint;
-                }
-                else
-                {
-                    break;
-                }
-            }
-        }
-
-        return results;
     }
 }

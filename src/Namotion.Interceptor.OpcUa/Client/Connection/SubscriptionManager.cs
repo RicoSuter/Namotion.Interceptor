@@ -27,6 +27,12 @@ internal class SubscriptionManager : IAsyncDisposable
     private readonly ConcurrentDictionary<uint, RegisteredSubjectProperty> _monitoredItems = new();
     private readonly ConcurrentDictionary<Subscription, byte> _subscriptions = new();
 
+    /// <summary>
+    /// Event raised when an OPC UA event notification is received.
+    /// Used for ModelChangeEvents and other event-based notifications.
+    /// </summary>
+    public event Action<EventNotificationList>? EventNotificationReceived;
+
     private volatile bool _shuttingDown; // Prevents new callbacks during cleanup
 
     /// <summary>
@@ -65,6 +71,7 @@ internal class SubscriptionManager : IAsyncDisposable
         foreach (var oldSubscription in _subscriptions.Keys)
         {
             oldSubscription.FastDataChangeCallback -= OnFastDataChange;
+            oldSubscription.FastEventCallback -= OnFastEventNotification;
         }
         _subscriptions.Clear();
         _monitoredItems.Clear();
@@ -97,6 +104,7 @@ internal class SubscriptionManager : IAsyncDisposable
             }
 
             subscription.FastDataChangeCallback += OnFastDataChange;
+            subscription.FastEventCallback += OnFastEventNotification;
             await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
 
             var batchEnd = Math.Min(i + maximumItemsPerSubscription, itemCount);
@@ -200,6 +208,145 @@ internal class SubscriptionManager : IAsyncDisposable
         }
     }
 
+    private void OnFastEventNotification(Subscription subscription, EventNotificationList notification, IList<string> stringTable)
+    {
+        if (_shuttingDown)
+        {
+            return;
+        }
+
+        try
+        {
+            EventNotificationReceived?.Invoke(notification);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error in event notification handler.");
+        }
+    }
+
+    /// <summary>
+    /// Adds monitored items to existing subscriptions for live sync of structural changes.
+    /// Items are added to the first subscription that has room, or a new subscription is created if all are full.
+    /// </summary>
+    /// <param name="monitoredItems">The monitored items to add.</param>
+    /// <param name="session">The current session.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task AddMonitoredItemsAsync(
+        IReadOnlyList<MonitoredItem> monitoredItems,
+        Session session,
+        CancellationToken cancellationToken)
+    {
+        if (monitoredItems.Count == 0)
+        {
+            return;
+        }
+
+        var itemsToAdd = new List<MonitoredItem>(monitoredItems);
+        var maximumItemsPerSubscription = _configuration.MaximumItemsPerSubscription;
+
+        // Try to add to existing subscriptions first
+        foreach (var subscription in _subscriptions.Keys)
+        {
+            if (itemsToAdd.Count == 0)
+            {
+                break;
+            }
+
+            var availableSpace = maximumItemsPerSubscription - (int)subscription.MonitoredItemCount;
+            if (availableSpace <= 0)
+            {
+                continue;
+            }
+
+            var itemsForThisSubscription = itemsToAdd.Take(availableSpace).ToList();
+            foreach (var item in itemsForThisSubscription)
+            {
+                subscription.AddItem(item);
+
+                if (item.Handle is RegisteredSubjectProperty property)
+                {
+                    _monitoredItems[item.ClientHandle] = property;
+                }
+            }
+
+            try
+            {
+                await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (ServiceResultException sre)
+            {
+                _logger.LogWarning(sre, "ApplyChanges failed when adding monitored items for live sync.");
+            }
+
+            await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
+            RegisterPropertiesWithReadAfterWriteManager(subscription);
+
+            foreach (var item in itemsForThisSubscription)
+            {
+                itemsToAdd.Remove(item);
+            }
+        }
+
+        // Create new subscriptions for remaining items
+        while (itemsToAdd.Count > 0)
+        {
+            var subscription = new Subscription(session.DefaultSubscription)
+            {
+                PublishingEnabled = true,
+                PublishingInterval = _configuration.DefaultPublishingInterval,
+                DisableMonitoredItemCache = true,
+                MinLifetimeInterval = 60_000,
+                KeepAliveCount = _configuration.SubscriptionKeepAliveCount,
+                LifetimeCount = _configuration.SubscriptionLifetimeCount,
+                Priority = _configuration.SubscriptionPriority,
+                MaxNotificationsPerPublish = _configuration.SubscriptionMaximumNotificationsPerPublish,
+                RepublishAfterTransfer = true,
+                SequentialPublishing = _configuration.SubscriptionSequentialPublishing,
+            };
+
+            if (!session.AddSubscription(subscription))
+            {
+                _logger.LogError("Failed to add new OPC UA subscription for live sync items.");
+                break;
+            }
+
+            subscription.FastDataChangeCallback += OnFastDataChange;
+            subscription.FastEventCallback += OnFastEventNotification;
+            await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
+
+            var itemsForThisSubscription = itemsToAdd.Take(maximumItemsPerSubscription).ToList();
+            foreach (var item in itemsForThisSubscription)
+            {
+                subscription.AddItem(item);
+
+                if (item.Handle is RegisteredSubjectProperty property)
+                {
+                    _monitoredItems[item.ClientHandle] = property;
+                }
+            }
+
+            try
+            {
+                await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (ServiceResultException sre)
+            {
+                _logger.LogWarning(sre, "ApplyChanges failed for new subscription in live sync.");
+            }
+
+            await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
+            RegisterPropertiesWithReadAfterWriteManager(subscription);
+
+            _subscriptions.TryAdd(subscription, 0);
+
+            foreach (var item in itemsForThisSubscription)
+            {
+                itemsToAdd.Remove(item);
+            }
+        }
+    }
+
     /// <summary>
     /// Updates the subscription list to reference subscriptions transferred by SessionReconnectHandler.
     /// Called after successful session transfer to embrace OPC Foundation's subscription preservation.
@@ -211,6 +358,8 @@ internal class SubscriptionManager : IAsyncDisposable
         {
             subscription.FastDataChangeCallback -= OnFastDataChange;
             subscription.FastDataChangeCallback += OnFastDataChange;
+            subscription.FastEventCallback -= OnFastEventNotification;
+            subscription.FastEventCallback += OnFastEventNotification;
             _subscriptions.TryAdd(subscription, 0);
         }
 
@@ -218,8 +367,8 @@ internal class SubscriptionManager : IAsyncDisposable
         {
             _subscriptions.TryRemove(oldSubscription, out _);
             oldSubscription.FastDataChangeCallback -= OnFastDataChange;
+            oldSubscription.FastEventCallback -= OnFastEventNotification;
         }
-
 
         _logger.LogInformation("Updated subscription manager with {Count} transferred subscriptions (removed {OldCount} old)",
             transferredSubscriptions.Count, oldSubscriptions.Length);
@@ -375,6 +524,7 @@ internal class SubscriptionManager : IAsyncDisposable
         foreach (var subscription in subscriptions)
         {
             subscription.FastDataChangeCallback -= OnFastDataChange;
+            subscription.FastEventCallback -= OnFastEventNotification;
         }
 
         var deleteTasks = subscriptions.Select(async subscription =>

@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
@@ -72,6 +73,35 @@ public class OpcUaServerConfiguration
     /// Default is false for security.
     /// </summary>
     public bool AutoAcceptUntrustedCertificates { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether to enable publishing of graph changes to the OPC UA address space.
+    /// When enabled, adding or removing subjects from collections, references, or dictionaries
+    /// will immediately create or delete nodes in the OPC UA address space and emit ModelChangeEvents.
+    /// Default is false for backward compatibility.
+    /// </summary>
+    public bool EnableGraphChangePublishing { get; set; } = false;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether to enable node management via AddNodes/DeleteNodes services.
+    /// When enabled, external OPC UA clients can create or delete nodes in the address space,
+    /// and the changes will be reflected in the C# model.
+    /// Requires a TypeRegistry to be configured to map TypeDefinitions to C# types.
+    /// Default is false for security and backward compatibility.
+    /// </summary>
+    public bool EnableNodeManagement { get; set; } = false;
+
+    /// <summary>
+    /// Gets or sets the type registry for resolving TypeDefinition NodeIds to C# types.
+    /// Required when EnableNodeManagement is true.
+    /// </summary>
+    public OpcUaTypeRegistry? TypeRegistry { get; set; }
+
+    /// <summary>
+    /// Gets or sets the factory used to create subject instances from external AddNodes requests.
+    /// Defaults to <see cref="DefaultSubjectFactory.Instance"/>.
+    /// </summary>
+    public ISubjectFactory SubjectFactory { get; set; } = DefaultSubjectFactory.Instance;
 
     /// <summary>
     /// Gets or sets the base path for certificate stores.
@@ -227,7 +257,7 @@ public class OpcUaServerConfiguration
         LoadNodeSetFromEmbeddedResource<OpcUaServerConfiguration>("NodeSets.Opc.Ua.PADIM.NodeSet2.xml", collection, context);
         LoadNodeSetFromEmbeddedResource<OpcUaServerConfiguration>("NodeSets.Opc.Ua.Machinery.NodeSet2.xml", collection, context);
         LoadNodeSetFromEmbeddedResource<OpcUaServerConfiguration>("NodeSets.Opc.Ua.Machinery.ProcessValues.NodeSet2.xml", collection, context);
-    } 
+    }
 
     protected void LoadNodeSetFromEmbeddedResource<TAssemblyType>(string name, NodeStateCollection nodes, ISystemContext context)
     {

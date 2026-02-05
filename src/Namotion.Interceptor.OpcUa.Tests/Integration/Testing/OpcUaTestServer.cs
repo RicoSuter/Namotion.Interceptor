@@ -17,16 +17,16 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
 
     private readonly TestLogger _logger;
     private IHost? _host;
-    private IInterceptorSubjectContext? _context;
     private Func<IInterceptorSubjectContext, TRoot>? _createRoot;
     private Action<IInterceptorSubjectContext, TRoot>? _initializeDefaults;
+    private Action<OpcUaServerConfiguration>? _configureServer;
     private string _baseAddress = DefaultBaseAddress;
     private string _certificateStoreBasePath = "pki";
     private int _disposed;
 
     public TRoot? Root { get; private set; }
-    public string BaseAddress => _baseAddress;
     public OpcUaServerDiagnostics? Diagnostics { get; private set; }
+    public IInterceptorSubjectContext? Context { get; private set; }
 
     public OpcUaTestServer(TestLogger logger)
     {
@@ -37,12 +37,14 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         Func<IInterceptorSubjectContext, TRoot> createRoot,
         Action<IInterceptorSubjectContext, TRoot>? initializeDefaults = null,
         string? baseAddress = null,
-        string? certificateStoreBasePath = null)
+        string? certificateStoreBasePath = null,
+        Action<OpcUaServerConfiguration>? configureServer = null)
     {
         _createRoot = createRoot;
         _initializeDefaults = initializeDefaults;
         _baseAddress = baseAddress ?? DefaultBaseAddress;
         _certificateStoreBasePath = certificateStoreBasePath ?? "pki";
+        _configureServer = configureServer;
 
         return StartInternalAsync();
     }
@@ -61,10 +63,10 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         {
             logging.ClearProviders();
             logging.SetMinimumLevel(LogLevel.Debug);
-            logging.AddXunit(_logger, "Server", LogLevel.Information);
+            logging.AddXunit(_logger, "Server", LogLevel.Debug);
         });
 
-        _context = InterceptorSubjectContext
+        Context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
             .WithRegistry()
@@ -72,9 +74,9 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
             .WithDataAnnotationValidation()
             .WithHostedServices(builder.Services);
 
-        Root = _createRoot!(_context);
+        Root = _createRoot!(Context);
 
-        _initializeDefaults?.Invoke(_context, Root);
+        _initializeDefaults?.Invoke(Context, Root);
 
         builder.Services.AddSingleton(Root);
         builder.Services.AddOpcUaSubjectServer(
@@ -85,18 +87,22 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
                 var telemetryContext = DefaultTelemetry.Create(b =>
                     b.Services.AddSingleton(loggerFactory));
 
-                return new OpcUaServerConfiguration
+                var config = new OpcUaServerConfiguration
                 {
                     RootName = "Root",
                     BaseAddress = _baseAddress,
                     ValueConverter = new OpcUaValueConverter(),
                     TelemetryContext = telemetryContext,
-                    CleanCertificateStore = false,
+                    CleanCertificateStore = true,
                     AutoAcceptUntrustedCertificates = true,
                     CertificateStoreBasePath = _certificateStoreBasePath,
-                    
+
                     BufferTime = TimeSpan.FromMilliseconds(100)
                 };
+
+                _configureServer?.Invoke(config);
+
+                return config;
             });
 
         _host = builder.Build();

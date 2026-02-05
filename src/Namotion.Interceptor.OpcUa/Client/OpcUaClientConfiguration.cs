@@ -26,18 +26,18 @@ public class OpcUaClientConfiguration
     /// If not specified, browsing starts from the ObjectsFolder root.
     /// </summary>
     public string? RootName { get; set; }
-    
+
     /// <summary>
     /// Gets the OPC UA client application name used for identification and certificate generation.
     /// Default is "Namotion.Interceptor.Client".
     /// </summary>
     public string ApplicationName { get; set; } = "Namotion.Interceptor.Client";
-    
+
     /// <summary>
     /// Gets the default namespace URI to use when a [OpcUaNode] attribute defines a NodeIdentifier but no NodeNamespaceUri.
     /// </summary>
     public string? DefaultNamespaceUri { get; set; }
-    
+
     /// <summary>
     /// Gets the maximum number of monitored items per subscription. Default is 1000.
     /// </summary>
@@ -86,13 +86,13 @@ public class OpcUaClientConfiguration
     /// Gets the type resolver used to infer C# types from OPC UA nodes during dynamic property discovery.
     /// </summary>
     public required OpcUaTypeResolver TypeResolver { get; set; }
-    
+
     /// <summary>
     /// Gets the value converter used to convert between OPC UA node values and C# property values.
     /// Handles type conversions such as decimal to double for OPC UA compatibility.
     /// </summary>
     public required OpcUaValueConverter ValueConverter { get; set; }
-    
+
     /// <summary>
     /// Gets the subject factory used to create interceptor subject instances for OPC UA object nodes.
     /// </summary>
@@ -226,6 +226,54 @@ public class OpcUaClientConfiguration
     /// Default is "pki". Change this to isolate certificate stores for parallel test execution.
     /// </summary>
     public string CertificateStoreBasePath { get; set; } = "pki";
+
+    /// <summary>
+    /// Gets or sets whether to enable publishing of graph changes to the server.
+    /// When enabled, adding or removing subjects from collections, references, or dictionaries
+    /// will create or remove nodes on the server via AddNodes/DeleteNodes services,
+    /// and create or remove MonitoredItems for the affected subjects.
+    /// This requires the server to support AddNodes/DeleteNodes services.
+    /// Default is false for backward compatibility.
+    /// </summary>
+    public bool EnableGraphChangePublishing { get; set; } = false;
+
+    /// <summary>
+    /// Gets or sets the optional type registry for mapping C# types to OPC UA TypeDefinition NodeIds.
+    /// Used when creating remote nodes via AddNodes service.
+    /// If not set, the client will try to use [OpcUaNode(TypeDefinition = "...")] attributes on the subject classes.
+    /// </summary>
+    public OpcUaTypeRegistry? TypeRegistry { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether to enable subscription to graph changes from the server.
+    /// When enabled, the client will subscribe to GeneralModelChangeEventType events
+    /// on the Server node to detect structural changes made by other clients or the server.
+    /// Default is false.
+    /// </summary>
+    public bool EnableGraphChangeSubscription { get; set; } = false;
+
+    /// <summary>
+    /// Gets or sets the queue size for the ModelChangeEvent monitored item.
+    /// Larger values prevent event loss when many structural changes occur in parallel.
+    /// Default is 10000.
+    /// </summary>
+    public uint ModelChangeEventQueueSize { get; set; } = 10_000;
+
+    /// <summary>
+    /// Gets or sets whether to enable periodic browsing of the server's graph structure.
+    /// When enabled, the client will periodically browse the server's address space
+    /// and update the local model to reflect any structural changes.
+    /// This is a fallback for servers that don't support ModelChangeEvents.
+    /// Default is false.
+    /// </summary>
+    public bool EnablePeriodicGraphBrowsing { get; set; } = false;
+
+    /// <summary>
+    /// Gets or sets the interval for periodic graph browsing.
+    /// Only used when EnablePeriodicGraphBrowsing is true.
+    /// Default is 30 seconds.
+    /// </summary>
+    public TimeSpan PeriodicGraphBrowsingInterval { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Gets or sets the polling interval for items that don't support subscriptions.
@@ -514,6 +562,13 @@ public class OpcUaClientConfiguration
             throw new ArgumentException(
                 $"ReadAfterWriteBuffer must be non-negative, got: {ReadAfterWriteBuffer}",
                 nameof(ReadAfterWriteBuffer));
+        }
+
+        if (EnablePeriodicGraphBrowsing && PeriodicGraphBrowsingInterval < TimeSpan.FromSeconds(1))
+        {
+            throw new ArgumentException(
+                $"PeriodicGraphBrowsingInterval must be at least 1 second when EnablePeriodicGraphBrowsing is true, got: {PeriodicGraphBrowsingInterval.TotalSeconds}s",
+                nameof(PeriodicGraphBrowsingInterval));
         }
     }
 }
