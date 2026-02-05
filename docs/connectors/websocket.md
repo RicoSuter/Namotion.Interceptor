@@ -18,7 +18,7 @@ The package offers two server modes with identical performance (both use Kestrel
 | Mode | Method | Best For |
 |------|--------|----------|
 | **Standalone** | `AddWebSocketSubjectServer` | Dedicated sync servers, edge nodes, SCADA systems, console apps |
-| **Embedded** | `AddWebSocketSubjectHandler` + `MapWebSocketSubject` | Adding sync to existing ASP.NET apps (API + WebSocket on same port) |
+| **Embedded** | `AddWebSocketSubjectHandler` + `MapWebSocketSubjectHandler` | Adding sync to existing ASP.NET apps (API + WebSocket on same port) |
 
 **Use standalone mode** when WebSocket sync is the primary purpose of your application. It creates a dedicated Kestrel server with minimal overhead.
 
@@ -83,7 +83,7 @@ app.MapBlazorHub();
 
 // Add WebSocket sync endpoint
 app.UseWebSockets();
-app.MapWebSocketSubject("/ws");
+app.MapWebSocketSubjectHandler("/ws");
 
 app.Run();
 // WebSocket available alongside your existing endpoints
