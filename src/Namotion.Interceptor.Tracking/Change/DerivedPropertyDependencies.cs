@@ -7,6 +7,8 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// - Writes: Lock-free CAS (Compare-And-Swap) with automatic retry on contention.
 /// - Version: Monotonically increasing counter for optimistic concurrency control.
 /// Design: Copy-on-write ensures readers never see partial updates. Version counter detects ABA problems.
+/// Memory: Allocates on mutation (inherent to copy-on-write). Steady-state is allocation-free
+/// when dependencies don't change (SequenceEqual early-exit in StoreRecordedTouchedProperties).
 /// </summary>
 public sealed class DerivedPropertyDependencies
 {
@@ -115,15 +117,22 @@ public sealed class DerivedPropertyDependencies
     /// <returns>True if replaced successfully; false if version changed (concurrent modification detected).</returns>
     internal bool TryReplace(ReadOnlySpan<PropertyReference> newItems, long expectedVersion)
     {
-        // Optimistic concurrency: Fail if another thread modified since we read
+        // Capture current array for CAS comparison
+        var snapshot = Volatile.Read(ref _items);
+
+        // Fast path: Fail if version already changed (avoids array allocation)
         if (Volatile.Read(ref _version) != expectedVersion)
             return false;
 
-        // Replace array atomically (volatile write ensures visibility)
+        // Allocate new array
         var newArr = newItems.Length == 0 ? [] : newItems.ToArray();
-        Volatile.Write(ref _items, newArr);
-        Interlocked.Increment(ref _version);
 
+        // CAS ensures no concurrent modification between our reads and write
+        // This closes the race window that existed with plain Volatile.Write
+        if (!ReferenceEquals(Interlocked.CompareExchange(ref _items, newArr, snapshot), snapshot))
+            return false;
+
+        Interlocked.Increment(ref _version);
         return true;
     }
 }
