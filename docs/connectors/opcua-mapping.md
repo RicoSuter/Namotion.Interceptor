@@ -19,6 +19,28 @@ Some configuration applies only to one side:
 - `SamplingInterval`, `QueueSize`, `DataChangeTrigger` - Client monitoring
 - `EventNotifier`, `ModellingRule` - Server node structure
 
+## Node Mapper Configuration
+
+The mapping is driven by the `IOpcUaNodeMapper` interface, configured via the `NodeMapper` property on `OpcUaClientConfiguration` and `OpcUaServerConfiguration`. The default is a `CompositeNodeMapper` combining:
+- `PathProviderOpcUaNodeMapper` — maps `[Path("opc", "...")]` attributes
+- `AttributeOpcUaNodeMapper` — maps `[OpcUaNode]` and `[OpcUaReference]` attributes
+
+For custom mapping, set `NodeMapper` explicitly:
+
+```csharp
+var config = new OpcUaClientConfiguration
+{
+    NodeMapper = new CompositeNodeMapper(
+        new FluentOpcUaNodeMapper<Machine>(),       // Instance overrides (see Fluent Configuration)
+        new AttributeOpcUaNodeMapper(),              // Attribute defaults
+        new PathProviderOpcUaNodeMapper(
+            new AttributeBasedPathProvider("opc"))), // Path fallback
+    // ... other settings
+};
+```
+
+See [Composite Mappers](#composite-mappers) for merge semantics and [Fluent Configuration](#fluent-configuration) for code-based mapping.
+
 ## Scope and Limitations
 
 This mapping system is designed for **instance mapping** - creating Object and Variable nodes in an OPC UA address space from C# object models. It supports:
