@@ -64,7 +64,7 @@ Defines node metadata. Can be applied to classes (type-level defaults) or proper
 public class OpcUaNodeAttribute : Attribute
 {
     // Constructor - BrowseName is required, namespace defaults to null
-    public OpcUaNodeAttribute(string browseName, string? browseNamespaceUri = null);
+    public OpcUaNodeAttribute(string browseName, string? browseNamespaceUri = null, string? connectorName = null);
 
     // Node identification (from constructor)
     public string BrowseName { get; }
@@ -102,6 +102,8 @@ public class OpcUaNodeAttribute : Attribute
     public byte EventNotifier { get; init; }
 }
 ```
+
+> For details on sampling vs exception-based monitoring, see [Monitoring & Subscriptions](opcua.md#monitoring--subscriptions).
 
 **Resolution order:**
 1. Class-level `[OpcUaNode]` - defaults for the type
@@ -314,6 +316,8 @@ TemperatureSensor (ObjectNode)
 
 Note: The C# property names (e.g., `Value_EURange`) are just convention - the OPC UA browse names come from the `[Path]` or `[OpcUaNode]` attributes. Attributes can be nested (attributes on attributes) for complex metadata hierarchies.
 
+`[PropertyAttribute]` is one way to define property attributes. Attributes can also be added dynamically at runtime via `AddAttribute()`. The OPC UA mapping handles all registry attributes the same way. For more on the property attributes concept, see [Registry](../registry.md#define-attributes-using-properties).
+
 ### Same Instance, Multiple References
 
 When the same C# object is referenced from multiple places, only one OPC UA node is created:
@@ -376,9 +380,7 @@ For runtime configuration without attributes.
 
 **Important:** Fluent configuration is **property-level only**. It configures specific property instances (e.g., `Motor1.Speed` vs `Motor2.Speed`), not type-level defaults.
 
-For **class-level configuration** (TypeDefinition, NodeClass that applies to all instances of a type), use:
-- `[OpcUaNode]` attribute on the class, OR
-- Composite mapper with `AttributeOpcUaNodeMapper` to pick up class attributes
+For **class-level configuration** (TypeDefinition, NodeClass that applies to all instances of a type), use `[OpcUaNode]` attributes on the class with `AttributeOpcUaNodeMapper` in a composite mapper to pick them up.
 
 ```csharp
 // Class-level: Use attributes (applies to ALL Motor instances)
@@ -464,18 +466,21 @@ var mapper = new FluentOpcUaNodeMapper<Machine>()
         // Add HasInterface reference to IVendorNameplateType
         .AdditionalReference(
             referenceType: "HasInterface",
+            referenceTypeNamespace: null,
             targetNodeId: "IVendorNameplateType",
             targetNamespaceUri: "http://opcfoundation.org/UA/DI/",
             isForward: true)
         // Multiple additional references can be added
         .AdditionalReference(
             referenceType: "HasTypeDefinition",
+            referenceTypeNamespace: null,
             targetNodeId: "MotorType",
             targetNamespaceUri: "http://example.org/Machinery/"));
 ```
 
 The `AdditionalReference` method parameters:
 - `referenceType`: The reference type name (e.g., "HasInterface", "Organizes")
+- `referenceTypeNamespace`: Optional namespace URI for the reference type (uses default namespace if null)
 - `targetNodeId`: The identifier of the target node
 - `targetNamespaceUri`: Optional namespace URI for the target node (uses default namespace if null)
 - `isForward`: Direction of the reference (default: `true`)
@@ -502,6 +507,8 @@ Result: { BrowseName: "Speed", SamplingInterval: 50 }
 ```
 
 **Note on ReferenceType defaults:** `PathProviderOpcUaNodeMapper` returns `null` for `ReferenceType` on non-attribute properties, allowing later mappers to specify it. `AttributeOpcUaNodeMapper` uses `"HasProperty"` as the default when `[OpcUaReference]` is not specified. This design allows the composite chain to resolve defaults correctly.
+
+> For custom value converters and type resolvers, see [Extensibility](opcua.md#extensibility).
 
 ## Standard Reference Types
 
@@ -618,7 +625,7 @@ OPC UA Views (filtered address space subsets) are not supported.
 
 ### Fluent Class-Level Configuration
 
-The fluent mapper (`FluentOpcUaNodeMapper<T>`) only supports property-level configuration. For class-level defaults (TypeDefinition, NodeClass), use `[OpcUaNode]` attributes on classes combined with `CompositeNodeMapper`.
+The fluent mapper only supports property-level configuration. See [Fluent Configuration](#fluent-configuration) for details on combining with attributes for class-level defaults.
 
 ## Future Extensibility
 
