@@ -72,7 +72,6 @@ builder.Services.AddOpcUaSubjectClientSource(
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://localhost:4840",
-        PathProvider = new AttributeBasedPathProvider("opc", ".", null),
         TypeResolver = new OpcUaTypeResolver(logger),
         ValueConverter = new OpcUaValueConverter(),
         SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -125,14 +124,13 @@ By default, all unknown attributes are added. Set to `null` to disable dynamic a
 
 ### Server Configuration
 
-The server configuration requires minimal setup with source path provider and value converter. Additional options control the application name, namespace URI, certificate management, and performance tuning.
+The server configuration requires minimal setup with value converter. Additional options control the application name, namespace URI, certificate management, and performance tuning.
 
 ```csharp
 builder.Services.AddOpcUaSubjectServer(
     subjectSelector: sp => sp.GetRequiredService<MyRoot>(),
     configurationProvider: sp => new OpcUaServerConfiguration
     {
-        PathProvider = new AttributeBasedPathProvider("opc", ".", null),
         ValueConverter = new OpcUaValueConverter(),
 
         // Optional
@@ -145,6 +143,10 @@ builder.Services.AddOpcUaSubjectServer(
 ```
 
 The server automatically configures security policies, authentication, operation limits (MaxNodesPerRead/Write=4000), and companion specification namespaces.
+
+### Node Mapper
+
+Both client and server configurations include a `NodeMapper` property (`IOpcUaNodeMapper`) that controls how C# properties map to OPC UA nodes. The default is a `CompositeNodeMapper` combining `PathProviderOpcUaNodeMapper` (maps `[Path]` attributes) and `AttributeOpcUaNodeMapper` (maps `[OpcUaNode]` attributes). For custom mapping strategies including fluent configuration and composite mappers, see [OPC UA Mapping Guide](opcua-mapping.md).
 
 ## Property Mapping
 
@@ -172,7 +174,7 @@ public partial class Machine
 
 For comprehensive mapping documentation including companion spec support, VariableTypes, and fluent configuration, see [OPC UA Mapping Guide](opcua-mapping.md).
 
-## Monitoring Modes
+## Monitoring & Subscriptions
 
 ### Sampling vs Exception-Based Monitoring
 
@@ -194,6 +196,29 @@ public partial bool StartCommand { get; set; }
 ```
 
 **Note:** Even with `SamplingInterval = 0`, the server may revise this based on its capabilities. Check the server's `RevisedSamplingInterval` to verify exception-based monitoring is active.
+
+### Discrete vs Analog Variables
+
+Industrial automation distinguishes between two types of variables:
+
+| Type | Characteristics | Examples | OPC UA Monitoring |
+|------|-----------------|----------|-------------------|
+| **Analog** | Continuous values, gradual changes, sampling is fine | Temperature, pressure, speed | Sampling-based (`SamplingInterval > 0`) with optional deadband |
+| **Discrete** | Binary on/off, every transition matters | Handshake flags, command triggers, state indicators | Exception-based (`SamplingInterval = 0`) |
+
+For **discrete variables**, missing a transition can cause system failures. A classic example is the handshake pattern: client writes `1`, PLC acknowledges by writing `0`. If sampling misses the `1→0` transition (because both samples see `0`), the client never knows the PLC acknowledged.
+
+OPC UA's sampling-based monitoring compares each sample against the *previous sample*, not against what the client knows. When a value changes faster than the sampling rate (e.g., `0→1→0` between samples), the server sees `0` at both sample points and reports no change.
+
+```
+Sampling-based (SamplingInterval = 100ms):
+t=0ms:   Sample value=0, baseline=0 → no change reported
+t=50ms:  Client writes 1 → value=1 (no sample happens)
+t=60ms:  PLC writes 0 → value=0 (no sample happens)
+t=100ms: Sample value=0, baseline=0 → no change reported ❌
+```
+
+This is spec-compliant behavior per [OPC UA Part 4](https://reference.opcfoundation.org/Core/Part4/v104/docs/5.12.1.2), not a bug.
 
 ### Data Change Filters
 
@@ -218,6 +243,62 @@ Control which value changes generate notifications:
     DeadbandValue = 0.5)]
 public partial double Temperature { get; set; }
 ```
+
+### Read After Write Fallback
+
+When a server doesn't support exception-based monitoring, the library provides an automatic read-after-write fallback.
+
+**Solution hierarchy:**
+1. **Best: Exception-based monitoring** (`SamplingInterval = 0`) - Server reports every change immediately
+2. **Fallback: Read-after-write** - When the server revises `SamplingInterval = 0` to non-zero, automatically read values after writes
+
+The library automatically detects when `SamplingInterval = 0` was revised to a non-zero value (common with legacy PLCs or servers that don't support exception-based monitoring). For these properties, after a successful write, it schedules a read-back to catch server-side changes that sampling would miss.
+
+```csharp
+// Mark as discrete variable - request exception-based monitoring
+[OpcUaNode("CommandTrigger", SamplingInterval = 0)]
+public partial bool CommandTrigger { get; set; }
+```
+
+**Configuration:**
+```csharp
+var config = new OpcUaClientConfiguration
+{
+    // Enable/disable read-after-write fallback (default: true)
+    EnableReadAfterWrite = true,
+
+    // Buffer added to revised interval before reading back (default: 50ms)
+    ReadAfterWriteBuffer = TimeSpan.FromMilliseconds(50)
+};
+```
+
+**Behavior:**
+- Only triggers for properties where `SamplingInterval = 0` was revised to > 0
+- Multiple rapid writes are coalesced into a single read
+- Reads are batched for efficiency
+- Circuit breaker prevents repeated failures from overwhelming the server
+- Logged when activated so you can verify which properties need this fallback
+
+**Limitations:**
+If the server's minimum sampling rate is slower than the value changes, no client-side workaround can help. In that case, consider:
+- Configuring the OPC UA server to support faster sampling or exception-based monitoring
+- Changing the PLC code to use a counter-based pattern instead of boolean handshakes
+- Using OPC UA Methods for command/response patterns (requires PLC support)
+
+### Subscription Configuration
+
+Configure monitored item behavior at global or per-property level:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `DefaultSamplingInterval` | null | Sampling interval in ms (null = server decides, 0 = exception-based) |
+| `DefaultQueueSize` | null | Values to buffer (null = library default of 1) |
+| `DefaultDiscardOldest` | null | Discard oldest when queue full (null = library default of true) |
+| `DefaultDataChangeTrigger` | null | When to report changes (null = StatusValue) |
+| `DefaultDeadbandType` | null | Deadband filter type (null = None) |
+| `DefaultDeadbandValue` | null | Deadband threshold (null = 0.0) |
+
+All settings can be overridden per-property using `[OpcUaNode]` attribute.
 
 ## Type Conversions
 
@@ -331,15 +412,6 @@ if (dynamicProperty != null)
 }
 ```
 
-## Performance
-
-The library includes optimizations:
-
-- Batched read/write operations respecting server limits
-- Object pooling for change buffers
-- Fast data change callbacks bypassing caches
-- Buffered updates batching rapid changes
-
 ## Companion Specifications
 
 The server automatically loads embedded NodeSets:
@@ -351,9 +423,9 @@ The server automatically loads embedded NodeSets:
 
 Reference these types with `[OpcUaNode(TypeDefinition = "...", TypeDefinitionNamespace = "...")]`.
 
-For comprehensive mapping documentation including companion spec support, VariableTypes, and fluent configuration, see [OPC UA Mapping Guide](opcua-mapping.md).
+For mapping patterns with companion specs, see [OPC UA Mapping Guide — Companion Spec Support](opcua-mapping.md#opc-ua-companion-spec-support).
 
-## Resilience Features
+## Resilience
 
 ### Write Retry Queue During Disconnection
 
@@ -365,7 +437,6 @@ builder.Services.AddOpcUaSubjectClientSource(
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        PathProvider = new AttributeBasedPathProvider("opc", ".", null),
         WriteRetryQueueSize = 1000 // Buffer up to 1000 writes (default)
     });
 
@@ -388,7 +459,6 @@ builder.Services.AddOpcUaSubjectClientSource(
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        PathProvider = new AttributeBasedPathProvider("opc", ".", null),
         EnablePollingFallback = true, // Default
         PollingInterval = TimeSpan.FromSeconds(1), // Default: 1 second
         PollingBatchSize = 100 // Default: 100 items per batch
@@ -411,7 +481,6 @@ builder.Services.AddOpcUaSubjectClientSource(
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        PathProvider = new AttributeBasedPathProvider("opc", ".", null),
         SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(5) // Default: 5 seconds
     });
 ```
@@ -427,77 +496,24 @@ builder.Services.AddOpcUaSubjectClientSource(
 - `PollingInterval` minimum of 100 milliseconds enforced
 - Fail-fast with clear error messages on invalid configuration
 
-### Read After Write for Discrete Variables
-
-#### Understanding Discrete vs Analog Variables
-
-Industrial automation distinguishes between two types of variables:
-
-| Type | Characteristics | Examples | OPC UA Monitoring |
-|------|-----------------|----------|-------------------|
-| **Analog** | Continuous values, gradual changes, sampling is fine | Temperature, pressure, speed | Sampling-based (`SamplingInterval > 0`) with optional deadband |
-| **Discrete** | Binary on/off, every transition matters | Handshake flags, command triggers, state indicators | Exception-based (`SamplingInterval = 0`) |
-
-For **discrete variables**, missing a transition can cause system failures. A classic example is the handshake pattern: client writes `1`, PLC acknowledges by writing `0`. If sampling misses the `1→0` transition (because both samples see `0`), the client never knows the PLC acknowledged.
-
-#### The Problem with Sampling-Based Monitoring
-
-OPC UA's sampling-based monitoring compares each sample against the *previous sample*, not against what the client knows. When a value changes faster than the sampling rate (e.g., `0→1→0` between samples), the server sees `0` at both sample points and reports no change.
-
-```
-Sampling-based (SamplingInterval = 100ms):
-t=0ms:   Sample value=0, baseline=0 → no change reported
-t=50ms:  Client writes 1 → value=1 (no sample happens)
-t=60ms:  PLC writes 0 → value=0 (no sample happens)
-t=100ms: Sample value=0, baseline=0 → no change reported ❌
-```
-
-This is spec-compliant behavior per [OPC UA Part 4](https://reference.opcfoundation.org/Core/Part4/v104/docs/5.12.1.2), not a bug.
-
-#### Solution Hierarchy
-
-1. **Best: Exception-based monitoring** (`SamplingInterval = 0`) - Server reports every change immediately
-2. **Fallback: Read-after-write** - When the server revises `SamplingInterval = 0` to non-zero, automatically read values after writes
-
-#### How Read-After-Write Works
-
-The library automatically detects when `SamplingInterval = 0` was revised to a non-zero value (common with legacy PLCs or servers that don't support exception-based monitoring). For these properties, after a successful write, it schedules a read-back to catch server-side changes that sampling would miss.
-
-```csharp
-// Mark as discrete variable - request exception-based monitoring
-[OpcUaNode("CommandTrigger", SamplingInterval = 0)]
-public partial bool CommandTrigger { get; set; }
-```
-
-**Configuration:**
-```csharp
-var config = new OpcUaClientConfiguration
-{
-    // Enable/disable read-after-write fallback (default: true)
-    EnableReadAfterWrite = true,
-
-    // Buffer added to revised interval before reading back (default: 50ms)
-    ReadAfterWriteBuffer = TimeSpan.FromMilliseconds(50)
-};
-```
-
-**Behavior:**
-- Only triggers for properties where `SamplingInterval = 0` was revised to > 0
-- Multiple rapid writes are coalesced into a single read
-- Reads are batched for efficiency
-- Circuit breaker prevents repeated failures from overwhelming the server
-- Logged when activated so you can verify which properties need this fallback
-
-#### Limitations
-
-If the server's minimum sampling rate is slower than the value changes, no client-side workaround can help. In that case, consider:
-- Configuring the OPC UA server to support faster sampling or exception-based monitoring
-- Changing the PLC code to use a counter-based pattern instead of boolean handshakes
-- Using OPC UA Methods for command/response patterns (requires PLC support)
-
 ### Stall Detection
 
 When the SDK's reconnection handler gets stuck (e.g., server never responds), the client automatically detects the stall and forces a reconnection reset. Configure via `MaxReconnectDuration` (default: 30 seconds). If the SDK reconnection hasn't succeeded within this duration, a full session reset and manual reconnection is triggered.
+
+### Resilience Configuration
+
+For 24/7 production use, the default configuration provides robust resilience:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `KeepAliveInterval` | 5s | How quickly disconnections are detected |
+| `ReconnectInterval` | 5s | Time between reconnection attempts |
+| `MaxReconnectDuration` | 30s | Max time to wait for SDK reconnection before forcing reset |
+| `WriteRetryQueueSize` | 1000 | Updates buffered during disconnection |
+| `SessionDisposalTimeout` | 5s | Max wait for graceful session close |
+| `SubscriptionSequentialPublishing` | false | Process subscription messages in order (see Thread Safety) |
+
+Stall recovery is triggered after `MaxReconnectDuration` (default: 30s) if SDK reconnection hasn't succeeded.
 
 ## Diagnostics
 
@@ -506,6 +522,26 @@ Monitor client and server health in production via the `Diagnostics` property on
 **Client diagnostics** (`OpcUaClientDiagnostics`): Connection state, session ID, subscription/monitored item counts, reconnection metrics, polling statistics.
 
 **Server diagnostics** (`OpcUaServerDiagnostics`): Running state, active session count, start time, consecutive failures, last error.
+
+## Security
+
+**Client security:**
+```csharp
+var config = new OpcUaClientConfiguration
+{
+    ServerUrl = "opc.tcp://plc.factory.com:4840",
+    UseSecurity = true,  // Enable signing and encryption (recommended for production)
+    // ... other settings
+};
+```
+
+When `UseSecurity = true`, the client prefers secure endpoints with message signing and encryption. The default is `false` for development convenience.
+
+**Server security:**
+By default, the server accepts anonymous connections without encryption. For production deployments requiring authentication:
+- Configure custom `UserTokenPolicies` in a derived `OpcUaServerConfiguration`
+- Use certificate-based authentication
+- Enable message signing and encryption
 
 ## Thread Safety
 
@@ -527,61 +563,11 @@ using (SubjectChangeContext.WithSource(opcUaSource))
 }
 ```
 
-## Security Considerations
-
-**Client security:**
-```csharp
-var config = new OpcUaClientConfiguration
-{
-    ServerUrl = "opc.tcp://plc.factory.com:4840",
-    UseSecurity = true,  // Enable signing and encryption (recommended for production)
-    // ... other settings
-};
-```
-
-When `UseSecurity = true`, the client prefers secure endpoints with message signing and encryption. The default is `false` for development convenience.
-
-**Server security:**
-By default, the server accepts anonymous connections without encryption. For production deployments requiring authentication:
-- Configure custom `UserTokenPolicies` in a derived `OpcUaServerConfiguration`
-- Use certificate-based authentication
-- Enable message signing and encryption
-
-## Resilience Configuration
-
-For 24/7 production use, the default configuration provides robust resilience:
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `KeepAliveInterval` | 5s | How quickly disconnections are detected |
-| `ReconnectInterval` | 5s | Time between reconnection attempts |
-| `MaxReconnectDuration` | 30s | Max time to wait for SDK reconnection before forcing reset |
-| `WriteRetryQueueSize` | 1000 | Updates buffered during disconnection |
-| `SessionDisposalTimeout` | 5s | Max wait for graceful session close |
-| `SubscriptionSequentialPublishing` | false | Process subscription messages in order (see Thread Safety) |
-
-Stall recovery is triggered after `MaxReconnectDuration` (default: 30s) if SDK reconnection hasn't succeeded.
-
-## Subscription Configuration
-
-Configure monitored item behavior at global or per-property level:
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `DefaultSamplingInterval` | null | Sampling interval in ms (null = server decides, 0 = exception-based) |
-| `DefaultQueueSize` | null | Values to buffer (null = library default of 1) |
-| `DefaultDiscardOldest` | null | Discard oldest when queue full (null = library default of true) |
-| `DefaultDataChangeTrigger` | null | When to report changes (null = StatusValue) |
-| `DefaultDeadbandType` | null | Deadband filter type (null = None) |
-| `DefaultDeadbandValue` | null | Deadband threshold (null = 0.0) |
-
-All settings can be overridden per-property using `[OpcUaNode]` attribute.
-
 ## Lifecycle Management
 
-### Automatic Cleanup on Subject Detach
+The OPC UA integration hooks into the interceptor lifecycle system (see [Subject Lifecycle Tracking](../tracking.md#subject-lifecycle-tracking)) to clean up resources when subjects are detached.
 
-When subjects are detached from the object graph (removed from collections, set to null, etc.), the OPC UA client and server automatically clean up their internal tracking structures to prevent memory leaks.
+### Automatic Cleanup on Subject Detach
 
 **Server behavior:**
 - When a subject is detached, its corresponding entries in `CustomNodeManager._subjects` are removed
@@ -595,14 +581,16 @@ When subjects are detached from the object graph (removed from collections, set 
 - OPC UA subscription items remain on the server until session ends
 - Cleanup is skipped during reconnection to avoid interfering with subscription transfer
 
-**Thread safety:**
-- Cleanup handlers are invoked inside the lifecycle interceptor's lock
-- Handlers use `ConcurrentDictionary.TryRemove` for safe concurrent modification
-- Event handlers are designed to be fast and exception-free
-
 **What this does NOT do:**
 - Does NOT dynamically add new subjects to OPC UA after initialization
 - Does NOT update the OPC UA address space when subjects are attached
 - New subjects added after startup require a restart to appear in OPC UA
 
-This minimal lifecycle integration prevents memory leaks in long-running services with dynamic object graphs.
+## Performance
+
+The library includes optimizations:
+
+- Batched read/write operations respecting server limits
+- Object pooling for change buffers
+- Fast data change callbacks bypassing caches
+- Buffered updates batching rapid changes
