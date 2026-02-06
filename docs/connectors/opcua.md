@@ -144,6 +144,10 @@ builder.Services.AddOpcUaSubjectServer(
 
 The server automatically configures security policies, authentication, operation limits (MaxNodesPerRead/Write=4000), and companion specification namespaces.
 
+### Node Mapper
+
+Both client and server configurations include a `NodeMapper` property (`IOpcUaNodeMapper`) that controls how C# properties map to OPC UA nodes. The default is a `CompositeNodeMapper` combining `PathProviderOpcUaNodeMapper` (maps `[Path]` attributes) and `AttributeOpcUaNodeMapper` (maps `[OpcUaNode]` attributes). For custom mapping strategies including fluent configuration and composite mappers, see [OPC UA Mapping Guide](opcua-mapping.md).
+
 ## Property Mapping
 
 Map C# properties to OPC UA nodes using attributes. For simple cases, use `[Path]`. For advanced OPC UA-specific configuration, use `[OpcUaNode]` and related attributes.
