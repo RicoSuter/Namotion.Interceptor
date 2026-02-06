@@ -85,7 +85,19 @@ public class JsonWebSocketSerializer : IWebSocketSerializer
         {
             throw new InvalidOperationException("Invalid message envelope: missing correlationId");
         }
-        int? correlationId = reader.TokenType == JsonTokenType.Null ? null : reader.GetInt32();
+        int? correlationId;
+        if (reader.TokenType == JsonTokenType.Null)
+        {
+            correlationId = null;
+        }
+        else if (reader.TokenType == JsonTokenType.Number)
+        {
+            correlationId = reader.GetInt32();
+        }
+        else
+        {
+            throw new InvalidOperationException("Invalid message envelope: correlationId must be a number or null");
+        }
 
         if (!reader.Read())
         {

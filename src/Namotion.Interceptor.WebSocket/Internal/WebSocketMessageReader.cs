@@ -108,7 +108,8 @@ internal static class WebSocketMessageReader
 
                 if (messageStream.Length + result.Count > maxMessageSize)
                 {
-                    // Dispose stream immediately since data is unusable (exceeds max size)
+                    // Abort WebSocket to prevent reading leftover fragments as a new message
+                    webSocket.Abort();
                     await messageStream.DisposeAsync();
                     return ReadResult.MaxSizeExceeded(null, buffer);
                 }
@@ -177,6 +178,8 @@ internal static class WebSocketMessageReader
 
             if (stream.Length + result.Count > maxMessageSize)
             {
+                // Abort WebSocket to prevent reading leftover fragments as a new message
+                webSocket.Abort();
                 return ReadResult.MaxSizeExceededNoResources;
             }
 

@@ -10,7 +10,6 @@ public class SubjectPropertyUpdate
     /// <summary>
     /// The kind of property update.
     /// </summary>
-    [JsonConverter(typeof(JsonStringEnumConverter))]
     [JsonPropertyName("kind")]
     public SubjectPropertyUpdateKind Kind { get; set; }
 

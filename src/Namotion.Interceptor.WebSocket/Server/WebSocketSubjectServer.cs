@@ -81,6 +81,12 @@ public class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
         builder.WebHost.UseUrls(url);
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
+        // Dispose previous WebApplication on retry
+        if (_app is not null)
+        {
+            await _app.DisposeAsync();
+        }
+
         _app = builder.Build();
         _app.UseWebSockets(new WebSocketOptions
         {
@@ -119,6 +125,17 @@ public class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
+
+        // Stop ExecuteAsync if called directly (not via hosting) (I6)
+        try
+        {
+            using var stopCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await StopAsync(stopCts.Token);
+        }
+        catch (Exception)
+        {
+            // Best effort stop
+        }
 
         await _handler.CloseAllConnectionsAsync();
 

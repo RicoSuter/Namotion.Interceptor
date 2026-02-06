@@ -221,10 +221,17 @@ Client                                 Server
    |-------- Hello ---------------------->|
    |  [0, null, {version:1}]              |
    |                                      |
+   |              (server registers connection for broadcasts)
+   |              (server builds snapshot under update lock)
+   |                                      |
    |<------- Welcome ---------------------|
    |  [1, null, {version:1, format:"json", state: SubjectUpdate}]
    |                                      |
-   |  (client applies initial state)      |
+   |<------- Update ----------------------|  (queued broadcasts flushed after Welcome)
+   |  [2, null, SubjectUpdate]            |
+   |                                      |
+   |  (client applies snapshot,           |
+   |   then replays buffered updates)     |
    |                                      |
    |<------- Update ----------------------|  (server pushes changes)
    |  [2, null, SubjectUpdate]            |
@@ -232,6 +239,17 @@ Client                                 Server
    |-------- Update --------------------->|  (client writes changes)
    |  [2, null, SubjectUpdate]            |
 ```
+
+#### Register-Before-Welcome Design
+
+The server registers the connection for broadcasts **before** building and sending the Welcome snapshot. This follows the buffer-flush-load-replay pattern (see [Connectors](../connectors.md)) and ensures eventual consistency:
+
+1. **Register**: Connection is added to the broadcast list. Any concurrent property changes are **queued per-connection** (not sent yet). The client does not receive any messages until the Welcome is sent.
+2. **Snapshot**: The server builds the complete state snapshot under `_applyUpdateLock`, the same lock used when applying client updates. This ensures the snapshot is a consistent cut: every update applied before the lock is included, every update applied after will be sent as a separate Update message.
+3. **Welcome**: The snapshot is sent to the client. Immediately after (under the same send lock), any queued updates are flushed. The client always sees Welcome as the first message, followed by any updates that occurred during snapshot build.
+4. **Buffer replay**: The client applies the snapshot as a baseline, then replays all buffered updates (received between connection and snapshot application) to catch up to current state.
+
+The snapshot does not need to be fully up-to-date — it is just a baseline. The buffered updates are what guarantee correctness. After replay, the client is fully caught up and subsequent updates flow directly.
 
 ### Payload Structures
 
@@ -295,19 +313,29 @@ configuration.RetryTime = TimeSpan.FromSeconds(10);
 
 ### Reconnection
 
-The client uses exponential backoff for reconnection:
+The client uses exponential backoff with jitter for reconnection:
 
 ```csharp
 configuration.ReconnectDelay = TimeSpan.FromSeconds(5);      // Initial delay
 configuration.MaxReconnectDelay = TimeSpan.FromSeconds(60);  // Maximum delay
 ```
 
-On reconnection:
-1. Wait for reconnect delay (with exponential backoff)
-2. Reconnect and perform Hello/Welcome handshake
-3. Flush pending writes from retry queue
-4. Apply fresh initial state from Welcome
-5. Resume normal operation
+On reconnection, the client follows the buffer-flush-load-replay pattern:
+
+1. **Buffer**: Start buffering inbound updates (via `SubjectPropertyWriter`)
+2. **Reconnect**: Connect and perform Hello/Welcome handshake (server registers connection, builds snapshot, sends Welcome)
+3. **Flush**: Flush pending writes from the retry queue to the server
+4. **Load**: Apply the Welcome snapshot as a baseline
+5. **Replay**: Replay all buffered updates received since reconnection (catches up to current state)
+6. **Resume**: Switch to direct update application (buffer mode off)
+
+This ensures:
+- No updates are lost during the reconnection window
+- The snapshot provides a consistent baseline
+- Buffered updates (including echoed retry queue changes) bring the state to current
+- Client and server converge to the same state (eventual consistency)
+
+> **Note**: The retry queue echo (server broadcasting the client's flushed changes back) may arrive during or shortly after the replay phase. If it arrives during replay, it is included in the buffer. If it arrives after, it is applied immediately. Either way, the state converges within one round trip.
 
 ### Error Handling
 

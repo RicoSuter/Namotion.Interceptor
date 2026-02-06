@@ -18,17 +18,23 @@ namespace Namotion.Interceptor.WebSocket.Server;
 /// </summary>
 public class WebSocketSubjectHandler
 {
+    private const int SupportedProtocolVersion = 1;
+
+    private int _connectionCount;
+
     private readonly IInterceptorSubject _subject;
     private readonly WebSocketServerConfiguration _configuration;
     private readonly ILogger _logger;
     private readonly ISubjectUpdateProcessor[] _processors;
     private readonly ConcurrentDictionary<string, WebSocketClientConnection> _connections = new();
-    private readonly object _applyUpdateLock = new();
-    private int _connectionCount;
+    private readonly Lock _applyUpdateLock = new();
 
     public IInterceptorSubjectContext Context { get; }
-    public int ConnectionCount => Volatile.Read(ref _connectionCount);
+    
+    public TimeSpan BufferTime => _configuration.BufferTime;
 
+    public int ConnectionCount => Volatile.Read(ref _connectionCount);
+    
     public WebSocketSubjectHandler(
         IInterceptorSubject subject,
         WebSocketServerConfiguration configuration,
@@ -40,9 +46,7 @@ public class WebSocketSubjectHandler
         Context = subject.Context;
         _processors = configuration.Processors ?? [];
     }
-
-    private const int SupportedProtocolVersion = 1;
-
+    
     public async Task HandleClientAsync(System.Net.WebSockets.WebSocket webSocket, CancellationToken stoppingToken)
     {
         // Atomically check and increment connection count
@@ -51,7 +55,15 @@ public class WebSocketSubjectHandler
         {
             Interlocked.Decrement(ref _connectionCount);
             _logger.LogWarning("Maximum connections ({MaxConnections}) reached, rejecting client", _configuration.MaxConnections);
-            await webSocket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.PolicyViolation, "Server at capacity", CancellationToken.None);
+            using var closeCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+            try
+            {
+                await webSocket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.PolicyViolation, "Server at capacity", closeCts.Token);
+            }
+            catch
+            {
+                webSocket.Abort();
+            }
             return;
         }
 
@@ -61,6 +73,7 @@ public class WebSocketSubjectHandler
             _configuration.MaxMessageSize,
             _configuration.HelloTimeout);
 
+        var registered = false;
         try
         {
             // Receive Hello
@@ -89,14 +102,21 @@ public class WebSocketSubjectHandler
             _logger.LogInformation("Client {ConnectionId} connected (protocol v{Version}), sending Welcome...",
                 connection.ConnectionId, hello.Version);
 
-            // Send Welcome with initial state
-            var initialState = SubjectUpdate.CreateCompleteUpdate(_subject, _processors);
+            // Register connection BEFORE Welcome (register-before-Welcome pattern)
+            _connections[connection.ConnectionId] = connection;
+            registered = true;
+
+            // Build snapshot under _applyUpdateLock for a consistent cut
+            SubjectUpdate initialState;
+            lock (_applyUpdateLock)
+            {
+                initialState = SubjectUpdate.CreateCompleteUpdate(_subject, _processors);
+            }
+
+            // Send Welcome (flushes queued updates under _sendLock)
             await connection.SendWelcomeAsync(initialState, stoppingToken);
 
             _logger.LogInformation("Client {ConnectionId}: Welcome sent, waiting for updates...", connection.ConnectionId);
-
-            // Register connection
-            _connections[connection.ConnectionId] = connection;
 
             // Handle incoming updates
             await ReceiveUpdatesAsync(connection, stoppingToken);
@@ -109,9 +129,18 @@ public class WebSocketSubjectHandler
         }
         finally
         {
-            // Only decrement if we successfully removed (prevents double-decrement with zombie cleanup)
-            if (_connections.TryRemove(connection.ConnectionId, out _))
+            if (registered)
             {
+                // Only decrement if we successfully removed (prevents double-decrement with zombie cleanup)
+                if (_connections.TryRemove(connection.ConnectionId, out _))
+                {
+                    Interlocked.Decrement(ref _connectionCount);
+                }
+                // else: zombie cleanup in BroadcastUpdateAsync already removed and decremented
+            }
+            else
+            {
+                // Handshake failed before registration — release the slot
                 Interlocked.Decrement(ref _connectionCount);
             }
 
@@ -139,7 +168,7 @@ public class WebSocketSubjectHandler
                 var factory = _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance;
                 lock (_applyUpdateLock)
                 {
-                    using (SubjectChangeContext.WithSource(this))
+                    using (SubjectChangeContext.WithSource(connection))
                     {
                         _subject.ApplySubjectUpdate(update, factory);
                     }
@@ -197,16 +226,21 @@ public class WebSocketSubjectHandler
             tasks.Add(connection.SendUpdateAsync(update, cancellationToken));
         }
 
-        await Task.WhenAll(tasks);
-
-        // Remove zombie connections (repeated send failures)
-        foreach (var (connectionId, connection) in _connections)
+        try
         {
-            if (connection.HasRepeatedSendFailures && _connections.TryRemove(connectionId, out _))
+            await Task.WhenAll(tasks);
+        }
+        finally
+        {
+            // Remove zombie connections (repeated send failures) even if WhenAll threw (I4)
+            foreach (var (connectionId, connection) in _connections)
             {
-                _logger.LogWarning("Removing zombie connection {ConnectionId} due to repeated send failures", connectionId);
-                Interlocked.Decrement(ref _connectionCount);
-                await connection.DisposeAsync();
+                if (connection.HasRepeatedSendFailures && _connections.TryRemove(connectionId, out _))
+                {
+                    _logger.LogWarning("Removing zombie connection {ConnectionId} due to repeated send failures", connectionId);
+                    Interlocked.Decrement(ref _connectionCount);
+                    await connection.DisposeAsync();
+                }
             }
         }
     }
@@ -215,8 +249,6 @@ public class WebSocketSubjectHandler
     {
         return _configuration.PathProvider?.IsPropertyIncluded(property) ?? true;
     }
-
-    public TimeSpan BufferTime => _configuration.BufferTime;
 
     public async ValueTask CloseAllConnectionsAsync()
     {
