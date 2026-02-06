@@ -125,7 +125,9 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                 }
             }
 
-            _receiveCts.Dispose();
+            var oldCts = _receiveCts;
+            _receiveCts = null;
+            oldCts.Dispose();
         }
 
         // Now safe to dispose socket
@@ -171,6 +173,11 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             }
 
             var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(readResult.MessageBytes.Span);
+            if (messageType == MessageType.Error)
+            {
+                var error = _serializer.Deserialize<ErrorPayload>(readResult.MessageBytes.Span.Slice(payloadStart, payloadLength));
+                throw new InvalidOperationException($"Server returned error during handshake: [{error.Code}] {error.Message}");
+            }
 
             if (messageType != MessageType.Welcome)
             {
@@ -553,8 +560,10 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
         public void Dispose()
         {
-            // Prefer DisposeAsync for proper cleanup
             if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
+            // Blocking call in sync path for correctness
+            try { onDispose().GetAwaiter().GetResult(); }
+            catch { /* Best effort */ }
         }
 
         public async ValueTask DisposeAsync()

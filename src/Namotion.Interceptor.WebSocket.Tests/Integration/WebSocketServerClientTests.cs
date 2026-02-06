@@ -102,6 +102,29 @@ public class WebSocketServerClientTests
     }
 
     [Fact]
+    public async Task ClientWriteProperty_ShouldPropagateToOtherClient()
+    {
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = new WebSocketTestServer<TestRoot>(_output);
+        await using var client1 = new WebSocketTestClient<TestRoot>(_output);
+        await using var client2 = new WebSocketTestClient<TestRoot>(_output);
+
+        await server.StartAsync(context => new TestRoot(context), port: portLease.Port);
+        await client1.StartAsync(context => new TestRoot(context), port: portLease.Port);
+        await client2.StartAsync(context => new TestRoot(context), port: portLease.Port);
+
+        // Client 1 updates property
+        client1.Root!.Name = "From Client 1";
+        await Task.Delay(500);
+
+        // Server should have the update
+        Assert.Equal("From Client 1", server.Root!.Name);
+
+        // Client 2 should also have received the update via the server
+        Assert.Equal("From Client 1", client2.Root!.Name);
+    }
+
+    [Fact]
     public async Task ServerRestart_WithDisconnectionWait_ClientRecovers()
     {
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
