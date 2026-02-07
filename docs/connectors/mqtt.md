@@ -242,9 +242,9 @@ The library ensures thread-safe operations across all MQTT interactions:
 
 ## Lifecycle Management
 
-### Automatic Cleanup on Subject Detach
+The MQTT integration hooks into the interceptor lifecycle system (see [Subject Lifecycle Tracking](../tracking.md#subject-lifecycle-tracking)) to clean up resources when subjects are detached.
 
-When subjects are detached from the object graph (removed from collections, set to null, etc.), the MQTT client and server automatically clean up their internal caches to prevent memory leaks.
+### Automatic Cleanup on Subject Detach
 
 **Client behavior:**
 - Cache entries in `_topicToProperty` and `_propertyToTopic` are removed for detached subjects
@@ -254,17 +254,10 @@ When subjects are detached from the object graph (removed from collections, set 
 - Cache entries in `_propertyToTopic` and `_pathToProperty` are removed for detached subjects
 - Same dual cleanup strategy as client
 
-**Thread safety:**
-- Cleanup handlers are invoked inside the lifecycle interceptor's lock
-- Handlers use `ConcurrentDictionary.TryRemove` for safe concurrent modification
-- Event handlers are designed to be fast and exception-free
-
 **Race condition prevention:**
 - Cache lookups validate subject attachment AFTER cache access
 - Stale entries are detected and removed even if the detach event already fired
 - This ensures we never return stale data even with concurrent attach/detach
-
-This minimal lifecycle integration prevents memory leaks in long-running services with dynamic object graphs.
 
 ## Performance
 
