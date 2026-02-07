@@ -586,8 +586,6 @@ The OPC UA integration hooks into the interceptor lifecycle system (see [Subject
 - Does NOT update the OPC UA address space when subjects are attached
 - New subjects added after startup require a restart to appear in OPC UA
 
-This minimal lifecycle integration prevents memory leaks in long-running services with dynamic object graphs.
-
 ## Performance
 
 The library includes optimizations:
