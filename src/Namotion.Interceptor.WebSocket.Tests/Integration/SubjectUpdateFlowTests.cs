@@ -6,6 +6,7 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.WebSocket.Protocol;
 using Namotion.Interceptor.WebSocket.Serialization;
+using Namotion.Interceptor.Tracking.Change;
 using Xunit;
 
 namespace Namotion.Interceptor.WebSocket.Tests.Integration;
@@ -268,5 +269,241 @@ public class SubjectUpdateFlowTests
 
         // Assert
         Assert.Equal("Initial", clientRoot.Name);
+    }
+
+    [Fact]
+    public void PartialUpdate_CollectionInsert_ShouldRoundTripThroughJson()
+    {
+        // Arrange - Server with initial collection
+        var serverContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var existingItem = new TestItem(serverContext) { Label = "Existing", Value = 1 };
+        var serverRoot = new TestRoot(serverContext) { Name = "Root", Items = [existingItem] };
+
+        // Client with matching initial state
+        var clientContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var clientRoot = new TestRoot(clientContext) { Name = "Root", Items = [new TestItem(clientContext) { Label = "Existing", Value = 1 }] };
+
+        // Make change - add item
+        var changes = new List<SubjectPropertyChange>();
+        using (serverContext.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            serverRoot.Items = [existingItem, new TestItem(serverContext) { Label = "New", Value = 2 }];
+        }
+
+        // Act - Create partial update, serialize through JSON, deserialize, apply
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(serverRoot, changes.ToArray(), []);
+        var serializer = new JsonWebSocketSerializer();
+        var bytes = serializer.SerializeMessage(MessageType.Update, null, update);
+        var (_, _, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
+        var deserialized = serializer.Deserialize<SubjectUpdate>(bytes.AsSpan(payloadStart, payloadLength));
+
+        clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Equal(2, clientRoot.Items.Length);
+        Assert.Equal("Existing", clientRoot.Items[0].Label);
+        Assert.Equal("New", clientRoot.Items[1].Label);
+        Assert.Equal(2, clientRoot.Items[1].Value);
+    }
+
+    [Fact]
+    public void PartialUpdate_CollectionRemove_ShouldRoundTripThroughJson()
+    {
+        // Arrange
+        var serverContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var item1 = new TestItem(serverContext) { Label = "First", Value = 1 };
+        var item2 = new TestItem(serverContext) { Label = "Second", Value = 2 };
+        var serverRoot = new TestRoot(serverContext) { Name = "Root", Items = [item1, item2] };
+
+        var clientContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var clientRoot = new TestRoot(clientContext)
+        {
+            Name = "Root",
+            Items = [new TestItem(clientContext) { Label = "First", Value = 1 }, new TestItem(clientContext) { Label = "Second", Value = 2 }]
+        };
+
+        // Make change - remove first item
+        var changes = new List<SubjectPropertyChange>();
+        using (serverContext.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            serverRoot.Items = [item2];
+        }
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(serverRoot, changes.ToArray(), []);
+        var serializer = new JsonWebSocketSerializer();
+        var bytes = serializer.SerializeMessage(MessageType.Update, null, update);
+        var (_, _, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
+        var deserialized = serializer.Deserialize<SubjectUpdate>(bytes.AsSpan(payloadStart, payloadLength));
+
+        clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Single(clientRoot.Items);
+        Assert.Equal("Second", clientRoot.Items[0].Label);
+    }
+
+    [Fact]
+    public void PartialUpdate_CollectionMove_ShouldRoundTripThroughJson()
+    {
+        // Arrange
+        var serverContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var item1 = new TestItem(serverContext) { Label = "A", Value = 1 };
+        var item2 = new TestItem(serverContext) { Label = "B", Value = 2 };
+        var item3 = new TestItem(serverContext) { Label = "C", Value = 3 };
+        var serverRoot = new TestRoot(serverContext) { Name = "Root", Items = [item1, item2, item3] };
+
+        var clientContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var clientRoot = new TestRoot(clientContext)
+        {
+            Name = "Root",
+            Items =
+            [
+                new TestItem(clientContext) { Label = "A", Value = 1 },
+                new TestItem(clientContext) { Label = "B", Value = 2 },
+                new TestItem(clientContext) { Label = "C", Value = 3 }
+            ]
+        };
+
+        // Make change - move C to front: [C, A, B]
+        var changes = new List<SubjectPropertyChange>();
+        using (serverContext.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            serverRoot.Items = [item3, item1, item2];
+        }
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(serverRoot, changes.ToArray(), []);
+        var serializer = new JsonWebSocketSerializer();
+        var bytes = serializer.SerializeMessage(MessageType.Update, null, update);
+        var (_, _, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
+        var deserialized = serializer.Deserialize<SubjectUpdate>(bytes.AsSpan(payloadStart, payloadLength));
+
+        clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Equal(3, clientRoot.Items.Length);
+        Assert.Equal("C", clientRoot.Items[0].Label);
+        Assert.Equal("A", clientRoot.Items[1].Label);
+        Assert.Equal("B", clientRoot.Items[2].Label);
+    }
+
+    [Fact]
+    public void PartialUpdate_WithTimestamp_ShouldPreserveThroughJson()
+    {
+        // Arrange
+        var serverContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var timestamp = new DateTimeOffset(2024, 6, 15, 10, 30, 0, TimeSpan.Zero);
+        var serverRoot = new TestRoot(serverContext) { Name = "Initial" };
+
+        var clientContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var clientRoot = new TestRoot(clientContext) { Name = "Initial" };
+
+        // Make change with timestamp
+        var changes = new List<SubjectPropertyChange>();
+        using (serverContext.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            using (Namotion.Interceptor.Tracking.Change.SubjectChangeContext.WithChangedTimestamp(timestamp))
+            {
+                serverRoot.Name = "Updated";
+            }
+        }
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(serverRoot, changes.ToArray(), []);
+        var serializer = new JsonWebSocketSerializer();
+        var bytes = serializer.SerializeMessage(MessageType.Update, null, update);
+        var (_, _, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
+        var deserialized = serializer.Deserialize<SubjectUpdate>(bytes.AsSpan(payloadStart, payloadLength));
+
+        clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Equal("Updated", clientRoot.Name);
+        Assert.Equal(timestamp, clientRoot.GetPropertyReference("Name").TryGetWriteTimestamp());
+    }
+
+    [Fact]
+    public void PartialUpdate_DictionaryInsertRemove_ShouldRoundTripThroughJson()
+    {
+        // Arrange
+        var serverContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var existingItem = new TestItem(serverContext) { Label = "Existing", Value = 1 };
+        var serverRoot = new TestRoot(serverContext)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, TestItem> { ["key1"] = existingItem }
+        };
+
+        var clientContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var clientRoot = new TestRoot(clientContext)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, TestItem>
+            {
+                ["key1"] = new TestItem(clientContext) { Label = "Existing", Value = 1 }
+            }
+        };
+
+        // Make change - remove key1, add key2
+        var changes = new List<SubjectPropertyChange>();
+        using (serverContext.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            serverRoot.Lookup = new Dictionary<string, TestItem>
+            {
+                ["key2"] = new TestItem(serverContext) { Label = "New", Value = 2 }
+            };
+        }
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(serverRoot, changes.ToArray(), []);
+        var serializer = new JsonWebSocketSerializer();
+        var bytes = serializer.SerializeMessage(MessageType.Update, null, update);
+        var (_, _, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
+        var deserialized = serializer.Deserialize<SubjectUpdate>(bytes.AsSpan(payloadStart, payloadLength));
+
+        clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Single(clientRoot.Lookup);
+        Assert.False(clientRoot.Lookup.ContainsKey("key1"));
+        Assert.True(clientRoot.Lookup.ContainsKey("key2"));
+        Assert.Equal("New", clientRoot.Lookup["key2"].Label);
+    }
+
+    [Fact]
+    public void PartialUpdate_ObjectReferenceSetToNull_ShouldRoundTripThroughJson()
+    {
+        // Arrange
+        var serverContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var serverRoot = new TestRoot(serverContext) { Name = "Root", Child = new TestItem(serverContext) { Label = "Child", Value = 42 } };
+
+        var clientContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var clientRoot = new TestRoot(clientContext) { Name = "Root", Child = new TestItem(clientContext) { Label = "Child", Value = 42 } };
+
+        // Make change - set Child to null
+        var changes = new List<SubjectPropertyChange>();
+        using (serverContext.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            serverRoot.Child = null;
+        }
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(serverRoot, changes.ToArray(), []);
+        var serializer = new JsonWebSocketSerializer();
+        var bytes = serializer.SerializeMessage(MessageType.Update, null, update);
+        var (_, _, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
+        var deserialized = serializer.Deserialize<SubjectUpdate>(bytes.AsSpan(payloadStart, payloadLength));
+
+        clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Null(clientRoot.Child);
     }
 }

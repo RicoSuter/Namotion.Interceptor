@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Globalization;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Namotion.Interceptor.Connectors;
@@ -61,7 +62,9 @@ public class DefaultSubjectFactory : ISubjectFactory
         foreach (var entry in entries)
         {
             // Convert key to the target key type if needed
-            var key = Convert.ChangeType(entry.Key, keyType);
+            var key = keyType.IsEnum
+                ? Enum.Parse(keyType, Convert.ToString(entry.Key, CultureInfo.InvariantCulture)!)
+                : Convert.ChangeType(entry.Key, keyType, CultureInfo.InvariantCulture);
             dictionary.Add(key, entry.Value);
         }
 
