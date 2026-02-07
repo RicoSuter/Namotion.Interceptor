@@ -228,22 +228,12 @@ internal static class SubjectItemsUpdateApplier
             return key;
 
         if (key is JsonElement jsonElement)
-        {
-            var stringValue = jsonElement.GetString() ?? jsonElement.ToString();
-            return ConvertStringToKeyType(stringValue, targetKeyType);
-        }
+            return jsonElement.Deserialize(targetKeyType)!;
 
-        var keyString = Convert.ToString(key, CultureInfo.InvariantCulture)!;
-        return ConvertStringToKeyType(keyString, targetKeyType);
-    }
-
-    private static object ConvertStringToKeyType(string value, Type targetKeyType)
-    {
-        if (targetKeyType == typeof(string))
-            return value;
         if (targetKeyType.IsEnum)
-            return Enum.Parse(targetKeyType, value);
-        return Convert.ChangeType(value, targetKeyType, CultureInfo.InvariantCulture);
+            return Enum.Parse(targetKeyType, Convert.ToString(key, CultureInfo.InvariantCulture)!);
+
+        return Convert.ChangeType(key, targetKeyType, CultureInfo.InvariantCulture);
     }
 
     private static IInterceptorSubject CreateAndApplyItem(
