@@ -18,6 +18,8 @@ internal sealed class SubjectUpdateBuilder
 
     public HashSet<IInterceptorSubject> ProcessedSubjects { get; } = [];
 
+    public HashSet<IInterceptorSubject> PathVisited { get; } = [];
+
     public void Initialize(IInterceptorSubject rootSubject, ISubjectUpdateProcessor[] processors)
     {
         Processors = processors;
@@ -111,6 +113,7 @@ internal sealed class SubjectUpdateBuilder
         _subjectToId.Clear();
         _propertyUpdates.Clear();
         ProcessedSubjects.Clear();
+        PathVisited.Clear();
         Subjects = new(); // create a fresh dictionary, old one transferred to result
         Processors = [];
     }

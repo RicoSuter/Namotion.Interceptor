@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Globalization;
 using System.Text.Json;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
@@ -139,7 +140,7 @@ internal static class SubjectItemsUpdateApplier
         SubjectUpdateApplyContext context)
     {
         var existingDictionary = property.GetValue() as IDictionary;
-        var workingDictionary = new Dictionary<object, IInterceptorSubject>();
+        var workingDictionary = new Dictionary<string, IInterceptorSubject>();
         var structureChanged = false;
 
         if (existingDictionary is not null)
@@ -147,7 +148,7 @@ internal static class SubjectItemsUpdateApplier
             foreach (DictionaryEntry entry in existingDictionary)
             {
                 if (entry.Value is IInterceptorSubject item)
-                    workingDictionary[entry.Key] = item;
+                    workingDictionary[Convert.ToString(entry.Key, CultureInfo.InvariantCulture)!] = item;
             }
         }
 
@@ -205,7 +206,7 @@ internal static class SubjectItemsUpdateApplier
 
         if (structureChanged)
         {
-            var dictionary = context.SubjectFactory.CreateSubjectDictionary(property.Type, workingDictionary);
+            var dictionary = context.SubjectFactory.CreateSubjectDictionary(property.Type, workingDictionary.ToDictionary(kvp => (object)kvp.Key, kvp => kvp.Value));
             using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
             {
                 property.SetValue(dictionary);
@@ -220,9 +221,11 @@ internal static class SubjectItemsUpdateApplier
         _ => Convert.ToInt32(index)
     };
 
-    private static object ConvertDictionaryKey(object key)
+    private static string ConvertDictionaryKey(object key)
     {
-        return key is JsonElement jsonElement ? jsonElement.GetString() ?? jsonElement.ToString() : key;
+        return key is JsonElement jsonElement
+            ? jsonElement.GetString() ?? jsonElement.ToString()
+            : Convert.ToString(key, CultureInfo.InvariantCulture)!;
     }
 
     private static IInterceptorSubject CreateAndApplyItem(

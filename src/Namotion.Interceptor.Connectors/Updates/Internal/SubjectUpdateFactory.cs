@@ -144,11 +144,27 @@ internal static class SubjectUpdateFactory
 
         if (property.IsSubjectDictionary)
         {
-            SubjectItemsUpdateFactory.BuildDictionaryComplete(update, value as IDictionary, builder);
+            if (value is null)
+            {
+                update.Kind = SubjectPropertyUpdateKind.Value;
+                update.Value = null;
+            }
+            else
+            {
+                SubjectItemsUpdateFactory.BuildDictionaryComplete(update, value as IDictionary, builder);
+            }
         }
         else if (property.IsSubjectCollection)
         {
-            SubjectItemsUpdateFactory.BuildCollectionComplete(update, value as IEnumerable<IInterceptorSubject>, builder);
+            if (value is null)
+            {
+                update.Kind = SubjectPropertyUpdateKind.Value;
+                update.Value = null;
+            }
+            else
+            {
+                SubjectItemsUpdateFactory.BuildCollectionComplete(update, value as IEnumerable<IInterceptorSubject>, builder);
+            }
         }
         else if (property.IsSubjectReference)
         {
@@ -179,14 +195,32 @@ internal static class SubjectUpdateFactory
 
         if (property.IsSubjectDictionary)
         {
-            SubjectItemsUpdateFactory.BuildDictionaryDiff(update, change.GetOldValue<IDictionary?>(),
-                change.GetNewValue<IDictionary?>(), builder);
+            var newValue = change.GetNewValue<IDictionary?>();
+            if (newValue is null)
+            {
+                update.Kind = SubjectPropertyUpdateKind.Value;
+                update.Value = null;
+            }
+            else
+            {
+                SubjectItemsUpdateFactory.BuildDictionaryDiff(update, change.GetOldValue<IDictionary?>(),
+                    newValue, builder);
+            }
         }
         else if (property.IsSubjectCollection)
         {
-            SubjectItemsUpdateFactory.BuildCollectionDiff(update,
-                change.GetOldValue<IEnumerable<IInterceptorSubject>?>(),
-                change.GetNewValue<IEnumerable<IInterceptorSubject>?>(), builder);
+            var newValue = change.GetNewValue<IEnumerable<IInterceptorSubject>?>();
+            if (newValue is null)
+            {
+                update.Kind = SubjectPropertyUpdateKind.Value;
+                update.Value = null;
+            }
+            else
+            {
+                SubjectItemsUpdateFactory.BuildCollectionDiff(update,
+                    change.GetOldValue<IEnumerable<IInterceptorSubject>?>(),
+                    newValue, builder);
+            }
         }
         else if (property.IsSubjectReference)
         {
@@ -234,10 +268,14 @@ internal static class SubjectUpdateFactory
         IInterceptorSubject rootSubject,
         SubjectUpdateBuilder builder)
     {
+        builder.PathVisited.Clear();
         var current = subject.TryGetRegisteredSubject();
 
         while (current is not null && current.Subject != rootSubject)
         {
+            if (!builder.PathVisited.Add(current.Subject))
+                break;
+
             if (current.Parents.Length == 0)
                 break;
 

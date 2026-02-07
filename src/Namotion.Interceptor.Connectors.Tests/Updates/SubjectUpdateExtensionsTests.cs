@@ -902,4 +902,103 @@ public class SubjectUpdateExtensionsTests
         Assert.Single(target.Children);
         Assert.Equal("NewChild", target.Children[0].FirstName);
     }
+
+    [Fact]
+    public void WhenApplyingNullCollection_ThenCollectionIsSetToNull()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var source = new Person(context) { FirstName = "Parent", Children = [new Person(context) { FirstName = "Child" }] };
+        var target = new Person(context) { FirstName = "Parent", Children = [new Person(context) { FirstName = "Child" }] };
+
+        // Make a change - set collection to null
+        var changes = new List<SubjectPropertyChange>();
+        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            source.Children = null!;
+        }
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Null(target.Children);
+    }
+
+    [Fact]
+    public void WhenApplyingNullDictionary_ThenDictionaryIsSetToNull()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var source = new CycleTestNode(context)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = new CycleTestNode(context) { Name = "Item1" } }
+        };
+        var target = new CycleTestNode(context)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = new CycleTestNode(context) { Name = "Item1" } }
+        };
+
+        // Make a change - set dictionary to null
+        var changes = new List<SubjectPropertyChange>();
+        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            source.Lookup = null!;
+        }
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Null(target.Lookup);
+    }
+
+    [Fact]
+    public void WhenCreatingCompleteUpdateWithNullCollection_ThenUpdateHasKindValueAndValueNull()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var source = new Person(context) { FirstName = "Parent", Children = null! };
+
+        // Act
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+
+        // Assert
+        var rootProps = update.Subjects[update.Root];
+        Assert.True(rootProps.ContainsKey("Children"));
+        Assert.Equal(SubjectPropertyUpdateKind.Value, rootProps["Children"].Kind);
+        Assert.Null(rootProps["Children"].Value);
+    }
+
+    [Fact]
+    public void WhenApplyingDictionaryUpdateWithIntKeys_ThenExistingEntriesAreMatched()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var source = new IntKeyNode(context)
+        {
+            Name = "Root",
+            IntLookup = new Dictionary<int, CycleTestNode>
+            {
+                [1] = new CycleTestNode(context) { Name = "Item1" },
+                [2] = new CycleTestNode(context) { Name = "Item2" }
+            }
+        };
+        var target = new IntKeyNode(context);
+
+        // Act - complete update round-trip (values will be int keys in source, need to be matched after deserialization)
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Equal(2, target.IntLookup.Count);
+        Assert.Equal("Item1", target.IntLookup[1].Name);
+        Assert.Equal("Item2", target.IntLookup[2].Name);
+    }
 }

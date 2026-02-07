@@ -575,6 +575,37 @@ public class SubjectUpdateCycleTests
         Assert.NotNull(json);
     }
 
+    [Fact]
+    public void WhenNonRootSubjectsFormCycleInParentPath_ThenBuildPathToRootTerminates()
+    {
+        // Arrange - Create a cycle among non-root subjects where none are the root
+        // root -> A (via Father), A -> B (via Father), B -> A (via Father) -- cycle!
+        // When a property changes on B, BuildPathToRoot walks B->A->B->A... infinitely
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+
+        var root = new Person(context) { FirstName = "Root" };
+        var nodeA = new Person { FirstName = "A" };
+        var nodeB = new Person { FirstName = "B" };
+
+        root.Father = nodeA;
+        nodeA.Father = nodeB;
+        nodeB.Father = nodeA; // cycle: A -> B -> A
+
+        var changes = new[]
+        {
+            SubjectPropertyChange.Create(
+                new PropertyReference(nodeB, "FirstName"), null, DateTimeOffset.UtcNow, null, "Old", "NewB"),
+        };
+
+        // Act -- should terminate, not infinite loop
+        var partialUpdate = SubjectUpdate
+            .CreatePartialUpdateFromChanges(root, changes, []);
+
+        // Assert
+        var json = System.Text.Json.JsonSerializer.Serialize(partialUpdate);
+        Assert.NotNull(json);
+    }
+
     /// <summary>
     /// Helper to find a subject ID that has a specific property value.
     /// </summary>
