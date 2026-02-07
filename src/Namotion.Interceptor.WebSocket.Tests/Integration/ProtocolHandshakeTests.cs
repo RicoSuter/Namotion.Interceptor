@@ -35,7 +35,7 @@ public class ProtocolHandshakeTests
         // Send Hello with wrong version
         var hello = new HelloPayload { Version = 999, Format = WebSocketFormat.Json };
         var sendBuffer = new ArrayBufferWriter<byte>(256);
-        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, null, hello);
+        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, hello);
         await rawClient.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
 
         // Should receive Error message
@@ -43,7 +43,7 @@ public class ProtocolHandshakeTests
         var result = await rawClient.ReceiveAsync(receiveBuffer, CancellationToken.None);
 
         Assert.Equal(WebSocketMessageType.Text, result.MessageType);
-        var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(
+        var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(
             new ReadOnlySpan<byte>(receiveBuffer, 0, result.Count));
         Assert.Equal(MessageType.Error, messageType);
 
@@ -82,13 +82,13 @@ public class ProtocolHandshakeTests
 
         var hello = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
         var sendBuffer = new ArrayBufferWriter<byte>(256);
-        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, null, hello);
+        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, hello);
         await rawClient.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
 
         var receiveBuffer = new byte[64 * 1024];
         var result = await rawClient.ReceiveAsync(receiveBuffer, CancellationToken.None);
 
-        var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(
+        var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(
             new ReadOnlySpan<byte>(receiveBuffer, 0, result.Count));
         Assert.Equal(MessageType.Welcome, messageType);
 

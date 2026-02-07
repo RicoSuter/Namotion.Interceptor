@@ -75,7 +75,7 @@ var context = InterceptorSubjectContext
 
 var device = new Device(context);
 builder.Services.AddSingleton(device);
-builder.Services.AddWebSocketSubjectHandler<Device>();
+builder.Services.AddWebSocketSubjectHandler<Device>("/ws");
 
 var app = builder.Build();
 
@@ -200,11 +200,10 @@ The WebSocket protocol uses a simple message envelope for all communication.
 All messages use the same structure:
 
 ```
-[MessageType, Sequence, Payload]
+[MessageType, Payload]
 ```
 
 - `MessageType`: Integer discriminator (0-4)
-- `Sequence`: Long integer or null. For server-to-client Update messages, this is the monotonically increasing sequence number. Null for all other messages.
 - `Payload`: Type-specific JSON payload
 
 ### Message Types
@@ -225,32 +224,32 @@ Client                                 Server
    |-------- WebSocket Connect ---------->|
    |                                      |
    |-------- Hello ---------------------->|
-   |  [0, null, {version:1}]              |
+   |  [0, {version:1}]                    |
    |                                      |
    |              (server registers connection for broadcasts)
    |              (server reads current sequence under update lock)
    |              (server builds snapshot under update lock)
    |                                      |
    |<------- Welcome ---------------------|
-   |  [1, null, {version:1, format:"json", state: SubjectUpdate, sequence: 5}]
+   |  [1, {version:1, format:"json", state: SubjectUpdate, sequence: 5}]
    |                                      |
    |  (client sets expectedNext = 6)      |
    |                                      |
    |<------- Update ----------------------|  (queued broadcasts flushed after Welcome)
-   |  [2, 6, {root:..., subjects:...}]    |
+   |  [2, {sequence:6, root:..., subjects:...}]
    |                                      |
    |  (client verifies sequence==6, sets expectedNext=7)
    |  (client applies snapshot,           |
    |   then replays buffered updates)     |
    |                                      |
-   |<------- Update ----------------------|  (server pushes changes, sequence: 7)
-   |  [2, 7, {root:..., subjects:...}]    |
+   |<------- Update ----------------------|  (server pushes changes)
+   |  [2, {sequence:7, root:..., subjects:...}]
    |                                      |
    |-------- Update --------------------->|  (client writes changes, no sequence)
-   |  [2, null, {root:..., subjects:...}] |
+   |  [2, {root:..., subjects:...}]       |
    |                                      |
    |<------- Heartbeat -------------------|  (periodic, every 30s by default)
-   |  [4, null, {sequence: 7}]            |
+   |  [4, {sequence: 7}]                  |
    |                                      |
    |  (client checks: 7 < 8 → in sync)   |
 ```
@@ -295,9 +294,9 @@ The snapshot does not need to be fully up-to-date — it is just a baseline. The
 }
 ```
 
-- `sequence`: Server's current sequence number (last broadcast batch). Does **not** increment the counter — it reflects the current value. Note: for Heartbeat messages, the sequence is in the payload (not the envelope) because heartbeats do not participate in the monotonic update sequence.
+- `sequence`: Server's current sequence number (last broadcast batch). Does **not** increment the counter — it reflects the current value.
 
-Example wire format: `[4, null, {"sequence": 42}]`
+Example wire format: `[4, {"sequence": 42}]`
 
 **ErrorPayload**
 ```json
@@ -371,15 +370,15 @@ This ensures:
 The server maintains a monotonically increasing sequence counter that is incremented atomically (`Interlocked.Increment`) each time an update batch is broadcast. This enables clients to detect lost updates.
 
 **Server behavior:**
-- Each `BroadcastUpdateAsync` call increments the counter and sets the sequence in the message envelope's second field (e.g., `[2, 7, {root:..., subjects:...}]`). The sequence is a transport-level concern and is not part of the `SubjectUpdate` payload.
+- Each `BroadcastUpdateAsync` call increments the counter and sets the sequence in the `UpdatePayload` (e.g., `[2, {sequence:7, root:..., subjects:...}]`). The sequence is carried in `UpdatePayload`, which inherits from `SubjectUpdate`.
 - The Welcome payload includes the current sequence at snapshot time. Clients initialize their expected next sequence to `welcome.sequence + 1`.
 - Heartbeat messages include the current sequence in their payload but do **not** increment it.
 
 **Client behavior:**
-- On receiving an Update: the client reads the sequence from the message envelope. If `sequence != expectedNextSequence`, the client logs a warning and exits the receive loop, triggering reconnection via the existing recovery flow.
+- On receiving an Update: the client reads the sequence from the `UpdatePayload`. If `sequence != expectedNextSequence`, the client logs a warning and exits the receive loop, triggering reconnection via the existing recovery flow.
 - On receiving a Heartbeat: if `heartbeat.sequence >= expectedNextSequence`, the server has sent updates the client never received. The client exits the receive loop and reconnects.
 - A heartbeat with `sequence < expectedNextSequence` means the client is fully caught up — no action needed.
-- A null or zero envelope sequence is treated as "unassigned" for backward compatibility with servers that don't send sequence numbers.
+- A null or zero sequence is treated as "unassigned" for client-to-server messages which do not carry sequence numbers.
 
 **Recovery flow on gap detection:**
 Gap detected -> receive loop exits -> `ExecuteAsync` detects connection lost -> `StartBuffering` -> exponential backoff delay -> `ConnectAsync` -> Welcome with full state + new sequence -> `CompleteInitializationAsync` (buffer-load-replay). No new recovery logic is needed; the existing reconnection flow handles everything.

@@ -238,14 +238,19 @@ public sealed class WebSocketSubjectHandler
     {
         if (_connections.IsEmpty) return;
 
-        // Each broadcast batch gets a unique, monotonically increasing sequence number
         var sequence = Interlocked.Increment(ref _sequence);
 
-        // Send to all connections with sequence in envelope
+        var updatePayload = new UpdatePayload
+        {
+            Root = update.Root,
+            Subjects = update.Subjects,
+            Sequence = sequence
+        };
+
         var tasks = new List<Task>(_connections.Count);
         foreach (var connection in _connections.Values)
         {
-            tasks.Add(connection.SendUpdateAsync(update, sequence, cancellationToken));
+            tasks.Add(connection.SendUpdateAsync(updatePayload, cancellationToken));
         }
 
         try

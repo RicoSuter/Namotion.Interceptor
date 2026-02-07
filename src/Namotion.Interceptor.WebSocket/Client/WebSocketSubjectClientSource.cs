@@ -151,7 +151,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             // Send Hello using reusable buffer
             var hello = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
             _sendBuffer.Clear();
-            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Hello, null, hello);
+            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Hello, hello);
             await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
 
             // Receive Welcome using shared utility
@@ -173,7 +173,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                 throw new InvalidOperationException("Failed to receive Welcome message");
             }
 
-            var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(readResult.MessageBytes.Span);
+            var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(readResult.MessageBytes.Span);
             if (messageType == MessageType.Error)
             {
                 var error = _serializer.Deserialize<ErrorPayload>(readResult.MessageBytes.Span.Slice(payloadStart, payloadLength));
@@ -300,7 +300,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
             var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, changes.Span, _processors);
             _sendBuffer.Clear();
-            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, null, update);
+            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, update);
             _logger.LogDebug("Sending {ByteCount} bytes ({SubjectCount} subjects) to server",
                 _sendBuffer.WrittenCount, update.Subjects.Count);
             await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
@@ -372,18 +372,18 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                         }
 
                         var messageBytes = new ReadOnlySpan<byte>(messageStream.GetBuffer(), 0, (int)messageStream.Length);
-                        var (messageType, envelopeSequence, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(messageBytes);
+                        var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(messageBytes);
                         var payloadBytes = messageBytes.Slice(payloadStart, payloadLength);
 
                         switch (messageType)
                         {
                             case MessageType.Update:
-                                var update = _serializer.Deserialize<SubjectUpdate>(payloadBytes);
-                                if (!_sequenceTracker.IsUpdateValid(envelopeSequence ?? 0))
+                                var update = _serializer.Deserialize<UpdatePayload>(payloadBytes);
+                                if (!_sequenceTracker.IsUpdateValid(update.Sequence ?? 0))
                                 {
                                     _logger.LogWarning(
                                         "Sequence gap detected: expected {Expected}, received {Received}. Triggering reconnection.",
-                                        _sequenceTracker.ExpectedNextSequence, envelopeSequence);
+                                        _sequenceTracker.ExpectedNextSequence, update.Sequence);
                                     return; // Exit receive loop -> triggers reconnection
                                 }
                                 HandleUpdate(update);

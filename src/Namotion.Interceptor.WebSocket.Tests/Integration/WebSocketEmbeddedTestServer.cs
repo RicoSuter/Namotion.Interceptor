@@ -66,13 +66,13 @@ public class WebSocketEmbeddedTestServer<TRoot> : IAsyncDisposable
         _initializeDefaults?.Invoke(context, Root);
 
         builder.Services.AddSingleton(Root);
-        builder.Services.AddWebSocketSubjectHandler<TRoot>();
+        builder.Services.AddWebSocketSubjectHandler<TRoot>("/ws");
 
         builder.WebHost.UseUrls($"http://localhost:{_port}");
 
         _app = builder.Build();
 
-        Handler = _app.Services.GetRequiredService<WebSocketSubjectHandler>();
+        Handler = _app.Services.GetRequiredKeyedService<WebSocketSubjectHandler>("/ws");
 
         _app.UseWebSockets();
         _app.MapWebSocketSubjectHandler("/ws");

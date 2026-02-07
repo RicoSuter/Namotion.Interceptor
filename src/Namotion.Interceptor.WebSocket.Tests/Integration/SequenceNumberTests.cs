@@ -41,14 +41,14 @@ public class SequenceNumberTests
 
         // Send Hello
         var sendBuffer = new ArrayBufferWriter<byte>(256);
-        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, null, new HelloPayload());
+        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, new HelloPayload());
         await ws.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
 
         // Receive Welcome
         var receiveBuffer = new byte[64 * 1024];
         var result = await ws.ReceiveAsync(receiveBuffer, CancellationToken.None);
         var bytes = new ReadOnlySpan<byte>(receiveBuffer, 0, result.Count);
-        var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
+        var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
 
         Assert.Equal(MessageType.Welcome, messageType);
         var welcome = _serializer.Deserialize<WelcomePayload>(
@@ -80,7 +80,7 @@ public class SequenceNumberTests
         using var ws = new ClientWebSocket();
         await ws.ConnectAsync(new Uri($"ws://localhost:{portLease.Port}/ws"), CancellationToken.None);
         var sendBuffer = new ArrayBufferWriter<byte>(256);
-        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, null, new HelloPayload());
+        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, new HelloPayload());
         await ws.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
         var receiveBuffer = new byte[64 * 1024];
         await ws.ReceiveAsync(receiveBuffer, CancellationToken.None); // Welcome
@@ -119,7 +119,7 @@ public class SequenceNumberTests
 
         // Handshake
         var sendBuffer = new ArrayBufferWriter<byte>(256);
-        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, null, new HelloPayload());
+        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, new HelloPayload());
         await ws.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
 
         var receiveBuffer = new byte[64 * 1024];
@@ -150,11 +150,13 @@ public class SequenceNumberTests
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             var readResult = await ws.ReceiveAsync(receiveBuffer, cts.Token);
             var bytes = new ReadOnlySpan<byte>(receiveBuffer, 0, readResult.Count);
-            var (messageType, envelopeSequence, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
+            var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
 
             if (messageType == MessageType.Update)
             {
-                var sequence = envelopeSequence ?? 0;
+                var updatePayload = _serializer.Deserialize<UpdatePayload>(
+                    new ReadOnlySpan<byte>(receiveBuffer, payloadStart, payloadLength));
+                var sequence = updatePayload.Sequence ?? 0;
                 _output.WriteLine($"Update sequence: {sequence}");
                 Assert.True(sequence > lastSequence,
                     $"Sequence should be monotonically increasing: {sequence} > {lastSequence}");
@@ -191,7 +193,7 @@ public class SequenceNumberTests
 
         // Handshake
         var sendBuffer = new ArrayBufferWriter<byte>(256);
-        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, null, new HelloPayload());
+        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, new HelloPayload());
         await ws.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
 
         var receiveBuffer = new byte[64 * 1024];
@@ -206,7 +208,7 @@ public class SequenceNumberTests
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
             var readResult = await ws.ReceiveAsync(receiveBuffer, cts.Token);
             var bytes = new ReadOnlySpan<byte>(receiveBuffer, 0, readResult.Count);
-            var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
+            var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
 
             if (messageType == MessageType.Heartbeat)
             {
@@ -275,7 +277,7 @@ public class SequenceNumberTests
 
         // Handshake
         var sendBuffer = new ArrayBufferWriter<byte>(256);
-        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, null, new HelloPayload());
+        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, new HelloPayload());
         await ws.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
 
         var receiveBuffer = new byte[64 * 1024];
@@ -290,7 +292,7 @@ public class SequenceNumberTests
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             var readResult = await ws.ReceiveAsync(receiveBuffer, cts.Token);
             var bytes = new ReadOnlySpan<byte>(receiveBuffer, 0, readResult.Count);
-            var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
+            var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
 
             if (messageType == MessageType.Heartbeat)
             {
@@ -329,7 +331,7 @@ public class SequenceNumberTests
         await ws.ConnectAsync(new Uri($"ws://localhost:{portLease.Port}/ws"), CancellationToken.None);
 
         var sendBuffer = new ArrayBufferWriter<byte>(256);
-        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, null, new HelloPayload());
+        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, new HelloPayload());
         await ws.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
 
         var receiveBuffer = new byte[64 * 1024];
@@ -343,7 +345,7 @@ public class SequenceNumberTests
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
             var readResult = await ws.ReceiveAsync(receiveBuffer, cts.Token);
             var bytes = new ReadOnlySpan<byte>(receiveBuffer, 0, readResult.Count);
-            var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
+            var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
 
             if (messageType == MessageType.Heartbeat)
             {
@@ -370,7 +372,7 @@ public class SequenceNumberTests
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
             var readResult = await ws.ReceiveAsync(receiveBuffer, cts.Token);
             var bytes = new ReadOnlySpan<byte>(receiveBuffer, 0, readResult.Count);
-            var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
+            var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
 
             if (messageType == MessageType.Heartbeat)
             {
@@ -411,11 +413,11 @@ public class SequenceNumberTests
 
         // Handshake both
         var sendBuffer1 = new ArrayBufferWriter<byte>(256);
-        _serializer.SerializeMessageTo(sendBuffer1, MessageType.Hello, null, new HelloPayload());
+        _serializer.SerializeMessageTo(sendBuffer1, MessageType.Hello, new HelloPayload());
         await ws1.SendAsync(sendBuffer1.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
 
         var sendBuffer2 = new ArrayBufferWriter<byte>(256);
-        _serializer.SerializeMessageTo(sendBuffer2, MessageType.Hello, null, new HelloPayload());
+        _serializer.SerializeMessageTo(sendBuffer2, MessageType.Hello, new HelloPayload());
         await ws2.SendAsync(sendBuffer2.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
 
         var receiveBuffer1 = new byte[64 * 1024];
@@ -465,12 +467,12 @@ public class SequenceNumberTests
         using var ws1 = new ClientWebSocket();
         await ws1.ConnectAsync(new Uri($"ws://localhost:{portLease.Port}/ws"), CancellationToken.None);
         var sendBuffer = new ArrayBufferWriter<byte>(256);
-        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, null, new HelloPayload());
+        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, new HelloPayload());
         await ws1.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
 
         var result1 = await ws1.ReceiveAsync(receiveBuffer, CancellationToken.None);
         var bytes1 = new ReadOnlySpan<byte>(receiveBuffer, 0, result1.Count);
-        var (msgType1, _, ps1, pl1) = _serializer.DeserializeMessageEnvelope(bytes1);
+        var (msgType1, ps1, pl1) = _serializer.DeserializeMessageEnvelope(bytes1);
         Assert.Equal(MessageType.Welcome, msgType1);
         var welcome1 = _serializer.Deserialize<WelcomePayload>(new ReadOnlySpan<byte>(receiveBuffer, ps1, pl1));
         var welcome1Sequence = welcome1.Sequence;
@@ -600,11 +602,13 @@ public class SequenceNumberTests
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
             var readResult = await webSocket.ReceiveAsync(buffer, cts.Token);
             var bytes = new ReadOnlySpan<byte>(buffer, 0, readResult.Count);
-            var (messageType, envelopeSequence, _, _) = _serializer.DeserializeMessageEnvelope(bytes);
+            var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
 
             if (messageType == MessageType.Update)
             {
-                return envelopeSequence ?? -1;
+                var updatePayload = _serializer.Deserialize<UpdatePayload>(
+                    new ReadOnlySpan<byte>(buffer, payloadStart, payloadLength));
+                return updatePayload.Sequence ?? -1;
             }
         }
 
@@ -617,12 +621,12 @@ public class SequenceNumberTests
         await ws.ConnectAsync(new Uri($"ws://localhost:{port}/ws"), CancellationToken.None);
 
         var sendBuffer = new ArrayBufferWriter<byte>(256);
-        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, null, new HelloPayload());
+        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, new HelloPayload());
         await ws.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
 
         var result = await ws.ReceiveAsync(receiveBuffer, CancellationToken.None);
         var bytes = new ReadOnlySpan<byte>(receiveBuffer, 0, result.Count);
-        var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
+        var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
 
         Assert.Equal(MessageType.Welcome, messageType);
         var welcome = _serializer.Deserialize<WelcomePayload>(

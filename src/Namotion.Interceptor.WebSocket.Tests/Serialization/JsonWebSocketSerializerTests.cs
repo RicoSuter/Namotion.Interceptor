@@ -54,22 +54,22 @@ public class JsonWebSocketSerializerTests
     {
         var payload = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
 
-        var bytes = _serializer.SerializeMessage(MessageType.Hello, null, payload);
+        var bytes = _serializer.SerializeMessage(MessageType.Hello, payload);
         var json = System.Text.Encoding.UTF8.GetString(bytes);
 
-        Assert.StartsWith("[0,null,", json); // [MessageType.Hello, null, payload]
+        Assert.StartsWith("[0,", json); // [MessageType, payload]
+        Assert.DoesNotContain("null", json); // no null sequence field
     }
 
     [Fact]
     public void DeserializeMessageEnvelope_ShouldExtractComponents()
     {
         var payload = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
-        var bytes = _serializer.SerializeMessage(MessageType.Hello, 42, payload);
+        var bytes = _serializer.SerializeMessage(MessageType.Hello, payload);
 
-        var (messageType, sequence, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
+        var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
 
         Assert.Equal(MessageType.Hello, messageType);
-        Assert.Equal(42, sequence);
 
         var deserializedPayload = _serializer.Deserialize<HelloPayload>(bytes.AsSpan(payloadStart, payloadLength));
         Assert.Equal(1, deserializedPayload.Version);
@@ -98,8 +98,8 @@ public class JsonWebSocketSerializerTests
             State = update
         };
 
-        var bytes = _serializer.SerializeMessage(MessageType.Welcome, null, welcome);
-        var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
+        var bytes = _serializer.SerializeMessage(MessageType.Welcome, welcome);
+        var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
 
         Assert.Equal(MessageType.Welcome, messageType);
 
@@ -174,36 +174,17 @@ public class JsonWebSocketSerializerTests
     [Fact]
     public void DeserializeMessageEnvelope_WithStringMessageType_ShouldThrow()
     {
-        var bytes = Encoding.UTF8.GetBytes("[\"hello\",null,{}]");
+        var bytes = Encoding.UTF8.GetBytes("[\"hello\",{}]");
         Assert.Throws<InvalidOperationException>(() =>
             _serializer.DeserializeMessageEnvelope(bytes));
     }
 
     [Fact]
-    public void DeserializeMessageEnvelope_WithStringSequence_ShouldThrow()
+    public void DeserializeMessageEnvelope_WithMissingPayload_ShouldThrow()
     {
-        var bytes = Encoding.UTF8.GetBytes("[0,\"bad\",{}]");
-        Assert.Throws<InvalidOperationException>(() =>
-            _serializer.DeserializeMessageEnvelope(bytes));
-    }
-
-    [Fact]
-    public void DeserializeMessageEnvelope_WithMissingSequenceAndPayload_ShouldThrow()
-    {
-        // [0] has only the messageType; after reading it, the next Read()
-        // returns EndArray which is neither null nor a number for sequence.
         var bytes = Encoding.UTF8.GetBytes("[0]");
         Assert.Throws<InvalidOperationException>(() =>
             _serializer.DeserializeMessageEnvelope(bytes));
-    }
-
-    [Fact]
-    public void DeserializeMessageEnvelope_WithNullSequence_ShouldReturnNull()
-    {
-        var payload = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
-        var bytes = _serializer.SerializeMessage(MessageType.Hello, null, payload);
-        var (_, sequence, _, _) = _serializer.DeserializeMessageEnvelope(bytes);
-        Assert.Null(sequence);
     }
 
     [Fact]
@@ -218,9 +199,9 @@ public class JsonWebSocketSerializerTests
     public void SerializeMessageTo_ShouldMatchSerializeMessage()
     {
         var payload = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
-        var bytes = _serializer.SerializeMessage(MessageType.Hello, 42, payload);
+        var bytes = _serializer.SerializeMessage(MessageType.Hello, payload);
         var bufferWriter = new ArrayBufferWriter<byte>(256);
-        _serializer.SerializeMessageTo(bufferWriter, MessageType.Hello, 42, payload);
+        _serializer.SerializeMessageTo(bufferWriter, MessageType.Hello, payload);
         Assert.Equal(bytes, bufferWriter.WrittenSpan.ToArray());
     }
 
@@ -237,8 +218,8 @@ public class JsonWebSocketSerializerTests
             ]
         };
 
-        var bytes = _serializer.SerializeMessage(MessageType.Error, null, original);
-        var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
+        var bytes = _serializer.SerializeMessage(MessageType.Error, original);
+        var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
 
         Assert.Equal(MessageType.Error, messageType);
 
