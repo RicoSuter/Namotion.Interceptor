@@ -137,6 +137,7 @@ public static class WebSocketSubjectExtensions
             {
                 var configuration = new WebSocketServerConfiguration();
                 configure?.Invoke(configuration);
+                configuration.Validate();
                 return configuration;
             })
             .AddSingleton(serviceProvider =>

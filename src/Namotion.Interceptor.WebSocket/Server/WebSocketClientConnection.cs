@@ -56,7 +56,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         try
         {
             using var result = await WebSocketMessageReader.ReadMessageWithTimeoutAsync(
-                _webSocket, _maxMessageSize, _helloTimeout, cancellationToken);
+                _webSocket, _maxMessageSize, _helloTimeout, cancellationToken).ConfigureAwait(false);
 
             if (result.IsCloseMessage)
             {
@@ -97,7 +97,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
 
     public async Task SendWelcomeAsync(SubjectUpdate initialState, CancellationToken cancellationToken)
     {
-        await _sendLock.WaitAsync(cancellationToken);
+        await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             var welcome = new WelcomePayload
@@ -109,7 +109,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
 
             _sendBuffer.Clear();
             _serializer.SerializeMessageTo(_sendBuffer, MessageType.Welcome, null, welcome);
-            await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken);
+            await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
 
             MaybeShrinkSendBuffer();
 
@@ -119,7 +119,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
             {
                 _sendBuffer.Clear();
                 _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, null, pendingUpdate);
-                await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken);
+                await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
                 MaybeShrinkSendBuffer();
             }
         }
@@ -129,15 +129,52 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         }
     }
 
-    public Task SendUpdateAsync(SubjectUpdate update, CancellationToken cancellationToken)
+    public async Task SendUpdateAsync(SubjectUpdate update, CancellationToken cancellationToken)
     {
-        if (!_welcomeSent)
+        // Acquire lock BEFORE checking _welcomeSent to prevent TOCTOU race with SendWelcomeAsync.
+        // Without this, an update could be enqueued after SendWelcomeAsync has already drained the queue.
+        if (!IsConnected || Volatile.Read(ref _disposed) == 1) return;
+
+        try
         {
-            _pendingUpdates.Enqueue(update);
-            return Task.CompletedTask;
+            await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
         }
 
-        return SendAsync(MessageType.Update, update, trackFailures: true, cancellationToken);
+        try
+        {
+            if (!_welcomeSent)
+            {
+                _pendingUpdates.Enqueue(update);
+                return;
+            }
+
+            if (!IsConnected) return;
+
+            _sendBuffer.Clear();
+            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, null, update);
+            await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+
+            MaybeShrinkSendBuffer();
+            Interlocked.Exchange(ref _consecutiveSendFailures, 0);
+        }
+        catch (ObjectDisposedException)
+        {
+            // Connection disposed during send
+        }
+        catch (WebSocketException ex)
+        {
+            Interlocked.Increment(ref _consecutiveSendFailures);
+            _logger.LogWarning(ex, "Failed to send Update to client {ConnectionId}", ConnectionId);
+        }
+        finally
+        {
+            try { _sendLock.Release(); }
+            catch (ObjectDisposedException) { }
+        }
     }
 
     public Task SendErrorAsync(ErrorPayload error, CancellationToken cancellationToken)
@@ -151,7 +188,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
 
         try
         {
-            await _sendLock.WaitAsync(cancellationToken);
+            await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (ObjectDisposedException)
         {
@@ -164,7 +201,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
 
             _sendBuffer.Clear();
             _serializer.SerializeMessageTo(_sendBuffer, messageType, null, payload);
-            await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken);
+            await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
 
             MaybeShrinkSendBuffer();
 
@@ -197,7 +234,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         try
         {
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _cts.Token);
-            using var result = await WebSocketMessageReader.ReadMessageAsync(_webSocket, _maxMessageSize, linkedCts.Token);
+            using var result = await WebSocketMessageReader.ReadMessageAsync(_webSocket, _maxMessageSize, linkedCts.Token).ConfigureAwait(false);
 
             if (result.IsCloseMessage)
             {
@@ -249,10 +286,11 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
             try
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, reason, cts.Token);
+                await _webSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, reason, cts.Token).ConfigureAwait(false);
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogDebug(ex, "Error during WebSocket close for {ConnectionId}, aborting", ConnectionId);
                 try { _webSocket.Abort(); }
                 catch (ObjectDisposedException) { }
             }
@@ -263,7 +301,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
 
-        await _cts.CancelAsync();
+        await _cts.CancelAsync().ConfigureAwait(false);
         try { _webSocket.Abort(); }
         catch (ObjectDisposedException) { }
         _webSocket.Dispose();

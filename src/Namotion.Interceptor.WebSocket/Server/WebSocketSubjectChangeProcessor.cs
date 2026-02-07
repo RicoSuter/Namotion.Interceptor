@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.WebSocket.Server;
 /// Background service that processes subject changes and broadcasts them via WebSocket.
 /// Used in embedded mode where the WebSocket endpoint is mapped into an existing ASP.NET app.
 /// </summary>
-public class WebSocketSubjectChangeProcessor : BackgroundService
+public sealed class WebSocketSubjectChangeProcessor : BackgroundService
 {
     private readonly WebSocketSubjectHandler _handler;
     private readonly ILogger _logger;
@@ -33,6 +33,6 @@ public class WebSocketSubjectChangeProcessor : BackgroundService
             _handler.BufferTime,
             _logger);
 
-        await changeQueueProcessor.ProcessAsync(stoppingToken);
+        await changeQueueProcessor.ProcessAsync(stoppingToken).ConfigureAwait(false);
     }
 }

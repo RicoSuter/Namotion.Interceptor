@@ -15,7 +15,7 @@ namespace Namotion.Interceptor.WebSocket.Server;
 /// Uses Kestrel for cross-platform support without elevation.
 /// For embedding in an existing ASP.NET app, use MapWebSocketSubjectHandler extension instead.
 /// </summary>
-public class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
+public sealed class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
 {
     private readonly WebSocketSubjectHandler _handler;
     private readonly WebSocketServerConfiguration _configuration;
@@ -51,7 +51,7 @@ public class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
         {
             try
             {
-                await RunServerAsync(stoppingToken);
+                await RunServerAsync(stoppingToken).ConfigureAwait(false);
                 break;
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -61,7 +61,7 @@ public class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
             catch (Exception ex)
             {
                 _logger.LogError(ex, "WebSocket server failed. Retrying in {Delay}...", retryDelay);
-                await Task.Delay(retryDelay, stoppingToken);
+                await Task.Delay(retryDelay, stoppingToken).ConfigureAwait(false);
 
                 var jitter = Random.Shared.NextDouble() * 0.1 + 0.95;
                 retryDelay = TimeSpan.FromMilliseconds(
@@ -84,7 +84,7 @@ public class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
         // Dispose previous WebApplication on retry
         if (_app is not null)
         {
-            await _app.DisposeAsync();
+            await _app.DisposeAsync().ConfigureAwait(false);
         }
 
         _app = builder.Build();
@@ -97,8 +97,8 @@ public class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
         {
             if (context.WebSockets.IsWebSocketRequest)
             {
-                var webSocket = await context.WebSockets.AcceptWebSocketAsync();
-                await _handler.HandleClientAsync(webSocket, stoppingToken);
+                var webSocket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
+                await _handler.HandleClientAsync(webSocket, stoppingToken).ConfigureAwait(false);
             }
             else
             {
@@ -119,7 +119,7 @@ public class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
         var processorTask = changeQueueProcessor.ProcessAsync(stoppingToken);
         var serverTask = _app.RunAsync(stoppingToken);
 
-        await Task.WhenAll(processorTask, serverTask);
+        await Task.WhenAll(processorTask, serverTask).ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync()
@@ -130,18 +130,18 @@ public class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
         try
         {
             using var stopCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-            await StopAsync(stopCts.Token);
+            await StopAsync(stopCts.Token).ConfigureAwait(false);
         }
         catch (Exception)
         {
             // Best effort stop
         }
 
-        await _handler.CloseAllConnectionsAsync();
+        await _handler.CloseAllConnectionsAsync().ConfigureAwait(false);
 
         if (_app is not null)
         {
-            await _app.DisposeAsync();
+            await _app.DisposeAsync().ConfigureAwait(false);
         }
 
         Dispose();

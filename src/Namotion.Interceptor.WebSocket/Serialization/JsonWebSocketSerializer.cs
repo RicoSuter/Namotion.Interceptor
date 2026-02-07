@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.WebSocket.Serialization;
 /// <summary>
 /// JSON serializer for WebSocket messages. This class is stateless and thread-safe.
 /// </summary>
-public class JsonWebSocketSerializer : IWebSocketSerializer
+public sealed class JsonWebSocketSerializer : IWebSocketSerializer
 {
     /// <summary>
     /// Shared singleton instance. Use this to avoid allocating a new serializer per connection.

@@ -98,7 +98,7 @@ internal static class WebSocketMessageReader
             WebSocketReceiveResult result;
             do
             {
-                result = await webSocket.ReceiveAsync(buffer, cancellationToken);
+                result = await webSocket.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false);
 
                 if (result.MessageType == WebSocketMessageType.Close)
                 {
@@ -110,7 +110,7 @@ internal static class WebSocketMessageReader
                 {
                     // Abort WebSocket to prevent reading leftover fragments as a new message
                     webSocket.Abort();
-                    await messageStream.DisposeAsync();
+                    await messageStream.DisposeAsync().ConfigureAwait(false);
                     return ReadResult.MaxSizeExceeded(null, buffer);
                 }
 
@@ -124,7 +124,7 @@ internal static class WebSocketMessageReader
         catch
         {
             // On exception, clean up resources
-            await messageStream.DisposeAsync();
+            await messageStream.DisposeAsync().ConfigureAwait(false);
             ArrayPool<byte>.Shared.Return(buffer);
             throw;
         }
@@ -147,7 +147,7 @@ internal static class WebSocketMessageReader
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(timeout);
 
-        return await ReadMessageAsync(webSocket, maxMessageSize, timeoutCts.Token);
+        return await ReadMessageAsync(webSocket, maxMessageSize, timeoutCts.Token).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -169,7 +169,7 @@ internal static class WebSocketMessageReader
         WebSocketReceiveResult result;
         do
         {
-            result = await webSocket.ReceiveAsync(buffer, cancellationToken);
+            result = await webSocket.ReceiveAsync(buffer, cancellationToken).ConfigureAwait(false);
 
             if (result.MessageType == WebSocketMessageType.Close)
             {
@@ -183,7 +183,7 @@ internal static class WebSocketMessageReader
                 return ReadResult.MaxSizeExceededNoResources;
             }
 
-            await stream.WriteAsync(buffer, 0, result.Count, cancellationToken);
+            await stream.WriteAsync(buffer, 0, result.Count, cancellationToken).ConfigureAwait(false);
         }
         while (!result.EndOfMessage);
 

@@ -53,19 +53,14 @@ public class WebSocketTestClient<TRoot> : IAsyncDisposable
         _host = builder.Build();
         await _host.StartAsync();
 
-        // Wait for connection and initial sync
-        var timeout = DateTime.UtcNow.AddSeconds(10);
+        // Wait for connection and initial sync (if caller provides a predicate)
         if (isConnected != null)
         {
-            while (!isConnected(Root) && DateTime.UtcNow < timeout)
+            var deadline = DateTime.UtcNow.AddSeconds(10);
+            while (!isConnected(Root) && DateTime.UtcNow < deadline)
             {
                 await Task.Delay(100);
             }
-        }
-        else
-        {
-            // Wait for initial state to be applied (property should change from default)
-            await Task.Delay(2000);
         }
     }
 
