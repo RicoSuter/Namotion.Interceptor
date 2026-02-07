@@ -1,6 +1,6 @@
 using System;
 using System.Buffers;
-using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Net.WebSockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -27,7 +27,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
     private ArrayBufferWriter<byte> _sendBuffer = new(4096);
     private readonly long _maxMessageSize;
     private readonly TimeSpan _helloTimeout;
-    private readonly ConcurrentQueue<SubjectUpdate> _pendingUpdates = new();
+    private readonly Queue<SubjectUpdate> _pendingUpdates = new();
     private volatile bool _welcomeSent;
 
     private int _disposed;
