@@ -27,7 +27,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
     private ArrayBufferWriter<byte> _sendBuffer = new(4096);
     private readonly long _maxMessageSize;
     private readonly TimeSpan _helloTimeout;
-    private readonly Queue<SubjectUpdate> _pendingUpdates = new();
+    private readonly Queue<(SubjectUpdate Update, long Sequence)> _pendingUpdates = new();
     private volatile bool _welcomeSent;
 
     private int _disposed;
@@ -95,7 +95,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         }
     }
 
-    public async Task SendWelcomeAsync(SubjectUpdate initialState, CancellationToken cancellationToken)
+    public async Task SendWelcomeAsync(SubjectUpdate initialState, long sequence, CancellationToken cancellationToken)
     {
         await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -104,7 +104,8 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
             {
                 Version = 1,
                 Format = WebSocketFormat.Json,
-                State = initialState
+                State = initialState,
+                Sequence = sequence
             };
 
             _sendBuffer.Clear();
@@ -115,10 +116,10 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
 
             // Mark welcome as sent and flush any queued updates
             _welcomeSent = true;
-            while (_pendingUpdates.TryDequeue(out var pendingUpdate))
+            while (_pendingUpdates.TryDequeue(out var pending))
             {
                 _sendBuffer.Clear();
-                _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, null, pendingUpdate);
+                _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, pending.Sequence, pending.Update);
                 await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
                 MaybeShrinkSendBuffer();
             }
@@ -129,7 +130,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         }
     }
 
-    public async Task SendUpdateAsync(SubjectUpdate update, CancellationToken cancellationToken)
+    public async Task SendUpdateAsync(SubjectUpdate update, long sequence, CancellationToken cancellationToken)
     {
         // Acquire lock BEFORE checking _welcomeSent to prevent TOCTOU race with SendWelcomeAsync.
         // Without this, an update could be enqueued after SendWelcomeAsync has already drained the queue.
@@ -148,14 +149,14 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         {
             if (!_welcomeSent)
             {
-                _pendingUpdates.Enqueue(update);
+                _pendingUpdates.Enqueue((update, sequence));
                 return;
             }
 
             if (!IsConnected) return;
 
             _sendBuffer.Clear();
-            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, null, update);
+            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, sequence, update);
             await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
 
             MaybeShrinkSendBuffer();
@@ -180,6 +181,13 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
     public Task SendErrorAsync(ErrorPayload error, CancellationToken cancellationToken)
     {
         return SendAsync(MessageType.Error, error, trackFailures: false, cancellationToken);
+    }
+
+    public Task SendHeartbeatAsync(HeartbeatPayload heartbeat, CancellationToken cancellationToken)
+    {
+        // Skip heartbeats until Welcome has been sent to avoid confusing clients
+        if (!_welcomeSent) return Task.CompletedTask;
+        return SendAsync(MessageType.Heartbeat, heartbeat, trackFailures: true, cancellationToken);
     }
 
     private async Task SendAsync<T>(MessageType messageType, T payload, bool trackFailures, CancellationToken cancellationToken)

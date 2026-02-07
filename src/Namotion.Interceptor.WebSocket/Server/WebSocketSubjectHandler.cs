@@ -9,6 +9,7 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.WebSocket.Protocol;
 
 namespace Namotion.Interceptor.WebSocket.Server;
 
@@ -21,6 +22,7 @@ public sealed class WebSocketSubjectHandler
     private const int SupportedProtocolVersion = 1;
 
     private int _connectionCount;
+    private long _sequence;
 
     private readonly IInterceptorSubject _subject;
     private readonly WebSocketServerConfiguration _configuration;
@@ -34,7 +36,9 @@ public sealed class WebSocketSubjectHandler
     public TimeSpan BufferTime => _configuration.BufferTime;
 
     public int ConnectionCount => Volatile.Read(ref _connectionCount);
-    
+
+    public long CurrentSequence => Volatile.Read(ref _sequence);
+
     public WebSocketSubjectHandler(
         IInterceptorSubject subject,
         WebSocketServerConfiguration configuration,
@@ -90,9 +94,9 @@ public sealed class WebSocketSubjectHandler
             {
                 _logger.LogWarning("Client {ConnectionId}: Protocol version mismatch (client: {ClientVersion}, server: {ServerVersion})",
                     connection.ConnectionId, hello.Version, SupportedProtocolVersion);
-                await connection.SendErrorAsync(new Protocol.ErrorPayload
+                await connection.SendErrorAsync(new ErrorPayload
                 {
-                    Code = Protocol.ErrorCode.VersionMismatch,
+                    Code = ErrorCode.VersionMismatch,
                     Message = $"Unsupported protocol version {hello.Version}. Server supports version {SupportedProtocolVersion}."
                 }, stoppingToken).ConfigureAwait(false);
                 await connection.CloseAsync("Protocol version mismatch").ConfigureAwait(false);
@@ -108,13 +112,15 @@ public sealed class WebSocketSubjectHandler
 
             // Build snapshot under _applyUpdateLock for a consistent cut
             SubjectUpdate initialState;
+            long welcomeSequence;
             lock (_applyUpdateLock)
             {
+                welcomeSequence = Volatile.Read(ref _sequence);
                 initialState = SubjectUpdate.CreateCompleteUpdate(_subject, _processors);
             }
 
             // Send Welcome (flushes queued updates under _sendLock)
-            await connection.SendWelcomeAsync(initialState, stoppingToken).ConfigureAwait(false);
+            await connection.SendWelcomeAsync(initialState, welcomeSequence, stoppingToken).ConfigureAwait(false);
 
             _logger.LogInformation("Client {ConnectionId}: Welcome sent, waiting for updates...", connection.ConnectionId);
 
@@ -164,9 +170,9 @@ public sealed class WebSocketSubjectHandler
             catch (Exception ex) when (ex is InvalidOperationException or System.Text.Json.JsonException)
             {
                 _logger.LogWarning(ex, "Client {ConnectionId}: Invalid message received", connection.ConnectionId);
-                await connection.SendErrorAsync(new Protocol.ErrorPayload
+                await connection.SendErrorAsync(new ErrorPayload
                 {
-                    Code = Protocol.ErrorCode.InvalidFormat,
+                    Code = ErrorCode.InvalidFormat,
                     Message = "Invalid message format."
                 }, stoppingToken).ConfigureAwait(false);
                 break;
@@ -192,9 +198,9 @@ public sealed class WebSocketSubjectHandler
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error applying update from client {ConnectionId}", connection.ConnectionId);
-                await connection.SendErrorAsync(new Protocol.ErrorPayload
+                await connection.SendErrorAsync(new ErrorPayload
                 {
-                    Code = Protocol.ErrorCode.InternalError,
+                    Code = ErrorCode.InternalError,
                     Message = "An internal error occurred while processing the update."
                 }, stoppingToken).ConfigureAwait(false);
             }
@@ -232,11 +238,14 @@ public sealed class WebSocketSubjectHandler
     {
         if (_connections.IsEmpty) return;
 
-        // Send to all connections
+        // Each broadcast batch gets a unique, monotonically increasing sequence number
+        var sequence = Interlocked.Increment(ref _sequence);
+
+        // Send to all connections with sequence in envelope
         var tasks = new List<Task>(_connections.Count);
         foreach (var connection in _connections.Values)
         {
-            tasks.Add(connection.SendUpdateAsync(update, cancellationToken));
+            tasks.Add(connection.SendUpdateAsync(update, sequence, cancellationToken));
         }
 
         try
@@ -245,15 +254,82 @@ public sealed class WebSocketSubjectHandler
         }
         finally
         {
-            // Remove zombie connections (repeated send failures) even if WhenAll threw (I4)
-            foreach (var (connectionId, connection) in _connections)
+            await RemoveZombieConnectionsAsync().ConfigureAwait(false);
+        }
+    }
+
+    public async Task RunHeartbeatLoopAsync(CancellationToken cancellationToken)
+    {
+        var interval = _configuration.HeartbeatInterval;
+        if (interval <= TimeSpan.Zero)
+        {
+            return; // Heartbeat disabled
+        }
+
+        _logger.LogInformation("Heartbeat loop started (interval: {Interval})", interval);
+
+        try
+        {
+            while (!cancellationToken.IsCancellationRequested)
             {
-                if (connection.HasRepeatedSendFailures && _connections.TryRemove(connectionId, out _))
+                await Task.Delay(interval, cancellationToken).ConfigureAwait(false);
+
+                try
                 {
-                    _logger.LogWarning("Removing zombie connection {ConnectionId} due to repeated send failures", connectionId);
-                    Interlocked.Decrement(ref _connectionCount);
-                    await connection.DisposeAsync().ConfigureAwait(false);
+                    await BroadcastHeartbeatAsync(cancellationToken).ConfigureAwait(false);
                 }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error broadcasting heartbeat");
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Normal shutdown
+        }
+
+        _logger.LogInformation("Heartbeat loop stopped");
+    }
+
+    private async Task BroadcastHeartbeatAsync(CancellationToken cancellationToken)
+    {
+        if (_connections.IsEmpty) return;
+
+        var heartbeat = new HeartbeatPayload
+        {
+            Sequence = Volatile.Read(ref _sequence)
+        };
+
+        var tasks = new List<Task>(_connections.Count);
+        foreach (var connection in _connections.Values)
+        {
+            tasks.Add(connection.SendHeartbeatAsync(heartbeat, cancellationToken));
+        }
+
+        try
+        {
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+        finally
+        {
+            await RemoveZombieConnectionsAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async Task RemoveZombieConnectionsAsync()
+    {
+        foreach (var (connectionId, connection) in _connections)
+        {
+            if (connection.HasRepeatedSendFailures && _connections.TryRemove(connectionId, out _))
+            {
+                _logger.LogWarning("Removing zombie connection {ConnectionId} due to repeated send failures", connectionId);
+                Interlocked.Decrement(ref _connectionCount);
+                await connection.DisposeAsync().ConfigureAwait(false);
             }
         }
     }

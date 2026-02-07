@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Xunit.Abstractions;
 
@@ -56,11 +57,10 @@ public class WebSocketTestClient<TRoot> : IAsyncDisposable
         // Wait for connection and initial sync (if caller provides a predicate)
         if (isConnected != null)
         {
-            var deadline = DateTime.UtcNow.AddSeconds(10);
-            while (!isConnected(Root) && DateTime.UtcNow < deadline)
-            {
-                await Task.Delay(100);
-            }
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => isConnected(Root),
+                timeout: TimeSpan.FromSeconds(10),
+                message: "Client should establish connection");
         }
     }
 

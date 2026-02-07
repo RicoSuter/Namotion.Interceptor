@@ -39,6 +39,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     private readonly SourceOwnershipManager _ownership;
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
 
+    private readonly ClientSequenceTracker _sequenceTracker = new();
     private volatile bool _isStarted;
     private int _disposed;
     private CancellationTokenRegistration _stoppingTokenRegistration;
@@ -191,8 +192,9 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             }
 
             _initialState = welcome.State;
+            _sequenceTracker.InitializeFromWelcome(welcome.Sequence);
 
-            _logger.LogInformation("Connected to WebSocket server");
+            _logger.LogInformation("Connected to WebSocket server (sequence: {Sequence})", welcome.Sequence);
 
             // Start receive loop (signals _receiveLoopCompleted when done)
             _ = ReceiveLoopAsync(_receiveCts.Token);
@@ -370,14 +372,32 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                         }
 
                         var messageBytes = new ReadOnlySpan<byte>(messageStream.GetBuffer(), 0, (int)messageStream.Length);
-                        var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(messageBytes);
+                        var (messageType, envelopeSequence, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(messageBytes);
                         var payloadBytes = messageBytes.Slice(payloadStart, payloadLength);
 
                         switch (messageType)
                         {
                             case MessageType.Update:
                                 var update = _serializer.Deserialize<SubjectUpdate>(payloadBytes);
+                                if (!_sequenceTracker.IsUpdateValid(envelopeSequence ?? 0))
+                                {
+                                    _logger.LogWarning(
+                                        "Sequence gap detected: expected {Expected}, received {Received}. Triggering reconnection.",
+                                        _sequenceTracker.ExpectedNextSequence, envelopeSequence);
+                                    return; // Exit receive loop -> triggers reconnection
+                                }
                                 HandleUpdate(update);
+                                break;
+
+                            case MessageType.Heartbeat:
+                                var heartbeat = _serializer.Deserialize<HeartbeatPayload>(payloadBytes);
+                                if (!_sequenceTracker.IsHeartbeatInSync(heartbeat.Sequence))
+                                {
+                                    _logger.LogWarning(
+                                        "Heartbeat sequence gap: server at {ServerSequence}, client expects {Expected}. Triggering reconnection.",
+                                        heartbeat.Sequence, _sequenceTracker.ExpectedNextSequence);
+                                    return; // Exit receive loop -> triggers reconnection
+                                }
                                 break;
 
                             case MessageType.Error:

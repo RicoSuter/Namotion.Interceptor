@@ -25,6 +25,28 @@ public class PayloadTests
     }
 
     [Fact]
+    public void WelcomePayload_ShouldDefaultSequenceToZero()
+    {
+        var payload = new WelcomePayload();
+
+        Assert.Equal(0L, payload.Sequence);
+    }
+
+    [Fact]
+    public void HeartbeatPayload_ShouldHaveDefaultValues()
+    {
+        var payload = new HeartbeatPayload();
+
+        Assert.Equal(0L, payload.Sequence);
+    }
+
+    [Fact]
+    public void MessageType_ShouldIncludeHeartbeat()
+    {
+        Assert.Equal(4, (int)MessageType.Heartbeat);
+    }
+
+    [Fact]
     public void ErrorPayload_ShouldSupportMultipleFailures()
     {
         var payload = new ErrorPayload

@@ -33,6 +33,8 @@ public sealed class WebSocketSubjectChangeProcessor : BackgroundService
             _handler.BufferTime,
             _logger);
 
-        await changeQueueProcessor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+        await Task.WhenAll(
+            changeQueueProcessor.ProcessAsync(stoppingToken),
+            _handler.RunHeartbeatLoopAsync(stoppingToken)).ConfigureAwait(false);
     }
 }

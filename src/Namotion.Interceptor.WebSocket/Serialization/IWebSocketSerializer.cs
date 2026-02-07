@@ -26,19 +26,19 @@ public interface IWebSocketSerializer
     T Deserialize<T>(ReadOnlySpan<byte> bytes);
 
     /// <summary>
-    /// Serializes a complete message envelope [MessageType, CorrelationId, Payload].
+    /// Serializes a complete message envelope [MessageType, Sequence, Payload].
     /// </summary>
-    byte[] SerializeMessage<T>(MessageType messageType, int? correlationId, T payload);
+    byte[] SerializeMessage<T>(MessageType messageType, long? sequence, T payload);
 
     /// <summary>
-    /// Serializes a complete message envelope [MessageType, CorrelationId, Payload] to a buffer writer.
+    /// Serializes a complete message envelope [MessageType, Sequence, Payload] to a buffer writer.
     /// This avoids allocating a new byte array for each message.
     /// </summary>
-    void SerializeMessageTo<T>(IBufferWriter<byte> bufferWriter, MessageType messageType, int? correlationId, T payload);
+    void SerializeMessageTo<T>(IBufferWriter<byte> bufferWriter, MessageType messageType, long? sequence, T payload);
 
     /// <summary>
-    /// Deserializes a message envelope and returns the message type, correlation ID, and payload byte range.
+    /// Deserializes a message envelope and returns the message type, sequence number, and payload byte range.
     /// The payload bytes reference the original input buffer and must be processed before the buffer is reused.
     /// </summary>
-    (MessageType Type, int? CorrelationId, int PayloadStart, int PayloadLength) DeserializeMessageEnvelope(ReadOnlySpan<byte> bytes);
+    (MessageType Type, long? Sequence, int PayloadStart, int PayloadLength) DeserializeMessageEnvelope(ReadOnlySpan<byte> bytes);
 }
