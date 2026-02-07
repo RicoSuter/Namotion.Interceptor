@@ -111,45 +111,58 @@ public static class WebSocketSubjectExtensions
 
     /// <summary>
     /// Adds a WebSocket subject handler for embedding in an existing ASP.NET application.
-    /// Call MapWebSocketSubjectHandler to map the endpoint after building the app.
+    /// The path is used as both the endpoint route and the keyed service identifier,
+    /// allowing multiple handlers to be registered on different paths.
+    /// Call MapWebSocketSubjectHandler with the same path to map the endpoint after building the app.
     /// </summary>
     public static IServiceCollection AddWebSocketSubjectHandler<TSubject>(
         this IServiceCollection services,
+        string path,
         Action<WebSocketServerConfiguration>? configure = null)
         where TSubject : IInterceptorSubject
     {
         return services.AddWebSocketSubjectHandler(
+            path,
             serviceProvider => serviceProvider.GetRequiredService<TSubject>(),
             configure);
     }
 
     /// <summary>
     /// Adds a WebSocket subject handler with custom subject selector.
-    /// Call MapWebSocketSubjectHandler to map the endpoint after building the app.
+    /// The path is used as both the endpoint route and the keyed service identifier,
+    /// allowing multiple handlers to be registered on different paths.
+    /// Call MapWebSocketSubjectHandler with the same path to map the endpoint after building the app.
     /// </summary>
     public static IServiceCollection AddWebSocketSubjectHandler(
         this IServiceCollection services,
+        string path,
         Func<IServiceProvider, IInterceptorSubject> subjectSelector,
         Action<WebSocketServerConfiguration>? configure = null)
     {
         return services
-            .AddSingleton(serviceProvider =>
+            .AddKeyedSingleton(path, (serviceProvider, _) =>
             {
                 var configuration = new WebSocketServerConfiguration();
                 configure?.Invoke(configuration);
                 configuration.Validate();
                 return configuration;
             })
-            .AddSingleton(serviceProvider =>
+            .AddKeyedSingleton(path, (serviceProvider, _) => subjectSelector(serviceProvider))
+            .AddKeyedSingleton(path, (serviceProvider, _) =>
             {
-                var subject = subjectSelector(serviceProvider);
-                var configuration = serviceProvider.GetRequiredService<WebSocketServerConfiguration>();
+                var subject = serviceProvider.GetRequiredKeyedService<IInterceptorSubject>(path);
                 return new WebSocketSubjectHandler(
                     subject,
-                    configuration,
+                    serviceProvider.GetRequiredKeyedService<WebSocketServerConfiguration>(path),
                     serviceProvider.GetRequiredService<ILogger<WebSocketSubjectHandler>>());
             })
-            .AddSingleton<IHostedService, WebSocketSubjectChangeProcessor>();
+            .AddSingleton<IHostedService>(serviceProvider =>
+            {
+                var handler = serviceProvider.GetRequiredKeyedService<WebSocketSubjectHandler>(path);
+                return new WebSocketSubjectChangeProcessor(
+                    handler,
+                    serviceProvider.GetRequiredService<ILogger<WebSocketSubjectChangeProcessor>>());
+            });
     }
 
     /// <summary>
@@ -162,7 +175,7 @@ public static class WebSocketSubjectExtensions
     /// <example>
     /// <code>
     /// // In Program.cs:
-    /// builder.Services.AddWebSocketSubjectHandler&lt;Device&gt;();
+    /// builder.Services.AddWebSocketSubjectHandler&lt;Device&gt;("/ws");
     ///
     /// var app = builder.Build();
     /// app.UseWebSockets();
@@ -178,7 +191,7 @@ public static class WebSocketSubjectExtensions
         {
             if (context.WebSockets.IsWebSocketRequest)
             {
-                var handler = context.RequestServices.GetRequiredService<WebSocketSubjectHandler>();
+                var handler = context.RequestServices.GetRequiredKeyedService<WebSocketSubjectHandler>(path);
                 var webSocket = await context.WebSockets.AcceptWebSocketAsync();
                 await handler.HandleClientAsync(webSocket, context.RequestAborted);
             }

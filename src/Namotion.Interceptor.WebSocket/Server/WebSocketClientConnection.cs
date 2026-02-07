@@ -27,7 +27,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
     private ArrayBufferWriter<byte> _sendBuffer = new(4096);
     private readonly long _maxMessageSize;
     private readonly TimeSpan _helloTimeout;
-    private readonly Queue<(SubjectUpdate Update, long Sequence)> _pendingUpdates = new();
+    private readonly Queue<UpdatePayload> _pendingUpdates = new();
     private volatile bool _welcomeSent;
 
     private int _disposed;
@@ -74,7 +74,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
                 return null;
             }
 
-            var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(result.MessageBytes.Span);
+            var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(result.MessageBytes.Span);
             if (messageType == MessageType.Hello)
             {
                 return _serializer.Deserialize<HelloPayload>(result.MessageBytes.Span.Slice(payloadStart, payloadLength));
@@ -109,7 +109,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
             };
 
             _sendBuffer.Clear();
-            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Welcome, null, welcome);
+            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Welcome, welcome);
             await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
 
             MaybeShrinkSendBuffer();
@@ -119,7 +119,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
             while (_pendingUpdates.TryDequeue(out var pending))
             {
                 _sendBuffer.Clear();
-                _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, pending.Sequence, pending.Update);
+                _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, pending);
                 await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
                 MaybeShrinkSendBuffer();
             }
@@ -130,7 +130,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         }
     }
 
-    public async Task SendUpdateAsync(SubjectUpdate update, long sequence, CancellationToken cancellationToken)
+    public async Task SendUpdateAsync(UpdatePayload update, CancellationToken cancellationToken)
     {
         // Acquire lock BEFORE checking _welcomeSent to prevent TOCTOU race with SendWelcomeAsync.
         // Without this, an update could be enqueued after SendWelcomeAsync has already drained the queue.
@@ -149,14 +149,14 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         {
             if (!_welcomeSent)
             {
-                _pendingUpdates.Enqueue((update, sequence));
+                _pendingUpdates.Enqueue(update);
                 return;
             }
 
             if (!IsConnected) return;
 
             _sendBuffer.Clear();
-            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, sequence, update);
+            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, update);
             await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
 
             MaybeShrinkSendBuffer();
@@ -208,7 +208,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
             if (!IsConnected) return;
 
             _sendBuffer.Clear();
-            _serializer.SerializeMessageTo(_sendBuffer, messageType, null, payload);
+            _serializer.SerializeMessageTo(_sendBuffer, messageType, payload);
             await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
 
             MaybeShrinkSendBuffer();
@@ -263,7 +263,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
 
             _logger.LogDebug("Client {ConnectionId}: Received {ByteCount} bytes", ConnectionId, result.MessageBytes.Length);
 
-            var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(result.MessageBytes.Span);
+            var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(result.MessageBytes.Span);
             if (messageType == MessageType.Update)
             {
                 var update = _serializer.Deserialize<SubjectUpdate>(result.MessageBytes.Span.Slice(payloadStart, payloadLength));

@@ -35,7 +35,7 @@ public class MalformedMessageTests
 
         var hello = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
         var sendBuffer = new ArrayBufferWriter<byte>(256);
-        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, null, hello);
+        _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, hello);
         await rawClient.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
 
         // Read Welcome

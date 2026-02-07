@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.WebSocket.Protocol;
 using Xunit;
 
@@ -63,5 +65,27 @@ public class PayloadTests
         Assert.Equal(100, payload.Code);
         Assert.Equal(2, payload.Failures!.Count);
         Assert.Equal("Motor/Speed", payload.Failures[0].Path);
+    }
+
+    [Fact]
+    public void UpdatePayload_ShouldInheritFromSubjectUpdate()
+    {
+        var payload = new UpdatePayload
+        {
+            Sequence = 42,
+            Root = "1",
+            Subjects = { ["1"] = new Dictionary<string, SubjectPropertyUpdate>() }
+        };
+
+        Assert.Equal(42, payload.Sequence);
+        Assert.Equal("1", payload.Root);
+        Assert.IsAssignableFrom<SubjectUpdate>(payload);
+    }
+
+    [Fact]
+    public void UpdatePayload_SequenceShouldDefaultToNull()
+    {
+        var payload = new UpdatePayload();
+        Assert.Null(payload.Sequence);
     }
 }

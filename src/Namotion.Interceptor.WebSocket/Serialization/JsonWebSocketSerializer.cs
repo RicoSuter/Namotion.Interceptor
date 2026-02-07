@@ -36,33 +36,23 @@ public sealed class JsonWebSocketSerializer : IWebSocketSerializer
             ?? throw new InvalidOperationException("Deserialization returned null");
     }
 
-    public byte[] SerializeMessage<T>(MessageType messageType, long? sequence, T payload)
+    public byte[] SerializeMessage<T>(MessageType messageType, T payload)
     {
-        var envelope = new object?[] { (int)messageType, sequence, payload };
+        var envelope = new object?[] { (int)messageType, payload };
         return JsonSerializer.SerializeToUtf8Bytes(envelope, Options);
     }
 
-    public void SerializeMessageTo<T>(IBufferWriter<byte> bufferWriter, MessageType messageType, long? sequence, T payload)
+    public void SerializeMessageTo<T>(IBufferWriter<byte> bufferWriter, MessageType messageType, T payload)
     {
         using var writer = new Utf8JsonWriter(bufferWriter);
         writer.WriteStartArray();
         writer.WriteNumberValue((int)messageType);
-
-        if (sequence.HasValue)
-        {
-            writer.WriteNumberValue(sequence.Value);
-        }
-        else
-        {
-            writer.WriteNullValue();
-        }
-
         JsonSerializer.Serialize(writer, payload, Options);
         writer.WriteEndArray();
         writer.Flush();
     }
 
-    public (MessageType Type, long? Sequence, int PayloadStart, int PayloadLength) DeserializeMessageEnvelope(ReadOnlySpan<byte> bytes)
+    public (MessageType Type, int PayloadStart, int PayloadLength) DeserializeMessageEnvelope(ReadOnlySpan<byte> bytes)
     {
         var reader = new Utf8JsonReader(bytes);
         if (!reader.Read() || reader.TokenType != JsonTokenType.StartArray)
@@ -81,25 +71,7 @@ public sealed class JsonWebSocketSerializer : IWebSocketSerializer
         }
         var messageType = (MessageType)reader.GetInt32();
 
-        if (!reader.Read())
-        {
-            throw new InvalidOperationException("Invalid message envelope: missing sequence");
-        }
-        long? sequence;
-        if (reader.TokenType == JsonTokenType.Null)
-        {
-            sequence = null;
-        }
-        else if (reader.TokenType == JsonTokenType.Number)
-        {
-            sequence = reader.GetInt64();
-        }
-        else
-        {
-            throw new InvalidOperationException("Invalid message envelope: sequence must be a number or null");
-        }
-
-        if (!reader.Read())
+        if (!reader.Read() || reader.TokenType == JsonTokenType.EndArray)
         {
             throw new InvalidOperationException("Invalid message envelope: missing payload");
         }
@@ -108,6 +80,6 @@ public sealed class JsonWebSocketSerializer : IWebSocketSerializer
         reader.Skip();
         var payloadLength = (int)reader.BytesConsumed - payloadStart;
 
-        return (messageType, sequence, payloadStart, payloadLength);
+        return (messageType, payloadStart, payloadLength);
     }
 }

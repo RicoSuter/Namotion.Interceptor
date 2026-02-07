@@ -137,8 +137,8 @@ public class SubjectUpdateFlowTests
         var update = SubjectUpdate.CreateCompleteUpdate(serverRoot, []);
 
         var welcome = new WelcomePayload { Version = 1, Format = WebSocketFormat.Json, State = update };
-        var bytes = serializer.SerializeMessage(MessageType.Welcome, null, welcome);
-        var (_, _, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
+        var bytes = serializer.SerializeMessage(MessageType.Welcome, welcome);
+        var (_, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
         var deserializedWelcome = serializer.Deserialize<WelcomePayload>(bytes.AsSpan(payloadStart, payloadLength));
 
         // This should not throw an InvalidCastException for JsonElement -> int conversion
@@ -190,8 +190,8 @@ public class SubjectUpdateFlowTests
         var serializer = new JsonWebSocketSerializer();
         var update = SubjectUpdate.CreateCompleteUpdate(serverRoot, []);
         var welcome = new WelcomePayload { Version = 1, Format = WebSocketFormat.Json, State = update };
-        var bytes = serializer.SerializeMessage(MessageType.Welcome, null, welcome);
-        var (_, _, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
+        var bytes = serializer.SerializeMessage(MessageType.Welcome, welcome);
+        var (_, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
         var deserializedWelcome = serializer.Deserialize<WelcomePayload>(bytes.AsSpan(payloadStart, payloadLength));
 
         clientRoot.ApplySubjectUpdate(deserializedWelcome.State!, DefaultSubjectFactory.Instance);
@@ -249,11 +249,11 @@ public class SubjectUpdateFlowTests
 
         var welcome = new WelcomePayload { Version = 1, Format = WebSocketFormat.Json, State = update };
 
-        var bytes = serializer.SerializeMessage(MessageType.Welcome, null, welcome);
+        var bytes = serializer.SerializeMessage(MessageType.Welcome, welcome);
         var json = System.Text.Encoding.UTF8.GetString(bytes);
         Assert.Contains("Initial", json); // Verify JSON contains the value
 
-        var (_, _, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
+        var (_, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
         var deserializedWelcome = serializer.Deserialize<WelcomePayload>(bytes.AsSpan(payloadStart, payloadLength));
 
         // Verify deserialized update has the property
@@ -294,8 +294,8 @@ public class SubjectUpdateFlowTests
         // Act - Create partial update, serialize through JSON, deserialize, apply
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(serverRoot, changes.ToArray(), []);
         var serializer = new JsonWebSocketSerializer();
-        var bytes = serializer.SerializeMessage(MessageType.Update, null, update);
-        var (_, _, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
+        var bytes = serializer.SerializeMessage(MessageType.Update, update);
+        var (_, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
         var deserialized = serializer.Deserialize<SubjectUpdate>(bytes.AsSpan(payloadStart, payloadLength));
 
         clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
@@ -334,8 +334,8 @@ public class SubjectUpdateFlowTests
         // Act
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(serverRoot, changes.ToArray(), []);
         var serializer = new JsonWebSocketSerializer();
-        var bytes = serializer.SerializeMessage(MessageType.Update, null, update);
-        var (_, _, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
+        var bytes = serializer.SerializeMessage(MessageType.Update, update);
+        var (_, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
         var deserialized = serializer.Deserialize<SubjectUpdate>(bytes.AsSpan(payloadStart, payloadLength));
 
         clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
@@ -378,8 +378,8 @@ public class SubjectUpdateFlowTests
         // Act
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(serverRoot, changes.ToArray(), []);
         var serializer = new JsonWebSocketSerializer();
-        var bytes = serializer.SerializeMessage(MessageType.Update, null, update);
-        var (_, _, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
+        var bytes = serializer.SerializeMessage(MessageType.Update, update);
+        var (_, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
         var deserialized = serializer.Deserialize<SubjectUpdate>(bytes.AsSpan(payloadStart, payloadLength));
 
         clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
@@ -416,8 +416,8 @@ public class SubjectUpdateFlowTests
         // Act
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(serverRoot, changes.ToArray(), []);
         var serializer = new JsonWebSocketSerializer();
-        var bytes = serializer.SerializeMessage(MessageType.Update, null, update);
-        var (_, _, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
+        var bytes = serializer.SerializeMessage(MessageType.Update, update);
+        var (_, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
         var deserialized = serializer.Deserialize<SubjectUpdate>(bytes.AsSpan(payloadStart, payloadLength));
 
         clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
@@ -463,8 +463,8 @@ public class SubjectUpdateFlowTests
         // Act
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(serverRoot, changes.ToArray(), []);
         var serializer = new JsonWebSocketSerializer();
-        var bytes = serializer.SerializeMessage(MessageType.Update, null, update);
-        var (_, _, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
+        var bytes = serializer.SerializeMessage(MessageType.Update, update);
+        var (_, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
         var deserialized = serializer.Deserialize<SubjectUpdate>(bytes.AsSpan(payloadStart, payloadLength));
 
         clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
@@ -497,8 +497,8 @@ public class SubjectUpdateFlowTests
         // Act
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(serverRoot, changes.ToArray(), []);
         var serializer = new JsonWebSocketSerializer();
-        var bytes = serializer.SerializeMessage(MessageType.Update, null, update);
-        var (_, _, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
+        var bytes = serializer.SerializeMessage(MessageType.Update, update);
+        var (_, payloadStart, payloadLength) = serializer.DeserializeMessageEnvelope(bytes);
         var deserialized = serializer.Deserialize<SubjectUpdate>(bytes.AsSpan(payloadStart, payloadLength));
 
         clientRoot.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
