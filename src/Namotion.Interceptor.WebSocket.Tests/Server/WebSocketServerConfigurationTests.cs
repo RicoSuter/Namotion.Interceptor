@@ -111,6 +111,30 @@ public class WebSocketServerConfigurationTests
     }
 
     [Fact]
+    public void HeartbeatInterval_ShouldDefaultTo30Seconds()
+    {
+        var configuration = new WebSocketServerConfiguration();
+
+        Assert.Equal(TimeSpan.FromSeconds(30), configuration.HeartbeatInterval);
+    }
+
+    [Fact]
+    public void Validate_ShouldThrowForNegativeHeartbeatInterval()
+    {
+        var configuration = new WebSocketServerConfiguration { HeartbeatInterval = TimeSpan.FromSeconds(-1) };
+
+        Assert.Throws<ArgumentException>(() => configuration.Validate());
+    }
+
+    [Fact]
+    public void Validate_ShouldAcceptZeroHeartbeatInterval()
+    {
+        var configuration = new WebSocketServerConfiguration { HeartbeatInterval = TimeSpan.Zero };
+
+        configuration.Validate(); // should not throw
+    }
+
+    [Fact]
     public void Validate_WithValidConfiguration_ShouldNotThrow()
     {
         var configuration = new WebSocketServerConfiguration

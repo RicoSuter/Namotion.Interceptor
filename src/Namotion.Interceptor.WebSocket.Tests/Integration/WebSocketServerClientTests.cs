@@ -331,11 +331,13 @@ public class WebSocketServerClientTests
         await client.StopAsync();
         _output.WriteLine("Client stopped abruptly");
 
-        // Trigger updates to hit the 3-failure zombie threshold
+        // Trigger updates to hit the 3-failure zombie threshold.
+        // Uses Task.Delay because the connection may already be removed by the
+        // receive loop, leaving no clients and preventing sequence increment.
         for (var i = 0; i < 5; i++)
         {
             server.Root!.Name = $"Update-{i}";
-            await Task.Delay(200);
+            await Task.Delay(TimeSpan.FromMilliseconds(200));
         }
 
         // Wait for cleanup

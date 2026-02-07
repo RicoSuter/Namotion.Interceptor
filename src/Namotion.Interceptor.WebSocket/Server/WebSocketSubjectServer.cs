@@ -26,6 +26,8 @@ public sealed class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
 
     public int ConnectionCount => _handler.ConnectionCount;
 
+    public long CurrentSequence => _handler.CurrentSequence;
+
     public WebSocketSubjectServer(
         IInterceptorSubject subject,
         WebSocketServerConfiguration configuration,
@@ -118,8 +120,9 @@ public sealed class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
 
         var processorTask = changeQueueProcessor.ProcessAsync(stoppingToken);
         var serverTask = _app.RunAsync(stoppingToken);
+        var heartbeatTask = _handler.RunHeartbeatLoopAsync(stoppingToken);
 
-        await Task.WhenAll(processorTask, serverTask).ConfigureAwait(false);
+        await Task.WhenAll(processorTask, serverTask, heartbeatTask).ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync()

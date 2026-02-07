@@ -66,10 +66,10 @@ public class JsonWebSocketSerializerTests
         var payload = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
         var bytes = _serializer.SerializeMessage(MessageType.Hello, 42, payload);
 
-        var (messageType, correlationId, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
+        var (messageType, sequence, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
 
         Assert.Equal(MessageType.Hello, messageType);
-        Assert.Equal(42, correlationId);
+        Assert.Equal(42, sequence);
 
         var deserializedPayload = _serializer.Deserialize<HelloPayload>(bytes.AsSpan(payloadStart, payloadLength));
         Assert.Equal(1, deserializedPayload.Version);
@@ -180,7 +180,7 @@ public class JsonWebSocketSerializerTests
     }
 
     [Fact]
-    public void DeserializeMessageEnvelope_WithStringCorrelationId_ShouldThrow()
+    public void DeserializeMessageEnvelope_WithStringSequence_ShouldThrow()
     {
         var bytes = Encoding.UTF8.GetBytes("[0,\"bad\",{}]");
         Assert.Throws<InvalidOperationException>(() =>
@@ -188,22 +188,22 @@ public class JsonWebSocketSerializerTests
     }
 
     [Fact]
-    public void DeserializeMessageEnvelope_WithMissingCorrelationIdAndPayload_ShouldThrow()
+    public void DeserializeMessageEnvelope_WithMissingSequenceAndPayload_ShouldThrow()
     {
         // [0] has only the messageType; after reading it, the next Read()
-        // returns EndArray which is neither null nor a number for correlationId.
+        // returns EndArray which is neither null nor a number for sequence.
         var bytes = Encoding.UTF8.GetBytes("[0]");
         Assert.Throws<InvalidOperationException>(() =>
             _serializer.DeserializeMessageEnvelope(bytes));
     }
 
     [Fact]
-    public void DeserializeMessageEnvelope_WithNullCorrelationId_ShouldReturnNull()
+    public void DeserializeMessageEnvelope_WithNullSequence_ShouldReturnNull()
     {
         var payload = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
         var bytes = _serializer.SerializeMessage(MessageType.Hello, null, payload);
-        var (_, correlationId, _, _) = _serializer.DeserializeMessageEnvelope(bytes);
-        Assert.Null(correlationId);
+        var (_, sequence, _, _) = _serializer.DeserializeMessageEnvelope(bytes);
+        Assert.Null(sequence);
     }
 
     [Fact]

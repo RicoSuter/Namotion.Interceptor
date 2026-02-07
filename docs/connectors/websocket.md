@@ -7,6 +7,8 @@ The `Namotion.Interceptor.WebSocket` package provides bidirectional WebSocket co
 - Bidirectional synchronization between server and clients
 - JSON serialization (extensible for MessagePack in future)
 - Hello/Welcome handshake with initial state delivery
+- Sequence numbers on server-to-client messages for gap detection
+- Periodic heartbeat messages for liveness checking
 - Automatic reconnection with exponential backoff
 - Write retry queue for resilience during disconnection
 - Multiple client support with broadcast updates
@@ -141,6 +143,9 @@ builder.Services.AddWebSocketSubjectServer<Device>(configuration =>
     configuration.MaxMessageSize = 10 * 1024 * 1024;  // Default: 10 MB
     configuration.HelloTimeout = TimeSpan.FromSeconds(10);  // Default: 10s
 
+    // Heartbeat / sequence numbers
+    configuration.HeartbeatInterval = TimeSpan.FromSeconds(30);  // Default: 30s (0 to disable)
+
     // Path mapping
     configuration.PathProvider = new AttributeBasedPathProvider("ws");
 
@@ -195,11 +200,11 @@ The WebSocket protocol uses a simple message envelope for all communication.
 All messages use the same structure:
 
 ```
-[MessageType, CorrelationId, Payload]
+[MessageType, Sequence, Payload]
 ```
 
-- `MessageType`: Integer discriminator (0-3)
-- `CorrelationId`: Integer or null (reserved for future request/response pairing)
+- `MessageType`: Integer discriminator (0-4)
+- `Sequence`: Long integer or null. For server-to-client Update messages, this is the monotonically increasing sequence number. Null for all other messages.
 - `Payload`: Type-specific JSON payload
 
 ### Message Types
@@ -210,6 +215,7 @@ All messages use the same structure:
 | Welcome | 1 | Server -> Client | Server responds with initial state |
 | Update | 2 | Bidirectional | Property changes |
 | Error | 3 | Bidirectional | Error notification |
+| Heartbeat | 4 | Server -> Client | Periodic liveness check with current sequence |
 
 ### Connection Sequence
 
@@ -222,22 +228,31 @@ Client                                 Server
    |  [0, null, {version:1}]              |
    |                                      |
    |              (server registers connection for broadcasts)
+   |              (server reads current sequence under update lock)
    |              (server builds snapshot under update lock)
    |                                      |
    |<------- Welcome ---------------------|
-   |  [1, null, {version:1, format:"json", state: SubjectUpdate}]
+   |  [1, null, {version:1, format:"json", state: SubjectUpdate, sequence: 5}]
+   |                                      |
+   |  (client sets expectedNext = 6)      |
    |                                      |
    |<------- Update ----------------------|  (queued broadcasts flushed after Welcome)
-   |  [2, null, SubjectUpdate]            |
+   |  [2, 6, {root:..., subjects:...}]    |
    |                                      |
+   |  (client verifies sequence==6, sets expectedNext=7)
    |  (client applies snapshot,           |
    |   then replays buffered updates)     |
    |                                      |
-   |<------- Update ----------------------|  (server pushes changes)
-   |  [2, null, SubjectUpdate]            |
+   |<------- Update ----------------------|  (server pushes changes, sequence: 7)
+   |  [2, 7, {root:..., subjects:...}]    |
    |                                      |
-   |-------- Update --------------------->|  (client writes changes)
-   |  [2, null, SubjectUpdate]            |
+   |-------- Update --------------------->|  (client writes changes, no sequence)
+   |  [2, null, {root:..., subjects:...}] |
+   |                                      |
+   |<------- Heartbeat -------------------|  (periodic, every 30s by default)
+   |  [4, null, {sequence: 7}]            |
+   |                                      |
+   |  (client checks: 7 < 8 → in sync)   |
 ```
 
 #### Register-Before-Welcome Design
@@ -266,9 +281,23 @@ The snapshot does not need to be fully up-to-date — it is just a baseline. The
 {
   "version": 1,
   "format": "json",
-  "state": { /* Complete SubjectUpdate */ }
+  "state": { /* Complete SubjectUpdate */ },
+  "sequence": 5
 }
 ```
+
+- `sequence`: Server's current sequence number at snapshot time. Clients initialize their expected next sequence to `sequence + 1`.
+
+**HeartbeatPayload**
+```json
+{
+  "sequence": 42
+}
+```
+
+- `sequence`: Server's current sequence number (last broadcast batch). Does **not** increment the counter — it reflects the current value. Note: for Heartbeat messages, the sequence is in the payload (not the envelope) because heartbeats do not participate in the monotonic update sequence.
+
+Example wire format: `[4, null, {"sequence": 42}]`
 
 **ErrorPayload**
 ```json
@@ -337,6 +366,56 @@ This ensures:
 
 > **Note**: The retry queue echo (server broadcasting the client's flushed changes back) may arrive during or shortly after the replay phase. If it arrives during replay, it is included in the buffer. If it arrives after, it is applied immediately. Either way, the state converges within one round trip.
 
+### Sequence Numbers and Gap Detection
+
+The server maintains a monotonically increasing sequence counter that is incremented atomically (`Interlocked.Increment`) each time an update batch is broadcast. This enables clients to detect lost updates.
+
+**Server behavior:**
+- Each `BroadcastUpdateAsync` call increments the counter and sets the sequence in the message envelope's second field (e.g., `[2, 7, {root:..., subjects:...}]`). The sequence is a transport-level concern and is not part of the `SubjectUpdate` payload.
+- The Welcome payload includes the current sequence at snapshot time. Clients initialize their expected next sequence to `welcome.sequence + 1`.
+- Heartbeat messages include the current sequence in their payload but do **not** increment it.
+
+**Client behavior:**
+- On receiving an Update: the client reads the sequence from the message envelope. If `sequence != expectedNextSequence`, the client logs a warning and exits the receive loop, triggering reconnection via the existing recovery flow.
+- On receiving a Heartbeat: if `heartbeat.sequence >= expectedNextSequence`, the server has sent updates the client never received. The client exits the receive loop and reconnects.
+- A heartbeat with `sequence < expectedNextSequence` means the client is fully caught up — no action needed.
+- A null or zero envelope sequence is treated as "unassigned" for backward compatibility with servers that don't send sequence numbers.
+
+**Recovery flow on gap detection:**
+Gap detected -> receive loop exits -> `ExecuteAsync` detects connection lost -> `StartBuffering` -> exponential backoff delay -> `ConnectAsync` -> Welcome with full state + new sequence -> `CompleteInitializationAsync` (buffer-load-replay). No new recovery logic is needed; the existing reconnection flow handles everything.
+
+**Why only server-to-client messages carry sequence numbers:**
+Client-to-server writes are covered by the write retry queue (ring buffer, oldest-dropped-when-full) and flush-before-load on reconnection. The server applies updates synchronously under a lock, so silent drops within the server are impossible.
+
+### Heartbeat
+
+The server periodically sends Heartbeat messages to all connected clients. This allows clients to detect lost updates even during quiet periods (no property changes).
+
+```csharp
+configuration.HeartbeatInterval = TimeSpan.FromSeconds(30);  // Default
+configuration.HeartbeatInterval = TimeSpan.Zero;              // Disable heartbeats
+```
+
+- The heartbeat loop runs as a parallel task alongside the change queue processor.
+- If a transient send failure occurs during heartbeat broadcast, the error is logged and the loop continues.
+- Zombie connections (repeated send failures) are cleaned up during heartbeat broadcast, using the same logic as update broadcasts.
+
+### Echo Behavior
+
+The server broadcasts every update to **all** connected clients, including the client that sent the change. This is intentional:
+
+- **Sequence number consistency**: Every client must see the same monotonic sequence progression. Skipping an update for the originator would create a gap, triggering a false reconnection.
+- **Implicit acknowledgment**: The echo acts as a server-side ACK that the client's update was applied.
+- **No correctness issue**: The client applies inbound updates with `SubjectChangeContext.WithSource(this)`, so echoed values are deduplicated by the change tracking layer and do not trigger outbound writes or loops.
+
+### Conflict Resolution
+
+The system uses **last-write-wins (LWW)** at the server. If two clients modify the same property simultaneously, the last update to reach the server wins and is broadcast to all clients.
+
+- All clients and the server converge to the same value after updates propagate (eventual consistency).
+- No vector clocks, version stamps, or merge logic needed.
+- Acceptable for the target use cases (IoT, industrial automation, UI binding) where properties represent current state rather than accumulated operations.
+
 ### Error Handling
 
 Tiered error handling preserves connections when possible:
@@ -372,12 +451,11 @@ Tiered error handling preserves connections when possible:
 The protocol is designed for future enhancements:
 
 - **MessagePack support**: `format` field in Hello/Welcome enables negotiation for 3-4x smaller payloads
-- **Commands/RPC**: Message types 4-5 reserved for invoking methods on subjects
-- **Subscriptions**: Message types 6-7 reserved for subscribing to specific subjects/properties
+- **Commands/RPC**: Message types 5-6 reserved for invoking methods on subjects
+- **Subscriptions**: Message types 7-8 reserved for subscribing to specific subjects/properties
 - **Message compression**: Per-message or per-frame compression to reduce bandwidth
 - **Authentication/authorization hooks**: Token-based auth during handshake or per-message access control
 - **Diagnostic counters**: Connection metrics, reconnection attempts, message throughput tracking
-- **Application-level ping/pong**: Heartbeat messages beyond Kestrel's KeepAliveInterval for proxy-friendly keep-alive
 
 ## Benchmark Results
 

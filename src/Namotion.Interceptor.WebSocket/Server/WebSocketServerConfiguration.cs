@@ -54,6 +54,12 @@ public class WebSocketServerConfiguration
     public TimeSpan HelloTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
+    /// Interval between heartbeat messages. Default: 30 seconds.
+    /// Set to TimeSpan.Zero to disable heartbeats.
+    /// </summary>
+    public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// Path provider for property filtering/mapping.
     /// </summary>
     public PathProviderBase? PathProvider { get; set; }
@@ -106,6 +112,11 @@ public class WebSocketServerConfiguration
         if (WriteBatchSize < 0)
         {
             throw new ArgumentException($"WriteBatchSize must be non-negative, got: {WriteBatchSize}", nameof(WriteBatchSize));
+        }
+
+        if (HeartbeatInterval < TimeSpan.Zero)
+        {
+            throw new ArgumentException($"HeartbeatInterval must be non-negative, got: {HeartbeatInterval}", nameof(HeartbeatInterval));
         }
     }
 }

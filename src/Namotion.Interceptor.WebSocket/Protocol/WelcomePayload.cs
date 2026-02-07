@@ -21,4 +21,10 @@ public class WelcomePayload
     /// Complete initial state.
     /// </summary>
     public SubjectUpdate? State { get; set; }
+
+    /// <summary>
+    /// Server's current sequence number at snapshot time.
+    /// Clients initialize their expected next sequence to this value + 1.
+    /// </summary>
+    public long Sequence { get; set; }
 }

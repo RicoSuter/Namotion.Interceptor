@@ -23,5 +23,10 @@ public enum MessageType
     /// <summary>
     /// Error response.
     /// </summary>
-    Error = 3
+    Error = 3,
+
+    /// <summary>
+    /// Server sends periodic heartbeat with current sequence number.
+    /// </summary>
+    Heartbeat = 4
 }
