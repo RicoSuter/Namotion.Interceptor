@@ -1,5 +1,6 @@
 using System.Reactive.Linq;
 using System.Text.Json;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
@@ -8,7 +9,7 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Tests.Updates;
 
-public class SubjectUpdateExtensionsTests
+public partial class SubjectUpdateExtensionsTests
 {
     [Fact]
     public async Task WhenApplyingSimpleProperty_ThenItWorks()
@@ -976,6 +977,19 @@ public class SubjectUpdateExtensionsTests
         Assert.Null(rootProps["Children"].Value);
     }
 
+    [InterceptorSubject]
+    public partial class IntKeyNode
+    {
+        public IntKeyNode()
+        {
+            Name = "";
+            IntLookup = new Dictionary<int, CycleTestNode>();
+        }
+
+        public partial string Name { get; set; }
+        public partial Dictionary<int, CycleTestNode> IntLookup { get; set; }
+    }
+
     [Fact]
     public void WhenApplyingDictionaryUpdateWithIntKeys_ThenExistingEntriesAreMatched()
     {
@@ -1000,5 +1014,48 @@ public class SubjectUpdateExtensionsTests
         Assert.Equal(2, target.IntLookup.Count);
         Assert.Equal("Item1", target.IntLookup[1].Name);
         Assert.Equal("Item2", target.IntLookup[2].Name);
+    }
+
+    [Fact]
+    public void WhenApplyingDictionaryPartialUpdateWithIntKeys_ThenExistingEntriesAreMatchedAndNewKeysAdded()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var existingItem = new CycleTestNode(context) { Name = "Existing" };
+        var source = new IntKeyNode(context)
+        {
+            Name = "Root",
+            IntLookup = new Dictionary<int, CycleTestNode> { [1] = existingItem }
+        };
+        var target = new IntKeyNode(context)
+        {
+            Name = "Root",
+            IntLookup = new Dictionary<int, CycleTestNode>
+            {
+                [1] = new CycleTestNode(context) { Name = "Existing" }
+            }
+        };
+
+        // Make a change - add key 2 and update key 1's name
+        var changes = new List<SubjectPropertyChange>();
+        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            existingItem.Name = "Updated";
+            source.IntLookup = new Dictionary<int, CycleTestNode>
+            {
+                [1] = existingItem,
+                [2] = new CycleTestNode(context) { Name = "NewItem" }
+            };
+        }
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Equal(2, target.IntLookup.Count);
+        Assert.Equal("Updated", target.IntLookup[1].Name);
+        Assert.Equal("NewItem", target.IntLookup[2].Name);
     }
 }

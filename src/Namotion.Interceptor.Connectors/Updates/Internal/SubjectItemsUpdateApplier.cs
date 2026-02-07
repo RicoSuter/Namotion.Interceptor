@@ -140,7 +140,8 @@ internal static class SubjectItemsUpdateApplier
         SubjectUpdateApplyContext context)
     {
         var existingDictionary = property.GetValue() as IDictionary;
-        var workingDictionary = new Dictionary<string, IInterceptorSubject>();
+        var targetKeyType = property.Type.GenericTypeArguments[0];
+        var workingDictionary = new Dictionary<object, IInterceptorSubject>();
         var structureChanged = false;
 
         if (existingDictionary is not null)
@@ -148,7 +149,7 @@ internal static class SubjectItemsUpdateApplier
             foreach (DictionaryEntry entry in existingDictionary)
             {
                 if (entry.Value is IInterceptorSubject item)
-                    workingDictionary[Convert.ToString(entry.Key, CultureInfo.InvariantCulture)!] = item;
+                    workingDictionary[entry.Key] = item;
             }
         }
 
@@ -157,7 +158,7 @@ internal static class SubjectItemsUpdateApplier
         {
             foreach (var operation in propertyUpdate.Operations)
             {
-                var key = ConvertDictionaryKey(operation.Index);
+                var key = ConvertDictionaryKey(operation.Index, targetKeyType);
                 switch (operation.Action)
                 {
                     case SubjectCollectionOperationType.Remove:
@@ -182,7 +183,7 @@ internal static class SubjectItemsUpdateApplier
         {
             foreach (var collUpdate in propertyUpdate.Items)
             {
-                var key = ConvertDictionaryKey(collUpdate.Index);
+                var key = ConvertDictionaryKey(collUpdate.Index, targetKeyType);
 
                 if (collUpdate.Id is not null &&
                     context.Subjects.TryGetValue(collUpdate.Id, out var itemProps))
@@ -206,7 +207,7 @@ internal static class SubjectItemsUpdateApplier
 
         if (structureChanged)
         {
-            var dictionary = context.SubjectFactory.CreateSubjectDictionary(property.Type, workingDictionary.ToDictionary(kvp => (object)kvp.Key, kvp => kvp.Value));
+            var dictionary = context.SubjectFactory.CreateSubjectDictionary(property.Type, workingDictionary);
             using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
             {
                 property.SetValue(dictionary);
@@ -221,11 +222,28 @@ internal static class SubjectItemsUpdateApplier
         _ => Convert.ToInt32(index)
     };
 
-    private static string ConvertDictionaryKey(object key)
+    private static object ConvertDictionaryKey(object key, Type targetKeyType)
     {
-        return key is JsonElement jsonElement
-            ? jsonElement.GetString() ?? jsonElement.ToString()
-            : Convert.ToString(key, CultureInfo.InvariantCulture)!;
+        if (targetKeyType.IsInstanceOfType(key))
+            return key;
+
+        if (key is JsonElement jsonElement)
+        {
+            var stringValue = jsonElement.GetString() ?? jsonElement.ToString();
+            return ConvertStringToKeyType(stringValue, targetKeyType);
+        }
+
+        var keyString = Convert.ToString(key, CultureInfo.InvariantCulture)!;
+        return ConvertStringToKeyType(keyString, targetKeyType);
+    }
+
+    private static object ConvertStringToKeyType(string value, Type targetKeyType)
+    {
+        if (targetKeyType == typeof(string))
+            return value;
+        if (targetKeyType.IsEnum)
+            return Enum.Parse(targetKeyType, value);
+        return Convert.ChangeType(value, targetKeyType, CultureInfo.InvariantCulture);
     }
 
     private static IInterceptorSubject CreateAndApplyItem(
