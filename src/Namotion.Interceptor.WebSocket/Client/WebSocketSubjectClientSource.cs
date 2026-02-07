@@ -31,7 +31,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     private readonly IWebSocketSerializer _serializer = JsonWebSocketSerializer.Instance;
     private readonly ArrayBufferWriter<byte> _sendBuffer = new(4096);
 
-    private ClientWebSocket? _webSocket;
+    private volatile ClientWebSocket? _webSocket;
     private volatile SubjectPropertyWriter? _propertyWriter;
     private SubjectUpdate? _initialState;
     private CancellationTokenSource? _receiveCts;
