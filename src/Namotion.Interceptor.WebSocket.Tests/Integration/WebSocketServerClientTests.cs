@@ -33,15 +33,16 @@ public class WebSocketServerClientTests
 
         await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
 
-        // Wait for initial sync
-        await Task.Delay(500);
-        Assert.Equal("Initial", client.Root!.Name);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Root!.Name == "Initial",
+            message: "Client should receive initial state");
 
         // Server updates property
         server.Root!.Name = "Updated from Server";
-        await Task.Delay(500);
 
-        Assert.Equal("Updated from Server", client.Root.Name);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Root!.Name == "Updated from Server",
+            message: "Client should receive server update");
     }
 
     [Fact]
@@ -51,14 +52,24 @@ public class WebSocketServerClientTests
         await using var server = new WebSocketTestServer<TestRoot>(_output);
         await using var client = new WebSocketTestClient<TestRoot>(_output);
 
-        await server.StartAsync(context => new TestRoot(context), port: portLease.Port);
+        await server.StartAsync(
+            context => new TestRoot(context),
+            (_, root) => root.Name = "Initial",
+            port: portLease.Port);
+
         await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
+
+        // Wait for connection to be established
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Root!.Name == "Initial",
+            message: "Client should receive initial state");
 
         // Client updates property
         client.Root!.Name = "Updated from Client";
-        await Task.Delay(500);
 
-        Assert.Equal("Updated from Client", server.Root!.Name);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => server.Root!.Name == "Updated from Client",
+            message: "Server should receive client update");
     }
 
     [Fact]
@@ -73,13 +84,15 @@ public class WebSocketServerClientTests
 
         // Server updates
         server.Root!.Number = 123.45m;
-        await Task.Delay(500);
-        Assert.Equal(123.45m, client.Root!.Number);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Root!.Number == 123.45m,
+            message: "Client should receive server's number update");
 
         // Client updates
-        client.Root.Number = 678.90m;
-        await Task.Delay(500);
-        Assert.Equal(678.90m, server.Root.Number);
+        client.Root!.Number = 678.90m;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => server.Root.Number == 678.90m,
+            message: "Server should receive client's number update");
     }
 
     [Fact]
@@ -95,10 +108,11 @@ public class WebSocketServerClientTests
         await client2.StartAsync(context => new TestRoot(context), port: portLease.Port);
 
         server.Root!.Name = "Broadcast Test";
-        await Task.Delay(500);
 
-        Assert.Equal("Broadcast Test", client1.Root!.Name);
-        Assert.Equal("Broadcast Test", client2.Root!.Name);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client1.Root!.Name == "Broadcast Test" &&
+                  client2.Root!.Name == "Broadcast Test",
+            message: "Both clients should receive broadcast");
     }
 
     [Fact]
@@ -109,19 +123,27 @@ public class WebSocketServerClientTests
         await using var client1 = new WebSocketTestClient<TestRoot>(_output);
         await using var client2 = new WebSocketTestClient<TestRoot>(_output);
 
-        await server.StartAsync(context => new TestRoot(context), port: portLease.Port);
+        await server.StartAsync(
+            context => new TestRoot(context),
+            (_, root) => root.Name = "Initial",
+            port: portLease.Port);
+
         await client1.StartAsync(context => new TestRoot(context), port: portLease.Port);
         await client2.StartAsync(context => new TestRoot(context), port: portLease.Port);
 
+        // Wait for both clients to connect
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client1.Root!.Name == "Initial" &&
+                  client2.Root!.Name == "Initial",
+            message: "Both clients should receive initial state");
+
         // Client 1 updates property
         client1.Root!.Name = "From Client 1";
-        await Task.Delay(500);
 
-        // Server should have the update
-        Assert.Equal("From Client 1", server.Root!.Name);
-
-        // Client 2 should also have received the update via the server
-        Assert.Equal("From Client 1", client2.Root!.Name);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => server.Root!.Name == "From Client 1" &&
+                  client2.Root!.Name == "From Client 1",
+            message: "Server and client2 should receive client1's update");
     }
 
     [Fact]
@@ -138,18 +160,15 @@ public class WebSocketServerClientTests
 
         await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
 
-        // Wait for initial sync
-        await Task.Delay(500);
-        Assert.Equal("Initial", client.Root!.Name);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Root!.Name == "Initial",
+            message: "Initial sync should complete");
+
         _output.WriteLine("Initial sync verified");
 
-        // Stop server and wait for client to detect disconnection
+        // Stop server
         _output.WriteLine("Stopping server...");
         await server.StopAsync();
-
-        // Wait for client to detect disconnection
-        await Task.Delay(2000);
-        _output.WriteLine("Client should have detected disconnection");
 
         // Restart server
         _output.WriteLine("Restarting server...");
@@ -164,8 +183,7 @@ public class WebSocketServerClientTests
             timeout: TimeSpan.FromSeconds(30),
             message: "Client should receive update after server restart");
 
-        _output.WriteLine($"Client received: {client.Root.Name}");
-        Assert.Equal("AfterRestart", client.Root.Name);
+        _output.WriteLine($"Client received: {client.Root!.Name}");
     }
 
     [Fact]
@@ -182,9 +200,10 @@ public class WebSocketServerClientTests
 
         await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
 
-        // Wait for initial sync
-        await Task.Delay(500);
-        Assert.Equal("Initial", client.Root!.Name);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Root!.Name == "Initial",
+            message: "Initial sync should complete");
+
         _output.WriteLine("Initial sync verified");
 
         // Instant restart - no waiting for disconnection detection
@@ -201,8 +220,7 @@ public class WebSocketServerClientTests
             timeout: TimeSpan.FromSeconds(30),
             message: "Client should receive update after instant restart");
 
-        _output.WriteLine($"Client received: {client.Root.Name}");
-        Assert.Equal("AfterInstantRestart", client.Root.Name);
+        _output.WriteLine($"Client received: {client.Root!.Name}");
     }
 
     [Fact]
@@ -242,7 +260,6 @@ public class WebSocketServerClientTests
         // Restart server
         _output.WriteLine("Restarting server...");
         await server.StopAsync();
-        await Task.Delay(1000);
         await server.RestartAsync();
 
         // Update server state after restart
@@ -260,8 +277,73 @@ public class WebSocketServerClientTests
             message: "All properties should resync after restart");
 
         _output.WriteLine($"Client synced: Name={client.Root.Name}, Items[0].Label={client.Root.Items[0].Label}, Items[2].Value={client.Root.Items[2].Value}");
-        Assert.Equal("AfterRestart", client.Root.Name);
-        Assert.Equal("Updated1", client.Root.Items[0].Label);
-        Assert.Equal(300, client.Root.Items[2].Value);
+    }
+
+    [Fact]
+    public async Task Server_MaxConnectionsReached_ShouldRejectNewClient()
+    {
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = new WebSocketTestServer<TestRoot>(_output);
+        await using var client1 = new WebSocketTestClient<TestRoot>(_output);
+
+        await server.StartAsync(
+            context => new TestRoot(context),
+            port: portLease.Port,
+            configureServer: config => config.MaxConnections = 1);
+
+        await client1.StartAsync(context => new TestRoot(context), port: portLease.Port);
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => server.Server!.ConnectionCount == 1,
+            message: "First client should connect");
+
+        _output.WriteLine($"First client connected. ConnectionCount: {server.Server!.ConnectionCount}");
+
+        // Second client connects but gets rejected — enters reconnect loop
+        await using var client2 = new WebSocketTestClient<TestRoot>(_output);
+        await client2.StartAsync(context => new TestRoot(context), port: portLease.Port);
+
+        // Brief wait to give second client time to attempt connection
+        await Task.Delay(500);
+
+        // Server should still have only 1 active connection
+        _output.WriteLine($"After second client attempt. ConnectionCount: {server.Server.ConnectionCount}");
+        Assert.Equal(1, server.Server.ConnectionCount);
+    }
+
+    [Fact]
+    public async Task AbruptClientDisconnect_ServerShouldCleanupConnection()
+    {
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = new WebSocketTestServer<TestRoot>(_output);
+        await using var client = new WebSocketTestClient<TestRoot>(_output);
+
+        await server.StartAsync(context => new TestRoot(context), port: portLease.Port);
+        await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => server.Server!.ConnectionCount == 1,
+            message: "Client should connect");
+
+        _output.WriteLine($"Client connected. ConnectionCount: {server.Server!.ConnectionCount}");
+
+        // Abruptly stop client
+        await client.StopAsync();
+        _output.WriteLine("Client stopped abruptly");
+
+        // Trigger updates to hit the 3-failure zombie threshold
+        for (var i = 0; i < 5; i++)
+        {
+            server.Root!.Name = $"Update-{i}";
+            await Task.Delay(200);
+        }
+
+        // Wait for cleanup
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => server.Server.ConnectionCount == 0,
+            timeout: TimeSpan.FromSeconds(10),
+            message: "Server should clean up zombie connection");
+
+        _output.WriteLine($"After cleanup. ConnectionCount: {server.Server.ConnectionCount}");
     }
 }

@@ -16,7 +16,7 @@ namespace Namotion.Interceptor.WebSocket.Server;
 /// Handles WebSocket client connections and broadcasts subject updates.
 /// Used by both standalone server and embedded endpoint modes.
 /// </summary>
-public class WebSocketSubjectHandler
+public sealed class WebSocketSubjectHandler
 {
     private const int SupportedProtocolVersion = 1;
 
@@ -58,7 +58,7 @@ public class WebSocketSubjectHandler
             using var closeCts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
             try
             {
-                await webSocket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.PolicyViolation, "Server at capacity", closeCts.Token);
+                await webSocket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.PolicyViolation, "Server at capacity", closeCts.Token).ConfigureAwait(false);
             }
             catch
             {
@@ -77,11 +77,11 @@ public class WebSocketSubjectHandler
         try
         {
             // Receive Hello
-            var hello = await connection.ReceiveHelloAsync(stoppingToken);
+            var hello = await connection.ReceiveHelloAsync(stoppingToken).ConfigureAwait(false);
             if (hello is null)
             {
                 _logger.LogWarning("Client {ConnectionId}: No Hello received, closing", connection.ConnectionId);
-                await connection.CloseAsync("No Hello received");
+                await connection.CloseAsync("No Hello received").ConfigureAwait(false);
                 return;
             }
 
@@ -94,8 +94,8 @@ public class WebSocketSubjectHandler
                 {
                     Code = Protocol.ErrorCode.VersionMismatch,
                     Message = $"Unsupported protocol version {hello.Version}. Server supports version {SupportedProtocolVersion}."
-                }, stoppingToken);
-                await connection.CloseAsync("Protocol version mismatch");
+                }, stoppingToken).ConfigureAwait(false);
+                await connection.CloseAsync("Protocol version mismatch").ConfigureAwait(false);
                 return;
             }
 
@@ -114,12 +114,12 @@ public class WebSocketSubjectHandler
             }
 
             // Send Welcome (flushes queued updates under _sendLock)
-            await connection.SendWelcomeAsync(initialState, stoppingToken);
+            await connection.SendWelcomeAsync(initialState, stoppingToken).ConfigureAwait(false);
 
             _logger.LogInformation("Client {ConnectionId}: Welcome sent, waiting for updates...", connection.ConnectionId);
 
             // Handle incoming updates
-            await ReceiveUpdatesAsync(connection, stoppingToken);
+            await ReceiveUpdatesAsync(connection, stoppingToken).ConfigureAwait(false);
 
             _logger.LogDebug("Client {ConnectionId}: ReceiveUpdatesAsync returned normally", connection.ConnectionId);
         }
@@ -144,7 +144,7 @@ public class WebSocketSubjectHandler
                 Interlocked.Decrement(ref _connectionCount);
             }
 
-            await connection.DisposeAsync();
+            await connection.DisposeAsync().ConfigureAwait(false);
             _logger.LogInformation("Client {ConnectionId} disconnected", connection.ConnectionId);
         }
     }
@@ -156,7 +156,22 @@ public class WebSocketSubjectHandler
 
         while (!stoppingToken.IsCancellationRequested && connection.IsConnected)
         {
-            var update = await connection.ReceiveUpdateAsync(stoppingToken);
+            SubjectUpdate? update;
+            try
+            {
+                update = await connection.ReceiveUpdateAsync(stoppingToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or System.Text.Json.JsonException)
+            {
+                _logger.LogWarning(ex, "Client {ConnectionId}: Invalid message received", connection.ConnectionId);
+                await connection.SendErrorAsync(new Protocol.ErrorPayload
+                {
+                    Code = Protocol.ErrorCode.InvalidFormat,
+                    Message = "Invalid message format."
+                }, stoppingToken).ConfigureAwait(false);
+                break;
+            }
+
             if (update is null)
             {
                 _logger.LogWarning("Client {ConnectionId}: Received null update, exiting loop", connection.ConnectionId);
@@ -177,13 +192,11 @@ public class WebSocketSubjectHandler
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error applying update from client {ConnectionId}", connection.ConnectionId);
-
-                // Don't expose internal exception details to clients
                 await connection.SendErrorAsync(new Protocol.ErrorPayload
                 {
                     Code = Protocol.ErrorCode.InternalError,
                     Message = "An internal error occurred while processing the update."
-                }, stoppingToken);
+                }, stoppingToken).ConfigureAwait(false);
             }
         }
 
@@ -200,7 +213,7 @@ public class WebSocketSubjectHandler
         {
             // Single batch
             var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, changes.Span, _processors);
-            await BroadcastUpdateAsync(update, cancellationToken);
+            await BroadcastUpdateAsync(update, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -210,7 +223,7 @@ public class WebSocketSubjectHandler
                 var currentBatchSize = Math.Min(batchSize, changes.Length - i);
                 var batch = changes.Slice(i, currentBatchSize);
                 var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, batch.Span, _processors);
-                await BroadcastUpdateAsync(update, cancellationToken);
+                await BroadcastUpdateAsync(update, cancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -228,7 +241,7 @@ public class WebSocketSubjectHandler
 
         try
         {
-            await Task.WhenAll(tasks);
+            await Task.WhenAll(tasks).ConfigureAwait(false);
         }
         finally
         {
@@ -239,7 +252,7 @@ public class WebSocketSubjectHandler
                 {
                     _logger.LogWarning("Removing zombie connection {ConnectionId} due to repeated send failures", connectionId);
                     Interlocked.Decrement(ref _connectionCount);
-                    await connection.DisposeAsync();
+                    await connection.DisposeAsync().ConfigureAwait(false);
                 }
             }
         }
@@ -276,14 +289,14 @@ public class WebSocketSubjectHandler
             closeTasks[i] = CloseConnectionAsync(connection);
         }
 
-        await Task.WhenAll(closeTasks);
+        await Task.WhenAll(closeTasks).ConfigureAwait(false);
     }
 
     private async Task CloseConnectionAsync(WebSocketClientConnection connection)
     {
         try
         {
-            await connection.DisposeAsync();
+            await connection.DisposeAsync().ConfigureAwait(false);
         }
         catch (Exception ex)
         {

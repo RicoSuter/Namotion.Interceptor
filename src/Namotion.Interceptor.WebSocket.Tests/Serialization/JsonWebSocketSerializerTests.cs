@@ -1,5 +1,8 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
+using System.Text;
+using System.Text.Json;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.WebSocket.Protocol;
 using Namotion.Interceptor.WebSocket.Serialization;
@@ -141,5 +144,108 @@ public class JsonWebSocketSerializerTests
         // But the string value can still be extracted
         var jsonElement = (System.Text.Json.JsonElement)nameUpdate.Value;
         Assert.Equal("TestValue", jsonElement.GetString());
+    }
+
+    [Fact]
+    public void DeserializeMessageEnvelope_WithEmptyInput_ShouldThrow()
+    {
+        // Utf8JsonReader.Read() throws a JsonException subclass on empty input
+        // before our validation code can check the return value.
+        Assert.ThrowsAny<JsonException>(() =>
+            _serializer.DeserializeMessageEnvelope(ReadOnlySpan<byte>.Empty));
+    }
+
+    [Fact]
+    public void DeserializeMessageEnvelope_WithNonArrayInput_ShouldThrow()
+    {
+        var bytes = Encoding.UTF8.GetBytes("{}");
+        Assert.Throws<InvalidOperationException>(() =>
+            _serializer.DeserializeMessageEnvelope(bytes));
+    }
+
+    [Fact]
+    public void DeserializeMessageEnvelope_WithEmptyArray_ShouldThrow()
+    {
+        var bytes = Encoding.UTF8.GetBytes("[]");
+        Assert.Throws<InvalidOperationException>(() =>
+            _serializer.DeserializeMessageEnvelope(bytes));
+    }
+
+    [Fact]
+    public void DeserializeMessageEnvelope_WithStringMessageType_ShouldThrow()
+    {
+        var bytes = Encoding.UTF8.GetBytes("[\"hello\",null,{}]");
+        Assert.Throws<InvalidOperationException>(() =>
+            _serializer.DeserializeMessageEnvelope(bytes));
+    }
+
+    [Fact]
+    public void DeserializeMessageEnvelope_WithStringCorrelationId_ShouldThrow()
+    {
+        var bytes = Encoding.UTF8.GetBytes("[0,\"bad\",{}]");
+        Assert.Throws<InvalidOperationException>(() =>
+            _serializer.DeserializeMessageEnvelope(bytes));
+    }
+
+    [Fact]
+    public void DeserializeMessageEnvelope_WithMissingCorrelationIdAndPayload_ShouldThrow()
+    {
+        // [0] has only the messageType; after reading it, the next Read()
+        // returns EndArray which is neither null nor a number for correlationId.
+        var bytes = Encoding.UTF8.GetBytes("[0]");
+        Assert.Throws<InvalidOperationException>(() =>
+            _serializer.DeserializeMessageEnvelope(bytes));
+    }
+
+    [Fact]
+    public void DeserializeMessageEnvelope_WithNullCorrelationId_ShouldReturnNull()
+    {
+        var payload = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
+        var bytes = _serializer.SerializeMessage(MessageType.Hello, null, payload);
+        var (_, correlationId, _, _) = _serializer.DeserializeMessageEnvelope(bytes);
+        Assert.Null(correlationId);
+    }
+
+    [Fact]
+    public void Deserialize_WithNullJson_ShouldThrow()
+    {
+        var bytes = Encoding.UTF8.GetBytes("null");
+        Assert.Throws<InvalidOperationException>(() =>
+            _serializer.Deserialize<HelloPayload>(bytes));
+    }
+
+    [Fact]
+    public void SerializeMessageTo_ShouldMatchSerializeMessage()
+    {
+        var payload = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
+        var bytes = _serializer.SerializeMessage(MessageType.Hello, 42, payload);
+        var bufferWriter = new ArrayBufferWriter<byte>(256);
+        _serializer.SerializeMessageTo(bufferWriter, MessageType.Hello, 42, payload);
+        Assert.Equal(bytes, bufferWriter.WrittenSpan.ToArray());
+    }
+
+    [Fact]
+    public void SerializeAndDeserialize_ErrorPayload_WithFailures_ShouldRoundTrip()
+    {
+        var original = new ErrorPayload
+        {
+            Code = ErrorCode.ValidationFailed,
+            Message = "Validation failed",
+            Failures =
+            [
+                new PropertyFailure { Path = "Motor/Speed", Code = ErrorCode.ReadOnlyProperty, Message = "Read-only" }
+            ]
+        };
+
+        var bytes = _serializer.SerializeMessage(MessageType.Error, null, original);
+        var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(bytes);
+
+        Assert.Equal(MessageType.Error, messageType);
+
+        var deserialized = _serializer.Deserialize<ErrorPayload>(bytes.AsSpan(payloadStart, payloadLength));
+        Assert.Equal(ErrorCode.ValidationFailed, deserialized.Code);
+        Assert.Equal("Validation failed", deserialized.Message);
+        Assert.Single(deserialized.Failures!);
+        Assert.Equal("Motor/Speed", deserialized.Failures![0].Path);
     }
 }

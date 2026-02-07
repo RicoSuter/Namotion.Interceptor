@@ -64,7 +64,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     {
         _propertyWriter = propertyWriter;
 
-        await ConnectAsync(cancellationToken);
+        await ConnectAsync(cancellationToken).ConfigureAwait(false);
 
         _isStarted = true;
 
@@ -76,7 +76,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                 try
                 {
                     using var closeCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                    await capturedSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Client closing", closeCts.Token);
+                    await capturedSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Client closing", closeCts.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -92,10 +92,10 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
     private async Task ConnectAsync(CancellationToken cancellationToken)
     {
-        await _connectionLock.WaitAsync(cancellationToken);
+        await _connectionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            await ConnectCoreAsync(cancellationToken);
+            await ConnectCoreAsync(cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -108,7 +108,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         // Clean up any previous connection
         if (_receiveCts is not null)
         {
-            await _receiveCts.CancelAsync();
+            await _receiveCts.CancelAsync().ConfigureAwait(false);
 
             // Wait for receive loop to exit before disposing socket
             var previousReceiveLoop = _receiveLoopCompleted?.Task;
@@ -117,7 +117,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                 try
                 {
                     using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                    await previousReceiveLoop.WaitAsync(timeoutCts.Token);
+                    await previousReceiveLoop.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
@@ -145,17 +145,17 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             connectCts.CancelAfter(_configuration.ConnectTimeout);
 
             _logger.LogInformation("Connecting to WebSocket server at {Uri}", _configuration.ServerUri);
-            await _webSocket.ConnectAsync(_configuration.ServerUri!, connectCts.Token);
+            await _webSocket.ConnectAsync(_configuration.ServerUri!, connectCts.Token).ConfigureAwait(false);
 
             // Send Hello using reusable buffer
             var hello = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
             _sendBuffer.Clear();
             _serializer.SerializeMessageTo(_sendBuffer, MessageType.Hello, null, hello);
-            await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken);
+            await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
 
             // Receive Welcome using shared utility
             using var readResult = await WebSocketMessageReader.ReadMessageAsync(
-                _webSocket, _configuration.MaxMessageSize, cancellationToken);
+                _webSocket, _configuration.MaxMessageSize, cancellationToken).ConfigureAwait(false);
 
             if (readResult.IsCloseMessage)
             {
@@ -185,6 +185,11 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             }
 
             var welcome = _serializer.Deserialize<WelcomePayload>(readResult.MessageBytes.Span.Slice(payloadStart, payloadLength));
+            if (welcome.Version != 1)
+            {
+                throw new InvalidOperationException($"Unsupported server protocol version {welcome.Version}. Client supports version 1.");
+            }
+
             _initialState = welcome.State;
 
             _logger.LogInformation("Connected to WebSocket server");
@@ -220,6 +225,8 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
             // Claim ownership of all properties matching the path provider
             ClaimPropertyOwnership();
+
+            _initialState = null;
         });
     }
 
@@ -269,7 +276,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
         try
         {
-            await _connectionLock.WaitAsync(cancellationToken);
+            await _connectionLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (ObjectDisposedException)
         {
@@ -294,7 +301,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, null, update);
             _logger.LogDebug("Sending {ByteCount} bytes ({SubjectCount} subjects) to server",
                 _sendBuffer.WrittenCount, update.Subjects.Count);
-            await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken);
+            await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
             _logger.LogDebug("Sent update successfully");
             return WriteResult.Success;
         }
@@ -330,52 +337,54 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             {
                 try
                 {
-                    await using var messageStream = MemoryStreamManager.GetStream();
-
-                    // Reset or recreate the timeout CTS for each message
-                    if (!timeoutCts.TryReset())
+                    var messageStream = MemoryStreamManager.GetStream();
+                    await using (messageStream.ConfigureAwait(false))
                     {
-                        timeoutCts.Dispose();
-                        timeoutCts = new CancellationTokenSource();
-                    }
+                        // Reset or recreate the timeout CTS for each message
+                        if (!timeoutCts.TryReset())
+                        {
+                            timeoutCts.Dispose();
+                            timeoutCts = new CancellationTokenSource();
+                        }
 
-                    timeoutCts.CancelAfter(_configuration.ReceiveTimeout);
+                        timeoutCts.CancelAfter(_configuration.ReceiveTimeout);
 
-                    // Create linked token for this message
-                    linkedCts?.Dispose();
-                    linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+                        // Create linked token for this message
+                        linkedCts?.Dispose();
+                        linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
 
-                    // Use shared utility for fragmented message receive
-                    var readResult = await WebSocketMessageReader.ReadMessageIntoStreamAsync(
-                        _webSocket, buffer, messageStream, _configuration.MaxMessageSize, linkedCts.Token);
+                        // Use shared utility for fragmented message receive
+                        var readResult = await WebSocketMessageReader.ReadMessageIntoStreamAsync(
+                            _webSocket, buffer, messageStream, _configuration.MaxMessageSize, linkedCts.Token).ConfigureAwait(false);
 
-                    if (readResult.IsCloseMessage)
-                    {
-                        _logger.LogInformation("Server closed connection");
-                        return;
-                    }
+                        if (readResult.IsCloseMessage)
+                        {
+                            _logger.LogInformation("Server closed connection");
+                            return;
+                        }
 
-                    if (readResult.ExceededMaxSize)
-                    {
-                        _logger.LogWarning("Message exceeds maximum size of {MaxSize} bytes", _configuration.MaxMessageSize);
-                        throw new InvalidOperationException($"Message exceeds maximum size of {_configuration.MaxMessageSize} bytes");
-                    }
+                        if (readResult.ExceededMaxSize)
+                        {
+                            _logger.LogWarning("Message exceeds maximum size of {MaxSize} bytes", _configuration.MaxMessageSize);
+                            throw new InvalidOperationException($"Message exceeds maximum size of {_configuration.MaxMessageSize} bytes");
+                        }
 
-                    var messageBytes = new ReadOnlySpan<byte>(messageStream.GetBuffer(), 0, (int)messageStream.Length);
-                    var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(messageBytes);
-                    var payloadBytes = messageBytes.Slice(payloadStart, payloadLength);
+                        var messageBytes = new ReadOnlySpan<byte>(messageStream.GetBuffer(), 0, (int)messageStream.Length);
+                        var (messageType, _, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(messageBytes);
+                        var payloadBytes = messageBytes.Slice(payloadStart, payloadLength);
 
-                    switch (messageType)
-                    {
-                        case MessageType.Update:
-                            var update = _serializer.Deserialize<SubjectUpdate>(payloadBytes);
-                            HandleUpdate(update);
-                            break;
+                        switch (messageType)
+                        {
+                            case MessageType.Update:
+                                var update = _serializer.Deserialize<SubjectUpdate>(payloadBytes);
+                                HandleUpdate(update);
+                                break;
 
-                        case MessageType.Error:
-                            var error = _serializer.Deserialize<ErrorPayload>(payloadBytes);
-                            _logger.LogWarning("Received error from server: {Code} - {Message}", error.Code, error.Message);
-                            break;
+                            case MessageType.Error:
+                                var error = _serializer.Deserialize<ErrorPayload>(payloadBytes);
+                                _logger.LogWarning("Received error from server: {Code} - {Message}", error.Code, error.Message);
+                                break;
+                        }
                     }
                 }
                 catch (WebSocketException ex)
@@ -432,7 +441,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         // Wait until StartListeningAsync has been called
         while (!_isStarted && !stoppingToken.IsCancellationRequested)
         {
-            await Task.Delay(100, stoppingToken);
+            await Task.Delay(500, stoppingToken).ConfigureAwait(false);
         }
 
         // Monitor connection and handle reconnection with exponential backoff
@@ -440,7 +449,11 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         var maxDelay = _configuration.MaxReconnectDelay;
 
         // Cancel receive loop when stopping (store registration for proper disposal)
-        _stoppingTokenRegistration = stoppingToken.Register(() => _receiveCts?.Cancel());
+        _stoppingTokenRegistration = stoppingToken.Register(() =>
+        {
+            try { _receiveCts?.Cancel(); }
+            catch (ObjectDisposedException) { }
+        });
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -450,7 +463,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                 var receiveLoopTask = _receiveLoopCompleted?.Task;
                 if (receiveLoopTask is not null)
                 {
-                    await receiveLoopTask.WaitAsync(stoppingToken);
+                    await receiveLoopTask.WaitAsync(stoppingToken).ConfigureAwait(false);
                 }
 
                 // Connection dropped - check if we should reconnect
@@ -465,11 +478,11 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                 _propertyWriter?.StartBuffering();
 
                 // Wait before reconnecting
-                await Task.Delay(reconnectDelay, stoppingToken);
+                await Task.Delay(reconnectDelay, stoppingToken).ConfigureAwait(false);
 
                 try
                 {
-                    await ConnectAsync(stoppingToken);
+                    await ConnectAsync(stoppingToken).ConfigureAwait(false);
 
                     _logger.LogInformation("WebSocket reconnected successfully");
 
@@ -477,7 +490,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                     // then replays any buffered updates received during reconnection
                     if (_propertyWriter is not null)
                     {
-                        await _propertyWriter.CompleteInitializationAsync(stoppingToken);
+                        await _propertyWriter.CompleteInitializationAsync(stoppingToken).ConfigureAwait(false);
                     }
 
                     // Success - reset reconnect delay
@@ -510,7 +523,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         // Cancel receive loop on exit
         if (_receiveCts is not null)
         {
-            await _receiveCts.CancelAsync();
+            await _receiveCts.CancelAsync().ConfigureAwait(false);
         }
     }
 
@@ -519,12 +532,12 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
 
         // Cancel all operations
-        await _stoppingTokenRegistration.DisposeAsync();
+        await _stoppingTokenRegistration.DisposeAsync().ConfigureAwait(false);
         _receiveLoopCompleted?.TrySetResult();
 
         if (_receiveCts is not null)
         {
-            await _receiveCts.CancelAsync();
+            await _receiveCts.CancelAsync().ConfigureAwait(false);
             _receiveCts.Dispose();
         }
 
@@ -532,7 +545,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         try
         {
             using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            await _connectionLock.WaitAsync(timeoutCts.Token);
+            await _connectionLock.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
             _connectionLock.Release();
         }
         catch (OperationCanceledException)
@@ -569,7 +582,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         public async ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
-            try { await onDispose(); }
+            try { await onDispose().ConfigureAwait(false); }
             catch { /* Best effort */ }
         }
     }

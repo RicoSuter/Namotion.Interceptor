@@ -20,6 +20,7 @@ public class WebSocketTestServer<TRoot> : IAsyncDisposable
 
     private Func<IInterceptorSubjectContext, TRoot>? _createRoot;
     private Action<IInterceptorSubjectContext, TRoot>? _initializeDefaults;
+    private Action<WebSocketServerConfiguration>? _configureServer;
     private int _port;
 
     public TRoot? Root { get; private set; }
@@ -33,10 +34,12 @@ public class WebSocketTestServer<TRoot> : IAsyncDisposable
     public async Task StartAsync(
         Func<IInterceptorSubjectContext, TRoot> createRoot,
         Action<IInterceptorSubjectContext, TRoot>? initializeDefaults = null,
-        int port = 18080)
+        int port = 18080,
+        Action<WebSocketServerConfiguration>? configureServer = null)
     {
         _createRoot = createRoot;
         _initializeDefaults = initializeDefaults;
+        _configureServer = configureServer;
         _port = port;
 
         await StartCoreAsync();
@@ -65,6 +68,7 @@ public class WebSocketTestServer<TRoot> : IAsyncDisposable
         builder.Services.AddWebSocketSubjectServer<TRoot>(configuration =>
         {
             configuration.Port = _port;
+            _configureServer?.Invoke(configuration);
         });
 
         _host = builder.Build();
