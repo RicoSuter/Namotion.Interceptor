@@ -62,9 +62,11 @@ public class DefaultSubjectFactory : ISubjectFactory
         foreach (var entry in entries)
         {
             // Convert key to the target key type if needed
-            var key = keyType.IsEnum
-                ? Enum.Parse(keyType, Convert.ToString(entry.Key, CultureInfo.InvariantCulture)!)
-                : Convert.ChangeType(entry.Key, keyType, CultureInfo.InvariantCulture);
+            var key = keyType.IsInstanceOfType(entry.Key)
+                ? entry.Key
+                : keyType.IsEnum
+                    ? Enum.Parse(keyType, Convert.ToString(entry.Key, CultureInfo.InvariantCulture)!)
+                    : Convert.ChangeType(entry.Key, keyType, CultureInfo.InvariantCulture);
             dictionary.Add(key, entry.Value);
         }
 
