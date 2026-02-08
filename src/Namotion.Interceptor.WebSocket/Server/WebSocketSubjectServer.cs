@@ -118,11 +118,20 @@ public sealed class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
             _handler.BufferTime,
             _logger);
 
-        var processorTask = changeQueueProcessor.ProcessAsync(stoppingToken);
-        var serverTask = _app.RunAsync(stoppingToken);
-        var heartbeatTask = _handler.RunHeartbeatLoopAsync(stoppingToken);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
-        await Task.WhenAll(processorTask, serverTask, heartbeatTask).ConfigureAwait(false);
+        var processorTask = changeQueueProcessor.ProcessAsync(linkedCts.Token);
+        var serverTask = _app.RunAsync(linkedCts.Token);
+        var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedCts.Token);
+
+        var tasks = new[] { processorTask, serverTask, heartbeatTask };
+        var completed = await Task.WhenAny(tasks).ConfigureAwait(false);
+        if (completed.IsFaulted)
+        {
+            await linkedCts.CancelAsync().ConfigureAwait(false);
+        }
+
+        await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 
     public async ValueTask DisposeAsync()

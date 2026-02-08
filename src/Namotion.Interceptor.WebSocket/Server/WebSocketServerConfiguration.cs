@@ -60,6 +60,12 @@ public class WebSocketServerConfiguration
     public TimeSpan HeartbeatInterval { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
+    /// Timeout for broadcasting updates and heartbeats to all connected clients. Default: 10 seconds.
+    /// Sends that haven't completed continue in the background; zombie detection cleans up persistently slow connections.
+    /// </summary>
+    public TimeSpan BroadcastTimeout { get; set; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>
     /// Path provider for property filtering/mapping.
     /// </summary>
     public PathProviderBase? PathProvider { get; set; }
@@ -117,6 +123,11 @@ public class WebSocketServerConfiguration
         if (HeartbeatInterval < TimeSpan.Zero)
         {
             throw new ArgumentException($"HeartbeatInterval must be non-negative, got: {HeartbeatInterval}", nameof(HeartbeatInterval));
+        }
+
+        if (BroadcastTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentException($"BroadcastTimeout must be positive, got: {BroadcastTimeout}", nameof(BroadcastTimeout));
         }
     }
 }

@@ -1,6 +1,6 @@
 # WebSocket
 
-The `Namotion.Interceptor.WebSocket` package provides bidirectional WebSocket communication for synchronizing `SubjectUpdate` data between .NET servers and clients. It's optimized for industrial, digital twin, and IoT scenarios.
+The `Namotion.Interceptor.WebSocket` package provides bidirectional WebSocket communication for synchronizing subject graphs between .NET servers and clients. It's optimized for industrial, digital twin, and IoT scenarios.
 
 ## Key Features
 
@@ -58,6 +58,8 @@ var host = builder.Build();
 host.Run();
 // Server listens on ws://localhost:8080/ws
 ```
+
+> See [Hosting](../hosting.md) for details on `WithHostedServices()`.
 
 ## Server Setup (Embedded)
 
@@ -433,6 +435,10 @@ Tiered error handling preserves connections when possible:
 
 **Client side**: Updates received from the server are not serialized with local property changes. If the application writes to a property while the client is applying an incoming server update, the two may race. In practice this is rarely an issue because property ownership is typically split (the server owns some properties, the client owns others).
 
+## Lifecycle Management
+
+Unlike MQTT and OPC UA connectors which maintain per-property topic/node caches that require cleanup on subject detach (see [Subject Lifecycle Tracking](../tracking.md#subject-lifecycle-tracking)), the WebSocket connector synchronizes the entire subject graph as a unit. There are no per-property caches to clean up — the server builds a fresh snapshot for each new client connection, and broadcast updates are derived from the change tracking layer. Connection-level resources (WebSocket, send lock, cancellation tokens) are cleaned up when a client disconnects or the server stops.
+
 ## Target Use Cases
 
 - **Industrial / SCADA**: High reliability, structured data, audit trails
@@ -445,6 +451,12 @@ Tiered error handling preserves connections when possible:
 - **Hierarchical**: Edge servers aggregate local devices, sync upstream to central server
 - **Peer-to-peer mesh**: Future extensibility
 
+## Known Limitations
+
+- **Snapshot lock during client connection**: When a new client connects, the server builds a full state snapshot under the same lock used for applying updates. This blocks incoming updates for the duration of the snapshot, which is proportional to graph size. This is acceptable because new-client connections are infrequent relative to the update rate, but could become a concern with very large subject graphs and frequent client reconnections.
+
+- **Broadcast timeout**: A slow client can delay broadcast completion for other clients. Broadcasts have a 10-second timeout to mitigate this — sends that haven't completed continue in the background, and zombie detection cleans up persistently slow connections. However, very slow clients may still cause temporary backpressure before being removed. This should be revisited if it becomes a bottleneck in high-throughput scenarios.
+
 ## Future Extensibility
 
 The protocol is designed for future enhancements:
@@ -455,6 +467,15 @@ The protocol is designed for future enhancements:
 - **Message compression**: Per-message or per-frame compression to reduce bandwidth
 - **Authentication/authorization hooks**: Token-based auth during handshake or per-message access control
 - **Diagnostic counters**: Connection metrics, reconnection attempts, message throughput tracking
+
+## Performance
+
+The library includes optimizations:
+
+- Batched outbound updates with configurable `BufferTime` to reduce per-message overhead
+- `RecyclableMemoryStream` and `ArrayPool<byte>` pooling for read/write buffers
+- Per-connection queuing during Welcome handshake to avoid blocking broadcasts
+- Configurable `WriteBatchSize` to cap message size and control serialization latency
 
 ## Benchmark Results
 
