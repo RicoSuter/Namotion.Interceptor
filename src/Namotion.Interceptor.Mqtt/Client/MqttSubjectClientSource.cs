@@ -203,7 +203,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
                         userProps.Clear();
                         userProps.Add(new MqttUserProperty(
                             _configuration.SourceTimestampPropertyName!,
-                            _configuration.SourceTimestampConverter(change.ChangedTimestamp)));
+                            _configuration.SourceTimestampSerializer(change.ChangedTimestamp)));
                         message.UserProperties = userProps;
                         userPropertiesArray[messageCount] = userProps;
                     }
@@ -418,7 +418,8 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         var receivedTimestamp = DateTimeOffset.UtcNow;
         var sourceTimestamp = MqttHelper.ExtractSourceTimestamp(
             e.ApplicationMessage.UserProperties,
-            _configuration.SourceTimestampPropertyName) ?? receivedTimestamp;
+            _configuration.SourceTimestampPropertyName,
+            _configuration.SourceTimestampDeserializer) ?? receivedTimestamp;
 
         // Use static delegate to avoid allocations on hot path
         propertyWriter.Write(
