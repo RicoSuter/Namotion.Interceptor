@@ -145,11 +145,18 @@ public class MqttClientConfiguration
     public string? SourceTimestampPropertyName { get; init; } = "ts";
 
     /// <summary>
-    /// Gets or sets the converter function for serializing timestamps to strings.
-    /// Default converts to Unix milliseconds.
+    /// Gets or sets the function for serializing timestamps to strings for MQTT user properties.
+    /// Default converts to Unix milliseconds. Must be paired with a matching <see cref="SourceTimestampDeserializer"/>.
     /// </summary>
-    public Func<DateTimeOffset, string> SourceTimestampConverter { get; init; } =
+    public Func<DateTimeOffset, string> SourceTimestampSerializer { get; init; } =
         static timestamp => timestamp.ToUnixTimeMilliseconds().ToString();
+
+    /// <summary>
+    /// Gets or sets the function for deserializing timestamp strings from MQTT user properties.
+    /// Default parses Unix milliseconds. Must be paired with a matching <see cref="SourceTimestampSerializer"/>.
+    /// </summary>
+    public Func<string, DateTimeOffset?> SourceTimestampDeserializer { get; init; } =
+        static value => long.TryParse(value, out var unixMs) ? DateTimeOffset.FromUnixTimeMilliseconds(unixMs) : null;
 
     /// <summary>
     /// Validates the configuration and throws if invalid.

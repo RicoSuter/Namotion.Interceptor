@@ -34,6 +34,11 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
     private readonly MqttServerConfiguration _configuration;
     private readonly ILogger _logger;
 
+    // Sentinel source used for values received from MQTT clients.
+    // Using a different source than `this` ensures the server's ChangeQueueProcessor
+    // re-publishes client-originated values to all subscribers (server-authoritative relay).
+    private static readonly object MqttClientSource = new();
+
     private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
     private readonly ConcurrentDictionary<string, PropertyReference?> _pathToProperty = new();
 
@@ -203,7 +208,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                     [
                         new MqttUserProperty(
                             timestampPropertyName,
-                            _configuration.SourceTimestampConverter(change.ChangedTimestamp))
+                            _configuration.SourceTimestampSerializer(change.ChangedTimestamp))
                     ];
                 }
 
@@ -388,6 +393,13 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             return Task.CompletedTask;
         }
 
+        // Server-authoritative relay: prevent the broker from distributing this client
+        // message directly to other subscribers. Instead, we apply the value locally with
+        // a non-self source (MqttClientSource) so the server's ChangeQueueProcessor picks
+        // it up and re-publishes it to all clients via InjectApplicationMessage.
+        // This ensures consistent ordering of all values through the server.
+        args.ProcessPublish = false;
+
         try
         {
             var payload = args.ApplicationMessage.Payload;
@@ -396,9 +408,10 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             var receivedTimestamp = DateTimeOffset.UtcNow;
             var sourceTimestamp = MqttHelper.ExtractSourceTimestamp(
                 args.ApplicationMessage.UserProperties,
-                _configuration.SourceTimestampPropertyName) ?? receivedTimestamp;
+                _configuration.SourceTimestampPropertyName,
+                _configuration.SourceTimestampDeserializer) ?? receivedTimestamp;
 
-            propertyReference.SetValueFromSource(this, sourceTimestamp, receivedTimestamp, value);
+            propertyReference.SetValueFromSource(MqttClientSource, sourceTimestamp, receivedTimestamp, value);
         }
         catch (Exception ex)
         {
