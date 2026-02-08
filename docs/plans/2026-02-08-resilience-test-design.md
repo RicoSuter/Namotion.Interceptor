@@ -104,35 +104,50 @@ Each client gets its own proxy instance so chaos can target individual clients i
 
 Each participant (server + each client) has its own mutation engine that randomly mutates the model. All sides write to the same properties concurrently to test last-write-wins semantics and eventual consistency.
 
-**Property discovery** via registry:
+**No registry-based discovery** - the mutator has hardcoded knowledge of the `TestNode` shape. It maintains a flat `List<TestNode>` of all known nodes (root + root.Collection children + root.Items values + any non-null ObjectRefs). This list is rebuilt after any structural mutation.
+
+**Initial known list**: root + 20 collection children + 10 dict entries = 31 nodes, ~155 value properties.
+
+**Operation types:**
+
+| Category | Operations | Initially Enabled |
+|----------|-----------|-------------------|
+| Value update | Pick random node, pick random value property (string/decimal/int/bool), set random value | Yes |
+| Object ref set | Pick random node, create new `TestNode`, assign to `ObjectRef`, add to known list | No (WebSocket only) |
+| Object ref clear | Pick random node, set `ObjectRef` to null, remove from known list | No (WebSocket only) |
+| Collection add | Create new `TestNode`, append to root's `Collection` | No (WebSocket only) |
+| Collection remove | Remove random item from root's `Collection` | No (WebSocket only) |
+| Collection move | Swap two positions in root's `Collection` | No (WebSocket only) |
+| Dictionary add | Create new `TestNode`, add to root's `Items` with stable key | No (WebSocket only) |
+| Dictionary remove | Remove random entry from root's `Items` | No (WebSocket only) |
+
+Initially only value mutations are enabled (works with OPC UA and MQTT). Structural mutations are gated behind configuration and enabled when WebSocket connector support lands (PR #150).
+
+**Value mutation loop** (initial implementation):
 
 ```csharp
-var registered = root.TryGetRegisteredSubject();
-// Walk entire object graph, not just root
-// Categorize each property by type:
-// - string/decimal/int/bool/...         → ValueProperty
-// - IInterceptorSubject                 → ObjectRefProperty
-// - T[] / IReadOnlyCollection<T>        → CollectionProperty
-// - IDictionary<K,V>                    → DictionaryProperty
+while (!cancellationToken.IsCancellationRequested)
+{
+    _coordinator.WaitIfPaused(cancellationToken);
+
+    var node = _knownNodes[_random.Next(_knownNodes.Count)];
+    var property = _random.Next(4);
+    switch (property)
+    {
+        case 0: node.StringValue = Guid.NewGuid().ToString("N")[..8]; break;
+        case 1: node.DecimalValue = _random.Next(0, 100000) / 100m; break;
+        case 2: node.IntValue = _random.Next(0, 100000); break;
+        case 3: node.BoolValue = !node.BoolValue; break;
+    }
+
+    _mutationCount++;
+    await Task.Delay(1000 / _mutationRate, cancellationToken);
+}
 ```
 
-Re-scans periodically (every N mutations) since the graph changes as collections grow/shrink and references are assigned/nulled.
+**Graph size bounds** (for when structural mutations are enabled): Collection add only if `count < maxSize` (e.g., 30), remove only if `count > minSize` (e.g., 5). Prevents unbounded growth over multi-day runs.
 
-**Operation selection** - weighted random (configurable per participant):
-
-| Category | Default Weight | Operations |
-|----------|---------------|-----------|
-| Value update | 60% | Set random string/decimal/int/bool value |
-| Object ref change | 10% | Assign random existing subject or null |
-| Collection add | 10% | Create new subject, append to collection |
-| Collection remove | 10% | Remove random item from collection |
-| Collection move | 5% | Swap two positions in collection |
-| Dictionary add | 2.5% | Add entry with random key |
-| Dictionary remove | 2.5% | Remove random entry |
-
-**Graph size bounds**: Collection add only if `count < maxSize` (e.g., 20), remove only if `count > minSize` (e.g., 2). Prevents unbounded growth over multi-day runs.
-
-**Collection/dictionary mutations use replace semantics** (per subject-guidelines.md - interceptors only fire on property assignment, not in-place mutation):
+**Collection/dictionary mutations use replace semantics** (interceptors only fire on property assignment, not in-place mutation):
 
 ```csharp
 // Collection add - spread into new array
@@ -147,11 +162,11 @@ var list = root.Collection.ToList();
 root.Collection = list.ToArray();
 
 // Dictionary add - create new dict
-root.Dictionary = new Dictionary<string, TestNode>(root.Dictionary)
-    { [randomKey] = newNode };
+root.Items = new Dictionary<string, TestNode>(root.Items)
+    { [key] = newNode };
 
 // Dictionary remove
-root.Dictionary = root.Dictionary
+root.Items = root.Items
     .Where(kv => kv.Key != targetKey)
     .ToDictionary(kv => kv.Key, kv => kv.Value);
 ```
@@ -300,11 +315,11 @@ This makes it easy to verify all operation types are exercised and to correlate 
 
 ## Test Model
 
-A purpose-built model where property names directly describe what they test. When a failure says `TestRoot.ObjectRef` diverged, the sync mechanism that's broken is immediately obvious.
+A single self-referential `TestNode` class. Property names directly describe what they test - when a failure says `TestNode.StringValue` diverged, the problem is immediately obvious. The mutator has hardcoded knowledge of this shape; no registry-based discovery needed.
 
 ```csharp
 [InterceptorSubject]
-public partial class TestRoot
+public partial class TestNode
 {
     [Path("opc", "StringValue")]
     [Path("mqtt", "StringValue")]
@@ -336,12 +351,12 @@ public partial class TestRoot
     [Path("ws", "Collection")]
     public partial TestNode[] Collection { get; set; }
 
-    [Path("opc", "Dictionary")]
-    [Path("mqtt", "Dictionary")]
-    [Path("ws", "Dictionary")]
-    public partial Dictionary<string, TestNode> Dictionary { get; set; }
+    [Path("opc", "Items")]
+    [Path("mqtt", "Items")]
+    [Path("ws", "Items")]
+    public partial Dictionary<string, TestNode> Items { get; set; }
 
-    public TestRoot()
+    public TestNode()
     {
         StringValue = string.Empty;
         DecimalValue = 0;
@@ -349,64 +364,66 @@ public partial class TestRoot
         BoolValue = false;
         ObjectRef = null;
         Collection = [];
-        Dictionary = new Dictionary<string, TestNode>();
-    }
-}
-
-[InterceptorSubject]
-public partial class TestNode
-{
-    [Path("opc", "StringValue")]
-    [Path("mqtt", "StringValue")]
-    [Path("ws", "StringValue")]
-    public partial string StringValue { get; set; }
-
-    [Path("opc", "DecimalValue")]
-    [Path("mqtt", "DecimalValue")]
-    [Path("ws", "DecimalValue")]
-    public partial decimal DecimalValue { get; set; }
-
-    [Path("opc", "ObjectRef")]
-    [Path("mqtt", "ObjectRef")]
-    [Path("ws", "ObjectRef")]
-    public partial TestNode? ObjectRef { get; set; }
-
-    [Path("opc", "Children")]
-    [Path("mqtt", "Children")]
-    [Path("ws", "Children")]
-    public partial IReadOnlyCollection<TestNode> Children { get; set; }
-
-    public TestNode()
-    {
-        StringValue = string.Empty;
-        DecimalValue = 0;
-        ObjectRef = null;
-        Children = [];
+        Items = new Dictionary<string, TestNode>();
     }
 }
 ```
 
+**Initial graph setup** (per participant):
+
+```csharp
+var root = new TestNode(context);
+
+// 20 children in collection
+root.Collection = Enumerable.Range(0, 20)
+    .Select(_ => new TestNode(context))
+    .ToArray();
+
+// 10 entries in dictionary with stable keys
+root.Items = Enumerable.Range(0, 10)
+    .ToDictionary(i => $"item-{i}", i => new TestNode(context));
+```
+
+Root has 20 collection children + 10 dict entries = 31 nodes total (including root). Children and dict entries start with empty collections and default values. This gives ~155 value properties (31 nodes x 5 value props) being mutated concurrently - enough to stress sync without being overwhelming.
+
+Nodes created via `ObjectRef` mutations (when enabled) are also added to the mutator's known node list and have their value properties mutated.
+
 ## Configuration
 
-All configuration via `appsettings.json` with per-participant sections:
+Per-connector configuration via environment-specific appsettings files loaded by launch profile. Common settings in `appsettings.json`, connector-specific overrides in `appsettings.{profile}.json`.
+
+**Launch profiles** (`Properties/launchSettings.json`):
+
+```json
+{
+  "profiles": {
+    "opcua": {
+      "commandName": "Project",
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "opcua" }
+    },
+    "mqtt": {
+      "commandName": "Project",
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "mqtt" }
+    },
+    "websocket": {
+      "commandName": "Project",
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "websocket" }
+    }
+  }
+}
+```
+
+Usage: `dotnet run --launch-profile opcua`
+
+**`appsettings.json`** (shared defaults):
 
 ```json
 {
   "ResilienceTest": {
-    "Connector": "websocket",
     "MutatePhaseDuration": "00:05:00",
     "ConvergenceTimeout": "00:01:00",
     "Server": {
       "MutationRate": 50,
-      "MutationWeights": {
-        "Value": 60,
-        "ObjectRef": 10,
-        "CollectionAdd": 10,
-        "CollectionRemove": 10,
-        "CollectionMove": 5,
-        "DictionaryAdd": 2.5,
-        "DictionaryRemove": 2.5
-      },
       "Chaos": {
         "Mode": "lifecycle",
         "IntervalMin": "00:01:00",
@@ -424,15 +441,6 @@ All configuration via `appsettings.json` with per-participant sections:
       {
         "Name": "flaky-client",
         "MutationRate": 50,
-        "MutationWeights": {
-          "Value": 40,
-          "ObjectRef": 15,
-          "CollectionAdd": 15,
-          "CollectionRemove": 15,
-          "CollectionMove": 5,
-          "DictionaryAdd": 5,
-          "DictionaryRemove": 5
-        },
         "Chaos": {
           "Mode": "both",
           "IntervalMin": "00:00:10",
@@ -457,15 +465,58 @@ All configuration via `appsettings.json` with per-participant sections:
 }
 ```
 
+**`appsettings.opcua.json`** (value mutations only):
+
+```json
+{
+  "ResilienceTest": {
+    "Connector": "opcua",
+    "EnableStructuralMutations": false
+  }
+}
+```
+
+**`appsettings.mqtt.json`** (value mutations only):
+
+```json
+{
+  "ResilienceTest": {
+    "Connector": "mqtt",
+    "EnableStructuralMutations": false
+  }
+}
+```
+
+**`appsettings.websocket.json`** (full mutations including structural):
+
+```json
+{
+  "ResilienceTest": {
+    "Connector": "websocket",
+    "EnableStructuralMutations": true,
+    "MutationWeights": {
+      "Value": 60,
+      "ObjectRef": 10,
+      "CollectionAdd": 10,
+      "CollectionRemove": 10,
+      "CollectionMove": 5,
+      "DictionaryAdd": 2.5,
+      "DictionaryRemove": 2.5
+    }
+  }
+}
+```
+
 **Configuration fields:**
 
 | Field | Description |
 |-------|-------------|
 | `Connector` | Which connector to test: `websocket`, `mqtt`, `opcua` |
+| `EnableStructuralMutations` | Enable collection/dict/ref mutations (default false, requires WebSocket) |
 | `MutatePhaseDuration` | How long mutations run before convergence check |
 | `ConvergenceTimeout` | Max time to wait for all models to match |
 | `MutationRate` | Mutations per second for this participant |
-| `MutationWeights` | Per-operation-type weights (defaults to 60/10/10/10/5/2.5/2.5 if omitted) |
+| `MutationWeights` | Per-operation-type weights when structural mutations enabled |
 | `Chaos.Mode` | `transport`, `lifecycle`, or `both` |
 | `Chaos.IntervalMin/Max` | Random range between chaos events |
 | `Chaos.DurationMin/Max` | Random range for disruption duration |
@@ -473,12 +524,12 @@ All configuration via `appsettings.json` with per-participant sections:
 
 ## Connector Wiring
 
-Each participant creates its own `IInterceptorSubjectContext` and `TestRoot` model upfront. The model reference is passed into the connector via the subject selector overload. This allows the verification engine to hold references to all models for snapshot comparison.
+Each participant creates its own `IInterceptorSubjectContext` and `TestNode` root model upfront, including the initial graph (20 collection children, 10 dict entries). The model reference is passed into the connector via the subject selector overload. This allows the verification engine to hold references to all models for snapshot comparison.
 
 ```csharp
 // Server
 var serverContext = CreateContext();
-var serverModel = new TestRoot(serverContext);
+var serverModel = CreateTestGraph(serverContext); // root + 20 children + 10 dict entries
 services.AddWebSocketSubjectServer(
     _ => serverModel,
     _ => new WebSocketServerConfiguration
@@ -489,7 +540,7 @@ services.AddWebSocketSubjectServer(
 
 // Client (pointing at proxy port, not server port)
 var clientContext = CreateContext();
-var clientModel = new TestRoot(clientContext);
+var clientModel = CreateTestGraph(clientContext);
 services.AddWebSocketSubjectClientSource(
     _ => clientModel,
     _ => new WebSocketClientConfiguration
@@ -516,13 +567,17 @@ src/
 └── Namotion.Interceptor.ResilienceTest/
     ├── Namotion.Interceptor.ResilienceTest.csproj
     ├── Program.cs
+    ├── Properties/
+    │   └── launchSettings.json
     ├── appsettings.json
+    ├── appsettings.opcua.json
+    ├── appsettings.mqtt.json
+    ├── appsettings.websocket.json
     ├── Configuration/
     │   ├── ResilienceTestConfiguration.cs
     │   ├── ParticipantConfiguration.cs
     │   └── ChaosConfiguration.cs
     ├── Model/
-    │   ├── TestRoot.cs
     │   └── TestNode.cs
     ├── Engine/
     │   ├── TestCycleCoordinator.cs
