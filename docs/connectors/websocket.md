@@ -480,29 +480,29 @@ The library includes optimizations:
 ## Benchmark Results
 
 ```
-Server Benchmark - 1 minute - [2026-01-20 22:35:29.418]
+Server Benchmark - 1 minute - [2026-02-08 00:43:54.182]
 
-Total received changes:          1199200
-Total published changes:         1197200
-Process memory:                  336.08 MB (187.32 MB in .NET heap)
-Avg allocations over last 60s:   76.02 MB/s
-
-Metric                               Avg        P50        P90        P95        P99      P99.9        Max        Min     StdDev      Count
--------------------------------------------------------------------------------------------------------------------------------------------
-Received (changes/s)            19962.86   19957.85   20327.33   20376.32   20638.96   20638.96   20638.96   18620.47     297.14          -
-End-to-end latency (ms)            20.59      18.29      28.82      33.14      41.49     135.05     179.08       0.67       8.17    1199200
-```
-
-```
-Client Benchmark - 1 minute - [2026-01-20 22:36:04.997]
-
-Total received changes:          1199600
-Total published changes:         1199200
-Process memory:                  394.45 MB (191.07 MB in .NET heap)
-Avg allocations over last 60s:   62.1 MB/s
+Total received changes:          1199599
+Total published changes:         1199600
+Process memory:                  339.89 MB (193.69 MB in .NET heap)
+Avg allocations over last 60s:   77.16 MB/s
 
 Metric                               Avg        P50        P90        P95        P99      P99.9        Max        Min     StdDev      Count
 -------------------------------------------------------------------------------------------------------------------------------------------
-Received (changes/s)            19985.38   19986.30   20286.07   20435.90   20631.95   20631.95   20631.95   19303.38     273.61          -
-End-to-end latency (ms)            20.45      18.30      29.29      33.44      39.44      49.61      72.07       0.52       6.12    1199600
+Received (changes/s)            19986.61   19977.31   20264.37   20358.98   20395.47   20395.47   20395.47   19284.34     241.02          -
+End-to-end latency (ms)            19.84      17.97      27.82      30.58      35.96      55.13      63.49       0.54       5.52    1199599
+```
+
+```
+Client Benchmark - 1 minute - [2026-02-08 00:43:49.966]
+
+Total received changes:          1199619
+Total published changes:         1199600
+Process memory:                  324.68 MB (167.66 MB in .NET heap)
+Avg allocations over last 60s:   70.98 MB/s
+
+Metric                               Avg        P50        P90        P95        P99      P99.9        Max        Min     StdDev      Count
+-------------------------------------------------------------------------------------------------------------------------------------------
+Received (changes/s)            19992.14   19962.97   20394.59   20527.46   20592.19   20592.19   20592.19   19413.39     294.82          -
+End-to-end latency (ms)            21.05      18.98      29.77      32.76      42.28      54.79      64.70       0.70       6.53    1199619
 ```
