@@ -191,6 +191,7 @@ public sealed class WebSocketSubjectHandler
             try
             {
                 var factory = _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance;
+                // Must use lock (not SemaphoreSlim) because SubjectChangeContext uses [ThreadStatic] storage.
                 lock (_applyUpdateLock)
                 {
                     using (SubjectChangeContext.WithSource(connection))
