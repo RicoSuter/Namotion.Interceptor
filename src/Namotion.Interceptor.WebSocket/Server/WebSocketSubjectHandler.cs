@@ -10,6 +10,7 @@ using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.WebSocket.Protocol;
+using Namotion.Interceptor.WebSocket.Serialization;
 
 namespace Namotion.Interceptor.WebSocket.Server;
 
@@ -28,6 +29,7 @@ public sealed class WebSocketSubjectHandler
     private readonly WebSocketServerConfiguration _configuration;
     private readonly ILogger _logger;
     private readonly ISubjectUpdateProcessor[] _processors;
+    private readonly JsonWebSocketSerializer _serializer = JsonWebSocketSerializer.Instance;
     private readonly ConcurrentDictionary<string, WebSocketClientConnection> _connections = new();
     private readonly Lock _applyUpdateLock = new();
 
@@ -110,7 +112,9 @@ public sealed class WebSocketSubjectHandler
             _connections[connection.ConnectionId] = connection;
             registered = true;
 
-            // Build snapshot under _applyUpdateLock for a consistent cut
+            // Build snapshot under _applyUpdateLock so the snapshot is consistent with its sequence number.
+            // Trade-off: this blocks incoming updates for the duration of the snapshot, which is proportional
+            // to graph size. Acceptable because new-client connections are infrequent relative to update rate.
             SubjectUpdate initialState;
             long welcomeSequence;
             lock (_applyUpdateLock)
@@ -247,15 +251,22 @@ public sealed class WebSocketSubjectHandler
             Sequence = sequence
         };
 
+        // Serialize once for all connections
+        var serializedMessage = _serializer.SerializeMessage(MessageType.Update, updatePayload);
+
         var tasks = new List<Task>(_connections.Count);
         foreach (var connection in _connections.Values)
         {
-            tasks.Add(connection.SendUpdateAsync(updatePayload, cancellationToken));
+            tasks.Add(connection.SendUpdateAsync(serializedMessage, cancellationToken));
         }
 
         try
         {
-            await Task.WhenAll(tasks).ConfigureAwait(false);
+            await Task.WhenAll(tasks).WaitAsync(_configuration.BroadcastTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning("Broadcast to {Count} client(s) timed out after {Timeout}", _connections.Count, _configuration.BroadcastTimeout);
         }
         finally
         {
@@ -310,15 +321,22 @@ public sealed class WebSocketSubjectHandler
             Sequence = Volatile.Read(ref _sequence)
         };
 
+        // Serialize once for all connections
+        var serializedMessage = _serializer.SerializeMessage(MessageType.Heartbeat, heartbeat);
+
         var tasks = new List<Task>(_connections.Count);
         foreach (var connection in _connections.Values)
         {
-            tasks.Add(connection.SendHeartbeatAsync(heartbeat, cancellationToken));
+            tasks.Add(connection.SendHeartbeatAsync(serializedMessage, cancellationToken));
         }
 
         try
         {
-            await Task.WhenAll(tasks).ConfigureAwait(false);
+            await Task.WhenAll(tasks).WaitAsync(_configuration.BroadcastTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning("Heartbeat broadcast to {Count} client(s) timed out after {Timeout}", _connections.Count, _configuration.BroadcastTimeout);
         }
         finally
         {

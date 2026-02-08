@@ -33,8 +33,18 @@ public sealed class WebSocketSubjectChangeProcessor : BackgroundService
             _handler.BufferTime,
             _logger);
 
-        await Task.WhenAll(
-            changeQueueProcessor.ProcessAsync(stoppingToken),
-            _handler.RunHeartbeatLoopAsync(stoppingToken)).ConfigureAwait(false);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+
+        var processorTask = changeQueueProcessor.ProcessAsync(linkedCts.Token);
+        var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedCts.Token);
+
+        var tasks = new[] { processorTask, heartbeatTask };
+        var completed = await Task.WhenAny(tasks).ConfigureAwait(false);
+        if (completed.IsFaulted)
+        {
+            await linkedCts.CancelAsync().ConfigureAwait(false);
+        }
+
+        await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 }

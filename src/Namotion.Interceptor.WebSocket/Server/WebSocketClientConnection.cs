@@ -18,6 +18,7 @@ namespace Namotion.Interceptor.WebSocket.Server;
 internal sealed class WebSocketClientConnection : IAsyncDisposable
 {
     private const int SendBufferShrinkThreshold = 256 * 1024;
+    private const int MaxPendingUpdates = 1000;
 
     private readonly System.Net.WebSockets.WebSocket _webSocket;
     private readonly ILogger _logger;
@@ -27,7 +28,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
     private ArrayBufferWriter<byte> _sendBuffer = new(4096);
     private readonly long _maxMessageSize;
     private readonly TimeSpan _helloTimeout;
-    private readonly Queue<UpdatePayload> _pendingUpdates = new();
+    private readonly Queue<byte[]> _pendingUpdates = new();
     private volatile bool _welcomeSent;
 
     private int _disposed;
@@ -114,14 +115,11 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
 
             MaybeShrinkSendBuffer();
 
-            // Mark welcome as sent and flush any queued updates
+            // Mark welcome as sent and flush any queued pre-serialized updates
             _welcomeSent = true;
             while (_pendingUpdates.TryDequeue(out var pending))
             {
-                _sendBuffer.Clear();
-                _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, pending);
-                await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
-                MaybeShrinkSendBuffer();
+                await _webSocket.SendAsync(pending, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
             }
         }
         finally
@@ -130,7 +128,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         }
     }
 
-    public async Task SendUpdateAsync(UpdatePayload update, CancellationToken cancellationToken)
+    public async Task SendUpdateAsync(ReadOnlyMemory<byte> serializedMessage, CancellationToken cancellationToken)
     {
         // Acquire lock BEFORE checking _welcomeSent to prevent TOCTOU race with SendWelcomeAsync.
         // Without this, an update could be enqueued after SendWelcomeAsync has already drained the queue.
@@ -149,17 +147,23 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         {
             if (!_welcomeSent)
             {
-                _pendingUpdates.Enqueue(update);
+                if (_pendingUpdates.Count >= MaxPendingUpdates)
+                {
+                    if (Interlocked.Increment(ref _consecutiveSendFailures) == 1)
+                    {
+                        _logger.LogWarning("Pending update queue full ({MaxPending} messages) for client {ConnectionId}, dropping messages until cleanup", MaxPendingUpdates, ConnectionId);
+                    }
+
+                    return; // drop message; zombie detection will clean up
+                }
+
+                _pendingUpdates.Enqueue(serializedMessage.ToArray());
                 return;
             }
 
             if (!IsConnected) return;
 
-            _sendBuffer.Clear();
-            _serializer.SerializeMessageTo(_sendBuffer, MessageType.Update, update);
-            await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
-
-            MaybeShrinkSendBuffer();
+            await _webSocket.SendAsync(serializedMessage, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
             Interlocked.Exchange(ref _consecutiveSendFailures, 0);
         }
         catch (ObjectDisposedException)
@@ -183,11 +187,11 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         return SendAsync(MessageType.Error, error, trackFailures: false, cancellationToken);
     }
 
-    public Task SendHeartbeatAsync(HeartbeatPayload heartbeat, CancellationToken cancellationToken)
+    public Task SendHeartbeatAsync(ReadOnlyMemory<byte> serializedMessage, CancellationToken cancellationToken)
     {
         // Skip heartbeats until Welcome has been sent to avoid confusing clients
         if (!_welcomeSent) return Task.CompletedTask;
-        return SendAsync(MessageType.Heartbeat, heartbeat, trackFailures: true, cancellationToken);
+        return SendPreSerializedAsync(serializedMessage, trackFailures: true, cancellationToken);
     }
 
     private async Task SendAsync<T>(MessageType messageType, T payload, bool trackFailures, CancellationToken cancellationToken)
@@ -229,6 +233,49 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
                 Interlocked.Increment(ref _consecutiveSendFailures);
             }
             _logger.LogWarning(ex, "Failed to send {MessageType} to client {ConnectionId}", messageType, ConnectionId);
+        }
+        finally
+        {
+            try { _sendLock.Release(); }
+            catch (ObjectDisposedException) { }
+        }
+    }
+
+    private async Task SendPreSerializedAsync(ReadOnlyMemory<byte> serializedMessage, bool trackFailures, CancellationToken cancellationToken)
+    {
+        if (!IsConnected || Volatile.Read(ref _disposed) == 1) return;
+
+        try
+        {
+            await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!IsConnected) return;
+
+            await _webSocket.SendAsync(serializedMessage, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+
+            if (trackFailures)
+            {
+                Interlocked.Exchange(ref _consecutiveSendFailures, 0);
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+            // Connection disposed during send
+        }
+        catch (WebSocketException ex)
+        {
+            if (trackFailures)
+            {
+                Interlocked.Increment(ref _consecutiveSendFailures);
+            }
+            _logger.LogWarning(ex, "Failed to send pre-serialized message to client {ConnectionId}", ConnectionId);
         }
         finally
         {

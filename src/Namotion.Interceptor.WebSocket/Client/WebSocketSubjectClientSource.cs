@@ -327,11 +327,13 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
     private async Task ReceiveLoopAsync(CancellationToken cancellationToken)
     {
+        var completionSource = _receiveLoopCompleted; // capture before loop to avoid stale TCS reference
         var buffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
 
         // Reusable CTS to reduce allocations (reset instead of recreate when possible)
         var timeoutCts = new CancellationTokenSource();
         CancellationTokenSource? linkedCts = null;
+        var consecutiveErrors = 0;
 
         try
         {
@@ -405,6 +407,8 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                                 _logger.LogWarning("Received error from server: {Code} - {Message}", error.Code, error.Message);
                                 break;
                         }
+
+                        consecutiveErrors = 0;
                     }
                 }
                 catch (WebSocketException ex)
@@ -425,7 +429,14 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error processing received message");
+                    consecutiveErrors++;
+                    _logger.LogError(ex, "Error processing received message (consecutive errors: {Count})", consecutiveErrors);
+
+                    if (consecutiveErrors >= 5)
+                    {
+                        _logger.LogError("Too many consecutive errors ({Count}), exiting receive loop", consecutiveErrors);
+                        break;
+                    }
                 }
             }
         }
@@ -436,7 +447,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             linkedCts?.Dispose();
 
             // Signal that receive loop has completed (for reconnection handling)
-            _receiveLoopCompleted?.TrySetResult();
+            completionSource?.TrySetResult();
         }
     }
 
@@ -551,7 +562,19 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
 
-        // Cancel all operations
+        // Stop ExecuteAsync first — this cancels the stoppingToken and waits for ExecuteAsync to exit,
+        // ensuring no concurrent access to resources before we dispose them.
+        try
+        {
+            using var stopCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await StopAsync(stopCts.Token).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            // Best effort stop
+        }
+
+        // Now safe to dispose — ExecuteAsync has exited
         await _stoppingTokenRegistration.DisposeAsync().ConfigureAwait(false);
         _receiveLoopCompleted?.TrySetResult();
 
@@ -559,23 +582,6 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         {
             await _receiveCts.CancelAsync().ConfigureAwait(false);
             _receiveCts.Dispose();
-        }
-
-        // Wait for any pending connection operations to complete before disposing the lock
-        try
-        {
-            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            await _connectionLock.WaitAsync(timeoutCts.Token).ConfigureAwait(false);
-            _connectionLock.Release();
-        }
-        catch (OperationCanceledException)
-        {
-            // Timeout waiting for lock - proceed with disposal anyway
-            _logger.LogWarning("Timeout waiting for connection lock during disposal");
-        }
-        catch (ObjectDisposedException)
-        {
-            // Already disposed
         }
 
         // Clean up resources
