@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Globalization;
 using System.Text.Json;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
@@ -139,6 +140,7 @@ internal static class SubjectItemsUpdateApplier
         SubjectUpdateApplyContext context)
     {
         var existingDictionary = property.GetValue() as IDictionary;
+        var targetKeyType = property.Type.GenericTypeArguments[0];
         var workingDictionary = new Dictionary<object, IInterceptorSubject>();
         var structureChanged = false;
 
@@ -156,7 +158,7 @@ internal static class SubjectItemsUpdateApplier
         {
             foreach (var operation in propertyUpdate.Operations)
             {
-                var key = ConvertDictionaryKey(operation.Index);
+                var key = ConvertDictionaryKey(operation.Index, targetKeyType);
                 switch (operation.Action)
                 {
                     case SubjectCollectionOperationType.Remove:
@@ -181,7 +183,7 @@ internal static class SubjectItemsUpdateApplier
         {
             foreach (var collUpdate in propertyUpdate.Items)
             {
-                var key = ConvertDictionaryKey(collUpdate.Index);
+                var key = ConvertDictionaryKey(collUpdate.Index, targetKeyType);
 
                 if (collUpdate.Id is not null &&
                     context.Subjects.TryGetValue(collUpdate.Id, out var itemProps))
@@ -220,9 +222,18 @@ internal static class SubjectItemsUpdateApplier
         _ => Convert.ToInt32(index)
     };
 
-    private static object ConvertDictionaryKey(object key)
+    private static object ConvertDictionaryKey(object key, Type targetKeyType)
     {
-        return key is JsonElement jsonElement ? jsonElement.GetString() ?? jsonElement.ToString() : key;
+        if (targetKeyType.IsInstanceOfType(key))
+            return key;
+
+        if (key is JsonElement jsonElement)
+            return jsonElement.Deserialize(targetKeyType)!;
+
+        if (targetKeyType.IsEnum)
+            return Enum.Parse(targetKeyType, Convert.ToString(key, CultureInfo.InvariantCulture)!);
+
+        return Convert.ChangeType(key, targetKeyType, CultureInfo.InvariantCulture);
     }
 
     private static IInterceptorSubject CreateAndApplyItem(
