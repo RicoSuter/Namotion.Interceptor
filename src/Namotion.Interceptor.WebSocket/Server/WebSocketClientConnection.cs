@@ -194,51 +194,10 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         return SendPreSerializedAsync(serializedMessage, trackFailures: true, cancellationToken);
     }
 
-    private async Task SendAsync<T>(MessageType messageType, T payload, bool trackFailures, CancellationToken cancellationToken)
+    private Task SendAsync<T>(MessageType messageType, T payload, bool trackFailures, CancellationToken cancellationToken)
     {
-        if (!IsConnected || Volatile.Read(ref _disposed) == 1) return;
-
-        try
-        {
-            await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (ObjectDisposedException)
-        {
-            return;
-        }
-
-        try
-        {
-            if (!IsConnected) return;
-
-            _sendBuffer.Clear();
-            _serializer.SerializeMessageTo(_sendBuffer, messageType, payload);
-            await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
-
-            MaybeShrinkSendBuffer();
-
-            if (trackFailures)
-            {
-                Interlocked.Exchange(ref _consecutiveSendFailures, 0);
-            }
-        }
-        catch (ObjectDisposedException)
-        {
-            // Connection disposed during send
-        }
-        catch (WebSocketException ex)
-        {
-            if (trackFailures)
-            {
-                Interlocked.Increment(ref _consecutiveSendFailures);
-            }
-            _logger.LogWarning(ex, "Failed to send {MessageType} to client {ConnectionId}", messageType, ConnectionId);
-        }
-        finally
-        {
-            try { _sendLock.Release(); }
-            catch (ObjectDisposedException) { }
-        }
+        var serializedMessage = _serializer.SerializeMessage(messageType, payload);
+        return SendPreSerializedAsync(serializedMessage, trackFailures, cancellationToken);
     }
 
     private async Task SendPreSerializedAsync(ReadOnlyMemory<byte> serializedMessage, bool trackFailures, CancellationToken cancellationToken)

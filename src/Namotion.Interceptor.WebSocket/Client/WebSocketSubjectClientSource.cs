@@ -432,7 +432,8 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                     consecutiveErrors++;
                     _logger.LogError(ex, "Error processing received message (consecutive errors: {Count})", consecutiveErrors);
 
-                    if (consecutiveErrors >= 5)
+                    const int maxConsecutiveReceiveErrors = 5;
+                    if (consecutiveErrors >= maxConsecutiveReceiveErrors)
                     {
                         _logger.LogError("Too many consecutive errors ({Count}), exiting receive loop", consecutiveErrors);
                         break;
@@ -457,12 +458,12 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         if (propertyWriter is null) return;
 
         propertyWriter.Write(
-            (update, _subject, this, _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance),
+            (update, subject: _subject, source: this, factory: _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance),
             static state =>
             {
-                using (SubjectChangeContext.WithSource(state.Item3))
+                using (SubjectChangeContext.WithSource(state.source))
                 {
-                    state._subject.ApplySubjectUpdate(state.update, state.Item4);
+                    state.subject.ApplySubjectUpdate(state.update, state.factory);
                 }
             });
     }
