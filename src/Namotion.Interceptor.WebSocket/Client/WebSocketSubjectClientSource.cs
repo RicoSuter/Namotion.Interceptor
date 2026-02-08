@@ -577,11 +577,27 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
         // Now safe to dispose — ExecuteAsync has exited
         await _stoppingTokenRegistration.DisposeAsync().ConfigureAwait(false);
-        _receiveLoopCompleted?.TrySetResult();
 
+        // Cancel receive loop and wait for it to finish before disposing resources
+        // (same pattern as ConnectCoreAsync)
         if (_receiveCts is not null)
         {
             await _receiveCts.CancelAsync().ConfigureAwait(false);
+
+            var receiveLoop = _receiveLoopCompleted?.Task;
+            if (receiveLoop is not null && !receiveLoop.IsCompleted)
+            {
+                try
+                {
+                    using var waitCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    await receiveLoop.WaitAsync(waitCts.Token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Receive loop did not complete within timeout — proceed with disposal
+                }
+            }
+
             _receiveCts.Dispose();
         }
 
