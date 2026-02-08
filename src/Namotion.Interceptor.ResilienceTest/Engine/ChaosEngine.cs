@@ -13,7 +13,7 @@ public class ChaosEngine : BackgroundService
     private readonly ChaosConfiguration _configuration;
     private readonly TestCycleCoordinator _coordinator;
     private readonly TcpProxy? _proxy;
-    private readonly IHostedService? _connectorService;
+    private IHostedService? _connectorService;
     private readonly ILogger _logger;
     private readonly Random _random = new();
 
@@ -35,6 +35,15 @@ public class ChaosEngine : BackgroundService
         _proxy = proxy;
         _connectorService = connectorService;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Sets the connector service for lifecycle chaos. Called after DI build
+    /// when the service can be resolved from the container.
+    /// </summary>
+    public void SetConnectorService(IHostedService connectorService)
+    {
+        _connectorService = connectorService;
     }
 
     public void ResetCounters()

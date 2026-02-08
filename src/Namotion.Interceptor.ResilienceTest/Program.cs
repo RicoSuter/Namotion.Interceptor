@@ -120,14 +120,15 @@ switch (configuration.Connector.ToLowerInvariant())
 }
 
 // Server chaos engine (if configured)
+ChaosEngine? serverChaosEngine = null;
 if (configuration.Server.Chaos != null)
 {
-    var serverChaosEngine = new ChaosEngine(
+    serverChaosEngine = new ChaosEngine(
         configuration.Server.Name,
         configuration.Server.Chaos,
         coordinator,
-        proxy: null, // server has no proxy
-        connectorService: null, // resolved after build for lifecycle chaos
+        proxy: null,
+        connectorService: null, // resolved after build
         LoggerFactory.Create(b => b.AddConsole()).CreateLogger($"ChaosEngine.{configuration.Server.Name}"));
     chaosEngines.Add(serverChaosEngine);
     builder.Services.AddSingleton<IHostedService>(serverChaosEngine);
@@ -238,6 +239,19 @@ builder.Services.AddSingleton<IHostedService>(sp =>
 
 // Build and start proxies
 var host = builder.Build();
+
+// Wire up server chaos engine with the connector service (resolved after build)
+if (serverChaosEngine != null)
+{
+    var connectorService = host.Services.GetServices<IHostedService>()
+        .FirstOrDefault(s => s.GetType().FullName?.Contains("Namotion.Interceptor.") == true
+            && s is not MutationEngine and not ChaosEngine and not VerificationEngine);
+
+    if (connectorService != null)
+    {
+        serverChaosEngine.SetConnectorService(connectorService);
+    }
+}
 
 foreach (var proxy in proxies)
 {
