@@ -53,7 +53,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Gets a value indicating whether initialization needs to be completed by the health check loop.
-    /// Set when SDK reconnection succeeds with subscription transfer.
+    /// Set when SDK reconnection succeeds (subscription transfer or preserved session).
     /// </summary>
     public bool NeedsInitialization => Volatile.Read(ref _needsInitialization) == 1;
 
@@ -343,6 +343,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             else
             {
                 _logger.LogInformation("Reconnect preserved existing OPC UA session. Subscriptions maintained.");
+                Interlocked.Exchange(ref _needsInitialization, 1);
             }
 
             Interlocked.Exchange(ref _isReconnecting, 0);
