@@ -83,18 +83,10 @@ public class ChaosEngine : BackgroundService
                     {
                         _logger.LogWarning("Chaos: restarting connector service on {Target}", _targetName);
 
-                        // Use CancellationToken.None for StartAsync to avoid linking a short-lived
-                        // timeout token into BackgroundService's internal _stoppingCts. The timeout
-                        // is applied externally via WaitAsync instead.
-                        try
-                        {
-                            await _connectorService.StartAsync(CancellationToken.None)
-                                .WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
-                        }
-                        catch (TimeoutException)
-                        {
-                            _logger.LogWarning("Chaos: StartAsync timed out on {Target}, continuing anyway", _targetName);
-                        }
+                        // Use CancellationToken.None to avoid linking into BackgroundService's
+                        // internal _stoppingCts. StartAsync returns immediately (it just kicks
+                        // off ExecuteAsync), so no timeout is needed.
+                        await _connectorService.StartAsync(CancellationToken.None);
 
                         _logger.LogWarning("Chaos: connector service restarted on {Target}", _targetName);
                     }
@@ -201,18 +193,12 @@ public class ChaosEngine : BackgroundService
                 {
                     _logger.LogWarning("Chaos: stopping connector service {Type} on {Target}",
                         _connectorService.GetType().Name, _targetName);
-                    using (var stopTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
-                    {
-                        stopTimeout.CancelAfter(TimeSpan.FromSeconds(30));
-                        try
-                        {
-                            await _connectorService.StopAsync(stopTimeout.Token);
-                        }
-                        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-                        {
-                            _logger.LogWarning("Chaos: StopAsync timed out on {Target}, continuing anyway", _targetName);
-                        }
-                    }
+
+                    // Await full completion — do NOT use a timeout that abandons StopAsync early.
+                    // If StopAsync returns before the server fully shuts down, calling StartAsync
+                    // creates a zombie server instance that holds the TCP port indefinitely.
+                    await _connectorService.StopAsync(cancellationToken);
+
                     _logger.LogWarning("Chaos: connector service stopped on {Target}", _targetName);
                 }
                 else
