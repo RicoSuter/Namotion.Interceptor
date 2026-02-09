@@ -1,4 +1,4 @@
-namespace Namotion.Interceptor.ResilienceTest.Engine;
+namespace Namotion.Interceptor.ConnectorTester.Engine;
 
 /// <summary>
 /// Coordinates mutate/converge cycle phases. All engines call WaitIfPaused()

@@ -1,6 +1,6 @@
-namespace Namotion.Interceptor.ResilienceTest.Configuration;
+namespace Namotion.Interceptor.ConnectorTester.Configuration;
 
-public class ResilienceTestConfiguration
+public class ConnectorTesterConfiguration
 {
     /// <summary>"opcua", "mqtt", or "websocket"</summary>
     public string Connector { get; set; } = "opcua";

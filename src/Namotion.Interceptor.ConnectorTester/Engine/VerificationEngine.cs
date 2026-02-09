@@ -1,11 +1,11 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Namotion.Interceptor.Connectors.Updates;
-using Namotion.Interceptor.ResilienceTest.Configuration;
-using Namotion.Interceptor.ResilienceTest.Logging;
-using Namotion.Interceptor.ResilienceTest.Model;
+using Namotion.Interceptor.ConnectorTester.Configuration;
+using Namotion.Interceptor.ConnectorTester.Logging;
+using Namotion.Interceptor.ConnectorTester.Model;
 
-namespace Namotion.Interceptor.ResilienceTest.Engine;
+namespace Namotion.Interceptor.ConnectorTester.Engine;
 
 /// <summary>
 /// Top-level orchestrator. Runs repeating mutate/converge cycles.
@@ -13,7 +13,7 @@ namespace Namotion.Interceptor.ResilienceTest.Engine;
 /// </summary>
 public class VerificationEngine : BackgroundService
 {
-    private readonly ResilienceTestConfiguration _configuration;
+    private readonly ConnectorTesterConfiguration _configuration;
     private readonly TestCycleCoordinator _coordinator;
     private readonly List<(string Name, TestNode Root)> _participants;
     private readonly List<MutationEngine> _mutationEngines;
@@ -24,7 +24,7 @@ public class VerificationEngine : BackgroundService
     private int _cycleNumber;
 
     public VerificationEngine(
-        ResilienceTestConfiguration configuration,
+        ConnectorTesterConfiguration configuration,
         TestCycleCoordinator coordinator,
         List<(string Name, TestNode Root)> participants,
         List<MutationEngine> mutationEngines,
@@ -48,7 +48,7 @@ public class VerificationEngine : BackgroundService
 
         // Log configuration header
         _logger.LogInformation("""
-            === Resilience Test Configuration ===
+            === Connector Tester Configuration ===
             Connector: {Connector}
             MutatePhaseDuration: {MutatePhaseDuration}
             ConvergenceTimeout: {ConvergenceTimeout}

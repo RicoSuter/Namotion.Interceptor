@@ -1,7 +1,7 @@
-using Namotion.Interceptor.ResilienceTest.Chaos;
-using Namotion.Interceptor.ResilienceTest.Configuration;
+using Namotion.Interceptor.ConnectorTester.Chaos;
+using Namotion.Interceptor.ConnectorTester.Configuration;
 
-namespace Namotion.Interceptor.ResilienceTest.Engine;
+namespace Namotion.Interceptor.ConnectorTester.Engine;
 
 /// <summary>
 /// Randomly disrupts a participant's transport (TCP proxy) and/or connector lifecycle.
