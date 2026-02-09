@@ -97,6 +97,7 @@ switch (configuration.Connector.ToLowerInvariant())
                     ValueConverter = new OpcUaValueConverter(),
                     TelemetryContext = telemetryContext,
                     AutoAcceptUntrustedCertificates = true,
+                    CleanCertificateStore = false,
                     BufferTime = TimeSpan.FromMilliseconds(100)
                 };
             });
@@ -193,18 +194,27 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
             break;
 
         case "mqtt":
+            var capturedMqttProxyPort = proxyPort;
             builder.Services.AddMqttSubjectClientSource(
                 _ => clientRoot,
                 _ => new MqttClientConfiguration
                 {
                     BrokerHost = "localhost",
-                    BrokerPort = proxyPort,
+                    BrokerPort = capturedMqttProxyPort,
                     PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
                     DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
                     UseRetainedMessages = true,
                     SourceTimestampSerializer = static ts => ts.UtcTicks.ToString(),
                     SourceTimestampDeserializer = static s => long.TryParse(s, out var ticks)
-                        ? new DateTimeOffset(ticks, TimeSpan.Zero) : null
+                        ? new DateTimeOffset(ticks, TimeSpan.Zero) : null,
+                    // Short keep-alive so proxy PAUSE is detected as disconnection
+                    KeepAliveInterval = TimeSpan.FromSeconds(2),
+                    // Aggressive reconnection for resilience testing
+                    ReconnectDelay = TimeSpan.FromSeconds(1),
+                    MaximumReconnectDelay = TimeSpan.FromSeconds(10),
+                    HealthCheckInterval = TimeSpan.FromSeconds(5),
+                    CircuitBreakerFailureThreshold = 3,
+                    CircuitBreakerCooldown = TimeSpan.FromSeconds(10),
                 });
             break;
     }
@@ -243,13 +253,18 @@ var host = builder.Build();
 // Wire up server chaos engine with the connector service (resolved after build)
 if (serverChaosEngine != null)
 {
-    var connectorService = host.Services.GetServices<IHostedService>()
-        .FirstOrDefault(s => s.GetType().FullName?.Contains("Namotion.Interceptor.") == true
-            && s is not MutationEngine and not ChaosEngine and not VerificationEngine);
+    var allHostedServices = host.Services.GetServices<IHostedService>().ToList();
+    var connectorService = allHostedServices.OfType<ISubjectConnector>().FirstOrDefault() as IHostedService;
 
+    var startupLogger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Program");
     if (connectorService != null)
     {
+        startupLogger.LogInformation("Server chaos wired to connector: {Type}", connectorService.GetType().FullName);
         serverChaosEngine.SetConnectorService(connectorService);
+    }
+    else
+    {
+        startupLogger.LogError("Could not find connector service for server chaos!");
     }
 }
 

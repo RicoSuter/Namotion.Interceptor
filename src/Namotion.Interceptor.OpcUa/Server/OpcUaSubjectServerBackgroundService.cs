@@ -10,7 +10,7 @@ using Opc.Ua.Configuration;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
-internal class OpcUaSubjectServerBackgroundService : BackgroundService
+internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubjectConnector
 {
     internal const string OpcVariableKey = "OpcVariable";
 
@@ -25,6 +25,9 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
     private OpcUaServerDiagnostics? _diagnostics;
     private DateTimeOffset? _startTime;
     private Exception? _lastError;
+
+    /// <inheritdoc />
+    public IInterceptorSubject RootSubject => _subject;
 
     /// <summary>
     /// Gets diagnostic information about the server state.
