@@ -188,7 +188,15 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
                         ValueConverter = new OpcUaValueConverter(),
                         SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
                         TelemetryContext = telemetryContext,
-                        BufferTime = TimeSpan.FromMilliseconds(100)
+                        BufferTime = TimeSpan.FromMilliseconds(100),
+                        // Aggressive timeouts for resilience testing
+                        KeepAliveInterval = TimeSpan.FromSeconds(2),
+                        SessionTimeout = TimeSpan.FromSeconds(10),
+                        OperationTimeout = TimeSpan.FromSeconds(10),
+                        ReconnectInterval = TimeSpan.FromSeconds(1),
+                        MaxReconnectDuration = TimeSpan.FromSeconds(15),
+                        ReconnectHandlerTimeout = TimeSpan.FromSeconds(5),
+                        SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(2),
                     };
                 });
             break;
