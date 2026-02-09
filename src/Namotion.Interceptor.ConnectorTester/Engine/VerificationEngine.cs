@@ -94,8 +94,8 @@ public class VerificationEngine : BackgroundService
                 await chaosEngine.RecoverActiveDisruptionAsync(stoppingToken);
             }
 
-            // Grace period for in-flight operations
-            await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+            // Grace period for server startup, port binding, and client reconnection
+            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
 
             // 3. Poll-compare snapshots
             var convergeStopwatch = Stopwatch.StartNew();

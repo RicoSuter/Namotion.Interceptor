@@ -16,6 +16,7 @@ public class ChaosEngine : BackgroundService
     private IHostedService? _connectorService;
     private readonly ILogger _logger;
     private readonly Random _random = new();
+    private readonly SemaphoreSlim _actionLock = new(1, 1);
 
     private string? _activeDisruption;
 
@@ -63,33 +64,44 @@ public class ChaosEngine : BackgroundService
 
         _logger.LogInformation("Chaos: force-recovering {Disruption} on {Target}", disruption, _targetName);
 
-        switch (disruption)
+        // Wait for any in-progress action (e.g. StopAsync) to finish before recovering.
+        // Without this, StartAsync could race with a still-running StopAsync, and if StopAsync
+        // finishes second, the server ends up stopped during convergence.
+        await _actionLock.WaitAsync(cancellationToken);
+        try
         {
-            case "pause":
-                _proxy?.ResumeForwarding();
-                break;
-            case "close":
-                // Connections already closed; nothing to recover - connector will reconnect
-                break;
-            case "lifecycle":
-                if (_connectorService != null)
-                {
-                    _logger.LogWarning("Chaos: restarting connector service on {Target}", _targetName);
-                    using (var startTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+            switch (disruption)
+            {
+                case "pause":
+                    _proxy?.ResumeForwarding();
+                    break;
+                case "close":
+                    // Connections already closed; nothing to recover - connector will reconnect
+                    break;
+                case "lifecycle":
+                    if (_connectorService != null)
                     {
-                        startTimeout.CancelAfter(TimeSpan.FromSeconds(30));
-                        try
+                        _logger.LogWarning("Chaos: restarting connector service on {Target}", _targetName);
+                        using (var startTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
                         {
-                            await _connectorService.StartAsync(startTimeout.Token);
+                            startTimeout.CancelAfter(TimeSpan.FromSeconds(30));
+                            try
+                            {
+                                await _connectorService.StartAsync(startTimeout.Token);
+                            }
+                            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                            {
+                                _logger.LogWarning("Chaos: StartAsync timed out on {Target}, continuing anyway", _targetName);
+                            }
                         }
-                        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-                        {
-                            _logger.LogWarning("Chaos: StartAsync timed out on {Target}, continuing anyway", _targetName);
-                        }
+                        _logger.LogWarning("Chaos: connector service restarted on {Target}", _targetName);
                     }
-                    _logger.LogWarning("Chaos: connector service restarted on {Target}", _targetName);
-                }
-                break;
+                    break;
+            }
+        }
+        finally
+        {
+            _actionLock.Release();
         }
     }
 
@@ -117,7 +129,15 @@ public class ChaosEngine : BackgroundService
                 // Set active disruption BEFORE executing so force-recovery can find it
                 // even if the action hangs (e.g. StopAsync blocks indefinitely).
                 _activeDisruption = action;
-                await ExecuteActionAsync(action, stoppingToken);
+                await _actionLock.WaitAsync(stoppingToken);
+                try
+                {
+                    await ExecuteActionAsync(action, stoppingToken);
+                }
+                finally
+                {
+                    _actionLock.Release();
+                }
 
                 // Hold disruption for random duration
                 var duration = RandomTimeSpan(_configuration.DurationMin, _configuration.DurationMax);
