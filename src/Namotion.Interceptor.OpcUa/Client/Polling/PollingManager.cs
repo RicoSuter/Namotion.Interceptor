@@ -162,18 +162,6 @@ internal sealed class PollingManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Removes an item from polling.
-    /// </summary>
-    public void RemoveItem(NodeId nodeId)
-    {
-        var key = nodeId.ToString();
-        if (_pollingItems.TryRemove(key, out _))
-        {
-            _logger.LogDebug("Removed node {NodeId} from polling", key);
-        }
-    }
-
-    /// <summary>
     /// Removes polling items for a detached subject. Idempotent.
     /// </summary>
     public void RemoveItemsForSubject(IInterceptorSubject subject)
@@ -445,9 +433,9 @@ internal sealed class PollingManager : IAsyncDisposable
         _logger.LogDebug("Disposing OPC UA polling manager (Total reads: {TotalReads}, Failed: {FailedReads}, Value changes: {ValueChanges}, Slow polls: {SlowPolls}, Circuit breaker trips: {Trips})",
             _metrics.TotalReads, _metrics.FailedReads, _metrics.ValueChanges, _metrics.SlowPolls, _circuitBreaker.TripCount);
 
-        // Stop timer and cancel work
-        _timer.Dispose();
+        // Cancel work and stop timer
         await _cts.CancelAsync();
+        _timer.Dispose();
 
         // Wait for polling task to complete asynchronously (with timeout)
         try
