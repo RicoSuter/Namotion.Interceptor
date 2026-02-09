@@ -45,6 +45,7 @@ builder.Services.AddSingleton(coordinator);
 var participants = new List<(string Name, TestNode Root)>();
 var mutationEngines = new List<MutationEngine>();
 var chaosEngines = new List<ChaosEngine>();
+var clientChaosEngines = new List<(ChaosEngine Engine, TestNode ClientRoot)>();
 var proxies = new List<TcpProxy>();
 
 // Read configuration
@@ -77,7 +78,9 @@ participants.Add((configuration.Server.Name, serverRoot));
 var serverMutationEngine = new MutationEngine(
     serverRoot, configuration.Server, coordinator,
     sharedLoggerFactory.CreateLogger($"MutationEngine.{configuration.Server.Name}"));
+
 mutationEngines.Add(serverMutationEngine);
+
 builder.Services.AddSingleton<IHostedService>(serverMutationEngine);
 
 // Server-side connector wiring
@@ -100,7 +103,6 @@ switch (configuration.Connector.ToLowerInvariant())
                     TelemetryContext = telemetryContext,
                     AutoAcceptUntrustedCertificates = true,
                     CleanCertificateStore = false,
-                    BufferTime = TimeSpan.FromMilliseconds(100)
                 };
             });
         break;
@@ -133,7 +135,9 @@ if (configuration.Server.Chaos != null)
         proxy: null,
         connectorService: null, // resolved after build
         sharedLoggerFactory.CreateLogger($"ChaosEngine.{configuration.Server.Name}"));
+   
     chaosEngines.Add(serverChaosEngine);
+    
     builder.Services.AddSingleton<IHostedService>(serverChaosEngine);
 }
 
@@ -239,36 +243,37 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
             proxy,
             connectorService: null,
             sharedLoggerFactory.CreateLogger($"ChaosEngine.{clientConfig.Name}"));
+
         chaosEngines.Add(clientChaosEngine);
+        clientChaosEngines.Add((clientChaosEngine, clientRoot));
+
         builder.Services.AddSingleton<IHostedService>(clientChaosEngine);
     }
 }
 
 // --- Verification Engine ---
-builder.Services.AddSingleton<IHostedService>(sp =>
-{
-    return new VerificationEngine(
-        configuration,
-        coordinator,
-        participants,
-        mutationEngines,
-        chaosEngines,
-        cycleLoggerProvider,
-        sp.GetRequiredService<ILogger<VerificationEngine>>());
-});
+builder.Services.AddSingleton<IHostedService>(sp => new VerificationEngine(
+    configuration,
+    coordinator,
+    participants,
+    mutationEngines,
+    chaosEngines,
+    cycleLoggerProvider,
+    sp.GetRequiredService<ILogger<VerificationEngine>>()));
 
 // Build and start proxies
 var host = builder.Build();
 
-// Wire up server chaos engine with the connector service (resolved after build)
+// Wire up chaos engines with connector services (resolved after build)
+var allHostedServices = host.Services.GetServices<IHostedService>().ToList();
+var startupLogger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Program");
+
 if (serverChaosEngine != null)
 {
-    var allHostedServices = host.Services.GetServices<IHostedService>().ToList();
     var connectorService = allHostedServices
         .OfType<ISubjectConnector>()
         .FirstOrDefault(connector => connector.RootSubject == serverRoot) as IHostedService;
 
-    var startupLogger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Program");
     if (connectorService != null)
     {
         startupLogger.LogInformation("Server chaos wired to connector: {Type}", connectorService.GetType().FullName);
@@ -277,6 +282,25 @@ if (serverChaosEngine != null)
     else
     {
         startupLogger.LogError("Could not find connector service for server chaos!");
+    }
+}
+
+foreach (var (clientEngine, clientRoot) in clientChaosEngines)
+{
+    var connectorService = allHostedServices
+        .OfType<ISubjectConnector>()
+        .FirstOrDefault(connector => connector.RootSubject == clientRoot) as IHostedService;
+
+    if (connectorService != null)
+    {
+        startupLogger.LogInformation("Client chaos [{Target}] wired to connector: {Type}",
+            clientEngine.TargetName, connectorService.GetType().FullName);
+        clientEngine.SetConnectorService(connectorService);
+    }
+    else
+    {
+        startupLogger.LogError("Could not find connector service for client chaos [{Target}]!",
+            clientEngine.TargetName);
     }
 }
 
