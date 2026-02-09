@@ -14,6 +14,7 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -22,7 +23,7 @@ namespace Namotion.Interceptor.Mqtt.Server;
 /// <summary>
 /// Background service that hosts an MQTT broker and publishes property changes.
 /// </summary>
-public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDisposable
+public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectConnector, IAsyncDisposable
 {
     // NOTE: We cannot pool UserProperties here because InjectApplicationMessages queues messages
     // asynchronously. The server may still be serializing packets after this method returns,
@@ -33,6 +34,9 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
     private readonly IInterceptorSubjectContext _context;
     private readonly MqttServerConfiguration _configuration;
     private readonly ILogger _logger;
+
+    /// <inheritdoc />
+    public IInterceptorSubject RootSubject => _subject;
 
     // Sentinel source used for values received from MQTT clients.
     // Using a different source than `this` ensures the server's ChangeQueueProcessor
@@ -343,6 +347,8 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             var server = _mqttServer;
             if (server is null) return;
 
+            var timestampPropertyName = _configuration.SourceTimestampPropertyName;
+
             foreach (var (path, property) in properties)
             {
                 var topic = MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
@@ -359,6 +365,20 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                     QualityOfServiceLevel = _configuration.DefaultQualityOfService,
                     Retain = _configuration.UseRetainedMessages
                 };
+
+                if (timestampPropertyName is not null)
+                {
+                    var writeTimestamp = property.Reference.TryGetWriteTimestamp();
+                    if (writeTimestamp.HasValue)
+                    {
+                        message.UserProperties =
+                        [
+                            new MqttUserProperty(
+                                timestampPropertyName,
+                                _configuration.SourceTimestampSerializer(writeTimestamp.Value))
+                        ];
+                    }
+                }
 
                 await server.InjectApplicationMessage(
                     new InjectedMqttApplicationMessage(message) { SenderClientId = _serverClientId },

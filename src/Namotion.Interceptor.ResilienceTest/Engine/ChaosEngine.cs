@@ -17,7 +17,7 @@ public class ChaosEngine : BackgroundService
     private readonly ILogger _logger;
     private readonly Random _random = new();
 
-    private volatile string? _activeDisruption;
+    private string? _activeDisruption;
 
     public long ChaosEventCount { get; private set; }
 
@@ -53,10 +53,11 @@ public class ChaosEngine : BackgroundService
 
     /// <summary>
     /// Recovers any active disruption. Called by verification engine before convergence check.
+    /// Thread-safe: uses Interlocked.Exchange to prevent double recovery.
     /// </summary>
     public async Task RecoverActiveDisruptionAsync(CancellationToken cancellationToken)
     {
-        var disruption = _activeDisruption;
+        var disruption = Interlocked.Exchange(ref _activeDisruption, null);
         if (disruption == null)
             return;
 
@@ -73,12 +74,12 @@ public class ChaosEngine : BackgroundService
             case "lifecycle":
                 if (_connectorService != null)
                 {
+                    _logger.LogWarning("Chaos: restarting connector service on {Target}", _targetName);
                     await _connectorService.StartAsync(cancellationToken);
+                    _logger.LogWarning("Chaos: connector service restarted on {Target}", _targetName);
                 }
                 break;
         }
-
-        _activeDisruption = null;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -162,7 +163,14 @@ public class ChaosEngine : BackgroundService
             case "lifecycle":
                 if (_connectorService != null)
                 {
+                    _logger.LogWarning("Chaos: stopping connector service {Type} on {Target}",
+                        _connectorService.GetType().Name, _targetName);
                     await _connectorService.StopAsync(cancellationToken);
+                    _logger.LogWarning("Chaos: connector service stopped on {Target}", _targetName);
+                }
+                else
+                {
+                    _logger.LogWarning("Chaos: lifecycle action skipped on {Target} - no connector service wired", _targetName);
                 }
                 break;
         }

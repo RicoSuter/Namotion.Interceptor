@@ -4,6 +4,7 @@ using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking;
 using Opc.Ua;
 using Opc.Ua.Server;
 
@@ -373,6 +374,13 @@ internal class CustomNodeManager : CustomNodeManager2
         }
 
         variableNode.Value = value;
+
+        var writeTimestamp = property.Reference.TryGetWriteTimestamp();
+        if (writeTimestamp.HasValue)
+        {
+            variableNode.Timestamp = writeTimestamp.Value.UtcDateTime;
+        }
+
         variableNode.StateChanged += (_, _, changes) =>
         {
             if (changes.HasFlag(NodeStateChangeMasks.Value))

@@ -92,6 +92,18 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
                 var signaled = await _reconnectSignal.WaitAsync(healthCheckInterval, cancellationToken).ConfigureAwait(false);
                 if (signaled)
                 {
+                    // Verify the signal is not stale (e.g., from a failed reconnect attempt).
+                    // If the client reports connected, confirm with a ping before acting.
+                    if (_client.IsConnected)
+                    {
+                        var stillHealthy = await _client.TryPingAsync(cancellationToken).ConfigureAwait(false);
+                        if (stillHealthy)
+                        {
+                            _logger.LogDebug("Stale disconnect signal ignored (client is connected and healthy).");
+                            continue;
+                        }
+                    }
+
                     _logger.LogWarning("MQTT disconnect event received.");
                     await _onDisconnected().ConfigureAwait(false);
                 }
@@ -153,6 +165,9 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
 
                                 // Wait for cooldown period (or until cancellation)
                                 await Task.Delay(cooldownRemaining, cancellationToken).ConfigureAwait(false);
+
+                                // Reset backoff after cooldown so the first retry is fast
+                                reconnectDelay = _configuration.ReconnectDelay;
                                 continue;
                             }
 
@@ -170,6 +185,12 @@ internal sealed class MqttConnectionMonitor : IAsyncDisposable
                                 // Success - close circuit breaker and reset counters
                                 _circuitBreaker?.RecordSuccess();
                                 Interlocked.Exchange(ref _reconnectingIterations, 0);
+
+                                // Drain any stale disconnect signals accumulated during reconnection
+                                // to prevent false StartBuffering on the next monitoring iteration
+                                try { _reconnectSignal.Wait(0); }
+                                catch (ObjectDisposedException) { }
+
                                 break;
                             }
                             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
