@@ -102,6 +102,12 @@ logs/
 
 Files are created as `pending` and renamed to `pass` or `FAIL` on cycle completion. Each file contains all log output (INFO+) for that cycle with timestamps.
 
+**Use the log files to analyze results and diagnose problems.** On failure, the `FAIL` log contains full snapshot diffs showing exactly which participants diverged and what their state was. Look for:
+- Chaos event timing (`Chaos: pause/close/lifecycle on ...`) to correlate disruptions with convergence delays.
+- Reconnection logs (`Attempting to reconnect`, `Reconnected successfully`) to verify recovery is working.
+- Mutation counts in the statistics block to confirm all engines were active.
+- Snapshot diffs at the end of failed cycles to identify which properties or participants didn't converge.
+
 ## Configuration
 
 Configuration is loaded from `appsettings.json` with environment-specific overrides (e.g., `appsettings.mqtt.json`). The root section is `"ConnectorTester"`.
