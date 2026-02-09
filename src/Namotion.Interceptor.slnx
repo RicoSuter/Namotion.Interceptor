@@ -57,7 +57,7 @@
     <Project Path="HomeBlaze/HomeBlaze.Storage.Tests/HomeBlaze.Storage.Tests.csproj" />
   </Folder>
   <Folder Name="/Samples/">
-    <Project Path="Namotion.Interceptor.ResilienceTest/Namotion.Interceptor.ResilienceTest.csproj" />
+    <Project Path="Namotion.Interceptor.ConnectorTester/Namotion.Interceptor.ConnectorTester.csproj" />
     <Project Path="Namotion.Interceptor.SampleBlazor/Namotion.Interceptor.SampleBlazor.csproj" />
     <Project Path="Namotion.Interceptor.SampleConsole/Namotion.Interceptor.SampleConsole.csproj" />
     <Project Path="Namotion.Interceptor.SampleMachine/Namotion.Interceptor.SampleMachine.csproj" />

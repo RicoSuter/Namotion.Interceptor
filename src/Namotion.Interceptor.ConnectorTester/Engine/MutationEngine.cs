@@ -1,8 +1,8 @@
-using Namotion.Interceptor.ResilienceTest.Configuration;
-using Namotion.Interceptor.ResilienceTest.Model;
+using Namotion.Interceptor.ConnectorTester.Configuration;
+using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Tracking.Change;
 
-namespace Namotion.Interceptor.ResilienceTest.Engine;
+namespace Namotion.Interceptor.ConnectorTester.Engine;
 
 /// <summary>
 /// Randomly mutates value properties on a TestNode graph.

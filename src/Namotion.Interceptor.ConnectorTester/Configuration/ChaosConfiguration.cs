@@ -1,4 +1,4 @@
-namespace Namotion.Interceptor.ResilienceTest.Configuration;
+namespace Namotion.Interceptor.ConnectorTester.Configuration;
 
 public class ChaosConfiguration
 {

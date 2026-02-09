@@ -1,7 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 
-namespace Namotion.Interceptor.ResilienceTest.Chaos;
+namespace Namotion.Interceptor.ConnectorTester.Chaos;
 
 /// <summary>
 /// A TCP relay that sits between a client and server, enabling chaos injection.

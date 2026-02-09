@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 
-namespace Namotion.Interceptor.ResilienceTest.Logging;
+namespace Namotion.Interceptor.ConnectorTester.Logging;
 
 /// <summary>
 /// Logger provider that writes to both console and per-cycle log files.

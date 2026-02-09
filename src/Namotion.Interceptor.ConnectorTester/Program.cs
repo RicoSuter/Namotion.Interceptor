@@ -12,11 +12,11 @@ using Namotion.Interceptor.OpcUa.Server;
 using Opc.Ua;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.ResilienceTest.Chaos;
-using Namotion.Interceptor.ResilienceTest.Configuration;
-using Namotion.Interceptor.ResilienceTest.Engine;
-using Namotion.Interceptor.ResilienceTest.Logging;
-using Namotion.Interceptor.ResilienceTest.Model;
+using Namotion.Interceptor.ConnectorTester.Chaos;
+using Namotion.Interceptor.ConnectorTester.Configuration;
+using Namotion.Interceptor.ConnectorTester.Engine;
+using Namotion.Interceptor.ConnectorTester.Logging;
+using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
 
@@ -27,8 +27,8 @@ var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
 });
 
 // Bind configuration
-builder.Services.Configure<ResilienceTestConfiguration>(
-    builder.Configuration.GetSection("ResilienceTest"));
+builder.Services.Configure<ConnectorTesterConfiguration>(
+    builder.Configuration.GetSection("ConnectorTester"));
 
 // Add cycle logger provider
 var cycleLoggerProvider = new CycleLoggerProvider();
@@ -47,8 +47,8 @@ var proxies = new List<TcpProxy>();
 
 // Read configuration
 var configuration = builder.Configuration
-    .GetSection("ResilienceTest")
-    .Get<ResilienceTestConfiguration>() ?? new ResilienceTestConfiguration();
+    .GetSection("ConnectorTester")
+    .Get<ConnectorTesterConfiguration>() ?? new ConnectorTesterConfiguration();
 
 // Determine server port based on connector type
 int serverPort = configuration.Connector.ToLowerInvariant() switch
