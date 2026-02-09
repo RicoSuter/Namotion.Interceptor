@@ -51,14 +51,15 @@ public partial class TestNode
     /// </summary>
     public static TestNode CreateWithGraph(IInterceptorSubjectContext context)
     {
-        var root = new TestNode(context);
+        var root = new TestNode(context)
+        {
+            Collection = Enumerable.Range(0, 20)
+                .Select(_ => new TestNode(context))
+                .ToArray(),
 
-        root.Collection = Enumerable.Range(0, 20)
-            .Select(_ => new TestNode(context))
-            .ToArray();
-
-        root.Items = Enumerable.Range(0, 10)
-            .ToDictionary(i => $"item-{i}", i => new TestNode(context));
+            Items = Enumerable.Range(0, 10)
+                .ToDictionary(i => $"item-{i}", i => new TestNode(context))
+        };
 
         return root;
     }

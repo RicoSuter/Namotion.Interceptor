@@ -13,7 +13,7 @@ namespace Namotion.Interceptor.ConnectorTester.Engine;
 /// </summary>
 public class VerificationEngine : BackgroundService
 {
-    private static readonly JsonSerializerOptions _snapshotJsonOptions = new()
+    private static readonly JsonSerializerOptions SnapshotJsonOptions = new()
     {
         WriteIndented = false
     };
@@ -200,7 +200,7 @@ public class VerificationEngine : BackgroundService
             }
         }
 
-        return JsonSerializer.Serialize(update, _snapshotJsonOptions);
+        return JsonSerializer.Serialize(update, SnapshotJsonOptions);
     }
 
     private void WriteStatistics(TimeSpan cycleDuration, TimeSpan convergeDuration, string result)

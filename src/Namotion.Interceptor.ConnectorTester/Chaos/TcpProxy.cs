@@ -31,13 +31,14 @@ public sealed class TcpProxy : IAsyncDisposable
     public int TargetPort => _targetPort;
     public bool IsPaused => _isPaused;
 
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public Task StartAsync(CancellationToken cancellationToken)
     {
         _acceptCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _listener = new TcpListener(IPAddress.Loopback, _listenPort);
         _listener.Start();
         _acceptTask = AcceptLoopAsync(_acceptCancellation.Token);
         _logger.LogInformation("TcpProxy started: localhost:{ListenPort} -> localhost:{TargetPort}", _listenPort, _targetPort);
+        return Task.CompletedTask;
     }
 
     /// <summary>

@@ -127,13 +127,13 @@ public class ChaosEngine : BackgroundService
                 var action = PickAction();
                 _logger.LogWarning("Chaos: {Action} on {Target}", action, _targetName);
 
-                // Set active disruption BEFORE executing so force-recovery can find it
-                // even if the action hangs (e.g. StopAsync blocks indefinitely).
-                _activeDisruption = action;
-                _currentEventStart = DateTimeOffset.UtcNow;
+                // Acquire the lock before setting _activeDisruption so that
+                // recovery cannot run before the disruptive action executes.
                 await _actionLock.WaitAsync(stoppingToken);
                 try
                 {
+                    _activeDisruption = action;
+                    _currentEventStart = DateTimeOffset.UtcNow;
                     await ExecuteActionAsync(action, stoppingToken);
                 }
                 finally
