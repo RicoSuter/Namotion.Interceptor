@@ -82,18 +82,20 @@ public class ChaosEngine : BackgroundService
                     if (_connectorService != null)
                     {
                         _logger.LogWarning("Chaos: restarting connector service on {Target}", _targetName);
-                        using (var startTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+
+                        // Use CancellationToken.None for StartAsync to avoid linking a short-lived
+                        // timeout token into BackgroundService's internal _stoppingCts. The timeout
+                        // is applied externally via WaitAsync instead.
+                        try
                         {
-                            startTimeout.CancelAfter(TimeSpan.FromSeconds(30));
-                            try
-                            {
-                                await _connectorService.StartAsync(startTimeout.Token);
-                            }
-                            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-                            {
-                                _logger.LogWarning("Chaos: StartAsync timed out on {Target}, continuing anyway", _targetName);
-                            }
+                            await _connectorService.StartAsync(CancellationToken.None)
+                                .WaitAsync(TimeSpan.FromSeconds(30), cancellationToken);
                         }
+                        catch (TimeoutException)
+                        {
+                            _logger.LogWarning("Chaos: StartAsync timed out on {Target}, continuing anyway", _targetName);
+                        }
+
                         _logger.LogWarning("Chaos: connector service restarted on {Target}", _targetName);
                     }
                     break;
