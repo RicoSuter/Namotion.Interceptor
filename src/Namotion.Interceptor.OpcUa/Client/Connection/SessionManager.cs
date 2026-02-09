@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
@@ -29,8 +30,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
 
     // Fields for deferred async work (handled by health check loop)
-    private Session? _pendingOldSession; // Old session needing disposal after reconnection (accessed via Interlocked)
-    private int _needsInitialization;   // 0 = false, 1 = true (thread-safe via Interlocked)
+    private readonly ConcurrentQueue<Session> _sessionsToDispose = new();
+    private int _needsInitialization; // 0 = false, 1 = true (thread-safe via Interlocked)
 
     /// <summary>
     /// Gets the current session. WARNING: Can change at any time due to reconnection. Never cache - read immediately before use.
@@ -57,9 +58,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     public bool NeedsInitialization => Volatile.Read(ref _needsInitialization) == 1;
 
     /// <summary>
-    /// Gets the pending old session that needs async disposal by the health check loop.
+    /// Gets whether there are sessions waiting for async disposal by the health check loop.
     /// </summary>
-    public Session? PendingOldSession => Volatile.Read(ref _pendingOldSession);
+    public bool HasSessionsToDispose => !_sessionsToDispose.IsEmpty;
 
     /// <summary>
     /// Gets the current subscriptions managed by the subscription manager.
@@ -290,7 +291,11 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             var reconnectedSession = _reconnectHandler.Session as Session;
             if (reconnectedSession is null)
             {
-                _logger.LogWarning("Reconnect completed with null session.");
+                _logger.LogWarning(
+                    "Reconnect completed with null session. " +
+                    "Clearing session to trigger full reconnection via health check.");
+
+                AbandonCurrentSession();
                 Interlocked.Exchange(ref _isReconnecting, 0);
                 return;
             }
@@ -300,20 +305,22 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             {
                 _logger.LogInformation("Reconnect created new OPC UA session.");
 
-                // Store old session for async disposal by health check
-                if (oldSession is not null)
-                {
-                    Volatile.Write(ref _pendingOldSession, oldSession);
-                }
-
-                Volatile.Write(ref _session, reconnectedSession);
-                reconnectedSession.KeepAlive -= OnKeepAlive;
-                reconnectedSession.KeepAlive += OnKeepAlive;
-
-                // Check if subscriptions transferred
+                // Check if subscriptions transferred BEFORE accepting the new session,
+                // to avoid having two sessions that need disposal with only one pending slot.
                 var transferredSubscriptions = reconnectedSession.Subscriptions.ToList();
                 if (transferredSubscriptions.Count > 0)
                 {
+                    // Transfer succeeded - accept new session, defer old session disposal
+                    if (oldSession is not null)
+                    {
+                        oldSession.KeepAlive -= OnKeepAlive;
+                        _sessionsToDispose.Enqueue(oldSession);
+                    }
+
+                    Volatile.Write(ref _session, reconnectedSession);
+                    reconnectedSession.KeepAlive -= OnKeepAlive;
+                    reconnectedSession.KeepAlive += OnKeepAlive;
+
                     SubscriptionManager.UpdateTransferredSubscriptions(transferredSubscriptions);
                     _logger.LogInformation(
                         "OPC UA session reconnected: Transferred {Count} subscriptions. Health check will complete initialization.",
@@ -322,12 +329,15 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 }
                 else
                 {
-                    // Transfer failed - clear session, health check will recreate
+                    // Transfer failed - reject new session, abandon old session.
+                    // The reconnected session has a live TCP connection so it must be disposed.
+                    // The old session's connection is already dead (server restarted) and will be GC'd.
                     _logger.LogWarning(
                         "OPC UA session reconnected but subscription transfer failed (server restart). " +
                         "Clearing session to trigger full reconnection via health check.");
-                    Volatile.Write(ref _session, null);
-                    ReadAfterWriteManager?.ClearPendingReads();
+                    AbandonCurrentSession();
+                    reconnectedSession.KeepAlive -= OnKeepAlive;
+                    _sessionsToDispose.Enqueue(reconnectedSession);
                 }
             }
             else
@@ -369,24 +379,23 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 (int)_configuration.ReconnectHandlerTimeout.TotalMilliseconds);
 
             // Clear everything - health check will restart fresh
-            Volatile.Write(ref _session, null);
+            AbandonCurrentSession();
             Interlocked.Exchange(ref _isReconnecting, 0);
             return true;
         }
     }
 
     /// <summary>
-    /// Disposes the pending old session asynchronously.
+    /// Disposes all sessions queued for deferred disposal.
     /// Called by health check loop after SDK reconnection completes.
     /// </summary>
-    public async Task DisposePendingOldSessionAsync(CancellationToken cancellationToken)
+    public async Task DisposePendingSessionsAsync(CancellationToken cancellationToken)
     {
-        var oldSession = Interlocked.Exchange(ref _pendingOldSession, null);
-        if (oldSession is not null)
+        while (_sessionsToDispose.TryDequeue(out var session))
         {
             try
             {
-                await DisposeSessionAsync(oldSession, cancellationToken).ConfigureAwait(false);
+                await DisposeSessionAsync(session, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -433,6 +442,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             // Read and clear session inside lock to prevent race with OnReconnectComplete
             sessionToDispose = Volatile.Read(ref _session);
             Volatile.Write(ref _session, null);
+            ReadAfterWriteManager?.ClearPendingReads();
         }
 
         // Dispose outside lock to avoid blocking SDK callbacks
@@ -440,6 +450,24 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         {
             await DisposeSessionAsync(sessionToDispose, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Queues the current session for deferred disposal and clears session state
+    /// so the health check loop will trigger a full reconnection.
+    /// Must be called inside <see cref="_reconnectingLock"/>.
+    /// </summary>
+    private void AbandonCurrentSession()
+    {
+        var session = Volatile.Read(ref _session);
+        if (session is not null)
+        {
+            session.KeepAlive -= OnKeepAlive;
+            _sessionsToDispose.Enqueue(session);
+        }
+
+        Volatile.Write(ref _session, null);
+        ReadAfterWriteManager?.ClearPendingReads();
     }
 
     private async Task DisposeSessionAsync(Session session, CancellationToken cancellationToken)
@@ -482,9 +510,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             try { await PollingManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing polling manager."); }
         }
 
-        // Dispose pending old session from reconnection if it exists
-        var pendingSession = Interlocked.Exchange(ref _pendingOldSession, null);
-        if (pendingSession is not null)
+        // Dispose all sessions queued for deferred disposal
+        while (_sessionsToDispose.TryDequeue(out var pendingSession))
         {
             try { pendingSession.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing pending old session."); }
         }

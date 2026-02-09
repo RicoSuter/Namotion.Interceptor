@@ -145,9 +145,9 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
                 CleanCertificateStore(application);
             }
 
+            var server = new OpcUaSubjectServer(_subject, this, _configuration, _logger);
             try
             {
-                using var server = new OpcUaSubjectServer(_subject, this, _configuration, _logger);
                 try
                 {
                     _server = server;
@@ -194,11 +194,19 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
             {
                 try
                 {
+                    // ShutdownServerAsync must run BEFORE server.Dispose() so that
+                    // application.StopAsync() can properly release the TCP listener socket.
+                    // If the server is disposed first, the application can't cleanly shut down
+                    // the transport layer, causing the TCP port to remain held.
                     await ShutdownServerAsync(application).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to shutdown OPC UA server.");
+                }
+                finally
+                {
+                    server.Dispose();
                 }
             }
         }
