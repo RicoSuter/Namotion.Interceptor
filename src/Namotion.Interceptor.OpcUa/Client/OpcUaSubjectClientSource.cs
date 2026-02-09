@@ -298,10 +298,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 var propertyWriter = _propertyWriter;
                 if (sessionManager is not null && propertyWriter is not null && _isStarted)
                 {
-                    // 1. Cleanup pending old session from SDK reconnection
-                    if (sessionManager.PendingOldSession is not null)
+                    // 1. Cleanup sessions queued for disposal from SDK reconnection
+                    if (sessionManager.HasSessionsToDispose)
                     {
-                        await sessionManager.DisposePendingOldSessionAsync(stoppingToken).ConfigureAwait(false);
+                        await sessionManager.DisposePendingSessionsAsync(stoppingToken).ConfigureAwait(false);
                     }
 
                     // 2. Complete initialization after SDK reconnection with subscription transfer
