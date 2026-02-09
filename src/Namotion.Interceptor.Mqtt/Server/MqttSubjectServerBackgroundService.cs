@@ -38,10 +38,10 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
     /// <inheritdoc />
     public IInterceptorSubject RootSubject => _subject;
 
-    // Sentinel source used for values received from MQTT clients.
+    // Per-instance sentinel source used for values received from MQTT clients.
     // Using a different source than `this` ensures the server's ChangeQueueProcessor
     // re-publishes client-originated values to all subscribers (server-authoritative relay).
-    private static readonly object MqttClientSource = new();
+    private readonly object _mqttClientSource = new();
 
     private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
     private readonly ConcurrentDictionary<string, PropertyReference?> _pathToProperty = new();
@@ -415,7 +415,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
 
         // Server-authoritative relay: prevent the broker from distributing this client
         // message directly to other subscribers. Instead, we apply the value locally with
-        // a non-self source (MqttClientSource) so the server's ChangeQueueProcessor picks
+        // a non-self source (_mqttClientSource) so the server's ChangeQueueProcessor picks
         // it up and re-publishes it to all clients via InjectApplicationMessage.
         // This ensures consistent ordering of all values through the server.
         args.ProcessPublish = false;
@@ -431,7 +431,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
                 _configuration.SourceTimestampPropertyName,
                 _configuration.SourceTimestampDeserializer) ?? receivedTimestamp;
 
-            propertyReference.SetValueFromSource(MqttClientSource, sourceTimestamp, receivedTimestamp, value);
+            propertyReference.SetValueFromSource(_mqttClientSource, sourceTimestamp, receivedTimestamp, value);
         }
         catch (Exception ex)
         {
