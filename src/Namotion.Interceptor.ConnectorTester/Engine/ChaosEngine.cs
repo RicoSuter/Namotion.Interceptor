@@ -19,8 +19,14 @@ public class ChaosEngine : BackgroundService
     private readonly SemaphoreSlim _actionLock = new(1, 1);
 
     private string? _activeDisruption;
+    private readonly List<ChaosEventRecord> _eventHistory = [];
+    private DateTimeOffset _currentEventStart;
+
+    public string TargetName => _targetName;
 
     public long ChaosEventCount { get; private set; }
+
+    public IReadOnlyList<ChaosEventRecord> EventHistory => _eventHistory;
 
     public ChaosEngine(
         string targetName,
@@ -50,6 +56,7 @@ public class ChaosEngine : BackgroundService
     public void ResetCounters()
     {
         ChaosEventCount = 0;
+        _eventHistory.Clear();
     }
 
     /// <summary>
@@ -123,6 +130,7 @@ public class ChaosEngine : BackgroundService
                 // Set active disruption BEFORE executing so force-recovery can find it
                 // even if the action hangs (e.g. StopAsync blocks indefinitely).
                 _activeDisruption = action;
+                _currentEventStart = DateTimeOffset.UtcNow;
                 await _actionLock.WaitAsync(stoppingToken);
                 try
                 {
@@ -139,6 +147,8 @@ public class ChaosEngine : BackgroundService
 
                 // Recover
                 await RecoverActiveDisruptionAsync(stoppingToken);
+                var recoveredAt = DateTimeOffset.UtcNow;
+                _eventHistory.Add(new ChaosEventRecord(action, _currentEventStart, recoveredAt));
                 _logger.LogInformation("Chaos: {Target} recovered from {Action}", _targetName, action);
                 ChaosEventCount++;
             }
@@ -214,4 +224,9 @@ public class ChaosEngine : BackgroundService
         var range = max - min;
         return min + TimeSpan.FromMilliseconds(_random.NextDouble() * range.TotalMilliseconds);
     }
+}
+
+public record ChaosEventRecord(string Action, DateTimeOffset DisruptedAt, DateTimeOffset RecoveredAt)
+{
+    public TimeSpan Duration => RecoveredAt - DisruptedAt;
 }

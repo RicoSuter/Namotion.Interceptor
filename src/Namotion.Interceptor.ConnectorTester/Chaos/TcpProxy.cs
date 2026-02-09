@@ -82,10 +82,11 @@ public sealed class TcpProxy : IAsyncDisposable
         while (!cancellationToken.IsCancellationRequested)
         {
             TcpClient? clientSocket = null;
+            TcpClient? serverSocket = null;
             try
             {
                 clientSocket = await _listener!.AcceptTcpClientAsync(cancellationToken);
-                var serverSocket = new TcpClient();
+                serverSocket = new TcpClient();
                 await serverSocket.ConnectAsync(IPAddress.Loopback, _targetPort, cancellationToken);
 
                 lock (_connectionsLock)
@@ -98,15 +99,18 @@ public sealed class TcpProxy : IAsyncDisposable
 
                 // Handoff successful - don't dispose in catch
                 clientSocket = null;
+                serverSocket = null;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 clientSocket?.Dispose();
+                serverSocket?.Dispose();
                 break;
             }
             catch (Exception exception)
             {
                 clientSocket?.Dispose();
+                serverSocket?.Dispose();
                 _logger.LogDebug(exception, "TcpProxy:{ListenPort} accept error", _listenPort);
             }
         }

@@ -26,6 +26,8 @@ var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
     ContentRootPath = AppContext.BaseDirectory
 });
 
+using var sharedLoggerFactory = LoggerFactory.Create(b => b.AddConsole());
+
 // Bind configuration
 builder.Services.Configure<ConnectorTesterConfiguration>(
     builder.Configuration.GetSection("ConnectorTester"));
@@ -74,7 +76,7 @@ participants.Add((configuration.Server.Name, serverRoot));
 
 var serverMutationEngine = new MutationEngine(
     serverRoot, configuration.Server, coordinator,
-    LoggerFactory.Create(b => b.AddConsole()).CreateLogger($"MutationEngine.{configuration.Server.Name}"));
+    sharedLoggerFactory.CreateLogger($"MutationEngine.{configuration.Server.Name}"));
 mutationEngines.Add(serverMutationEngine);
 builder.Services.AddSingleton<IHostedService>(serverMutationEngine);
 
@@ -130,7 +132,7 @@ if (configuration.Server.Chaos != null)
         coordinator,
         proxy: null,
         connectorService: null, // resolved after build
-        LoggerFactory.Create(b => b.AddConsole()).CreateLogger($"ChaosEngine.{configuration.Server.Name}"));
+        sharedLoggerFactory.CreateLogger($"ChaosEngine.{configuration.Server.Name}"));
     chaosEngines.Add(serverChaosEngine);
     builder.Services.AddSingleton<IHostedService>(serverChaosEngine);
 }
@@ -157,13 +159,13 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
     // Create TCP proxy for this client
     var proxy = new TcpProxy(
         proxyPort, serverPort,
-        LoggerFactory.Create(b => b.AddConsole()).CreateLogger($"TcpProxy.{clientConfig.Name}"));
+        sharedLoggerFactory.CreateLogger($"TcpProxy.{clientConfig.Name}"));
     proxies.Add(proxy);
 
     // Client mutation engine
     var clientMutationEngine = new MutationEngine(
         clientRoot, clientConfig, coordinator,
-        LoggerFactory.Create(b => b.AddConsole()).CreateLogger($"MutationEngine.{clientConfig.Name}"));
+        sharedLoggerFactory.CreateLogger($"MutationEngine.{clientConfig.Name}"));
     mutationEngines.Add(clientMutationEngine);
     builder.Services.AddSingleton<IHostedService>(clientMutationEngine);
 
@@ -236,7 +238,7 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
             coordinator,
             proxy,
             connectorService: null,
-            LoggerFactory.Create(b => b.AddConsole()).CreateLogger($"ChaosEngine.{clientConfig.Name}"));
+            sharedLoggerFactory.CreateLogger($"ChaosEngine.{clientConfig.Name}"));
         chaosEngines.Add(clientChaosEngine);
         builder.Services.AddSingleton<IHostedService>(clientChaosEngine);
     }
@@ -262,7 +264,9 @@ var host = builder.Build();
 if (serverChaosEngine != null)
 {
     var allHostedServices = host.Services.GetServices<IHostedService>().ToList();
-    var connectorService = allHostedServices.OfType<ISubjectConnector>().FirstOrDefault() as IHostedService;
+    var connectorService = allHostedServices
+        .OfType<ISubjectConnector>()
+        .FirstOrDefault(connector => connector.RootSubject == serverRoot) as IHostedService;
 
     var startupLogger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Program");
     if (connectorService != null)
@@ -276,14 +280,14 @@ if (serverChaosEngine != null)
     }
 }
 
-foreach (var proxy in proxies)
-{
-    await proxy.StartAsync(CancellationToken.None);
-}
-
 // Run the host (blocks until shutdown)
 try
 {
+    foreach (var proxy in proxies)
+    {
+        await proxy.StartAsync(CancellationToken.None);
+    }
+
     await host.RunAsync();
 }
 finally

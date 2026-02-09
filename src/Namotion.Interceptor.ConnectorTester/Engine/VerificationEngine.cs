@@ -13,6 +13,11 @@ namespace Namotion.Interceptor.ConnectorTester.Engine;
 /// </summary>
 public class VerificationEngine : BackgroundService
 {
+    private static readonly JsonSerializerOptions _snapshotJsonOptions = new()
+    {
+        WriteIndented = false
+    };
+
     private readonly ConnectorTesterConfiguration _configuration;
     private readonly TestCycleCoordinator _coordinator;
     private readonly List<(string Name, TestNode Root)> _participants;
@@ -195,10 +200,7 @@ public class VerificationEngine : BackgroundService
             }
         }
 
-        return JsonSerializer.Serialize(update, new JsonSerializerOptions
-        {
-            WriteIndented = false
-        });
+        return JsonSerializer.Serialize(update, _snapshotJsonOptions);
     }
 
     private void WriteStatistics(TimeSpan cycleDuration, TimeSpan convergeDuration, string result)
@@ -220,6 +222,16 @@ public class VerificationEngine : BackgroundService
         {
             _logger.LogInformation("  {Name}: {Values:N0} value mutations",
                 engine.Name, engine.ValueMutationCount);
+        }
+
+        // Chaos event timeline
+        foreach (var engine in _chaosEngines)
+        {
+            foreach (var record in engine.EventHistory)
+            {
+                _logger.LogInformation("  {Name}: {Action} at {Time:HH:mm:ss} ({Duration:F1}s)",
+                    engine.TargetName, record.Action, record.DisruptedAt.LocalDateTime, record.Duration.TotalSeconds);
+            }
         }
     }
 }
