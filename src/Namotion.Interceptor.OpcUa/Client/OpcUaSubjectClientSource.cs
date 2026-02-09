@@ -436,6 +436,12 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
             _logger.LogInformation("New OPC UA session created successfully.");
 
+            // Load initial state BEFORE creating subscriptions to avoid the race where
+            // subscription notifications could contain values older than the initial state read.
+            // With no active subscriptions, the buffer is empty, so CompleteInitializationAsync
+            // simply reads and applies the current server state cleanly.
+            await propertyWriter.CompleteInitializationAsync(cancellationToken).ConfigureAwait(false);
+
             await _structureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
@@ -454,8 +460,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             {
                 _structureLock.Release();
             }
-
-            await propertyWriter.CompleteInitializationAsync(cancellationToken).ConfigureAwait(false);
 
             Interlocked.Increment(ref _successfulReconnections);
             Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);

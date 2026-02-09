@@ -75,7 +75,18 @@ public class ChaosEngine : BackgroundService
                 if (_connectorService != null)
                 {
                     _logger.LogWarning("Chaos: restarting connector service on {Target}", _targetName);
-                    await _connectorService.StartAsync(cancellationToken);
+                    using (var startTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+                    {
+                        startTimeout.CancelAfter(TimeSpan.FromSeconds(30));
+                        try
+                        {
+                            await _connectorService.StartAsync(startTimeout.Token);
+                        }
+                        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                        {
+                            _logger.LogWarning("Chaos: StartAsync timed out on {Target}, continuing anyway", _targetName);
+                        }
+                    }
                     _logger.LogWarning("Chaos: connector service restarted on {Target}", _targetName);
                 }
                 break;
@@ -102,8 +113,11 @@ public class ChaosEngine : BackgroundService
                 // Pick and execute chaos action
                 var action = PickAction();
                 _logger.LogWarning("Chaos: {Action} on {Target}", action, _targetName);
-                await ExecuteActionAsync(action, stoppingToken);
+
+                // Set active disruption BEFORE executing so force-recovery can find it
+                // even if the action hangs (e.g. StopAsync blocks indefinitely).
                 _activeDisruption = action;
+                await ExecuteActionAsync(action, stoppingToken);
 
                 // Hold disruption for random duration
                 var duration = RandomTimeSpan(_configuration.DurationMin, _configuration.DurationMax);
@@ -165,7 +179,18 @@ public class ChaosEngine : BackgroundService
                 {
                     _logger.LogWarning("Chaos: stopping connector service {Type} on {Target}",
                         _connectorService.GetType().Name, _targetName);
-                    await _connectorService.StopAsync(cancellationToken);
+                    using (var stopTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken))
+                    {
+                        stopTimeout.CancelAfter(TimeSpan.FromSeconds(30));
+                        try
+                        {
+                            await _connectorService.StopAsync(stopTimeout.Token);
+                        }
+                        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+                        {
+                            _logger.LogWarning("Chaos: StopAsync timed out on {Target}, continuing anyway", _targetName);
+                        }
+                    }
                     _logger.LogWarning("Chaos: connector service stopped on {Target}", _targetName);
                 }
                 else
