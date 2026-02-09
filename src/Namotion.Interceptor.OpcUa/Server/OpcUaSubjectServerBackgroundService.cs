@@ -132,6 +132,10 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
 
     private async Task ExecuteServerLoopAsync(CancellationToken stoppingToken)
     {
+        // Reset failure counter on fresh start so that accumulated failures from
+        // previous stop/start cycles don't cause excessive backoff delays.
+        _consecutiveFailures = 0;
+
         while (!stoppingToken.IsCancellationRequested)
         {
             var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
