@@ -28,7 +28,7 @@ public class ChangeQueueProcessor : IDisposable
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
     private int _flushGate; // 0 = free, 1 = flushing
-    private bool _disposed;
+    private volatile bool _disposed;
 
     // Scratch buffers used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
