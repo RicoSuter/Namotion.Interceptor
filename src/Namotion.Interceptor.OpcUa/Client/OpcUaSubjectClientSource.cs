@@ -304,7 +304,16 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                         await sessionManager.DisposePendingSessionsAsync(stoppingToken).ConfigureAwait(false);
                     }
 
-                    // 2. Complete initialization after SDK reconnection with subscription transfer
+                    // 2. Resume from buffering after preserved session reconnect (no server round-trip)
+                    if (sessionManager.NeedsBufferResume)
+                    {
+                        propertyWriter.CompleteInitialization();
+                        sessionManager.ClearBufferResumeFlag();
+                        RecordReconnectionSuccess();
+                        _logger.LogInformation("Preserved session reconnect completed (buffer replayed).");
+                    }
+
+                    // 3. Complete initialization after SDK reconnection with subscription transfer
                     if (sessionManager.NeedsInitialization)
                     {
                         try
@@ -322,7 +331,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                         }
                     }
 
-                    // 3. Check session health and trigger reconnection if needed
+                    // 4. Check session health and trigger reconnection if needed
                     var isReconnecting = sessionManager.IsReconnecting;
                     var currentSession = sessionManager.CurrentSession;
                     var sessionIsConnected = currentSession?.Connected ?? false;
