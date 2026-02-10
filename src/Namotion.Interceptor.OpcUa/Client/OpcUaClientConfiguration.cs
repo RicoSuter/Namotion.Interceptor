@@ -284,7 +284,7 @@ public class OpcUaClientConfiguration
     /// Shorter timeouts allow faster disconnection detection but may cause false positives on slow networks.
     /// Default is 60 seconds.
     /// </summary>
-    public TimeSpan OperationTimeout { get; set; } = TimeSpan.FromSeconds(60);
+    public TimeSpan OperationTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Gets or sets the maximum time the reconnect handler will attempt to reconnect before giving up.
@@ -394,7 +394,7 @@ public class OpcUaClientConfiguration
             },
             ClientConfiguration = new ClientConfiguration
             {
-                DefaultSessionTimeout = 60000
+                DefaultSessionTimeout = (int)SessionTimeout.TotalMilliseconds
             },
             DisableHiResClock = true,
             TraceConfiguration = new TraceConfiguration
