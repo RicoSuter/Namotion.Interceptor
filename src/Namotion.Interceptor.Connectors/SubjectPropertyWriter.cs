@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Connectors;
 /// Implements the buffer-load-replay pattern to ensure eventual consistency during source initialization.
 /// </summary>
 /// <remarks>
-/// During initialization, updates are buffered. Once <see cref="CompleteInitializationAsync"/> or
+/// During initialization, updates are buffered. Once <see cref="CompleteInitializationWithInitialStateAsync"/> or
 /// <see cref="CompleteInitialization"/> is called, buffered updates are replayed and
 /// subsequent writes are applied immediately.
 /// This buffering behavior is transparent to sources - they simply call <see cref="Write{TState}"/>.
@@ -37,7 +37,7 @@ public sealed class SubjectPropertyWriter
 
     /// <summary>
     /// Starts buffering updates instead of applying them directly.
-    /// Buffered updates will be replayed when <see cref="CompleteInitializationAsync"/> or
+    /// Buffered updates will be replayed when <see cref="CompleteInitializationWithInitialStateAsync"/> or
     /// <see cref="CompleteInitialization"/> is called.
     /// This method should be called before the source starts listening for changes.
     /// </summary>
@@ -61,7 +61,7 @@ public sealed class SubjectPropertyWriter
     /// </remarks>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The task.</returns>
-    public async Task CompleteInitializationAsync(CancellationToken cancellationToken)
+    public async Task CompleteInitializationWithInitialStateAsync(CancellationToken cancellationToken)
     {
         // Flush pending writes first (so server has latest before we load state)
         if (_flushRetryQueueAsync is not null)
@@ -77,7 +77,7 @@ public sealed class SubjectPropertyWriter
     /// Completes initialization by replaying buffered updates and resuming direct writes,
     /// without flushing pending writes or loading state from the source.
     /// Use after a preserved session reconnect where subscriptions are maintained and data is still flowing.
-    /// For full initialization (flush + load + replay), use <see cref="CompleteInitializationAsync"/> instead.
+    /// For full initialization (flush + load + replay), use <see cref="CompleteInitializationWithInitialStateAsync"/> instead.
     /// </summary>
     /// <param name="applyBeforeReplay">Optional action to apply before replaying buffered updates (e.g. loaded initial state).</param>
     public void CompleteInitialization(Action? applyBeforeReplay = null)

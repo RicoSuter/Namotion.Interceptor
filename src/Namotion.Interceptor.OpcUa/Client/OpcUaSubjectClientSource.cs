@@ -318,7 +318,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                     {
                         try
                         {
-                            await propertyWriter.CompleteInitializationAsync(stoppingToken).ConfigureAwait(false);
+                            await propertyWriter.CompleteInitializationWithInitialStateAsync(stoppingToken).ConfigureAwait(false);
                             sessionManager.ClearInitializationFlag();
                             RecordReconnectionSuccess();
                             _logger.LogInformation("SDK reconnection initialization completed successfully.");
@@ -464,7 +464,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 _structureLock.Release();
             }
 
-            await propertyWriter.CompleteInitializationAsync(cancellationToken).ConfigureAwait(false);
+            await propertyWriter.CompleteInitializationWithInitialStateAsync(cancellationToken).ConfigureAwait(false);
 
             Interlocked.Increment(ref _successfulReconnections);
             Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
