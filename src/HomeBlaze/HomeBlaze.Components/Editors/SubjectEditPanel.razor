@@ -141,4 +141,44 @@
 
         return ValueTask.CompletedTask;
     }
+
+    private T FindNearest<T>(IInterceptorSubject subject)
+    {
+        // TODO: Replace with BFS when available in Namotion.Interceptor.Tracking
+
+        // Check if the subject itself is a writer
+        if (subject is T writer)
+        {
+            return writer;
+        }
+
+        // Traverse parents to find the nearest IConfigurationWriter
+        var visited = new HashSet<IInterceptorSubject>();
+        var current = subject;
+
+        while (current != null)
+        {
+            if (!visited.Add(current))
+            {
+                break; // Avoid infinite loops
+            }
+
+            var parents = current.GetParents();
+            if (parents.Length == 0)
+            {
+                break;
+            }
+
+            // Get the first parent's subject
+            var parentSubject = parents[0].Property.Subject;
+            if (parentSubject is T parentWriter)
+            {
+                return parentWriter;
+            }
+
+            current = parentSubject;
+        }
+
+        return default!;
+    }
 }
