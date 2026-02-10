@@ -216,12 +216,20 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
     {
         try
         {
-            if (application.Server is OpcUaSubjectServer { CurrentInstance.SessionManager: not null } server)
+            if (application.Server is OpcUaSubjectServer server)
             {
-                var sessions = server.CurrentInstance.SessionManager.GetSessions();
-                foreach (var session in sessions)
+                // Close transport listeners first to stop accepting new connections.
+                // Without this, clients reconnect during shutdown faster than sessions
+                // can be closed, causing StopAsync to hang indefinitely.
+                server.CloseTransportListeners();
+
+                if (server.CurrentInstance?.SessionManager is { } sessionManager)
                 {
-                    session.Close();
+                    var sessions = sessionManager.GetSessions();
+                    foreach (var session in sessions)
+                    {
+                        try { session.Close(); } catch { /* best-effort */ }
+                    }
                 }
             }
 
