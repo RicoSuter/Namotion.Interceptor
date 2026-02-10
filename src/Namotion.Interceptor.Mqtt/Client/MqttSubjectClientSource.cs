@@ -462,7 +462,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         await SubscribeToPropertiesAsync(cancellationToken).ConfigureAwait(false);
         if (_propertyWriter is not null)
         {
-            await _propertyWriter.CompleteInitializationAsync(cancellationToken).ConfigureAwait(false);
+            await _propertyWriter.CompleteInitializationWithInitialStateAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 

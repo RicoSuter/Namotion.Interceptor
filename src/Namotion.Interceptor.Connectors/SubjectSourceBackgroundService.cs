@@ -52,7 +52,7 @@ public class SubjectSourceBackgroundService : BackgroundService
                 var disposable = await _source.StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
                 try
                 {
-                    await _propertyWriter.CompleteInitializationAsync(stoppingToken);
+                    await _propertyWriter.CompleteInitializationWithInitialStateAsync(stoppingToken);
 
                     using var processor = new ChangeQueueProcessor(
                         _source,
