@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
@@ -30,6 +31,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
 
     // Fields for deferred async work (handled by health check loop)
+    // Enqueued by SDK reconnection callbacks (sync), drained by health check loop via DisposePendingSessionsAsync (async).
     private readonly ConcurrentQueue<Session> _sessionsToDispose = new();
     private int _needsInitialization; // 0 = false, 1 = true (thread-safe via Interlocked)
 
@@ -460,6 +462,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// </summary>
     private void AbandonCurrentSession()
     {
+        Debug.Assert(Monitor.IsEntered(_reconnectingLock), "AbandonCurrentSession must be called inside _reconnectingLock.");
+
         var session = Volatile.Read(ref _session);
         if (session is not null)
         {

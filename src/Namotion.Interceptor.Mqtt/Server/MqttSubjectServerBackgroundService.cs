@@ -353,9 +353,18 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
             {
                 var topic = MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
 
-                var payload = _configuration.ValueConverter.Serialize(
-                    property.GetValue(),
-                    property.Type);
+                byte[] payload;
+                try
+                {
+                    payload = _configuration.ValueConverter.Serialize(
+                        property.GetValue(),
+                        property.Type);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to serialize initial value for topic {Topic}.", topic);
+                    continue;
+                }
 
                 var message = new MqttApplicationMessage
                 {
