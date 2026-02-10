@@ -1,6 +1,6 @@
 # Connector Tester
 
-An in-process integration test that validates **eventual consistency** across Namotion.Interceptor connectors under chaos conditions. It hosts a server and multiple clients in a single process, mutates their object models concurrently, injects network and lifecycle disruptions, and verifies that all participants eventually reach identical state. Exits with code 1 on failure for CI/CD integration.
+An in-process integration test that validates **eventual consistency** across Namotion.Interceptor connectors under chaos conditions. It hosts a server and multiple clients in a single process, mutates their object models concurrently, injects disruptions via `IChaosTarget` (kill and disconnect), and verifies that all participants eventually reach identical state. Exits with code 1 on failure for CI/CD integration.
 
 ## Architecture
 
@@ -17,15 +17,10 @@ An in-process integration test that validates **eventual consistency** across Na
                  +----------------+----------------+
                  |                                 |
           +------+------+                   +------+------+
-          |  TcpProxy   |                   |  TcpProxy   |
-          |  (port N+1) |                   |  (port N+2) |
-          +------+------+                   +------+------+
-                 |                                 |
-          +------+------+                   +------+------+
           |   Client 1  |                   |   Client 2  |
-          |  TestNode   |                   |  TestNode   |
-          |  Mutation   |                   |  Mutation   |
-          |  Chaos?     |                   |  Chaos?     |
+          |  TestNode   |                   |  Mutation   |
+          |  Mutation   |                   |  Chaos?     |
+          |  (stable)   |                   |  (flaky)    |
           +-------------+                   +-------------+
 
     VerificationEngine orchestrates mutate/converge cycles
@@ -38,54 +33,79 @@ Each test cycle has two phases:
 
 1. **Mutate phase**: All MutationEngines and ChaosEngines run concurrently. Engines randomly mutate value properties (`StringValue`, `DecimalValue`, `IntValue`) on TestNode objects across the graph (1 root + 20 collection items + 10 dictionary items = 31 objects per participant).
 
-2. **Converge phase**: The VerificationEngine pauses all engines via the TestCycleCoordinator, recovers any active chaos disruptions, then polls snapshots every second. Each snapshot serializes the full object graph using `SubjectUpdate.CreateCompleteUpdate()`. Structural property timestamps (Collection, Dictionary, Object) are stripped since they represent local creation time, not synced state. Value property timestamps are preserved and must converge.
+2. **Converge phase**: The VerificationEngine pauses all engines via the TestCycleCoordinator, recovers any active chaos disruptions, waits a grace period (20s for OPC UA) for reconnection, then polls snapshots every second. Each snapshot serializes the full object graph using `SubjectUpdate.CreateCompleteUpdate()`. Structural property timestamps (Collection, Dictionary, Object) are stripped since they represent local creation time, not synced state. Value property timestamps are preserved and must converge.
 
 A cycle **passes** when all participant snapshots are identical JSON. It **fails** if the convergence timeout expires. On failure, the process logs snapshot diffs and exits with code 1.
+
+### Chaos via IChaosTarget
+
+Each connector implements `IChaosTarget` (separate from the production `ISubjectConnector` interface) with two chaos modes:
+
+- **Kill** (`KillAsync`): Hard kill — stops the connector entirely. The background service loop auto-restarts.
+  - *OPC UA Server*: Cancels the server loop token, closes transport listeners (TCP RST to all clients), disposes without graceful shutdown.
+  - *OPC UA Client*: Clears the session without sending `CloseSession` to the server (disposes local socket). Health check detects missing session and triggers full reconnection.
+  - *MQTT*: Stops the underlying service and lets the background loop restart it.
+
+- **Disconnect** (`DisconnectAsync`): Soft kill — breaks the transport connection without stopping the connector. Lets the SDK's built-in reconnection logic detect the failure and recover.
+  - *OPC UA Server*: Delegates to `KillAsync` (no meaningful "soft disconnect" for a multi-connection server).
+  - *OPC UA Client*: Disposes the transport channel. Keep-alive failure triggers `SessionReconnectHandler.BeginReconnect`, exercising the session preservation/transfer path.
+  - *MQTT*: Delegates to `KillAsync`.
+
+The ChaosEngine picks an action based on the configured `Mode` ("kill", "disconnect", or "both"). In "both" mode, each event randomly chooses between kill and disconnect. After the action, the engine holds a "disruption window" for a random duration (representing the outage period for verification purposes).
 
 ### Key Design Decisions
 
 - **Global mutation counter**: A static `Interlocked.Increment` counter ensures every mutation produces a globally unique value, preventing the equality interceptor from dropping duplicate changes.
 - **Explicit timestamp scoping**: Mutations use `SubjectChangeContext.WithChangedTimestamp()` so all interceptors and change queue observers see the same timestamp.
-- **Thread-safe chaos recovery**: `Interlocked.Exchange` on the active disruption field prevents double recovery during convergence.
+- **IChaosTarget separation**: Chaos testing uses a dedicated `IChaosTarget` interface (separate from production `ISubjectConnector`). Two modes: `KillAsync` (hard kill with auto-restart) and `DisconnectAsync` (transport disconnect with SDK reconnection).
+- **Shutdown timeout**: The OPC UA server's `ShutdownServerAsync` wraps `application.StopAsync()` with a 10s timeout to prevent hang when clients keep reconnecting during graceful shutdown.
 
 ## Supported Connectors
 
-| Connector | Status | Chaos Modes | Notes                                                                                                      |
-|-----------|--------|-------------|------------------------------------------------------------------------------------------------------------|
-| OPC UA | Working | lifecycle | Server stop/start. 5 min convergence timeout (see note below). `decimal` round-trips through `double`.     |
-| MQTT | Working | transport, lifecycle, both | Keep-alive (2s) required for proxy PAUSE detection. Server-authoritative relay. 2 min convergence timeout. |
-| WebSocket | Planned | - | Config exists but no wiring in Program.cs yet.                                                             |
+| Connector | Status | Notes |
+|-----------|--------|-------|
+| OPC UA | Working | Server kill drops TCP connections, client kill abandons session. 1 min convergence timeout. `decimal` round-trips through `double`. |
+| MQTT | Working | Server and client kill/disconnect. 2 min convergence timeout. |
+| WebSocket | Planned | Config exists but no wiring in Program.cs yet. |
 
 ### Connector-Specific Behaviors
 
-**OPC UA**: Uses `OpcUaValueConverter` for type mapping. `decimal` values lose precision beyond ~15 significant digits due to `decimal` -> `double` -> `decimal` round-trip. `BufferTime=100ms` batches changes. **Lifecycle chaos requires a long convergence timeout (>2 min)** because the OPC UA SDK does not set `SO_REUSEADDR` on its TCP listener socket. After a server stop, established connections enter TCP TIME_WAIT (~60s on Linux), preventing the new server from binding to the same port until they expire. The server retries with exponential backoff during this period.
+**OPC UA**: Uses `OpcUaValueConverter` for type mapping. `decimal` values lose precision beyond ~15 significant digits due to `decimal` -> `double` -> `decimal` round-trip. `BufferTime=100ms` batches changes. Server chaos closes transport listeners before dispose, so clients get an immediate TCP RST rather than waiting for keep-alive timeout. Client chaos disposes the session without `CloseAsync`, simulating an abrupt disconnection.
 
-**MQTT**: Uses server-authoritative relay pattern where client publishes are intercepted, applied to the server model, and re-published to all clients. Ticks-based timestamp serialization (`UtcTicks`) for full precision. Short keep-alive interval (2s) is critical for detecting proxy PAUSE disruptions, which silently drop bytes without closing connections. QoS=AtLeastOnce with retained messages.
+**MQTT**: Uses server-authoritative relay pattern where client publishes are intercepted, applied to the server model, and re-published to all clients. Ticks-based timestamp serialization (`UtcTicks`) for full precision. QoS=AtLeastOnce with retained messages.
 
 ## Running
 
 Run with a launch profile to select the connector:
 
 ```bash
-# OPC UA
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua
+# OPC UA (Release mode recommended for performance)
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua -c Release
 
 # MQTT
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt -c Release
 ```
 
 Launch profiles set the `DOTNET_ENVIRONMENT` variable, which loads the corresponding `appsettings.{environment}.json` file.
 
 ### What to Look For
 
-**Success**: Each cycle prints `PASS` with convergence time:
+**Success**: Each cycle prints `PASS` with convergence time and chaos event counts:
 ```
-=== Cycle 1: PASS (converged in 3.2s, cycle 33s) ===
+=== Cycle 1: PASS (converged in 5.1s, cycle 85s) ===
+--- Cycle 1 Statistics ---
+Duration: 85s (converged in 5.1s)
+Total mutations: 17,200 | Total chaos events: 7
+  server: 11,300 value mutations
+  stable-client: 2,950 value mutations
+  flaky-client: 2,950 value mutations
+  flaky-client: disconnect at 21:08:37 (2.8s)
+  server: kill at 21:08:38 (5.4s)
 ```
 
 **Failure**: Prints `FAIL` with snapshot diffs, then exits with code 1:
 ```
-=== Cycle 3: FAIL (did not converge within 00:02:00) ===
+=== Cycle 3: FAIL (did not converge within 00:01:00) ===
 Mismatch between server and flaky-client
 ```
 
@@ -103,33 +123,32 @@ logs/
 Files are created as `pending` and renamed to `pass` or `FAIL` on cycle completion. Each file contains all log output (INFO+) for that cycle with timestamps.
 
 **Use the log files to analyze results and diagnose problems.** On failure, the `FAIL` log contains full snapshot diffs showing exactly which participants diverged and what their state was. Look for:
-- Chaos event timing (`Chaos: pause/close/lifecycle on ...`) to correlate disruptions with convergence delays.
-- Reconnection logs (`Attempting to reconnect`, `Reconnected successfully`) to verify recovery is working.
+- Chaos event timing (`Chaos: force-killing ...`) to correlate disruptions with convergence delays.
+- Reconnection logs (`OPC UA server connection lost. Beginning reconnect...`, `SDK reconnection initialization completed successfully.`) to verify recovery.
 - Mutation counts in the statistics block to confirm all engines were active.
 - Snapshot diffs at the end of failed cycles to identify which properties or participants didn't converge.
 
 ## Configuration
 
-Configuration is loaded from `appsettings.json` with environment-specific overrides (e.g., `appsettings.mqtt.json`). The root section is `"ConnectorTester"`.
+Configuration is loaded from `appsettings.json` with environment-specific overrides (e.g., `appsettings.opcua.json`). The root section is `"ConnectorTester"`.
 
-### Full Example
+### OPC UA Example (appsettings.opcua.json)
 
 ```json
 {
   "ConnectorTester": {
-    "Connector": "mqtt",
+    "Connector": "opcua",
     "EnableStructuralMutations": false,
-    "MutatePhaseDuration": "00:00:30",
-    "ConvergenceTimeout": "00:02:00",
+    "MutatePhaseDuration": "00:01:00",
+    "ConvergenceTimeout": "00:01:00",
     "Server": {
-      "Name": "server",
       "MutationRate": 200,
       "Chaos": {
-        "Mode": "lifecycle",
-        "IntervalMin": "00:00:05",
-        "IntervalMax": "00:00:10",
-        "DurationMin": "00:00:02",
-        "DurationMax": "00:00:05"
+        "IntervalMin": "00:00:10",
+        "IntervalMax": "00:00:20",
+        "DurationMin": "00:00:03",
+        "DurationMax": "00:00:05",
+        "Mode": "both"
       }
     },
     "Clients": [
@@ -142,11 +161,11 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
         "Name": "flaky-client",
         "MutationRate": 50,
         "Chaos": {
-          "Mode": "transport",
-          "IntervalMin": "00:00:03",
-          "IntervalMax": "00:00:08",
+          "IntervalMin": "00:00:08",
+          "IntervalMax": "00:00:15",
           "DurationMin": "00:00:02",
-          "DurationMax": "00:00:05"
+          "DurationMax": "00:00:04",
+          "Mode": "both"
         }
       }
     ]
@@ -177,29 +196,18 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `Mode` | string | `"transport"` | Chaos mode (see below) |
 | `IntervalMin` | TimeSpan | `00:01:00` | Minimum wait before next disruption |
 | `IntervalMax` | TimeSpan | `00:05:00` | Maximum wait before next disruption |
 | `DurationMin` | TimeSpan | `00:00:05` | Minimum disruption hold time |
 | `DurationMax` | TimeSpan | `00:00:30` | Maximum disruption hold time |
+| `Mode` | string | `"both"` | `"kill"`, `"disconnect"`, or `"both"` (random choice) |
 
-### Chaos Modes
+### Tuning Chaos Intervals
 
-| Mode | Target | Actions | Description |
-|------|--------|---------|-------------|
-| `transport` | Client (TcpProxy) | `pause`, `close` | **pause**: Drops bytes silently (simulates network partition). **close**: Disposes all TCP connections (simulates crash). |
-| `lifecycle` | Server (connector) | `lifecycle` | Stops and restarts the connector service (e.g., OPC UA server or MQTT broker). |
-| `both` | Either | All of above | Randomly picks from transport and lifecycle actions. |
-
-### Port Allocation
-
-Ports are assigned automatically based on connector type:
-
-| Connector | Server Port | Client Proxies |
-|-----------|------------|----------------|
-| OPC UA | 4840 | 4841, 4842, ... |
-| MQTT | 1883 | 1884, 1885, ... |
-| WebSocket | 8080 | 8081, 8082, ... |
+Chaos intervals must be shorter than `MutatePhaseDuration` to ensure disruptions actually occur during each cycle. As a guideline:
+- Set `IntervalMax` to at most half of `MutatePhaseDuration` to guarantee at least one event per cycle.
+- Each chaos event takes `Interval + Duration` time, so account for both when calculating expected events per cycle.
+- Server chaos is more impactful (affects all clients) so can use longer intervals. Client chaos is local and can be more frequent.
 
 ## Adding a New Connector
 
@@ -218,16 +226,22 @@ Ports are assigned automatically based on connector type:
    - Add a `case "{name}":` in the client connector switch (inside the client loop).
    - Pick a base port in the `serverPort` switch.
 
-4. **Add `[Path]` attributes** to `TestNode.cs` properties for the new connector's path provider key.
+4. **Implement `IChaosTarget`** on the connector's background service so ChaosEngine can inject disruptions. Implement `KillAsync` (hard kill) and `DisconnectAsync` (transport disconnect).
+
+5. **Add `[Path]` attributes** to `TestNode.cs` properties for the new connector's path provider key.
 
 ## Troubleshooting
 
 ### Convergence Timeout
 
 If cycles consistently fail to converge:
-- Check that chaos recovery is working (look for "force-recovering" log messages during converge phase).
-- For MQTT, ensure keep-alive is short enough (2s) to detect proxy PAUSE within the convergence window.
+- Check that chaos recovery is working (look for "Chaos: force-killing" and "recovered from force-kill" log messages).
 - Increase `ConvergenceTimeout` if the connector needs more time for full state synchronization.
+- Verify the grace period in `VerificationEngine` is sufficient for your connector's reconnection chain.
+
+### No Chaos Events
+
+If cycles pass but show 0 chaos events, the chaos intervals are too long relative to `MutatePhaseDuration`. Reduce `IntervalMin`/`IntervalMax` so that `IntervalMax < MutatePhaseDuration`.
 
 ### Structural Timestamp Mismatch
 
@@ -250,16 +264,14 @@ Namotion.Interceptor.ConnectorTester/
   Configuration/
     ConnectorTesterConfiguration.cs      # Top-level config
     ParticipantConfiguration.cs          # Per-participant config
-    ChaosConfiguration.cs               # Chaos timing and mode
+    ChaosConfiguration.cs               # Chaos timing config
   Model/
     TestNode.cs                          # Test data model with path annotations
   Engine/
     TestCycleCoordinator.cs             # Pause/resume synchronization
     MutationEngine.cs                   # Random property mutations
-    ChaosEngine.cs                      # Transport/lifecycle disruptions
+    ChaosEngine.cs                      # Kill/disconnect disruptions
     VerificationEngine.cs               # Cycle orchestration and snapshot comparison
-  Chaos/
-    TcpProxy.cs                         # TCP relay for network chaos injection
   Logging/
     CycleLoggerProvider.cs              # Per-cycle log file writer
   Properties/
