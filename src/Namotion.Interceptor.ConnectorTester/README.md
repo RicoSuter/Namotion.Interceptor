@@ -50,15 +50,15 @@ A cycle **passes** when all participant snapshots are identical JSON. It **fails
 
 ## Supported Connectors
 
-| Connector | Status | Chaos Modes | Notes |
-|-----------|--------|-------------|-------|
-| OPC UA | Working | lifecycle | Server stop/start. 60s convergence timeout. `decimal` round-trips through `double`. |
+| Connector | Status | Chaos Modes | Notes                                                                                                      |
+|-----------|--------|-------------|------------------------------------------------------------------------------------------------------------|
+| OPC UA | Working | lifecycle | Server stop/start. 5 min convergence timeout (see note below). `decimal` round-trips through `double`.     |
 | MQTT | Working | transport, lifecycle, both | Keep-alive (2s) required for proxy PAUSE detection. Server-authoritative relay. 2 min convergence timeout. |
-| WebSocket | Planned | - | Config exists but no wiring in Program.cs yet. |
+| WebSocket | Planned | - | Config exists but no wiring in Program.cs yet.                                                             |
 
 ### Connector-Specific Behaviors
 
-**OPC UA**: Uses `OpcUaValueConverter` for type mapping. `decimal` values lose precision beyond ~15 significant digits due to `decimal` -> `double` -> `decimal` round-trip. `BufferTime=100ms` batches changes.
+**OPC UA**: Uses `OpcUaValueConverter` for type mapping. `decimal` values lose precision beyond ~15 significant digits due to `decimal` -> `double` -> `decimal` round-trip. `BufferTime=100ms` batches changes. **Lifecycle chaos requires a long convergence timeout (>2 min)** because the OPC UA SDK does not set `SO_REUSEADDR` on its TCP listener socket. After a server stop, established connections enter TCP TIME_WAIT (~60s on Linux), preventing the new server from binding to the same port until they expire. The server retries with exponential backoff during this period.
 
 **MQTT**: Uses server-authoritative relay pattern where client publishes are intercepted, applied to the server model, and re-published to all clients. Ticks-based timestamp serialization (`UtcTicks`) for full precision. Short keep-alive interval (2s) is critical for detecting proxy PAUSE disruptions, which silently drop bytes without closing connections. QoS=AtLeastOnce with retained messages.
 

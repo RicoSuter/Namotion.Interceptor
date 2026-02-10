@@ -26,16 +26,22 @@ var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
     ContentRootPath = AppContext.BaseDirectory
 });
 
-using var sharedLoggerFactory = LoggerFactory.Create(b => b.AddConsole());
+// Add cycle logger provider (created first so it can be shared with sharedLoggerFactory)
+var cycleLoggerProvider = new CycleLoggerProvider();
+builder.Services.AddSingleton(cycleLoggerProvider);
+builder.Logging.AddProvider(cycleLoggerProvider);
+
+// Shared logger factory for engines created before DI host build.
+// Includes both console output and cycle logger so engine events appear in per-cycle log files.
+using var sharedLoggerFactory = LoggerFactory.Create(b =>
+{
+    b.AddConsole();
+    b.AddProvider(cycleLoggerProvider);
+});
 
 // Bind configuration
 builder.Services.Configure<ConnectorTesterConfiguration>(
     builder.Configuration.GetSection("ConnectorTester"));
-
-// Add cycle logger provider
-var cycleLoggerProvider = new CycleLoggerProvider();
-builder.Services.AddSingleton(cycleLoggerProvider);
-builder.Logging.AddProvider(cycleLoggerProvider);
 
 // Shared coordinator for all engines
 var coordinator = new TestCycleCoordinator();
@@ -195,14 +201,6 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
                         SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
                         TelemetryContext = telemetryContext,
                         BufferTime = TimeSpan.FromMilliseconds(100),
-                        // Aggressive timeouts for resilience testing
-                        KeepAliveInterval = TimeSpan.FromSeconds(2),
-                        SessionTimeout = TimeSpan.FromSeconds(10),
-                        OperationTimeout = TimeSpan.FromSeconds(10),
-                        ReconnectInterval = TimeSpan.FromSeconds(1),
-                        MaxReconnectDuration = TimeSpan.FromSeconds(15),
-                        ReconnectHandlerTimeout = TimeSpan.FromSeconds(5),
-                        SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(2),
                     };
                 });
             break;
