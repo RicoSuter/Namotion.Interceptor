@@ -276,6 +276,15 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     {
         lock (_reconnectingLock)
         {
+            // Ignore stale callbacks from a disposed/replaced reconnect handler.
+            // After ClearSessionAsync or TryForceResetIfStalled replaces _reconnectHandler,
+            // the old handler's callback may still fire (async void already queued on thread pool).
+            if (!ReferenceEquals(sender, _reconnectHandler))
+            {
+                _logger.LogDebug("Ignoring stale reconnect callback from replaced handler.");
+                return;
+            }
+
             if (Volatile.Read(ref _disposed) == 1)
             {
                 return;
