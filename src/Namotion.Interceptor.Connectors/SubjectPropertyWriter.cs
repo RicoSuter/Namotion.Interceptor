@@ -8,8 +8,9 @@ namespace Namotion.Interceptor.Connectors;
 /// Implements the buffer-load-replay pattern to ensure eventual consistency during source initialization.
 /// </summary>
 /// <remarks>
-/// During initialization, updates are buffered. Once <see cref="CompleteInitializationAsync"/> is called,
-/// the initial state is loaded, buffered updates are replayed, and subsequent writes are applied immediately.
+/// During initialization, updates are buffered. Once <see cref="CompleteInitializationAsync"/> or
+/// <see cref="CompleteInitialization"/> is called, buffered updates are replayed and
+/// subsequent writes are applied immediately.
 /// This buffering behavior is transparent to sources - they simply call <see cref="Write{TState}"/>.
 /// </remarks>
 public sealed class SubjectPropertyWriter
@@ -36,7 +37,8 @@ public sealed class SubjectPropertyWriter
 
     /// <summary>
     /// Starts buffering updates instead of applying them directly.
-    /// Buffered updates will be replayed when <see cref="CompleteInitializationAsync"/> is called.
+    /// Buffered updates will be replayed when <see cref="CompleteInitializationAsync"/> or
+    /// <see cref="CompleteInitialization"/> is called.
     /// This method should be called before the source starts listening for changes.
     /// </summary>
     public void StartBuffering()
@@ -68,17 +70,26 @@ public sealed class SubjectPropertyWriter
         }
 
         var applyAction = await _source.LoadInitialStateAsync(cancellationToken).ConfigureAwait(false);
+        CompleteInitialization(applyAction);
+    }
+
+    /// <summary>
+    /// Completes initialization by replaying buffered updates and resuming direct writes,
+    /// without flushing pending writes or loading state from the source.
+    /// Use after a preserved session reconnect where subscriptions are maintained and data is still flowing.
+    /// For full initialization (flush + load + replay), use <see cref="CompleteInitializationAsync"/> instead.
+    /// </summary>
+    /// <param name="applyBeforeReplay">Optional action to apply before replaying buffered updates (e.g. loaded initial state).</param>
+    public void CompleteInitialization(Action? applyBeforeReplay = null)
+    {
         lock (_lock)
         {
-            applyAction?.Invoke();
+            applyBeforeReplay?.Invoke();
 
-            // Replay previously buffered updates
             var updates = _updates;
             if (updates is null)
             {
-                // Already replayed by a concurrent/previous call (race between automatic and manual reconnection).
-                // This is safe - it means another reconnection cycle already loaded state and replayed updates.
-                _logger.LogDebug("CompleteInitializationAsync called but updates already replayed by concurrent reconnection.");
+                _logger.LogDebug("CompleteInitialization called but updates already replayed by concurrent reconnection.");
                 return;
             }
 
@@ -91,7 +102,7 @@ public sealed class SubjectPropertyWriter
                 }
                 catch (Exception e)
                 {
-                    _logger.LogError(e, "Failed to apply subject update.");
+                    _logger.LogError(e, "Failed to apply buffered update.");
                 }
             }
         }
