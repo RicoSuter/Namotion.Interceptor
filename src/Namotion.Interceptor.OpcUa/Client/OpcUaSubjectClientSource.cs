@@ -335,21 +335,12 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                         await sessionManager.DisposePendingSessionsAsync(stoppingToken).ConfigureAwait(false);
                     }
 
-                    // 2. Resume from buffering after preserved session reconnect (no server round-trip)
-                    if (sessionManager.NeedsBufferResume)
-                    {
-                        propertyWriter.CompleteInitialization();
-                        sessionManager.ClearBufferResumeFlag();
-                        RecordReconnectionSuccess();
-                        _logger.LogInformation("Preserved session reconnect completed (buffer replayed).");
-                    }
-
-                    // 3. Complete initialization after SDK reconnection with subscription transfer
+                    // 2. Complete initialization after SDK reconnection (subscription transfer or preserved session)
                     if (sessionManager.NeedsInitialization)
                     {
                         try
                         {
-                            await propertyWriter.CompleteInitializationWithInitialStateAsync(stoppingToken).ConfigureAwait(false);
+                            await propertyWriter.CompleteInitializationAsync(stoppingToken).ConfigureAwait(false);
                             sessionManager.ClearInitializationFlag();
                             RecordReconnectionSuccess();
                             _logger.LogInformation("SDK reconnection initialization completed successfully.");
@@ -502,7 +493,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 _structureLock.Release();
             }
 
-            await propertyWriter.CompleteInitializationWithInitialStateAsync(token).ConfigureAwait(false);
+            await propertyWriter.CompleteInitializationAsync(token).ConfigureAwait(false);
 
             Interlocked.Increment(ref _successfulReconnections);
             Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
