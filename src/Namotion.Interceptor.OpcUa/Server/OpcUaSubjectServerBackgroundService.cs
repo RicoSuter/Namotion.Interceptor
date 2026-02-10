@@ -22,7 +22,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
     private LifecycleInterceptor? _lifecycleInterceptor;
     private volatile OpcUaSubjectServer? _server;
     private volatile bool _isForceKill;
-    private CancellationTokenSource? _forceKillCts;
+    private volatile CancellationTokenSource? _forceKillCts;
     private int _consecutiveFailures;
     private OpcUaServerDiagnostics? _diagnostics;
     private DateTimeOffset? _startTime;
@@ -268,7 +268,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
                     var sessions = sessionManager.GetSessions();
                     foreach (var session in sessions)
                     {
-                        try { session.Close(); } catch { /* best-effort */ }
+                        try { session.Close(); } catch (Exception ex) { _logger.LogDebug(ex, "Error closing session during shutdown."); }
                     }
                 }
             }
@@ -278,6 +278,11 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
             if (await Task.WhenAny(stopTask, Task.Delay(TimeSpan.FromSeconds(10))).ConfigureAwait(false) != stopTask)
             {
                 _logger.LogWarning("OPC UA server shutdown timed out after 10s. Continuing with disposal.");
+
+                // Observe the abandoned task to prevent UnobservedTaskException
+                _ = stopTask.ContinueWith(
+                    t => _logger.LogDebug(t.Exception, "StopAsync completed after timeout."),
+                    TaskContinuationOptions.OnlyOnFaulted);
             }
         }
         catch (ServiceResultException e) when (e.StatusCode == StatusCodes.BadServerHalted)
