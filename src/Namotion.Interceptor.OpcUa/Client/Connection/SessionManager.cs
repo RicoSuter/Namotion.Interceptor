@@ -347,8 +347,14 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 // kicks the timer back to life.
                 ConfigureSession(reconnectedSession);
 
-                _logger.LogInformation("Reconnect preserved existing OPC UA session. Subscriptions maintained.");
-                Interlocked.Exchange(ref _needsBufferResume, 1);
+                // Always do full initialization (state read from server) instead of just buffer replay.
+                // After a server restart, the SDK may report "preserved session" (same reference) even though
+                // the session doesn't exist on the new server. A buffer-only replay would skip the state read,
+                // leaving the client with stale values. Full initialization detects this: the read fails with
+                // BadSessionNotActivated, the error handler clears the session, and health check triggers
+                // a proper full reconnection.
+                _logger.LogInformation("Reconnect preserved existing OPC UA session. Health check will verify with full state read.");
+                Interlocked.Exchange(ref _needsInitialization, 1);
             }
 
             Interlocked.Exchange(ref _isReconnecting, 0);
