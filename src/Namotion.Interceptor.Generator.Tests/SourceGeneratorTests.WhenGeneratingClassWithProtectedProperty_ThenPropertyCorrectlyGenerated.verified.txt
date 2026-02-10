@@ -30,6 +30,9 @@ namespace YourDefaultNamespace
 
         void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);
 
+        private static readonly global::System.Collections.Generic.IReadOnlyDictionary<string, global::Namotion.Interceptor.SubjectPropertyMetadata> __defaultProperties =
+            global::Namotion.Interceptor.SubjectPropertyMetadataCache.Get<SampleSubject>();
+
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
@@ -40,51 +43,29 @@ namespace YourDefaultNamespace
         ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
 
         [JsonIgnore]
-        IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
+        global::System.Collections.Generic.IReadOnlyDictionary<string, global::Namotion.Interceptor.SubjectPropertyMetadata> global::Namotion.Interceptor.IInterceptorSubject.Properties =>
+            _properties ?? __defaultProperties;
 
         [JsonIgnore]
         object IInterceptorSubject.SyncRoot { get; } = new object();
 
-        void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+        void global::Namotion.Interceptor.IInterceptorSubject.AddProperties(params global::System.Collections.Generic.IEnumerable<global::Namotion.Interceptor.SubjectPropertyMetadata> properties)
         {
-            _properties = (_properties ?? DefaultProperties)
-                .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+            _properties = (_properties ?? __defaultProperties)
+                .Concat(properties.Select(p => new global::System.Collections.Generic.KeyValuePair<string, global::Namotion.Interceptor.SubjectPropertyMetadata>(p.Name, p)))
                 .ToFrozenDictionary();
         }
 
-        public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
-            new Dictionary<string, SubjectPropertyMetadata>
-            {
-                {
-                    "Value",
-                    new SubjectPropertyMetadata(
-                        typeof(SampleSubject).GetProperty(nameof(Value), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((SampleSubject)o).Value,
-                        (o, v) => ((SampleSubject)o).Value = (int)v,
-                        isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "Name",
-                    new SubjectPropertyMetadata(
-                        typeof(SampleSubject).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((SampleSubject)o).Name,
-                        (o, v) => ((SampleSubject)o).Name = (string)v,
-                        isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "Hidden",
-                    new SubjectPropertyMetadata(
-                        typeof(SampleSubject).GetProperty(nameof(Hidden), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((SampleSubject)o).Hidden,
-                        (o, v) => ((SampleSubject)o).Hidden = (string)v,
-                        isIntercepted: false,
-                        isDynamic: false)
-                },
-            }
-            .ToFrozenDictionary();
 
+        [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]
+        internal static (global::System.Func<global::Namotion.Interceptor.IInterceptorSubject, object?>?, global::System.Action<global::Namotion.Interceptor.IInterceptorSubject, object?>?)
+            __GetPropertyAccessors(string name) => name switch
+        {
+            "Value" => (static o => ((SampleSubject)o).Value, static (o, v) => ((SampleSubject)o).Value = (int)v!),
+            "Name" => (static o => ((SampleSubject)o).Name, static (o, v) => ((SampleSubject)o).Name = (string)v!),
+            "Hidden" => (static o => ((SampleSubject)o).Hidden, static (o, v) => ((SampleSubject)o).Hidden = (string)v!),
+            _ => (null, null)
+        };
         public SampleSubject()
         {
         }
@@ -96,6 +77,7 @@ namespace YourDefaultNamespace
 
         private int _Value;
 
+        [global::Namotion.Interceptor.Attributes.Intercepted]
         public partial int Value
         {
             get
@@ -121,6 +103,7 @@ namespace YourDefaultNamespace
 
         private string _Name;
 
+        [global::Namotion.Interceptor.Attributes.Intercepted]
         public partial string Name
         {
             get
