@@ -12,7 +12,6 @@ using Namotion.Interceptor.OpcUa.Server;
 using Opc.Ua;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.ConnectorTester.Chaos;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Engine;
 using Namotion.Interceptor.ConnectorTester.Logging;
@@ -51,8 +50,6 @@ builder.Services.AddSingleton(coordinator);
 var participants = new List<(string Name, TestNode Root)>();
 var mutationEngines = new List<MutationEngine>();
 var chaosEngines = new List<ChaosEngine>();
-var clientChaosEngines = new List<(ChaosEngine Engine, TestNode ClientRoot)>();
-var proxies = new List<TcpProxy>();
 
 // Read configuration
 var configuration = builder.Configuration
@@ -130,28 +127,10 @@ switch (configuration.Connector.ToLowerInvariant())
         break;
 }
 
-// Server chaos engine (if configured)
-ChaosEngine? serverChaosEngine = null;
-if (configuration.Server.Chaos != null)
-{
-    serverChaosEngine = new ChaosEngine(
-        configuration.Server.Name,
-        configuration.Server.Chaos,
-        coordinator,
-        proxy: null,
-        connectorService: null, // resolved after build
-        sharedLoggerFactory.CreateLogger($"ChaosEngine.{configuration.Server.Name}"));
-   
-    chaosEngines.Add(serverChaosEngine);
-    
-    builder.Services.AddSingleton<IHostedService>(serverChaosEngine);
-}
-
 // --- Client Setup ---
 for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex++)
 {
     var clientConfig = configuration.Clients[clientIndex];
-    var proxyPort = serverPort + 1 + clientIndex;
 
     var clientContext = InterceptorSubjectContext
         .Create()
@@ -166,12 +145,6 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
     var clientRoot = TestNode.CreateWithGraph(clientContext);
     participants.Add((clientConfig.Name, clientRoot));
 
-    // Create TCP proxy for this client
-    var proxy = new TcpProxy(
-        proxyPort, serverPort,
-        sharedLoggerFactory.CreateLogger($"TcpProxy.{clientConfig.Name}"));
-    proxies.Add(proxy);
-
     // Client mutation engine
     var clientMutationEngine = new MutationEngine(
         clientRoot, clientConfig, coordinator,
@@ -179,11 +152,10 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
     mutationEngines.Add(clientMutationEngine);
     builder.Services.AddSingleton<IHostedService>(clientMutationEngine);
 
-    // Client connector wiring
+    // Client connector wiring (connect directly to server)
     switch (configuration.Connector.ToLowerInvariant())
     {
         case "opcua":
-            var capturedProxyPort = proxyPort;
             builder.Services.AddOpcUaSubjectClientSource(
                 _ => clientRoot,
                 sp =>
@@ -194,7 +166,7 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
 
                     return new OpcUaClientConfiguration
                     {
-                        ServerUrl = $"opc.tcp://localhost:{capturedProxyPort}",
+                        ServerUrl = $"opc.tcp://localhost:{serverPort}",
                         RootName = "Root",
                         TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
                         ValueConverter = new OpcUaValueConverter(),
@@ -206,22 +178,18 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
             break;
 
         case "mqtt":
-            var capturedMqttProxyPort = proxyPort;
             builder.Services.AddMqttSubjectClientSource(
                 _ => clientRoot,
                 _ => new MqttClientConfiguration
                 {
                     BrokerHost = "localhost",
-                    BrokerPort = capturedMqttProxyPort,
+                    BrokerPort = serverPort,
                     PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
                     DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
                     UseRetainedMessages = true,
                     SourceTimestampSerializer = static ts => ts.UtcTicks.ToString(),
                     SourceTimestampDeserializer = static s => long.TryParse(s, out var ticks)
                         ? new DateTimeOffset(ticks, TimeSpan.Zero) : null,
-                    // Short keep-alive so proxy PAUSE is detected as disconnection
-                    KeepAliveInterval = TimeSpan.FromSeconds(2),
-                    // Aggressive reconnection for resilience testing
                     ReconnectDelay = TimeSpan.FromSeconds(1),
                     MaximumReconnectDelay = TimeSpan.FromSeconds(10),
                     HealthCheckInterval = TimeSpan.FromSeconds(5),
@@ -231,22 +199,35 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
             break;
     }
 
-    // Client chaos engine (if configured)
+    // Client chaos engine (if configured) - connector resolved after build
     if (clientConfig.Chaos != null)
     {
+        var capturedClientRoot = clientRoot;
         var clientChaosEngine = new ChaosEngine(
             clientConfig.Name,
             clientConfig.Chaos,
             coordinator,
-            proxy,
-            connectorService: null,
+            target: null, // resolved after build
             sharedLoggerFactory.CreateLogger($"ChaosEngine.{clientConfig.Name}"));
 
         chaosEngines.Add(clientChaosEngine);
-        clientChaosEngines.Add((clientChaosEngine, clientRoot));
-
         builder.Services.AddSingleton<IHostedService>(clientChaosEngine);
     }
+}
+
+// Server chaos engine (if configured)
+ChaosEngine? serverChaosEngine = null;
+if (configuration.Server.Chaos != null)
+{
+    serverChaosEngine = new ChaosEngine(
+        configuration.Server.Name,
+        configuration.Server.Chaos,
+        coordinator,
+        target: null, // resolved after build
+        sharedLoggerFactory.CreateLogger($"ChaosEngine.{configuration.Server.Name}"));
+
+    chaosEngines.Add(serverChaosEngine);
+    builder.Services.AddSingleton<IHostedService>(serverChaosEngine);
 }
 
 // --- Verification Engine ---
@@ -259,63 +240,22 @@ builder.Services.AddSingleton<IHostedService>(sp => new VerificationEngine(
     cycleLoggerProvider,
     sp.GetRequiredService<ILogger<VerificationEngine>>()));
 
-// Build and start proxies
+// Build and wire up connectors for chaos engines
 var host = builder.Build();
 
-// Wire up chaos engines with connector services (resolved after build)
-var allHostedServices = host.Services.GetServices<IHostedService>().ToList();
-var startupLogger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Program");
+var allConnectors = host.Services.GetServices<IHostedService>()
+    .OfType<ISubjectConnector>()
+    .ToList();
 
-if (serverChaosEngine != null)
+foreach (var chaosEngine in chaosEngines)
 {
-    var connectorService = allHostedServices
-        .OfType<ISubjectConnector>()
-        .FirstOrDefault(connector => connector.RootSubject == serverRoot) as IHostedService;
-
-    if (connectorService != null)
+    // Find the connector whose root subject matches one of the participants, then cast to IChaosTarget
+    var participant = participants.FirstOrDefault(p => p.Name == chaosEngine.TargetName);
+    var connector = allConnectors.FirstOrDefault(c => c.RootSubject == participant.Root);
+    if (connector is IChaosTarget chaosTarget)
     {
-        startupLogger.LogInformation("Server chaos wired to connector: {Type}", connectorService.GetType().FullName);
-        serverChaosEngine.SetConnectorService(connectorService);
-    }
-    else
-    {
-        startupLogger.LogError("Could not find connector service for server chaos!");
+        chaosEngine.SetTarget(chaosTarget);
     }
 }
 
-foreach (var (clientEngine, clientRoot) in clientChaosEngines)
-{
-    var connectorService = allHostedServices
-        .OfType<ISubjectConnector>()
-        .FirstOrDefault(connector => connector.RootSubject == clientRoot) as IHostedService;
-
-    if (connectorService != null)
-    {
-        startupLogger.LogInformation("Client chaos [{Target}] wired to connector: {Type}",
-            clientEngine.TargetName, connectorService.GetType().FullName);
-        clientEngine.SetConnectorService(connectorService);
-    }
-    else
-    {
-        startupLogger.LogError("Could not find connector service for client chaos [{Target}]!",
-            clientEngine.TargetName);
-    }
-}
-
-// Run the host (blocks until shutdown)
-try
-{
-    foreach (var proxy in proxies)
-    {
-        await proxy.StartAsync(CancellationToken.None);
-    }
-
-    await host.RunAsync();
-}
-finally
-{
-    foreach (var proxy in proxies)
-    {
-        await proxy.DisposeAsync();
-    }
-}
+await host.RunAsync();

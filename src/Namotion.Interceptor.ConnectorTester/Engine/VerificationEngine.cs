@@ -99,8 +99,10 @@ public class VerificationEngine : BackgroundService
                 await chaosEngine.RecoverActiveDisruptionAsync(stoppingToken);
             }
 
-            // Grace period for server startup, port binding, and client reconnection
-            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+            // Grace period for server startup, port binding, and client reconnection.
+            // OPC UA needs ~15-20s: server restart + port bind, client keep-alive
+            // detection (up to 5s), reconnect handler (5s), session + subscription setup.
+            await Task.Delay(TimeSpan.FromSeconds(20), stoppingToken);
 
             // 3. Poll-compare snapshots
             var convergeStopwatch = Stopwatch.StartNew();

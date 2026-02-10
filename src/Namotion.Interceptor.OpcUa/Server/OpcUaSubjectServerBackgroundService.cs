@@ -10,7 +10,7 @@ using Opc.Ua.Configuration;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
-internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubjectConnector
+internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubjectConnector, IChaosTarget
 {
     internal const string OpcVariableKey = "OpcVariable";
 
@@ -21,6 +21,8 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
 
     private LifecycleInterceptor? _lifecycleInterceptor;
     private volatile OpcUaSubjectServer? _server;
+    private volatile bool _isForceKill;
+    private CancellationTokenSource? _forceKillCts;
     private int _consecutiveFailures;
     private OpcUaServerDiagnostics? _diagnostics;
     private DateTimeOffset? _startTime;
@@ -28,6 +30,23 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
 
     /// <inheritdoc />
     public IInterceptorSubject RootSubject => _subject;
+
+    /// <inheritdoc />
+    public Task KillAsync()
+    {
+        _isForceKill = true;
+        try { _forceKillCts?.Cancel(); }
+        catch (ObjectDisposedException) { /* CTS disposed between loop iterations */ }
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public Task DisconnectAsync()
+    {
+        // For a multi-connection server, disconnecting transport = killing the server.
+        // There's no meaningful "soft disconnect" when the server has multiple clients.
+        return KillAsync();
+    }
 
     /// <summary>
     /// Gets diagnostic information about the server state.
@@ -138,6 +157,10 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            _forceKillCts = cts;
+            var linkedToken = cts.Token;
+
             var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
 
             if (_configuration.CleanCertificateStore)
@@ -152,7 +175,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
                 {
                     _server = server;
 
-                    await application.CheckApplicationInstanceCertificatesAsync(true, ct: stoppingToken).ConfigureAwait(false);
+                    await application.CheckApplicationInstanceCertificatesAsync(true, ct: linkedToken).ConfigureAwait(false);
                     await application.StartAsync(server).ConfigureAwait(false);
 
                     _startTime = DateTimeOffset.UtcNow;
@@ -164,7 +187,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
                         propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
                         _configuration.BufferTime, _logger);
 
-                    await changeQueueProcessor.ProcessAsync(stoppingToken);
+                    await changeQueueProcessor.ProcessAsync(linkedToken);
                 }
                 finally
                 {
@@ -177,6 +200,11 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 // Normal shutdown - don't log as error
+            }
+            catch (OperationCanceledException) when (_isForceKill)
+            {
+                // Force-kill: CTS was cancelled by KillAsync
+                _logger.LogWarning("OPC UA server force-killed. Restarting...");
             }
             catch (Exception ex)
             {
@@ -194,11 +222,21 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
             {
                 try
                 {
-                    // ShutdownServerAsync must run BEFORE server.Dispose() so that
-                    // application.StopAsync() can properly release the TCP listener socket.
-                    // If the server is disposed first, the application can't cleanly shut down
-                    // the transport layer, causing the TCP port to remain held.
-                    await ShutdownServerAsync(application).ConfigureAwait(false);
+                    if (_isForceKill)
+                    {
+                        // Force-kill: skip application.StopAsync() which can hang.
+                        // Just close listeners to release the TCP port immediately.
+                        if (application.Server is OpcUaSubjectServer s)
+                        {
+                            s.CloseTransportListeners();
+                        }
+                    }
+                    else
+                    {
+                        // Graceful: ShutdownServerAsync must run BEFORE server.Dispose() so that
+                        // application.StopAsync() can properly release the TCP listener socket.
+                        await ShutdownServerAsync(application).ConfigureAwait(false);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -206,7 +244,9 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
                 }
                 finally
                 {
+                    _isForceKill = false;
                     server.Dispose();
+                    cts.Dispose();
                 }
             }
         }
@@ -233,7 +273,12 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
                 }
             }
 
-            await application.StopAsync().ConfigureAwait(false);
+            // Timeout prevents hang when clients keep reconnecting during shutdown
+            var stopTask = application.StopAsync().AsTask();
+            if (await Task.WhenAny(stopTask, Task.Delay(TimeSpan.FromSeconds(10))).ConfigureAwait(false) != stopTask)
+            {
+                _logger.LogWarning("OPC UA server shutdown timed out after 10s. Continuing with disposal.");
+            }
         }
         catch (ServiceResultException e) when (e.StatusCode == StatusCodes.BadServerHalted)
         {

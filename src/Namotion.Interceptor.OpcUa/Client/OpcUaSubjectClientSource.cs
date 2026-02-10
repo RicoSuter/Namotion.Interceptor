@@ -12,7 +12,7 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
-internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IAsyncDisposable
+internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, ISubjectConnector, IChaosTarget, IAsyncDisposable
 {
     private const int DefaultChunkSize = 512;
 
@@ -136,6 +136,30 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     /// <inheritdoc />
     public IInterceptorSubject RootSubject => _subject;
+
+    /// <inheritdoc />
+    public async Task KillAsync()
+    {
+        var sessionManager = _sessionManager;
+        if (sessionManager != null)
+        {
+            _logger.LogWarning("Chaos: killing OPC UA client session.");
+            await sessionManager.ClearSessionAsync(CancellationToken.None, gracefulClose: false).ConfigureAwait(false);
+        }
+    }
+
+    /// <inheritdoc />
+    public Task DisconnectAsync()
+    {
+        var sessionManager = _sessionManager;
+        if (sessionManager != null)
+        {
+            _logger.LogWarning("Chaos: disconnecting OPC UA client transport.");
+            sessionManager.DisconnectTransport();
+        }
+
+        return Task.CompletedTask;
+    }
 
     public async Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
     {
