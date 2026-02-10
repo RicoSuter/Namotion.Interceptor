@@ -31,6 +31,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     private volatile bool _isStarted;
     private long _reconnectStartedTimestamp; // 0 = not reconnecting, otherwise Stopwatch timestamp when reconnection started (for stall detection)
+    private volatile CancellationTokenSource? _reconnectCts; // Cancelled by KillAsync to abort in-flight reconnection
 
     // Diagnostics tracking - accessed from multiple threads via Diagnostics property
     private long _totalReconnectionAttempts;
@@ -144,6 +145,12 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         if (sessionManager != null)
         {
             _logger.LogWarning("Chaos: killing OPC UA client session.");
+
+            // Cancel in-flight reconnection first so it aborts cleanly
+            // rather than continuing to use a session we're about to dispose.
+            try { _reconnectCts?.Cancel(); }
+            catch (ObjectDisposedException) { /* CTS disposed between check and cancel */ }
+
             await sessionManager.ClearSessionAsync(CancellationToken.None, gracefulClose: false).ConfigureAwait(false);
         }
     }
@@ -452,8 +459,15 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
         Interlocked.Increment(ref _totalReconnectionAttempts);
 
+        // Create a linked CTS so KillAsync can cancel this reconnection mid-flight.
+        // Without this, KillAsync disposes the session while we're still using it,
+        // leading to BadSessionNotActivated errors and 60s hangs.
+        using var reconnectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _reconnectCts = reconnectCts;
+
         try
         {
+            var token = reconnectCts.Token;
             _logger.LogInformation("Restarting OPC UA session...");
 
             // Start collecting updates - any incoming subscription notifications will be buffered
@@ -462,21 +476,21 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
             // Create new session (CreateSessionAsync disposes old session internally)
             var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
-            var session = await sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
+            var session = await sessionManager.CreateSessionAsync(application, _configuration, token).ConfigureAwait(false);
 
             // Clear all read-after-write state - new session means old pending reads and registrations are invalid
             sessionManager.ReadAfterWriteManager?.ClearAll();
 
             _logger.LogInformation("New OPC UA session created successfully.");
 
-            await _structureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await _structureLock.WaitAsync(token).ConfigureAwait(false);
             try
             {
                 // Recreate MonitoredItems from owned properties (avoids memory leak from holding SDK objects)
                 var monitoredItems = CreateMonitoredItemsForReconnection();
                 if (monitoredItems.Count > 0)
                 {
-                    await sessionManager.CreateSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
+                    await sessionManager.CreateSubscriptionsAsync(monitoredItems, session, token).ConfigureAwait(false);
 
                     _logger.LogInformation(
                         "Subscriptions recreated successfully with {Count} monitored items.",
@@ -488,11 +502,22 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 _structureLock.Release();
             }
 
-            await propertyWriter.CompleteInitializationWithInitialStateAsync(cancellationToken).ConfigureAwait(false);
+            await propertyWriter.CompleteInitializationWithInitialStateAsync(token).ConfigureAwait(false);
 
             Interlocked.Increment(ref _successfulReconnections);
             Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
             _logger.LogInformation("Session restart complete.");
+        }
+        catch (OperationCanceledException) when (reconnectCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            // Reconnection was cancelled by KillAsync, not by shutdown.
+            // Don't increment failed counter - this is expected during chaos testing.
+            _logger.LogInformation("Reconnection cancelled by kill. Will retry on next health check.");
+
+            // Clear the session so health check can trigger a fresh reconnection attempt
+            await sessionManager.ClearSessionAsync(cancellationToken).ConfigureAwait(false);
+
+            throw; // Re-throw to trigger retry in ExecuteAsync
         }
         catch (Exception ex)
         {
@@ -503,6 +528,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             await sessionManager.ClearSessionAsync(cancellationToken).ConfigureAwait(false);
 
             throw; // Re-throw to trigger retry in ExecuteAsync
+        }
+        finally
+        {
+            _reconnectCts = null;
         }
     }
 

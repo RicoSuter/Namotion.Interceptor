@@ -28,7 +28,7 @@ internal class OpcUaSubjectServer : StandardServer
     {
         foreach (var listener in TransportListeners)
         {
-            try { listener.Close(); } catch { /* best-effort */ }
+            try { listener.Close(); } catch (Exception ex) { _logger.LogDebug(ex, "Error closing transport listener."); }
         }
     }
 

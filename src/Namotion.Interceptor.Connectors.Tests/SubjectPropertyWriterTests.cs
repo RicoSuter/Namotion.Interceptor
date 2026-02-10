@@ -193,4 +193,97 @@ public class SubjectPropertyWriterTests
         Assert.Empty(updates);
     }
 
+    [Fact]
+    public void CompleteInitialization_ReplaysBufferedUpdates()
+    {
+        // Arrange
+        var sourceMock = new Mock<ISubjectSource>();
+        var writer = new SubjectPropertyWriter(sourceMock.Object, null, NullLogger.Instance);
+        var updates = new List<string>();
+
+        writer.StartBuffering();
+        writer.Write(updates, u => u.Add("Buffered1"));
+        writer.Write(updates, u => u.Add("Buffered2"));
+
+        // Act
+        writer.CompleteInitialization();
+
+        // Assert - buffered updates replayed
+        Assert.Equal(2, updates.Count);
+        Assert.Equal("Buffered1", updates[0]);
+        Assert.Equal("Buffered2", updates[1]);
+
+        // Subsequent writes applied immediately
+        writer.Write(updates, u => u.Add("Immediate"));
+        Assert.Equal(3, updates.Count);
+        Assert.Equal("Immediate", updates[2]);
+    }
+
+    [Fact]
+    public void CompleteInitialization_ApplyBeforeReplayRunsFirst()
+    {
+        // Arrange
+        var sourceMock = new Mock<ISubjectSource>();
+        var writer = new SubjectPropertyWriter(sourceMock.Object, null, NullLogger.Instance);
+        var order = new List<string>();
+
+        writer.StartBuffering();
+        writer.Write(order, o => o.Add("Buffered"));
+
+        // Act
+        writer.CompleteInitialization(applyBeforeReplay: () => order.Add("BeforeReplay"));
+
+        // Assert - applyBeforeReplay runs before buffered updates
+        Assert.Equal(2, order.Count);
+        Assert.Equal("BeforeReplay", order[0]);
+        Assert.Equal("Buffered", order[1]);
+    }
+
+    [Fact]
+    public void CompleteInitialization_CalledTwice_SecondCallIsNoOp()
+    {
+        // Arrange
+        var sourceMock = new Mock<ISubjectSource>();
+        var writer = new SubjectPropertyWriter(sourceMock.Object, null, NullLogger.Instance);
+        var replayCount = 0;
+
+        writer.StartBuffering();
+        writer.Write(replayCount, _ => replayCount++);
+
+        // Act
+        writer.CompleteInitialization();
+        writer.CompleteInitialization(); // Second call should be no-op
+
+        // Assert - replay happened only once
+        Assert.Equal(1, replayCount);
+    }
+
+    [Fact]
+    public void CompleteInitialization_DoesNotFlushOrLoadState()
+    {
+        // Arrange
+        var sourceMock = new Mock<ISubjectSource>();
+        var flushCalled = false;
+        var writer = new SubjectPropertyWriter(
+            sourceMock.Object,
+            ct =>
+            {
+                flushCalled = true;
+                return ValueTask.FromResult(true);
+            },
+            NullLogger.Instance);
+
+        writer.StartBuffering();
+        writer.Write(0, _ => { });
+
+        // Act - sync CompleteInitialization should NOT flush or load state
+        writer.CompleteInitialization();
+
+        // Assert
+        Assert.False(flushCalled);
+        sourceMock.Verify(
+            s => s.LoadInitialStateAsync(It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
 }
