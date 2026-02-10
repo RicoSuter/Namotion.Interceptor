@@ -206,7 +206,7 @@ public class ChaosEngine : BackgroundService
 
                     // Await full completion — do NOT use a timeout that abandons StopAsync early.
                     // If StopAsync returns before the server fully shuts down, calling StartAsync
-                    // creates a zombie server instance that holds the TCP port indefinitely.
+                    // creates a second concurrent server instance that fights for the TCP port.
                     await _connectorService.StopAsync(cancellationToken);
 
                     _logger.LogWarning("Chaos: connector service stopped on {Target}", _targetName);

@@ -179,19 +179,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 $"Session factory returned unexpected type '{sessionResult?.GetType().FullName ?? "null"}'. " +
                 $"Expected '{typeof(Session).FullName}'. Ensure the configured SessionFactory returns a valid Session instance.");
 
-        // Enable SDK's built-in subscription transfer for seamless reconnection
-        // TransferSubscriptionsOnReconnect: SDK will automatically transfer subscriptions during reconnect
-        // DeleteSubscriptionsOnClose: Keep subscriptions on server during reconnection for transfer
-        newSession.TransferSubscriptionsOnReconnect = true;
-        newSession.DeleteSubscriptionsOnClose = false;
-
-        // MinPublishRequestCount: Keep multiple publish requests in flight for reliability
-        // OPC Foundation's reference client uses 3 to prevent message loss during traffic spikes
-        newSession.MinPublishRequestCount = configuration.MinPublishRequestCount;
-
-        newSession.KeepAlive -= OnKeepAlive;
-        newSession.KeepAlive += OnKeepAlive;
-        newSession.KeepAliveInterval = (int)configuration.KeepAliveInterval.TotalMilliseconds;
+        ConfigureSession(newSession);
 
         Volatile.Write(ref _session, newSession);
 
@@ -327,8 +315,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                     }
 
                     Volatile.Write(ref _session, reconnectedSession);
-                    reconnectedSession.KeepAlive -= OnKeepAlive;
-                    reconnectedSession.KeepAlive += OnKeepAlive;
+                    ConfigureSession(reconnectedSession);
 
                     SubscriptionManager.UpdateTransferredSubscriptions(transferredSubscriptions);
                     _logger.LogInformation(
@@ -468,6 +455,16 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         {
             await DisposeSessionAsync(sessionToDispose, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    private void ConfigureSession(Session session)
+    {
+        session.TransferSubscriptionsOnReconnect = true;
+        session.DeleteSubscriptionsOnClose = false;
+        session.MinPublishRequestCount = _configuration.MinPublishRequestCount;
+        session.KeepAlive -= OnKeepAlive;
+        session.KeepAlive += OnKeepAlive;
+        session.KeepAliveInterval = (int)_configuration.KeepAliveInterval.TotalMilliseconds;
     }
 
     /// <summary>
