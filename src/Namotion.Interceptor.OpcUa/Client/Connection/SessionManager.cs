@@ -33,7 +33,6 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     // Enqueued by SDK reconnection callbacks (sync), drained by health check loop via DisposePendingSessionsAsync (async).
     private readonly ConcurrentQueue<Session> _sessionsToDispose = new();
     private int _needsInitialization; // 0 = false, 1 = true (thread-safe via Interlocked)
-    private int _needsBufferResume;   // 0 = false, 1 = true (thread-safe via Interlocked)
 
     /// <summary>
     /// Gets the current session. WARNING: Can change at any time due to reconnection. Never cache - read immediately before use.
@@ -58,12 +57,6 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// Set when SDK reconnection succeeds (subscription transfer or preserved session).
     /// </summary>
     public bool NeedsInitialization => Volatile.Read(ref _needsInitialization) == 1;
-
-    /// <summary>
-    /// Gets a value indicating whether the buffer should be replayed after a preserved session reconnect.
-    /// Unlike full initialization, this does not require a server round-trip.
-    /// </summary>
-    public bool NeedsBufferResume => Volatile.Read(ref _needsBufferResume) == 1;
 
     /// <summary>
     /// Gets whether there are sessions waiting for async disposal by the health check loop.
@@ -424,13 +417,6 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         Interlocked.Exchange(ref _needsInitialization, 0);
     }
 
-    /// <summary>
-    /// Clears the buffer resume flag after the health check replays the buffer.
-    /// </summary>
-    public void ClearBufferResumeFlag()
-    {
-        Interlocked.Exchange(ref _needsBufferResume, 0);
-    }
 
     /// <summary>
     /// Clears the current session and resets the reconnect handler to allow health check to trigger reconnection.
