@@ -146,12 +146,22 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         {
             _logger.LogWarning("Chaos: killing OPC UA client session.");
 
-            // Cancel in-flight reconnection first so it aborts cleanly
-            // rather than continuing to use a session we're about to dispose.
-            try { _reconnectCts?.Cancel(); }
-            catch (ObjectDisposedException) { /* CTS disposed between check and cancel */ }
-
-            await sessionManager.ClearSessionAsync(CancellationToken.None, gracefulClose: false).ConfigureAwait(false);
+            var reconnectCts = _reconnectCts;
+            if (reconnectCts is not null)
+            {
+                // Manual reconnection in progress — just cancel it.
+                // ReconnectSessionAsync's catch block will handle cleanup via ClearSessionAsync.
+                // Calling ClearSessionAsync here would race: it disposes the session that
+                // ReconnectSessionAsync just created, causing BadSessionNotActivated on the
+                // next read and triggering a permanent failure loop.
+                try { await reconnectCts.CancelAsync(); }
+                catch (ObjectDisposedException) { /* CTS disposed between check and cancel */ }
+            }
+            else
+            {
+                // No manual reconnection in progress — clear session directly.
+                await sessionManager.ClearSessionAsync(CancellationToken.None).ConfigureAwait(false);
+            }
         }
     }
 
@@ -161,6 +171,15 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         var sessionManager = _sessionManager;
         if (sessionManager != null)
         {
+            if (sessionManager.IsReconnecting)
+            {
+                // Manual reconnection in progress — skip the disconnect.
+                // Killing the transport now would destroy the session that ReconnectSessionAsync
+                // just created, causing the reconnection to fail and triggering a retry loop.
+                _logger.LogDebug("Chaos: skipping disconnect during active reconnection.");
+                return Task.CompletedTask;
+            }
+
             _logger.LogWarning("Chaos: disconnecting OPC UA client transport.");
             sessionManager.DisconnectTransport();
         }
@@ -335,25 +354,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                         await sessionManager.DisposePendingSessionsAsync(stoppingToken).ConfigureAwait(false);
                     }
 
-                    // 2. Complete initialization after SDK reconnection (subscription transfer or preserved session)
-                    if (sessionManager.NeedsInitialization)
-                    {
-                        try
-                        {
-                            await propertyWriter.CompleteInitializationAsync(stoppingToken).ConfigureAwait(false);
-                            sessionManager.ClearInitializationFlag();
-                            RecordReconnectionSuccess();
-                            _logger.LogInformation("SDK reconnection initialization completed successfully.");
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "SDK reconnection initialization failed. Clearing session for full restart.");
-                            sessionManager.ClearInitializationFlag();
-                            await sessionManager.ClearSessionAsync(stoppingToken).ConfigureAwait(false);
-                        }
-                    }
-
-                    // 4. Check session health and trigger reconnection if needed
+                    // 2. Check session health and trigger reconnection if needed
                     var isReconnecting = sessionManager.IsReconnecting;
                     var currentSession = sessionManager.CurrentSession;
                     var sessionIsConnected = currentSession?.Connected ?? false;
@@ -456,6 +457,12 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         using var reconnectCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _reconnectCts = reconnectCts;
 
+        // Prevent OnKeepAlive from triggering SDK reconnection during manual reconnection.
+        // Without this, keep-alive on the newly created session can fire immediately,
+        // triggering OnKeepAlive → BeginReconnect → OnReconnectComplete → AbandonCurrentSession,
+        // which nullifies the session while we're still setting up subscriptions and loading state.
+        sessionManager.SetReconnecting(true);
+
         try
         {
             var token = reconnectCts.Token;
@@ -472,7 +479,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             // Clear all read-after-write state - new session means old pending reads and registrations are invalid
             sessionManager.ReadAfterWriteManager?.ClearAll();
 
-            _logger.LogInformation("New OPC UA session created successfully.");
+            _logger.LogInformation(
+                "New OPC UA session created successfully (id={SessionId}, connected={Connected}).",
+                session.SessionId,
+                session.Connected);
 
             await _structureLock.WaitAsync(token).ConfigureAwait(false);
             try
@@ -493,11 +503,11 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 _structureLock.Release();
             }
 
-            await propertyWriter.CompleteInitializationAsync(token).ConfigureAwait(false);
+            await propertyWriter.LoadInitialStateAndResumeAsync(token).ConfigureAwait(false);
 
             Interlocked.Increment(ref _successfulReconnections);
             Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
-            _logger.LogInformation("Session restart complete.");
+            _logger.LogInformation("Session restart complete (id={SessionId}).", session.SessionId);
         }
         catch (OperationCanceledException) when (reconnectCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
@@ -522,6 +532,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
         }
         finally
         {
+            // Always clear the reconnecting flag when manual reconnection completes.
+            // On failure paths, ClearSessionAsync already resets this, but the explicit
+            // reset ensures it's always cleared (especially on the success path).
+            sessionManager.SetReconnecting(false);
             _reconnectCts = null;
         }
     }
