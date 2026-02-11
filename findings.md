@@ -6,7 +6,7 @@ Summary of bugs found and fixes applied during resilience testing of OPC UA clie
 
 **100% pass rate** on connector tester chaos testing (`--launch-profile opcua`).
 
-**Result**: 16/16 cycles PASS (verified).
+**Result**: 8/9 cycles PASS in extended run (1h endurance test). 16/16 in initial verification.
 
 ## Fixes Applied
 
@@ -59,6 +59,16 @@ This breaks eventual consistency: the full state read returns values at time T1,
 
 **Note**: This bug also exists in master.
 
+### Fix 5: RecordReconnectionSuccess not called from SDK handler path (OpcUaSubjectClientSource.cs, SessionManager.cs)
+
+**Root cause**: `RecordReconnectionSuccess()` (increments `SuccessfulReconnections` counter) was only called from the manual `ReconnectSessionAsync` path. When the SDK's `SessionReconnectHandler` reconnected successfully via `OnReconnectComplete`, the counter was never incremented. This caused the CI integration test `ServerRestart_WithDisconnectionWait_ClientRecovers` to fail with "Should have at least 1 successful reconnection, had 0".
+
+**Fix**:
+- Changed `RecordReconnectionSuccess()` from `private` to `internal` in `OpcUaSubjectClientSource.cs`.
+- Added `_source.RecordReconnectionSuccess()` calls in `SessionManager.OnReconnectComplete` for both success paths (subscription transfer and preserved session).
+
+**Status**: Not yet committed.
+
 ### Additional improvements in SessionManager.cs
 
 - **ConcurrentQueue for session disposal** — Replaces single-slot `_pendingOldSession` to handle multiple sessions queuing for disposal during rapid reconnection.
@@ -70,9 +80,75 @@ This breaks eventual consistency: the full state read returns values at time T1,
 
 ## Known Remaining Issues
 
-### Request timeout loop (not reproduced)
+### Request timeout loop (reproduced: 3 times)
 
-During early testing (~10-20% of cycles), clients entered a permanent `BadRequestTimeout` (0x80850000) loop where `FetchNamespaceTablesAsync` timed out on every retry. Not reproduced in the final 16/16 test run. May have been incidentally fixed by the transport kill and timeout improvements.
+**Symptom**: After rapid successive chaos events (multiple server kills + client kills in one cycle), BOTH clients enter a permanent `BadRequestTimeout` (0x80850000) loop. Every reconnection attempt creates a session on the server but `CreateAsync()` never returns — it times out after 30s (OperationTimeout).
+
+**Root cause identified by enhanced diagnostics (run 3, cycle 1)**:
+
+Stack traces from the enhanced exception logging reveal the failure is in **`FetchNamespaceTablesAsync`**, NOT `ActivateSession` as initially hypothesized:
+
+```
+Session.OpenAsync
+  → Session.FetchNamespaceTablesAsync    ← FAILS HERE
+    → SessionClient.ReadAsync
+      → UaSCUaBinaryClientChannel.SendRequestAsync
+        → ChannelAsyncOperation.EndAsync  [80850000 / 80840000]
+```
+
+**The session is successfully created and activated** (server logs confirm "session created"), but the subsequent `ReadAsync` call to fetch the namespace table times out.
+
+**Detailed timeline from run 3 (cycle 1)**:
+
+1. Chaos: kill server → restart → both clients reconnect successfully (step 4/4)
+2. Chaos: kill stable-client, disconnect server (= kill server again), kill flaky-client, kill stable-client (rapid succession)
+3. Sessions created on the DYING server (355, 412) — CreateSession/ActivateSession succeed but FetchNamespaceTablesAsync times out because server is shutting down
+4. Server restarts (3rd time), clients recover
+5. Both clients enter permanent loop: create session on NEW server → FetchNamespaceTables times out → retry
+
+**Key findings from enhanced diagnostics**:
+
+1. **Failure is in `FetchNamespaceTablesAsync`** — The session is created and activated. The server logs "session created". But the follow-up `ReadAsync` to fetch namespace tables times out. This means the server's security/session layer works but the service layer (Read/Write/Browse) is unresponsive.
+
+2. **First error is `BadSecureChannelIdInvalid` (0x80840000)** after 14273ms — NOT a timeout but an active server rejection. The secure channel became invalid between ActivateSession and FetchNamespaceTablesAsync. This likely happens because the server was killed mid-connection. Subsequent errors are `BadRequestTimeout` (0x80850000) after exactly 30000ms.
+
+3. **Active sessions drop to 1** but loop continues — rules out zombie session accumulation as root cause.
+
+4. **Thread pool is fine** — 32740+/32767 workers available throughout. Workers slowly leak (~1 per 2 attempts) but not starvation.
+
+5. **Loop is permanent** — 30+ consecutive failures with zero self-recovery.
+
+6. **Server creates sessions on the new server instance** — After the server restarts, new sessions are created (Active sessions: 1, 2, etc.) but FetchNamespaceTablesAsync still times out. The server's service layer is non-functional despite session management working.
+
+7. **Multiple server kills in one cycle** is the trigger — The loop always starts after 2+ rapid server kills with interleaved client kills. Single server kills never cause this issue.
+
+**Root cause hypothesis** (updated):
+
+The server successfully handles CreateSession/ActivateSession (session-layer operations) but fails to respond to Read requests (service-layer operations). This suggests the server's service request processing pipeline is blocked or deadlocked after rapid kill/restart cycles.
+
+Remaining hypotheses:
+1. **Server service layer deadlock** — The `MasterNodeManager` or `StandardServer.ProcessRequest` may hold a lock from the previous server instance that prevents the new instance from processing Read requests. Shared static state between server instances could cause this.
+2. **Custom node manager initialization blocking** — After server kill/restart, our `CustomNodeManager` may not be fully initialized, and incoming Read requests for namespace 0 nodes might be queued behind a blocked node manager initialization.
+3. **TCP socket/channel corruption** — The rapid kill/restart cycle may leave orphaned TCP connections or half-open channels that interfere with new connections to the same port.
+
+**Next diagnostics needed**:
+1. **Server-side Read request logging** — Override `Read` in the server or add middleware to confirm whether Read requests reach the server. If they don't, the issue is in the transport/channel layer. If they do, the issue is in the service processing pipeline.
+2. **Test with a third fresh client** — After the loop starts, try connecting a brand new client. If it succeeds, the issue is on the stuck clients. If it fails, the issue is on the server.
+
+### Data convergence failure after server kill + subscription transfer
+
+**Symptom**: After server kill → server recover → SDK subscription transfer, some property values remain stale on clients. Reproduced at cycle 6 of run +11.
+
+**Details**:
+- Subject 6's `DecimalValue`: server had 691.1 but both stable-client and flaky-client had 688.83 (stale value with older timestamp).
+- Both clients had the same stale value, suggesting the issue is in subscription transfer behavior.
+- The server's value had a newer timestamp than the clients' value, confirming it was a missed update.
+
+**Root cause hypothesis**: After server kill, the SDK's subscription transfer mechanism (`RecreateAsync`) creates new subscriptions and delivers initial data change notifications. However, if the server was killed mid-mutation, the notification for the last write may be lost — the write was applied to the server's in-memory model but the data change notification was never sent (or was sent but not acknowledged before the transport died). On recreation, the subscription's initial notification delivers the current server value, but if the mutation engine wrote a new value between server recovery and subscription recreation, that intermediate value may not trigger a new notification if the monitored item's sampling interval hasn't elapsed.
+
+**Frequency**: Rare (1 occurrence in ~50 cycles across all runs). Lower priority than the BadRequestTimeout loop.
+
+**Status**: Under observation. May be related to timing of mutations vs subscription recreation.
 
 ### SDK Bug: ArgumentOutOfRangeException in SetDefaultPermissions (non-blocking)
 
@@ -91,10 +167,15 @@ SDK's `CustomNodeManager2.SetDefaultPermissions` accesses `namespaceMetadataValu
 | +6 | + StartBuffering in OnReconnectComplete | 0/1 (wrong approach) |
 | +7 | + 15min converge window | 7/8 pass (data mismatch) |
 | +8 | Skip full state read (Fix 4) + cleanup | **16/16 pass** |
+| +9 | 1h endurance test (cleanup + rename) | **8/9 pass** (timeout loop) |
+| +10 | + diagnostic step logging | **15/16 pass** (timeout loop at cycle 16) |
+| +11 | + exception/threadpool/stopwatch diagnostics | **5/6 pass** (data convergence at cycle 6) |
+| +12 | same diagnostics (re-run) | **0/1 fail** (timeout loop at cycle 1 — FetchNamespaceTables identified) |
 
 ## Environment
 
 - OPC UA SDK: OPCFoundation.NetStandard.Opc.Ua.* 1.5.376.244
+- OPC UA SDK source: C:\Users\rsute\GitHub\UA-.NETStandard
 - .NET 9.0
 - Testing: ConnectorTester with `--launch-profile opcua`
 - Branch: `feature/resilience-testing`
