@@ -6,7 +6,7 @@ Summary of bugs found and fixes applied during resilience testing of OPC UA clie
 
 **100% pass rate** on connector tester chaos testing (`--launch-profile opcua`).
 
-**Result**: 8/9 cycles PASS in extended run (1h endurance test). 16/16 in initial verification.
+**Result**: **18/18 cycles PASS** with Fix 6 + Fix 7. Endurance test completed successfully.
 
 ## Fixes Applied
 
@@ -67,7 +67,7 @@ This breaks eventual consistency: the full state read returns values at time T1,
 - Changed `RecordReconnectionSuccess()` from `private` to `internal` in `OpcUaSubjectClientSource.cs`.
 - Added `_source.RecordReconnectionSuccess()` calls in `SessionManager.OnReconnectComplete` for both success paths (subscription transfer and preserved session).
 
-**Status**: Not yet committed.
+**Status**: Committed.
 
 ### Additional improvements in SessionManager.cs
 
@@ -78,62 +78,94 @@ This breaks eventual consistency: the full state read returns values at time T1,
 - **DetachChannel guard** — If preserved session has no transport (SDK called `DetachChannel()`), abandon immediately instead of trying to use it.
 - **CreateSessionAsync validation** — Verifies new session is connected with valid transport before accepting.
 
+### Fix 6: Server never restarts after KillAsync — TryDequeue cancellation bug (PropertyChangeQueueSubscription.cs)
+
+**Root cause**: `PropertyChangeQueueSubscription.TryDequeue` fast path dequeues items without checking `CancellationToken`. When producers (mutation engine, other sources) continuously feed the queue, the cancellation token is never observed, and `ChangeQueueProcessor.ProcessAsync` never exits. This prevents the server from restarting after `KillAsync()`.
+
+**Evidence** (server-side diagnostic logging in run +13):
+- `[ServerLoop]` shutdown/restart messages never appear after initial startup — server never restarts
+- `[Server ReadAsync]` never appears — Read requests never reach the server override
+- Server is in a zombie state: CTS cancelled but ProcessAsync still spinning in TryDequeue fast path
+
+**The timeout loop** was a consequence: the zombie server's transport listener stays open, so clients connect to the old instance. CreateSession/ActivateSession succeed (session-layer), but Read requests (FetchNamespaceTablesAsync) time out because the server's service layer is non-functional in the zombie state.
+
+**Fix**: Added `cancellationToken.IsCancellationRequested` check at the top of the `TryDequeue` while loop, before the fast path dequeue. This ensures kill/shutdown signals are observed within one iteration even when the queue is continuously fed.
+
+```csharp
+// PropertyChangeQueueSubscription.TryDequeue - before fix:
+while (true)
+{
+    if (_queue.TryDequeue(out item))  // ← never checks cancellation!
+        return true;
+    // ... _signal.Wait(cancellationToken) only reached when queue is empty
+}
+
+// After fix:
+while (true)
+{
+    if (cancellationToken.IsCancellationRequested)  // ← added
+    {
+        item = default!;
+        return false;
+    }
+    if (_queue.TryDequeue(out item))
+        return true;
+    // ...
+}
+```
+
+**Impact**: Fixes the permanent BadRequestTimeout loop (0x80850000) that occurred after rapid successive chaos events (2+ server kills in one cycle).
+
+**Note**: This bug also affects production scenarios — any source that continuously writes properties (MQTT, another OPC UA client) would prevent server restart after KillAsync.
+
+**Status**: Verified — server restarts correctly after kills.
+
+### Fix 7: Flush task deadlock blocks server restart (OpcUaSubjectServerBackgroundService.cs, CustomNodeManager.cs)
+
+**Root cause**: After Fix 6 resolved the TryDequeue issue, a second server restart blocker was uncovered. The `ChangeQueueProcessor`'s flush task would hang during server shutdown, blocking `ProcessAsync` from returning and preventing server disposal/restart.
+
+**Evidence**: The flush task was stuck inside `WriteChangesAsync`, and `server.Dispose()` also hung — a classic ABBA deadlock.
+
+**Deadlock chain**:
+```
+Thread A (flush task):     lock(node) → ClearChangeMasks → OnMonitoredNodeChanged → tries lock(NodeManager.Lock) — BLOCKED
+Thread B (server.Dispose): StandardServer.Dispose → lock(NodeManager.Lock) → node cleanup → tries lock(node) — DEADLOCK
+```
+
+The original `lock(node)` in `WriteChangesAsync` was the wrong lock — it's a custom lock that the SDK doesn't use. The SDK coordinates all node access via `NodeManager.Lock` (= `CustomNodeManager2.Lock`). Our `lock(node)` created a second lock in the chain, enabling the deadlock with SDK operations.
+
+**Fix**: **Use `NodeManager.Lock` instead of `lock(node)`** in `WriteChangesAsync`. This matches the SDK's own locking pattern. `ClearChangeMasks` → `OnMonitoredNodeChanged` → `lock(NodeManager.Lock)` is reentrant on the same thread (C# Monitor allows re-entry), so no deadlock. `StandardServer.Dispose` simply waits for the lock to be released, then proceeds normally.
+
+```csharp
+// Before: lock(node) { Value; Timestamp; ClearChangeMasks; } — deadlock with SDK
+// After:
+var nodeManagerLock = server?.NodeManagerLock;
+lock (nodeManagerLock)
+{
+    node.Value = convertedValue;
+    node.Timestamp = change.ChangedTimestamp.UtcDateTime;
+    node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
+}
+```
+
+**Files changed**:
+- `OpcUaSubjectServer.cs` — Added `NodeManagerLock` property exposing `CustomNodeManager2.Lock`
+- `OpcUaSubjectServerBackgroundService.cs` — `WriteChangesAsync` uses `NodeManager.Lock` instead of `lock(node)`
+- `CustomNodeManager.cs` — Removed redundant `lock(variableNode)` from StateChanged handler (now always called under NodeManager.Lock)
+
+**Status**: **18/18 cycles PASS**. Endurance test completed. Code review confirmed correct lock ordering and no remaining deadlock potential.
+
 ## Known Remaining Issues
 
-### Request timeout loop (reproduced: 3 times)
+### Request timeout loop → Fixed by Fix 6 + Fix 7
 
-**Symptom**: After rapid successive chaos events (multiple server kills + client kills in one cycle), BOTH clients enter a permanent `BadRequestTimeout` (0x80850000) loop. Every reconnection attempt creates a session on the server but `CreateAsync()` never returns — it times out after 30s (OperationTimeout).
+**Symptom**: After rapid successive chaos events (multiple server kills + client kills in one cycle), BOTH clients enter a permanent `BadRequestTimeout` (0x80850000) loop.
 
-**Root cause identified by enhanced diagnostics (run 3, cycle 1)**:
+**Root cause**: Two server-side bugs prevented restart after KillAsync:
+1. `TryDequeue` fast path doesn't check cancellation → server's ProcessAsync never exits (Fix 6)
+2. Flush task deadlock with `lock(node)` vs `NodeManager.Lock` → server.Dispose() hangs (Fix 7)
 
-Stack traces from the enhanced exception logging reveal the failure is in **`FetchNamespaceTablesAsync`**, NOT `ActivateSession` as initially hypothesized:
-
-```
-Session.OpenAsync
-  → Session.FetchNamespaceTablesAsync    ← FAILS HERE
-    → SessionClient.ReadAsync
-      → UaSCUaBinaryClientChannel.SendRequestAsync
-        → ChannelAsyncOperation.EndAsync  [80850000 / 80840000]
-```
-
-**The session is successfully created and activated** (server logs confirm "session created"), but the subsequent `ReadAsync` call to fetch the namespace table times out.
-
-**Detailed timeline from run 3 (cycle 1)**:
-
-1. Chaos: kill server → restart → both clients reconnect successfully (step 4/4)
-2. Chaos: kill stable-client, disconnect server (= kill server again), kill flaky-client, kill stable-client (rapid succession)
-3. Sessions created on the DYING server (355, 412) — CreateSession/ActivateSession succeed but FetchNamespaceTablesAsync times out because server is shutting down
-4. Server restarts (3rd time), clients recover
-5. Both clients enter permanent loop: create session on NEW server → FetchNamespaceTables times out → retry
-
-**Key findings from enhanced diagnostics**:
-
-1. **Failure is in `FetchNamespaceTablesAsync`** — The session is created and activated. The server logs "session created". But the follow-up `ReadAsync` to fetch namespace tables times out. This means the server's security/session layer works but the service layer (Read/Write/Browse) is unresponsive.
-
-2. **First error is `BadSecureChannelIdInvalid` (0x80840000)** after 14273ms — NOT a timeout but an active server rejection. The secure channel became invalid between ActivateSession and FetchNamespaceTablesAsync. This likely happens because the server was killed mid-connection. Subsequent errors are `BadRequestTimeout` (0x80850000) after exactly 30000ms.
-
-3. **Active sessions drop to 1** but loop continues — rules out zombie session accumulation as root cause.
-
-4. **Thread pool is fine** — 32740+/32767 workers available throughout. Workers slowly leak (~1 per 2 attempts) but not starvation.
-
-5. **Loop is permanent** — 30+ consecutive failures with zero self-recovery.
-
-6. **Server creates sessions on the new server instance** — After the server restarts, new sessions are created (Active sessions: 1, 2, etc.) but FetchNamespaceTablesAsync still times out. The server's service layer is non-functional despite session management working.
-
-7. **Multiple server kills in one cycle** is the trigger — The loop always starts after 2+ rapid server kills with interleaved client kills. Single server kills never cause this issue.
-
-**Root cause hypothesis** (updated):
-
-The server successfully handles CreateSession/ActivateSession (session-layer operations) but fails to respond to Read requests (service-layer operations). This suggests the server's service request processing pipeline is blocked or deadlocked after rapid kill/restart cycles.
-
-Remaining hypotheses:
-1. **Server service layer deadlock** — The `MasterNodeManager` or `StandardServer.ProcessRequest` may hold a lock from the previous server instance that prevents the new instance from processing Read requests. Shared static state between server instances could cause this.
-2. **Custom node manager initialization blocking** — After server kill/restart, our `CustomNodeManager` may not be fully initialized, and incoming Read requests for namespace 0 nodes might be queued behind a blocked node manager initialization.
-3. **TCP socket/channel corruption** — The rapid kill/restart cycle may leave orphaned TCP connections or half-open channels that interfere with new connections to the same port.
-
-**Next diagnostics needed**:
-1. **Server-side Read request logging** — Override `Read` in the server or add middleware to confirm whether Read requests reach the server. If they don't, the issue is in the transport/channel layer. If they do, the issue is in the service processing pipeline.
-2. **Test with a third fresh client** — After the loop starts, try connecting a brand new client. If it succeeds, the issue is on the stuck clients. If it fails, the issue is on the server.
+**Status**: Fixed. Server restarts reliably after kills.
 
 ### Data convergence failure after server kill + subscription transfer
 
@@ -171,6 +203,8 @@ SDK's `CustomNodeManager2.SetDefaultPermissions` accesses `namespaceMetadataValu
 | +10 | + diagnostic step logging | **15/16 pass** (timeout loop at cycle 16) |
 | +11 | + exception/threadpool/stopwatch diagnostics | **5/6 pass** (data convergence at cycle 6) |
 | +12 | same diagnostics (re-run) | **0/1 fail** (timeout loop at cycle 1 — FetchNamespaceTables identified) |
+| +13 | Fix 6: TryDequeue cancellation check | server restarts but flush task hangs |
+| +14 | Fix 7: NodeManager.Lock + cancellation check | **18/18 pass** |
 
 ## Environment
 

@@ -385,15 +385,9 @@ internal class CustomNodeManager : CustomNodeManager2
         {
             if (changes.HasFlag(NodeStateChangeMasks.Value))
             {
-                DateTimeOffset timestamp;
-                object? nodeValue;
-                lock (variableNode)
-                {
-                    timestamp = variableNode.Timestamp;
-                    nodeValue = variableNode.Value;
-                }
-
-                _source.UpdateProperty(property.Reference, timestamp, nodeValue);
+                // No lock needed: StateChanged fires from ClearChangeMasks which is always
+                // called under NodeManager.Lock (from WriteChangesAsync or SDK write handling).
+                _source.UpdateProperty(property.Reference, variableNode.Timestamp, variableNode.Value);
             }
         };
 
