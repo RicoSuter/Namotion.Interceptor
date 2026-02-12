@@ -40,7 +40,7 @@ Summary of bugs found and fixes applied during resilience testing of OPC UA clie
 - Fixed `DefaultSessionTimeout` to use `SessionTimeout` property instead of hardcoded 60000.
 - Added validation: `SessionTimeout > 2 * OperationTimeout`.
 
-### Fix 4: Skip full state read after SDK subscription transfer (SessionManager.cs, SubjectPropertyWriter.cs)
+### Fix 4: Skip full state read after SDK subscription transfer (SessionManager.cs, SubjectPropertyWriter.cs) — OUTDATED by Fix 8
 
 **Root cause**: The `subscribe+collect/load/reapply` pattern was designed for initial startup. Master incorrectly reused it after SDK reconnection by setting `_needsInitialization = 1` in `OnReconnectComplete`, triggering a full server state read after subscription transfer.
 
@@ -59,7 +59,9 @@ This breaks eventual consistency: the full state read returns values at time T1,
 
 **Note**: This bug also exists in master.
 
-### Fix 5: RecordReconnectionSuccess not called from SDK handler path (OpcUaSubjectClientSource.cs, SessionManager.cs)
+**OUTDATED**: Fix 8 reverses this approach. Relying solely on subscription notifications proved unreliable — notifications can be lost due to subscription lifetime expiration, queue overflow, or timing gaps. Fix 8 re-introduces the full state read after ALL reconnections.
+
+### Fix 5: RecordReconnectionSuccess not called from SDK handler path (OpcUaSubjectClientSource.cs, SessionManager.cs) — partially OUTDATED by Fix 8
 
 **Root cause**: `RecordReconnectionSuccess()` (increments `SuccessfulReconnections` counter) was only called from the manual `ReconnectSessionAsync` path. When the SDK's `SessionReconnectHandler` reconnected successfully via `OnReconnectComplete`, the counter was never incremented. This caused the CI integration test `ServerRestart_WithDisconnectionWait_ClientRecovers` to fail with "Should have at least 1 successful reconnection, had 0".
 
@@ -67,7 +69,7 @@ This breaks eventual consistency: the full state read returns values at time T1,
 - Changed `RecordReconnectionSuccess()` from `private` to `internal` in `OpcUaSubjectClientSource.cs`.
 - Added `_source.RecordReconnectionSuccess()` calls in `SessionManager.OnReconnectComplete` for both success paths (subscription transfer and preserved session).
 
-**Status**: Committed.
+**Status**: Committed. Fix 8 removed the preserved session success path (always abandons now), so `RecordReconnectionSuccess` is only called from the transfer success path in `OnReconnectComplete`.
 
 ### Additional improvements in SessionManager.cs
 
@@ -155,6 +157,39 @@ lock (nodeManagerLock)
 
 **Status**: **18/18 cycles PASS**. Endurance test completed. Code review confirmed correct lock ordering and no remaining deadlock potential.
 
+### Fix 8: Full state read after ALL reconnections + abandon preserved sessions (SessionManager.cs, OpcUaSubjectClientSource.cs)
+
+**Root cause**: Fix 4 removed the full state read after SDK reconnection, relying solely on subscription notifications for state sync. This proved unreliable — chaos testing revealed data convergence failures where client property values remained permanently stale after server kills (cycle 6 of run +11, cycle 18 of parallel run). Both stable-client and flaky-client showed the same stale values, pointing to subscription transfer itself as the source.
+
+**Why subscription notifications alone are insufficient**:
+1. **Subscription lifetime expiration**: With `SubscriptionLifetimeCount × RevisedPublishingInterval`, the server silently deletes subscriptions during prolonged client disconnects. The transferred subscription appears valid but is dead.
+2. **Notification queue overflow**: Server-side notification queues have finite depth. During disconnect, if mutations continue, older notifications are lost.
+3. **Timing gaps**: Between server address space creation and `ChangeQueueProcessor` subscription, mutations can occur that never become notifications.
+4. **Stuck reconnect handler**: If `OnReconnectComplete` never fires (observed in cycle-018 log), the client stays in buffering mode permanently.
+
+**Fix** (two changes):
+
+1. **Always perform full state read after SDK subscription transfer**:
+   - `OnReconnectComplete` transfer success path: sets `NeedsInitialization = 1` instead of calling `ReplayBufferAndResume()`.
+   - Removed `StartBuffering()` from `OnKeepAlive` — no buffering during SDK reconnection itself.
+   - Health check loop detects `NeedsInitialization` on healthy session: `StartBuffering()` → `LoadInitialStateAndResumeAsync()` → `ClearInitializationFlag()`.
+   - Key insight: buffering starts AFTER SDK reconnection completes (session is healthy), not during the disconnect. This avoids Fix 4's race condition where disconnect-period notifications overwrite read values.
+
+2. **Abandon preserved sessions unconditionally**:
+   - `OnReconnectComplete` preserved session path: calls `AbandonCurrentSession()` instead of accepting.
+   - Preserved sessions are unreliable: subscriptions may be silently dead (lifetime expired) with no mechanism for future updates.
+   - Health check sees dead session → triggers `ReconnectSessionAsync` with fresh subscriptions + full state read.
+
+**Design**: SessionManager no longer stores `_propertyWriter` as a field — it only passes it through to PollingManager/SubscriptionManager constructors. The `_needsInitialization` flag (Interlocked) is the coordination mechanism between `OnReconnectComplete` (sets) and the health check loop (reads/clears). Flag is cleared in `AbandonCurrentSession()` and `ClearSessionAsync()` to prevent stale flags from triggering state reads on wrong sessions.
+
+**Error handling**: If `LoadInitialStateAndResumeAsync` fails during NeedsInitialization handling, `ClearSessionAsync` is called. The writer stays in buffering mode (accumulating notifications). `ReconnectSessionAsync` calls `StartBuffering()` (idempotent) → buffer replays on next successful load.
+
+**Files changed**:
+- `SessionManager.cs` — Removed `_propertyWriter` field, added `_needsInitialization` mechanism, simplified `OnReconnectComplete` to two outcomes (transfer → NeedsInitialization, everything else → Abandon)
+- `OpcUaSubjectClientSource.cs` — Added NeedsInitialization handling in health check loop
+
+**Status**: Build + tests pass. Needs chaos testing verification.
+
 ## Known Remaining Issues
 
 ### Request timeout loop → Fixed by Fix 6 + Fix 7
@@ -167,20 +202,19 @@ lock (nodeManagerLock)
 
 **Status**: Fixed. Server restarts reliably after kills.
 
-### Data convergence failure after server kill + subscription transfer
+### Data convergence failure after server kill + subscription transfer → Addressed by Fix 8
 
-**Symptom**: After server kill → server recover → SDK subscription transfer, some property values remain stale on clients. Reproduced at cycle 6 of run +11.
+**Symptom**: After server kill → server recover → SDK subscription transfer, some property values remain stale on clients. Reproduced at cycle 6 of run +11 and cycle 18 of parallel run.
 
 **Details**:
 - Subject 6's `DecimalValue`: server had 691.1 but both stable-client and flaky-client had 688.83 (stale value with older timestamp).
 - Both clients had the same stale value, suggesting the issue is in subscription transfer behavior.
 - The server's value had a newer timestamp than the clients' value, confirming it was a missed update.
+- Cycle-018 log: flaky-client's SDK reconnect handler never completed after disconnect, leaving client stuck in buffering mode permanently.
 
-**Root cause hypothesis**: After server kill, the SDK's subscription transfer mechanism (`RecreateAsync`) creates new subscriptions and delivers initial data change notifications. However, if the server was killed mid-mutation, the notification for the last write may be lost — the write was applied to the server's in-memory model but the data change notification was never sent (or was sent but not acknowledged before the transport died). On recreation, the subscription's initial notification delivers the current server value, but if the mutation engine wrote a new value between server recovery and subscription recreation, that intermediate value may not trigger a new notification if the monitored item's sampling interval hasn't elapsed.
+**Root cause**: Subscription notifications alone are insufficient for state sync after reconnection. Notifications can be lost due to subscription lifetime expiration, queue overflow, timing gaps, or stuck reconnect handler.
 
-**Frequency**: Rare (1 occurrence in ~50 cycles across all runs). Lower priority than the BadRequestTimeout loop.
-
-**Status**: Under observation. May be related to timing of mutations vs subscription recreation.
+**Status**: Addressed by Fix 8 — full state read after ALL reconnections ensures eventual consistency regardless of subscription notification reliability.
 
 ### SDK Bug: ArgumentOutOfRangeException in SetDefaultPermissions (non-blocking)
 
