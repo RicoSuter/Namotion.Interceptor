@@ -32,6 +32,12 @@ internal class OpcUaSubjectServer : StandardServer
         }
     }
 
+    /// <summary>
+    /// Gets the node manager's lock object for thread-safe node updates.
+    /// This is the same lock used by the SDK for Read/Write operations.
+    /// </summary>
+    internal object? NodeManagerLock => _nodeManagerFactory.NodeManager?.Lock;
+
     public void ClearPropertyData()
     {
         _nodeManagerFactory.NodeManager?.ClearPropertyData();

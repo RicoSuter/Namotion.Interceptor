@@ -368,6 +368,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                     // fresh read values.
                     _propertyWriter.ReplayBufferAndResume();
 
+                    _source.RecordReconnectionSuccess();
+
                     _logger.LogInformation(
                         "OPC UA session reconnected: Transferred {Count} subscriptions. Subscription notifications will sync state.",
                         transferredSubscriptions.Count);
@@ -413,6 +415,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 // session and subscriptions. Pending notifications cover changes during the disconnect.
                 // A full state read would race with notification delivery, causing data corruption.
                 _propertyWriter.ReplayBufferAndResume();
+
+                _source.RecordReconnectionSuccess();
 
                 _logger.LogInformation(
                     "Reconnect preserved existing OPC UA session (id={SessionId}, connected={Connected}). " +

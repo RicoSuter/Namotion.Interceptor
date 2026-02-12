@@ -96,26 +96,37 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
 
     private ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        var currentInstance = _server?.CurrentInstance;
+        var server = _server;
+        var currentInstance = server?.CurrentInstance;
         if (currentInstance == null)
         {
             return ValueTask.CompletedTask;
         }
 
-        var span = changes.Span;
-        for (var i = 0; i < span.Length; i++)
+        // Use the SDK's NodeManager.Lock for thread-safe node updates.
+        // This is the same lock the SDK uses for Read/Write/subscription operations.
+        // ClearChangeMasks → OnMonitoredNodeChanged also acquires this lock,
+        // but Monitor is reentrant on the same thread so no deadlock.
+        var nodeManagerLock = server?.NodeManagerLock;
+        if (nodeManagerLock == null)
         {
-            var change = span[i];
-            if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) &&
-                data is BaseDataVariableState node &&
-                change.Property.TryGetRegisteredProperty() is { } registeredProperty)
-            {
-                var value = change.GetNewValue<object?>();
-                var convertedValue = _configuration.ValueConverter
-                    .ConvertToNodeValue(value, registeredProperty);
+            return ValueTask.CompletedTask;
+        }
 
-                lock (node)
+        var span = changes.Span;
+        lock (nodeManagerLock)
+        {
+            for (var i = 0; i < span.Length; i++)
+            {
+                var change = span[i];
+                if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) &&
+                    data is BaseDataVariableState node &&
+                    change.Property.TryGetRegisteredProperty() is { } registeredProperty)
                 {
+                    var value = change.GetNewValue<object?>();
+                    var convertedValue = _configuration.ValueConverter
+                        .ConvertToNodeValue(value, registeredProperty);
+
                     node.Value = convertedValue;
                     node.Timestamp = change.ChangedTimestamp.UtcDateTime;
                     node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);

@@ -81,7 +81,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
     /// Updates diagnostics metrics to track the successful reconnection.
     /// Note: Does not increment TotalReconnectionAttempts - that's done in RecordReconnectionAttemptStart.
     /// </summary>
-    private void RecordReconnectionSuccess()
+    internal void RecordReconnectionSuccess()
     {
         Interlocked.Increment(ref _successfulReconnections);
         Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
