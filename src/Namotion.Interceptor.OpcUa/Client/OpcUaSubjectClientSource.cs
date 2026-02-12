@@ -361,8 +361,29 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
                     if (currentSession is not null && sessionIsConnected && !isReconnecting)
                     {
-                        // Session healthy - validate subscriptions and reset stall detection timestamp
+                        // Session healthy - reset stall detection timestamp
                         Interlocked.Exchange(ref _reconnectStartedTimestamp, 0);
+
+                        // After SDK reconnection with subscription transfer, perform a full state read
+                        // to ensure eventual consistency. Subscription notifications alone may be incomplete
+                        // (notification queue overflow, timing gaps, subscription lifetime expiration).
+                        if (sessionManager.NeedsInitialization)
+                        {
+                            _logger.LogInformation("Performing full state sync after SDK reconnection...");
+                            propertyWriter.StartBuffering();
+                            try
+                            {
+                                await propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
+                                sessionManager.ClearInitializationFlag();
+                                _logger.LogInformation("Full state sync completed successfully after SDK reconnection.");
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex, "Full state sync failed after SDK reconnection. Clearing session for manual reconnection.");
+                                await sessionManager.ClearSessionAsync(stoppingToken).ConfigureAwait(false);
+                            }
+                        }
+
                         await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(
                             sessionManager.Subscriptions,
                             stoppingToken).ConfigureAwait(false);

@@ -17,7 +17,6 @@ namespace Namotion.Interceptor.OpcUa.Client.Connection;
 internal sealed class SessionManager : IAsyncDisposable, IDisposable
 {
     private readonly OpcUaSubjectClientSource _source;
-    private readonly SubjectPropertyWriter _propertyWriter;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
 
@@ -28,6 +27,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private readonly object _reconnectingLock = new();
 
     private int _isReconnecting; // 0 = false, 1 = true (thread-safe via Interlocked)
+    private int _needsInitialization; // 0 = false, 1 = true (thread-safe via Interlocked)
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     // Enqueued by SDK reconnection callbacks (sync), drained by health check loop via DisposePendingSessionsAsync (async).
     private readonly ConcurrentQueue<Session> _sessionsToDispose = new();
@@ -44,6 +44,21 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     public bool IsConnected =>
         Volatile.Read(ref _isReconnecting) == 0 &&
         (Volatile.Read(ref _session)?.Connected ?? false);
+
+    /// <summary>
+    /// Gets a value indicating whether the session needs a full state read after SDK reconnection.
+    /// Set by <see cref="OnReconnectComplete"/> when subscription transfer succeeds.
+    /// Cleared by the health check loop after <see cref="SubjectPropertyWriter.LoadInitialStateAndResumeAsync"/>.
+    /// </summary>
+    public bool NeedsInitialization => Volatile.Read(ref _needsInitialization) == 1;
+
+    /// <summary>
+    /// Clears the initialization flag after the health check has performed the full state read.
+    /// </summary>
+    public void ClearInitializationFlag()
+    {
+        Interlocked.Exchange(ref _needsInitialization, 0);
+    }
 
     /// <summary>
     /// Gets a value indicating whether the session is currently reconnecting.
@@ -90,7 +105,6 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     public SessionManager(OpcUaSubjectClientSource source, SubjectPropertyWriter propertyWriter, OpcUaClientConfiguration configuration, ILogger logger)
     {
         _source = source;
-        _propertyWriter = propertyWriter;
         _logger = logger;
         _configuration = configuration;
         _reconnectHandler = new SessionReconnectHandler(configuration.TelemetryContext, false, (int)configuration.ReconnectHandlerTimeout.TotalMilliseconds);
@@ -260,7 +274,6 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             }
 
             _logger.LogInformation("OPC UA server connection lost. Beginning reconnect...");
-            _propertyWriter.StartBuffering();
 
             // Set flag before BeginReconnect to avoid window where external observers see IsReconnecting=false
             Interlocked.Exchange(ref _isReconnecting, 1);
@@ -361,17 +374,16 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
                     SubscriptionManager.UpdateTransferredSubscriptions(transferredSubscriptions);
 
-                    // Stop buffering and discard the stale buffer (from OnKeepAlive's StartBuffering).
-                    // Do NOT trigger LoadInitialStateAndResumeAsync / full state read — the SDK's subscription
-                    // mechanism handles state sync via pending notifications. A full state read would race
-                    // with subscription notification delivery, causing stale notifications to overwrite
-                    // fresh read values.
-                    _propertyWriter.ReplayBufferAndResume();
+                    // Signal the health check loop to perform a full state read.
+                    // We don't rely on subscription notifications alone because they can be
+                    // incomplete (notification queue overflow, timing gaps between address space
+                    // creation and ChangeQueueProcessor subscription on the server).
+                    Interlocked.Exchange(ref _needsInitialization, 1);
 
                     _source.RecordReconnectionSuccess();
 
                     _logger.LogInformation(
-                        "OPC UA session reconnected: Transferred {Count} subscriptions. Subscription notifications will sync state.",
+                        "OPC UA session reconnected: Transferred {Count} subscriptions. Full state sync pending.",
                         transferredSubscriptions.Count);
                 }
                 else
@@ -393,36 +405,16 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 // After server restart, the SDK reconnects transport but may not create a new session.
                 // The old session ID doesn't exist on the restarted server.
 
-                // FIX: If the handler's internal reconnection called DetachChannel() on this session
-                // (happens when handler gets BadSessionIdInvalid and starts RecreateAsync), the transport
-                // is null. In that case, the session is definitely unusable — abandon immediately instead
-                // of waiting for LoadInitialStateAndResumeAsync to fail.
-                if (!hasTransport)
-                {
-                    _logger.LogWarning(
-                        "Reconnect preserved OPC UA session but transport channel is null (detached by handler). " +
-                        "Abandoning session to trigger full reconnection via health check.");
-                    AbandonCurrentSession();
-                    Interlocked.Exchange(ref _isReconnecting, 0);
-                    return;
-                }
-
-                // Re-apply session settings to ensure keep-alive timer is properly restarted.
-                ConfigureSession(reconnectedSession);
-
-                // Stop buffering and discard the stale buffer (from OnKeepAlive's StartBuffering).
-                // Do NOT trigger LoadInitialStateAndResumeAsync / full state read — the SDK preserved the
-                // session and subscriptions. Pending notifications cover changes during the disconnect.
-                // A full state read would race with notification delivery, causing data corruption.
-                _propertyWriter.ReplayBufferAndResume();
-
-                _source.RecordReconnectionSuccess();
-
+                // Preserved sessions are unreliable: subscriptions may have been silently
+                // deleted by the server (lifetime expired during disconnect), leaving no
+                // mechanism for future updates. Abandon the session and let the health check
+                // trigger a full manual reconnection with fresh subscriptions + full state read.
                 _logger.LogInformation(
                     "Reconnect preserved existing OPC UA session (id={SessionId}, connected={Connected}). " +
-                    "Subscription notifications will sync state.",
+                    "Abandoning to trigger full reconnection with state sync.",
                     reconnectedSession.SessionId,
                     reconnectedSession.Connected);
+                AbandonCurrentSession();
             }
 
             Interlocked.Exchange(ref _isReconnecting, 0);
@@ -510,6 +502,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 (int)_configuration.ReconnectHandlerTimeout.TotalMilliseconds);
 
             Interlocked.Exchange(ref _isReconnecting, 0);
+            Interlocked.Exchange(ref _needsInitialization, 0);
 
             // Read and clear session inside lock to prevent race with OnReconnectComplete
             sessionToDispose = Volatile.Read(ref _session);
@@ -568,6 +561,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
 
         Volatile.Write(ref _session, null);
+        Interlocked.Exchange(ref _needsInitialization, 0);
         ReadAfterWriteManager?.ClearPendingReads();
     }
 
