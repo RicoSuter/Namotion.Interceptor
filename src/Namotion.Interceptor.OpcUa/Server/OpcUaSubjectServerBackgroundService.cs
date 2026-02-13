@@ -10,7 +10,7 @@ using Opc.Ua.Configuration;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
-internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubjectConnector, IChaosTarget
+internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubjectConnector, IFaultInjectable
 {
     internal const string OpcVariableKey = "OpcVariable";
 
@@ -32,20 +32,14 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
     public IInterceptorSubject RootSubject => _subject;
 
     /// <inheritdoc />
-    public Task KillAsync()
+    Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
     {
+        // For a multi-connection server, disconnecting transport = killing the server.
+        // There's no meaningful "soft disconnect" when the server has multiple clients.
         _isForceKill = true;
         try { _forceKillCts?.Cancel(); }
         catch (ObjectDisposedException) { /* CTS disposed between loop iterations */ }
         return Task.CompletedTask;
-    }
-
-    /// <inheritdoc />
-    public Task DisconnectAsync()
-    {
-        // For a multi-connection server, disconnecting transport = killing the server.
-        // There's no meaningful "soft disconnect" when the server has multiple clients.
-        return KillAsync();
     }
 
     /// <summary>

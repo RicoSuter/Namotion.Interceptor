@@ -268,8 +268,8 @@ public class VerificationEngine : BackgroundService
         {
             foreach (var record in engine.EventHistory)
             {
-                _logger.LogInformation("  {Name}: {Action} at {Time:HH:mm:ss} ({Duration:F1}s)",
-                    engine.TargetName, record.Action, record.DisruptedAt.LocalDateTime, record.Duration.TotalSeconds);
+                _logger.LogInformation("  {Name}: {FaultType} at {Time:HH:mm:ss} ({Duration:F1}s)",
+                    engine.TargetName, record.FaultType, record.DisruptedAt.LocalDateTime, record.Duration.TotalSeconds);
             }
         }
     }

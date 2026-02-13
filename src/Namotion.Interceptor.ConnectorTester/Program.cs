@@ -25,7 +25,7 @@ var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
     ContentRootPath = AppContext.BaseDirectory
 });
 
-// Add cycle logger provider (created first so it can be shared with sharedLoggerFactory)
+// Add a cycle logger provider (created first so it can be shared with sharedLoggerFactory)
 var cycleLoggerProvider = new CycleLoggerProvider();
 builder.Services.AddSingleton(cycleLoggerProvider);
 builder.Logging.AddProvider(cycleLoggerProvider);
@@ -215,10 +215,9 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
 }
 
 // Server chaos engine (if configured)
-ChaosEngine? serverChaosEngine = null;
 if (configuration.Server.Chaos != null)
 {
-    serverChaosEngine = new ChaosEngine(
+    var serverChaosEngine = new ChaosEngine(
         configuration.Server.Name,
         configuration.Server.Chaos,
         coordinator,
@@ -251,12 +250,12 @@ var allConnectors = host.Services.GetServices<IHostedService>()
 
 foreach (var chaosEngine in chaosEngines)
 {
-    // Find the connector whose root subject matches one of the participants, then cast to IChaosTarget
+    // Find the connector whose root subject matches one of the participants, then cast to IFaultInjectable
     var participant = participants.FirstOrDefault(p => p.Name == chaosEngine.TargetName);
     var connector = allConnectors.FirstOrDefault(c => c.RootSubject == participant.Root);
-    if (connector is IChaosTarget chaosTarget)
+    if (connector is IFaultInjectable faultInjectable)
     {
-        chaosEngine.SetTarget(chaosTarget);
+        chaosEngine.SetTarget(faultInjectable);
     }
 }
 
