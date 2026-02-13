@@ -1,7 +1,6 @@
 using System.Collections;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Interceptors;
-using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -267,7 +266,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         var currentValue = context.CurrentValue;
-        context.WriteTimestampUtcTicks = SubjectChangeContext.Current.ChangedTimestamp.UtcTicks;
         next(ref context);
         var newValue = context.GetFinalValue();
 

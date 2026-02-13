@@ -40,13 +40,6 @@ public struct PropertyWriteContext<TProperty>
     /// </summary>
     public bool IsWritten { get; set; }
 
-    /// <summary>
-    /// Gets or sets the UTC ticks to store as the write timestamp after the backing field is written.
-    /// 0 means no timestamp to set. Set by interceptors (e.g. LifecycleInterceptor),
-    /// applied atomically with the write inside the terminal lock.
-    /// </summary>
-    public long WriteTimestampUtcTicks { get; set; }
-
     public PropertyWriteContext(PropertyReference property, TProperty currentValue, TProperty newValue)
     {
         Property = property;

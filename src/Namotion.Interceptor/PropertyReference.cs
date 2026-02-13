@@ -80,27 +80,35 @@ public struct PropertyReference : IEquatable<PropertyReference>
     private const string WriteTimestampKey = "Namotion.Interceptor.WriteTimestamp";
 
     /// <summary>
+    /// Gets the write timestamp, or null if no timestamp has been set.
+    /// </summary>
+    public DateTimeOffset? TryGetWriteTimestamp()
+    {
+        if (Subject.Data.TryGetValue((Name, WriteTimestampKey), out var value) && value is long[] holder)
+        {
+            var ticks = Interlocked.Read(ref holder[0]);
+            return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Sets the write timestamp.
+    /// </summary>
+    /// <param name="timestamp">The timestamp to store.</param>
+    public void SetWriteTimestamp(DateTimeOffset timestamp)
+        => SetWriteTimestampUtcTicks(timestamp.UtcTicks);
+
+    /// <summary>
     /// Sets the write timestamp as UTC ticks. Called inside the terminal write lock
     /// to ensure atomicity with the backing field write.
     /// </summary>
     /// <param name="utcTicks">The UTC ticks to store.</param>
-    public void SetWriteTimestampUtcTicks(long utcTicks)
+    internal void SetWriteTimestampUtcTicks(long utcTicks)
     {
         var holder = (long[])Subject.Data.GetOrAdd((Name, WriteTimestampKey), static _ => new long[1])!;
         Interlocked.Exchange(ref holder[0], utcTicks);
-    }
-
-    /// <summary>
-    /// Gets the write timestamp as UTC ticks. Returns 0 if no timestamp has been set.
-    /// </summary>
-    public long GetWriteTimestampUtcTicks()
-    {
-        if (Subject.Data.TryGetValue((Name, WriteTimestampKey), out var value) && value is long[] holder)
-        {
-            return Interlocked.Read(ref holder[0]);
-        }
-
-        return 0;
     }
 
     #endregion

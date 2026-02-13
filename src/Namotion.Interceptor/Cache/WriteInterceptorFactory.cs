@@ -25,11 +25,13 @@ internal static class WriteInterceptorFactory<TProperty>
                     innerWriteValue(context.Property.Subject, context.NewValue);
                     context.IsWritten = true;
 
-                    var ticks = context.WriteTimestampUtcTicks;
-                    if (ticks != 0)
+                    var ticks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
+                    if (ticks == 0)
                     {
-                        context.Property.SetWriteTimestampUtcTicks(ticks);
+                        ticks = SubjectChangeContext.GetTimestampFunction().UtcTicks;
                     }
+
+                    context.Property.SetWriteTimestampUtcTicks(ticks);
                 }
                 return context.NewValue;
             }
