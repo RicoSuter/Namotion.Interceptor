@@ -18,14 +18,25 @@ public class ChaosEngine : BackgroundService
     private readonly Random _random = new();
 
     private volatile bool _isDisrupted;
+    private readonly Lock _eventLock = new();
     private readonly List<ChaosEventRecord> _eventHistory = [];
+    private long _chaosEventCount;
     private DateTimeOffset _currentEventStart;
 
     public string TargetName => _targetName;
 
-    public long ChaosEventCount { get; private set; }
+    public long ChaosEventCount => Interlocked.Read(ref _chaosEventCount);
 
-    public IReadOnlyList<ChaosEventRecord> EventHistory => _eventHistory;
+    public IReadOnlyList<ChaosEventRecord> EventHistory
+    {
+        get
+        {
+            lock (_eventLock)
+            {
+                return _eventHistory.ToList();
+            }
+        }
+    }
 
     /// <summary>
     /// When false, the engine skips chaos actions but continues running.
@@ -45,6 +56,8 @@ public class ChaosEngine : BackgroundService
         _coordinator = coordinator;
         _target = target;
         _logger = logger;
+
+        configuration.Validate();
     }
 
     public void SetTarget(IFaultInjectable target)
@@ -54,8 +67,11 @@ public class ChaosEngine : BackgroundService
 
     public void ResetCounters()
     {
-        ChaosEventCount = 0;
-        _eventHistory.Clear();
+        Interlocked.Exchange(ref _chaosEventCount, 0);
+        lock (_eventLock)
+        {
+            _eventHistory.Clear();
+        }
     }
 
     /// <summary>
@@ -104,7 +120,7 @@ public class ChaosEngine : BackgroundService
                 _currentEventStart = DateTimeOffset.UtcNow;
                 _isDisrupted = true;
 
-                await _target.InjectFaultAsync(faultType);
+                await _target.InjectFaultAsync(faultType, stoppingToken);
 
                 // Hold disruption for random duration
                 var duration = RandomTimeSpan(_configuration.DurationMin, _configuration.DurationMax);
@@ -113,9 +129,12 @@ public class ChaosEngine : BackgroundService
                 // Mark recovered
                 _isDisrupted = false;
                 var recoveredAt = DateTimeOffset.UtcNow;
-                _eventHistory.Add(new ChaosEventRecord(faultType, _currentEventStart, recoveredAt));
+                lock (_eventLock)
+                {
+                    _eventHistory.Add(new ChaosEventRecord(faultType, _currentEventStart, recoveredAt));
+                }
                 _logger.LogInformation("Chaos: {Target} recovered from {FaultType}", _targetName, faultType);
-                ChaosEventCount++;
+                Interlocked.Increment(ref _chaosEventCount);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

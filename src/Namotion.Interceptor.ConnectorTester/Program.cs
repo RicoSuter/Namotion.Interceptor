@@ -201,7 +201,6 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
     // Client chaos engine (if configured) - connector resolved after build
     if (clientConfig.Chaos != null)
     {
-        var capturedClientRoot = clientRoot;
         var clientChaosEngine = new ChaosEngine(
             clientConfig.Name,
             clientConfig.Chaos,
@@ -248,6 +247,8 @@ var allConnectors = host.Services.GetServices<IHostedService>()
     .OfType<ISubjectConnector>()
     .ToList();
 
+var startupLogger = host.Services.GetRequiredService<ILogger<VerificationEngine>>();
+
 foreach (var chaosEngine in chaosEngines)
 {
     // Find the connector whose root subject matches one of the participants, then cast to IFaultInjectable
@@ -256,6 +257,12 @@ foreach (var chaosEngine in chaosEngines)
     if (connector is IFaultInjectable faultInjectable)
     {
         chaosEngine.SetTarget(faultInjectable);
+    }
+    else
+    {
+        startupLogger.LogWarning(
+            "ChaosEngine [{Target}] could not be wired to a connector. Chaos will be skipped for this participant.",
+            chaosEngine.TargetName);
     }
 }
 

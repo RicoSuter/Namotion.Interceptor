@@ -11,4 +11,13 @@ public class ChaosConfiguration
     /// Chaos mode: "kill" (hard kill), "disconnect" (soft transport disconnect), or "both" (random choice).
     /// </summary>
     public string Mode { get; set; } = "both";
+
+    public void Validate()
+    {
+        if (IntervalMin > IntervalMax)
+            throw new ArgumentException("Chaos IntervalMin must be <= IntervalMax.");
+
+        if (DurationMin > DurationMax)
+            throw new ArgumentException("Chaos DurationMin must be <= DurationMax.");
+    }
 }

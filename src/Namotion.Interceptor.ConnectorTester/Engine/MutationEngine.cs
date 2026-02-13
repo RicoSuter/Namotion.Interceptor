@@ -23,9 +23,11 @@ public class MutationEngine : BackgroundService
 
     private List<TestNode> _knownNodes = [];
 
+    private long _valueMutationCount;
+
     public string Name => _configuration.Name;
     public int MutationRate => _configuration.MutationRate;
-    public long ValueMutationCount { get; private set; }
+    public long ValueMutationCount => Interlocked.Read(ref _valueMutationCount);
 
     public MutationEngine(
         TestNode root,
@@ -42,7 +44,7 @@ public class MutationEngine : BackgroundService
     /// <summary>Resets counters at the start of each cycle.</summary>
     public void ResetCounters()
     {
-        ValueMutationCount = 0;
+        Interlocked.Exchange(ref _valueMutationCount, 0);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -60,7 +62,7 @@ public class MutationEngine : BackgroundService
             {
                 _coordinator.WaitIfPaused(stoppingToken);
                 PerformValueMutation();
-                ValueMutationCount++;
+                Interlocked.Increment(ref _valueMutationCount);
 
                 if (delayMilliseconds > 0)
                 {
