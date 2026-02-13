@@ -318,22 +318,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                         // After SDK reconnection with subscription transfer, perform a full state read
                         // to ensure eventual consistency. Subscription notifications alone may be incomplete
                         // (notification queue overflow, timing gaps, subscription lifetime expiration).
-                        if (sessionManager.NeedsFullStateSync)
-                        {
-                            _logger.LogInformation("Performing full state sync after SDK reconnection...");
-                            propertyWriter.StartBuffering();
-                            try
-                            {
-                                await propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
-                                sessionManager.ClearFullStateSyncFlag();
-                                _logger.LogInformation("Full state sync completed successfully after SDK reconnection.");
-                            }
-                            catch (Exception ex)
-                            {
-                                _logger.LogError(ex, "Full state sync failed after SDK reconnection. Clearing session for manual reconnection.");
-                                await sessionManager.ClearSessionAsync(stoppingToken).ConfigureAwait(false);
-                            }
-                        }
+                        await sessionManager.PerformFullStateSyncIfNeededAsync(stoppingToken).ConfigureAwait(false);
 
                         await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(
                             sessionManager.Subscriptions,
