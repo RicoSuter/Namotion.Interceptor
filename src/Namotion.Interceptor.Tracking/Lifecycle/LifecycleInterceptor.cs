@@ -267,10 +267,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         var currentValue = context.CurrentValue;
+        context.WriteTimestampUtcTicks = SubjectChangeContext.Current.ChangedTimestamp.UtcTicks;
         next(ref context);
         var newValue = context.GetFinalValue();
-
-        context.Property.SetWriteTimestamp(SubjectChangeContext.Current.ChangedTimestamp);
 
         if (typeof(TProperty).IsValueType || typeof(TProperty) == typeof(string))
         {
