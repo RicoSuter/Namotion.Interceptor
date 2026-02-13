@@ -186,17 +186,20 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
                 {
                     _server = server;
 
+                    // Create the ChangeQueueProcessor (and its subscription) BEFORE starting the server.
+                    // This ensures property changes during OPC UA node creation are captured in the queue
+                    // and not lost in the gap between node creation and processing start.
+                    using var changeQueueProcessor = new ChangeQueueProcessor(
+                        source: this, _context,
+                        propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
+                        _configuration.BufferTime, _logger);
+
                     await application.CheckApplicationInstanceCertificatesAsync(true, ct: linkedToken).ConfigureAwait(false);
                     await application.StartAsync(server).ConfigureAwait(false);
 
                     _startTime = DateTimeOffset.UtcNow;
                     _consecutiveFailures = 0;
                     _lastError = null;
-
-                    using var changeQueueProcessor = new ChangeQueueProcessor(
-                        source: this, _context,
-                        propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
-                        _configuration.BufferTime, _logger);
 
                     await changeQueueProcessor.ProcessAsync(linkedToken);
                 }
