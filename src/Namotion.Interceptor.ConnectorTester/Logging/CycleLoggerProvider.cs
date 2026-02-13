@@ -8,6 +8,8 @@ namespace Namotion.Interceptor.ConnectorTester.Logging;
 /// </summary>
 public sealed class CycleLoggerProvider : ILoggerProvider
 {
+    private const int MaxPassingLogFiles = 50;
+
     private readonly ConcurrentDictionary<string, CycleLogger> _loggers = new();
     private readonly string _logDirectory;
     private readonly Lock _fileLock = new();
@@ -67,6 +69,8 @@ public sealed class CycleLoggerProvider : ILoggerProvider
 
             _currentFilePath = null;
         }
+
+        CleanupOldLogFiles();
     }
 
     public ILogger CreateLogger(string categoryName) =>
@@ -85,6 +89,37 @@ public sealed class CycleLoggerProvider : ILoggerProvider
         lock (_fileLock)
         {
             _currentWriter?.WriteLine(message);
+        }
+    }
+
+    /// <summary>
+    /// Deletes old passing log files, keeping only the most recent ones.
+    /// FAIL logs are always preserved for investigation.
+    /// </summary>
+    private void CleanupOldLogFiles()
+    {
+        try
+        {
+            var passingLogs = Directory.GetFiles(_logDirectory, "cycle-*-pass-*.log")
+                .OrderByDescending(File.GetLastWriteTimeUtc)
+                .Skip(MaxPassingLogFiles)
+                .ToList();
+
+            foreach (var file in passingLogs)
+            {
+                try
+                {
+                    File.Delete(file);
+                }
+                catch
+                {
+                    // Best-effort cleanup
+                }
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup
         }
     }
 
