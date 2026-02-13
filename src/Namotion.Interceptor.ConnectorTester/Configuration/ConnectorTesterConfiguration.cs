@@ -17,4 +17,6 @@ public class ConnectorTesterConfiguration
     };
 
     public List<ParticipantConfiguration> Clients { get; set; } = [];
+
+    public List<ChaosProfileConfiguration> ChaosProfiles { get; set; } = [];
 }

@@ -79,6 +79,27 @@ public class VerificationEngine : BackgroundService
             _logger.LogInformation("  {Name}: {Rate} mutations/sec", engine.Name, engine.MutationRate);
         }
 
+        if (_configuration.ChaosProfiles.Count > 0)
+        {
+            _logger.LogInformation("  Chaos profiles ({Count}): {Profiles}",
+                _configuration.ChaosProfiles.Count,
+                string.Join(" -> ", _configuration.ChaosProfiles.Select(p => p.Name)));
+        }
+
+        // Validate chaos profile participant names
+        foreach (var profile in _configuration.ChaosProfiles)
+        {
+            foreach (var participant in profile.Participants)
+            {
+                if (!_chaosEngines.Any(e => e.TargetName == participant))
+                {
+                    _logger.LogWarning(
+                        "Chaos profile '{Profile}' references '{Participant}' which has no chaos engine (no Chaos config or not a known participant). It will be ignored.",
+                        profile.Name, participant);
+                }
+            }
+        }
+
         while (!stoppingToken.IsCancellationRequested)
         {
             _cycleNumber++;
@@ -89,14 +110,17 @@ public class VerificationEngine : BackgroundService
             foreach (var engine in _chaosEngines)
                 engine.ResetCounters();
 
+            var activeProfileName = ApplyChaosProfile();
+
             _cycleLoggerProvider?.StartNewCycle(_cycleNumber);
 
             var cycleStopwatch = Stopwatch.StartNew();
 
             // 1. Mutate phase
             _coordinator.Resume();
-            _logger.LogInformation("=== Cycle {Cycle}: Mutate phase started ({Duration}) ===",
-                _cycleNumber, _configuration.MutatePhaseDuration);
+            var profileLabel = activeProfileName != null ? $" [profile: {activeProfileName}]" : "";
+            _logger.LogInformation("=== Cycle {Cycle}: Mutate phase started ({Duration}){Profile} ===",
+                _cycleNumber, _configuration.MutatePhaseDuration, profileLabel);
 
             await Task.Delay(_configuration.MutatePhaseDuration, stoppingToken);
 
@@ -248,5 +272,23 @@ public class VerificationEngine : BackgroundService
                     engine.TargetName, record.Action, record.DisruptedAt.LocalDateTime, record.Duration.TotalSeconds);
             }
         }
+    }
+
+    private string? ApplyChaosProfile()
+    {
+        var profiles = _configuration.ChaosProfiles;
+        if (profiles.Count == 0)
+        {
+            return null;
+        }
+
+        var profile = profiles[(_cycleNumber - 1) % profiles.Count];
+
+        foreach (var engine in _chaosEngines)
+        {
+            engine.Enabled = profile.Participants.Contains(engine.TargetName);
+        }
+
+        return profile.Name;
     }
 }
