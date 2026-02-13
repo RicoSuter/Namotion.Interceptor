@@ -260,10 +260,11 @@ foreach (var chaosEngine in chaosEngines)
     }
 }
 
+var verificationEngine = host.Services.GetRequiredService<VerificationEngine>();
+
 await host.RunAsync();
 
 // Set non-zero exit code on convergence failure
-var verificationEngine = host.Services.GetRequiredService<VerificationEngine>();
 if (verificationEngine.Failed)
 {
     Environment.ExitCode = 1;
