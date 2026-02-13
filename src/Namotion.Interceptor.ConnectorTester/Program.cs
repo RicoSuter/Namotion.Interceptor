@@ -172,7 +172,6 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
                         ValueConverter = new OpcUaValueConverter(),
                         SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
                         TelemetryContext = telemetryContext,
-                        BufferTime = TimeSpan.FromMilliseconds(100),
                     };
                 });
             break;
