@@ -17,6 +17,7 @@ namespace Namotion.Interceptor.OpcUa.Client.Connection;
 internal sealed class SessionManager : IAsyncDisposable, IDisposable
 {
     private readonly OpcUaSubjectClientSource _source;
+    private readonly SubjectPropertyWriter _propertyWriter;
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
 
@@ -46,18 +47,31 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         (Volatile.Read(ref _session)?.Connected ?? false);
 
     /// <summary>
-    /// Gets a value indicating whether the session needs a full state read after SDK reconnection.
-    /// Set by <see cref="OnReconnectComplete"/> when subscription transfer succeeds.
-    /// Cleared by the health check loop after <see cref="SubjectPropertyWriter.LoadInitialStateAndResumeAsync"/>.
+    /// Performs a full state synchronization after SDK reconnection if needed.
+    /// Buffers incoming notifications, reads all property values from the server,
+    /// replays the buffer, and resumes normal operation.
+    /// On failure, clears the session to trigger manual reconnection via the health check loop.
     /// </summary>
-    public bool NeedsFullStateSync => Volatile.Read(ref _needsFullStateSync) == 1;
-
-    /// <summary>
-    /// Clears the full state sync flag after the health check has performed the full state read.
-    /// </summary>
-    public void ClearFullStateSyncFlag()
+    public async Task PerformFullStateSyncIfNeededAsync(CancellationToken cancellationToken)
     {
-        Interlocked.Exchange(ref _needsFullStateSync, 0);
+        if (Volatile.Read(ref _needsFullStateSync) != 1)
+        {
+            return;
+        }
+
+        _logger.LogInformation("Performing full state sync after SDK reconnection...");
+        _propertyWriter.StartBuffering();
+        try
+        {
+            await _propertyWriter.LoadInitialStateAndResumeAsync(cancellationToken).ConfigureAwait(false);
+            Interlocked.Exchange(ref _needsFullStateSync, 0);
+            _logger.LogInformation("Full state sync completed successfully after SDK reconnection.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Full state sync failed after SDK reconnection. Clearing session for manual reconnection.");
+            await ClearSessionAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -105,6 +119,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     public SessionManager(OpcUaSubjectClientSource source, SubjectPropertyWriter propertyWriter, OpcUaClientConfiguration configuration, ILogger logger)
     {
         _source = source;
+        _propertyWriter = propertyWriter;
         _logger = logger;
         _configuration = configuration;
         _reconnectHandler = new SessionReconnectHandler(configuration.TelemetryContext, false, (int)configuration.ReconnectHandlerTimeout.TotalMilliseconds);
