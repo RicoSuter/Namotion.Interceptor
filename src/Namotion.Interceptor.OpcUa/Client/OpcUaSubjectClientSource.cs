@@ -708,7 +708,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 await KillSessionAsync().ConfigureAwait(false);
                 break;
             case FaultType.Disconnect:
-                DisconnectTransportAsync();
+                await DisconnectTransportAsync(cancellationToken).ConfigureAwait(false);
                 break;
         }
     }
@@ -735,26 +735,39 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             {
                 // No manual reconnection in progress — clear session directly.
                 await sessionManager.ClearSessionAsync(CancellationToken.None).ConfigureAwait(false);
+
+                // If ReconnectSessionAsync started between our _reconnectCts check and ClearSessionAsync,
+                // cancel it to speed up recovery instead of waiting for it to fail naturally.
+                var lateCts = _reconnectCts;
+                if (lateCts is not null)
+                {
+                    try { await lateCts.CancelAsync(); }
+                    catch (ObjectDisposedException) { /* CTS disposed between check and cancel */ }
+                }
             }
         }
     }
 
-    private void DisconnectTransportAsync()
+    private async Task DisconnectTransportAsync(CancellationToken cancellationToken)
     {
         var sessionManager = _sessionManager;
         if (sessionManager != null)
         {
             if (sessionManager.IsReconnecting)
             {
-                // Manual reconnection in progress — skip the disconnect.
-                // Killing the transport now would destroy the session that ReconnectSessionAsync
-                // just created, causing the reconnection to fail and triggering a retry loop.
+                // Reconnection in progress — transport disconnect would destroy the session
+                // being set up, causing the reconnection to fail. Skip is safe because the
+                // reconnection itself will establish a fresh connection.
                 _logger.LogDebug("Chaos: skipping disconnect during active reconnection.");
                 return;
             }
 
             _logger.LogWarning("Chaos: disconnecting OPC UA client transport.");
-            sessionManager.DisconnectTransport();
+
+            // Note: TOCTOU — reconnection could start between the IsReconnecting check and
+            // DisconnectTransportAsync(). This is benign: the transport close triggers keep-alive
+            // failure on the new session, which is caught and retried by the health check loop.
+            await sessionManager.DisconnectTransportAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 

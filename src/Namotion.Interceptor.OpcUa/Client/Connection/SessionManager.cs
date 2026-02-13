@@ -536,12 +536,12 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// This triggers keep-alive failure -> OnKeepAlive -> SessionReconnectHandler.BeginReconnect,
     /// exercising the SDK's session preservation/transfer reconnection path.
     /// </summary>
-    internal void DisconnectTransport()
+    internal async Task DisconnectTransportAsync(CancellationToken cancellationToken)
     {
         var session = Volatile.Read(ref _session);
         if (session is not null)
         {
-            KillTransportChannel(session);
+            await CloseTransportChannelAsync(session, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -568,9 +568,32 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     }
 
     /// <summary>
-    /// Kills a session's transport channel immediately.
-    /// Protected against the SDK's NullableTransportChannel throwing ServiceResultException
-    /// when the session was disposed (e.g., by the reconnect handler's async work continuing after Dispose).
+    /// Closes a session's transport channel asynchronously.
+    /// Used by fault injection (Disconnect) to avoid blocking the calling thread.
+    /// Falls back to synchronous Dispose if CloseAsync hangs.
+    /// </summary>
+    private async Task CloseTransportChannelAsync(Session session, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var channel = session.NullableTransportChannel;
+            if (channel is not null)
+            {
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+                await channel.CloseAsync(timeoutCts.Token).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error closing transport channel, falling back to synchronous dispose.");
+            KillTransportChannel(session);
+        }
+    }
+
+    /// <summary>
+    /// Kills a session's transport channel immediately (synchronous).
+    /// Used for fast failover during reconnection — makes in-flight operations fail fast.
     /// </summary>
     private void KillTransportChannel(Session session)
     {
@@ -618,7 +641,10 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             return;
         }
 
-        try { _reconnectHandler.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing reconnect handler."); }
+        lock (_reconnectingLock)
+        {
+            try { _reconnectHandler.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing reconnect handler."); }
+        }
         if (ReadAfterWriteManager is not null)
         {
             try { await ReadAfterWriteManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing read-after-write manager."); }

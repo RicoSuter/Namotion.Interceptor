@@ -1,6 +1,4 @@
-using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Mapping;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -283,7 +281,7 @@ public class OpcUaClientConfiguration
     /// Gets or sets the operation timeout for OPC UA requests.
     /// This determines how long to wait for a response before timing out.
     /// Shorter timeouts allow faster disconnection detection but may cause false positives on slow networks.
-    /// Default is 60 seconds.
+    /// Default is 30 seconds.
     /// </summary>
     public TimeSpan OperationTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
@@ -325,7 +323,7 @@ public class OpcUaClientConfiguration
     /// Maps C# properties to OPC UA nodes.
     /// Defaults to composite of PathProviderOpcUaNodeMapper (with "opc" source) and AttributeOpcUaNodeMapper.
     /// </summary>
-    public IOpcUaNodeMapper NodeMapper { get; init; } = DefaultNodeMapper;
+    public IOpcUaNodeMapper NodeMapper { get; set; } = DefaultNodeMapper;
 
     /// <summary>
     /// Gets or sets the timeout for session disposal during shutdown.
