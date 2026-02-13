@@ -510,7 +510,7 @@ When the connection drops, the OPC UA SDK's `SessionReconnectHandler` attempts t
 
 1. Keep-alive detects dead connection and triggers the SDK reconnect handler
 2. SDK creates a new session and transfers subscriptions via `TransferSubscriptions`
-3. `OnReconnectComplete` accepts the new session and sets a `NeedsInitialization` flag
+3. `OnReconnectComplete` accepts the new session and sets a `NeedsFullStateSync` flag
 4. The health check loop detects the flag on the next iteration:
    - Starts buffering incoming subscription notifications
    - Reads ALL property values from the server

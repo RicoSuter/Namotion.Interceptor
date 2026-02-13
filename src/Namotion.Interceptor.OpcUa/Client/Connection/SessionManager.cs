@@ -27,7 +27,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private readonly object _reconnectingLock = new();
 
     private int _isReconnecting; // 0 = false, 1 = true (thread-safe via Interlocked)
-    private int _needsInitialization; // 0 = false, 1 = true (thread-safe via Interlocked)
+    private int _needsFullStateSync; // 0 = false, 1 = true (thread-safe via Interlocked)
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     // Enqueued by SDK reconnection callbacks (sync), drained by health check loop via DisposePendingSessionsAsync (async).
     private readonly ConcurrentQueue<Session> _sessionsToDispose = new();
@@ -50,14 +50,14 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// Set by <see cref="OnReconnectComplete"/> when subscription transfer succeeds.
     /// Cleared by the health check loop after <see cref="SubjectPropertyWriter.LoadInitialStateAndResumeAsync"/>.
     /// </summary>
-    public bool NeedsInitialization => Volatile.Read(ref _needsInitialization) == 1;
+    public bool NeedsFullStateSync => Volatile.Read(ref _needsFullStateSync) == 1;
 
     /// <summary>
-    /// Clears the initialization flag after the health check has performed the full state read.
+    /// Clears the full state sync flag after the health check has performed the full state read.
     /// </summary>
-    public void ClearInitializationFlag()
+    public void ClearFullStateSyncFlag()
     {
-        Interlocked.Exchange(ref _needsInitialization, 0);
+        Interlocked.Exchange(ref _needsFullStateSync, 0);
     }
 
     /// <summary>
@@ -365,7 +365,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                     // We don't rely on subscription notifications alone because they can be
                     // incomplete (notification queue overflow, timing gaps between address space
                     // creation and ChangeQueueProcessor subscription on the server).
-                    Interlocked.Exchange(ref _needsInitialization, 1);
+                    Interlocked.Exchange(ref _needsFullStateSync, 1);
 
                     _source.RecordReconnectionSuccess();
 
@@ -489,7 +489,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 (int)_configuration.ReconnectHandlerTimeout.TotalMilliseconds);
 
             Interlocked.Exchange(ref _isReconnecting, 0);
-            Interlocked.Exchange(ref _needsInitialization, 0);
+            Interlocked.Exchange(ref _needsFullStateSync, 0);
 
             // Read and clear session inside lock to prevent race with OnReconnectComplete
             sessionToDispose = Volatile.Read(ref _session);
@@ -548,7 +548,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         }
 
         Volatile.Write(ref _session, null);
-        Interlocked.Exchange(ref _needsInitialization, 0);
+        Interlocked.Exchange(ref _needsFullStateSync, 0);
         ReadAfterWriteManager?.ClearPendingReads();
     }
 
