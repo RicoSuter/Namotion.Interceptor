@@ -33,9 +33,9 @@ Each test cycle has two phases:
 
 1. **Mutate phase**: All MutationEngines and ChaosEngines run concurrently. Engines randomly mutate value properties (`StringValue`, `DecimalValue`, `IntValue`) on TestNode objects across the graph (1 root + 20 collection items + 10 dictionary items = 31 objects per participant).
 
-2. **Converge phase**: The VerificationEngine pauses all engines via the TestCycleCoordinator, recovers any active chaos disruptions, waits a grace period (20s for OPC UA) for reconnection, then polls snapshots every second. Each snapshot serializes the full object graph using `SubjectUpdate.CreateCompleteUpdate()`. Structural property timestamps (Collection, Dictionary, Object) are stripped since they represent local creation time, not synced state. Value property timestamps are preserved and must converge.
+2. **Converge phase**: The VerificationEngine pauses all engines via the TestCycleCoordinator, recovers any active chaos disruptions, waits a grace period (20s for OPC UA) for reconnection, then polls snapshots every 5 seconds. Each snapshot serializes the full object graph using `SubjectUpdate.CreateCompleteUpdate()`. Structural property timestamps (Collection, Dictionary, Object) are stripped since they represent local creation time, not synced state. Value property timestamps are preserved and must converge.
 
-A cycle **passes** when all participant snapshots are identical JSON. It **fails** if the convergence timeout expires. On failure, the process logs snapshot diffs and exits with code 1.
+A cycle **passes** when all participant snapshots are identical JSON. It **fails** if the convergence timeout expires. On failure, the process logs snapshot diffs, gracefully shuts down all hosted services, and exits with code 1.
 
 ### Chaos via IChaosTarget
 
@@ -120,7 +120,7 @@ logs/
   cycle-003-FAIL-2026-02-08T22-35-00.log
 ```
 
-Files are created as `pending` and renamed to `pass` or `FAIL` on cycle completion. Each file contains all log output (INFO+) for that cycle with timestamps.
+Files are created as `pending` and renamed to `pass` or `FAIL` on cycle completion. Each file contains all log output (INFO+) for that cycle with timestamps. To prevent disk exhaustion during long-running tests, only the 50 most recent passing log files are kept. FAIL logs are always preserved.
 
 **Use the log files to analyze results and diagnose problems.** On failure, the `FAIL` log contains full snapshot diffs showing exactly which participants diverged and what their state was. Look for:
 - Chaos event timing (`Chaos: force-killing ...`) to correlate disruptions with convergence delays.
@@ -208,6 +208,76 @@ Chaos intervals must be shorter than `MutatePhaseDuration` to ensure disruptions
 - Set `IntervalMax` to at most half of `MutatePhaseDuration` to guarantee at least one event per cycle.
 - Each chaos event takes `Interval + Duration` time, so account for both when calculating expected events per cycle.
 - Server chaos is more impactful (affects all clients) so can use longer intervals. Client chaos is local and can be more frequent.
+
+## Failure Scenario Coverage
+
+### Covered (OPC UA)
+
+| Scenario | Kill | Disconnect | Recovery Mechanism |
+|----------|------|------------|-------------------|
+| Abrupt server crash | Server loop cancelled, TCP listeners closed (RST to clients) | Delegates to Kill | Background loop auto-restarts with exponential backoff (1s-30s + jitter) |
+| Abrupt client crash | Session disposed without CloseSession RPC | Transport channel disposed, session preserved | Health check detects missing session, triggers full reconnection |
+| Network partition | N/A | Client transport disposed, keep-alive detects within 5-10s | SDK `SessionReconnectHandler.BeginReconnect` with subscription transfer |
+| Server restart (clean state) | Full server restart, new node manager | N/A | Client subscription transfer fails, falls back to full state reload |
+| Session stall / hung reconnect | N/A | N/A | Stall detection after 30s forces SDK handler reset, triggers manual reconnection |
+| Subscription creation failure | N/A | N/A | `SubscriptionHealthMonitor` retries failed items every 5s, falls back to polling |
+| Port already in use on restart | N/A | N/A | Retried with exponential backoff |
+| Resource exhaustion (polling) | N/A | N/A | Circuit breaker (5 failures, 60s cooldown) |
+| Concurrent server + client chaos | Both engines run independently, overlapping disruptions possible | Same | Each connector recovers independently |
+| Bidirectional mutations during chaos | Server and clients mutate concurrently during disruptions | Same | WriteRetryQueue buffers outbound writes, full state sync on reconnect |
+
+### Not Covered
+
+| Scenario | Why Not Covered | Production Impact |
+|----------|-----------------|-------------------|
+| Partial network failure (slow/lossy connections) | Keep-alive uses binary pass/fail detection | Low - TCP keepalive settings at OS level handle this |
+| Certificate expiry mid-session | No certificate rotation mechanism | Low for tests, relevant for >6 month production deployments |
+| Server returning persistent error status codes | Polling ignores some error codes | Low - circuit breaker limits impact |
+| Out-of-order or duplicate notifications | No deduplication logic | Very low - OPC UA SDK handles within subscriptions |
+| Notification duplication after subscription transfer | Full state read overwrites stale values | Low - brief inconsistency only |
+| Server overload / adaptive backpressure | No response-time-based throttling | Low - not a connectivity failure |
+| Flapping connections (rapid up/down cycles) | Backoff resets on each success | Low - stall detection provides upper bound |
+
+### What the Tester Detects
+
+The snapshot comparison **reliably detects**:
+- Value divergence between any participants
+- Collection/dictionary structural mismatches
+- Object reference integrity breaks
+- Data loss that isn't recovered within the convergence window
+
+The snapshot comparison **does not detect** (by design):
+- Transient state changes lost to deduplication (ChangeQueueProcessor keeps only last value per property within its 8ms buffer window)
+- Timestamp accuracy for same-value updates (equality interceptor suppresses writes when value is unchanged, even if timestamp differs)
+- Temporal ordering of changes (only final converged state is checked, not causality)
+- Multi-property atomicity (no transaction support; A and B may converge independently)
+
+The MutationEngine's global counter ensures every mutation produces a unique value, which prevents the equality interceptor from ever suppressing test mutations. This makes the tester resilient to the same-value suppression issue, though that issue could still affect production workloads.
+
+## Long-Running Tests
+
+The tester is designed to run continuously for extended periods (days/weeks). Key features for long-running viability:
+
+- **Log rotation**: Only the 50 most recent passing log files are kept. FAIL logs are always preserved.
+- **Graceful shutdown on failure**: On convergence failure, the host shuts down cleanly (flushing logs, disposing connectors) before setting exit code 1.
+- **Reduced GC pressure**: Snapshot polling uses a 5-second interval to minimize allocation churn from JSON serialization.
+- **Bounded retry queues**: `WriteRetryQueue` uses a ring buffer (default 1000 items) to prevent unbounded memory growth during long disconnections.
+
+For multi-day runs, consider using longer cycle durations and lower mutation rates to reduce overall resource consumption:
+
+```json
+{
+  "ConnectorTester": {
+    "MutatePhaseDuration": "00:02:00",
+    "ConvergenceTimeout": "00:02:00",
+    "Server": { "MutationRate": 500 },
+    "Clients": [
+      { "Name": "stable-client", "MutationRate": 25 },
+      { "Name": "flaky-client", "MutationRate": 25 }
+    ]
+  }
+}
+```
 
 ## Adding a New Connector
 

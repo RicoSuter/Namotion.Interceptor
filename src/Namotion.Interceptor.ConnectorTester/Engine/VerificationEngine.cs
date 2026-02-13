@@ -13,6 +13,8 @@ namespace Namotion.Interceptor.ConnectorTester.Engine;
 /// </summary>
 public class VerificationEngine : BackgroundService
 {
+    private static readonly TimeSpan SnapshotPollInterval = TimeSpan.FromSeconds(5);
+
     private static readonly JsonSerializerOptions SnapshotJsonOptions = new()
     {
         WriteIndented = false
@@ -24,9 +26,16 @@ public class VerificationEngine : BackgroundService
     private readonly List<MutationEngine> _mutationEngines;
     private readonly List<ChaosEngine> _chaosEngines;
     private readonly CycleLoggerProvider? _cycleLoggerProvider;
+    private readonly IHostApplicationLifetime _applicationLifetime;
     private readonly ILogger _logger;
 
     private int _cycleNumber;
+    private bool _failed;
+
+    /// <summary>
+    /// Whether the last cycle failed to converge. Used to set the process exit code.
+    /// </summary>
+    public bool Failed => _failed;
 
     public VerificationEngine(
         ConnectorTesterConfiguration configuration,
@@ -35,6 +44,7 @@ public class VerificationEngine : BackgroundService
         List<MutationEngine> mutationEngines,
         List<ChaosEngine> chaosEngines,
         CycleLoggerProvider? cycleLoggerProvider,
+        IHostApplicationLifetime applicationLifetime,
         ILogger logger)
     {
         _configuration = configuration;
@@ -43,6 +53,7 @@ public class VerificationEngine : BackgroundService
         _mutationEngines = mutationEngines;
         _chaosEngines = chaosEngines;
         _cycleLoggerProvider = cycleLoggerProvider;
+        _applicationLifetime = applicationLifetime;
         _logger = logger;
     }
 
@@ -107,9 +118,9 @@ public class VerificationEngine : BackgroundService
             // 3. Poll-compare snapshots
             var convergeStopwatch = Stopwatch.StartNew();
             var converged = false;
-            var convergenceTimeoutSeconds = (int)_configuration.ConvergenceTimeout.TotalSeconds;
+            var maxPolls = (int)(_configuration.ConvergenceTimeout / SnapshotPollInterval);
 
-            for (var poll = 0; poll < convergenceTimeoutSeconds; poll++)
+            for (var poll = 0; poll < maxPolls; poll++)
             {
                 var snapshots = _participants
                     .Select(participant => (
@@ -133,7 +144,7 @@ public class VerificationEngine : BackgroundService
                     break;
                 }
 
-                await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+                await Task.Delay(SnapshotPollInterval, stoppingToken);
             }
 
             if (!converged)
@@ -171,7 +182,9 @@ public class VerificationEngine : BackgroundService
                 WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, "FAIL");
                 _cycleLoggerProvider?.FinishCycle(_cycleNumber, false);
 
-                Environment.Exit(1);
+                _failed = true;
+                _applicationLifetime.StopApplication();
+                return;
             }
         }
     }

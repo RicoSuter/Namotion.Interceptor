@@ -231,14 +231,17 @@ if (configuration.Server.Chaos != null)
 }
 
 // --- Verification Engine ---
-builder.Services.AddSingleton<IHostedService>(sp => new VerificationEngine(
+builder.Services.AddSingleton(sp => new VerificationEngine(
     configuration,
     coordinator,
     participants,
     mutationEngines,
     chaosEngines,
     cycleLoggerProvider,
+    sp.GetRequiredService<IHostApplicationLifetime>(),
     sp.GetRequiredService<ILogger<VerificationEngine>>()));
+
+builder.Services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<VerificationEngine>());
 
 // Build and wire up connectors for chaos engines
 var host = builder.Build();
@@ -259,3 +262,10 @@ foreach (var chaosEngine in chaosEngines)
 }
 
 await host.RunAsync();
+
+// Set non-zero exit code on convergence failure
+var verificationEngine = host.Services.GetRequiredService<VerificationEngine>();
+if (verificationEngine.Failed)
+{
+    Environment.ExitCode = 1;
+}

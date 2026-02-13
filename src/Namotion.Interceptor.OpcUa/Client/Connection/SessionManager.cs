@@ -241,8 +241,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// </summary>
     private void OnKeepAlive(ISession sender, KeepAliveEventArgs e)
     {
-        if (ServiceResult.IsGood(e.Status) ||
-            e.CurrentState is not (ServerState.Unknown or ServerState.Failed))
+        if (ServiceResult.IsGood(e.Status))
         {
             return;
         }
@@ -337,18 +336,6 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             }
 
             var oldSession = Volatile.Read(ref _session);
-            bool hasTransport;
-            try
-            {
-                hasTransport = reconnectedSession.NullableTransportChannel is not null;
-            }
-            catch
-            {
-                // NullableTransportChannel throws ServiceResultException if session was disposed
-                // but channel is non-null (SDK considers this a bug in caller code).
-                // This can happen if the handler's async work disposed the session.
-                hasTransport = false;
-            }
 
             if (!ReferenceEquals(oldSession, reconnectedSession))
             {
@@ -534,7 +521,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// This triggers keep-alive failure -> OnKeepAlive -> SessionReconnectHandler.BeginReconnect,
     /// exercising the SDK's session preservation/transfer reconnection path.
     /// </summary>
-    public void DisconnectTransport()
+    internal void DisconnectTransport()
     {
         var session = Volatile.Read(ref _session);
         if (session is not null)
@@ -589,9 +576,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         {
             // Timeout prevents hang when the session's TCP connection is dead.
             // CloseAsync sends a CloseSession request to the server; on a dead connection
-            // it can wait for the full operation timeout (60s) before failing.
+            // it can wait for the full operation timeout before failing.
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+            timeoutCts.CancelAfter(_configuration.SessionDisposalTimeout);
             await session.CloseAsync(timeoutCts.Token).ConfigureAwait(false);
             _logger.LogDebug("OPC UA session closed successfully (id={SessionId}).", session.SessionId);
         }

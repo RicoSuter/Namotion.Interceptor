@@ -48,40 +48,6 @@ public sealed class SubjectPropertyWriter
     }
 
     /// <summary>
-    /// Replays all buffered updates and resumes immediate write mode.
-    /// Use this after SDK reconnection with subscription transfer, where the subscription
-    /// mechanism handles state synchronization and a full state read is not needed.
-    /// </summary>
-    public void ReplayBufferAndResume()
-    {
-        lock (_lock)
-        {
-            ReplayBufferAndResumeWithoutLock();
-        }
-    }
-
-    private void ReplayBufferAndResumeWithoutLock()
-    {
-        var updates = _updates;
-        _updates = null;
-
-        if (updates is not null)
-        {
-            foreach (var action in updates)
-            {
-                try
-                {
-                    action();
-                }
-                catch (Exception e)
-                {
-                    _logger.LogError(e, "Failed to apply subject update.");
-                }
-            }
-        }
-    }
-
-    /// <summary>
     /// Completes initialization by flushing pending writes, loading initial state from the source,
     /// and replaying all buffered updates. This ensures zero data loss during the initialization period.
     /// </summary>
@@ -105,7 +71,29 @@ public sealed class SubjectPropertyWriter
         lock (_lock)
         {
             applyAction?.Invoke();
-            ReplayBufferAndResumeWithoutLock();
+
+            // Replay previously buffered updates
+            var updates = _updates;
+            if (updates is null)
+            {
+                // Already replayed by a concurrent/previous call (race between automatic and manual reconnection).
+                // This is safe - it means another reconnection cycle already loaded state and replayed updates.
+                _logger.LogDebug("LoadInitialStateAndResumeAsync called but updates already replayed by concurrent reconnection.");
+                return;
+            }
+
+            _updates = null;
+            foreach (var action in updates)
+            {
+                try
+                {
+                    action();
+                }
+                catch (Exception e)
+                {
+                    _logger.LogError(e, "Failed to apply subject update.");
+                }
+            }
         }
     }
 
