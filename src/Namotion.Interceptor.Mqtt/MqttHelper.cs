@@ -8,7 +8,8 @@ internal static class MqttHelper
 {
     public static DateTimeOffset? ExtractSourceTimestamp(
         IReadOnlyCollection<MqttUserProperty>? userProperties,
-        string? timestampPropertyName)
+        string? timestampPropertyName,
+        Func<string, DateTimeOffset?> deserializer)
     {
         if (timestampPropertyName is null || userProperties is null)
         {
@@ -17,9 +18,9 @@ internal static class MqttHelper
 
         foreach (var prop in userProperties)
         {
-            if (prop.Name == timestampPropertyName && long.TryParse(prop.Value, out var unixMs))
+            if (prop.Name == timestampPropertyName)
             {
-                return DateTimeOffset.FromUnixTimeMilliseconds(unixMs);
+                return deserializer(prop.Value);
             }
         }
 

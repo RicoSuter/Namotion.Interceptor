@@ -19,6 +19,25 @@ internal class OpcUaSubjectServer : StandardServer
         AddNodeManager(_nodeManagerFactory);
     }
 
+    /// <summary>
+    /// Closes all transport listeners to stop accepting new connections.
+    /// Must be called before closing sessions during shutdown to prevent
+    /// clients from reconnecting while the server is shutting down.
+    /// </summary>
+    public void CloseTransportListeners()
+    {
+        foreach (var listener in TransportListeners)
+        {
+            try { listener.Close(); } catch (Exception ex) { _logger.LogDebug(ex, "Error closing transport listener."); }
+        }
+    }
+
+    /// <summary>
+    /// Gets the node manager's lock object for thread-safe node updates.
+    /// This is the same lock used by the SDK for Read/Write operations.
+    /// </summary>
+    internal object? NodeManagerLock => _nodeManagerFactory.NodeManager?.Lock;
+
     public void ClearPropertyData()
     {
         _nodeManagerFactory.NodeManager?.ClearPropertyData();

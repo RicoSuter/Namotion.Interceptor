@@ -10,7 +10,7 @@ using Opc.Ua.Configuration;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
-internal class OpcUaSubjectServerBackgroundService : BackgroundService
+internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubjectConnector, IFaultInjectable
 {
     internal const string OpcVariableKey = "OpcVariable";
 
@@ -21,10 +21,26 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
 
     private LifecycleInterceptor? _lifecycleInterceptor;
     private volatile OpcUaSubjectServer? _server;
+    private volatile bool _isForceKill;
+    private volatile CancellationTokenSource? _forceKillCts;
     private int _consecutiveFailures;
     private OpcUaServerDiagnostics? _diagnostics;
     private DateTimeOffset? _startTime;
     private Exception? _lastError;
+
+    /// <inheritdoc />
+    public IInterceptorSubject RootSubject => _subject;
+
+    /// <inheritdoc />
+    Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
+    {
+        // For a multi-connection server, disconnecting transport = killing the server.
+        // There's no meaningful "soft disconnect" when the server has multiple clients.
+        _isForceKill = true;
+        try { _forceKillCts?.Cancel(); }
+        catch (ObjectDisposedException) { /* CTS disposed between loop iterations */ }
+        return Task.CompletedTask;
+    }
 
     /// <summary>
     /// Gets diagnostic information about the server state.
@@ -74,26 +90,37 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
 
     private ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        var currentInstance = _server?.CurrentInstance;
+        var server = _server;
+        var currentInstance = server?.CurrentInstance;
         if (currentInstance == null)
         {
             return ValueTask.CompletedTask;
         }
 
-        var span = changes.Span;
-        for (var i = 0; i < span.Length; i++)
+        // Use the SDK's NodeManager.Lock for thread-safe node updates.
+        // This is the same lock the SDK uses for Read/Write/subscription operations.
+        // ClearChangeMasks → OnMonitoredNodeChanged also acquires this lock,
+        // but Monitor is reentrant on the same thread so no deadlock.
+        var nodeManagerLock = server?.NodeManagerLock;
+        if (nodeManagerLock == null)
         {
-            var change = span[i];
-            if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) &&
-                data is BaseDataVariableState node &&
-                change.Property.TryGetRegisteredProperty() is { } registeredProperty)
-            {
-                var value = change.GetNewValue<object?>();
-                var convertedValue = _configuration.ValueConverter
-                    .ConvertToNodeValue(value, registeredProperty);
+            return ValueTask.CompletedTask;
+        }
 
-                lock (node)
+        var span = changes.Span;
+        lock (nodeManagerLock)
+        {
+            for (var i = 0; i < span.Length; i++)
+            {
+                var change = span[i];
+                if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) &&
+                    data is BaseDataVariableState node &&
+                    change.Property.TryGetRegisteredProperty() is { } registeredProperty)
                 {
+                    var value = change.GetNewValue<object?>();
+                    var convertedValue = _configuration.ValueConverter
+                        .ConvertToNodeValue(value, registeredProperty);
+
                     node.Value = convertedValue;
                     node.Timestamp = change.ChangedTimestamp.UtcDateTime;
                     node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
@@ -129,8 +156,16 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
 
     private async Task ExecuteServerLoopAsync(CancellationToken stoppingToken)
     {
+        // Reset failure counter on fresh start so that accumulated failures from
+        // previous stop/start cycles don't cause excessive backoff delays.
+        _consecutiveFailures = 0;
+
         while (!stoppingToken.IsCancellationRequested)
         {
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            _forceKillCts = cts;
+            var linkedToken = cts.Token;
+
             var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
 
             if (_configuration.CleanCertificateStore)
@@ -138,26 +173,29 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
                 CleanCertificateStore(application);
             }
 
+            var server = new OpcUaSubjectServer(_subject, this, _configuration, _logger);
             try
             {
-                using var server = new OpcUaSubjectServer(_subject, this, _configuration, _logger);
                 try
                 {
                     _server = server;
 
-                    await application.CheckApplicationInstanceCertificatesAsync(true, ct: stoppingToken).ConfigureAwait(false);
+                    // Create the ChangeQueueProcessor (and its subscription) BEFORE starting the server.
+                    // This ensures property changes during OPC UA node creation are captured in the queue
+                    // and not lost in the gap between node creation and processing start.
+                    using var changeQueueProcessor = new ChangeQueueProcessor(
+                        source: this, _context,
+                        propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
+                        _configuration.BufferTime, _logger);
+
+                    await application.CheckApplicationInstanceCertificatesAsync(true, ct: linkedToken).ConfigureAwait(false);
                     await application.StartAsync(server).ConfigureAwait(false);
 
                     _startTime = DateTimeOffset.UtcNow;
                     _consecutiveFailures = 0;
                     _lastError = null;
 
-                    using var changeQueueProcessor = new ChangeQueueProcessor(
-                        source: this, _context,
-                        propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
-                        _configuration.BufferTime, _logger);
-
-                    await changeQueueProcessor.ProcessAsync(stoppingToken);
+                    await changeQueueProcessor.ProcessAsync(linkedToken);
                 }
                 finally
                 {
@@ -170,6 +208,11 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 // Normal shutdown - don't log as error
+            }
+            catch (OperationCanceledException) when (_isForceKill)
+            {
+                // Force-kill: CTS was cancelled by KillAsync
+                _logger.LogWarning("OPC UA server force-killed. Restarting...");
             }
             catch (Exception ex)
             {
@@ -187,11 +230,31 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
             {
                 try
                 {
-                    await ShutdownServerAsync(application).ConfigureAwait(false);
+                    if (_isForceKill)
+                    {
+                        // Force-kill: skip application.StopAsync() which can hang.
+                        // Just close listeners to release the TCP port immediately.
+                        if (application.Server is OpcUaSubjectServer s)
+                        {
+                            s.CloseTransportListeners();
+                        }
+                    }
+                    else
+                    {
+                        // Graceful: ShutdownServerAsync must run BEFORE server.Dispose() so that
+                        // application.StopAsync() can properly release the TCP listener socket.
+                        await ShutdownServerAsync(application).ConfigureAwait(false);
+                    }
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to shutdown OPC UA server.");
+                }
+                finally
+                {
+                    _isForceKill = false;
+                    server.Dispose();
+                    cts.Dispose();
                 }
             }
         }
@@ -201,16 +264,34 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService
     {
         try
         {
-            if (application.Server is OpcUaSubjectServer { CurrentInstance.SessionManager: not null } server)
+            if (application.Server is OpcUaSubjectServer server)
             {
-                var sessions = server.CurrentInstance.SessionManager.GetSessions();
-                foreach (var session in sessions)
+                // Close transport listeners first to stop accepting new connections.
+                // Without this, clients reconnect during shutdown faster than sessions
+                // can be closed, causing StopAsync to hang indefinitely.
+                server.CloseTransportListeners();
+
+                if (server.CurrentInstance?.SessionManager is { } sessionManager)
                 {
-                    session.Close();
+                    var sessions = sessionManager.GetSessions();
+                    foreach (var session in sessions)
+                    {
+                        try { session.Close(); } catch (Exception ex) { _logger.LogDebug(ex, "Error closing session during shutdown."); }
+                    }
                 }
             }
 
-            await application.StopAsync().ConfigureAwait(false);
+            // Timeout prevents hang when clients keep reconnecting during shutdown
+            var stopTask = application.StopAsync().AsTask();
+            if (await Task.WhenAny(stopTask, Task.Delay(TimeSpan.FromSeconds(10))).ConfigureAwait(false) != stopTask)
+            {
+                _logger.LogWarning("OPC UA server shutdown timed out after 10s. Continuing with disposal.");
+
+                // Observe the abandoned task to prevent UnobservedTaskException
+                _ = stopTask.ContinueWith(
+                    t => _logger.LogDebug(t.Exception, "StopAsync completed after timeout."),
+                    TaskContinuationOptions.OnlyOnFaulted);
+            }
         }
         catch (ServiceResultException e) when (e.StatusCode == StatusCodes.BadServerHalted)
         {
