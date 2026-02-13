@@ -3,7 +3,6 @@ using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Connectors.Tests.Paths;
 
