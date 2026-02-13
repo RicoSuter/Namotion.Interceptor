@@ -23,7 +23,7 @@ namespace Namotion.Interceptor.Mqtt.Server;
 /// <summary>
 /// Background service that hosts an MQTT broker and publishes property changes.
 /// </summary>
-public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectConnector, IAsyncDisposable
+public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectConnector, IFaultInjectable, IAsyncDisposable
 {
     // NOTE: We cannot pool UserProperties here because InjectApplicationMessages queues messages
     // asynchronously. The server may still be serializing packets after this method returns,
@@ -55,6 +55,8 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
     private int _disposed;
     private int _isListening;
     private MqttServer? _mqttServer;
+    private volatile bool _isForceKill;
+    private volatile CancellationTokenSource? _forceKillCts;
 
     /// <summary>
     /// Gets whether the MQTT server is listening.
@@ -82,6 +84,39 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
 
     private bool IsPropertyIncluded(RegisteredSubjectProperty property) =>
         _configuration.PathProvider.IsPropertyIncluded(property);
+
+    /// <inheritdoc />
+    async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
+    {
+        switch (faultType)
+        {
+            case FaultType.Kill:
+                _isForceKill = true;
+                try { _forceKillCts?.Cancel(); }
+                catch (ObjectDisposedException) { /* CTS disposed between loop iterations */ }
+                break;
+
+            case FaultType.Disconnect:
+                var server = _mqttServer;
+                if (server is not null)
+                {
+                    var clientStatuses = await server.GetClientsAsync().ConfigureAwait(false);
+                    var disconnectOptions = new MqttServerClientDisconnectOptions();
+                    foreach (var clientStatus in clientStatuses)
+                    {
+                        try
+                        {
+                            await server.DisconnectClientAsync(clientStatus.Id, disconnectOptions).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Error disconnecting MQTT client {ClientId} during fault injection.", clientStatus.Id);
+                        }
+                    }
+                }
+                break;
+        }
+    }
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -113,6 +148,10 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            _forceKillCts = cts;
+            var linkedToken = cts.Token;
+
             try
             {
                 await _mqttServer.StartAsync().ConfigureAwait(false);
@@ -130,7 +169,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
                         _configuration.BufferTime,
                         _logger);
 
-                    await changeQueueProcessor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+                    await changeQueueProcessor.ProcessAsync(linkedToken).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -138,17 +177,30 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
                     Volatile.Write(ref _isListening, 0);
                 }
             }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (OperationCanceledException) when (_isForceKill)
+            {
+                _logger.LogWarning("MQTT server force-killed. Restarting...");
+            }
             catch (Exception ex)
             {
                 Volatile.Write(ref _isListening, 0);
 
-                if (ex is TaskCanceledException or OperationCanceledException)
+                if (ex is TaskCanceledException)
                 {
                     return;
                 }
 
                 _logger.LogError(ex, "Error in MQTT server.");
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _isForceKill = false;
+                cts.Dispose();
             }
         }
     }

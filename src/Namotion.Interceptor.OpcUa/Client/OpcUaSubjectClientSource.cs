@@ -12,7 +12,7 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
-internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, ISubjectConnector, IChaosTarget, IAsyncDisposable
+internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, ISubjectConnector, IFaultInjectable, IAsyncDisposable
 {
     private const int DefaultChunkSize = 512;
 
@@ -137,55 +137,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
     /// <inheritdoc />
     public IInterceptorSubject RootSubject => _subject;
-
-    /// <inheritdoc />
-    public async Task KillAsync()
-    {
-        var sessionManager = _sessionManager;
-        if (sessionManager != null)
-        {
-            _logger.LogWarning("Chaos: killing OPC UA client session.");
-
-            var reconnectCts = _reconnectCts;
-            if (reconnectCts is not null)
-            {
-                // Manual reconnection in progress — just cancel it.
-                // ReconnectSessionAsync's catch block will handle cleanup via ClearSessionAsync.
-                // Calling ClearSessionAsync here would race: it disposes the session that
-                // ReconnectSessionAsync just created, causing BadSessionNotActivated on the
-                // next read and triggering a permanent failure loop.
-                try { await reconnectCts.CancelAsync(); }
-                catch (ObjectDisposedException) { /* CTS disposed between check and cancel */ }
-            }
-            else
-            {
-                // No manual reconnection in progress — clear session directly.
-                await sessionManager.ClearSessionAsync(CancellationToken.None).ConfigureAwait(false);
-            }
-        }
-    }
-
-    /// <inheritdoc />
-    public Task DisconnectAsync()
-    {
-        var sessionManager = _sessionManager;
-        if (sessionManager != null)
-        {
-            if (sessionManager.IsReconnecting)
-            {
-                // Manual reconnection in progress — skip the disconnect.
-                // Killing the transport now would destroy the session that ReconnectSessionAsync
-                // just created, causing the reconnection to fail and triggering a retry loop.
-                _logger.LogDebug("Chaos: skipping disconnect during active reconnection.");
-                return Task.CompletedTask;
-            }
-
-            _logger.LogWarning("Chaos: disconnecting OPC UA client transport.");
-            sessionManager.DisconnectTransport();
-        }
-
-        return Task.CompletedTask;
-    }
 
     public async Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
     {
@@ -761,6 +712,65 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
         // Transient connectivity/server errors: Retry
         return StatusCode.IsBad(statusCode);
+    }
+
+    /// <inheritdoc />
+    async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
+    {
+        switch (faultType)
+        {
+            case FaultType.Kill:
+                await KillSessionAsync().ConfigureAwait(false);
+                break;
+            case FaultType.Disconnect:
+                DisconnectTransportAsync();
+                break;
+        }
+    }
+
+    private async Task KillSessionAsync()
+    {
+        var sessionManager = _sessionManager;
+        if (sessionManager != null)
+        {
+            _logger.LogWarning("Chaos: killing OPC UA client session.");
+
+            var reconnectCts = _reconnectCts;
+            if (reconnectCts is not null)
+            {
+                // Manual reconnection in progress — just cancel it.
+                // ReconnectSessionAsync's catch block will handle cleanup via ClearSessionAsync.
+                // Calling ClearSessionAsync here would race: it disposes the session that
+                // ReconnectSessionAsync just created, causing BadSessionNotActivated on the
+                // next read and triggering a permanent failure loop.
+                try { await reconnectCts.CancelAsync(); }
+                catch (ObjectDisposedException) { /* CTS disposed between check and cancel */ }
+            }
+            else
+            {
+                // No manual reconnection in progress — clear session directly.
+                await sessionManager.ClearSessionAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private void DisconnectTransportAsync()
+    {
+        var sessionManager = _sessionManager;
+        if (sessionManager != null)
+        {
+            if (sessionManager.IsReconnecting)
+            {
+                // Manual reconnection in progress — skip the disconnect.
+                // Killing the transport now would destroy the session that ReconnectSessionAsync
+                // just created, causing the reconnection to fail and triggering a retry loop.
+                _logger.LogDebug("Chaos: skipping disconnect during active reconnection.");
+                return;
+            }
+
+            _logger.LogWarning("Chaos: disconnecting OPC UA client transport.");
+            sessionManager.DisconnectTransport();
+        }
     }
 
     private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(

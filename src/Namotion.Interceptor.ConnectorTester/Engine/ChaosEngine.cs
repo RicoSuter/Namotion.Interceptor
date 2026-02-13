@@ -13,7 +13,7 @@ public class ChaosEngine : BackgroundService
     private readonly string _targetName;
     private readonly ChaosConfiguration _configuration;
     private readonly TestCycleCoordinator _coordinator;
-    private IChaosTarget? _target;
+    private IFaultInjectable? _target;
     private readonly ILogger _logger;
     private readonly Random _random = new();
 
@@ -37,7 +37,7 @@ public class ChaosEngine : BackgroundService
         string targetName,
         ChaosConfiguration configuration,
         TestCycleCoordinator coordinator,
-        IChaosTarget? target,
+        IFaultInjectable? target,
         ILogger logger)
     {
         _targetName = targetName;
@@ -47,7 +47,7 @@ public class ChaosEngine : BackgroundService
         _logger = logger;
     }
 
-    public void SetTarget(IChaosTarget target)
+    public void SetTarget(IFaultInjectable target)
     {
         _target = target;
     }
@@ -99,20 +99,12 @@ public class ChaosEngine : BackgroundService
                     continue;
                 }
 
-                var action = PickAction();
-                _logger.LogWarning("Chaos: {Action} on {Target}", action, _targetName);
+                var faultType = PickFaultType();
+                _logger.LogWarning("Chaos: {FaultType} on {Target}", faultType, _targetName);
                 _currentEventStart = DateTimeOffset.UtcNow;
                 _isDisrupted = true;
 
-                switch (action)
-                {
-                    case "kill":
-                        await _target.KillAsync();
-                        break;
-                    case "disconnect":
-                        await _target.DisconnectAsync();
-                        break;
-                }
+                await _target.InjectFaultAsync(faultType);
 
                 // Hold disruption for random duration
                 var duration = RandomTimeSpan(_configuration.DurationMin, _configuration.DurationMax);
@@ -121,8 +113,8 @@ public class ChaosEngine : BackgroundService
                 // Mark recovered
                 _isDisrupted = false;
                 var recoveredAt = DateTimeOffset.UtcNow;
-                _eventHistory.Add(new ChaosEventRecord(action, _currentEventStart, recoveredAt));
-                _logger.LogInformation("Chaos: {Target} recovered from {Action}", _targetName, action);
+                _eventHistory.Add(new ChaosEventRecord(faultType, _currentEventStart, recoveredAt));
+                _logger.LogInformation("Chaos: {Target} recovered from {FaultType}", _targetName, faultType);
                 ChaosEventCount++;
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -132,13 +124,13 @@ public class ChaosEngine : BackgroundService
         }
     }
 
-    private string PickAction()
+    private FaultType PickFaultType()
     {
         return _configuration.Mode.ToLowerInvariant() switch
         {
-            "kill" => "kill",
-            "disconnect" => "disconnect",
-            _ => _random.Next(2) == 0 ? "kill" : "disconnect"
+            "kill" => FaultType.Kill,
+            "disconnect" => FaultType.Disconnect,
+            _ => _random.Next(2) == 0 ? FaultType.Kill : FaultType.Disconnect
         };
     }
 
@@ -149,7 +141,7 @@ public class ChaosEngine : BackgroundService
     }
 }
 
-public record ChaosEventRecord(string Action, DateTimeOffset DisruptedAt, DateTimeOffset RecoveredAt)
+public record ChaosEventRecord(FaultType FaultType, DateTimeOffset DisruptedAt, DateTimeOffset RecoveredAt)
 {
     public TimeSpan Duration => RecoveredAt - DisruptedAt;
 }
