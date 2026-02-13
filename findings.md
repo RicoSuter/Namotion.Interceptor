@@ -6,7 +6,7 @@ Summary of bugs found and fixes applied during resilience testing of OPC UA clie
 
 **100% pass rate** on connector tester chaos testing (`--launch-profile opcua`).
 
-**Result**: **18/18 cycles PASS** with Fix 6 + Fix 7. Endurance test completed successfully.
+**Result**: **41/42 cycles PASS** with Fix 8. Fix 9 addresses the remaining server-side gap.
 
 ## Fixes Applied
 
@@ -188,6 +188,48 @@ lock (nodeManagerLock)
 - `SessionManager.cs` — Removed `_propertyWriter` field, added `_needsInitialization` mechanism, simplified `OnReconnectComplete` to two outcomes (transfer → NeedsInitialization, everything else → Abandon)
 - `OpcUaSubjectClientSource.cs` — Added NeedsInitialization handling in health check loop
 
+**Status**: Build + tests pass. Verified by run +15 (Fix 8 alone). Failed at cycle 42/42 — data convergence failure caused by Fix 9's root cause.
+
+### Fix 9: Server-side change loss during OPC UA server restart (ChangeQueueProcessor.cs, OpcUaSubjectServerBackgroundService.cs)
+
+**Root cause**: Mutations to the interceptor subject during the gap between OPC UA node creation (`application.StartAsync`) and `ChangeQueueProcessor` subscription creation were permanently lost from the OPC UA server's perspective. Clients performing full state reads would get stale values with no correction mechanism.
+
+**Evidence** (cycle 42 of run +15):
+- Subject 11's `DecimalValue`: server interceptor subject had `25633.08` (timestamp `01:17:33.42`) but both stable-client and flaky-client had `25630.87` (timestamp `01:17:33.01`).
+- Both clients performed successful full state syncs (93 nodes each) well after the mutation — but read stale values from the OPC UA nodes.
+- The mutation at `01:17:33.42` landed during server restart from a disconnect chaos event at `01:17:32`.
+
+**The gap**:
+```csharp
+// BEFORE fix — OpcUaSubjectServerBackgroundService:
+await application.StartAsync(server);        // 1. Creates OPC UA nodes from subject values
+// ← mutations here are LOST
+using var changeQueueProcessor = new ChangeQueueProcessor(...);
+await changeQueueProcessor.ProcessAsync(...); // 2. Subscribes to change queue
+```
+
+Between step 1 and step 2, the `PropertyChangeQueueSubscription` does not exist. Any property changes fire change events, but no subscriber captures them. If node creation reads the pre-mutation value and the mutation happens before the subscription is active, the OPC UA node is permanently stale.
+
+**Fix** (two changes):
+
+1. **Move subscription creation to `ChangeQueueProcessor` constructor**: The `PropertyChangeQueueSubscription` is now created immediately in the constructor instead of at the start of `ProcessAsync`. Changes are captured in the queue from the moment the processor is constructed, even before processing begins.
+
+2. **Create `ChangeQueueProcessor` before `application.StartAsync`**: In `OpcUaSubjectServerBackgroundService`, the processor is now constructed before the OPC UA server starts, ensuring the subscription is active during node creation:
+
+```csharp
+// AFTER fix:
+using var changeQueueProcessor = new ChangeQueueProcessor(...); // subscription active
+await application.StartAsync(server);        // nodes created — changes captured
+await changeQueueProcessor.ProcessAsync(...); // processes queued + ongoing changes
+```
+
+**Files changed**:
+- `ChangeQueueProcessor.cs` — `PropertyChangeQueueSubscription` created in constructor, disposed in `Dispose()`, removed `using var` from `ProcessAsync`
+- `OpcUaSubjectServerBackgroundService.cs` — Moved `ChangeQueueProcessor` creation before `CheckApplicationInstanceCertificatesAsync` and `StartAsync`
+- `ChangeQueueProcessorTests.cs` — Added `WithPropertyChangeQueue()` to test contexts (now required by constructor)
+
+**Note**: This bug also affects production scenarios — any property mutation during OPC UA server restart (e.g., from MQTT source, another OPC UA client, or application logic) would be lost from the OPC UA server's address space.
+
 **Status**: Build + tests pass. Needs chaos testing verification.
 
 ## Known Remaining Issues
@@ -202,19 +244,15 @@ lock (nodeManagerLock)
 
 **Status**: Fixed. Server restarts reliably after kills.
 
-### Data convergence failure after server kill + subscription transfer → Addressed by Fix 8
+### Data convergence failure after server kill + subscription transfer → Addressed by Fix 8 + Fix 9
 
-**Symptom**: After server kill → server recover → SDK subscription transfer, some property values remain stale on clients. Reproduced at cycle 6 of run +11 and cycle 18 of parallel run.
+**Symptom**: After server kill → server recover → SDK subscription transfer, some property values remain stale on clients.
 
-**Details**:
-- Subject 6's `DecimalValue`: server had 691.1 but both stable-client and flaky-client had 688.83 (stale value with older timestamp).
-- Both clients had the same stale value, suggesting the issue is in subscription transfer behavior.
-- The server's value had a newer timestamp than the clients' value, confirming it was a missed update.
-- Cycle-018 log: flaky-client's SDK reconnect handler never completed after disconnect, leaving client stuck in buffering mode permanently.
+**Two distinct root causes identified**:
+1. **Client-side** (Fix 8): Subscription notifications alone are insufficient for state sync after reconnection — notifications can be lost due to subscription lifetime expiration, queue overflow, timing gaps, or stuck reconnect handler. Fixed by full state read after ALL reconnections.
+2. **Server-side** (Fix 9): Mutations during OPC UA server restart gap are lost — the `ChangeQueueProcessor` subscription didn't exist during node creation, so changes were never written to OPC UA nodes. Clients reading stale OPC UA nodes get stale values regardless of full state reads.
 
-**Root cause**: Subscription notifications alone are insufficient for state sync after reconnection. Notifications can be lost due to subscription lifetime expiration, queue overflow, timing gaps, or stuck reconnect handler.
-
-**Status**: Addressed by Fix 8 — full state read after ALL reconnections ensures eventual consistency regardless of subscription notification reliability.
+**Status**: Fix 8 addresses client-side. Fix 9 addresses server-side. Both needed for full eventual consistency.
 
 ### SDK Bug: ArgumentOutOfRangeException in SetDefaultPermissions (non-blocking)
 
@@ -239,6 +277,7 @@ SDK's `CustomNodeManager2.SetDefaultPermissions` accesses `namespaceMetadataValu
 | +12 | same diagnostics (re-run) | **0/1 fail** (timeout loop at cycle 1 — FetchNamespaceTables identified) |
 | +13 | Fix 6: TryDequeue cancellation check | server restarts but flush task hangs |
 | +14 | Fix 7: NodeManager.Lock + cancellation check | **18/18 pass** |
+| +15 | Fix 8: Full state read after ALL reconnections | **41/42 pass** (data convergence at cycle 42 — server-side gap) |
 
 ## Environment
 
