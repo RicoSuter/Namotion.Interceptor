@@ -17,10 +17,10 @@ An in-process integration test that validates **eventual consistency** across Na
                  +----------------+----------------+
                  |                                 |
           +------+------+                   +------+------+
-          |   Client 1  |                   |   Client 2  |
-          |  TestNode   |                   |  Mutation   |
-          |  Mutation   |                   |  Chaos?     |
-          |  (stable)   |                   |  (flaky)    |
+          |   Client A  |                   |   Client B  |
+          |  TestNode   |                   |  TestNode   |
+          |  Mutation   |                   |  Mutation   |
+          |  Chaos?     |                   |  Chaos?     |
           +-------------+                   +-------------+
 
     VerificationEngine orchestrates mutate/converge cycles
@@ -97,16 +97,16 @@ Launch profiles set the `DOTNET_ENVIRONMENT` variable, which loads the correspon
 Duration: 85s (converged in 5.1s)
 Total mutations: 17,200 | Total chaos events: 7
   server: 11,300 value mutations
-  stable-client: 2,950 value mutations
-  flaky-client: 2,950 value mutations
-  flaky-client: disconnect at 21:08:37 (2.8s)
+  client-a: 2,950 value mutations
+  client-b: 2,950 value mutations
+  client-b: disconnect at 21:08:37 (2.8s)
   server: kill at 21:08:38 (5.4s)
 ```
 
 **Failure**: Prints `FAIL` with snapshot diffs, then exits with code 1:
 ```
 === Cycle 3: FAIL (did not converge within 00:01:00) ===
-Mismatch between server and flaky-client
+Mismatch between server and client-b
 ```
 
 ### Log Files
@@ -153,12 +153,18 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
     },
     "Clients": [
       {
-        "Name": "stable-client",
+        "Name": "client-a",
         "MutationRate": 50,
-        "Chaos": null
+        "Chaos": {
+          "IntervalMin": "00:00:10",
+          "IntervalMax": "00:00:20",
+          "DurationMin": "00:00:02",
+          "DurationMax": "00:00:04",
+          "Mode": "both"
+        }
       },
       {
-        "Name": "flaky-client",
+        "Name": "client-b",
         "MutationRate": 50,
         "Chaos": {
           "IntervalMin": "00:00:08",
@@ -168,6 +174,12 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
           "Mode": "both"
         }
       }
+    ],
+    "ChaosProfiles": [
+      { "Name": "no-chaos", "Participants": [] },
+      { "Name": "server-only", "Participants": ["server"] },
+      { "Name": "client-a-only", "Participants": ["client-a"] },
+      { "Name": "full-chaos", "Participants": ["server", "client-a", "client-b"] }
     ]
   }
 }
@@ -183,6 +195,7 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
 | `ConvergenceTimeout` | TimeSpan | `00:01:00` | Max time to wait for all snapshots to match |
 | `Server` | object | - | Server participant configuration |
 | `Clients` | array | `[]` | Client participant configurations |
+| `ChaosProfiles` | array | `[]` | Named chaos profiles that rotate round-robin per cycle. Empty = all engines always active. |
 
 ### Participant Configuration
 
@@ -202,12 +215,39 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
 | `DurationMax` | TimeSpan | `00:00:30` | Maximum disruption hold time |
 | `Mode` | string | `"both"` | `"kill"`, `"disconnect"`, or `"both"` (random choice) |
 
+### Chaos Profile Configuration
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `Name` | string | `""` | Profile identifier (appears in cycle logs) |
+| `Participants` | array | `[]` | Participant names that have chaos active in this profile |
+
 ### Tuning Chaos Intervals
 
 Chaos intervals must be shorter than `MutatePhaseDuration` to ensure disruptions actually occur during each cycle. As a guideline:
 - Set `IntervalMax` to at most half of `MutatePhaseDuration` to guarantee at least one event per cycle.
 - Each chaos event takes `Interval + Duration` time, so account for both when calculating expected events per cycle.
 - Server chaos is more impactful (affects all clients) so can use longer intervals. Client chaos is local and can be more frequent.
+
+### Chaos Profiles
+
+By default, all chaos engines run every cycle. To vary which participants experience chaos per cycle, define `ChaosProfiles` — a list of named profiles that rotate round-robin:
+
+```json
+"ChaosProfiles": [
+  { "Name": "no-chaos", "Participants": [] },
+  { "Name": "server-only", "Participants": ["server"] },
+  { "Name": "client-b-only", "Participants": ["client-b"] },
+  { "Name": "full-chaos", "Participants": ["server", "client-a", "client-b"] }
+]
+```
+
+Each profile lists which participants have chaos active for that cycle. Profiles rotate in order: cycle 1 uses the first profile, cycle 2 uses the second, and so on (wrapping around).
+
+**Constraints:**
+- Only participants with a `Chaos` configuration get a chaos engine. Referencing a participant without `Chaos` config in a profile logs a warning and has no effect.
+- When `ChaosProfiles` is empty or omitted, all chaos engines run every cycle (current default behavior).
+- Cycle logs show the active profile: `=== Cycle 3: Mutate phase started (01:00) [profile: server-only] ===`
 
 ## Failure Scenario Coverage
 
@@ -272,9 +312,10 @@ For multi-day runs, consider using longer cycle durations and lower mutation rat
     "ConvergenceTimeout": "00:02:00",
     "Server": { "MutationRate": 500 },
     "Clients": [
-      { "Name": "stable-client", "MutationRate": 25 },
-      { "Name": "flaky-client", "MutationRate": 25 }
-    ]
+      { "Name": "client-a", "MutationRate": 25 },
+      { "Name": "client-b", "MutationRate": 25 }
+    ],
+    "ChaosProfiles": []
   }
 }
 ```
@@ -335,6 +376,7 @@ Namotion.Interceptor.ConnectorTester/
     ConnectorTesterConfiguration.cs      # Top-level config
     ParticipantConfiguration.cs          # Per-participant config
     ChaosConfiguration.cs               # Chaos timing config
+    ChaosProfileConfiguration.cs        # Chaos profile config
   Model/
     TestNode.cs                          # Test data model with path annotations
   Engine/

@@ -27,6 +27,12 @@ public class ChaosEngine : BackgroundService
 
     public IReadOnlyList<ChaosEventRecord> EventHistory => _eventHistory;
 
+    /// <summary>
+    /// When false, the engine skips chaos actions but continues running.
+    /// Controlled by VerificationEngine based on the active chaos profile.
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
     public ChaosEngine(
         string targetName,
         ChaosConfiguration configuration,
@@ -81,6 +87,11 @@ public class ChaosEngine : BackgroundService
                 await Task.Delay(interval, stoppingToken);
 
                 _coordinator.WaitIfPaused(stoppingToken);
+
+                if (!Enabled)
+                {
+                    continue;
+                }
 
                 if (_target == null)
                 {
