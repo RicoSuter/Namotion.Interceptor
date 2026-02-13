@@ -51,6 +51,8 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
     private readonly List<Task> _runningInitialStateTasks = [];
     private readonly Lock _initialStateTasksLock = new();
 
+    private readonly CancellationTokenSource _shutdownCts = new();
+
     private int _numberOfClients;
     private int _disposed;
     private int _isListening;
@@ -349,20 +351,21 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
         _logger.LogInformation("Client {ClientId} connected. Total clients: {Count}.", arg.ClientId, count);
 
         // Publish all current property values to new client
+        var shutdownToken = _shutdownCts.Token;
         var task = Task.Run(async () =>
         {
             try
             {
                 if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 0)
                 {
-                    await PublishInitialStateAsync().ConfigureAwait(false);
+                    await PublishInitialStateAsync(shutdownToken).ConfigureAwait(false);
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to publish initial state to client {ClientId}.", arg.ClientId);
             }
-        });
+        }, shutdownToken);
 
         lock (_initialStateTasksLock)
         {
@@ -374,7 +377,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
         return Task.CompletedTask;
     }
 
-    private async Task PublishInitialStateAsync()
+    private async Task PublishInitialStateAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -386,7 +389,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
                 return;
             }
 
-            await Task.Delay(delay).ConfigureAwait(false);
+            await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
 
             var properties = _subject
                 .TryGetRegisteredSubject()?
@@ -403,6 +406,8 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
 
             foreach (var (path, property) in properties)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 var topic = MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
 
                 byte[] payload;
@@ -422,7 +427,6 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
                 {
                     Topic = topic,
                     PayloadSegment = new ArraySegment<byte>(payload),
-                    ContentType = "application/json",
                     QualityOfServiceLevel = _configuration.DefaultQualityOfService,
                     Retain = _configuration.UseRetainedMessages
                 };
@@ -443,8 +447,12 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
 
                 await server.InjectApplicationMessage(
                     new InjectedMqttApplicationMessage(message) { SenderClientId = _serverClientId },
-                    CancellationToken.None).ConfigureAwait(false);
+                    cancellationToken).ConfigureAwait(false);
             }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Shutdown requested, stop publishing initial state
         }
         catch (Exception ex)
         {
@@ -544,6 +552,9 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
             _lifecycleInterceptor.SubjectDetaching -= OnSubjectDetaching;
         }
 
+        // Cancel any in-progress initial state tasks (e.g. Task.Delay) before waiting
+        _shutdownCts.Cancel();
+
         var server = _mqttServer;
         if (server is not null)
         {
@@ -587,6 +598,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
         _pathToProperty.Clear();
 
         Volatile.Write(ref _isListening, 0);
+        _shutdownCts.Dispose();
         Dispose();
     }
 }

@@ -112,10 +112,10 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             _configuration,
             GetClientOptions,
             async ct => await OnReconnectedAsync(ct).ConfigureAwait(false),
-            async () =>
+            () =>
             {
                 _propertyWriter?.StartBuffering();
-                await Task.CompletedTask;
+                return Task.CompletedTask;
             }, _logger);
 
         _isStarted = true;
