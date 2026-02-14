@@ -150,6 +150,65 @@ public class WriteTimestampTests
     }
 
     [Fact]
+    public void WriteTimestamp_ConcurrentWrites_ValueAndTimestampAreConsistent()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+        var syncRoot = ((IInterceptorSubject)person).SyncRoot;
+
+        // Each thread writes a unique value with a matching unique timestamp.
+        // After each write, we read value + timestamp under the same lock to verify
+        // they belong to the same write operation.
+        const int threadCount = 8;
+        const int iterationsPerThread = 5_000;
+        var barrier = new Barrier(threadCount);
+        var failures = 0;
+
+        // Act
+        var threads = Enumerable.Range(0, threadCount).Select(threadIndex => new Thread(() =>
+        {
+            barrier.SignalAndWait();
+            for (var i = 0; i < iterationsPerThread; i++)
+            {
+                var index = threadIndex * iterationsPerThread + i;
+                var timestamp = new DateTimeOffset(index + 1, TimeSpan.Zero); // ticks = index+1 (avoid 0)
+
+                using (SubjectChangeContext.WithChangedTimestamp(timestamp))
+                {
+                    person.FirstName = $"Name{index}";
+                }
+
+                // Read value + timestamp under the same lock that protects writes
+                lock (syncRoot)
+                {
+                    var storedTimestamp = person.GetPropertyReference("FirstName").TryGetWriteTimestamp();
+                    var storedValue = person.FirstName;
+
+                    if (storedTimestamp.HasValue)
+                    {
+                        var expectedIndex = (int)(storedTimestamp.Value.UtcTicks - 1);
+                        var expectedValue = $"Name{expectedIndex}";
+                        if (storedValue != expectedValue)
+                        {
+                            Interlocked.Increment(ref failures);
+                        }
+                    }
+                }
+            }
+        })).ToArray();
+
+        foreach (var thread in threads) thread.Start();
+        foreach (var thread in threads) thread.Join();
+
+        // Assert
+        Assert.Equal(0, failures);
+    }
+
+    [Fact]
     public void WriteTimestamp_AfterScopeEnds_ShouldUseCurrentTime()
     {
         // Arrange
