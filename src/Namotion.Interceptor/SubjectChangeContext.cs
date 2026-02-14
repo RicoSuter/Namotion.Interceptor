@@ -7,15 +7,16 @@ public readonly struct SubjectChangeContext
     [ThreadStatic]
     private static SubjectChangeContext _current;
 
-    internal readonly long ChangedTimestampUtcTicks;
-    internal readonly long ReceivedTimestampUtcTicks;
+    private readonly long _changedTimestampUtcTicks;
+    private readonly long _receivedTimestampUtcTicks;
+
     public readonly object? Source;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private SubjectChangeContext(long changedTimestampUtcTicks, long receivedTimestampUtcTicks, object? source)
     {
-        ChangedTimestampUtcTicks = changedTimestampUtcTicks;
-        ReceivedTimestampUtcTicks = receivedTimestampUtcTicks;
+        _changedTimestampUtcTicks = changedTimestampUtcTicks;
+        _receivedTimestampUtcTicks = receivedTimestampUtcTicks;
         Source = source;
     }
 
@@ -23,8 +24,8 @@ public readonly struct SubjectChangeContext
     public DateTimeOffset ChangedTimestamp
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => ChangedTimestampUtcTicks != 0
-            ? new DateTimeOffset(ChangedTimestampUtcTicks, TimeSpan.Zero)
+        get => _changedTimestampUtcTicks != 0
+            ? new DateTimeOffset(_changedTimestampUtcTicks, TimeSpan.Zero)
             : GetTimestampFunction();
     }
 
@@ -32,15 +33,15 @@ public readonly struct SubjectChangeContext
     public DateTimeOffset? ReceivedTimestamp
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => ReceivedTimestampUtcTicks != 0
-            ? new DateTimeOffset(ReceivedTimestampUtcTicks, TimeSpan.Zero)
+        get => _receivedTimestampUtcTicks != 0
+            ? new DateTimeOffset(_receivedTimestampUtcTicks, TimeSpan.Zero)
             : null;
     }
 
     /// <summary>
     /// Gets or sets a function which retrieves the current timestamp (default is <see cref="DateTimeOffset.UtcNow"/>).
     /// </summary>
-    public static Func<DateTimeOffset> GetTimestampFunction { get; set; } = () => DateTimeOffset.UtcNow;
+    private static Func<DateTimeOffset> GetTimestampFunction { get; set; } = () => DateTimeOffset.UtcNow;
 
     /// <summary>Gets the current change context.</summary>
     public static SubjectChangeContext Current
@@ -55,7 +56,7 @@ public readonly struct SubjectChangeContext
         var previousState = _current;
         _current = new SubjectChangeContext(
             changed?.UtcTicks ?? 0,
-            previousState.ReceivedTimestampUtcTicks,
+            previousState._receivedTimestampUtcTicks,
             previousState.Source);
         return new SubjectChangeContextScope(previousState);
     }
@@ -66,7 +67,7 @@ public readonly struct SubjectChangeContext
     {
         var previousState = _current;
         _current = new SubjectChangeContext(
-            previousState.ChangedTimestampUtcTicks,
+            previousState._changedTimestampUtcTicks,
             received?.UtcTicks ?? 0,
             previousState.Source);
         return new SubjectChangeContextScope(previousState);
@@ -78,8 +79,8 @@ public readonly struct SubjectChangeContext
     {
         var previousState = _current;
         _current = new SubjectChangeContext(
-            previousState.ChangedTimestampUtcTicks,
-            previousState.ReceivedTimestampUtcTicks,
+            previousState._changedTimestampUtcTicks,
+            previousState._receivedTimestampUtcTicks,
             source);
         return new SubjectChangeContextScope(previousState);
     }

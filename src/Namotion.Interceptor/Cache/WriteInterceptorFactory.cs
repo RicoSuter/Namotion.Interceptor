@@ -24,14 +24,7 @@ internal static class WriteInterceptorFactory<TProperty>
                 {
                     innerWriteValue(context.Property.Subject, context.NewValue);
                     context.IsWritten = true;
-
-                    var ticks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
-                    if (ticks == 0)
-                    {
-                        ticks = SubjectChangeContext.GetTimestampFunction().UtcTicks;
-                    }
-
-                    context.Property.SetWriteTimestampUtcTicks(ticks);
+                    context.Property.SetWriteTimestamp(SubjectChangeContext.Current.ChangedTimestamp);
                 }
                 return context.NewValue;
             }
