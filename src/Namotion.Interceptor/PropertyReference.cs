@@ -75,8 +75,6 @@ public struct PropertyReference : IEquatable<PropertyReference>
             .Remove(new KeyValuePair<(string?, string), object?>((Name, key), expectedValue));
     }
 
-    #region Write Timestamp
-
     private const string WriteTimestampKey = "Namotion.Interceptor.WriteTimestamp";
 
     /// <summary>
@@ -98,20 +96,10 @@ public struct PropertyReference : IEquatable<PropertyReference>
     /// </summary>
     /// <param name="timestamp">The timestamp to store.</param>
     public void SetWriteTimestamp(DateTimeOffset timestamp)
-        => SetWriteTimestampUtcTicks(timestamp.UtcTicks);
-
-    /// <summary>
-    /// Sets the write timestamp as UTC ticks. Called inside the terminal write lock
-    /// to ensure atomicity with the backing field write.
-    /// </summary>
-    /// <param name="utcTicks">The UTC ticks to store.</param>
-    internal void SetWriteTimestampUtcTicks(long utcTicks)
     {
         var holder = (long[])Subject.Data.GetOrAdd((Name, WriteTimestampKey), static _ => new long[1])!;
-        Interlocked.Exchange(ref holder[0], utcTicks);
+        Interlocked.Exchange(ref holder[0], timestamp.UtcTicks);
     }
-
-    #endregion
 
     #region Equality
 
