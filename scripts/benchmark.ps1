@@ -70,7 +70,7 @@ function Run-Benchmark {
     param([string]$Label, [string]$OutputPath)
 
     Write-Host "Running benchmark on $Label (filter: $Filter)..."
-    dotnet run --project $BenchmarkProject -c Release -- --filter "$Filter" --exporters markdown --join @ExtraArgs
+    dotnet run --project $BenchmarkProject -c Release -- --filter "$Filter" --exporters markdown --join @script:ExtraArgs | Out-Host
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Benchmark failed on $Label"
         return $false
