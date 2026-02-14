@@ -37,11 +37,16 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         var transaction = SubjectTransaction.Current;
-        if (transaction is { IsCommitting: false } &&
-            transaction.PendingChanges.TryGetValue(context.Property, out var change))
+        if (transaction is { IsCommitting: false })
         {
-            // Return pending value if transaction active and not committing
-            return change.GetNewValue<TProperty>();
+            lock (transaction.PendingChangesLock)
+            {
+                if (transaction.PendingChanges.TryGetValue(context.Property, out var change))
+                {
+                    // Return pending value if transaction active and not committing
+                    return change.GetNewValue<TProperty>();
+                }
+            }
         }
 
         return next(ref context);
@@ -72,28 +77,31 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
 
             var currentContext = SubjectChangeContext.Current;
 
-            var isFirstWrite = !transaction.PendingChanges.TryGetValue(context.Property, out var existingChange);
-            if (isFirstWrite)
+            lock (transaction.PendingChangesLock)
             {
-                // Preserve the original old value for first write (used for conflict detection at commit)
-                transaction.PendingChanges[context.Property] = SubjectPropertyChange.Create(
-                    context.Property,
-                    source: currentContext.Source,
-                    changedTimestamp: currentContext.ChangedTimestamp,
-                    receivedTimestamp: currentContext.ReceivedTimestamp,
-                    context.CurrentValue,
-                    context.NewValue);
-            }
-            else
-            {
-                // Last write wins, but preserve original old value
-                transaction.PendingChanges[context.Property] = SubjectPropertyChange.Create(
-                    context.Property,
-                    source: currentContext.Source,
-                    changedTimestamp: currentContext.ChangedTimestamp,
-                    receivedTimestamp: currentContext.ReceivedTimestamp,
-                    existingChange.GetOldValue<TProperty>(),
-                    context.NewValue);
+                var isFirstWrite = !transaction.PendingChanges.TryGetValue(context.Property, out var existingChange);
+                if (isFirstWrite)
+                {
+                    // Preserve the original old value for first write (used for conflict detection at commit)
+                    transaction.PendingChanges[context.Property] = SubjectPropertyChange.Create(
+                        context.Property,
+                        source: currentContext.Source,
+                        changedTimestamp: currentContext.ChangedTimestamp,
+                        receivedTimestamp: currentContext.ReceivedTimestamp,
+                        context.CurrentValue,
+                        context.NewValue);
+                }
+                else
+                {
+                    // Last write wins, but preserve original old value
+                    transaction.PendingChanges[context.Property] = SubjectPropertyChange.Create(
+                        context.Property,
+                        source: currentContext.Source,
+                        changedTimestamp: currentContext.ChangedTimestamp,
+                        receivedTimestamp: currentContext.ReceivedTimestamp,
+                        existingChange.GetOldValue<TProperty>(),
+                        context.NewValue);
+                }
             }
 
             return; // Do NOT call next(): Interceptor chain stops here

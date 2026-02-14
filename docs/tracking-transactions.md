@@ -367,6 +367,59 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
 }
 ```
 
+### Capture and Commit Replay
+
+Transactions buffer property writes in a pending dictionary instead of applying them immediately. Consider a motor with a configurable speed limit, where a validator rejects `MotorSpeed` values that exceed `MaxAllowedSpeed`:
+
+```csharp
+[InterceptorSubject]
+public partial class Motor
+{
+    public partial int MaxAllowedSpeed { get; set; } // Default: 100
+    public partial int MotorSpeed { get; set; }      // Validated: must be <= MaxAllowedSpeed
+}
+```
+
+**During the transaction (capture phase):**
+
+```
+motor.MaxAllowedSpeed = 200;
+    → ValidationInterceptor: validates 200 for MaxAllowedSpeed → OK
+    → TransactionInterceptor: captures in pending[MaxAllowedSpeed] = 200, stops chain
+    (no field write, no notifications)
+
+motor.MotorSpeed = 150;
+    → ValidationInterceptor: validates 150 for MotorSpeed
+        reads MaxAllowedSpeed → TransactionInterceptor returns pending value 200
+        150 <= 200 → OK
+    → TransactionInterceptor: captures in pending[MotorSpeed] = 150, stops chain
+    (no field write, no notifications)
+```
+
+**On commit (replay phase):**
+
+Changes are replayed in insertion order through the full interceptor chain against the real model:
+
+```
+await transaction.CommitAsync(cancellationToken);
+
+Apply pending[MaxAllowedSpeed] = 200:
+    → ValidationInterceptor: validates 200 → OK
+    → TransactionInterceptor: IsCommitting=true → calls next (no capture)
+    → Field write: MaxAllowedSpeed = 200
+    → Notifications fired
+
+Apply pending[MotorSpeed] = 150:
+    → ValidationInterceptor: validates 150
+        reads MaxAllowedSpeed from real model → 200 (already committed above)
+        150 <= 200 → OK
+    → TransactionInterceptor: IsCommitting=true → calls next (no capture)
+    → Field write: MotorSpeed = 150
+    → Notifications fired
+```
+
+**Why insertion order matters:** If `MotorSpeed` were committed before `MaxAllowedSpeed`, the validator would read `MaxAllowedSpeed = 100` from the real model and reject the write.
+
 ### Thread Safety
 
 - `BeginTransactionAsync()` uses `AsyncLocal<T>` to store the current transaction
