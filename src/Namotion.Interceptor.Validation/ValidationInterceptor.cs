@@ -1,12 +1,15 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Text;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Validation;
 
 /// <summary>
 /// Interceptor that validates property values using registered validators before writing.
+/// Runs first in the interceptor chain to reject invalid values before any other processing.
 /// </summary>
+[RunsFirst]
 public class ValidationInterceptor : IWriteInterceptor
 {
     /// <inheritdoc />

@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Collections.Concurrent;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Transactions;
@@ -56,15 +55,28 @@ public sealed class SubjectTransaction : IDisposable
     internal SubjectTransactionInterceptor Interceptor { get; }
 
     /// <summary>
-    /// Last write wins if the same property is written multiple times.
-    /// Thread-safe for concurrent property writes within the same transaction.
+    /// Lock object for synchronizing access to <see cref="PendingChanges"/>.
+    /// Required because <see cref="OrderedDictionary{TKey, TValue}"/> is not thread-safe.
     /// </summary>
-    internal ConcurrentDictionary<PropertyReference, SubjectPropertyChange> PendingChanges { get; } = new(PropertyReference.Comparer);
+    internal object PendingChangesLock { get; } = new();
 
     /// <summary>
-    /// Gets the pending changes as a read-only list.
+    /// Last write wins if the same property is written multiple times.
+    /// Preserves insertion order so that commit replays changes in the order they were written.
+    /// Access must be synchronized via <see cref="PendingChangesLock"/>.
     /// </summary>
-    public IReadOnlyList<SubjectPropertyChange> GetPendingChanges() => PendingChanges.Values.ToList();
+    internal OrderedDictionary<PropertyReference, SubjectPropertyChange> PendingChanges { get; } = new(PropertyReference.Comparer);
+
+    /// <summary>
+    /// Gets the pending changes as a read-only list, in insertion order.
+    /// </summary>
+    public IReadOnlyList<SubjectPropertyChange> GetPendingChanges()
+    {
+        lock (PendingChangesLock)
+        {
+            return PendingChanges.Values.ToList();
+        }
+    }
 
     /// <summary>
     /// Gets the context this transaction is bound to.
@@ -178,10 +190,13 @@ public sealed class SubjectTransaction : IDisposable
     {
         ValidateCanCommit();
 
-        if (PendingChanges.Count == 0)
+        lock (PendingChangesLock)
         {
-            _isCommitted = true;
-            return;
+            if (PendingChanges.Count == 0)
+            {
+                _isCommitted = true;
+                return;
+            }
         }
 
         var commitLock = await AcquireOptimisticLockIfNeededAsync(cancellationToken);
@@ -198,7 +213,11 @@ public sealed class SubjectTransaction : IDisposable
 
             var (successful, failed, errors) = await ExecuteWritesAsync(changes, commitToken);
 
-            PendingChanges.Clear();
+            lock (PendingChangesLock)
+            {
+                PendingChanges.Clear();
+            }
+
             _isCommitted = true;
 
             ThrowIfFailed(successful, failed, errors);
@@ -231,16 +250,19 @@ public sealed class SubjectTransaction : IDisposable
 
     private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes) RentAndCopyChanges()
     {
-        var changeCount = PendingChanges.Count;
-        var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount);
-
-        var index = 0;
-        foreach (var change in PendingChanges.Values)
+        lock (PendingChangesLock)
         {
-            rentedArray[index++] = change;
-        }
+            var changeCount = PendingChanges.Count;
+            var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount);
 
-        return (rentedArray, rentedArray.AsMemory(0, changeCount));
+            var index = 0;
+            foreach (var change in PendingChanges.Values)
+            {
+                rentedArray[index++] = change;
+            }
+
+            return (rentedArray, rentedArray.AsMemory(0, changeCount));
+        }
     }
 
     private void ThrowIfConflictsDetected(ReadOnlySpan<SubjectPropertyChange> changes)
@@ -414,7 +436,12 @@ public sealed class SubjectTransaction : IDisposable
         if (Interlocked.CompareExchange(ref _isDisposed, 1, 0) == 0)
         {
             Interlocked.Decrement(ref _activeTransactionCount);
-            PendingChanges.Clear();
+
+            lock (PendingChangesLock)
+            {
+                PendingChanges.Clear();
+            }
+
             CurrentTransaction.Value = null;
             _lockReleaser?.Dispose(); // May be null for Optimistic transactions
         }
