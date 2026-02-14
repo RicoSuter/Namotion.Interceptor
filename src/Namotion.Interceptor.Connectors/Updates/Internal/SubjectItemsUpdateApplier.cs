@@ -1,7 +1,6 @@
 using System.Collections;
 using System.Text.Json;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
 
