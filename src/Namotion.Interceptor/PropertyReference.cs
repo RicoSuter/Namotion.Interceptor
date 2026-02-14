@@ -97,8 +97,16 @@ public struct PropertyReference : IEquatable<PropertyReference>
     /// <param name="timestamp">The timestamp to store.</param>
     public void SetWriteTimestamp(DateTimeOffset timestamp)
     {
+        SetWriteTimestampUtcTicks(timestamp.UtcTicks);
+    }
+
+    /// <summary>
+    /// Sets the write timestamp from raw UTC ticks, avoiding DateTimeOffset conversion on the hot path.
+    /// </summary>
+    internal void SetWriteTimestampUtcTicks(long utcTicks)
+    {
         var holder = (long[])Subject.Data.GetOrAdd((Name, WriteTimestampKey), static _ => new long[1])!;
-        Interlocked.Exchange(ref holder[0], timestamp.UtcTicks);
+        Interlocked.Exchange(ref holder[0], utcTicks);
     }
 
     #region Equality
