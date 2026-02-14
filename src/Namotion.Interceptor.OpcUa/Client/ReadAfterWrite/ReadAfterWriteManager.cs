@@ -2,7 +2,6 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Resilience;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Tracking;
 using Opc.Ua;
 using Opc.Ua.Client;
 
