@@ -11,8 +11,12 @@ internal static class WriteInterceptorFactory<TProperty>
         {
             return static (ref interception, innerWriteValue) =>
             {
-                innerWriteValue(interception.Property.Subject, interception.NewValue);
-                interception.IsWritten = true;
+                lock (interception.Property.Subject.SyncRoot)
+                {
+                    innerWriteValue(interception.Property.Subject, interception.NewValue);
+                    interception.IsWritten = true;
+                    interception.Property.SetWriteTimestampUtcTicks(SubjectChangeContext.Current.ChangedTimestampUtcTicks);
+                }
             };
         }
 
