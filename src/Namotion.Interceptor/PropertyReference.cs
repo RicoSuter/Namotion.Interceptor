@@ -103,6 +103,7 @@ public struct PropertyReference : IEquatable<PropertyReference>
     /// <summary>
     /// Sets the write timestamp from raw UTC ticks, avoiding DateTimeOffset conversion on the hot path.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void SetWriteTimestampUtcTicks(long utcTicks)
     {
         var holder = (long[])Subject.Data.GetOrAdd((Name, WriteTimestampKey), static _ => new long[1])!;
