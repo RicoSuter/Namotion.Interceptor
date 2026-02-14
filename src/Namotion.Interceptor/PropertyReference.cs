@@ -92,15 +92,6 @@ public struct PropertyReference : IEquatable<PropertyReference>
     }
 
     /// <summary>
-    /// Sets the write timestamp.
-    /// </summary>
-    /// <param name="timestamp">The timestamp to store.</param>
-    public void SetWriteTimestamp(DateTimeOffset timestamp)
-    {
-        SetWriteTimestampUtcTicks(timestamp.UtcTicks);
-    }
-
-    /// <summary>
     /// Sets the write timestamp from raw UTC ticks, avoiding DateTimeOffset conversion on the hot path.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
