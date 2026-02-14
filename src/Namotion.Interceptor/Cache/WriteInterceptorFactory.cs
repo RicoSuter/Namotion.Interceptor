@@ -24,7 +24,7 @@ internal static class WriteInterceptorFactory<TProperty>
                 {
                     innerWriteValue(context.Property.Subject, context.NewValue);
                     context.IsWritten = true;
-                    context.Property.SetWriteTimestamp(SubjectChangeContext.Current.ChangedTimestamp);
+                    context.Property.SetWriteTimestampUtcTicks(SubjectChangeContext.Current.ChangedTimestampUtcTicks);
                 }
                 return context.NewValue;
             }

@@ -29,6 +29,15 @@ public readonly struct SubjectChangeContext
             : GetTimestampFunction();
     }
 
+    /// <summary>Gets the changed timestamp as raw UTC ticks, avoiding DateTimeOffset allocation on the hot path.</summary>
+    internal long ChangedTimestampUtcTicks
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _changedTimestampUtcTicks != 0
+            ? _changedTimestampUtcTicks
+            : GetTimestampFunction().UtcTicks;
+    }
+
     /// <summary>Gets the received timestamp from the thread-local context, or null if not set.</summary>
     public DateTimeOffset? ReceivedTimestamp
     {
@@ -41,7 +50,7 @@ public readonly struct SubjectChangeContext
     /// <summary>
     /// Gets or sets a function which retrieves the current timestamp (default is <see cref="DateTimeOffset.UtcNow"/>).
     /// </summary>
-    private static Func<DateTimeOffset> GetTimestampFunction { get; set; } = () => DateTimeOffset.UtcNow;
+    public static Func<DateTimeOffset> GetTimestampFunction { get; set; } = () => DateTimeOffset.UtcNow;
 
     /// <summary>Gets the current change context.</summary>
     public static SubjectChangeContext Current
