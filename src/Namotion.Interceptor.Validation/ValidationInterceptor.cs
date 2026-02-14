@@ -2,14 +2,15 @@
 using System.Text;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
+using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.Validation;
 
 /// <summary>
 /// Interceptor that validates property values using registered validators before writing.
-/// Runs first in the interceptor chain to reject invalid values before any other processing.
+/// Runs before the transaction interceptor to validate during both capture and commit phases.
 /// </summary>
-[RunsFirst]
+[RunsBefore(typeof(SubjectTransactionInterceptor))]
 public class ValidationInterceptor : IWriteInterceptor
 {
     /// <inheritdoc />
