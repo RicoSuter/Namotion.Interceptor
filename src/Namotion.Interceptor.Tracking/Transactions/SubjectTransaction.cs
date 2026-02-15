@@ -57,6 +57,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <summary>
     /// Lock object for synchronizing access to <see cref="PendingChanges"/>.
     /// Required because <see cref="OrderedDictionary{TKey, TValue}"/> is not thread-safe.
+    /// TODO(perf): Consider ReaderWriterLockSlim to reduce read contention during transactions.
     /// </summary>
     internal object PendingChangesLock { get; } = new();
 
