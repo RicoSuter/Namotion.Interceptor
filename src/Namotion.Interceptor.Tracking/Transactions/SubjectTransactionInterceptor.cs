@@ -7,9 +7,10 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 
 /// <summary>
 /// Interceptor that captures property changes during transactions.
-/// Must run before PropertyChangeObservable/Queue to suppress notifications during capture.
+/// Must run before all downstream interceptors to suppress side effects during capture.
 /// Also manages the per-context transaction lock for serialized transactions.
 /// </summary>
+[RunsBefore(typeof(DerivedPropertyChangeHandler))]
 [RunsBefore(typeof(PropertyChangeObservable))]
 [RunsBefore(typeof(PropertyChangeQueue))]
 public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInterceptor
