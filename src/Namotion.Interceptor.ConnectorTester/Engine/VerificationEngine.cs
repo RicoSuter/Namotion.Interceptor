@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Text.Json;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.ConnectorTester.Configuration;
@@ -14,6 +15,7 @@ namespace Namotion.Interceptor.ConnectorTester.Engine;
 public class VerificationEngine : BackgroundService
 {
     private static readonly TimeSpan SnapshotPollInterval = TimeSpan.FromSeconds(5);
+    private const string MemoryLogPath = "logs/memory.log";
 
     private static readonly JsonSerializerOptions SnapshotJsonOptions = new()
     {
@@ -59,6 +61,13 @@ public class VerificationEngine : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // Reset memory log for this run
+        Directory.CreateDirectory(Path.GetDirectoryName(MemoryLogPath)!);
+        if (File.Exists(MemoryLogPath))
+        {
+            File.Delete(MemoryLogPath);
+        }
+
         // Brief startup delay to let connectors initialize
         await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
 
@@ -159,6 +168,7 @@ public class VerificationEngine : BackgroundService
                     cycleStopwatch.Stop();
 
                     WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, "PASS");
+                    AppendMemoryLog(activeProfileName, "PASS");
                     _logger.LogInformation(
                         "=== Cycle {Cycle}: PASS (converged in {ConvergeTime:F1}s, cycle {CycleTime:F0}s) ===",
                         _cycleNumber, convergeStopwatch.Elapsed.TotalSeconds, cycleStopwatch.Elapsed.TotalSeconds);
@@ -204,6 +214,7 @@ public class VerificationEngine : BackgroundService
                 }
 
                 WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, "FAIL");
+                AppendMemoryLog(activeProfileName, "FAIL");
                 _cycleLoggerProvider?.FinishCycle(_cycleNumber, false);
 
                 _failed = true;
@@ -272,6 +283,25 @@ public class VerificationEngine : BackgroundService
                     engine.TargetName, record.FaultType, record.DisruptedAt.LocalDateTime, record.Duration.TotalSeconds);
             }
         }
+    }
+
+    private void AppendMemoryLog(string? profileName, string result)
+    {
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true);
+        GC.WaitForPendingFinalizers();
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true);
+
+        var process = Process.GetCurrentProcess();
+        var workingSetMb = process.WorkingSet64 / (1024.0 * 1024.0);
+        var heapMb = GC.GetTotalMemory(forceFullCollection: false) / (1024.0 * 1024.0);
+        var profile = profileName != null ? $"profile: {profileName}" : "no profile";
+
+        var line = string.Format(
+            CultureInfo.InvariantCulture,
+            "{0:yyyy-MM-ddTHH:mm:ss.fffZ}, Cycle {1}, {2}, {3}, ProcessMB: {4:F1}, HeapMB: {5:F1}",
+            DateTimeOffset.UtcNow, _cycleNumber, profile, result, workingSetMb, heapMb);
+
+        File.AppendAllText(MemoryLogPath, line + Environment.NewLine);
     }
 
     private string? ApplyChaosProfile()
