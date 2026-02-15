@@ -422,12 +422,42 @@ Apply pending[MotorSpeed] = 150:
 
 **Write order limitation:** Only the final value per property is stored (last write wins), and the commit position is determined by the *first* write to each property. If a property is re-written with a value that has different dependency requirements than the initial value, the commit order (based on first-write positions) may no longer match the dependency order needed by the final values. This can cause commit-time validation to fail even though the final set of values is consistent. To avoid this, ensure that re-writes do not shift dependency requirements relative to the original insertion order. See [#192](https://github.com/RicoSuter/Namotion.Interceptor/issues/192) for details and potential solutions.
 
+### Retry After Conflict Detection
+
+When using `TransactionConflictBehavior.FailOnConflict`, a `SubjectTransactionConflictException` is thrown *before* any writes are applied. The pending changes remain intact, so you can modify them and retry:
+
+```csharp
+using var transaction = await context.BeginTransactionAsync(
+    TransactionFailureHandling.BestEffort,
+    conflictBehavior: TransactionConflictBehavior.FailOnConflict);
+
+motor.MaxAllowedSpeed = 200;
+motor.MotorSpeed = 150;
+
+try
+{
+    await transaction.CommitAsync(cancellationToken);
+}
+catch (SubjectTransactionConflictException ex)
+{
+    // Conflict detected before any writes — pending changes are still intact.
+    // Re-read current state, adjust, and retry.
+    motor.MaxAllowedSpeed = 250;
+    await transaction.CommitAsync(cancellationToken);
+}
+```
+
+Post-write failures (`SubjectTransactionException` from `BestEffort` or `Rollback`) clear the pending changes as part of the commit process, so retry is not possible — dispose the transaction and start a new one.
+
+Note that concurrent `CommitAsync` calls on the same transaction are rejected — only one commit attempt can be in progress at a time.
+
 ### Thread Safety
 
 - `BeginTransactionAsync()` uses `AsyncLocal<T>` to store the current transaction
 - Exclusive transactions use a per-context semaphore
 - Each async execution context has its own transaction scope
 - The transaction is automatically cleared on `Dispose()`
+- Concurrent `CommitAsync` calls on the same transaction instance are rejected
 
 ## Best Practices
 
