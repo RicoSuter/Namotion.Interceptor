@@ -201,12 +201,10 @@ public sealed class SubjectTransaction : IDisposable
         }
 
         var commitLock = await AcquireOptimisticLockIfNeededAsync(cancellationToken);
-        var (rentedArray, changes) = RentAndCopyChanges();
+        var (rentedArray, changes) = StartCommitAndSnapshotChanges();
 
         try
         {
-            _isCommitting = true;
-
             ThrowIfConflictsDetected(changes.Span);
 
             using var timeoutCts = CreateCommitTimeoutCts();
@@ -249,10 +247,14 @@ public sealed class SubjectTransaction : IDisposable
         return null;
     }
 
-    private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes) RentAndCopyChanges()
+    private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes) StartCommitAndSnapshotChanges()
     {
         lock (PendingChangesLock)
         {
+            // Set _isCommitting inside the lock to prevent concurrent writes from being
+            // captured into PendingChanges between the copy and the flag update (TOCTOU).
+            _isCommitting = true;
+
             var changeCount = PendingChanges.Count;
             var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount);
 
