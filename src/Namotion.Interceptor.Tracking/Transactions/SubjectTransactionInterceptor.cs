@@ -42,6 +42,13 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         {
             lock (transaction.PendingChangesLock)
             {
+                if (transaction.IsCommitting)
+                {
+                    throw new InvalidOperationException(
+                        "Cannot read transactional property while commit is in progress. " +
+                        "This typically indicates the transaction is being used from multiple threads.");
+                }
+
                 if (transaction.PendingChanges.TryGetValue(context.Property, out var change))
                 {
                     // Return pending value if transaction active and not committing
@@ -80,6 +87,13 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
 
             lock (transaction.PendingChangesLock)
             {
+                if (transaction.IsCommitting)
+                {
+                    throw new InvalidOperationException(
+                        "Cannot write transactional property while commit is in progress. " +
+                        "This typically indicates the transaction is being used from multiple threads.");
+                }
+
                 var isFirstWrite = !transaction.PendingChanges.TryGetValue(context.Property, out var existingChange);
                 if (isFirstWrite)
                 {

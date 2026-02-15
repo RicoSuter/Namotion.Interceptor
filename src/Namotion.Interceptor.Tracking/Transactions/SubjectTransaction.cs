@@ -28,6 +28,7 @@ public sealed class SubjectTransaction : IDisposable
 
     private volatile bool _isCommitting;
     private volatile bool _isCommitted;
+    private int _commitStarted;
     private int _isDisposed;
 
     /// <summary>
@@ -224,6 +225,14 @@ public sealed class SubjectTransaction : IDisposable
         finally
         {
             _isCommitting = false;
+
+            if (!_isCommitted)
+            {
+                // Allow retry: reset so CommitAsync can be called again after a failure
+                // (e.g., conflict detected, timeout, validation during replay).
+                Volatile.Write(ref _commitStarted, 0);
+            }
+
             ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray);
             commitLock?.Dispose();
         }
@@ -236,6 +245,9 @@ public sealed class SubjectTransaction : IDisposable
 
         if (_isCommitted)
             throw new InvalidOperationException("Transaction has already been committed.");
+
+        if (Interlocked.CompareExchange(ref _commitStarted, 1, 0) != 0)
+            throw new InvalidOperationException("CommitAsync is already in progress.");
     }
 
     private async ValueTask<IDisposable?> AcquireOptimisticLockIfNeededAsync(CancellationToken cancellationToken)
