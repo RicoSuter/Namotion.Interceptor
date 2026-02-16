@@ -39,12 +39,12 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
             person.FirstName = "John";
 
             Assert.NotNull(SubjectTransaction.Current);
-            Assert.Single(transaction.PendingChanges);
+            Assert.Single(transaction.GetPendingChanges());
         }
 
         // Assert
         Assert.Null(SubjectTransaction.Current);
-        Assert.Empty(capturedTransaction.PendingChanges);
+        Assert.Empty(capturedTransaction.GetPendingChanges());
         Assert.Null(person.FirstName);
     }
 
@@ -73,7 +73,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
         await transaction.CommitAsync(CancellationToken.None);
 
         // Assert
-        Assert.Empty(transaction.PendingChanges);
+        Assert.Empty(transaction.GetPendingChanges());
     }
 
     [Fact]
@@ -86,7 +86,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
         using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
         person.FirstName = "John";
 
-        Assert.Single(transaction.PendingChanges);
+        Assert.Single(transaction.GetPendingChanges());
 
         // Act
         await transaction.CommitAsync(CancellationToken.None);
@@ -110,16 +110,16 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
             capturedTransaction = transaction;
             person.FirstName = "John";
 
-            Assert.Single(transaction.PendingChanges);
+            Assert.Single(transaction.GetPendingChanges());
 
             await transaction.CommitAsync(CancellationToken.None);
 
-            Assert.Empty(transaction.PendingChanges);
+            Assert.Empty(transaction.GetPendingChanges());
         }
 
         // Assert
         Assert.Null(SubjectTransaction.Current);
-        Assert.Empty(capturedTransaction.PendingChanges);
+        Assert.Empty(capturedTransaction.GetPendingChanges());
     }
 
     [Fact]

@@ -279,7 +279,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
             if (messageCount > 0)
             {
 #if USE_LOCAL_MQTTNET
-                await server.InjectApplicationMessages(
+                await server.InjectApplicationMessagesAsync(
                     new ArraySegment<InjectedMqttApplicationMessage>(messages, 0, messageCount),
                     cancellationToken).ConfigureAwait(false);
 #else

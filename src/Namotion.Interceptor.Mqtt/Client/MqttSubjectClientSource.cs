@@ -223,7 +223,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 #if USE_LOCAL_MQTTNET
                 try
                 {
-                    await client.PublishManyAsync(
+                    await client.PublishMessagesAsync(
                         new ArraySegment<MqttApplicationMessage>(messages, 0, messageCount),
                         cancellationToken).ConfigureAwait(false);
                 }

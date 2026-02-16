@@ -1,4 +1,5 @@
 using System;
+using System.Buffers.Text;
 using MQTTnet.Protocol;
 using Namotion.Interceptor.Registry.Paths;
 
@@ -80,18 +81,25 @@ public class MqttServerConfiguration
     public string? SourceTimestampPropertyName { get; init; } = "ts";
 
     /// <summary>
-    /// Gets or sets the function for serializing timestamps to strings for MQTT user properties.
-    /// Default converts to Unix milliseconds. Must be paired with a matching <see cref="SourceTimestampDeserializer"/>.
+    /// Gets or sets the function for serializing timestamps to bytes for MQTT user properties.
+    /// Default converts to Unix milliseconds as UTF8. Must be paired with a matching <see cref="SourceTimestampDeserializer"/>.
     /// </summary>
-    public Func<DateTimeOffset, string> SourceTimestampSerializer { get; init; } =
-        static timestamp => timestamp.ToUnixTimeMilliseconds().ToString();
+    public Func<DateTimeOffset, byte[]> SourceTimestampSerializer { get; init; } =
+        static timestamp =>
+        {
+            Span<byte> buffer = stackalloc byte[20];
+            Utf8Formatter.TryFormat(timestamp.ToUnixTimeMilliseconds(), buffer, out var bytesWritten);
+            return buffer[..bytesWritten].ToArray();
+        };
 
     /// <summary>
-    /// Gets or sets the function for deserializing timestamp strings from MQTT user properties.
-    /// Default parses Unix milliseconds. Must be paired with a matching <see cref="SourceTimestampSerializer"/>.
+    /// Gets or sets the function for deserializing timestamp bytes from MQTT user properties.
+    /// Default parses Unix milliseconds from UTF8. Must be paired with a matching <see cref="SourceTimestampSerializer"/>.
     /// </summary>
-    public Func<string, DateTimeOffset?> SourceTimestampDeserializer { get; init; } =
-        static value => long.TryParse(value, out var unixMs) ? DateTimeOffset.FromUnixTimeMilliseconds(unixMs) : null;
+    public Func<ReadOnlyMemory<byte>, DateTimeOffset?> SourceTimestampDeserializer { get; init; } =
+        static value => Utf8Parser.TryParse(value.Span, out long unixMs, out _)
+            ? DateTimeOffset.FromUnixTimeMilliseconds(unixMs)
+            : null;
 
     /// <summary>
     /// Validates the configuration.

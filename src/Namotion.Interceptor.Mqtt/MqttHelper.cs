@@ -9,18 +9,18 @@ internal static class MqttHelper
     public static DateTimeOffset? ExtractSourceTimestamp(
         IReadOnlyCollection<MqttUserProperty>? userProperties,
         string? timestampPropertyName,
-        Func<string, DateTimeOffset?> deserializer)
+        Func<ReadOnlyMemory<byte>, DateTimeOffset?> deserializer)
     {
         if (timestampPropertyName is null || userProperties is null)
         {
             return null;
         }
 
-        foreach (var prop in userProperties)
+        foreach (var property in userProperties)
         {
-            if (prop.Name == timestampPropertyName)
+            if (property.Name == timestampPropertyName)
             {
-                return deserializer(prop.Value);
+                return deserializer(property.ValueBuffer);
             }
         }
 
