@@ -82,7 +82,9 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            if (!_isCommitting && _pendingChanges.TryGetValue(property, out var change))
+            ThrowIfCommittingConcurrently();
+
+            if (_pendingChanges.TryGetValue(property, out var change))
             {
                 value = change.GetNewValue<TProperty>();
                 return true;
@@ -95,11 +97,11 @@ public sealed class SubjectTransaction : IDisposable
 
     /// <summary>
     /// Atomically captures a property change into the pending dictionary.
-    /// Returns false if the transaction is currently committing (caller should call next in the chain).
     /// First write preserves <paramref name="currentValue"/> as old value for conflict detection;
     /// subsequent writes preserve the original old value (last write wins).
     /// </summary>
-    internal bool TryCaptureChange<TProperty>(
+    /// <exception cref="InvalidOperationException">Thrown if a concurrent commit is in progress (TOCTOU race).</exception>
+    internal void CaptureChange<TProperty>(
         PropertyReference property,
         object? source,
         DateTimeOffset changedTimestamp,
@@ -109,8 +111,7 @@ public sealed class SubjectTransaction : IDisposable
     {
         lock (_pendingChangesLock)
         {
-            if (_isCommitting)
-                return false;
+            ThrowIfCommittingConcurrently();
 
             var isFirstWrite = !_pendingChanges.TryGetValue(property, out var existingChange);
             _pendingChanges[property] = SubjectPropertyChange.Create(
@@ -120,8 +121,16 @@ public sealed class SubjectTransaction : IDisposable
                 receivedTimestamp: receivedTimestamp,
                 isFirstWrite ? currentValue : existingChange.GetOldValue<TProperty>(),
                 newValue);
+        }
+    }
 
-            return true;
+    private void ThrowIfCommittingConcurrently()
+    {
+        if (_isCommitting)
+        {
+            throw new InvalidOperationException(
+                "Cannot access transactional property while commit is in progress. " +
+                "This typically indicates the transaction is being used from multiple threads.");
         }
     }
 
