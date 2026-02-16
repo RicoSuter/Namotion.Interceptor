@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
@@ -203,7 +204,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                     [
                         new MqttUserProperty(
                             timestampPropertyName,
-                            _configuration.SourceTimestampConverter(change.ChangedTimestamp))
+                            Encoding.UTF8.GetBytes(_configuration.SourceTimestampConverter(change.ChangedTimestamp)))
                     ];
                 }
 
@@ -216,7 +217,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             if (messageCount > 0)
             {
 #if USE_LOCAL_MQTTNET
-                await server.InjectApplicationMessages(
+                await server.InjectApplicationMessagesAsync(
                     new ArraySegment<InjectedMqttApplicationMessage>(messages, 0, messageCount),
                     cancellationToken).ConfigureAwait(false);
 #else

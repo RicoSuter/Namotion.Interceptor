@@ -15,9 +15,9 @@ internal static class MqttHelper
             return null;
         }
 
-        foreach (var prop in userProperties)
+        foreach (var property in userProperties)
         {
-            if (prop.Name == timestampPropertyName && long.TryParse(prop.Value, out var unixMs))
+            if (property.Name == timestampPropertyName && long.TryParse(property.ReadValueAsString(), out var unixMs))
             {
                 return DateTimeOffset.FromUnixTimeMilliseconds(unixMs);
             }
