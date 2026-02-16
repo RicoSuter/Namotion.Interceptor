@@ -2,7 +2,6 @@ using System.ComponentModel.DataAnnotations;
 using System.Reactive.Concurrency;
 using Moq;
 using Namotion.Interceptor.Connectors.Tests.Models;
-using Namotion.Interceptor.Connectors.Transactions;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
@@ -28,8 +27,8 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         person.FirstName = "John";
 
         // Assert
-        Assert.Single(transaction.PendingChanges);
-        var change = transaction.PendingChanges.Values.First();
+        Assert.Single(transaction.GetPendingChanges());
+        var change = transaction.GetPendingChanges().First();
         Assert.Equal("John", change.GetNewValue<string>());
         Assert.Null(change.GetOldValue<string>());
     }
@@ -86,8 +85,8 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         _ = person.FullName;
 
         // Assert
-        Assert.Equal(2, transaction.PendingChanges.Count);
-        Assert.All(transaction.PendingChanges.Keys, key => Assert.False(key.Metadata.IsDerived));
+        Assert.Equal(2, transaction.GetPendingChanges().Count);
+        Assert.All(transaction.GetPendingChanges(), change => Assert.False(change.Property.Metadata.IsDerived));
     }
 
     [Fact]
@@ -104,8 +103,8 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         person.FirstName = "Jack";
 
         // Assert
-        Assert.Single(transaction.PendingChanges);
-        var change = transaction.PendingChanges.Values.First();
+        Assert.Single(transaction.GetPendingChanges());
+        var change = transaction.GetPendingChanges().First();
         Assert.Equal("Jack", change.GetNewValue<string>());
         Assert.Null(change.GetOldValue<string>());
     }
@@ -129,7 +128,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         }
 
         // Assert
-        var change = transaction.PendingChanges.Values.First();
+        var change = transaction.GetPendingChanges().First();
         Assert.Same(mockSource, change.Source);
         Assert.Equal(changedTime, change.ChangedTimestamp);
         Assert.Equal(receivedTime, change.ReceivedTimestamp);
@@ -151,7 +150,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
 
             // Assert
             Assert.Equal("Pending", readValue);
-            Assert.Single(transaction.PendingChanges);
+            Assert.Single(transaction.GetPendingChanges());
         }
 
         Assert.Equal("Original", person.FirstName);
@@ -186,7 +185,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
 
         // Assert
         Assert.Equal("Stored", result);
-        Assert.Empty(transaction.PendingChanges);
+        Assert.Empty(transaction.GetPendingChanges());
     }
 
     [Fact]
@@ -283,7 +282,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
             person1.FirstName = "John";
             person2.FirstName = "Jane";
 
-            Assert.Equal(2, transaction.PendingChanges.Count);
+            Assert.Equal(2, transaction.GetPendingChanges().Count);
 
             await transaction.CommitAsync(CancellationToken.None);
         }

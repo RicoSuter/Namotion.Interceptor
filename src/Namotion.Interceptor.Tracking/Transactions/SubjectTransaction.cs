@@ -26,6 +26,14 @@ public sealed class SubjectTransaction : IDisposable
     private readonly TimeSpan _commitTimeout;
     private readonly IDisposable? _lockReleaser; // null for Optimistic until commit
 
+    /// <summary>
+    /// Last write wins if the same property is written multiple times.
+    /// Preserves insertion order so that commit replays changes in the order they were written.
+    /// Access must be synchronized via <see cref="_pendingChangesLock"/>.
+    /// </summary>
+    private readonly OrderedDictionary<PropertyReference, SubjectPropertyChange> _pendingChanges = new(PropertyReference.Comparer);
+    private readonly Lock _pendingChangesLock = new();
+
     private volatile bool _isCommitting;
     private volatile bool _isCommitted;
     private int _commitStarted;
@@ -56,27 +64,64 @@ public sealed class SubjectTransaction : IDisposable
     internal SubjectTransactionInterceptor Interceptor { get; }
 
     /// <summary>
-    /// Lock object for synchronizing access to <see cref="PendingChanges"/>.
-    /// Required because <see cref="OrderedDictionary{TKey, TValue}"/> is not thread-safe.
-    /// TODO(perf): Consider ReaderWriterLockSlim to reduce read contention during transactions.
-    /// </summary>
-    internal object PendingChangesLock { get; } = new();
-
-    /// <summary>
-    /// Last write wins if the same property is written multiple times.
-    /// Preserves insertion order so that commit replays changes in the order they were written.
-    /// Access must be synchronized via <see cref="PendingChangesLock"/>.
-    /// </summary>
-    internal OrderedDictionary<PropertyReference, SubjectPropertyChange> PendingChanges { get; } = new(PropertyReference.Comparer);
-
-    /// <summary>
-    /// Gets the pending changes as a read-only list, in insertion order.
+    /// Gets a snapshot of the pending changes as a read-only list, in insertion order.
     /// </summary>
     public IReadOnlyList<SubjectPropertyChange> GetPendingChanges()
     {
-        lock (PendingChangesLock)
+        lock (_pendingChangesLock)
         {
-            return PendingChanges.Values.ToList();
+            return _pendingChanges.Values.ToList();
+        }
+    }
+
+    /// <summary>
+    /// Tries to read a pending value for the given property.
+    /// Returns false if the transaction is committing or no pending value exists.
+    /// </summary>
+    internal bool TryGetPendingValue<TProperty>(PropertyReference property, out TProperty value)
+    {
+        lock (_pendingChangesLock)
+        {
+            if (!_isCommitting && _pendingChanges.TryGetValue(property, out var change))
+            {
+                value = change.GetNewValue<TProperty>();
+                return true;
+            }
+
+            value = default!;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Atomically captures a property change into the pending dictionary.
+    /// Returns false if the transaction is currently committing (caller should call next in the chain).
+    /// First write preserves <paramref name="currentValue"/> as old value for conflict detection;
+    /// subsequent writes preserve the original old value (last write wins).
+    /// </summary>
+    internal bool TryCaptureChange<TProperty>(
+        PropertyReference property,
+        object? source,
+        DateTimeOffset changedTimestamp,
+        DateTimeOffset? receivedTimestamp,
+        TProperty currentValue,
+        TProperty newValue)
+    {
+        lock (_pendingChangesLock)
+        {
+            if (_isCommitting)
+                return false;
+
+            var isFirstWrite = !_pendingChanges.TryGetValue(property, out var existingChange);
+            _pendingChanges[property] = SubjectPropertyChange.Create(
+                property,
+                source: source,
+                changedTimestamp: changedTimestamp,
+                receivedTimestamp: receivedTimestamp,
+                isFirstWrite ? currentValue : existingChange.GetOldValue<TProperty>(),
+                newValue);
+
+            return true;
         }
     }
 
@@ -192,9 +237,9 @@ public sealed class SubjectTransaction : IDisposable
     {
         ValidateCanCommit();
 
-        lock (PendingChangesLock)
+        lock (_pendingChangesLock)
         {
-            if (PendingChanges.Count == 0)
+            if (_pendingChanges.Count == 0)
             {
                 _isCommitted = true;
                 return;
@@ -213,9 +258,9 @@ public sealed class SubjectTransaction : IDisposable
 
             var (successful, failed, errors) = await ExecuteWritesAsync(changes, commitToken);
 
-            lock (PendingChangesLock)
+            lock (_pendingChangesLock)
             {
-                PendingChanges.Clear();
+                _pendingChanges.Clear();
             }
 
             _isCommitted = true;
@@ -261,17 +306,17 @@ public sealed class SubjectTransaction : IDisposable
 
     private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes) StartCommitAndSnapshotChanges()
     {
-        lock (PendingChangesLock)
+        lock (_pendingChangesLock)
         {
             // Set _isCommitting inside the lock to prevent concurrent writes from being
-            // captured into PendingChanges between the copy and the flag update (TOCTOU).
+            // captured into _pendingChanges between the copy and the flag update (TOCTOU).
             _isCommitting = true;
 
-            var changeCount = PendingChanges.Count;
+            var changeCount = _pendingChanges.Count;
             var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount);
 
             var index = 0;
-            foreach (var change in PendingChanges.Values)
+            foreach (var change in _pendingChanges.Values)
             {
                 rentedArray[index++] = change;
             }
@@ -452,9 +497,9 @@ public sealed class SubjectTransaction : IDisposable
         {
             Interlocked.Decrement(ref _activeTransactionCount);
 
-            lock (PendingChangesLock)
+            lock (_pendingChangesLock)
             {
-                PendingChanges.Clear();
+                _pendingChanges.Clear();
             }
 
             CurrentTransaction.Value = null;
