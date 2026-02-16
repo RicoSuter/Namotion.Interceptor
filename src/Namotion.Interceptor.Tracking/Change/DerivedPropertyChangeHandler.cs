@@ -92,7 +92,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return;
         }
 
-        // Skip derived property recalculation during transaction capture
+        // Skip dependent recalculation during transaction capture.
+        // The [RunsBefore] ordering (Transaction before Derived) prevents non-derived writes
+        // from reaching here during capture. However, derived-with-setter properties bypass
+        // the transaction interceptor (IsDerived check), so this guard is still needed to
+        // suppress cascading recalculations until commit replay.
         if (SubjectTransaction.HasActiveTransaction &&
             SubjectTransaction.Current is { IsCommitting: false })
         {
