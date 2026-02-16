@@ -5,6 +5,7 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Client.Polling;
 using Opc.Ua;
+using Opc.Ua.Bindings;
 using Opc.Ua.Client;
 using Opc.Ua.Configuration;
 
@@ -602,7 +603,19 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     {
         try
         {
-            session.NullableTransportChannel?.Dispose();
+            var channel = session.NullableTransportChannel;
+
+            // TODO: Remove socket close when https://github.com/OPCFoundation/UA-.NETStandard/pull/3560
+            // is released. The SDK will then close sockets in UaSCUaBinaryChannel.Dispose().
+            // The explicit close before Dispose ensures in-flight operations fail immediately
+            // (fast failover), but the leak prevention aspect becomes redundant with the SDK fix.
+            if (channel is IMessageSocketChannel socketChannel)
+            {
+                try { socketChannel.Socket?.Dispose(); }
+                catch { /* best effort - socket may already be closed */ }
+            }
+
+            channel?.Dispose();
         }
         catch (Exception ex)
         {

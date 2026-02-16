@@ -396,30 +396,26 @@ internal class SubscriptionManager : IAsyncDisposable
             subscription.FastDataChangeCallback -= OnFastDataChange;
         }
 
-        var deleteTasks = subscriptions.Select(async subscription =>
+        // Use session.RemoveSubscriptionsAsync instead of subscription.DeleteAsync
+        // to also remove subscriptions from session.m_subscriptions. DeleteAsync alone
+        // only deletes on the server but does not remove from the session's internal list,
+        // keeping the entire Subscription object graph alive until session disposal.
+        if (subscriptions.Length > 0)
         {
-            try
+            var session = subscriptions[0].Session;
+            if (session != null)
             {
-                await subscription.DeleteAsync(true).ConfigureAwait(false);
+                var disposalTimeout = _configuration.SessionDisposalTimeout;
+                try
+                {
+                    await session.RemoveSubscriptionsAsync(subscriptions, default)
+                        .WaitAsync(disposalTimeout).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to remove subscriptions during disposal.");
+                }
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to delete subscription {SubscriptionId} during disposal.", subscription.Id);
-            }
-        });
-
-        // Use timeout to prevent indefinite hang if server is unresponsive
-        var disposalTimeout = _configuration.SessionDisposalTimeout;
-        try
-        {
-            await Task.WhenAll(deleteTasks).WaitAsync(disposalTimeout).ConfigureAwait(false);
-        }
-        catch (TimeoutException)
-        {
-            _logger.LogWarning(
-                "Subscription deletion timed out after {Timeout} during disposal. " +
-                "Some subscriptions may not have been cleanly removed from server.",
-                disposalTimeout);
         }
     }
 }

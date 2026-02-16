@@ -6,7 +6,35 @@ Summary of bugs found and fixes applied during resilience testing of OPC UA clie
 
 **100% pass rate** on connector tester chaos testing (`--launch-profile opcua`).
 
-**Result**: **654/655 cycles PASS** after Fix 12. Fix 13 + Fix 14 address server-side memory leak (HeapMB stable after 58+ cycles). Fix 15 addresses LOH fragmentation in measurement. Pending full verification run with all fixes combined.
+**Result**: All fixes verified. Current run: **35+ cycles, 100% PASS, HeapMB stable at 79–80 MB**.
+
+## Summary
+
+| Fix | Description | Area | SDK PR | Status |
+|-----|-------------|------|--------|--------|
+| 1 | Transport kill + stale callback guard + SetReconnecting | Client | | Verified |
+| 2 | KillAsync/DisconnectAsync race guards | Client | | Verified |
+| 3 | SessionTimeout configuration | Client | | Verified |
+| 4 | ~~Skip full state read after SDK reconnection~~ | Client | | Outdated (replaced by Fix 8) |
+| 5 | RecordReconnectionSuccess from SDK handler | Client | | Verified |
+| 6 | TryDequeue cancellation check | Server | | Verified |
+| 7 | Flush task deadlock (NodeManager.Lock) | Server | | Verified |
+| 8 | Full state read after ALL reconnections | Client | | Verified |
+| 9 | Server-side change loss during restart | Server | | Verified |
+| 10 | Client session disposal order (close before kill) | Client | | Verified |
+| 11 | Delete subscriptions on close | Client | | Verified |
+| 12 | PublishingStopped detection triggers reconnection | Client | | Verified |
+| 13 | Server cleanup on force-kill (SDK tasks) | Server | | Verified |
+| 14 | Three SDK disposal workarounds (memory leak) | Server | [#3560](https://github.com/OPCFoundation/UA-.NETStandard/pull/3560), [#3561](https://github.com/OPCFoundation/UA-.NETStandard/pull/3561) | Verified (local workaround + TODOs) |
+| 15 | HeapMB measurement + LOH compaction | Tester | | Verified |
+
+### Upstream SDK PRs
+
+| PR | Description | Local workaround |
+|----|-------------|-----------------|
+| [#3559](https://github.com/OPCFoundation/UA-.NETStandard/pull/3559) | DiagnosticsNodeManager copy-paste bug | None needed |
+| [#3560](https://github.com/OPCFoundation/UA-.NETStandard/pull/3560) | Socket disposal + CertificateUpdate unsubscribe | 4 TODOs in code |
+| [#3561](https://github.com/OPCFoundation/UA-.NETStandard/pull/3561) | StopAsync TCP listener dispose | 1 TODO in code |
 
 ## Fixes Applied
 
@@ -398,7 +426,9 @@ All three fixes are required. Fix #3 had the biggest impact (broke the most nume
 
 **Status**: Verified — HeapMB stable at ~91 MB after 58+ cycles. Only 2 `OpcUaSubjectServer` instances retained (1 live + 1 pending GC).
 
-**Note**: These are SDK bugs that should be fixed upstream. See "Upstream SDK Issues" section below.
+**Upstream PRs**:
+- https://github.com/OPCFoundation/UA-.NETStandard/pull/3560 (fixes #2 socket disposal and #3 CertificateUpdate). Workarounds #2 and #3 can be removed once the SDK NuGet is updated.
+- https://github.com/OPCFoundation/UA-.NETStandard/pull/3561 (fixes #1 StopAsync not disposing TCP listeners). Workaround #1 (saved listeners) can be removed once the SDK NuGet is updated.
 
 ### Fix 15: HeapMB measurement noise + LOH fragmentation (VerificationEngine.cs)
 
@@ -415,7 +445,7 @@ All three fixes are required. Fix #3 had the biggest impact (broke the most nume
 
 **Files changed**: `VerificationEngine.cs` — `AppendMemoryLog` method
 
-**Status**: LOH compaction did not eliminate the drift — 18 cycles show ~0.23 MB/cycle, similar to without compaction (~0.25 MB/cycle). Root cause is likely Gen2 heap fragmentation from extreme server restart churn (Gen2 was 45% free/holes in dump analysis). All sampled objects had 0 GC roots, confirming no actual object retention leak. At ~9 MB/hour this is acceptable for the test harness and negligible in production (where server restarts are rare). Monitoring via multi-day run to confirm it doesn't accelerate.
+**Status**: Verified — after removing the server-side socket reflection hack (CloseChannelSockets), the ~0.2 MB/cycle drift is gone. Current run (35+ cycles) shows HeapMB flat at 79–80 MB with no upward trend after warmup. The earlier drift was likely caused by additional object churn from the reflection-based socket closing. LOH compaction remains in place as a precaution.
 
 ## Investigation: Stale Value Root Cause (Cycles 565 & 655)
 
@@ -531,45 +561,41 @@ SDK's `CustomNodeManager2.SetDefaultPermissions` accesses `namespaceMetadataValu
 | SDK: `UaSCBinaryChannel.cs` | `Dispose` | Doesn't close Socket (Fix 14) |
 | SDK: `StandardServer.cs` | `Dispose` / `OnServerStarted` | CertificateUpdate never unsubscribed (Fix 14) |
 
-## Open Issues: Upstream SDK Bugs to Report (OPCFoundation/UA-.NETStandard)
+## Upstream SDK Issues (OPCFoundation/UA-.NETStandard)
 
-Two issues to file against the OPC UA .NET Standard SDK (version 1.5.378.65, confirmed not fixed on master). These cause memory leaks when servers are repeatedly created and destroyed within the same process (e.g., server restart loops). In single-lifecycle production, process exit cleans everything up.
+### Issue 1: Memory leak — Server not GC'd after `StopAsync`/`Dispose` due to socket and event disposal bugs
 
-Verified against SDK sources at tag `1.5.378.65` (matches NuGet package version).
+**PR submitted**: https://github.com/OPCFoundation/UA-.NETStandard/pull/3560
 
-### Issue 1: Memory leak — Server not GC'd after `StopAsync`/`Dispose` due to transport listener disposal bugs
+**Reproduction**: Create a `StandardServer`, start it with connected clients, call `StopAsync()` then `Dispose()`. The server object is never garbage collected (~2 MB leaked per restart cycle).
 
-**Reproduction**: Create a `StandardServer`, start it with connected clients, call `StopAsync()` then `Dispose()`. The server object is never garbage collected.
+**Root cause**: Two disposal bugs prevent proper cleanup:
 
-**Root cause**: Three related bugs in the disposal chain prevent proper cleanup:
+1. **`UaSCUaBinaryChannel.Dispose`** (`UaSCBinaryChannel.cs:~224`) doesn't close the `Socket` property. Only `TcpListenerChannel.ChannelClosed()` (protected) calls `Socket?.Close()`, but this is never triggered during disposal. Lingering sockets in `SocketAsyncEngine` act as strong GC roots retaining the entire chain: Socket → Channel → Listener → m_callback → SessionEndpoint → Server.
 
-1. **`ServerBase.StopAsync`** (`ServerBase.cs:573`) calls `listeners.Clear()` after calling `Close()` on each listener. When `ServerBase.Dispose()` later iterates `TransportListeners` to call `Dispose()` on them, the list is empty — so `TcpTransportListener.Dispose()` never runs. Timers, channels, and buffer managers leak.
+2. **`StandardServer.OnServerStarted()`** subscribes `CertificateValidator.CertificateUpdate += OnCertificateUpdateAsync` but neither `StandardServer.Dispose()` nor `ServerBase.Dispose()` unsubscribes. Since the `CertificateValidator` is shared (from `ApplicationConfiguration`) and outlives the server, the delegate retains every disposed server instance.
 
-2. **`UaSCUaBinaryChannel.Dispose`** (`UaSCBinaryChannel.cs:~224`) doesn't close the `Socket` property. Only `TcpListenerChannel.ChannelClosed()` (protected) calls `Socket?.Close()`, but this is never triggered during disposal. Lingering sockets in `SocketAsyncEngine` act as strong GC roots.
+**Our workarounds** (until SDK NuGet is updated):
+- Save listener references before `StopAsync`, manually dispose them after (for the `listeners.Clear()` bug — fixed in PR #3561)
+- Null `m_callback` via reflection to break the GC retention chain (redundant once SDK disposes sockets in channel Dispose — fixed in PR #3560)
+- Override `Dispose(bool)` and unsubscribe `CertificateUpdate` (redundant once SDK unsubscribes in `StandardServer.Dispose` — fixed in PR #3560)
 
-3. **`TcpTransportListener.Dispose`** doesn't null `m_callback`. Combined with #2, lingering sockets retain: Socket → `TcpMessageSocket` → `TcpServerChannel` → `Listener` → `m_callback` → `SessionEndpoint` → Server — keeping the entire server object graph alive.
+### Issue 3: `ServerBase.StopAsync` doesn't dispose TCP transport listeners
 
-**Suggested fix** (any one of these would break the retention chain):
-- Close sockets in `UaSCUaBinaryChannel.Dispose()`: `(Socket as IDisposable)?.Dispose()`
-- Null `m_callback` in `TcpTransportListener.Dispose()`
-- Don't call `listeners.Clear()` in `StopAsync()` — let `Dispose()` handle cleanup
+**PR submitted**: https://github.com/OPCFoundation/UA-.NETStandard/pull/3561
 
-**Our workaround**: Save listener references before `StopAsync`, manually dispose them after, and null `m_callback` via reflection (no public API exists — `ChannelClosed()` is protected, `Socket` is `protected internal`).
+**Root cause**: `ServerBase.StopAsync()` calls `Close()` on each transport listener, then `Clear()` on the list. `ServerBase.Dispose()` later iterates `TransportListeners` to call `Dispose()` on each — but the list is already empty, so `TcpTransportListener.Dispose()` never runs. The bug is TCP-specific: `HttpsTransportListener.Close()` → `Stop()` → `Dispose()` (full cleanup), but `TcpTransportListener.Close()` → `Stop()` only closes listening sockets without calling `Dispose()`. This leaks `m_inactivityDetectionTimer` and all `TcpListenerChannel` instances per server restart cycle.
 
-### Issue 2: Memory leak — `StandardServer` subscribes `CertificateValidator.CertificateUpdate` but never unsubscribes
+### Issue 2: Copy-paste bug — `DiagnosticsNodeManager.SetDiagnosticsEnabled(false)` deletes wrong nodes
 
-**Reproduction**: Create a `StandardServer` with a shared `ApplicationConfiguration`, start it, then `Dispose()` it. Create a new server with the same configuration. Repeat. Each disposed server is retained by the `CertificateValidator`.
+**PR submitted**: https://github.com/OPCFoundation/UA-.NETStandard/pull/3559
 
-**Root cause**: `StandardServer.OnServerStarted()` (`StandardServer.cs:3231`) subscribes `CertificateValidator.CertificateUpdate += OnCertificateUpdateAsync`. Neither `StandardServer.Dispose()` nor `ServerBase.Dispose()` unsubscribes. Since the `CertificateValidator` comes from the shared `ApplicationConfiguration` and outlives the server, the delegate retains every disposed server instance.
-
-**Suggested fix**: Add `CertificateValidator.CertificateUpdate -= OnCertificateUpdateAsync;` in `StandardServer.Dispose()`.
-
-**Our workaround**: Override `Dispose(bool)` and unsubscribe (`OnCertificateUpdateAsync` is `protected virtual` on `ServerBase`, so this is clean — no reflection needed).
+**Root cause**: In `DiagnosticsNodeManager.cs:643-646`, the subscription cleanup loop iterates `m_subscriptions.Count` but indexes `m_sessions[ii].Value.Variable` instead of `m_subscriptions[ii].Value.Variable`. This causes `IndexOutOfRangeException` when subscriptions > sessions (preventing all cleanup), and deletes the wrong nodes (session nodes instead of subscription nodes) otherwise. Subscription diagnostic nodes leak permanently in `PredefinedNodes`.
 
 ### Other known SDK issues (lower priority)
 
-- **`SubscriptionManager` fire-and-forget tasks lack cancellation tokens** (`SubscriptionManager.cs:~236`): `PublishSubscriptionsAsync` and `ConditionRefreshWorkerAsync` started via `Task.Factory.StartNew(LongRunning)` with no cancellation token. If `Dispose()` is called without `StopAsync()`, tasks keep the server alive as GC roots. The SDK has TODO comments acknowledging this.
-- **`CustomNodeManager2.SetDefaultPermissions`**: Accesses `namespaceMetadataValues[0]` without bounds checking. `ReadAttributes()` returns empty list during server restart. Non-blocking.
+- **`SubscriptionManager` fire-and-forget tasks lack cancellation tokens** (`SubscriptionManager.cs:~236`): `PublishSubscriptionsAsync` and `ConditionRefreshWorkerAsync` started via `Task.Factory.StartNew(LongRunning)` with no cancellation token. The SDK has TODO comments acknowledging this. However, this is handled by design: both tasks catch `ObjectDisposedException` and log "Exited Normally (disposed during shutdown)" — this is their intended fallback exit path when `Dispose()` runs. Our Fix 13 ensures `ShutdownAsync` (which signals `m_shutdownEvent.Set()`) is always called before `Dispose`, so tasks typically exit cleanly via the signal. If the signal is missed due to timing, the `ObjectDisposedException` fallback handles it. No upstream fix needed.
+- **`CustomNodeManager2.SetDefaultPermissions`**: Accesses `namespaceMetadataValues[0]` without bounds checking. However, `ReadAttributes` called with `params uint[]` always returns one entry per attribute — the empty list case is not reachable. Not a real bug.
 
 ## Remaining Work
 
@@ -652,7 +678,7 @@ Review ALL changed files in `feature/resilience-testing` vs `master` (66 files, 
 - [ ] Run `dotnet test src/Namotion.Interceptor.slnx` — all unit tests pass
 
 **Upstream**:
-- [ ] File upstream SDK issues (see "Open Issues" section above)
+- [x] File upstream SDK issues: [#3560](https://github.com/OPCFoundation/UA-.NETStandard/pull/3560) (socket + certificate), [#3559](https://github.com/OPCFoundation/UA-.NETStandard/pull/3559) (diagnostics copy-paste), [#3561](https://github.com/OPCFoundation/UA-.NETStandard/pull/3561) (StopAsync TCP listener dispose)
 
 ### 4. Update PR description
 

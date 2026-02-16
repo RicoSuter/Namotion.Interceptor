@@ -1,21 +1,20 @@
-﻿using System.Reflection;
+using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Opc.Ua;
+using Opc.Ua.Bindings;
 using Opc.Ua.Server;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
 internal class OpcUaSubjectServer : StandardServer
 {
-    // Workaround for OPC UA SDK bug: TcpTransportListener.Dispose() doesn't null m_callback,
-    // and channel Dispose() doesn't close sockets. Lingering sockets (held by SocketAsyncEngine)
-    // retain channels which chain: Channel → Listener → m_callback → SessionEndpoint → Server.
-    // No public API exists to break this chain — ChannelClosed() is protected, Socket is
-    // protected internal. We null m_callback after disposal to allow GC of the server graph.
-    // Upstream SDK issue: TcpTransportListener.Dispose() doesn't null m_callback and channel
-    // Dispose() doesn't close sockets. Tracked for upstream contribution.
+    // TODO: Remove when https://github.com/OPCFoundation/UA-.NETStandard/pull/3560 is released.
+    // Workaround: UaSCUaBinaryChannel.Dispose() doesn't close its Socket, so lingering sockets
+    // (held by SocketAsyncEngine) retain the chain: Socket → Channel → Listener → m_callback → Server.
+    // We null m_callback via reflection to break this chain. Once the SDK disposes sockets in
+    // channel Dispose, SocketAsyncEngine releases its references and this becomes unnecessary.
     private static readonly FieldInfo? TransportListenerCallbackField =
-        typeof(Opc.Ua.Bindings.TcpTransportListener)
+        typeof(TcpTransportListener)
             .GetField("m_callback", BindingFlags.NonPublic | BindingFlags.Instance);
 
     private readonly ILogger _logger;
@@ -32,6 +31,14 @@ internal class OpcUaSubjectServer : StandardServer
         _nodeManagerFactory = new CustomNodeManagerFactory(subject, source, configuration, logger);
         AddNodeManager(_nodeManagerFactory);
     }
+
+    // TODO: Remove saved listener workaround when https://github.com/OPCFoundation/UA-.NETStandard/pull/3561 is released.
+    // Workaround: ServerBase.StopAsync calls Close() then Clear() on the listener list.
+    // TcpTransportListener.Close() only stops listening sockets — it does NOT call Dispose().
+    // ServerBase.Dispose() later iterates TransportListeners to dispose them, but the list is
+    // already empty. So TcpTransportListener.Dispose() never runs, leaking timers, channels,
+    // and buffer managers. We save listener references before StopAsync clears the list,
+    // then manually dispose them after shutdown.
 
     /// <summary>
     /// Closes all transport listeners to stop accepting new connections.
@@ -51,10 +58,10 @@ internal class OpcUaSubjectServer : StandardServer
     }
 
     /// <summary>
-    /// Disposes all saved transport listeners, closing per-client channel
-    /// sockets and timers. Must be called after shutdown to work around
-    /// the SDK's StopAsync clearing TransportListeners before Dispose
-    /// can process them (which causes a memory leak).
+    /// Disposes all saved transport listeners. Must be called after shutdown
+    /// because the SDK's StopAsync clears the TransportListeners list before
+    /// Dispose can process them, causing TcpTransportListener.Dispose() to
+    /// never run (leaking timers, channels, and buffer managers).
     /// </summary>
     public void DisposeTransportListeners()
     {
@@ -75,6 +82,7 @@ internal class OpcUaSubjectServer : StandardServer
             try { (listener as IDisposable)?.Dispose(); }
             catch (Exception ex) { _logger.LogDebug(ex, "Error disposing transport listener."); }
 
+            // TODO: Remove when https://github.com/OPCFoundation/UA-.NETStandard/pull/3560 is released.
             try { TransportListenerCallbackField?.SetValue(listener, null); }
             catch (Exception ex) { _logger.LogDebug(ex, "Error clearing transport listener callback."); }
         }
@@ -130,13 +138,11 @@ internal class OpcUaSubjectServer : StandardServer
     {
         if (disposing)
         {
-            // Unsubscribe from the CertificateValidator.CertificateUpdate event.
-            // The SDK subscribes in StandardServer.OnServerStarted but never unsubscribes.
-            // Since the CertificateValidator is shared (from ApplicationConfiguration) and
-            // outlives the server, the delegate retains the server instance. Combined with
-            // lingering sockets that hold ChannelQuotas → CertificateValidator references,
-            // this creates a GC root chain: Socket → Channel → ChannelQuotas →
-            // CertificateValidator → CertificateUpdateEventHandler → Server.
+            // TODO: Remove when https://github.com/OPCFoundation/UA-.NETStandard/pull/3560 is released.
+            // Workaround: StandardServer.OnServerStarted subscribes CertificateValidator.CertificateUpdate
+            // but never unsubscribes. The shared CertificateValidator outlives the server, retaining every
+            // disposed server instance. Once the SDK unsubscribes in StandardServer.Dispose, this is redundant
+            // (double-unsubscribe is harmless but unnecessary).
             if (CertificateValidator is not null)
             {
                 CertificateValidator.CertificateUpdate -= OnCertificateUpdateAsync;
