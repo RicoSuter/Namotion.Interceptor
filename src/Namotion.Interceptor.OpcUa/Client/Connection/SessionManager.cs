@@ -514,10 +514,13 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
         if (sessionToDispose is not null)
         {
-            // Kill transport immediately so any in-flight operations fail fast
-            // and to avoid closing a shared secure channel that new sessions may need.
-            KillTransportChannel(sessionToDispose);
+            // Try graceful close first so the server can clean up the session and its subscriptions.
+            // Without this, the server has an orphaned session with active subscriptions publishing
+            // to a dead transport, which can disrupt the server's publish pipeline for other clients.
             await DisposeSessionAsync(sessionToDispose, cancellationToken).ConfigureAwait(false);
+
+            // Kill transport after close to ensure any remaining in-flight operations fail fast.
+            KillTransportChannel(sessionToDispose);
         }
     }
 
@@ -610,6 +613,13 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private async Task DisposeSessionAsync(Session session, CancellationToken cancellationToken)
     {
         session.KeepAlive -= OnKeepAlive;
+
+        // Clean up orphaned subscriptions on the server when closing this session.
+        // ConfigureSession sets DeleteSubscriptionsOnClose = false for SDK transfer scenarios,
+        // but during manual reconnection the old session's subscriptions are orphaned and must
+        // be deleted to prevent server resource exhaustion that can affect other clients.
+        session.DeleteSubscriptionsOnClose = true;
+
         try
         {
             // Timeout prevents hang when the session's TCP connection is dead.

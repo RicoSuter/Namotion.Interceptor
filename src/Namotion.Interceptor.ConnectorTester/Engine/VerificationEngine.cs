@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Runtime;
 using System.Text.Json;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.ConnectorTester.Configuration;
@@ -287,13 +288,16 @@ public class VerificationEngine : BackgroundService
 
     private void AppendMemoryLog(string? profileName, string result)
     {
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true);
+        // Compact LOH to prevent fragmentation from large temporary objects
+        // created during server restart cycles (NodeSet XML, serialization buffers).
+        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
         GC.WaitForPendingFinalizers();
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true);
+        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
 
         var process = Process.GetCurrentProcess();
         var workingSetMb = process.WorkingSet64 / (1024.0 * 1024.0);
-        var heapMb = GC.GetTotalMemory(forceFullCollection: false) / (1024.0 * 1024.0);
+        var heapMb = GC.GetTotalMemory(forceFullCollection: true) / (1024.0 * 1024.0);
         var profile = profileName != null ? $"profile: {profileName}" : "no profile";
 
         var line = string.Format(

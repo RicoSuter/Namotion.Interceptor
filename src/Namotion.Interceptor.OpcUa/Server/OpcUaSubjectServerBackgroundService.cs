@@ -232,19 +232,22 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
                 {
                     if (_isForceKill)
                     {
-                        // Force-kill: skip application.StopAsync() which can hang.
-                        // Just close listeners to release the TCP port immediately.
+                        // Force-kill: close transport listeners immediately so clients see
+                        // an abrupt connection loss (realistic crash simulation).
                         if (application.Server is OpcUaSubjectServer s)
                         {
                             s.CloseTransportListeners();
                         }
                     }
-                    else
-                    {
-                        // Graceful: ShutdownServerAsync must run BEFORE server.Dispose() so that
-                        // application.StopAsync() can properly release the TCP listener socket.
-                        await ShutdownServerAsync(application).ConfigureAwait(false);
-                    }
+
+                    // Always run ShutdownServerAsync to ensure the SDK's internal tasks
+                    // (SubscriptionManager publish/refresh threads) are properly signaled
+                    // to exit via OnServerStoppingAsync. Without StopAsync, these
+                    // fire-and-forget tasks keep the entire server object graph alive as
+                    // GC roots, causing ~8-16 MB leak per server restart.
+                    // On force-kill the transport is already dead, so this only cleans up
+                    // internal state — it doesn't change what clients observe.
+                    await ShutdownServerAsync(application).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {
@@ -253,6 +256,15 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
                 finally
                 {
                     _isForceKill = false;
+
+                    // Dispose transport listeners before server.Dispose().
+                    // The SDK's StopAsync calls Close() on each listener (which only
+                    // stops accepting connections) then clears the TransportListeners list.
+                    // When server.Dispose() later tries to Dispose() listeners, the list
+                    // is empty — so TcpTransportListener.Dispose() never runs, leaving
+                    // per-client channel sockets and inactivity timers alive as GC roots
+                    // that retain the entire server object graph.
+                    server.DisposeTransportListeners();
                     server.Dispose();
                     cts.Dispose();
                 }

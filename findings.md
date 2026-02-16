@@ -6,7 +6,7 @@ Summary of bugs found and fixes applied during resilience testing of OPC UA clie
 
 **100% pass rate** on connector tester chaos testing (`--launch-profile opcua`).
 
-**Result**: **41/42 cycles PASS** with Fix 8. Fix 9 addresses the remaining server-side gap.
+**Result**: **654/655 cycles PASS** after Fix 12. Fix 13 + Fix 14 address server-side memory leak (HeapMB stable after 58+ cycles). Fix 15 addresses LOH fragmentation in measurement. Pending full verification run with all fixes combined.
 
 ## Fixes Applied
 
@@ -230,7 +230,225 @@ await changeQueueProcessor.ProcessAsync(...); // processes queued + ongoing chan
 
 **Note**: This bug also affects production scenarios — any property mutation during OPC UA server restart (e.g., from MQTT source, another OPC UA client, or application logic) would be lost from the OPC UA server's address space.
 
-**Status**: Build + tests pass. Needs chaos testing verification.
+**Status**: Committed. Included in run +17 (654/655 pass) but that run also discovered the memory leak (Fix 13), so verification is ongoing with the current run.
+
+### Fix 10: Client session disposal order — close before transport kill (SessionManager.cs)
+
+**Root cause**: In `ClearSessionAsync`, the transport was killed BEFORE sending `CloseSession` to the server. The server never received `CloseSession`, leaving orphaned sessions and subscriptions that disrupted the publish pipeline for ALL connected clients — including clients that were never disrupted by chaos.
+
+**Evidence** (Cycle 655 of extended chaos run — see Investigation section below):
+- Profile `client-b-only`: only client-b was killed, yet **client-a** had stale values
+- Client-a's subscription showed `PublishingStopped = true` just 3 seconds after client-b was killed
+- Client-a received zero notifications for 6+ minutes despite never being disrupted
+
+```
+Old flow (broken):
+1. KillTransportChannel(session)     → TCP connection dies
+2. session.CloseAsync()              → FAILS (transport is dead)
+3. Server never gets CloseSession    → orphaned session + subscriptions
+4. Server publishes to dead connection → disrupts publish pipeline for ALL clients
+
+New flow (fixed):
+1. session.CloseAsync()              → server receives CloseSession
+2. Server cleans up session + subs   → no orphaned resources
+3. KillTransportChannel(session)     → cleanup of remaining transport state
+```
+
+On a healthy connection (Kill chaos), `CloseAsync` completes in milliseconds. On a dead connection (real network failure), it times out after `SessionDisposalTimeout` (5 seconds).
+
+### Fix 11: Delete subscriptions on close during manual reconnection (SessionManager.cs)
+
+**Root cause**: `ConfigureSession` set `DeleteSubscriptionsOnClose = false` (needed for SDK subscription transfer), but this also applied during manual reconnection disposal where subscriptions should be deleted. Orphaned subscriptions lingered on the server for up to 1 hour (`MaxSubscriptionLifetime = 3,600,000ms`).
+
+**Fix**: Set `session.DeleteSubscriptionsOnClose = true` in `DisposeSessionAsync` before `CloseAsync`. `ConfigureSession` still sets it to `false` for SDK automatic reconnection (where subscription transfer IS desired). The override only applies when we're permanently done with a session.
+
+### Fix 12: PublishingStopped detection triggers manual reconnection (SubscriptionManager.cs, OpcUaSubjectClientSource.cs)
+
+**Root cause**: Health check only verified `session.Connected` and `item.Created` / `StatusCode.IsBad` — never checked `PublishingStopped`. A client could receive zero notifications indefinitely without triggering reconnection.
+
+**Fix**: Added `HasStoppedPublishing` property on `SubscriptionManager` that checks if any subscription has `PublishingStopped == true`. The health check loop in `OpcUaSubjectClientSource.ExecuteAsync` triggers manual reconnection when detected. Only runs when `!isReconnecting` to avoid false positives during normal reconnection.
+
+This is defense-in-depth for scenarios where Fix 10 can't help — real network failures where graceful close is impossible (cable pulled, process crash). `PublishingStopped` triggers after `LifetimeCount × PublishingInterval` ≈ 10 seconds of no publish responses.
+
+**Additional**: Fixed `LogRevisedSubscriptionParameters` to log `item.Status.QueueSize` (server-revised) instead of `item.QueueSize` (client-requested).
+
+### Fix 13: Server memory leak on force-kill — SDK tasks not signaled to exit (OpcUaSubjectServerBackgroundService.cs)
+
+**Root cause**: On server force-kill, `application.StopAsync()` was skipped entirely (comment: "can hang"). This meant `OnServerStoppingAsync` never ran, so the SDK's internal `SubscriptionManager.ShutdownAsync()` was never called. Two fire-and-forget tasks started by the SDK (`PublishSubscriptionsAsync` and `ConditionRefreshWorkerAsync`) via `Task.Factory.StartNew(LongRunning)` with no cancellation token were never signaled to exit. These tasks held the entire server object graph alive as GC roots: Task → SubscriptionManager → ServerInternalData → ApplicationConfiguration → entire server infrastructure (~8-16 MB per server restart).
+
+**Evidence** (memory.log from 83-cycle endurance run):
+- HeapMB grew linearly from 75.6 MB to 407.7 MB over 83 cycles (~4 MB/cycle average)
+- Growth correlated with server restarts: `server-only` profile added +8-16 MB/cycle, while `client-a-only` showed slight heap *decrease*
+- The SDK itself has TODO comments in SubscriptionManager: `"// TODO: Ensure shutdown awaits completion and a cancellation token is passed"`
+
+**Fix**: On force-kill, close transport listeners first (clients still see abrupt crash — chaos simulation preserved), then always call `ShutdownServerAsync(application)`. The transport is already dead, so `StopAsync` only cleans up internal SDK state. `ShutdownServerAsync` already has a 10-second timeout as a safety net.
+
+```csharp
+// Force-kill path (before):
+s.CloseTransportListeners();     // ← clients see crash
+// StopAsync SKIPPED             // ← SDK tasks never signaled → memory leak
+
+// Force-kill path (after):
+s.CloseTransportListeners();     // ← clients see crash (unchanged)
+ShutdownServerAsync(application) // ← SDK tasks signaled to exit + 10s timeout
+```
+
+**Files changed**: `OpcUaSubjectServerBackgroundService.cs` — removed force-kill special case that skipped `ShutdownServerAsync`
+
+**Status**: Verified — internal SDK tasks exit properly. However, heap still grew ~2 MB/cycle due to three additional SDK disposal bugs discovered via `dotnet-dump` GC root analysis (see Fix 14).
+
+**Investigation details** (for future debugging if leak persists):
+
+Per-profile heap delta analysis from 83-cycle memory.log:
+
+| Profile | Heap delta/cycle | Notes |
+|---------|-----------------|-------|
+| server-only | +8–16 MB | Biggest contributor — server kill/restart |
+| full-chaos | +6–8 MB | Contains server kill component |
+| all-clients | +0.3–1.3 MB | Minimal |
+| client-a-only | slight decrease | GC reclaims more than allocated |
+| no-chaos | slight decrease | Baseline — no leak without restarts |
+
+SDK code paths examined (`/home/rico/GitHub/UA-.NETStandard`):
+
+- **`ApplicationInstance.cs`** — Lightweight, no IDisposable, no static registrations. Not a leak source.
+- **`CertificateValidator.cs`** — No static registrations, no IDisposable. `CertificateUpdate` event subscriber in `StandardServer` never unsubscribed, but validator is local to `ApplicationConfiguration` which goes out of scope — not a GC root.
+- **`DefaultTelemetry.cs` / `TelemetryContextBase.cs`** — Static dictionaries for ActivitySource and Assembly cache, but bounded by assembly count. Not a growth source.
+- **`CustomNodeManager2.Dispose`** — Properly clears `PredefinedNodes` and disposes all nodes. Not a leak source.
+- **`ServerBase.Dispose`** — Disposes transport listeners, service hosts, request queue. Does basic cleanup.
+- **`ServerInternalData.Dispose`** — Calls `Utils.SilentDispose` on all managers but doesn't null fields.
+- **`SamplingGroup.Dispose`** — Properly waits for sampling task via `GetAwaiter().GetResult()`. Not a leak source.
+
+The critical difference between `StopAsync` and `Dispose`:
+
+```
+StopAsync → OnServerStoppingAsync:
+  1. SubscriptionManager.ShutdownAsync()  → signals m_shutdownEvent.Set() → publish tasks exit
+  2. SessionManager.Shutdown()            → closes sessions
+  3. NodeManager.ShutdownAsync()          → shuts down node managers
+
+Dispose (WITHOUT StopAsync):
+  1. ServerInternalData.Dispose()         → disposes managers
+  2. SubscriptionManager.Dispose()        → disposes m_shutdownEvent WITHOUT signaling it
+  3. Publish tasks catch ObjectDisposedException eventually, but hold GC roots while running
+```
+
+The SDK's `SubscriptionManager.StartupAsync` (line ~236) starts two fire-and-forget tasks:
+```csharp
+m_shutdownEvent.Reset();
+// TODO: Ensure shutdown awaits completion and a cancellation token is passed
+_ = Task.Factory.StartNew(
+    () => PublishSubscriptionsAsync(m_publishingResolution),
+    default,
+    TaskCreationOptions.LongRunning | TaskCreationOptions.DenyChildAttach,
+    TaskScheduler.Default);
+```
+These tasks loop on `m_shutdownEvent.WaitOne(timeout)`. Without `Set()`, they only exit when `WaitOne` throws `ObjectDisposedException` after `Dispose()` — but the task itself keeps the SubscriptionManager (and everything it references) alive as a GC root until then.
+
+If the fix doesn't resolve the leak, next steps:
+1. Check if `ShutdownServerAsync` times out on force-kill (look for `"OPC UA server shutdown timed out after 10s"` in logs)
+2. If it does time out, investigate what blocks `StopAsync` after transport is already closed
+3. If heap still grows but no timeout, use `dotnet-dump` / `dotnet-gcdump` to identify actual GC roots
+
+### Fix 14: Server memory leak — three SDK disposal bugs (OpcUaSubjectServer.cs)
+
+**Root cause**: After Fix 13 resolved the fire-and-forget task leak, `dotnet-dump` GC root analysis (`gcroot` on retained `OpcUaSubjectServer` instances) revealed three additional SDK bugs causing ~2 MB/cycle heap growth. All three retention paths originate from lingering TCP sockets held by `SocketAsyncEngine` (the .NET runtime's async socket infrastructure keeps strong references to sockets with pending operations).
+
+**Three GC retention chains discovered**:
+
+1. **`StopAsync` clears listener list before `Dispose` can process it**:
+   - `ServerBase.StopAsync()` calls `listeners[ii].Close()` then `listeners.Clear()` (line 573)
+   - `ServerBase.Dispose()` iterates `TransportListeners` to dispose them — but the list is empty
+   - Result: `TcpTransportListener.Dispose()` never runs → timers, channels, and buffer managers leak
+
+2. **Channel `Dispose()` doesn't close sockets** → lingering sockets retain server via `m_callback`:
+   - `TcpTransportListener.Dispose()` calls `Utils.SilentDispose()` on each channel
+   - `UaSCUaBinaryChannel.Dispose()` discards tokens/nonces but does NOT close the `Socket` property
+   - Only `TcpListenerChannel.ChannelClosed()` (protected) calls `Socket?.Close()` — but it's never called during disposal
+   - Lingering sockets retain: Socket → `TcpMessageSocket` → `TcpServerChannel` → `Listener` → `TcpTransportListener` → `m_callback` → `SessionEndpoint` → Server
+   - `TcpTransportListener.Dispose()` does NOT null `m_callback`
+
+3. **`StandardServer` subscribes `CertificateUpdate` but never unsubscribes**:
+   - `StandardServer.OnServerStarted()` subscribes `CertificateValidator.CertificateUpdate += OnCertificateUpdateAsync` (line 3231)
+   - Neither `StandardServer.Dispose()` nor `ServerBase.Dispose()` unsubscribes
+   - The `CertificateValidator` is shared (from `ApplicationConfiguration`) and outlives the server
+   - Lingering sockets retain: Socket → Channel → `ChannelQuotas` → `CertificateValidator` → `CertificateUpdateEventHandler` → Server
+
+**Fix** (three workarounds for SDK bugs):
+
+1. **Save and manually dispose transport listeners**: `CloseTransportListeners()` saves listener references before `StopAsync` clears the list. `DisposeTransportListeners()` disposes them after shutdown, before `server.Dispose()`.
+
+2. **Null `m_callback` via reflection**: After disposing each listener, null the private `m_callback` field to break the Socket → Listener → Server retention chain. No public API exists (`ChannelClosed()` is protected, `Socket` is `protected internal`, `m_callback` has no setter). This is the only workaround without modifying the SDK.
+
+3. **Unsubscribe `CertificateUpdate` in `Dispose()`**: Override `Dispose(bool)` and call `CertificateValidator.CertificateUpdate -= OnCertificateUpdateAsync`. This is clean — `OnCertificateUpdateAsync` is `protected virtual` on `ServerBase`, so accessible from our subclass. No reflection needed.
+
+**Verification** (`dotnet-dump` analysis):
+
+| Dump | Cycles | Retained `OpcUaSubjectServer` | HeapMB |
+|------|--------|-------------------------------|--------|
+| Before any fix | ~50 | 16 | growing ~4 MB/cycle |
+| After fix #1 only | ~50 | 13 | growing ~7 MB/cycle |
+| After fix #1 + #2 | 344 | 295 | growing ~2 MB/cycle |
+| After fix #1 + #2 + #3 | 58 | **2** (1 live + 1 pending GC) | **stable ~91 MB** |
+| After fix #1 + #3 (no reflection) | 14 | **14** | growing ~12 MB/cycle |
+
+All three fixes are required. Fix #3 had the biggest impact (broke the most numerous retention path), but without fix #2 the `m_callback` chain still retains servers.
+
+**Files changed**: `OpcUaSubjectServer.cs` — Added `TransportListenerCallbackField` (reflection), `CloseTransportListeners()`, `DisposeTransportListeners()`, and `CertificateUpdate` unsubscription in `Dispose()`
+
+**Status**: Verified — HeapMB stable at ~91 MB after 58+ cycles. Only 2 `OpcUaSubjectServer` instances retained (1 live + 1 pending GC).
+
+**Note**: These are SDK bugs that should be fixed upstream. See "Upstream SDK Issues" section below.
+
+### Fix 15: HeapMB measurement noise + LOH fragmentation (VerificationEngine.cs)
+
+**Root cause**: Two measurement issues in the ConnectorTester's `AppendMemoryLog`:
+
+1. **Measurement noise**: `GC.GetTotalMemory(forceFullCollection: false)` includes uncollected Gen0 objects, giving noisy readings. Heap dumps at cycle 50 and 58 (with `false`) showed identical Gen2 (39.7 MB) and LOH (5.0 MB), confirming the ~0.3 MB/cycle apparent growth was measurement noise.
+
+2. **LOH fragmentation**: After switching to `forceFullCollection: true`, a slower but persistent ~0.2 MB/cycle growth remained. Heap dumps at cycle 40 and 51 showed massive transient object accumulation mid-cycle (Export XML types: 2 → 36,830 objects, System.Xml types: 480 → 38,836 objects, OpcUaNodeConfiguration: 339 → 2,655) — but ALL sampled objects had **0 GC roots**. These are mid-cycle garbage from NodeSet XML parsing during server restarts. The persistent HeapMB growth is caused by **LOH fragmentation**: large temporary objects (~500-800 KB NodeSet XML strings, serialization buffers) land on the LOH, become garbage, get collected, but leave unfillable holes since LOH doesn't compact by default.
+
+**Fix**:
+- Changed `GC.GetTotalMemory(forceFullCollection: false)` → `forceFullCollection: true`
+- Added `GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce` before forced GC
+- Added `compacting: true` to `GC.Collect()` calls
+
+**Files changed**: `VerificationEngine.cs` — `AppendMemoryLog` method
+
+**Status**: LOH compaction did not eliminate the drift — 18 cycles show ~0.23 MB/cycle, similar to without compaction (~0.25 MB/cycle). Root cause is likely Gen2 heap fragmentation from extreme server restart churn (Gen2 was 45% free/holes in dump analysis). All sampled objects had 0 GC roots, confirming no actual object retention leak. At ~9 MB/hour this is acceptable for the test harness and negligible in production (where server restarts are rare). Monitoring via multi-day run to confirm it doesn't accelerate.
+
+## Investigation: Stale Value Root Cause (Cycles 565 & 655)
+
+### Background
+
+After Fix 9, an extended chaos run was started with diagnostic logging enabled (subscription parameters, PublishingStopped detection, zero-notification flow detection). The run passed 654 cycles before a failure at cycle 655 revealed the root cause of stale values.
+
+### Cycle 565 — Initial Failure (Pre-Diagnostic Logging)
+
+Client-a had ~20/93 stale property values after chaos testing. Stale timestamps clustered in a ~250ms window (08:59:24.67–08:59:24.91), while the server's final values had timestamps up to 08:59:26.85. Selective staleness within a single subscription was puzzling. This failure motivated adding the diagnostic logging that enabled the Cycle 655 root cause analysis.
+
+### Cycle 655 — Root Cause Found
+
+Profile `client-b-only` — only client-b was killed, yet client-a had stale values. Client-a was never disrupted.
+
+```
+13:30:25  Kill on client-b (client-a NOT disrupted)
+13:30:28  Client-a subscription 2501304071: PublishingStopped = true, zero notifications
+13:31:25  Converge phase starts (mutations stop)
+13:32:36  Client-b creates new session + subscription (correct state via state read)
+13:32:43  Server session closing (client-b's old session timeout)
+13:36:45  FAIL — client-a has stale values, client-b matches server
+```
+
+Client-a's subscription stopped publishing 3 seconds after client-b's kill. The server's publish pipeline was disrupted by client-b's orphaned session (transport dead, session never closed). This led to Fix 10 (disposal order), Fix 11 (delete subscriptions), and Fix 12 (PublishingStopped detection).
+
+### Diagnostic Logging Added
+
+Three diagnostic checks in `SubscriptionManager.LogSubscriptionDiagnostics()`, called from health check loop (~5s interval):
+
+1. **Revised subscription parameters** (INFO, one-time after `ApplyChangesAsync`): Subscription ID, revised PublishingInterval, KeepAliveCount, LifetimeCount, SamplingInterval range, QueueSize
+2. **PublishingStopped detection** (WARNING, periodic): Logs if any subscription has `PublishingStopped == true`
+3. **Zero notification flow** (WARNING, periodic): Logs if zero notifications received since last health check while subscriptions exist
 
 ## Known Remaining Issues
 
@@ -278,11 +496,166 @@ SDK's `CustomNodeManager2.SetDefaultPermissions` accesses `namespaceMetadataValu
 | +13 | Fix 6: TryDequeue cancellation check | server restarts but flush task hangs |
 | +14 | Fix 7: NodeManager.Lock + cancellation check | **18/18 pass** |
 | +15 | Fix 8: Full state read after ALL reconnections | **41/42 pass** (data convergence at cycle 42 — server-side gap) |
+| +16 | Fix 9: ChangeQueueProcessor before StartAsync | verification run |
+| +17 | Fix 10-12: Session disposal order + PublishingStopped detection | **654/655 pass** (memory leak identified) |
+| +18 | Fix 13: Server cleanup on force-kill | heap still growing ~2 MB/cycle (SDK disposal bugs) |
+| +19 | Fix 14: Three SDK disposal workarounds | **58+ cycles, HeapMB stable ~91 MB, 2 instances** |
+| +20 | Fix 15: LOH compaction + accurate measurement | ~0.2 MB/cycle drift remains (Gen2 fragmentation, not object retention). Multi-day run in progress. |
 
 ## Environment
 
 - OPC UA SDK: OPCFoundation.NetStandard.Opc.Ua.* 1.5.376.244
-- OPC UA SDK source: C:\Users\rsute\GitHub\UA-.NETStandard
+- OPC UA SDK source: /home/rico/GitHub/UA-.NETStandard
 - .NET 9.0
 - Testing: ConnectorTester with `--launch-profile opcua`
 - Branch: `feature/resilience-testing`
+
+## Key Code Paths
+
+| File | Method | Relevance |
+|------|--------|-----------|
+| `SessionManager.cs` | `ClearSessionAsync` | Session disposal (Fix 10: close before transport kill) |
+| `SessionManager.cs` | `DisposeSessionAsync` | Session cleanup (Fix 11: DeleteSubscriptionsOnClose) |
+| `SessionManager.cs` | `OnReconnectComplete` | SDK reconnection handling |
+| `SubscriptionManager.cs` | `HasStoppedPublishing` | Fix 12: PublishingStopped detection |
+| `SubscriptionManager.cs` | `LogSubscriptionDiagnostics` | Diagnostic logging (subscription health) |
+| `SubscriptionManager.cs` | `OnFastDataChange` | Processes incoming notifications |
+| `OpcUaSubjectClientSource.cs` | `ExecuteAsync` | Health check loop, triggers reconnection |
+| `OpcUaSubjectServerBackgroundService.cs` | `ExecuteServerLoopAsync` | Server restart loop (Fix 13: always shutdown) |
+| `OpcUaSubjectServerBackgroundService.cs` | `ShutdownServerAsync` | Graceful server shutdown with timeout |
+| `ChangeQueueProcessor.cs` | constructor | Fix 9: subscription created before server start |
+| SDK: `SubscriptionManager.cs` | `StartupAsync` | Fire-and-forget tasks (Fix 13 root cause) |
+| SDK: `StandardServer.cs` | `OnServerStoppingAsync` | Critical cleanup skipped on force-kill |
+| SDK: `ServerBase.cs` | `StopAsync` | Clears listener list before Dispose (Fix 14) |
+| SDK: `TcpTransportListener.cs` | `Dispose` | Doesn't null m_callback (Fix 14) |
+| SDK: `UaSCBinaryChannel.cs` | `Dispose` | Doesn't close Socket (Fix 14) |
+| SDK: `StandardServer.cs` | `Dispose` / `OnServerStarted` | CertificateUpdate never unsubscribed (Fix 14) |
+
+## Open Issues: Upstream SDK Bugs to Report (OPCFoundation/UA-.NETStandard)
+
+Two issues to file against the OPC UA .NET Standard SDK (version 1.5.378.65, confirmed not fixed on master). These cause memory leaks when servers are repeatedly created and destroyed within the same process (e.g., server restart loops). In single-lifecycle production, process exit cleans everything up.
+
+Verified against SDK sources at tag `1.5.378.65` (matches NuGet package version).
+
+### Issue 1: Memory leak — Server not GC'd after `StopAsync`/`Dispose` due to transport listener disposal bugs
+
+**Reproduction**: Create a `StandardServer`, start it with connected clients, call `StopAsync()` then `Dispose()`. The server object is never garbage collected.
+
+**Root cause**: Three related bugs in the disposal chain prevent proper cleanup:
+
+1. **`ServerBase.StopAsync`** (`ServerBase.cs:573`) calls `listeners.Clear()` after calling `Close()` on each listener. When `ServerBase.Dispose()` later iterates `TransportListeners` to call `Dispose()` on them, the list is empty — so `TcpTransportListener.Dispose()` never runs. Timers, channels, and buffer managers leak.
+
+2. **`UaSCUaBinaryChannel.Dispose`** (`UaSCBinaryChannel.cs:~224`) doesn't close the `Socket` property. Only `TcpListenerChannel.ChannelClosed()` (protected) calls `Socket?.Close()`, but this is never triggered during disposal. Lingering sockets in `SocketAsyncEngine` act as strong GC roots.
+
+3. **`TcpTransportListener.Dispose`** doesn't null `m_callback`. Combined with #2, lingering sockets retain: Socket → `TcpMessageSocket` → `TcpServerChannel` → `Listener` → `m_callback` → `SessionEndpoint` → Server — keeping the entire server object graph alive.
+
+**Suggested fix** (any one of these would break the retention chain):
+- Close sockets in `UaSCUaBinaryChannel.Dispose()`: `(Socket as IDisposable)?.Dispose()`
+- Null `m_callback` in `TcpTransportListener.Dispose()`
+- Don't call `listeners.Clear()` in `StopAsync()` — let `Dispose()` handle cleanup
+
+**Our workaround**: Save listener references before `StopAsync`, manually dispose them after, and null `m_callback` via reflection (no public API exists — `ChannelClosed()` is protected, `Socket` is `protected internal`).
+
+### Issue 2: Memory leak — `StandardServer` subscribes `CertificateValidator.CertificateUpdate` but never unsubscribes
+
+**Reproduction**: Create a `StandardServer` with a shared `ApplicationConfiguration`, start it, then `Dispose()` it. Create a new server with the same configuration. Repeat. Each disposed server is retained by the `CertificateValidator`.
+
+**Root cause**: `StandardServer.OnServerStarted()` (`StandardServer.cs:3231`) subscribes `CertificateValidator.CertificateUpdate += OnCertificateUpdateAsync`. Neither `StandardServer.Dispose()` nor `ServerBase.Dispose()` unsubscribes. Since the `CertificateValidator` comes from the shared `ApplicationConfiguration` and outlives the server, the delegate retains every disposed server instance.
+
+**Suggested fix**: Add `CertificateValidator.CertificateUpdate -= OnCertificateUpdateAsync;` in `StandardServer.Dispose()`.
+
+**Our workaround**: Override `Dispose(bool)` and unsubscribe (`OnCertificateUpdateAsync` is `protected virtual` on `ServerBase`, so this is clean — no reflection needed).
+
+### Other known SDK issues (lower priority)
+
+- **`SubscriptionManager` fire-and-forget tasks lack cancellation tokens** (`SubscriptionManager.cs:~236`): `PublishSubscriptionsAsync` and `ConditionRefreshWorkerAsync` started via `Task.Factory.StartNew(LongRunning)` with no cancellation token. If `Dispose()` is called without `StopAsync()`, tasks keep the server alive as GC roots. The SDK has TODO comments acknowledging this.
+- **`CustomNodeManager2.SetDefaultPermissions`**: Accesses `namespaceMetadataValues[0]` without bounds checking. `ReadAttributes()` returns empty list during server restart. Non-blocking.
+
+## Remaining Work
+
+### 1. Long-running tester verification
+
+Run ConnectorTester with all fixes (Fix 1–15) for 200+ cycles to confirm:
+- [ ] Pass rate matches or exceeds previous 654/655 (99.85%)
+- [ ] HeapMB remains stable with LOH compaction (no growth trend after initial warmup)
+- [ ] No new failure modes introduced by memory leak fixes
+- [ ] Fix 15 (LOH compaction) eliminates the ~0.2 MB/cycle drift seen in 51-cycle run
+
+### 2. Clean up diagnostics logging
+
+Review all logging added during investigation. Files to review:
+- [ ] `SessionManager.cs` — review log levels, remove any temporary debug logging
+- [ ] `SubscriptionManager.cs` — review `LogSubscriptionDiagnostics` (keep health checks, remove investigation-only logging)
+- [ ] `OpcUaSubjectClientSource.cs` — review health check logging verbosity
+- [ ] `OpcUaSubjectServerBackgroundService.cs` — review server loop logging verbosity
+- [ ] General: ensure log levels are appropriate (INFO for operational events, DEBUG for diagnostics, no leftover WARN spam)
+
+### 3. Final review of all changes in branch
+
+Review ALL changed files in `feature/resilience-testing` vs `master` (66 files, ~4000 lines added):
+
+**OPC UA Client** (Fix 1–5, 8, 10–12):
+- [ ] `SessionManager.cs` — reconnection handling, transport kill, stale callback guard, SetReconnecting, ConcurrentQueue disposal, AbandonCurrentSession, full state sync, disposal order, DeleteSubscriptionsOnClose
+- [ ] `SubscriptionManager.cs` — HasStoppedPublishing, LogSubscriptionDiagnostics, LogRevisedSubscriptionParameters, notification counting, UpdateTransferredSubscriptions cleanup
+- [ ] `OpcUaSubjectClientSource.cs` — IFaultInjectable, KillAsync/DisconnectAsync race guards, reconnectCts, PublishingStopped reconnection trigger, full state sync in health loop
+- [ ] `OpcUaClientConfiguration.cs` — SessionTimeout/OperationTimeout defaults, validation
+- [ ] `PollingManager.cs` — changes review
+- [ ] `ReadAfterWriteManager.cs` — unused using removal
+
+**OPC UA Server** (Fix 6, 7, 9, 13, 14):
+- [ ] `OpcUaSubjectServer.cs` — transport listener disposal, m_callback reflection workaround, CertificateUpdate unsubscription, NodeManagerLock, session event handlers
+- [ ] `OpcUaSubjectServerBackgroundService.cs` — IFaultInjectable, force-kill CTS, NodeManager.Lock instead of lock(node), ChangeQueueProcessor before StartAsync, ShutdownServerAsync always called, transport listener disposal, exponential backoff
+- [ ] `CustomNodeManager.cs` — removed redundant lock(variableNode), RemoveSubjectNodes
+- [ ] `OpcUaNodeFactory.cs` — minor fix
+
+**Core/Connectors infrastructure**:
+- [ ] `ChangeQueueProcessor.cs` — subscription in constructor (Fix 9), disposal
+- [ ] `PropertyChangeQueueSubscription.cs` — cancellation check in TryDequeue (Fix 6)
+- [ ] `SubjectPropertyWriter.cs` — LoadInitialStateAndResumeAsync rename
+- [ ] `IFaultInjectable.cs` — new interface for chaos testing
+- [ ] `SubjectSourceBackgroundService.cs` — minor change
+- [ ] `PropertyReference.cs` — SetValueFromSource extensions
+- [ ] `SubjectChangeContext.cs` — write timestamp atomicity (#190)
+- [ ] `IWriteInterceptor.cs` / `WriteInterceptorFactory.cs` — write interceptor changes
+- [ ] `SubjectPropertyMetadata.cs` — minor change
+
+**MQTT connector**:
+- [ ] `MqttSubjectClientSource.cs` — resilience improvements
+- [ ] `MqttSubjectServerBackgroundService.cs` — IFaultInjectable, restart loop, resilience
+- [ ] `MqttClientConfiguration.cs` / `MqttServerConfiguration.cs` — configuration changes
+- [ ] `MqttConnectionMonitor.cs` — new file
+- [ ] `MqttHelper.cs` — minor change
+
+**Tracking**:
+- [ ] `DerivedPropertyChangeHandler.cs` — changes review
+- [ ] `LifecycleInterceptor.cs` — removal of unused code
+- [ ] `PropertyReferenceTimestampExtensions.cs` — removed (moved to core)
+
+**Tests**:
+- [ ] `ChangeQueueProcessorTests.cs` — updated for Fix 9
+- [ ] `SubjectPropertyWriterTests.cs` — updated for rename
+- [ ] `WriteTimestampTests.cs` — new (replaces TimestampTests.cs)
+- [ ] `MqttClientConfigurationTests.cs` / `MqttServerConfigurationTests.cs` — new
+
+**ConnectorTester** (new project):
+- [ ] Review all tester files for anything that shouldn't be committed (investigation artifacts, hardcoded paths, temp files)
+- [ ] `VerificationEngine.cs` — memory logging (added for diagnostics — keep or remove?), Fix 15 LOH compaction
+
+**Other**:
+- [ ] `findings.md` — keep as documentation or remove before merge?
+- [ ] `docs/` — aspnetcore.md, opcua.md, mqtt.md documentation updates
+- [ ] `scripts/benchmark.ps1` — benchmark script changes
+- [ ] `.claude/settings.local.json` — should NOT be committed (local settings)
+
+**Build & test verification**:
+- [ ] Run `dotnet build src/Namotion.Interceptor.slnx` — no warnings
+- [ ] Run `dotnet test src/Namotion.Interceptor.slnx` — all unit tests pass
+
+**Upstream**:
+- [ ] File upstream SDK issues (see "Open Issues" section above)
+
+### 4. Update PR description
+
+- [ ] Update PR description with summary of all changes in the branch
+- [ ] Include: ConnectorTester (new project), OPC UA client resilience (Fix 1–5, 8, 10–12), OPC UA server resilience (Fix 6, 7, 9, 13, 14), MQTT resilience improvements, core infrastructure (IFaultInjectable, write timestamp atomicity), documentation updates
+- [ ] Link to findings.md for detailed fix descriptions

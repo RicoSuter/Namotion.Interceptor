@@ -39,6 +39,25 @@ internal class SubscriptionManager : IAsyncDisposable
     /// </summary>
     public IReadOnlyDictionary<uint, RegisteredSubjectProperty> MonitoredItems => _monitoredItems;
 
+    /// <summary>
+    /// Returns true if any active subscription has stopped receiving publish responses from the server.
+    /// </summary>
+    public bool HasStoppedPublishing
+    {
+        get
+        {
+            foreach (var subscription in _subscriptions.Keys)
+            {
+                if (subscription.PublishingStopped)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
     public SubscriptionManager(
         OpcUaSubjectClientSource source,
         SubjectPropertyWriter propertyWriter,

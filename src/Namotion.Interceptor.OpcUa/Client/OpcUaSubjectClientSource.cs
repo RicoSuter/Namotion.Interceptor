@@ -320,6 +320,17 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                         // (notification queue overflow, timing gaps, subscription lifetime expiration).
                         await sessionManager.PerformFullStateSyncIfNeededAsync(stoppingToken).ConfigureAwait(false);
 
+                        // Check if any subscription has stopped publishing (server stopped sending responses).
+                        // This can happen when another client's session disruption affects the server's publish pipeline.
+                        // The session appears connected but notifications aren't flowing — trigger manual reconnection.
+                        if (sessionManager.SubscriptionManager.HasStoppedPublishing)
+                        {
+                            _logger.LogWarning(
+                                "OPC UA subscription has stopped publishing. Starting manual reconnection to recover notification flow...");
+                            await ReconnectSessionAsync(stoppingToken).ConfigureAwait(false);
+                            continue;
+                        }
+
                         await _subscriptionHealthMonitor.CheckAndHealSubscriptionsAsync(
                             sessionManager.Subscriptions,
                             stoppingToken).ConfigureAwait(false);
