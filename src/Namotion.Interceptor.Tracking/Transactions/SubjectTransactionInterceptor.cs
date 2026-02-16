@@ -38,7 +38,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         var transaction = SubjectTransaction.Current;
-        if (transaction != null &&
+        if (transaction is { IsCommitting: false } &&
             transaction.TryGetPendingValue<TProperty>(context.Property, out var pendingValue))
         {
             return pendingValue;
@@ -59,7 +59,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         var transaction = SubjectTransaction.Current;
-        if (transaction != null && !context.Property.Metadata.IsDerived)
+        if (transaction is { IsCommitting: false } && !context.Property.Metadata.IsDerived)
         {
             // Validate context binding
             var subjectInterceptor = context.Property.Subject.Context.TryGetService<SubjectTransactionInterceptor>();
@@ -71,16 +71,15 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
 
             var currentContext = SubjectChangeContext.Current;
 
-            if (transaction.TryCaptureChange(
+            transaction.CaptureChange(
                 context.Property,
                 currentContext.Source,
                 currentContext.ChangedTimestamp,
                 currentContext.ReceivedTimestamp,
                 context.CurrentValue,
-                context.NewValue))
-            {
-                return; // Captured, interceptor chain stops here
-            }
+                context.NewValue);
+
+            return; // Captured, interceptor chain stops here
         }
 
         next(ref context); // No transaction, derived, or committing: Normal flow
