@@ -135,7 +135,7 @@ public class SubjectPropertyWriterTests
     }
 
     [Fact]
-    public async Task WhenCompleteInitCalledTwice_ThenSecondCallSkipsReplay()
+    public async Task WhenLoadInitialStateAndResumeCalledTwice_ThenSecondCallSkipsReplay()
     {
         // Arrange
         var sourceMock = new Mock<ISubjectSource>();

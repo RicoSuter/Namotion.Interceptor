@@ -69,7 +69,17 @@ public class ChangeQueueProcessor : IDisposable
         _writeHandler = writeHandler;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
-        _subscription = _context.CreatePropertyChangeQueueSubscription();
+
+        try
+        {
+            _subscription = _context.CreatePropertyChangeQueueSubscription();
+        }
+        catch
+        {
+            ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
+            _flushDedupedBuffer = null!;
+            throw;
+        }
     }
 
     /// <summary>

@@ -4,7 +4,6 @@ using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Tracking;
 using Opc.Ua;
 using Opc.Ua.Server;
 

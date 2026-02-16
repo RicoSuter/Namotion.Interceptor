@@ -1,5 +1,4 @@
 using System;
-using System.Buffers.Text;
 using MQTTnet.Protocol;
 using Namotion.Interceptor.Registry.Paths;
 
@@ -149,22 +148,13 @@ public class MqttClientConfiguration
     /// Gets or sets the function for serializing timestamps to bytes for MQTT user properties.
     /// Default converts to Unix milliseconds as UTF8. Must be paired with a matching <see cref="SourceTimestampDeserializer"/>.
     /// </summary>
-    public Func<DateTimeOffset, byte[]> SourceTimestampSerializer { get; init; } =
-        static timestamp =>
-        {
-            Span<byte> buffer = stackalloc byte[20];
-            Utf8Formatter.TryFormat(timestamp.ToUnixTimeMilliseconds(), buffer, out var bytesWritten);
-            return buffer[..bytesWritten].ToArray();
-        };
+    public Func<DateTimeOffset, byte[]> SourceTimestampSerializer { get; init; } = MqttHelper.DefaultSerializeTimestamp;
 
     /// <summary>
     /// Gets or sets the function for deserializing timestamp bytes from MQTT user properties.
     /// Default parses Unix milliseconds from UTF8. Must be paired with a matching <see cref="SourceTimestampSerializer"/>.
     /// </summary>
-    public Func<ReadOnlyMemory<byte>, DateTimeOffset?> SourceTimestampDeserializer { get; init; } =
-        static value => Utf8Parser.TryParse(value.Span, out long unixMs, out _)
-            ? DateTimeOffset.FromUnixTimeMilliseconds(unixMs)
-            : null;
+    public Func<ReadOnlyMemory<byte>, DateTimeOffset?> SourceTimestampDeserializer { get; init; } = MqttHelper.DefaultDeserializeTimestamp;
 
     /// <summary>
     /// Validates the configuration and throws if invalid.

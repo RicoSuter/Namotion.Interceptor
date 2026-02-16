@@ -473,8 +473,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
 
             await propertyWriter.LoadInitialStateAndResumeAsync(token).ConfigureAwait(false);
 
-            Interlocked.Increment(ref _successfulReconnections);
-            Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
+            RecordReconnectionSuccess();
             _logger.LogInformation("Session restart complete (id={SessionId}).", session.SessionId);
         }
         catch (OperationCanceledException) when (reconnectCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
@@ -721,6 +720,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
             case FaultType.Disconnect:
                 await DisconnectTransportAsync(cancellationToken).ConfigureAwait(false);
                 break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(faultType), faultType, null);
         }
     }
 
@@ -739,7 +740,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 // Calling ClearSessionAsync here would race: it disposes the session that
                 // ReconnectSessionAsync just created, causing BadSessionNotActivated on the
                 // next read and triggering a permanent failure loop.
-                try { await reconnectCts.CancelAsync(); }
+                try { await reconnectCts.CancelAsync().ConfigureAwait(false); }
                 catch (ObjectDisposedException) { /* CTS disposed between check and cancel */ }
             }
             else
@@ -752,7 +753,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSour
                 var lateCts = _reconnectCts;
                 if (lateCts is not null)
                 {
-                    try { await lateCts.CancelAsync(); }
+                    try { await lateCts.CancelAsync().ConfigureAwait(false); }
                     catch (ObjectDisposedException) { /* CTS disposed between check and cancel */ }
                 }
             }

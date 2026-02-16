@@ -513,6 +513,8 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
                     await client.DisconnectAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
                 }
                 break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(faultType), faultType, null);
         }
     }
 

@@ -117,6 +117,8 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
                     }
                 }
                 break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(faultType), faultType, null);
         }
     }
 

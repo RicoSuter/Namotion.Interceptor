@@ -264,7 +264,7 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets or sets the OPC UA session timeout.
     /// This determines how long the server will maintain the session after losing communication.
-    /// Must be greater than 2 * OperationTimeout to avoid sessions expiring during in-flight operations.
+    /// Should be greater than OperationTimeout to allow time for failure detection and reconnection.
     /// Default is 120 seconds.
     /// </summary>
     public TimeSpan SessionTimeout { get; set; } = TimeSpan.FromSeconds(120);

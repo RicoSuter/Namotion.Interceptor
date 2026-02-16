@@ -564,7 +564,7 @@ For 24/7 production use, the default configuration provides robust resilience:
 | `KeepAliveInterval` | 5s | How quickly disconnections are detected |
 | `ReconnectInterval` | 5s | Time between SDK reconnection attempts |
 | `MaxReconnectDuration` | 30s | Max time for SDK reconnection before forcing manual reset |
-| `SessionTimeout` | 120s | Server-side session lifetime (must be > 2x OperationTimeout) |
+| `SessionTimeout` | 120s | Server-side session lifetime (should be > OperationTimeout) |
 | `OperationTimeout` | 30s | Timeout for individual OPC UA operations |
 | `SubscriptionHealthCheckInterval` | 5s | Interval for health checks and post-reconnection state sync |
 | `WriteRetryQueueSize` | 1000 | Updates buffered during disconnection |

@@ -52,7 +52,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// replays the buffer, and resumes normal operation.
     /// On failure, clears the session to trigger manual reconnection via the health check loop.
     /// </summary>
-    public async Task PerformFullStateSyncIfNeededAsync(CancellationToken cancellationToken)
+    internal async Task PerformFullStateSyncIfNeededAsync(CancellationToken cancellationToken)
     {
         if (Volatile.Read(ref _needsFullStateSync) != 1)
         {
@@ -612,6 +612,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
     private async Task DisposeSessionAsync(Session session, CancellationToken cancellationToken)
     {
+        // Belt-and-suspenders: callers already unsubscribe before enqueuing, but ensure
+        // no stale keep-alive fires during the close/dispose sequence.
         session.KeepAlive -= OnKeepAlive;
 
         // Clean up orphaned subscriptions on the server when closing this session.
@@ -665,7 +667,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             try { await PollingManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing polling manager."); }
         }
 
-        // Dispose all sessions queued for deferred disposal
+        // Dispose queued sessions synchronously — these are abandoned sessions whose transport
+        // is already dead, so graceful CloseAsync would timeout. Fast sync Dispose is intentional.
         while (_sessionsToDispose.TryDequeue(out var pendingSession))
         {
             try { pendingSession.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing pending old session."); }

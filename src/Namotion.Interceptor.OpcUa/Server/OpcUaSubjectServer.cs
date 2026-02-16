@@ -12,7 +12,8 @@ internal class OpcUaSubjectServer : StandardServer
     // retain channels which chain: Channel → Listener → m_callback → SessionEndpoint → Server.
     // No public API exists to break this chain — ChannelClosed() is protected, Socket is
     // protected internal. We null m_callback after disposal to allow GC of the server graph.
-    // TODO: File upstream PR to fix TcpTransportListener.Dispose() and channel socket cleanup.
+    // Upstream SDK issue: TcpTransportListener.Dispose() doesn't null m_callback and channel
+    // Dispose() doesn't close sockets. Tracked for upstream contribution.
     private static readonly FieldInfo? TransportListenerCallbackField =
         typeof(Opc.Ua.Bindings.TcpTransportListener)
             .GetField("m_callback", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -42,8 +43,8 @@ internal class OpcUaSubjectServer : StandardServer
     /// </summary>
     public void CloseTransportListeners()
     {
-        _savedTransportListeners = [.. TransportListeners];
-        foreach (var listener in TransportListeners)
+        _savedTransportListeners ??= [.. TransportListeners];
+        foreach (var listener in _savedTransportListeners)
         {
             try { listener.Close(); } catch (Exception ex) { _logger.LogDebug(ex, "Error closing transport listener."); }
         }
@@ -60,6 +61,13 @@ internal class OpcUaSubjectServer : StandardServer
         if (_savedTransportListeners is null)
         {
             return;
+        }
+
+        if (TransportListenerCallbackField is null)
+        {
+            _logger.LogWarning(
+                "TcpTransportListener.m_callback field not found. " +
+                "The OPC UA SDK may have changed its internals — transport listener memory leak workaround is inactive.");
         }
 
         foreach (var listener in _savedTransportListeners)

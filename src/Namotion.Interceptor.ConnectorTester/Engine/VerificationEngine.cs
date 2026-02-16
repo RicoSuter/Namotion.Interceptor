@@ -295,9 +295,9 @@ public class VerificationEngine : BackgroundService
         GC.WaitForPendingFinalizers();
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
 
-        var process = Process.GetCurrentProcess();
+        using var process = Process.GetCurrentProcess();
         var workingSetMb = process.WorkingSet64 / (1024.0 * 1024.0);
-        var heapMb = GC.GetTotalMemory(forceFullCollection: true) / (1024.0 * 1024.0);
+        var heapMb = GC.GetTotalMemory(forceFullCollection: false) / (1024.0 * 1024.0);
         var profile = profileName != null ? $"profile: {profileName}" : "no profile";
 
         var line = string.Format(

@@ -34,7 +34,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
     /// <inheritdoc />
     Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
     {
-        // For a multi-connection server, disconnecting transport = killing the server.
+        // For a multi-connection server, all fault types are treated as force-kill.
         // There's no meaningful "soft disconnect" when the server has multiple clients.
         _isForceKill = true;
         try { _forceKillCts?.Cancel(); }
@@ -207,7 +207,8 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                // Normal shutdown - don't log as error
+                // Normal shutdown takes priority over force-kill (checked first intentionally).
+                // If both stoppingToken and _isForceKill are set, we exit cleanly rather than restart.
             }
             catch (OperationCanceledException) when (_isForceKill)
             {
@@ -294,15 +295,14 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
             }
 
             // Timeout prevents hang when clients keep reconnecting during shutdown
-            var stopTask = application.StopAsync().AsTask();
-            if (await Task.WhenAny(stopTask, Task.Delay(TimeSpan.FromSeconds(10))).ConfigureAwait(false) != stopTask)
+            using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            try
+            {
+                await application.StopAsync().AsTask().WaitAsync(timeoutCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
             {
                 _logger.LogWarning("OPC UA server shutdown timed out after 10s. Continuing with disposal.");
-
-                // Observe the abandoned task to prevent UnobservedTaskException
-                _ = stopTask.ContinueWith(
-                    t => _logger.LogDebug(t.Exception, "StopAsync completed after timeout."),
-                    TaskContinuationOptions.OnlyOnFaulted);
             }
         }
         catch (ServiceResultException e) when (e.StatusCode == StatusCodes.BadServerHalted)
