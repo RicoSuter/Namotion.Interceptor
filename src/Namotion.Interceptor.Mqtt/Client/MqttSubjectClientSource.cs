@@ -485,7 +485,11 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             options.WithCredentials(_configuration.Username, _configuration.Password);
         }
 
-        return options.Build();
+        var clientOptions = options.Build();
+#if USE_LOCAL_MQTTNET
+        clientOptions.AcknowledgeQoS1OnReceive = true;
+#endif
+        return clientOptions;
     }
 
     /// <inheritdoc />
