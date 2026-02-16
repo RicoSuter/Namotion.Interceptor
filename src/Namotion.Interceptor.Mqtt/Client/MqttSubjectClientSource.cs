@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
@@ -203,7 +204,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
                         userProps.Clear();
                         userProps.Add(new MqttUserProperty(
                             _configuration.SourceTimestampPropertyName!,
-                            _configuration.SourceTimestampConverter(change.ChangedTimestamp)));
+                            Encoding.UTF8.GetBytes(_configuration.SourceTimestampConverter(change.ChangedTimestamp))));
                         message.UserProperties = userProps;
                         userPropertiesArray[messageCount] = userProps;
                     }
@@ -221,7 +222,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 #if USE_LOCAL_MQTTNET
                 try
                 {
-                    await client.PublishManyAsync(
+                    await client.PublishMessagesAsync(
                         new ArraySegment<MqttApplicationMessage>(messages, 0, messageCount),
                         cancellationToken).ConfigureAwait(false);
                 }
