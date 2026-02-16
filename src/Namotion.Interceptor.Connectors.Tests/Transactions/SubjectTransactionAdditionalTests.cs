@@ -99,7 +99,7 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
         stopwatch.Stop();
 
         // Assert
-        Assert.Empty(transaction.PendingChanges);
+        Assert.Empty(transaction.GetPendingChanges());
         Assert.True(stopwatch.ElapsedMilliseconds < 100, "Empty commit should be fast");
     }
 
@@ -167,8 +167,8 @@ public class SubjectTransactionAdditionalTests : TransactionTestBase
 
         // Assert - only FirstName and LastName should be in pending changes
         // FullName is a derived property and should not be captured
-        var pendingPropertyNames = transaction.PendingChanges.Keys
-            .Select(k => k.Name)
+        var pendingPropertyNames = transaction.GetPendingChanges()
+            .Select(c => c.Property.Name)
             .ToList();
 
         Assert.Contains("FirstName", pendingPropertyNames);

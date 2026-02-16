@@ -38,23 +38,10 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         var transaction = SubjectTransaction.Current;
-        if (transaction is { IsCommitting: false })
+        if (transaction != null &&
+            transaction.TryGetPendingValue<TProperty>(context.Property, out var pendingValue))
         {
-            lock (transaction.PendingChangesLock)
-            {
-                if (transaction.IsCommitting)
-                {
-                    throw new InvalidOperationException(
-                        "Cannot read transactional property while commit is in progress. " +
-                        "This typically indicates the transaction is being used from multiple threads.");
-                }
-
-                if (transaction.PendingChanges.TryGetValue(context.Property, out var change))
-                {
-                    // Return pending value if transaction active and not committing
-                    return change.GetNewValue<TProperty>();
-                }
-            }
+            return pendingValue;
         }
 
         return next(ref context);
@@ -72,8 +59,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         var transaction = SubjectTransaction.Current;
-        if (transaction is { IsCommitting: false } &&
-            !context.Property.Metadata.IsDerived)
+        if (transaction != null && !context.Property.Metadata.IsDerived)
         {
             // Validate context binding
             var subjectInterceptor = context.Property.Subject.Context.TryGetService<SubjectTransactionInterceptor>();
@@ -85,44 +71,19 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
 
             var currentContext = SubjectChangeContext.Current;
 
-            lock (transaction.PendingChangesLock)
+            if (transaction.TryCaptureChange(
+                context.Property,
+                currentContext.Source,
+                currentContext.ChangedTimestamp,
+                currentContext.ReceivedTimestamp,
+                context.CurrentValue,
+                context.NewValue))
             {
-                if (transaction.IsCommitting)
-                {
-                    throw new InvalidOperationException(
-                        "Cannot write transactional property while commit is in progress. " +
-                        "This typically indicates the transaction is being used from multiple threads.");
-                }
-
-                var isFirstWrite = !transaction.PendingChanges.TryGetValue(context.Property, out var existingChange);
-                if (isFirstWrite)
-                {
-                    // Preserve the original old value for first write (used for conflict detection at commit)
-                    transaction.PendingChanges[context.Property] = SubjectPropertyChange.Create(
-                        context.Property,
-                        source: currentContext.Source,
-                        changedTimestamp: currentContext.ChangedTimestamp,
-                        receivedTimestamp: currentContext.ReceivedTimestamp,
-                        context.CurrentValue,
-                        context.NewValue);
-                }
-                else
-                {
-                    // Last write wins, but preserve original old value
-                    transaction.PendingChanges[context.Property] = SubjectPropertyChange.Create(
-                        context.Property,
-                        source: currentContext.Source,
-                        changedTimestamp: currentContext.ChangedTimestamp,
-                        receivedTimestamp: currentContext.ReceivedTimestamp,
-                        existingChange.GetOldValue<TProperty>(),
-                        context.NewValue);
-                }
+                return; // Captured, interceptor chain stops here
             }
-
-            return; // Do NOT call next(): Interceptor chain stops here
         }
 
-        next(ref context); // No transaction or committing: Normal flow
+        next(ref context); // No transaction, derived, or committing: Normal flow
     }
 
     private sealed class LockReleaser(SemaphoreSlim semaphore) : IDisposable
