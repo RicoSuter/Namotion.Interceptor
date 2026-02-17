@@ -56,16 +56,15 @@ namespace YourDefaultNamespace
             new Dictionary<string, SubjectPropertyMetadata>
             {
                 {
-                    "VirtualProp",       
+                    "VirtualProp",
                     new SubjectPropertyMetadata(
-                        typeof(BaseClass).GetProperty(nameof(VirtualProp), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
-                        (o) => ((BaseClass)o).VirtualProp, 
-                        (o, v) => ((BaseClass)o).VirtualProp = (string)v, 
+                        typeof(BaseClass).GetProperty(nameof(VirtualProp), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((BaseClass)o).VirtualProp,
+                        (o, v) => ((BaseClass)o).VirtualProp = (string)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
             }
-            
             .ToFrozenDictionary();
 
         public BaseClass()
@@ -81,11 +80,11 @@ namespace YourDefaultNamespace
 
         public virtual partial string VirtualProp
         {
-             get
+            get
             {
                 return GetPropertyValue<string>(nameof(VirtualProp), static (o) => ((BaseClass)o)._VirtualProp);
             }
-             set
+            set
             {
                 var newValue = value;
                 var cancel = false;

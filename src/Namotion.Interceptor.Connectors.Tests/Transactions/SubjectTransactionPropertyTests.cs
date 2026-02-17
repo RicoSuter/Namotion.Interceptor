@@ -1,9 +1,12 @@
+using System.ComponentModel.DataAnnotations;
 using System.Reactive.Concurrency;
 using Moq;
 using Namotion.Interceptor.Connectors.Tests.Models;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Transactions;
+using Namotion.Interceptor.Validation;
 
 namespace Namotion.Interceptor.Connectors.Tests.Transactions;
 
@@ -24,8 +27,8 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         person.FirstName = "John";
 
         // Assert
-        Assert.Single(transaction.PendingChanges);
-        var change = transaction.PendingChanges.Values.First();
+        Assert.Single(transaction.GetPendingChanges());
+        var change = transaction.GetPendingChanges().First();
         Assert.Equal("John", change.GetNewValue<string>());
         Assert.Null(change.GetOldValue<string>());
     }
@@ -82,8 +85,8 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         _ = person.FullName;
 
         // Assert
-        Assert.Equal(2, transaction.PendingChanges.Count);
-        Assert.All(transaction.PendingChanges.Keys, key => Assert.False(key.Metadata.IsDerived));
+        Assert.Equal(2, transaction.GetPendingChanges().Count);
+        Assert.All(transaction.GetPendingChanges(), change => Assert.False(change.Property.Metadata.IsDerived));
     }
 
     [Fact]
@@ -100,8 +103,8 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         person.FirstName = "Jack";
 
         // Assert
-        Assert.Single(transaction.PendingChanges);
-        var change = transaction.PendingChanges.Values.First();
+        Assert.Single(transaction.GetPendingChanges());
+        var change = transaction.GetPendingChanges().First();
         Assert.Equal("Jack", change.GetNewValue<string>());
         Assert.Null(change.GetOldValue<string>());
     }
@@ -125,7 +128,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         }
 
         // Assert
-        var change = transaction.PendingChanges.Values.First();
+        var change = transaction.GetPendingChanges().First();
         Assert.Same(mockSource, change.Source);
         Assert.Equal(changedTime, change.ChangedTimestamp);
         Assert.Equal(receivedTime, change.ReceivedTimestamp);
@@ -147,7 +150,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
 
             // Assert
             Assert.Equal("Pending", readValue);
-            Assert.Single(transaction.PendingChanges);
+            Assert.Single(transaction.GetPendingChanges());
         }
 
         Assert.Equal("Original", person.FirstName);
@@ -182,7 +185,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
 
         // Assert
         Assert.Equal("Stored", result);
-        Assert.Empty(transaction.PendingChanges);
+        Assert.Empty(transaction.GetPendingChanges());
     }
 
     [Fact]
@@ -279,7 +282,7 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
             person1.FirstName = "John";
             person2.FirstName = "Jane";
 
-            Assert.Equal(2, transaction.PendingChanges.Count);
+            Assert.Equal(2, transaction.GetPendingChanges().Count);
 
             await transaction.CommitAsync(CancellationToken.None);
         }
@@ -380,5 +383,73 @@ public class SubjectTransactionPropertyTests : TransactionTestBase
         Assert.Contains("FirstName", firedEvents);
         Assert.Contains("LastName", firedEvents);
         Assert.Contains("FullName", firedEvents);
+    }
+
+    [Fact]
+    public async Task CommitAsync_WithDependentProperties_CommitsInInsertionOrder()
+    {
+        // Arrange: Motor with MaxAllowedSpeed=100 and a validator that rejects MotorSpeed > MaxAllowedSpeed.
+        // Setting MotorSpeed=150 requires MaxAllowedSpeed to be raised first.
+        var context = CreateContextWithMotorValidation();
+        var motor = new Motor(context);
+
+        // Act: Raise limit first, then set speed above old limit
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        motor.MaxAllowedSpeed = 200;
+        motor.MotorSpeed = 150;
+
+        await transaction.CommitAsync(CancellationToken.None);
+
+        // Assert: Both values applied because commit replayed in insertion order
+        Assert.Equal(200, motor.MaxAllowedSpeed);
+        Assert.Equal(150, motor.MotorSpeed);
+    }
+
+    [Fact]
+    public async Task CommitAsync_WithDependentProperties_ValidatorRejectsInvalidSpeedDuringCapture()
+    {
+        // Arrange: Motor with MaxAllowedSpeed=100
+        var context = CreateContextWithMotorValidation();
+        var motor = new Motor(context);
+
+        // Act & Assert: Setting MotorSpeed=150 without raising limit is rejected during capture
+        using var transaction = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        Assert.Throws<ValidationException>(() => motor.MotorSpeed = 150);
+    }
+
+    private static IInterceptorSubjectContext CreateContextWithMotorValidation()
+    {
+        return InterceptorSubjectContext
+            .Create()
+            .WithPropertyValidation()
+            .WithService<IPropertyValidator>(() => new MotorSpeedValidator())
+            .WithRegistry()
+            .WithTransactions()
+            .WithFullPropertyTracking()
+            .WithSourceTransactions();
+    }
+
+    /// <summary>
+    /// Validates that MotorSpeed does not exceed MaxAllowedSpeed.
+    /// Reads MaxAllowedSpeed through the property getter, which returns the pending value during transactions.
+    /// </summary>
+    private class MotorSpeedValidator : IPropertyValidator
+    {
+        public IEnumerable<ValidationResult> Validate<TProperty>(PropertyReference property, TProperty value)
+        {
+            if (property.Metadata.Name == nameof(Motor.MotorSpeed) &&
+                value is int speed &&
+                property.Subject is Motor motor)
+            {
+                // Reading MaxAllowedSpeed goes through the interceptor chain,
+                // so during a transaction it returns the pending value
+                var maxAllowedSpeed = motor.MaxAllowedSpeed;
+                if (speed > maxAllowedSpeed)
+                {
+                    yield return new ValidationResult(
+                        $"MotorSpeed {speed} exceeds MaxAllowedSpeed {maxAllowedSpeed}.");
+                }
+            }
+        }
     }
 }

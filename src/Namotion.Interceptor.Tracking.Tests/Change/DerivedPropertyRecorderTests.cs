@@ -184,4 +184,26 @@ public class DerivedPropertyRecorderTests
         // Assert - should not throw, buffers reused
         Assert.False(recorder.IsRecording);
     }
+
+    [Fact]
+    public void ClearLastRecording_SetsCountToZero()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var person = new Person(context);
+        var recorder = CreateRecorder();
+        var prop = new PropertyReference(person, nameof(Person.FirstName));
+
+        recorder.StartRecording();
+        recorder.TouchProperty(ref prop);
+        _ = recorder.FinishRecording();
+
+        // Act
+        recorder.ClearLastRecording();
+
+        // Assert - next recording session should start fresh
+        recorder.StartRecording();
+        var recorded = recorder.FinishRecording();
+        Assert.Equal(0, recorded.Length);
+    }
 }

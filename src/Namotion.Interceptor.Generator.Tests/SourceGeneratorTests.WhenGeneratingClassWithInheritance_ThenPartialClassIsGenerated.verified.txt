@@ -56,25 +56,24 @@ namespace YourDefaultNamespace
             new Dictionary<string, SubjectPropertyMetadata>
             {
                 {
-                    "FirstName",       
+                    "FirstName",
                     new SubjectPropertyMetadata(
-                        typeof(Person).GetProperty(nameof(FirstName), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
-                        (o) => ((Person)o).FirstName, 
-                        (o, v) => ((Person)o).FirstName = (string)v, 
+                        typeof(Person).GetProperty(nameof(FirstName), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((Person)o).FirstName,
+                        (o, v) => ((Person)o).FirstName = (string)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
                 {
-                    "LastName",       
+                    "LastName",
                     new SubjectPropertyMetadata(
-                        typeof(Person).GetProperty(nameof(LastName), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
-                        (o) => ((Person)o).LastName, 
-                        (o, v) => ((Person)o).LastName = (string)v, 
+                        typeof(Person).GetProperty(nameof(LastName), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((Person)o).LastName,
+                        (o, v) => ((Person)o).LastName = (string)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
             }
-            
             .ToFrozenDictionary();
 
         public Person()
@@ -90,11 +89,11 @@ namespace YourDefaultNamespace
 
         public partial string FirstName
         {
-             get
+            get
             {
                 return GetPropertyValue<string>(nameof(FirstName), static (o) => ((Person)o)._FirstName);
             }
-             set
+            set
             {
                 var newValue = value;
                 var cancel = false;
@@ -115,11 +114,11 @@ namespace YourDefaultNamespace
 
         public partial string LastName
         {
-             get
+            get
             {
                 return GetPropertyValue<string>(nameof(LastName), static (o) => ((Person)o)._LastName);
             }
-             set
+            set
             {
                 var newValue = value;
                 var cancel = false;
@@ -190,8 +189,6 @@ namespace YourDefaultNamespace
 {
     public partial class Teacher : IInterceptorSubject
     {
-        
-
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
@@ -218,11 +215,11 @@ namespace YourDefaultNamespace
             new Dictionary<string, SubjectPropertyMetadata>
             {
                 {
-                    "MainCourse",       
+                    "MainCourse",
                     new SubjectPropertyMetadata(
-                        typeof(Teacher).GetProperty(nameof(MainCourse), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
-                        (o) => ((Teacher)o).MainCourse, 
-                        (o, v) => ((Teacher)o).MainCourse = (string)v, 
+                        typeof(Teacher).GetProperty(nameof(MainCourse), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((Teacher)o).MainCourse,
+                        (o, v) => ((Teacher)o).MainCourse = (string)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
@@ -243,11 +240,11 @@ namespace YourDefaultNamespace
 
         public partial string MainCourse
         {
-             get
+            get
             {
                 return GetPropertyValue<string>(nameof(MainCourse), static (o) => ((Teacher)o)._MainCourse);
             }
-             set
+            set
             {
                 var newValue = value;
                 var cancel = false;

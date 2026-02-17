@@ -1,30 +1,52 @@
 using System.Runtime.CompilerServices;
 
-namespace Namotion.Interceptor.Tracking.Change;
+namespace Namotion.Interceptor;
 
 public readonly struct SubjectChangeContext
 {
     [ThreadStatic]
     private static SubjectChangeContext _current;
-    
-    private readonly DateTimeOffset? _changedTimestamp;
-    public readonly DateTimeOffset? ReceivedTimestamp;
+
+    private readonly long _changedTimestampUtcTicks;
+    private readonly long _receivedTimestampUtcTicks;
+
     public readonly object? Source;
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private SubjectChangeContext(DateTimeOffset? changed, DateTimeOffset? received, object? source)
+    private SubjectChangeContext(long changedTimestampUtcTicks, long receivedTimestampUtcTicks, object? source)
     {
-        _changedTimestamp = changed;
-        ReceivedTimestamp = received;
+        _changedTimestampUtcTicks = changedTimestampUtcTicks;
+        _receivedTimestampUtcTicks = receivedTimestampUtcTicks;
         Source = source;
     }
 
     /// <summary>Gets the changed timestamp from the thread-local context or falls back to <see cref="SubjectChangeContext.GetTimestampFunction"/>.</summary>
     public DateTimeOffset ChangedTimestamp
     {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)] get => _changedTimestamp ?? GetTimestampFunction();
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _changedTimestampUtcTicks != 0
+            ? new DateTimeOffset(_changedTimestampUtcTicks, TimeSpan.Zero)
+            : GetTimestampFunction();
     }
-    
+
+    /// <summary>Gets the changed timestamp as raw UTC ticks, avoiding DateTimeOffset allocation on the hot path.</summary>
+    internal long ChangedTimestampUtcTicks
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _changedTimestampUtcTicks != 0
+            ? _changedTimestampUtcTicks
+            : GetTimestampFunction().UtcTicks;
+    }
+
+    /// <summary>Gets the received timestamp from the thread-local context, or null if not set.</summary>
+    public DateTimeOffset? ReceivedTimestamp
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _receivedTimestampUtcTicks != 0
+            ? new DateTimeOffset(_receivedTimestampUtcTicks, TimeSpan.Zero)
+            : null;
+    }
+
     /// <summary>
     /// Gets or sets a function which retrieves the current timestamp (default is <see cref="DateTimeOffset.UtcNow"/>).
     /// </summary>
@@ -41,7 +63,10 @@ public readonly struct SubjectChangeContext
     public static SubjectChangeContextScope WithChangedTimestamp(DateTimeOffset? changed)
     {
         var previousState = _current;
-        _current = new SubjectChangeContext(changed, previousState.ReceivedTimestamp, previousState.Source);
+        _current = new SubjectChangeContext(
+            changed?.UtcTicks ?? 0,
+            previousState._receivedTimestampUtcTicks,
+            previousState.Source);
         return new SubjectChangeContextScope(previousState);
     }
 
@@ -50,7 +75,10 @@ public readonly struct SubjectChangeContext
     public static SubjectChangeContextScope WithReceivedTimestamp(DateTimeOffset? received)
     {
         var previousState = _current;
-        _current = new SubjectChangeContext(previousState._changedTimestamp, received, previousState.Source);
+        _current = new SubjectChangeContext(
+            previousState._changedTimestampUtcTicks,
+            received?.UtcTicks ?? 0,
+            previousState.Source);
         return new SubjectChangeContextScope(previousState);
     }
 
@@ -59,7 +87,10 @@ public readonly struct SubjectChangeContext
     public static SubjectChangeContextScope WithSource(object? source)
     {
         var previousState = _current;
-        _current = new SubjectChangeContext(previousState._changedTimestamp, previousState.ReceivedTimestamp, source);
+        _current = new SubjectChangeContext(
+            previousState._changedTimestampUtcTicks,
+            previousState._receivedTimestampUtcTicks,
+            source);
         return new SubjectChangeContextScope(previousState);
     }
 
@@ -68,7 +99,10 @@ public readonly struct SubjectChangeContext
     public static SubjectChangeContextScope WithState(object? source, DateTimeOffset? changed, DateTimeOffset? received)
     {
         var previousState = _current;
-        _current = new SubjectChangeContext(changed, received, source);
+        _current = new SubjectChangeContext(
+            changed?.UtcTicks ?? 0,
+            received?.UtcTicks ?? 0,
+            source);
         return new SubjectChangeContextScope(previousState);
     }
 
