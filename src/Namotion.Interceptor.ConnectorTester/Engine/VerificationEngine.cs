@@ -25,7 +25,7 @@ public class VerificationEngine : BackgroundService
 
     private readonly ConnectorTesterConfiguration _configuration;
     private readonly TestCycleCoordinator _coordinator;
-    private readonly List<(string Name, TestNode Root)> _participants;
+    private readonly Dictionary<string, TestNode> _participants;
     private readonly List<MutationEngine> _mutationEngines;
     private readonly List<ChaosEngine> _chaosEngines;
     private readonly CycleLoggerProvider? _cycleLoggerProvider;
@@ -43,7 +43,7 @@ public class VerificationEngine : BackgroundService
     public VerificationEngine(
         ConnectorTesterConfiguration configuration,
         TestCycleCoordinator coordinator,
-        List<(string Name, TestNode Root)> participants,
+        Dictionary<string, TestNode> participants,
         List<MutationEngine> mutationEngines,
         List<ChaosEngine> chaosEngines,
         CycleLoggerProvider? cycleLoggerProvider,
@@ -83,7 +83,7 @@ public class VerificationEngine : BackgroundService
             _configuration.Connector,
             _configuration.MutatePhaseDuration,
             _configuration.ConvergenceTimeout,
-            string.Join(", ", _participants.Select(p => p.Name)));
+            string.Join(", ", _participants.Select(p => p.Key)));
         foreach (var engine in _mutationEngines)
         {
             _logger.LogInformation("  {Name}: {Rate} mutations/sec", engine.Name, engine.MutationRate);
@@ -158,8 +158,8 @@ public class VerificationEngine : BackgroundService
             {
                 var snapshots = _participants
                     .Select(participant => (
-                        participant.Name,
-                        Snapshot: CreateSnapshot(participant.Root)))
+                        Name: participant.Key,
+                        Snapshot: CreateSnapshot(participant.Value)))
                     .ToList();
 
                 var firstSnapshot = snapshots[0].Snapshot;
@@ -190,8 +190,8 @@ public class VerificationEngine : BackgroundService
                 // Log failure details
                 var snapshots = _participants
                     .Select(participant => (
-                        participant.Name,
-                        Snapshot: CreateSnapshot(participant.Root)))
+                        Name: participant.Key,
+                        Snapshot: CreateSnapshot(participant.Value)))
                     .ToList();
 
                 _logger.LogError("=== Cycle {Cycle}: FAIL (did not converge within {Timeout}) ===",

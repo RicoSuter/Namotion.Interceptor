@@ -2,8 +2,8 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Client.Polling;
+using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Opc.Ua;
 using Opc.Ua.Bindings;
 using Opc.Ua.Client;
@@ -53,6 +53,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// replays the buffer, and resumes normal operation.
     /// On failure, clears the session to trigger manual reconnection via the health check loop.
     /// </summary>
+    /// <remarks>
+    /// Called only from the health check loop in OpcUaSubjectClientSource.ExecuteAsync (single-threaded).
+    /// </remarks>
     internal async Task PerformFullStateSyncIfNeededAsync(CancellationToken cancellationToken)
     {
         if (Volatile.Read(ref _needsFullStateSync) != 1)

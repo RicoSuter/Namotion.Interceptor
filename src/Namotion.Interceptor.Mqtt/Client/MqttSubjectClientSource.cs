@@ -21,7 +21,7 @@ namespace Namotion.Interceptor.Mqtt.Client;
 /// <summary>
 /// MQTT client source that subscribes to an MQTT broker and synchronizes properties.
 /// </summary>
-internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSource, ISubjectConnector, IFaultInjectable, IAsyncDisposable
+internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSource, IFaultInjectable, IAsyncDisposable
 {
     // Pool for UserProperties lists to avoid allocations on hot path
     private static readonly ObjectPool<List<MqttUserProperty>> UserPropertiesPool

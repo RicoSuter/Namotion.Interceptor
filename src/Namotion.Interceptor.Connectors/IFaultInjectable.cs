@@ -12,7 +12,7 @@ public enum FaultType
 
     /// <summary>
     /// Soft kill: breaks the transport connection without stopping the connector.
-    /// Lets the SDK's built-in reconnection logic detect the failure and recover.
+    /// The connector's built-in reconnection logic should detect the failure and recover.
     /// </summary>
     Disconnect
 }
@@ -28,5 +28,5 @@ public interface IFaultInjectable
     /// </summary>
     /// <param name="faultType">The type of fault to inject.</param>
     /// <param name="cancellationToken">A token to cancel the operation.</param>
-    Task InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken = default);
+    Task InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken);
 }

@@ -1,6 +1,6 @@
 # Connector Tester
 
-An in-process integration test that validates **eventual consistency** across Namotion.Interceptor connectors under chaos conditions. It hosts a server and multiple clients in a single process, mutates their object models concurrently, injects disruptions via `IChaosTarget` (kill and disconnect), and verifies that all participants eventually reach identical state. Exits with code 1 on failure for CI/CD integration.
+An in-process integration test that validates **eventual consistency** across Namotion.Interceptor connectors under chaos conditions. It hosts a server and multiple clients in a single process, mutates their object models concurrently, injects disruptions via `IFaultInjectable` (kill and disconnect), and verifies that all participants eventually reach identical state. Exits with code 1 on failure for CI/CD integration.
 
 ## Architecture
 
@@ -37,9 +37,9 @@ Each test cycle has two phases:
 
 A cycle **passes** when all participant snapshots are identical JSON. It **fails** if the convergence timeout expires. On failure, the process logs snapshot diffs, gracefully shuts down all hosted services, and exits with code 1.
 
-### Chaos via IChaosTarget
+### Chaos via IFaultInjectable
 
-Each connector implements `IChaosTarget` (separate from the production `ISubjectConnector` interface) with two chaos modes:
+Each connector implements `IFaultInjectable` (separate from the production `ISubjectConnector` interface) with two chaos modes:
 
 - **Kill** (`KillAsync`): Hard kill — stops the connector entirely. The background service loop auto-restarts.
   - *OPC UA Server*: Cancels the server loop token, closes transport listeners (TCP RST to all clients), disposes without graceful shutdown.
@@ -57,7 +57,7 @@ The ChaosEngine picks an action based on the configured `Mode` ("kill", "disconn
 
 - **Global mutation counter**: A static `Interlocked.Increment` counter ensures every mutation produces a globally unique value, preventing the equality interceptor from dropping duplicate changes.
 - **Explicit timestamp scoping**: Mutations use `SubjectChangeContext.WithChangedTimestamp()` so all interceptors and change queue observers see the same timestamp.
-- **IChaosTarget separation**: Chaos testing uses a dedicated `IChaosTarget` interface (separate from production `ISubjectConnector`). Two modes: `KillAsync` (hard kill with auto-restart) and `DisconnectAsync` (transport disconnect with SDK reconnection).
+- **IFaultInjectable separation**: Chaos testing uses a dedicated `IFaultInjectable` interface (separate from production `ISubjectConnector`). Two modes: `KillAsync` (hard kill with auto-restart) and `DisconnectAsync` (transport disconnect with SDK reconnection).
 - **Shutdown timeout**: The OPC UA server's `ShutdownServerAsync` wraps `application.StopAsync()` with a 10s timeout to prevent hang when clients keep reconnecting during graceful shutdown.
 
 ## Supported Connectors
@@ -140,9 +140,9 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
     "Connector": "opcua",
     "EnableStructuralMutations": false,
     "MutatePhaseDuration": "00:01:00",
-    "ConvergenceTimeout": "00:01:00",
+    "ConvergenceTimeout": "00:05:00",
     "Server": {
-      "MutationRate": 200,
+      "MutationRate": 1000,
       "Chaos": {
         "IntervalMin": "00:00:10",
         "IntervalMax": "00:00:20",
@@ -154,7 +154,7 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
     "Clients": [
       {
         "Name": "client-a",
-        "MutationRate": 50,
+        "MutationRate": 100,
         "Chaos": {
           "IntervalMin": "00:00:10",
           "IntervalMax": "00:00:20",
@@ -165,7 +165,7 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
       },
       {
         "Name": "client-b",
-        "MutationRate": 50,
+        "MutationRate": 100,
         "Chaos": {
           "IntervalMin": "00:00:08",
           "IntervalMax": "00:00:15",
@@ -179,6 +179,7 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
       { "Name": "no-chaos", "Participants": [] },
       { "Name": "server-only", "Participants": ["server"] },
       { "Name": "client-a-only", "Participants": ["client-a"] },
+      { "Name": "all-clients", "Participants": ["client-a", "client-b"] },
       { "Name": "full-chaos", "Participants": ["server", "client-a", "client-b"] }
     ]
   }
@@ -191,7 +192,7 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
 |-----|------|---------|-------------|
 | `Connector` | string | `"opcua"` | Protocol to test: `"opcua"`, `"mqtt"`, or `"websocket"` |
 | `EnableStructuralMutations` | bool | `false` | Reserved for future collection/dictionary mutations |
-| `MutatePhaseDuration` | TimeSpan | `00:05:00` | How long mutations run before convergence check |
+| `MutatePhaseDuration` | TimeSpan | `00:01:00` | How long mutations run before convergence check |
 | `ConvergenceTimeout` | TimeSpan | `00:01:00` | Max time to wait for all snapshots to match |
 | `Server` | object | - | Server participant configuration |
 | `Clients` | array | `[]` | Client participant configurations |
@@ -337,7 +338,7 @@ For multi-day runs, consider using longer cycle durations and lower mutation rat
    - Add a `case "{name}":` in the client connector switch (inside the client loop).
    - Pick a base port in the `serverPort` switch.
 
-4. **Implement `IChaosTarget`** on the connector's background service so ChaosEngine can inject disruptions. Implement `KillAsync` (hard kill) and `DisconnectAsync` (transport disconnect).
+4. **Implement `IFaultInjectable`** on the connector's background service so ChaosEngine can inject disruptions. Implement `KillAsync` (hard kill) and `DisconnectAsync` (transport disconnect).
 
 5. **Add `[Path]` attributes** to `TestNode.cs` properties for the new connector's path provider key.
 

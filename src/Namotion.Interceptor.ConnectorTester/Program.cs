@@ -17,7 +17,21 @@ using Namotion.Interceptor.ConnectorTester.Engine;
 using Namotion.Interceptor.ConnectorTester.Logging;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Validation;
+
+// Tick-precision timestamp serializers (not default Unix milliseconds) to ensure
+// exact timestamp convergence in snapshot comparison.
+static byte[] SerializeTickTimestamp(DateTimeOffset ts)
+{
+    Span<byte> buffer = stackalloc byte[20];
+    System.Buffers.Text.Utf8Formatter.TryFormat(ts.UtcTicks, buffer, out var bytesWritten);
+    return buffer[..bytesWritten].ToArray();
+}
+
+static DateTimeOffset? DeserializeTickTimestamp(ReadOnlyMemory<byte> value)
+{
+    return System.Buffers.Text.Utf8Parser.TryParse(value.Span, out long ticks, out int _)
+        ? new DateTimeOffset(ticks, TimeSpan.Zero) : null;
+}
 
 var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
 {
@@ -47,7 +61,7 @@ var coordinator = new TestCycleCoordinator();
 builder.Services.AddSingleton(coordinator);
 
 // Will be populated during setup
-var participants = new List<(string Name, TestNode Root)>();
+var participants = new Dictionary<string, TestNode>();
 var mutationEngines = new List<MutationEngine>();
 var chaosEngines = new List<ChaosEngine>();
 
@@ -72,11 +86,10 @@ var serverContext = InterceptorSubjectContext
     .WithRegistry()
     .WithParents()
     .WithLifecycle()
-    .WithDataAnnotationValidation()
     .WithHostedServices(builder.Services);
 
 var serverRoot = TestNode.CreateWithGraph(serverContext);
-participants.Add((configuration.Server.Name, serverRoot));
+participants[configuration.Server.Name] = serverRoot;
 
 var serverMutationEngine = new MutationEngine(
     serverRoot, configuration.Server, coordinator,
@@ -120,14 +133,8 @@ switch (configuration.Connector.ToLowerInvariant())
                 PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
                 DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
                 UseRetainedMessages = true,
-                SourceTimestampSerializer = static ts =>
-                {
-                    Span<byte> buffer = stackalloc byte[20];
-                    System.Buffers.Text.Utf8Formatter.TryFormat(ts.UtcTicks, buffer, out var bytesWritten);
-                    return buffer[..bytesWritten].ToArray();
-                },
-                SourceTimestampDeserializer = static value => System.Buffers.Text.Utf8Parser.TryParse(value.Span, out long ticks, out int _bytesConsumed)
-                    ? new DateTimeOffset(ticks, TimeSpan.Zero) : null
+                SourceTimestampSerializer = SerializeTickTimestamp,
+                SourceTimestampDeserializer = DeserializeTickTimestamp
             });
         break;
 }
@@ -143,12 +150,11 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
         .WithRegistry()
         .WithParents()
         .WithLifecycle()
-        .WithDataAnnotationValidation()
-        .WithSourceTransactions()
+            .WithSourceTransactions()
         .WithHostedServices(builder.Services);
 
     var clientRoot = TestNode.CreateWithGraph(clientContext);
-    participants.Add((clientConfig.Name, clientRoot));
+    participants[clientConfig.Name] = clientRoot;
 
     // Client mutation engine
     var clientMutationEngine = new MutationEngine(
@@ -262,8 +268,8 @@ var startupLogger = host.Services.GetRequiredService<ILogger<VerificationEngine>
 foreach (var chaosEngine in chaosEngines)
 {
     // Find the connector whose root subject matches one of the participants, then cast to IFaultInjectable
-    var participant = participants.FirstOrDefault(p => p.Name == chaosEngine.TargetName);
-    var connector = allConnectors.FirstOrDefault(c => c.RootSubject == participant.Root);
+    participants.TryGetValue(chaosEngine.TargetName, out var participantRoot);
+    var connector = allConnectors.FirstOrDefault(c => c.RootSubject == participantRoot);
     if (connector is IFaultInjectable faultInjectable)
     {
         chaosEngine.SetTarget(faultInjectable);

@@ -8,6 +8,7 @@ namespace Namotion.Interceptor.OpcUa.Tests.Server;
 /// reflection-based workarounds for SDK disposal bugs (Fix 14).
 /// If any of these tests fail after an SDK upgrade, the corresponding
 /// workaround in OpcUaSubjectServer needs to be updated.
+/// TODO: Remove when https://github.com/OPCFoundation/UA-.NETStandard/pull/3560 is released.
 /// </summary>
 public class OpcUaSubjectServerSdkCompatibilityTests
 {

@@ -110,9 +110,7 @@ builder.Services.AddMqttSubjectClient(
 
         // Serialization
         ValueConverter = new JsonMqttValueConverter(),
-        SourceTimestampPropertyName = "ts",
-        SourceTimestampSerializer = ts => ts.ToUnixTimeMilliseconds().ToString(),
-        SourceTimestampDeserializer = s => long.TryParse(s, out var ms) ? DateTimeOffset.FromUnixTimeMilliseconds(ms) : null
+        SourceTimestampPropertyName = "ts"
     });
 ```
 
@@ -146,9 +144,7 @@ builder.Services.AddMqttSubjectServer(
 
         // Serialization
         ValueConverter = new JsonMqttValueConverter(),
-        SourceTimestampPropertyName = "ts",
-        SourceTimestampSerializer = ts => ts.ToUnixTimeMilliseconds().ToString(),
-        SourceTimestampDeserializer = s => long.TryParse(s, out var ms) ? DateTimeOffset.FromUnixTimeMilliseconds(ms) : null
+        SourceTimestampPropertyName = "ts"
     });
 ```
 

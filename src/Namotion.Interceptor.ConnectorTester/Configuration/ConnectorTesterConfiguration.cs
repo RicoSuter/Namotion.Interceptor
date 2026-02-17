@@ -7,7 +7,7 @@ public class ConnectorTesterConfiguration
 
     public bool EnableStructuralMutations { get; set; } = false;
 
-    public TimeSpan MutatePhaseDuration { get; set; } = TimeSpan.FromMinutes(5);
+    public TimeSpan MutatePhaseDuration { get; set; } = TimeSpan.FromMinutes(1);
     public TimeSpan ConvergenceTimeout { get; set; } = TimeSpan.FromMinutes(1);
 
     public ParticipantConfiguration Server { get; set; } = new()

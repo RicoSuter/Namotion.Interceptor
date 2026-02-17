@@ -24,7 +24,6 @@ var context = InterceptorSubjectContext
     .Create()
     .WithFullPropertyTracking()
     .WithRegistry()
-    .WithParents()
     .WithDataAnnotationValidation();
 
 // Create and register your subject
@@ -43,9 +42,9 @@ app.Run();
 **Required context extensions:**
 - `WithFullPropertyTracking()` - Enables property change detection
 - `WithRegistry()` - Enables object graph navigation and dynamic properties in JSON output
-- `WithParents()` - Required for `GetJsonPath()` to work correctly
 
 **Optional extensions:**
+- `WithParents()` - Required if using `GetJsonPath()` for JSON path resolution from child to root
 - `WithDataAnnotationValidation()` - Enables validation via data annotations
 - `WithLifecycle()` - Enables attach/detach callbacks
 - `WithHostedServices(builder.Services)` - Registers subjects implementing `BackgroundService`
@@ -175,17 +174,6 @@ var json = subject.ToJsonObject(jsonSerializerOptions);
 ```
 
 Requires `WithRegistry()` for dynamic properties to be included.
-
-#### GetJsonPath
-
-Gets the JSON path for a property reference:
-
-```csharp
-var path = propertyReference.GetJsonPath(jsonSerializerOptions);
-// Returns: "name" or "tires[0].pressure"
-```
-
-Requires `WithParents()` to be configured on the context.
 
 #### FindPropertyFromJsonPath
 
