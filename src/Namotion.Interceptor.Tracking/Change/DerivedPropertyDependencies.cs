@@ -117,12 +117,12 @@ public sealed class DerivedPropertyDependencies
     /// <returns>True if replaced successfully; false if version changed (concurrent modification detected).</returns>
     internal bool TryReplace(ReadOnlySpan<PropertyReference> newItems, long expectedVersion)
     {
-        // Capture current array for CAS comparison
-        var snapshot = Volatile.Read(ref _items);
-
         // Fast path: Fail if version already changed (avoids array allocation)
         if (Volatile.Read(ref _version) != expectedVersion)
             return false;
+
+        // Capture current array for CAS comparison
+        var snapshot = Volatile.Read(ref _items);
 
         // Allocate new array
         var newArr = newItems.Length == 0 ? [] : newItems.ToArray();
