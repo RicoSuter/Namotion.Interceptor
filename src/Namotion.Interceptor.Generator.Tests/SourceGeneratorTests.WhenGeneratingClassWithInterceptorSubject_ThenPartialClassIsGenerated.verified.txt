@@ -56,25 +56,24 @@ namespace YourDefaultNamespace
             new Dictionary<string, SubjectPropertyMetadata>
             {
                 {
-                    "Value",       
+                    "Value",
                     new SubjectPropertyMetadata(
-                        typeof(SampleSubject).GetProperty(nameof(Value), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
-                        (o) => ((SampleSubject)o).Value, 
-                        (o, v) => ((SampleSubject)o).Value = (int)v, 
+                        typeof(SampleSubject).GetProperty(nameof(Value), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((SampleSubject)o).Value,
+                        (o, v) => ((SampleSubject)o).Value = (int)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
                 {
-                    "Name",       
+                    "Name",
                     new SubjectPropertyMetadata(
-                        typeof(SampleSubject).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
-                        (o) => ((SampleSubject)o).Name, 
-                        (o, v) => ((SampleSubject)o).Name = (string)v, 
+                        typeof(SampleSubject).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((SampleSubject)o).Name,
+                        (o, v) => ((SampleSubject)o).Name = (string)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
             }
-            
             .ToFrozenDictionary();
 
         public SampleSubject()
@@ -90,11 +89,11 @@ namespace YourDefaultNamespace
 
         public partial int Value
         {
-             get
+            get
             {
                 return GetPropertyValue<int>(nameof(Value), static (o) => ((SampleSubject)o)._Value);
             }
-             set
+            set
             {
                 var newValue = value;
                 var cancel = false;
@@ -115,11 +114,11 @@ namespace YourDefaultNamespace
 
         public partial string Name
         {
-             get
+            get
             {
                 return GetPropertyValue<string>(nameof(Name), static (o) => ((SampleSubject)o)._Name);
             }
-             set
+            set
             {
                 var newValue = value;
                 var cancel = false;

@@ -21,7 +21,7 @@ using System.Text.Json.Serialization;
 
 namespace YourDefaultNamespace
 {
-    public partial class SampleSubject : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+    public partial class TemperatureSensor : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
     {
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -56,93 +56,59 @@ namespace YourDefaultNamespace
             new Dictionary<string, SubjectPropertyMetadata>
             {
                 {
-                    "Value",
+                    "Celsius",
                     new SubjectPropertyMetadata(
-                        typeof(SampleSubject).GetProperty(nameof(Value), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((SampleSubject)o).Value,
-                        (o, v) => ((SampleSubject)o).Value = (int)v,
+                        typeof(TemperatureSensor).GetProperty(nameof(Celsius), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((TemperatureSensor)o).Celsius,
+                        (o, v) => ((TemperatureSensor)o).Celsius = (double)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
                 {
-                    "Name",
+                    "Fahrenheit",
                     new SubjectPropertyMetadata(
-                        typeof(SampleSubject).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((SampleSubject)o).Name,
-                        (o, v) => ((SampleSubject)o).Name = (string)v,
-                        isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "Hidden",
-                    new SubjectPropertyMetadata(
-                        typeof(SampleSubject).GetProperty(nameof(Hidden), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((SampleSubject)o).Hidden,
-                        (o, v) => ((SampleSubject)o).Hidden = (string)v,
+                        typeof(global::ITemperatureSensor).GetProperty(nameof(global::ITemperatureSensor.Fahrenheit), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((global::ITemperatureSensor)o).Fahrenheit,
+                        null,
                         isIntercepted: false,
                         isDynamic: false)
                 },
             }
             .ToFrozenDictionary();
 
-        public SampleSubject()
+        public TemperatureSensor()
         {
         }
 
-        public SampleSubject(IInterceptorSubjectContext context) : this()
+        public TemperatureSensor(IInterceptorSubjectContext context) : this()
         {
             ((IInterceptorSubject)this).Context.AddFallbackContext(context);
         }
 
-        private int _Value;
+        private double _Celsius;
 
-        public partial int Value
+        public partial double Celsius
         {
             get
             {
-                return GetPropertyValue<int>(nameof(Value), static (o) => ((SampleSubject)o)._Value);
+                return GetPropertyValue<double>(nameof(Celsius), static (o) => ((TemperatureSensor)o)._Celsius);
             }
             set
             {
                 var newValue = value;
                 var cancel = false;
-                OnValueChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Value), newValue, static (o) => ((SampleSubject)o)._Value, static (o, v) => ((SampleSubject)o)._Value = v))
+                OnCelsiusChanging(ref newValue, ref cancel);
+                if (!cancel && SetPropertyValue(nameof(Celsius), newValue, static (o) => ((TemperatureSensor)o)._Celsius, static (o, v) => ((TemperatureSensor)o)._Celsius = v))
                 {
-                    OnValueChanged(_Value);
-                    RaisePropertyChanged(nameof(Value));
+                    OnCelsiusChanged(_Celsius);
+                    RaisePropertyChanged(nameof(Celsius));
                 }
             }
         }
 
-        partial void OnValueChanging(ref int newValue, ref bool cancel);
+        partial void OnCelsiusChanging(ref double newValue, ref bool cancel);
 
-        partial void OnValueChanged(int newValue);
-
-        private string _Name;
-
-        public partial string Name
-        {
-            get
-            {
-                return GetPropertyValue<string>(nameof(Name), static (o) => ((SampleSubject)o)._Name);
-            }
-            set
-            {
-                var newValue = value;
-                var cancel = false;
-                OnNameChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Name), newValue, static (o) => ((SampleSubject)o)._Name, static (o, v) => ((SampleSubject)o)._Name = v))
-                {
-                    OnNameChanged(_Name);
-                    RaisePropertyChanged(nameof(Name));
-                }
-            }
-        }
-
-        partial void OnNameChanging(ref string newValue, ref bool cancel);
-
-        partial void OnNameChanged(string newValue);
+        partial void OnCelsiusChanged(double newValue);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)

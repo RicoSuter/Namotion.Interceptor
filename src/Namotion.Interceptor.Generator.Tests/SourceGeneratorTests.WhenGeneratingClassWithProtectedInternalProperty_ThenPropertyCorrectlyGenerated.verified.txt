@@ -56,30 +56,12 @@ namespace YourDefaultNamespace
             new Dictionary<string, SubjectPropertyMetadata>
             {
                 {
-                    "Value",
-                    new SubjectPropertyMetadata(
-                        typeof(SampleSubject).GetProperty(nameof(Value), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((SampleSubject)o).Value,
-                        (o, v) => ((SampleSubject)o).Value = (int)v,
-                        isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
                     "Name",
                     new SubjectPropertyMetadata(
                         typeof(SampleSubject).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
                         (o) => ((SampleSubject)o).Name,
                         (o, v) => ((SampleSubject)o).Name = (string)v,
                         isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "Hidden",
-                    new SubjectPropertyMetadata(
-                        typeof(SampleSubject).GetProperty(nameof(Hidden), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((SampleSubject)o).Hidden,
-                        (o, v) => ((SampleSubject)o).Hidden = (string)v,
-                        isIntercepted: false,
                         isDynamic: false)
                 },
             }
@@ -94,34 +76,9 @@ namespace YourDefaultNamespace
             ((IInterceptorSubject)this).Context.AddFallbackContext(context);
         }
 
-        private int _Value;
-
-        public partial int Value
-        {
-            get
-            {
-                return GetPropertyValue<int>(nameof(Value), static (o) => ((SampleSubject)o)._Value);
-            }
-            set
-            {
-                var newValue = value;
-                var cancel = false;
-                OnValueChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Value), newValue, static (o) => ((SampleSubject)o)._Value, static (o, v) => ((SampleSubject)o)._Value = v))
-                {
-                    OnValueChanged(_Value);
-                    RaisePropertyChanged(nameof(Value));
-                }
-            }
-        }
-
-        partial void OnValueChanging(ref int newValue, ref bool cancel);
-
-        partial void OnValueChanged(int newValue);
-
         private string _Name;
 
-        public partial string Name
+        protected internal partial string Name
         {
             get
             {

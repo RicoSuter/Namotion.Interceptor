@@ -7,9 +7,10 @@ namespace Namotion.Interceptor.Tracking.Transactions;
 
 /// <summary>
 /// Interceptor that captures property changes during transactions.
-/// Must run before PropertyChangeObservable/Queue to suppress notifications during capture.
+/// Must run before all downstream interceptors to suppress side effects during capture.
 /// Also manages the per-context transaction lock for serialized transactions.
 /// </summary>
+[RunsBefore(typeof(DerivedPropertyChangeHandler))]
 [RunsBefore(typeof(PropertyChangeObservable))]
 [RunsBefore(typeof(PropertyChangeQueue))]
 public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInterceptor
@@ -38,10 +39,9 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
 
         var transaction = SubjectTransaction.Current;
         if (transaction is { IsCommitting: false } &&
-            transaction.PendingChanges.TryGetValue(context.Property, out var change))
+            transaction.TryGetPendingValue<TProperty>(context.Property, out var pendingValue))
         {
-            // Return pending value if transaction active and not committing
-            return change.GetNewValue<TProperty>();
+            return pendingValue;
         }
 
         return next(ref context);
@@ -59,8 +59,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
         }
 
         var transaction = SubjectTransaction.Current;
-        if (transaction is { IsCommitting: false } &&
-            !context.Property.Metadata.IsDerived)
+        if (transaction is { IsCommitting: false } && !context.Property.Metadata.IsDerived)
         {
             // Validate context binding
             var subjectInterceptor = context.Property.Subject.Context.TryGetService<SubjectTransactionInterceptor>();
@@ -72,34 +71,18 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
 
             var currentContext = SubjectChangeContext.Current;
 
-            var isFirstWrite = !transaction.PendingChanges.TryGetValue(context.Property, out var existingChange);
-            if (isFirstWrite)
-            {
-                // Preserve the original old value for first write (used for conflict detection at commit)
-                transaction.PendingChanges[context.Property] = SubjectPropertyChange.Create(
-                    context.Property,
-                    source: currentContext.Source,
-                    changedTimestamp: currentContext.ChangedTimestamp,
-                    receivedTimestamp: currentContext.ReceivedTimestamp,
-                    context.CurrentValue,
-                    context.NewValue);
-            }
-            else
-            {
-                // Last write wins, but preserve original old value
-                transaction.PendingChanges[context.Property] = SubjectPropertyChange.Create(
-                    context.Property,
-                    source: currentContext.Source,
-                    changedTimestamp: currentContext.ChangedTimestamp,
-                    receivedTimestamp: currentContext.ReceivedTimestamp,
-                    existingChange.GetOldValue<TProperty>(),
-                    context.NewValue);
-            }
+            transaction.CaptureChange(
+                context.Property,
+                currentContext.Source,
+                currentContext.ChangedTimestamp,
+                currentContext.ReceivedTimestamp,
+                context.CurrentValue,
+                context.NewValue);
 
-            return; // Do NOT call next(): Interceptor chain stops here
+            return; // Captured, interceptor chain stops here
         }
 
-        next(ref context); // No transaction or committing: Normal flow
+        next(ref context); // No transaction, derived, or committing: Normal flow
     }
 
     private sealed class LockReleaser(SemaphoreSlim semaphore) : IDisposable

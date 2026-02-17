@@ -32,6 +32,7 @@
         <ProjectReference Include="..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" />
         <ProjectReference Include="..\Namotion.Interceptor\Namotion.Interceptor.csproj" />
         <ProjectReference Include="..\Namotion.Interceptor.Tracking\Namotion.Interceptor.Tracking.csproj" />
+        <ProjectReference Include="..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
     </ItemGroup>
 
 </Project>
