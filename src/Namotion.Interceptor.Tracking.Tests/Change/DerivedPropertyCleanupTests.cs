@@ -39,8 +39,10 @@ public class DerivedPropertyCleanupTests
     }
 
     [Fact]
-    public void WhenSourcePropertyIsDetached_ThenItIsRemovedFromDerivedPropertiesRequiredProperties()
+    public void WhenSourcePropertyIsDetachedStandalone_ThenItIsRemovedFromDerivedPropertiesRequiredProperties()
     {
+        // Standalone detach (not inside WriteProperty) uses immediate Remove() for Case 2.
+
         // Arrange
         var context = InterceptorSubjectContext
             .Create()
@@ -59,11 +61,45 @@ public class DerivedPropertyCleanupTests
         // FullName depends on FirstName
         Assert.Contains(firstNameProp, fullNameProp.GetRequiredProperties().Items.ToArray());
 
-        // Act - Detach the FirstName property (simulating partial cleanup)
+        // Act - Standalone detach (not inside a WriteProperty call)
         person.DetachSubjectProperty(firstNameProp);
 
-        // Assert - FirstName should be removed from FullName's RequiredProperties
+        // Assert - FirstName should be immediately removed from FullName's RequiredProperties
         Assert.DoesNotContain(firstNameProp, fullNameProp.GetRequiredProperties().Items.ToArray());
+    }
+
+    [Fact]
+    public void WhenCrossSubjectSourceIsReplaced_ThenRequiredPropertiesIsCleanedViaRecalculation()
+    {
+        // Write-triggered detach defers Case 2 removals. After recalculation (TryReplace),
+        // the deferred Remove() calls find nothing and exit cleanly (no allocation).
+
+        // Arrange - Car.AveragePressure depends on each tire's Pressure
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithDerivedPropertyChangeDetection()
+            .WithLifecycle()
+            .WithContextInheritance();
+
+        var car = new Car(context);
+        var oldTire = car.Tires[0];
+
+        var averagePressureProp = new PropertyReference(car, nameof(Car.AveragePressure));
+        var oldTirePressureProp = new PropertyReference(oldTire, nameof(Tire.Pressure));
+
+        // AveragePressure depends on old tire's Pressure
+        Assert.Contains(oldTirePressureProp, averagePressureProp.GetRequiredProperties().Items.ToArray());
+
+        // Act - Replace tires: deferred Case 2 + recalculation + flush
+        var newTires = new[] { new Tire(context), car.Tires[1], car.Tires[2], car.Tires[3] };
+        car.Tires = newTires;
+
+        // Assert - Old tire's Pressure is no longer in RequiredProperties
+        Assert.DoesNotContain(oldTirePressureProp, averagePressureProp.GetRequiredProperties().Items.ToArray());
+
+        // New tire's Pressure should now be tracked
+        var newTirePressureProp = new PropertyReference(newTires[0], nameof(Tire.Pressure));
+        Assert.Contains(newTirePressureProp, averagePressureProp.GetRequiredProperties().Items.ToArray());
     }
 
     [Fact]

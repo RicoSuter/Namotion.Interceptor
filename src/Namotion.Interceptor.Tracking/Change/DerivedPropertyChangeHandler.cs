@@ -27,6 +27,19 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     [ThreadStatic]
     private static object? _threadLocalOldValue;
 
+    // Deferred Case 2 removal buffer: During write-triggered detach, Case 2 removals
+    // (removing detached source from derived properties' RequiredProperties) are buffered
+    // here instead of executing immediately. After recalculation, the buffer is flushed.
+    // For targets that were recalculated, TryReplace already replaced RequiredProperties,
+    // so Remove() finds nothing (no allocation). For targets not recalculated, Remove()
+    // performs the normal CAS cleanup. This turns N costly CAS+allocation operations into
+    // N cheap "not found" lookups in the common case.
+    [ThreadStatic]
+    private static int _writePropertyDepth;
+
+    [ThreadStatic]
+    private static List<(DerivedPropertyDependencies target, PropertyReference source)>? _pendingRemovals;
+
     private static readonly Func<IInterceptorSubject, object?> GetOldValueDelegate = static _ => _threadLocalOldValue;
     private static readonly Action<IInterceptorSubject, object?> NoOpWriteDelegate = static (_, _) => { };
 
@@ -36,13 +49,16 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         var metadata = change.Property.Metadata;
         if (metadata.IsDerived)
         {
+            // Get consolidated data once for LastKnownValue + StoreRecordedTouchedProperties
+            var data = change.Property.GetDerivedPropertyData();
+
             StartRecordingTouchedProperties();
 
             var result = metadata.GetValue?.Invoke(change.Subject);
-            change.Property.SetLastKnownValue(result);
+            data.LastKnownValue = result;
             change.Property.SetWriteTimestampUtcTicks(SubjectChangeContext.Current.ChangedTimestampUtcTicks);
-            
-            StoreRecordedTouchedProperties(change.Property);
+
+            StoreRecordedTouchedProperties(change.Property, data);
         }
     }
 
@@ -51,37 +67,60 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         var property = change.Property;
 
+        // Single lookup for consolidated data (covers both Case 1 and Case 2)
+        var data = property.TryGetDerivedPropertyData();
+        if (data is null)
+        {
+            return;
+        }
+
         // Case 1: This is a derived property being detached.
         // Remove it from all its dependencies' UsedByProperties to break backward refs.
         if (property.Metadata.IsDerived)
         {
-            var requiredProperties = property.TryGetRequiredProperties();
+            var requiredProperties = data.RequiredProperties;
             if (requiredProperties is not null)
             {
                 foreach (ref readonly var dependency in requiredProperties.Items)
                 {
                     // Use TryGet to avoid allocating on dependencies that have no UsedByProperties
-                    dependency.TryGetUsedByProperties()?.Remove(property);
+                    dependency.TryGetDerivedPropertyData()?.UsedByProperties?.Remove(property);
                 }
             }
         }
 
         // Case 2: This property (source or derived) might be used by derived properties on OTHER subjects.
         // Remove this property from those derived properties' RequiredProperties to prevent memory leaks.
-        //
-        // Performance note: We intentionally DON'T clear this property's UsedByProperties for two reasons:
-        // 1. Detached subjects have their context/fallback removed, so recalculation won't affect the live graph
-        // 2. The stale entries will be GC'd along with the detached subject - no memory leak
-        // This avoids the overhead of iterating and removing from potentially many derived properties.
-        var usedByProperties = property.TryGetUsedByProperties();
+        var usedByProperties = data.UsedByProperties;
         if (usedByProperties is null || usedByProperties.Count == 0)
         {
-            return; // No dependencies to clean up - fast path, no allocation
+            return;
         }
 
-        foreach (ref readonly var derivedProperty in usedByProperties.Items)
+        if (_writePropertyDepth > 0)
         {
-            derivedProperty.TryGetRequiredProperties()?.Remove(property);
+            // Inside WriteProperty: defer removals. After recalculation, TryReplace will have
+            // already replaced RequiredProperties for recalculated targets, so the deferred
+            // Remove() calls will find nothing and return immediately (no CAS, no allocation).
+            // For non-recalculated targets, Remove() performs normal cleanup.
+            _pendingRemovals ??= new(4);
+            foreach (ref readonly var derivedProperty in usedByProperties.Items)
+            {
+                var derivedData = derivedProperty.TryGetDerivedPropertyData();
+                var requiredProperties = derivedData?.RequiredProperties;
+                if (requiredProperties is not null)
+                {
+                    _pendingRemovals.Add((requiredProperties, property));
+                }
+            }
+        }
+        else
+        {
+            // Standalone detach (not inside WriteProperty): immediate cleanup.
+            foreach (ref readonly var derivedProperty in usedByProperties.Items)
+            {
+                derivedProperty.TryGetDerivedPropertyData()?.RequiredProperties?.Remove(property);
+            }
         }
     }
 
@@ -102,7 +141,15 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        next(ref context);
+        _writePropertyDepth++;
+        try
+        {
+            next(ref context);
+        }
+        finally
+        {
+            _writePropertyDepth--;
+        }
 
         // If this property is itself a derived property with a setter, recalculate it.
         // This handles the case where SetValue is called directly on a derived property -
@@ -118,11 +165,12 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             RecalculateDerivedProperty(ref property, currentTimestampUtcTicks);
         }
 
-        // Check this first as it's more likely to early-exit than transaction check
-        // Use TryGet to avoid allocating DerivedPropertyDependencies for properties with no dependents
-        var usedByProperties = context.Property.TryGetUsedByProperties();
+        // Single lookup for consolidated data (short key "ni.dpd")
+        // Use TryGet to avoid allocating DerivedPropertyData for properties with no dependents
+        var usedByProperties = context.Property.TryGetDerivedPropertyData()?.UsedByProperties;
         if (usedByProperties is null || usedByProperties.Count == 0)
         {
+            FlushPendingRemovals();
             return;
         }
 
@@ -136,6 +184,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         if (SubjectTransaction.HasActiveTransaction &&
             SubjectTransaction.Current is { IsCommitting: false })
         {
+            FlushPendingRemovals();
             return;
         }
 
@@ -150,6 +199,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
             RecalculateDerivedProperty(ref dependent, timestampUtcTicks);
         }
+
+        FlushPendingRemovals();
     }
 
     /// <summary>
@@ -160,12 +211,15 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
 
-        var oldValue = derivedProperty.GetLastKnownValue();
+        // Get consolidated data once: provides LastKnownValue + RequiredProperties
+        var data = derivedProperty.GetDerivedPropertyData();
+        var oldValue = data.LastKnownValue;
+
         StartRecordingTouchedProperties();
         var newValue = derivedProperty.Metadata.GetValue?.Invoke(derivedProperty.Subject);
-        StoreRecordedTouchedProperties(derivedProperty);
+        StoreRecordedTouchedProperties(derivedProperty, data);
 
-        derivedProperty.SetLastKnownValue(newValue);
+        data.LastKnownValue = newValue;
         derivedProperty.SetWriteTimestampUtcTicks(timestampUtcTicks);
 
         // Fire change notification (null source indicates derived property change)
@@ -185,6 +239,28 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     }
 
     /// <summary>
+    /// Flushes deferred Case 2 removals. For targets where TryReplace already replaced
+    /// RequiredProperties (recalculated derived properties), Remove() returns false immediately
+    /// with no allocation. Only non-recalculated targets pay the CAS cost.
+    /// </summary>
+    private static void FlushPendingRemovals()
+    {
+        var pendingRemovals = _pendingRemovals;
+        if (pendingRemovals is null || pendingRemovals.Count == 0 || _writePropertyDepth > 0)
+        {
+            return;
+        }
+
+        for (var i = 0; i < pendingRemovals.Count; i++)
+        {
+            var (target, source) = pendingRemovals[i];
+            target.Remove(source);
+        }
+
+        pendingRemovals.Clear();
+    }
+
+    /// <summary>
     /// Starts recording property accesses for dependency tracking.
     /// </summary>
     private static void StartRecordingTouchedProperties()
@@ -195,16 +271,17 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
     /// <summary>
     /// Updates forward (required) and backward (usedBy) dependencies using optimistic concurrency control.
+    /// Accepts pre-fetched DerivedPropertyData to avoid redundant dictionary lookup.
     /// Strategy:
     /// - Sequential writes: Replace dependencies (exact tracking, removes stale)
     /// - Concurrent writes: Merge dependencies (conservative, keeps all discovered)
     /// - No change: Early exit (allocation-free)
     /// Use version to prevent ABA problem where two threads think they have exclusive access.
     /// </summary>
-    private static void StoreRecordedTouchedProperties(PropertyReference derivedProperty)
+    private static void StoreRecordedTouchedProperties(PropertyReference derivedProperty, DerivedPropertyData data)
     {
         var recordedDependencies = _recorder!.FinishRecording();
-        var requiredProps = derivedProperty.GetRequiredProperties();
+        var requiredProps = data.GetOrCreateRequiredProperties();
 
         // Read version twice to detect concurrent modifications (allocation-free double-check)
         var version1 = requiredProps.Version;
