@@ -104,7 +104,7 @@ public abstract class TransactionTestBase
     /// </summary>
     protected static void AssertTransactionSucceeded(SubjectTransaction transaction)
     {
-        Assert.Empty(transaction.PendingChanges);
+        Assert.Empty(transaction.GetPendingChanges());
     }
 
     /// <summary>

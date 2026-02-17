@@ -67,4 +67,23 @@ public class MqttServerConfigurationTests
         Assert.Equal(25000, config.MaxPendingMessagesPerClient);
         Assert.NotNull(config.ValueConverter);
     }
+
+    [Fact]
+    public void DefaultTimestampSerializerAndDeserializer_Roundtrip()
+    {
+        // Arrange
+        var config = new MqttServerConfiguration
+        {
+            PathProvider = CreateTestPathProvider()
+        };
+        var timestamp = DateTimeOffset.UtcNow;
+
+        // Act
+        var serialized = config.SourceTimestampSerializer(timestamp);
+        var deserialized = config.SourceTimestampDeserializer(serialized);
+
+        // Assert
+        Assert.NotNull(deserialized);
+        Assert.Equal(timestamp.ToUnixTimeMilliseconds(), deserialized!.Value.ToUnixTimeMilliseconds());
+    }
 }

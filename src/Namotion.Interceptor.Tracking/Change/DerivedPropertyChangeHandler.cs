@@ -40,7 +40,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
             var result = metadata.GetValue?.Invoke(change.Subject);
             change.Property.SetLastKnownValue(result);
-            change.Property.SetWriteTimestamp(SubjectChangeContext.Current.ChangedTimestamp);
+            change.Property.SetWriteTimestampUtcTicks(SubjectChangeContext.Current.ChangedTimestampUtcTicks);
             
             StoreRecordedTouchedProperties(change.Property);
         }
@@ -80,9 +80,9 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         var metadata = context.Property.Metadata;
         if (metadata is { IsDerived: true, SetValue: not null })
         {
-            var currentTimestamp = SubjectChangeContext.Current.ChangedTimestamp;
+            var currentTimestampUtcTicks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
             var property = context.Property;
-            RecalculateDerivedProperty(ref property, ref currentTimestamp);
+            RecalculateDerivedProperty(ref property, currentTimestampUtcTicks);
         }
 
         // Check this first as it's more likely to early-exit than transaction check
@@ -92,14 +92,18 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return;
         }
 
-        // Skip derived property recalculation during transaction capture
+        // Skip dependent recalculation during transaction capture.
+        // The [RunsBefore] ordering (Transaction before Derived) prevents non-derived writes
+        // from reaching here during capture. However, derived-with-setter properties bypass
+        // the transaction interceptor (IsDerived check), so this guard is still needed to
+        // suppress cascading recalculations until commit replay.
         if (SubjectTransaction.HasActiveTransaction &&
             SubjectTransaction.Current is { IsCommitting: false })
         {
             return;
         }
 
-        var timestamp = SubjectChangeContext.Current.ChangedTimestamp;
+        var timestampUtcTicks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
         for (var i = 0; i < usedByProperties.Length; i++)
         {
             var dependent = usedByProperties[i];
@@ -108,7 +112,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 continue; // Skip self-references (rare edge case)
             }
 
-            RecalculateDerivedProperty(ref dependent, ref timestamp);
+            RecalculateDerivedProperty(ref dependent, timestampUtcTicks);
         }
     }
 
@@ -116,7 +120,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// Recalculates a derived property when one of its dependencies changes.
     /// Records new dependencies during evaluation and updates dependency graph.
     /// </summary>
-    private static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, ref DateTimeOffset timestamp)
+    private static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long timestampUtcTicks)
     {
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
 
@@ -126,7 +130,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         StoreRecordedTouchedProperties(derivedProperty);
 
         derivedProperty.SetLastKnownValue(newValue);
-        derivedProperty.SetWriteTimestamp(timestamp);
+        derivedProperty.SetWriteTimestampUtcTicks(timestampUtcTicks);
 
         // Fire change notification (null source indicates derived property change)
         // Use thread-local storage + static delegates to avoid closure allocation

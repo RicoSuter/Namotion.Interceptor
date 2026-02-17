@@ -413,4 +413,137 @@ public class SubjectTransactionAsyncTests
         Assert.Equal("Original", changes[0].GetOldValue<string>());
         Assert.Equal("Second", changes[0].GetNewValue<string>());
     }
+
+    [Fact]
+    public async Task CommitAsync_AfterConflictFailure_CanRetrySuccessfully()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithTransactions()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+        person.FirstName = "Original";
+
+        using var tx = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort,
+            conflictBehavior: TransactionConflictBehavior.FailOnConflict);
+
+        person.FirstName = "TransactionValue";
+
+        // Simulate external change to cause conflict
+        Task externalTask;
+        var asyncFlowControl = ExecutionContext.SuppressFlow();
+        try
+        {
+            externalTask = Task.Run(() => person.FirstName = "ExternalChange");
+        }
+        finally
+        {
+            asyncFlowControl.Undo();
+        }
+        await externalTask;
+
+        // Act: First commit fails due to conflict
+        await Assert.ThrowsAsync<SubjectTransactionConflictException>(
+            () => tx.CommitAsync(CancellationToken.None));
+
+        // Pending changes are still intact after conflict failure
+        Assert.Single(tx.GetPendingChanges());
+
+        // Update to match current state and retry — old value is still "Original"
+        // but the real field is now "ExternalChange", so we need to resolve the conflict.
+        // Overwrite with a new value using Ignore to skip conflict check on retry.
+        // Since FailOnConflict would detect the same conflict again, we verify retry works
+        // by confirming the pending changes survive and a second commit attempt is allowed.
+        person.FirstName = "ResolvedValue";
+
+        // Simulate resolving the conflict by reverting the external change
+        asyncFlowControl = ExecutionContext.SuppressFlow();
+        try
+        {
+            externalTask = Task.Run(() => person.FirstName = "Original");
+        }
+        finally
+        {
+            asyncFlowControl.Undo();
+        }
+        await externalTask;
+
+        // Retry commit — now current value matches captured OldValue ("Original")
+        await tx.CommitAsync(CancellationToken.None);
+
+        // Assert: The transaction's value was applied
+        Assert.Equal("ResolvedValue", person.FirstName);
+    }
+
+    [Fact]
+    public async Task CommitAsync_AfterConflictFailure_PendingChangesRemainIntact()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithTransactions()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+        person.FirstName = "Original";
+        person.LastName = "Smith";
+
+        using var tx = await context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort,
+            conflictBehavior: TransactionConflictBehavior.FailOnConflict);
+
+        person.FirstName = "NewFirst";
+        person.LastName = "NewLast";
+
+        // Simulate external change on FirstName only
+        Task externalTask;
+        var asyncFlowControl = ExecutionContext.SuppressFlow();
+        try
+        {
+            externalTask = Task.Run(() => person.FirstName = "ExternalFirst");
+        }
+        finally
+        {
+            asyncFlowControl.Undo();
+        }
+        await externalTask;
+
+        // Act: Commit fails due to conflict on FirstName
+        var ex = await Assert.ThrowsAsync<SubjectTransactionConflictException>(
+            () => tx.CommitAsync(CancellationToken.None));
+
+        // Assert: Both pending changes are still intact
+        var pendingChanges = tx.GetPendingChanges();
+        Assert.Equal(2, pendingChanges.Count);
+
+        // Within the transaction, reads still return pending values (transaction is still active)
+        Assert.Equal("NewFirst", person.FirstName);
+        Assert.Equal("NewLast", person.LastName);
+    }
+
+    [Fact]
+    public async Task CommitAsync_AfterAlreadyCommitted_ThrowsInvalidOperation()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithTransactions()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+
+        using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+        person.FirstName = "John";
+        await tx.CommitAsync(CancellationToken.None);
+
+        // Act & Assert: Second commit on already-committed transaction throws
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => tx.CommitAsync(CancellationToken.None));
+    }
 }

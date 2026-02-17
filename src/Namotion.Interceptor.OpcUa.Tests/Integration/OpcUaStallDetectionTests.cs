@@ -93,47 +93,49 @@ public class OpcUaStallDetectionTests
                 message: "Client should detect disconnection");
             logger.Log("Client detected disconnection");
 
-            // Wait for reconnection to start
+            // Wait for reconnection to start — use TotalReconnectionAttempts instead of IsReconnecting
+            // because IsReconnecting is only true for the brief duration of each failed manual
+            // reconnection attempt (~10-50ms when server is down). The 100ms polling interval
+            // can miss it entirely, causing flaky test timeouts on CI.
             await AsyncTestHelpers.WaitUntilAsync(
-                () => client.Diagnostics.IsReconnecting,
+                () => client.Diagnostics.TotalReconnectionAttempts > initialReconnectAttempts,
                 timeout: TimeSpan.FromSeconds(120),
                 message: "Client should start reconnecting");
-            logger.Log("Client started reconnecting");
+            logger.Log($"Client started reconnecting (attempts: {client.Diagnostics.TotalReconnectionAttempts})");
 
-            // Wait for stall detection to trigger (15s with our config + buffer for parallel execution)
-            // Note: Under parallel load, SDK can take 20-30s to start reconnecting, plus 15s stall detection
-            var stallDetectionTimeout = TimeSpan.FromSeconds(90);
+            // Wait for client to demonstrate ongoing recovery behavior.
+            // Two possible paths depending on timing:
+            // 1. SDK keep-alive detects loss first → BeginReconnect → IsReconnecting=true for MaxReconnectDuration
+            //    → stall detection triggers → manual reconnection takes over
+            // 2. Health check detects PublishingStopped first → manual reconnection immediately
+            //    → repeated attempts (server never returns)
+            // Both paths are correct — the key is the client keeps retrying and doesn't get stuck.
+            var recoveryTimeout = TimeSpan.FromSeconds(90);
             var startTime = DateTime.UtcNow;
 
             await AsyncTestHelpers.WaitUntilAsync(
                 () =>
                 {
-                    // Stall detection succeeded if:
-                    // 1. No longer reconnecting (state was reset), OR
-                    // 2. Reconnection attempts increased significantly (manual reconnect triggered)
-                    var notReconnecting = !client.Diagnostics.IsReconnecting;
-                    var attemptsIncreased = client.Diagnostics.TotalReconnectionAttempts > initialReconnectAttempts + 1;
-
-                    if (notReconnecting || attemptsIncreased)
+                    var attempts = client.Diagnostics.TotalReconnectionAttempts;
+                    if (attempts > initialReconnectAttempts + 2)
                     {
-                        logger.Log($"Stall detection triggered: IsReconnecting={client.Diagnostics.IsReconnecting}, " +
-                                   $"Attempts={client.Diagnostics.TotalReconnectionAttempts}");
+                        logger.Log($"Recovery verified: IsReconnecting={client.Diagnostics.IsReconnecting}, " +
+                                   $"Attempts={attempts}");
                         return true;
                     }
                     return false;
                 },
-                timeout: stallDetectionTimeout,
-                message: "Stall detection should trigger and reset reconnection state");
+                timeout: recoveryTimeout,
+                message: "Client should keep retrying reconnection");
 
             var elapsed = DateTime.UtcNow - startTime;
-            logger.Log($"Stall detection completed in {elapsed.TotalSeconds:F1}s");
+            logger.Log($"Recovery behavior confirmed in {elapsed.TotalSeconds:F1}s");
 
-            // Verify stall detection worked within expected timeframe
-            // Under parallel execution, SDK can take 20-30s to start, plus 15s stall detection
+            // Verify recovery happened within expected timeframe
             Assert.True(elapsed < TimeSpan.FromSeconds(85),
-                $"Stall detection should complete within 85s (actual: {elapsed.TotalSeconds:F1}s)");
+                $"Recovery should be confirmed within 85s (actual: {elapsed.TotalSeconds:F1}s)");
 
-            logger.Log("Test passed - stall detection working correctly");
+            logger.Log("Test passed - client correctly handles server-never-returns scenario");
         }
         finally
         {
