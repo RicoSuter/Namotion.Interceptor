@@ -211,7 +211,7 @@ internal sealed class OpcUaNodeFactory
             AccessLevel = AccessLevels.CurrentReadOrWrite,
             UserAccessLevel = AccessLevels.CurrentReadOrWrite,
             StatusCode = StatusCodes.Good,
-            Timestamp = DateTime.UtcNow, // TODO: Is using now correct here?
+            Timestamp = DateTime.UtcNow, // Default; overridden by caller with property write timestamp when available
 
             ReferenceTypeId = referenceType ?? ReferenceTypeIds.HasProperty
         };

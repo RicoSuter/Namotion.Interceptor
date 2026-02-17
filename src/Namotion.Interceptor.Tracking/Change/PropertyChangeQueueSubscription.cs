@@ -48,6 +48,14 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
     {
         while (true)
         {
+            // Check cancellation before dequeuing so that kill/shutdown signals
+            // are observed even when the queue is continuously fed by producers.
+            if (cancellationToken.IsCancellationRequested)
+            {
+                item = default!;
+                return false;
+            }
+
             // Fast path: dequeue if available
             if (_queue.TryDequeue(out item))
             {

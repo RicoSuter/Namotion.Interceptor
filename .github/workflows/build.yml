@@ -30,6 +30,7 @@ jobs:
       homeblaze: ${{ github.event_name != 'pull_request' || steps.filter.outputs.homeblaze == 'true' }}
       opcua: ${{ github.event_name != 'pull_request' || steps.filter.outputs.opcua == 'true' }}
       websocket: ${{ github.event_name != 'pull_request' || steps.filter.outputs.websocket == 'true' }}
+      mqtt: ${{ github.event_name != 'pull_request' || steps.filter.outputs.mqtt == 'true' }}
     steps:
       - uses: actions/checkout@v3
         if: github.event_name == 'pull_request'
@@ -45,6 +46,8 @@ jobs:
               - 'src/HomeBlaze/*OpcUa*/**'
             websocket:
               - 'src/Namotion.Interceptor.WebSocket*/**'
+            mqtt:
+              - 'src/Namotion.Interceptor.Mqtt*/**'
 
   test:
     timeout-minutes: 15
@@ -195,6 +198,39 @@ jobs:
           path: '**/TestResults/**/coverage.cobertura.xml'
           if-no-files-found: warn
 
+  test-mqtt-integration:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.mqtt == 'true'
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build
+        run: dotnet build src/Namotion.Interceptor.slnx --configuration Release
+
+      - name: Run MQTT integration tests
+        run: |
+          dotnet test src/Namotion.Interceptor.Mqtt.Tests `
+            --configuration Release `
+            --no-build `
+            --filter "Category=Integration" `
+            --results-directory ./TestResults `
+            --collect:"XPlat Code Coverage" `
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+
+      - name: Upload MQTT integration test coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-coverage-mqtt-integration
+          path: '**/TestResults/**/coverage.cobertura.xml'
+          if-no-files-found: warn
+
   pack:
     timeout-minutes: 15
     if: github.event_name == 'release'
@@ -244,7 +280,7 @@ jobs:
     timeout-minutes: 15
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
-    needs: [ validate, test, test-homeblaze-integration, test-opcua-integration, test-websocket-integration ]
+    needs: [ validate, test, test-homeblaze-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration ]
     steps:
       - uses: actions/download-artifact@v4
         with:

@@ -41,8 +41,13 @@ public class ChangeQueueProcessor : IDisposable
     // Reusable single-item buffer for the no-buffer (immediate) path
     private readonly SubjectPropertyChange[] _immediateBuffer = new SubjectPropertyChange[1];
 
+    private readonly PropertyChangeQueueSubscription _subscription;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ChangeQueueProcessor"/> class.
+    /// The subscription is created immediately so that changes are captured from this point,
+    /// even before <see cref="ProcessAsync"/> is called. This prevents change loss during
+    /// initialization gaps (e.g., between OPC UA node creation and processing start).
     /// </summary>
     /// <param name="source">Source to ignore (to prevent update loops).</param>
     /// <param name="context">The interceptor subject context.</param>
@@ -64,6 +69,17 @@ public class ChangeQueueProcessor : IDisposable
         _writeHandler = writeHandler;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
+
+        try
+        {
+            _subscription = _context.CreatePropertyChangeQueueSubscription();
+        }
+        catch
+        {
+            ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
+            _flushDedupedBuffer = null!;
+            throw;
+        }
     }
 
     /// <summary>
@@ -73,8 +89,6 @@ public class ChangeQueueProcessor : IDisposable
     /// <returns>The task.</returns>
     public async Task ProcessAsync(CancellationToken cancellationToken)
     {
-        using var subscription = _context.CreatePropertyChangeQueueSubscription();
-
         using var periodicTimer = _bufferTime > TimeSpan.Zero ? new PeriodicTimer(_bufferTime) : null;
         using var linkedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -113,7 +127,7 @@ public class ChangeQueueProcessor : IDisposable
         {
             await Task.Yield();
 
-            while (subscription.TryDequeue(out var change, linkedTokenSource.Token))
+            while (_subscription.TryDequeue(out var change, linkedTokenSource.Token))
             {
                 if (change.Source == _source)
                 {
@@ -263,6 +277,8 @@ public class ChangeQueueProcessor : IDisposable
         {
             return;
         }
+
+        _subscription.Dispose();
 
         // Try to acquire gate once - if flush is in progress, it will handle cleanup when it sees _disposed
         if (Interlocked.CompareExchange(ref _flushGate, 1, 0) == 0)

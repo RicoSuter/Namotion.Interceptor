@@ -22,12 +22,12 @@ public struct PropertyWriteContext<TProperty>
     /// Gets the property to write a value to.
     /// </summary>
     public PropertyReference Property { get; }
- 
+
     /// <summary>
     /// Gets the current property value.
     /// </summary>
     public TProperty CurrentValue { get; }
-    
+
     /// <summary>
     /// Gets the new value to write (might be different than the value returned by calling the
     /// getter after the write, use <see cref="GetFinalValue"/> for that).
@@ -47,13 +47,13 @@ public struct PropertyWriteContext<TProperty>
         NewValue = newValue;
         IsWritten = false;
     }
-    
+
     /// <summary>
     /// Reads the current property value (might be different from <see cref="NewValue"/> if the property is derived).
     /// Must only be used after the 'next()' call in the write interceptor.
     /// </summary>
     /// <returns>The property value.</returns>
-    public TProperty GetFinalValue() => Property.Metadata.IsDerived ? 
-        (TProperty)Property.Metadata.GetValue?.Invoke(Property.Subject)! : 
+    public TProperty GetFinalValue() => Property.Metadata.IsDerived ?
+        (TProperty)Property.Metadata.GetValue?.Invoke(Property.Subject)! :
         NewValue;
 }

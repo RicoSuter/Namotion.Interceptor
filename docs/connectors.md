@@ -121,11 +121,34 @@ When the external system sends new values:
 
 #### Outbound (Subject → External)
 
-When you change a property value in code:
+When you change a property value in code, the **local model is updated immediately** — these are regular C# property setters. The change is then picked up by the change queue and written to the attached source **asynchronously** in the background:
 
-1. Subject property is changed
-2. `WriteChangesAsync()` is called with the change
-3. Source sends update to external system
+1. Property setter writes the new value to the backing field (immediate)
+2. Change notification is enqueued
+3. Background service dequeues the change and calls `WriteChangesAsync()` on the source
+4. Source sends the update to the external system
+
+This means the local model and the external system can be temporarily inconsistent. If the source write fails (network error, validation on the remote system), the local model already has the new value. The write retry queue handles transient failures by buffering and retrying, but the local model is always ahead of the external system.
+
+For **servers**, the pattern is similar: local writes are applied immediately, then eventually pushed to connected clients.
+
+#### Source-First Writes with Transactions
+
+If you need the external source to accept the change *before* updating the local model, use transactions with `WithSourceTransactions()`. This inverts the write order: changes are buffered in memory, written to the external source on commit, and only applied to the local model if the source write succeeds.
+
+```csharp
+var context = InterceptorSubjectContext
+    .Create()
+    .WithFullPropertyTracking()
+    .WithTransactions()
+    .WithSourceTransactions(); // Enables source-first commit
+
+using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+sensor.Temperature = 42.0m; // Buffered, not applied yet
+await tx.CommitAsync(ct);   // Writes to source first, then applies locally
+```
+
+Without `WithSourceTransactions()`, transactions are purely in-memory: changes are buffered and applied atomically to the local model on commit, but no external sources are involved. See [Transactions](tracking-transactions.md) for full details.
 
 ### Initialization Sequence
 
