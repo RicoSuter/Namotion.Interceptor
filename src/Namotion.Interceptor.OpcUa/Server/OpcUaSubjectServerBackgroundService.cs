@@ -265,8 +265,12 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
                     // is empty — so TcpTransportListener.Dispose() never runs, leaving
                     // per-client channel sockets and inactivity timers alive as GC roots
                     // that retain the entire server object graph.
-                    server.DisposeTransportListeners();
-                    server.Dispose();
+                    try { server.DisposeTransportListeners(); }
+                    catch (Exception ex) { _logger.LogDebug(ex, "Error disposing transport listeners."); }
+
+                    try { server.Dispose(); }
+                    catch (Exception ex) { _logger.LogDebug(ex, "Error disposing OPC UA server."); }
+
                     cts.Dispose();
                 }
             }
