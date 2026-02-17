@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Tests;
@@ -13,6 +14,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
+        context.WithPropertyChangeQueue();
 
         var subject = new Person(context);
         var writtenChanges = new List<SubjectPropertyChange>();
@@ -50,6 +52,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
+        context.WithPropertyChangeQueue();
 
         var subject = new Person(context);
         var writtenChanges = new List<SubjectPropertyChange>();
@@ -87,6 +90,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
+        context.WithPropertyChangeQueue();
 
         var subject = new Person(context);
         var writtenChanges = new List<SubjectPropertyChange>();
@@ -128,6 +132,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
+        context.WithPropertyChangeQueue();
 
         var writeHandlerCalled = false;
 
@@ -158,6 +163,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
+        context.WithPropertyChangeQueue();
 
         var processor = new ChangeQueueProcessor(
             source: null,
@@ -178,6 +184,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
+        context.WithPropertyChangeQueue();
 
         var subject = new Person(context);
         var flushCount = 0;

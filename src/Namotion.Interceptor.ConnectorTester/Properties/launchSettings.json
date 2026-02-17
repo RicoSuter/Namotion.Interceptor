@@ -1,0 +1,16 @@
+{
+  "profiles": {
+    "opcua": {
+      "commandName": "Project",
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "opcua" }
+    },
+    "mqtt": {
+      "commandName": "Project",
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "mqtt" }
+    },
+    "websocket": {
+      "commandName": "Project",
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "websocket" }
+    }
+  }
+}
