@@ -28,8 +28,9 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
     private ArrayBufferWriter<byte> _sendBuffer = new(4096);
     private readonly long _maxMessageSize;
     private readonly TimeSpan _helloTimeout;
-    private readonly Queue<byte[]> _pendingUpdates = new();
+    private readonly Queue<(byte[] Message, long Sequence)> _pendingUpdates = new();
     private volatile bool _welcomeSent;
+    private long _welcomeSequence;
 
     private int _disposed;
     private int _consecutiveSendFailures;
@@ -115,11 +116,19 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
 
             MaybeShrinkSendBuffer();
 
-            // Mark welcome as sent and flush any queued pre-serialized updates
+            // Mark welcome as sent and flush any queued pre-serialized updates.
+            // Only send updates with sequence > welcomeSequence, since the Welcome
+            // snapshot already includes all changes up through welcomeSequence.
+            // Store welcomeSequence so SendUpdateAsync can also filter late-arriving
+            // broadcasts whose sequence was already included in the snapshot.
+            _welcomeSequence = sequence;
             _welcomeSent = true;
             while (_pendingUpdates.TryDequeue(out var pending))
             {
-                await _webSocket.SendAsync(pending, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+                if (pending.Sequence > sequence)
+                {
+                    await _webSocket.SendAsync(pending.Message, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+                }
             }
         }
         finally
@@ -128,7 +137,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         }
     }
 
-    public async Task SendUpdateAsync(ReadOnlyMemory<byte> serializedMessage, CancellationToken cancellationToken)
+    public async Task SendUpdateAsync(ReadOnlyMemory<byte> serializedMessage, long sequence, CancellationToken cancellationToken)
     {
         // Acquire lock BEFORE checking _welcomeSent to prevent TOCTOU race with SendWelcomeAsync.
         // Without this, an update could be enqueued after SendWelcomeAsync has already drained the queue.
@@ -157,11 +166,17 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
                     return; // drop message; zombie detection will clean up
                 }
 
-                _pendingUpdates.Enqueue(serializedMessage.ToArray());
+                _pendingUpdates.Enqueue((serializedMessage.ToArray(), sequence));
                 return;
             }
 
             if (!IsConnected) return;
+
+            // Skip updates whose sequence was already included in the Welcome snapshot.
+            // This handles the race where BroadcastUpdateAsync increments _sequence,
+            // then HandleClientAsync reads that sequence into the Welcome snapshot,
+            // and then the broadcast sends the update to this now-welcomed connection.
+            if (sequence <= Volatile.Read(ref _welcomeSequence)) return;
 
             await _webSocket.SendAsync(serializedMessage, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
             Interlocked.Exchange(ref _consecutiveSendFailures, 0);

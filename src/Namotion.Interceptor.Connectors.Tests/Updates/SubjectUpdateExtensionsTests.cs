@@ -268,8 +268,8 @@ public partial class SubjectUpdateExtensionsTests
             Name = "Root",
             Lookup = new Dictionary<string, CycleTestNode>
             {
-                ["key1"] = new CycleTestNode(context) { Name = "Item1" },
-                ["key2"] = new CycleTestNode(context) { Name = "Item2" }
+                ["key1"] = new(context) { Name = "Item1" },
+                ["key2"] = new(context) { Name = "Item2" }
             }
         };
         var target = new CycleTestNode(context);
@@ -301,7 +301,7 @@ public partial class SubjectUpdateExtensionsTests
             Name = "Root",
             Lookup = new Dictionary<string, CycleTestNode>
             {
-                ["existing"] = new CycleTestNode(context) { Name = "Existing" }
+                ["existing"] = new(context) { Name = "Existing" }
             }
         };
 
@@ -313,7 +313,7 @@ public partial class SubjectUpdateExtensionsTests
             source.Lookup = new Dictionary<string, CycleTestNode>
             {
                 ["existing"] = existingItem,
-                ["newKey"] = new CycleTestNode(context) { Name = "NewItem" }
+                ["newKey"] = new(context) { Name = "NewItem" }
             };
         }
 
@@ -344,8 +344,8 @@ public partial class SubjectUpdateExtensionsTests
             Name = "Root",
             Lookup = new Dictionary<string, CycleTestNode>
             {
-                ["key1"] = new CycleTestNode(context) { Name = "Item1" },
-                ["key2"] = new CycleTestNode(context) { Name = "Item2" }
+                ["key1"] = new(context) { Name = "Item1" },
+                ["key2"] = new(context) { Name = "Item2" }
             }
         };
 
@@ -428,7 +428,7 @@ public partial class SubjectUpdateExtensionsTests
             Root = "1",
             Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
             {
-                ["1"] = new Dictionary<string, SubjectPropertyUpdate>
+                ["1"] = new()
                 {
                     ["FirstName"] = new SubjectPropertyUpdate
                     {
@@ -936,12 +936,12 @@ public partial class SubjectUpdateExtensionsTests
         var source = new CycleTestNode(context)
         {
             Name = "Root",
-            Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = new CycleTestNode(context) { Name = "Item1" } }
+            Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = new(context) { Name = "Item1" } }
         };
         var target = new CycleTestNode(context)
         {
             Name = "Root",
-            Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = new CycleTestNode(context) { Name = "Item1" } }
+            Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = new(context) { Name = "Item1" } }
         };
 
         // Make a change - set dictionary to null
@@ -1000,8 +1000,8 @@ public partial class SubjectUpdateExtensionsTests
             Name = "Root",
             IntLookup = new Dictionary<int, CycleTestNode>
             {
-                [1] = new CycleTestNode(context) { Name = "Item1" },
-                [2] = new CycleTestNode(context) { Name = "Item2" }
+                [1] = new(context) { Name = "Item1" },
+                [2] = new(context) { Name = "Item2" }
             }
         };
         var target = new IntKeyNode(context);
@@ -1014,6 +1014,50 @@ public partial class SubjectUpdateExtensionsTests
         Assert.Equal(2, target.IntLookup.Count);
         Assert.Equal("Item1", target.IntLookup[1].Name);
         Assert.Equal("Item2", target.IntLookup[2].Name);
+    }
+
+    [Fact]
+    public void WhenApplyingDictionaryItemPropertyChangeViaJsonRoundTrip_ThenUpdateIsAppliedCorrectly()
+    {
+        // Arrange - this tests the BuildPathToRoot code path: when a property on a
+        // dictionary item changes, the partial update must use Kind=Dictionary (not Collection).
+        // After JSON round-trip, dictionary keys become JsonElement strings, so using
+        // Kind=Collection would cause ConvertIndexToInt to fail on the string key.
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var item1 = new CycleTestNode(context) { Name = "Item1" };
+        var source = new CycleTestNode(context)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode> { ["myKey"] = item1 }
+        };
+        var target = new CycleTestNode(context)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode>
+            {
+                ["myKey"] = new(context) { Name = "Item1" }
+            }
+        };
+
+        // Change a property on the dictionary item (triggers BuildPathToRoot)
+        var changes = new List<SubjectPropertyChange>();
+        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            item1.Name = "Item1Updated";
+        }
+
+        // Create the update, serialize to JSON, then deserialize (simulating WebSocket transfer)
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
+        var json = JsonSerializer.Serialize(update);
+        var deserialized = JsonSerializer.Deserialize<SubjectUpdate>(json)!;
+
+        // Act - apply the deserialized update (this is where the bug manifested:
+        // Kind=Collection with a string JsonElement key caused ConvertIndexToInt to throw)
+        target.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Equal("Item1Updated", target.Lookup["myKey"].Name);
     }
 
     [Fact]
@@ -1032,7 +1076,7 @@ public partial class SubjectUpdateExtensionsTests
             Name = "Root",
             IntLookup = new Dictionary<int, CycleTestNode>
             {
-                [1] = new CycleTestNode(context) { Name = "Existing" }
+                [1] = new(context) { Name = "Existing" }
             }
         };
 
@@ -1045,7 +1089,7 @@ public partial class SubjectUpdateExtensionsTests
             source.IntLookup = new Dictionary<int, CycleTestNode>
             {
                 [1] = existingItem,
-                [2] = new CycleTestNode(context) { Name = "NewItem" }
+                [2] = new(context) { Name = "NewItem" }
             };
         }
 
