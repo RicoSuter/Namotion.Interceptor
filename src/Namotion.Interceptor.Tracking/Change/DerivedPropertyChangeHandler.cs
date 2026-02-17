@@ -176,6 +176,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             derivedProperty.SetPropertyValueWithInterception(newValue, GetOldValueDelegate, NoOpWriteDelegate);
         }
 
+        _threadLocalOldValue = null; // Release reference to prevent stale subject retention
+
         if (derivedProperty.Subject is IRaisePropertyChanged raiser)
         {
             raiser.RaisePropertyChanged(derivedProperty.Metadata.Name);
@@ -213,11 +215,13 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         if (version1 != version2)
         {
             MergeRecordedDependencies(requiredProps, recordedDependencies, derivedProperty);
+            _recorder.ClearLastRecording();
             return;
         }
 
         if (previousItems.SequenceEqual(recordedDependencies))
         {
+            _recorder.ClearLastRecording();
             return;
         }
 
@@ -225,6 +229,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         {
             // Version changed = concurrent write detected, use conservative merge
             MergeRecordedDependencies(requiredProps, recordedDependencies, derivedProperty);
+            _recorder.ClearLastRecording();
             return;
         }
 
@@ -247,6 +252,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 newDependency.GetUsedByProperties().Add(derivedProperty);
             }
         }
+
+        _recorder.ClearLastRecording();
     }
 
     /// <summary>
