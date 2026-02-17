@@ -3,7 +3,6 @@ using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
@@ -15,6 +14,7 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -23,7 +23,7 @@ namespace Namotion.Interceptor.Mqtt.Server;
 /// <summary>
 /// Background service that hosts an MQTT broker and publishes property changes.
 /// </summary>
-public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDisposable
+public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectConnector, IFaultInjectable, IAsyncDisposable
 {
     // NOTE: We cannot pool UserProperties here because InjectApplicationMessages queues messages
     // asynchronously. The server may still be serializing packets after this method returns,
@@ -35,6 +35,14 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
     private readonly MqttServerConfiguration _configuration;
     private readonly ILogger _logger;
 
+    /// <inheritdoc />
+    public IInterceptorSubject RootSubject => _subject;
+
+    // Per-instance sentinel source used for values received from MQTT clients.
+    // Using a different source than `this` ensures the server's ChangeQueueProcessor
+    // re-publishes client-originated values to all subscribers (server-authoritative relay).
+    private readonly object _mqttClientSource = new();
+
     private readonly ConcurrentDictionary<PropertyReference, string?> _propertyToTopic = new();
     private readonly ConcurrentDictionary<string, PropertyReference?> _pathToProperty = new();
 
@@ -43,10 +51,14 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
     private readonly List<Task> _runningInitialStateTasks = [];
     private readonly Lock _initialStateTasksLock = new();
 
+    private readonly CancellationTokenSource _shutdownCts = new();
+
     private int _numberOfClients;
     private int _disposed;
     private int _isListening;
     private MqttServer? _mqttServer;
+    private volatile bool _isForceKill;
+    private volatile CancellationTokenSource? _forceKillCts;
 
     /// <summary>
     /// Gets whether the MQTT server is listening.
@@ -74,6 +86,41 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
 
     private bool IsPropertyIncluded(RegisteredSubjectProperty property) =>
         _configuration.PathProvider.IsPropertyIncluded(property);
+
+    /// <inheritdoc />
+    async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
+    {
+        switch (faultType)
+        {
+            case FaultType.Kill:
+                _isForceKill = true;
+                try { _forceKillCts?.Cancel(); }
+                catch (ObjectDisposedException) { /* CTS disposed between loop iterations */ }
+                break;
+
+            case FaultType.Disconnect:
+                var server = _mqttServer;
+                if (server is not null)
+                {
+                    var clientStatuses = await server.GetClientsAsync().ConfigureAwait(false);
+                    var disconnectOptions = new MqttServerClientDisconnectOptions();
+                    foreach (var clientStatus in clientStatuses)
+                    {
+                        try
+                        {
+                            await server.DisconnectClientAsync(clientStatus.Id, disconnectOptions).ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogDebug(ex, "Error disconnecting MQTT client {ClientId} during fault injection.", clientStatus.Id);
+                        }
+                    }
+                }
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(faultType), faultType, null);
+        }
+    }
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -105,6 +152,10 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            _forceKillCts = cts;
+            var linkedToken = cts.Token;
+
             try
             {
                 await _mqttServer.StartAsync().ConfigureAwait(false);
@@ -122,7 +173,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                         _configuration.BufferTime,
                         _logger);
 
-                    await changeQueueProcessor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+                    await changeQueueProcessor.ProcessAsync(linkedToken).ConfigureAwait(false);
                 }
                 finally
                 {
@@ -130,17 +181,30 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                     Volatile.Write(ref _isListening, 0);
                 }
             }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (OperationCanceledException) when (_isForceKill)
+            {
+                _logger.LogWarning("MQTT server force-killed. Restarting...");
+            }
             catch (Exception ex)
             {
                 Volatile.Write(ref _isListening, 0);
 
-                if (ex is TaskCanceledException or OperationCanceledException)
+                if (ex is TaskCanceledException)
                 {
                     return;
                 }
 
                 _logger.LogError(ex, "Error in MQTT server.");
                 await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                _isForceKill = false;
+                cts.Dispose();
             }
         }
     }
@@ -204,7 +268,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                     [
                         new MqttUserProperty(
                             timestampPropertyName,
-                            Encoding.UTF8.GetBytes(_configuration.SourceTimestampConverter(change.ChangedTimestamp)))
+                            _configuration.SourceTimestampSerializer(change.ChangedTimestamp))
                     ];
                 }
 
@@ -289,20 +353,21 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         _logger.LogInformation("Client {ClientId} connected. Total clients: {Count}.", arg.ClientId, count);
 
         // Publish all current property values to new client
+        var shutdownToken = _shutdownCts.Token;
         var task = Task.Run(async () =>
         {
             try
             {
                 if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 0)
                 {
-                    await PublishInitialStateAsync().ConfigureAwait(false);
+                    await PublishInitialStateAsync(shutdownToken).ConfigureAwait(false);
                 }
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Failed to publish initial state to client {ClientId}.", arg.ClientId);
             }
-        });
+        }, shutdownToken);
 
         lock (_initialStateTasksLock)
         {
@@ -314,7 +379,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         return Task.CompletedTask;
     }
 
-    private async Task PublishInitialStateAsync()
+    private async Task PublishInitialStateAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -326,7 +391,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
                 return;
             }
 
-            await Task.Delay(delay).ConfigureAwait(false);
+            await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
 
             var properties = _subject
                 .TryGetRegisteredSubject()?
@@ -339,27 +404,57 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             var server = _mqttServer;
             if (server is null) return;
 
+            var timestampPropertyName = _configuration.SourceTimestampPropertyName;
+
             foreach (var (path, property) in properties)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 var topic = MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
 
-                var payload = _configuration.ValueConverter.Serialize(
-                    property.GetValue(),
-                    property.Type);
+                byte[] payload;
+                try
+                {
+                    payload = _configuration.ValueConverter.Serialize(
+                        property.GetValue(),
+                        property.Type);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to serialize initial value for topic {Topic}.", topic);
+                    continue;
+                }
 
                 var message = new MqttApplicationMessage
                 {
                     Topic = topic,
                     PayloadSegment = new ArraySegment<byte>(payload),
-                    ContentType = "application/json",
                     QualityOfServiceLevel = _configuration.DefaultQualityOfService,
                     Retain = _configuration.UseRetainedMessages
                 };
 
+                if (timestampPropertyName is not null)
+                {
+                    var writeTimestamp = property.Reference.TryGetWriteTimestamp();
+                    if (writeTimestamp.HasValue)
+                    {
+                        message.UserProperties =
+                        [
+                            new MqttUserProperty(
+                                timestampPropertyName,
+                                _configuration.SourceTimestampSerializer(writeTimestamp.Value))
+                        ];
+                    }
+                }
+
                 await server.InjectApplicationMessage(
                     new InjectedMqttApplicationMessage(message) { SenderClientId = _serverClientId },
-                    CancellationToken.None).ConfigureAwait(false);
+                    cancellationToken).ConfigureAwait(false);
             }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Shutdown requested, stop publishing initial state
         }
         catch (Exception ex)
         {
@@ -389,6 +484,13 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             return Task.CompletedTask;
         }
 
+        // Server-authoritative relay: prevent the broker from distributing this client
+        // message directly to other subscribers. Instead, we apply the value locally with
+        // a non-self source (_mqttClientSource) so the server's ChangeQueueProcessor picks
+        // it up and re-publishes it to all clients via InjectApplicationMessage.
+        // This ensures consistent ordering of all values through the server.
+        args.ProcessPublish = false;
+
         try
         {
             var payload = args.ApplicationMessage.Payload;
@@ -397,9 +499,10 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             var receivedTimestamp = DateTimeOffset.UtcNow;
             var sourceTimestamp = MqttHelper.ExtractSourceTimestamp(
                 args.ApplicationMessage.UserProperties,
-                _configuration.SourceTimestampPropertyName) ?? receivedTimestamp;
+                _configuration.SourceTimestampPropertyName,
+                _configuration.SourceTimestampDeserializer) ?? receivedTimestamp;
 
-            propertyReference.SetValueFromSource(this, sourceTimestamp, receivedTimestamp, value);
+            propertyReference.SetValueFromSource(_mqttClientSource, sourceTimestamp, receivedTimestamp, value);
         }
         catch (Exception ex)
         {
@@ -451,6 +554,9 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
             _lifecycleInterceptor.SubjectDetaching -= OnSubjectDetaching;
         }
 
+        // Cancel any in-progress initial state tasks (e.g. Task.Delay) before waiting
+        _shutdownCts.Cancel();
+
         var server = _mqttServer;
         if (server is not null)
         {
@@ -494,6 +600,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, IAsyncDispo
         _pathToProperty.Clear();
 
         Volatile.Write(ref _isListening, 0);
+        _shutdownCts.Dispose();
         Dispose();
     }
 }

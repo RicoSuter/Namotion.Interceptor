@@ -496,9 +496,64 @@ builder.Services.AddOpcUaSubjectClientSource(
 - `PollingInterval` minimum of 100 milliseconds enforced
 - Fail-fast with clear error messages on invalid configuration
 
-### Stall Detection
+### Connection Loss Recovery
+
+The client handles connection loss through two cooperating mechanisms: the OPC UA SDK's built-in `SessionReconnectHandler` (automatic) and a health check loop that performs manual reconnection when the SDK handler fails or is insufficient.
+
+**All reconnection paths guarantee eventual consistency** through a full server state read. The client never relies solely on subscription notifications for state synchronization after a reconnection.
+
+#### Reconnection Flows
+
+**Flow A: SDK reconnection with subscription transfer**
+
+When the connection drops, the OPC UA SDK's `SessionReconnectHandler` attempts to reconnect automatically. If it succeeds and transfers existing subscriptions to the new session:
+
+1. Keep-alive detects dead connection and triggers the SDK reconnect handler
+2. SDK creates a new session and transfers subscriptions via `TransferSubscriptions`
+3. `OnReconnectComplete` accepts the new session and sets a `NeedsFullStateSync` flag
+4. The health check loop detects the flag on the next iteration:
+   - Starts buffering incoming subscription notifications
+   - Reads ALL property values from the server
+   - Applies server values, replays the buffer, resumes normal operation
+5. Full consistency is restored
+
+**Flow B: SDK reconnection fails or returns a preserved session**
+
+If the SDK handler cannot transfer subscriptions (e.g., server restarted and old subscriptions are gone), or if it returns the same session object ("preserved session"), the client abandons the session entirely:
+
+1. `OnReconnectComplete` calls `AbandonCurrentSession()` (session nulled, transport killed)
+2. The health check loop detects the dead session and triggers manual reconnection
+3. Manual reconnection creates a fresh session, new subscriptions, and performs a full state read
+4. Full consistency is restored
+
+Preserved sessions are always abandoned because subscriptions may have been silently deleted by the server (subscription lifetime expired during the disconnect period), leaving no mechanism for future data change notifications.
+
+**Flow C: No SDK handler active (session dead without reconnection in progress)**
+
+If the session dies without the SDK handler being active (e.g., after `KillAsync`, `ClearSessionAsync`, or a previous failed reconnection):
+
+1. The health check loop detects the dead session
+2. Triggers manual reconnection: fresh session, new subscriptions, full state read
+3. Full consistency is restored
+
+#### Stall Detection
 
 When the SDK's reconnection handler gets stuck (e.g., server never responds), the client automatically detects the stall and forces a reconnection reset. Configure via `MaxReconnectDuration` (default: 30 seconds). If the SDK reconnection hasn't succeeded within this duration, a full session reset and manual reconnection is triggered.
+
+#### Consistency Guarantees and Trade-offs
+
+**Guarantee**: After any reconnection completes, all client property values will match the server's current state. The full state read (buffer + read all values + replay + resume pattern) ensures no property is left stale, regardless of what happened to subscription notifications during the disconnect.
+
+**Trade-off: brief stale data window after SDK reconnection (Flow A)**
+
+Between the SDK's `OnReconnectComplete` (step 3) and the health check's full state read (step 4), there is a window of up to one health check interval (~5 seconds by default) where:
+
+- Subscription notifications from the transfer may apply partially (some notifications may have been lost due to server-side queue overflow or subscription lifetime expiration)
+- Property values may temporarily reflect incomplete state
+
+This window is bounded and self-correcting: the health check's full state read overwrites all values with the server's current state. For most industrial applications, this brief window is acceptable. If tighter consistency is required, reduce `SubscriptionHealthCheckInterval`.
+
+**No-loss guarantee for writes**: Client-to-server writes during disconnection are buffered in the write retry queue (see above) and flushed after reconnection. Combined with the full state read for server-to-client values, this provides bidirectional eventual consistency.
 
 ### Resilience Configuration
 
@@ -507,13 +562,14 @@ For 24/7 production use, the default configuration provides robust resilience:
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `KeepAliveInterval` | 5s | How quickly disconnections are detected |
-| `ReconnectInterval` | 5s | Time between reconnection attempts |
-| `MaxReconnectDuration` | 30s | Max time to wait for SDK reconnection before forcing reset |
+| `ReconnectInterval` | 5s | Time between SDK reconnection attempts |
+| `MaxReconnectDuration` | 30s | Max time for SDK reconnection before forcing manual reset |
+| `SessionTimeout` | 120s | Server-side session lifetime (should be > OperationTimeout) |
+| `OperationTimeout` | 30s | Timeout for individual OPC UA operations |
+| `SubscriptionHealthCheckInterval` | 5s | Interval for health checks and post-reconnection state sync |
 | `WriteRetryQueueSize` | 1000 | Updates buffered during disconnection |
 | `SessionDisposalTimeout` | 5s | Max wait for graceful session close |
 | `SubscriptionSequentialPublishing` | false | Process subscription messages in order (see Thread Safety) |
-
-Stall recovery is triggered after `MaxReconnectDuration` (default: 30s) if SDK reconnection hasn't succeeded.
 
 ## Diagnostics
 

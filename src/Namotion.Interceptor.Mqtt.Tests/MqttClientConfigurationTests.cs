@@ -140,4 +140,24 @@ public class MqttClientConfigurationTests
         Assert.Equal(TimeSpan.FromMinutes(1), config.MaximumReconnectDelay);
         Assert.NotNull(config.ValueConverter);
     }
+
+    [Fact]
+    public void DefaultTimestampSerializerAndDeserializer_Roundtrip()
+    {
+        // Arrange
+        var config = new MqttClientConfiguration
+        {
+            BrokerHost = "localhost",
+            PathProvider = CreateTestPathProvider()
+        };
+        var timestamp = DateTimeOffset.UtcNow;
+
+        // Act
+        var serialized = config.SourceTimestampSerializer(timestamp);
+        var deserialized = config.SourceTimestampDeserializer(serialized);
+
+        // Assert
+        Assert.NotNull(deserialized);
+        Assert.Equal(timestamp.ToUnixTimeMilliseconds(), deserialized!.Value.ToUnixTimeMilliseconds());
+    }
 }

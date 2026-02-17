@@ -19,7 +19,7 @@ public class SubjectPropertyWriterTests
         var updates = new List<string>();
 
         writer.StartBuffering();
-        await writer.CompleteInitializationAsync(CancellationToken.None);
+        await writer.LoadInitialStateAndResumeAsync(CancellationToken.None);
 
         // Act - write after initialization
         writer.Write(updates, u => u.Add("Immediate"));
@@ -54,7 +54,7 @@ public class SubjectPropertyWriterTests
         // Act
         writer.StartBuffering();
         writer.Write(order, o => o.Add("BufferedUpdate"));
-        await writer.CompleteInitializationAsync(CancellationToken.None);
+        await writer.LoadInitialStateAndResumeAsync(CancellationToken.None);
 
         // Assert - order: flush first, then initial state, then buffered (avoids state toggle)
         Assert.True(flushInvoked);
@@ -82,7 +82,7 @@ public class SubjectPropertyWriterTests
         writer.Write(updates, _ => throw new Exception("Test error"));
         writer.Write(updates, u => u.Add("Update3"));
 
-        await writer.CompleteInitializationAsync(CancellationToken.None);
+        await writer.LoadInitialStateAndResumeAsync(CancellationToken.None);
 
         // Assert - first and third updates applied, second error logged (not thrown)
         Assert.Equal(2, updates.Count);
@@ -102,7 +102,7 @@ public class SubjectPropertyWriterTests
         var writer = new SubjectPropertyWriter(sourceMock.Object, null, NullLogger.Instance);
 
         writer.StartBuffering();
-        await writer.CompleteInitializationAsync(CancellationToken.None);
+        await writer.LoadInitialStateAndResumeAsync(CancellationToken.None);
 
         // Act & Assert - should not throw
         writer.Write(0, _ => throw new Exception("Test error"));
@@ -127,7 +127,7 @@ public class SubjectPropertyWriterTests
         writer.StartBuffering(); // Reset buffer
         writer.Write(updates, u => u.Add("Second"));
 
-        await writer.CompleteInitializationAsync(CancellationToken.None);
+        await writer.LoadInitialStateAndResumeAsync(CancellationToken.None);
 
         // Assert - only "Second" replayed
         Assert.Single(updates);
@@ -135,7 +135,7 @@ public class SubjectPropertyWriterTests
     }
 
     [Fact]
-    public async Task WhenCompleteInitCalledTwice_ThenSecondCallSkipsReplay()
+    public async Task WhenLoadInitialStateAndResumeCalledTwice_ThenSecondCallSkipsReplay()
     {
         // Arrange
         var sourceMock = new Mock<ISubjectSource>();
@@ -151,8 +151,8 @@ public class SubjectPropertyWriterTests
         // Act
         writer.StartBuffering();
         writer.Write(replayCount, _ => replayCount++);
-        await writer.CompleteInitializationAsync(CancellationToken.None);
-        await writer.CompleteInitializationAsync(CancellationToken.None); // Second call
+        await writer.LoadInitialStateAndResumeAsync(CancellationToken.None);
+        await writer.LoadInitialStateAndResumeAsync(CancellationToken.None); // Second call
 
         // Assert
         // LoadInitialStateAsync called twice (before null check), but replay only happens once
@@ -171,7 +171,7 @@ public class SubjectPropertyWriterTests
         // Act
         writer.StartBuffering();
         writer.Write(updates, u => u.Add("Update"));
-        await writer.CompleteInitializationAsync(CancellationToken.None);
+        await writer.LoadInitialStateAndResumeAsync(CancellationToken.None);
 
         // Assert - update replayed without LoadInitialStateAsync call
         Assert.Single(updates);

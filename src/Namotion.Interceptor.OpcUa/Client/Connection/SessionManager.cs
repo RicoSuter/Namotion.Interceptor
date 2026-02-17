@@ -1,8 +1,11 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Namotion.Interceptor.OpcUa.Client.Polling;
+using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Opc.Ua;
+using Opc.Ua.Bindings;
 using Opc.Ua.Client;
 using Opc.Ua.Configuration;
 
@@ -26,11 +29,10 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private readonly object _reconnectingLock = new();
 
     private int _isReconnecting; // 0 = false, 1 = true (thread-safe via Interlocked)
+    private int _needsFullStateSync; // 0 = false, 1 = true (thread-safe via Interlocked)
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
-
-    // Fields for deferred async work (handled by health check loop)
-    private Session? _pendingOldSession; // Old session needing disposal after reconnection (accessed via Interlocked)
-    private int _needsInitialization;   // 0 = false, 1 = true (thread-safe via Interlocked)
+    // Enqueued by SDK reconnection callbacks (sync), drained by health check loop via DisposePendingSessionsAsync (async).
+    private readonly ConcurrentQueue<Session> _sessionsToDispose = new();
 
     /// <summary>
     /// Gets the current session. WARNING: Can change at any time due to reconnection. Never cache - read immediately before use.
@@ -46,20 +48,57 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         (Volatile.Read(ref _session)?.Connected ?? false);
 
     /// <summary>
+    /// Performs a full state synchronization after SDK reconnection if needed.
+    /// Buffers incoming notifications, reads all property values from the server,
+    /// replays the buffer, and resumes normal operation.
+    /// On failure, clears the session to trigger manual reconnection via the health check loop.
+    /// </summary>
+    /// <remarks>
+    /// Called only from the health check loop in OpcUaSubjectClientSource.ExecuteAsync (single-threaded).
+    /// </remarks>
+    internal async Task PerformFullStateSyncIfNeededAsync(CancellationToken cancellationToken)
+    {
+        if (Volatile.Read(ref _needsFullStateSync) != 1)
+        {
+            return;
+        }
+
+        _logger.LogInformation("Performing full state sync after SDK reconnection...");
+        _propertyWriter.StartBuffering();
+        try
+        {
+            await _propertyWriter.LoadInitialStateAndResumeAsync(cancellationToken).ConfigureAwait(false);
+            Interlocked.Exchange(ref _needsFullStateSync, 0);
+            _logger.LogInformation("Full state sync completed successfully after SDK reconnection.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Full state sync failed after SDK reconnection. Clearing session for manual reconnection.");
+            await ClearSessionAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
     /// Gets a value indicating whether the session is currently reconnecting.
     /// </summary>
     public bool IsReconnecting => Volatile.Read(ref _isReconnecting) == 1;
 
     /// <summary>
-    /// Gets a value indicating whether initialization needs to be completed by the health check loop.
-    /// Set when SDK reconnection succeeds with subscription transfer.
+    /// Gets whether there are sessions waiting for async disposal by the health check loop.
     /// </summary>
-    public bool NeedsInitialization => Volatile.Read(ref _needsInitialization) == 1;
+    public bool HasSessionsToDispose => !_sessionsToDispose.IsEmpty;
 
     /// <summary>
-    /// Gets the pending old session that needs async disposal by the health check loop.
+    /// Sets or clears the reconnecting flag. When set, OnKeepAlive returns early
+    /// without triggering the SDK reconnect handler. Used by manual reconnection
+    /// (ReconnectSessionAsync) to prevent keep-alive on newly created sessions from
+    /// triggering OnReconnectComplete → AbandonCurrentSession while the manual
+    /// reconnection is still in progress.
     /// </summary>
-    public Session? PendingOldSession => Volatile.Read(ref _pendingOldSession);
+    internal void SetReconnecting(bool value)
+    {
+        Interlocked.Exchange(ref _isReconnecting, value ? 1 : 0);
+    }
 
     /// <summary>
     /// Gets the current subscriptions managed by the subscription manager.
@@ -169,25 +208,34 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 $"Session factory returned unexpected type '{sessionResult?.GetType().FullName ?? "null"}'. " +
                 $"Expected '{typeof(Session).FullName}'. Ensure the configured SessionFactory returns a valid Session instance.");
 
-        // Enable SDK's built-in subscription transfer for seamless reconnection
-        // TransferSubscriptionsOnReconnect: SDK will automatically transfer subscriptions during reconnect
-        // DeleteSubscriptionsOnClose: Keep subscriptions on server during reconnection for transfer
-        newSession.TransferSubscriptionsOnReconnect = true;
-        newSession.DeleteSubscriptionsOnClose = false;
+        ConfigureSession(newSession);
 
-        // MinPublishRequestCount: Keep multiple publish requests in flight for reliability
-        // OPC Foundation's reference client uses 3 to prevent message loss during traffic spikes
-        newSession.MinPublishRequestCount = configuration.MinPublishRequestCount;
+        // Validate: a brand new session must be connected with a valid transport channel.
+        // If not, something went wrong during creation (e.g., server not fully initialized).
+        if (!newSession.Connected || newSession.NullableTransportChannel is null)
+        {
+            _logger.LogError(
+                "Newly created OPC UA session is not usable (id={SessionId}, connected={Connected}, hasTransport={HasTransport}). " +
+                "Disposing and throwing to trigger retry.",
+                newSession.SessionId,
+                newSession.Connected,
+                newSession.NullableTransportChannel is not null);
 
-        newSession.KeepAlive -= OnKeepAlive;
-        newSession.KeepAlive += OnKeepAlive;
-        newSession.KeepAliveInterval = (int)configuration.KeepAliveInterval.TotalMilliseconds;
+            try { newSession.Dispose(); } catch { /* best effort */ }
+            throw new InvalidOperationException(
+                $"Newly created OPC UA session is not connected or has no transport channel. " +
+                $"SessionId={newSession.SessionId}, Connected={newSession.Connected}.");
+        }
 
         Volatile.Write(ref _session, newSession);
 
         if (oldSession is not null)
         {
-            await DisposeSessionAsync(oldSession, cancellationToken).ConfigureAwait(false);
+            // Kill old transport immediately so any in-flight WriteAsync calls fail fast
+            // and release SourceWriteLock, unblocking LoadInitialStateAndResumeAsync.
+            oldSession.KeepAlive -= OnKeepAlive;
+            KillTransportChannel(oldSession);
+            _sessionsToDispose.Enqueue(oldSession);
         }
 
         return newSession;
@@ -212,8 +260,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// </summary>
     private void OnKeepAlive(ISession sender, KeepAliveEventArgs e)
     {
-        if (ServiceResult.IsGood(e.Status) ||
-            e.CurrentState is not (ServerState.Unknown or ServerState.Failed))
+        if (ServiceResult.IsGood(e.Status))
         {
             return;
         }
@@ -245,7 +292,6 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             }
 
             _logger.LogInformation("OPC UA server connection lost. Beginning reconnect...");
-            _propertyWriter.StartBuffering();
 
             // Set flag before BeginReconnect to avoid window where external observers see IsReconnecting=false
             Interlocked.Exchange(ref _isReconnecting, 1);
@@ -282,6 +328,15 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     {
         lock (_reconnectingLock)
         {
+            // Ignore stale callbacks from a disposed/replaced reconnect handler.
+            // After ClearSessionAsync or TryForceResetIfStalled replaces _reconnectHandler,
+            // the old handler's callback may still fire (async void already queued on thread pool).
+            if (!ReferenceEquals(sender, _reconnectHandler))
+            {
+                _logger.LogDebug("Ignoring stale reconnect callback from replaced handler.");
+                return;
+            }
+
             if (Volatile.Read(ref _disposed) == 1)
             {
                 return;
@@ -290,49 +345,82 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             var reconnectedSession = _reconnectHandler.Session as Session;
             if (reconnectedSession is null)
             {
-                _logger.LogWarning("Reconnect completed with null session.");
+                _logger.LogWarning(
+                    "Reconnect completed with null session. " +
+                    "Clearing session to trigger full reconnection via health check.");
+
+                AbandonCurrentSession();
                 Interlocked.Exchange(ref _isReconnecting, 0);
                 return;
             }
 
             var oldSession = Volatile.Read(ref _session);
+
             if (!ReferenceEquals(oldSession, reconnectedSession))
             {
-                _logger.LogInformation("Reconnect created new OPC UA session.");
+                _logger.LogInformation(
+                    "Reconnect created new OPC UA session (id={SessionId}, connected={Connected}).",
+                    reconnectedSession.SessionId,
+                    reconnectedSession.Connected);
 
-                // Store old session for async disposal by health check
-                if (oldSession is not null)
-                {
-                    Volatile.Write(ref _pendingOldSession, oldSession);
-                }
-
-                Volatile.Write(ref _session, reconnectedSession);
-                reconnectedSession.KeepAlive -= OnKeepAlive;
-                reconnectedSession.KeepAlive += OnKeepAlive;
-
-                // Check if subscriptions transferred
+                // Check if subscriptions transferred BEFORE accepting the new session,
+                // to avoid having two sessions that need disposal with only one pending slot.
                 var transferredSubscriptions = reconnectedSession.Subscriptions.ToList();
                 if (transferredSubscriptions.Count > 0)
                 {
+                    // Transfer succeeded - accept new session, defer old session disposal
+                    if (oldSession is not null)
+                    {
+                        oldSession.KeepAlive -= OnKeepAlive;
+                        _sessionsToDispose.Enqueue(oldSession);
+                    }
+
+                    Volatile.Write(ref _session, reconnectedSession);
+                    ConfigureSession(reconnectedSession);
+
                     SubscriptionManager.UpdateTransferredSubscriptions(transferredSubscriptions);
+
+                    // Signal the health check loop to perform a full state read.
+                    // We don't rely on subscription notifications alone because they can be
+                    // incomplete (notification queue overflow, timing gaps between address space
+                    // creation and ChangeQueueProcessor subscription on the server).
+                    Interlocked.Exchange(ref _needsFullStateSync, 1);
+
+                    _source.RecordReconnectionSuccess();
+
                     _logger.LogInformation(
-                        "OPC UA session reconnected: Transferred {Count} subscriptions. Health check will complete initialization.",
+                        "OPC UA session reconnected: Transferred {Count} subscriptions. Full state sync pending.",
                         transferredSubscriptions.Count);
-                    Interlocked.Exchange(ref _needsInitialization, 1);
                 }
                 else
                 {
-                    // Transfer failed - clear session, health check will recreate
+                    // Transfer failed - reject new session, abandon old session.
+                    // The reconnected session has a live TCP connection so it must be disposed.
+                    // The old session's connection is already dead (server restarted) and will be GC'd.
                     _logger.LogWarning(
                         "OPC UA session reconnected but subscription transfer failed (server restart). " +
                         "Clearing session to trigger full reconnection via health check.");
-                    Volatile.Write(ref _session, null);
-                    ReadAfterWriteManager?.ClearPendingReads();
+                    AbandonCurrentSession();
+                    reconnectedSession.KeepAlive -= OnKeepAlive;
+                    _sessionsToDispose.Enqueue(reconnectedSession);
                 }
             }
             else
             {
-                _logger.LogInformation("Reconnect preserved existing OPC UA session. Subscriptions maintained.");
+                // Same Session object reference — SDK "preserved" the session.
+                // After server restart, the SDK reconnects transport but may not create a new session.
+                // The old session ID doesn't exist on the restarted server.
+
+                // Preserved sessions are unreliable: subscriptions may have been silently
+                // deleted by the server (lifetime expired during disconnect), leaving no
+                // mechanism for future updates. Abandon the session and let the health check
+                // trigger a full manual reconnection with fresh subscriptions + full state read.
+                _logger.LogInformation(
+                    "Reconnect preserved existing OPC UA session (id={SessionId}, connected={Connected}). " +
+                    "Abandoning to trigger full reconnection with state sync.",
+                    reconnectedSession.SessionId,
+                    reconnectedSession.Connected);
+                AbandonCurrentSession();
             }
 
             Interlocked.Exchange(ref _isReconnecting, 0);
@@ -369,38 +457,29 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 (int)_configuration.ReconnectHandlerTimeout.TotalMilliseconds);
 
             // Clear everything - health check will restart fresh
-            Volatile.Write(ref _session, null);
+            AbandonCurrentSession();
             Interlocked.Exchange(ref _isReconnecting, 0);
             return true;
         }
     }
 
     /// <summary>
-    /// Disposes the pending old session asynchronously.
+    /// Disposes all sessions queued for deferred disposal.
     /// Called by health check loop after SDK reconnection completes.
     /// </summary>
-    public async Task DisposePendingOldSessionAsync(CancellationToken cancellationToken)
+    public async Task DisposePendingSessionsAsync(CancellationToken cancellationToken)
     {
-        var oldSession = Interlocked.Exchange(ref _pendingOldSession, null);
-        if (oldSession is not null)
+        while (_sessionsToDispose.TryDequeue(out var session))
         {
             try
             {
-                await DisposeSessionAsync(oldSession, cancellationToken).ConfigureAwait(false);
+                await DisposeSessionAsync(session, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
                 _logger.LogDebug(ex, "Error disposing old session during reconnection cleanup.");
             }
         }
-    }
-
-    /// <summary>
-    /// Clears the initialization flag after health check completes initialization.
-    /// </summary>
-    public void ClearInitializationFlag()
-    {
-        Interlocked.Exchange(ref _needsInitialization, 0);
     }
 
     /// <summary>
@@ -429,30 +508,149 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 (int)_configuration.ReconnectHandlerTimeout.TotalMilliseconds);
 
             Interlocked.Exchange(ref _isReconnecting, 0);
+            Interlocked.Exchange(ref _needsFullStateSync, 0);
 
             // Read and clear session inside lock to prevent race with OnReconnectComplete
             sessionToDispose = Volatile.Read(ref _session);
             Volatile.Write(ref _session, null);
+            ReadAfterWriteManager?.ClearPendingReads();
         }
 
-        // Dispose outside lock to avoid blocking SDK callbacks
         if (sessionToDispose is not null)
         {
+            // Try graceful close first so the server can clean up the session and its subscriptions.
+            // Without this, the server has an orphaned session with active subscriptions publishing
+            // to a dead transport, which can disrupt the server's publish pipeline for other clients.
             await DisposeSessionAsync(sessionToDispose, cancellationToken).ConfigureAwait(false);
+
+            // Kill transport after close to ensure any remaining in-flight operations fail fast.
+            KillTransportChannel(sessionToDispose);
+        }
+    }
+
+    private void ConfigureSession(Session session)
+    {
+        session.TransferSubscriptionsOnReconnect = true;
+        session.DeleteSubscriptionsOnClose = false;
+        session.MinPublishRequestCount = _configuration.MinPublishRequestCount;
+        session.KeepAlive -= OnKeepAlive;
+        session.KeepAlive += OnKeepAlive;
+        session.KeepAliveInterval = (int)_configuration.KeepAliveInterval.TotalMilliseconds;
+    }
+
+    /// <summary>
+    /// Disposes the transport channel without clearing the session.
+    /// This triggers keep-alive failure -> OnKeepAlive -> SessionReconnectHandler.BeginReconnect,
+    /// exercising the SDK's session preservation/transfer reconnection path.
+    /// </summary>
+    internal async Task DisconnectTransportAsync(CancellationToken cancellationToken)
+    {
+        var session = Volatile.Read(ref _session);
+        if (session is not null)
+        {
+            await CloseTransportChannelAsync(session, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Queues the current session for deferred disposal and clears session state
+    /// so the health check loop will trigger a full reconnection.
+    /// Must be called inside <see cref="_reconnectingLock"/>.
+    /// </summary>
+    private void AbandonCurrentSession()
+    {
+        Debug.Assert(Monitor.IsEntered(_reconnectingLock), "AbandonCurrentSession must be called inside _reconnectingLock.");
+
+        var session = Volatile.Read(ref _session);
+        if (session is not null)
+        {
+            session.KeepAlive -= OnKeepAlive;
+            KillTransportChannel(session);
+            _sessionsToDispose.Enqueue(session);
+        }
+
+        Volatile.Write(ref _session, null);
+        Interlocked.Exchange(ref _needsFullStateSync, 0);
+        ReadAfterWriteManager?.ClearPendingReads();
+    }
+
+    /// <summary>
+    /// Closes a session's transport channel asynchronously.
+    /// Used by fault injection (Disconnect) to avoid blocking the calling thread.
+    /// Falls back to synchronous Dispose if CloseAsync hangs.
+    /// </summary>
+    private async Task CloseTransportChannelAsync(Session session, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var channel = session.NullableTransportChannel;
+            if (channel is not null)
+            {
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+                await channel.CloseAsync(timeoutCts.Token).ConfigureAwait(false);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error closing transport channel, falling back to synchronous dispose.");
+            KillTransportChannel(session);
+        }
+    }
+
+    /// <summary>
+    /// Kills a session's transport channel immediately (synchronous).
+    /// Used for fast failover during reconnection — makes in-flight operations fail fast.
+    /// </summary>
+    private void KillTransportChannel(Session session)
+    {
+        try
+        {
+            var channel = session.NullableTransportChannel;
+
+            // TODO: Remove socket close when https://github.com/OPCFoundation/UA-.NETStandard/pull/3560
+            // is released. The SDK will then close sockets in UaSCUaBinaryChannel.Dispose().
+            // The explicit close before Dispose ensures in-flight operations fail immediately
+            // (fast failover), but the leak prevention aspect becomes redundant with the SDK fix.
+            if (channel is IMessageSocketChannel socketChannel)
+            {
+                try { socketChannel.Socket?.Dispose(); }
+                catch { /* best effort - socket may already be closed */ }
+            }
+
+            channel?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Error killing transport channel (session may already be disposed).");
         }
     }
 
     private async Task DisposeSessionAsync(Session session, CancellationToken cancellationToken)
     {
+        // Belt-and-suspenders: callers already unsubscribe before enqueuing, but ensure
+        // no stale keep-alive fires during the close/dispose sequence.
         session.KeepAlive -= OnKeepAlive;
+
+        // Clean up orphaned subscriptions on the server when closing this session.
+        // ConfigureSession sets DeleteSubscriptionsOnClose = false for SDK transfer scenarios,
+        // but during manual reconnection the old session's subscriptions are orphaned and must
+        // be deleted to prevent server resource exhaustion that can affect other clients.
+        session.DeleteSubscriptionsOnClose = true;
+
         try
         {
-            await session.CloseAsync(cancellationToken).ConfigureAwait(false);
-            _logger.LogDebug("OPC UA session closed successfully.");
+            // Timeout prevents hang when the session's TCP connection is dead.
+            // CloseAsync sends a CloseSession request to the server; on a dead connection
+            // it can wait for the full operation timeout before failing.
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(_configuration.SessionDisposalTimeout);
+            await session.CloseAsync(timeoutCts.Token).ConfigureAwait(false);
+            _logger.LogDebug("OPC UA session closed successfully (id={SessionId}).", session.SessionId);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Error closing OPC UA session.");
+            _logger.LogDebug(ex, "Error closing OPC UA session (id={SessionId}, may be expected after force-kill).", session.SessionId);
         }
         try
         {
@@ -471,7 +669,10 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             return;
         }
 
-        try { _reconnectHandler.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing reconnect handler."); }
+        lock (_reconnectingLock)
+        {
+            try { _reconnectHandler.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing reconnect handler."); }
+        }
         if (ReadAfterWriteManager is not null)
         {
             try { await ReadAfterWriteManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing read-after-write manager."); }
@@ -482,9 +683,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             try { await PollingManager.DisposeAsync().ConfigureAwait(false); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing polling manager."); }
         }
 
-        // Dispose pending old session from reconnection if it exists
-        var pendingSession = Interlocked.Exchange(ref _pendingOldSession, null);
-        if (pendingSession is not null)
+        // Dispose queued sessions synchronously — these are abandoned sessions whose transport
+        // is already dead, so graceful CloseAsync would timeout. Fast sync Dispose is intentional.
+        while (_sessionsToDispose.TryDequeue(out var pendingSession))
         {
             try { pendingSession.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error disposing pending old session."); }
         }
