@@ -15,7 +15,7 @@ namespace Namotion.Interceptor.WebSocket.Server;
 /// Uses Kestrel for cross-platform support without elevation.
 /// For embedding in an existing ASP.NET app, use MapWebSocketSubjectHandler extension instead.
 /// </summary>
-public sealed class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
+public sealed class WebSocketSubjectServer : BackgroundService, ISubjectConnector, IFaultInjectable, IAsyncDisposable
 {
     private readonly WebSocketSubjectHandler _handler;
     private readonly WebSocketServerConfiguration _configuration;
@@ -23,6 +23,11 @@ public sealed class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
 
     private WebApplication? _app;
     private int _disposed;
+    private volatile bool _isForceKill;
+    private volatile CancellationTokenSource? _forceKillCts;
+
+    /// <inheritdoc />
+    public IInterceptorSubject RootSubject { get; }
 
     public int ConnectionCount => _handler.ConnectionCount;
 
@@ -39,9 +44,30 @@ public sealed class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
 
         configuration.Validate();
 
+        RootSubject = subject;
         _handler = new WebSocketSubjectHandler(subject, configuration, logger);
         _configuration = configuration;
         _logger = logger;
+    }
+
+    /// <inheritdoc />
+    async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
+    {
+        switch (faultType)
+        {
+            case FaultType.Kill:
+                _isForceKill = true;
+                try { _forceKillCts?.Cancel(); }
+                catch (ObjectDisposedException) { /* CTS disposed between loop iterations */ }
+                break;
+
+            case FaultType.Disconnect:
+                await _handler.CloseAllConnectionsAsync().ConfigureAwait(false);
+                break;
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(faultType), faultType, null);
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -51,14 +77,22 @@ public sealed class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            _forceKillCts = cts;
+            var linkedToken = cts.Token;
+
             try
             {
-                await RunServerAsync(stoppingToken).ConfigureAwait(false);
+                await RunServerAsync(linkedToken).ConfigureAwait(false);
                 break;
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 break;
+            }
+            catch (OperationCanceledException) when (_isForceKill)
+            {
+                _logger.LogWarning("WebSocket server force-killed. Restarting...");
             }
             catch (Exception ex)
             {
@@ -68,6 +102,11 @@ public sealed class WebSocketSubjectServer : BackgroundService, IAsyncDisposable
                 var jitter = Random.Shared.NextDouble() * 0.1 + 0.95;
                 retryDelay = TimeSpan.FromMilliseconds(
                     Math.Min(retryDelay.TotalMilliseconds * 2 * jitter, maxRetryDelay.TotalMilliseconds));
+            }
+            finally
+            {
+                _isForceKill = false;
+                cts.Dispose();
             }
         }
     }

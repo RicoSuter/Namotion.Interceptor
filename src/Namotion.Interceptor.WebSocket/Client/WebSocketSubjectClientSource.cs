@@ -20,7 +20,7 @@ namespace Namotion.Interceptor.WebSocket.Client;
 /// <summary>
 /// WebSocket client source that connects to a WebSocket server and synchronizes subjects.
 /// </summary>
-public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSource, IAsyncDisposable
+public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSource, ISubjectConnector, IFaultInjectable, IAsyncDisposable
 {
     private static readonly RecyclableMemoryStreamManager MemoryStreamManager = new();
 
@@ -41,6 +41,8 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
     private readonly ClientSequenceTracker _sequenceTracker = new();
     private volatile bool _isStarted;
+    private volatile bool _isForceKill;
+    private volatile CancellationTokenSource? _forceKillCts;
     private int _disposed;
     private CancellationTokenRegistration _stoppingTokenRegistration;
 
@@ -468,6 +470,28 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             });
     }
 
+    /// <inheritdoc />
+    Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
+    {
+        switch (faultType)
+        {
+            case FaultType.Kill:
+                _isForceKill = true;
+                try { _forceKillCts?.Cancel(); }
+                catch (ObjectDisposedException) { /* CTS disposed between loop iterations */ }
+                break;
+
+            case FaultType.Disconnect:
+                _webSocket?.Abort();
+                break;
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(faultType), faultType, null);
+        }
+
+        return Task.CompletedTask;
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // Wait until StartListeningAsync has been called
@@ -489,13 +513,17 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            _forceKillCts = cts;
+            var linkedToken = cts.Token;
+
             try
             {
                 // Wait for receive loop to complete (connection dropped)
                 var receiveLoopTask = _receiveLoopCompleted?.Task;
                 if (receiveLoopTask is not null)
                 {
-                    await receiveLoopTask.WaitAsync(stoppingToken).ConfigureAwait(false);
+                    await receiveLoopTask.WaitAsync(linkedToken).ConfigureAwait(false);
                 }
 
                 // Connection dropped - check if we should reconnect
@@ -510,7 +538,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                 _propertyWriter?.StartBuffering();
 
                 // Wait before reconnecting
-                await Task.Delay(reconnectDelay, stoppingToken).ConfigureAwait(false);
+                await Task.Delay(reconnectDelay, linkedToken).ConfigureAwait(false);
 
                 try
                 {
@@ -518,11 +546,11 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
                     _logger.LogInformation("WebSocket reconnected successfully");
 
-                    // CompleteInitializationAsync will call LoadInitialStateAsync which applies the initial state,
+                    // LoadInitialStateAndResumeAsync will call LoadInitialStateAsync which applies the initial state,
                     // then replays any buffered updates received during reconnection
                     if (_propertyWriter is not null)
                     {
-                        await _propertyWriter.CompleteInitializationAsync(stoppingToken).ConfigureAwait(false);
+                        await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
                     }
 
                     // Success - reset reconnect delay
@@ -546,9 +574,44 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             {
                 break;
             }
+            catch (OperationCanceledException) when (_isForceKill)
+            {
+                _logger.LogWarning("WebSocket client force-killed. Restarting...");
+                _webSocket?.Abort();
+
+                // Start buffering during force-kill recovery
+                _propertyWriter?.StartBuffering();
+
+                try
+                {
+                    await ConnectAsync(stoppingToken).ConfigureAwait(false);
+
+                    _logger.LogInformation("WebSocket reconnected after force-kill");
+
+                    if (_propertyWriter is not null)
+                    {
+                        await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
+                    }
+
+                    reconnectDelay = _configuration.ReconnectDelay;
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to reconnect after force-kill");
+                }
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error in WebSocket connection monitoring");
+            }
+            finally
+            {
+                _isForceKill = false;
+                cts.Dispose();
             }
         }
 

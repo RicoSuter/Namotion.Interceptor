@@ -407,7 +407,7 @@ public class SubjectUpdateFlowTests
         using (serverContext.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
             .Subscribe(c => changes.Add(c)))
         {
-            using (Namotion.Interceptor.Tracking.Change.SubjectChangeContext.WithChangedTimestamp(timestamp))
+            using (SubjectChangeContext.WithChangedTimestamp(timestamp))
             {
                 serverRoot.Name = "Updated";
             }

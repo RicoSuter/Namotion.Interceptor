@@ -25,6 +25,7 @@
     <ProjectReference Include="..\Namotion.Interceptor.Connectors\Namotion.Interceptor.Connectors.csproj" />
     <ProjectReference Include="..\Namotion.Interceptor.OpcUa\Namotion.Interceptor.OpcUa.csproj" />
     <ProjectReference Include="..\Namotion.Interceptor.Mqtt\Namotion.Interceptor.Mqtt.csproj" />
+    <ProjectReference Include="..\Namotion.Interceptor.WebSocket\Namotion.Interceptor.WebSocket.csproj" />
   </ItemGroup>
 
 </Project>

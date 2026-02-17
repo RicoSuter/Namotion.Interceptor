@@ -258,7 +258,7 @@ public sealed class WebSocketSubjectHandler
         var tasks = new List<Task>(_connections.Count);
         foreach (var connection in _connections.Values)
         {
-            tasks.Add(connection.SendUpdateAsync(serializedMessage, cancellationToken));
+            tasks.Add(connection.SendUpdateAsync(serializedMessage, sequence, cancellationToken));
         }
 
         try

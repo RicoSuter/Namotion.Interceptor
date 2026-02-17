@@ -288,7 +288,10 @@ internal static class SubjectUpdateFactory
 
             if (parentInfo.Index is not null)
             {
-                AddCollectionOrDictionaryItemToParent(parentProperties, parentProperty.Name, parentInfo.Index, childId);
+                var kind = parentProperty.IsSubjectDictionary
+                    ? SubjectPropertyUpdateKind.Dictionary
+                    : SubjectPropertyUpdateKind.Collection;
+                AddCollectionOrDictionaryItemToParent(parentProperties, parentProperty.Name, parentInfo.Index, childId, kind);
             }
             else
             {
@@ -307,7 +310,8 @@ internal static class SubjectUpdateFactory
         Dictionary<string, SubjectPropertyUpdate> parentProperties,
         string propertyName,
         object index,
-        string childId)
+        string childId,
+        SubjectPropertyUpdateKind kind)
     {
         if (parentProperties.TryGetValue(propertyName, out var existingUpdate))
         {
@@ -322,7 +326,7 @@ internal static class SubjectUpdateFactory
         {
             parentProperties[propertyName] = new SubjectPropertyUpdate
             {
-                Kind = SubjectPropertyUpdateKind.Collection,
+                Kind = kind,
                 Items = [new SubjectPropertyItemUpdate { Index = index, Id = childId }]
             };
         }
