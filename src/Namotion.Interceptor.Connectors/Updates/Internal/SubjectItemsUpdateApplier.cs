@@ -65,7 +65,7 @@ internal static class SubjectItemsUpdateApplier
                 var snapshot = workingItems.ToArray();
                 foreach (var operation in propertyUpdate.Operations)
                 {
-                    if (operation.Action == SubjectCollectionOperationType.Move && operation.FromIndex.HasValue)
+                    if (operation is { Action: SubjectCollectionOperationType.Move, FromIndex: not null })
                     {
                         var toIndex = ConvertIndexToInt(operation.Index);
                         var fromIndex = operation.FromIndex.Value;
@@ -227,10 +227,11 @@ internal static class SubjectItemsUpdateApplier
             return key;
 
         if (key is JsonElement jsonElement)
-            return jsonElement.Deserialize(targetKeyType)!;
+            return jsonElement.Deserialize(targetKeyType)
+                ?? throw new InvalidOperationException($"Cannot convert null JSON element to dictionary key type '{targetKeyType.Name}'.");
 
         if (targetKeyType.IsEnum)
-            return Enum.Parse(targetKeyType, Convert.ToString(key, CultureInfo.InvariantCulture)!);
+            return Enum.Parse(targetKeyType, Convert.ToString(key, CultureInfo.InvariantCulture)!, ignoreCase: true);
 
         return Convert.ChangeType(key, targetKeyType, CultureInfo.InvariantCulture);
     }

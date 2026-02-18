@@ -65,7 +65,7 @@ public class DefaultSubjectFactory : ISubjectFactory
             var key = keyType.IsInstanceOfType(entry.Key)
                 ? entry.Key
                 : keyType.IsEnum
-                    ? Enum.Parse(keyType, Convert.ToString(entry.Key, CultureInfo.InvariantCulture)!)
+                    ? Enum.Parse(keyType, Convert.ToString(entry.Key, CultureInfo.InvariantCulture)!, ignoreCase: true)
                     : Convert.ChangeType(entry.Key, keyType, CultureInfo.InvariantCulture);
             dictionary.Add(key, entry.Value);
         }

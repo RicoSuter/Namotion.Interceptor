@@ -303,8 +303,8 @@ internal static class SubjectUpdateFactory
     }
 
     /// <summary>
-    /// Adds a collection item reference to the parent's property update.
-    /// Appends to existing collection update or creates a new one.
+    /// Adds a collection or dictionary item reference to the parent's property update.
+    /// Appends to an existing update or creates a new one with the specified kind.
     /// </summary>
     private static void AddCollectionOrDictionaryItemToParent(
         Dictionary<string, SubjectPropertyUpdate> parentProperties,
