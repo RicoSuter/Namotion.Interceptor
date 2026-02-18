@@ -225,8 +225,8 @@ public class PerformanceProfiler : IDisposable
     {
         _cts.Cancel();
         _timer.Dispose();
-        _subscription.Dispose();
         _consumerThread.Join(TimeSpan.FromSeconds(2));
+        _subscription.Dispose();
         _cts.Dispose();
     }
 }

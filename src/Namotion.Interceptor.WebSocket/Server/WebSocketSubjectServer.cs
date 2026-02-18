@@ -102,11 +102,14 @@ public sealed class WebSocketSubjectServer : BackgroundService, ISubjectConnecto
 
                 try
                 {
+                    // When either task completes, cancel the other to prevent blocking forever.
+                    await Task.WhenAny(processorTask, heartbeatTask).ConfigureAwait(false);
+                    await cts.CancelAsync().ConfigureAwait(false);
                     await Task.WhenAll(processorTask, heartbeatTask).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
                 {
-                    // Kill: linkedToken canceled and tasks propagated OCE
+                    // Kill or one task completed: linkedToken canceled
                 }
 
                 // Both tasks completed — either normally (tasks catch OCE internally and
