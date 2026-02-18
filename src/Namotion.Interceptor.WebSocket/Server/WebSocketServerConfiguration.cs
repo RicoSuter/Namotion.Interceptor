@@ -66,6 +66,14 @@ public class WebSocketServerConfiguration
     public TimeSpan BroadcastTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
+    /// Timeout for acquiring the per-connection send lock. Default: 5 seconds.
+    /// If a previous send to a connection is still in progress after this time,
+    /// the new send is skipped and counted as a failure (triggering zombie detection
+    /// for persistently slow clients).
+    /// </summary>
+    public TimeSpan SendLockTimeout { get; set; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// Path provider for property filtering/mapping.
     /// </summary>
     public PathProviderBase? PathProvider { get; set; }
@@ -128,6 +136,11 @@ public class WebSocketServerConfiguration
         if (BroadcastTimeout <= TimeSpan.Zero)
         {
             throw new ArgumentException($"BroadcastTimeout must be positive, got: {BroadcastTimeout}", nameof(BroadcastTimeout));
+        }
+
+        if (SendLockTimeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentException($"SendLockTimeout must be positive, got: {SendLockTimeout}", nameof(SendLockTimeout));
         }
     }
 }

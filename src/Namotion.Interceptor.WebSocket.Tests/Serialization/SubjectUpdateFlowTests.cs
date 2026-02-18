@@ -7,9 +7,10 @@ using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.WebSocket.Protocol;
 using Namotion.Interceptor.WebSocket.Serialization;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.WebSocket.Tests.Integration;
 using Xunit;
 
-namespace Namotion.Interceptor.WebSocket.Tests.Integration;
+namespace Namotion.Interceptor.WebSocket.Tests.Serialization;
 
 public class SubjectUpdateFlowTests
 {

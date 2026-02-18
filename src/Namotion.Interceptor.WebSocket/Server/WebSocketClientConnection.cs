@@ -27,6 +27,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
     private ArrayBufferWriter<byte>? _sendBuffer = new(4096);
     private readonly long _maxMessageSize;
     private readonly TimeSpan _helloTimeout;
+    private readonly TimeSpan _sendLockTimeout;
     private readonly Queue<(byte[] Message, long Sequence)> _pendingUpdates = new();
     private volatile bool _welcomeSent;
     private long _welcomeSequence;
@@ -44,12 +45,14 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         System.Net.WebSockets.WebSocket webSocket,
         ILogger logger,
         long maxMessageSize = 10 * 1024 * 1024,
-        TimeSpan? helloTimeout = null)
+        TimeSpan? helloTimeout = null,
+        TimeSpan? sendLockTimeout = null)
     {
         _webSocket = webSocket;
         _logger = logger;
         _maxMessageSize = maxMessageSize;
         _helloTimeout = helloTimeout ?? TimeSpan.FromSeconds(10);
+        _sendLockTimeout = sendLockTimeout ?? TimeSpan.FromSeconds(5);
     }
 
     public async Task<HelloPayload?> ReceiveHelloAsync(CancellationToken cancellationToken)
@@ -142,12 +145,21 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         // Without this, an update could be enqueued after SendWelcomeAsync has already drained the queue.
         if (!IsConnected || Volatile.Read(ref _disposed) == 1) return;
 
+        bool acquired;
         try
         {
-            await _sendLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            acquired = await _sendLock.WaitAsync(_sendLockTimeout, cancellationToken).ConfigureAwait(false);
         }
         catch (ObjectDisposedException)
         {
+            return;
+        }
+
+        if (!acquired)
+        {
+            // Previous send still in progress — client is too slow, count as failure for zombie detection
+            Interlocked.Increment(ref _consecutiveSendFailures);
+            _logger.LogWarning("Client {ConnectionId}: Send lock timeout ({Timeout}), skipping update (slow client)", ConnectionId, _sendLockTimeout);
             return;
         }
 
