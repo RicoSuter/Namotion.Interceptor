@@ -653,33 +653,34 @@ The library includes optimizations:
 
 ## Benchmark Results
 
-```
-Server Benchmark - 1 minute - [2026-01-20 22:29:45.260]
+Intel(R) Core(TM) Ultra 7 258V
 
-Total received changes:          1189867
-Total published changes:         1196800
-Process memory:                  628.24 MB (419.63 MB in .NET heap)
-Avg allocations over last 60s:   502.47 MB/s
+```
+Server Benchmark - 1 minute - [2026-02-18 22:08:35.641]
+
+Total received changes:          1182669
+Total published changes:         1196000
+Process memory:                  645.51 MB (434.04 MB in .NET heap)
+Avg allocations over last 60s:   525.09 MB/s
 
 Metric                               Avg        P50        P90        P95        P99      P99.9        Max        Min     StdDev      Count
 -------------------------------------------------------------------------------------------------------------------------------------------
-Received (changes/s)            19817.96   19967.97   20763.99   21555.02   22729.66   22729.66   22729.66   14266.49    1099.08          -
-Processing latency (ms)             0.06       0.00       0.02       0.09       0.65      10.08      19.22       0.00       0.61    1189867
-End-to-end latency (ms)            57.24      28.27     172.11     230.22     322.76     378.85     392.92       0.46      70.20    1189867
-
+Received (changes/s)            19707.66   19691.68   20604.91   20891.21   25145.73   25145.73   25145.73   14275.83    1155.00          -
+Processing latency (ms)             0.05       0.00       0.02       0.07       0.46       8.97     174.59       0.00       0.51    1182669
+End-to-end latency (ms)            36.62      28.49      53.71      74.94     239.75     308.09     328.73       0.37      37.57    1182669
 ```
 
 ```
-Client Benchmark - 1 minute - [2026-01-20 22:29:52.755]
+Client Benchmark - 1 minute - [2026-02-18 22:08:38.466]
 
-Total received changes:          1195948
-Total published changes:         1189174
-Process memory:                  506.01 MB (255.02 MB in .NET heap)
-Avg allocations over last 60s:   27.98 MB/s
+Total received changes:          1195101
+Total published changes:         1181200
+Process memory:                  475.24 MB (247.02 MB in .NET heap)
+Avg allocations over last 60s:   30.13 MB/s
 
 Metric                               Avg        P50        P90        P95        P99      P99.9        Max        Min     StdDev      Count
 -------------------------------------------------------------------------------------------------------------------------------------------
-Received (changes/s)            19938.96   20008.40   20726.40   21121.12   23081.15   23081.15   23081.15   14879.78    1027.90          -
-Processing latency (ms)             1.89       1.00       2.21       2.80      27.21      43.55     136.39       0.00       5.15    1195948
-End-to-end latency (ms)            68.39      56.34     114.76     163.69     255.27     423.46     449.37       2.08      47.60    1195948
+Received (changes/s)            19930.38   19932.58   20715.65   20858.03   21507.32   21507.32   21507.32   16980.51     669.75          -
+Processing latency (ms)             1.96       0.86       1.80       2.22      36.11      40.20      41.56       0.00       5.54    1195101
+End-to-end latency (ms)            57.50      52.40      87.15     100.72     154.92     238.92     288.00       1.70      27.17    1195101
 ```
