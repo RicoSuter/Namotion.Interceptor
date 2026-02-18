@@ -31,7 +31,9 @@ public class WebSocketClientConfiguration
     public TimeSpan ConnectTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// Receive timeout. If no data is received within this time, the connection is considered lost. Default: 60 seconds
+    /// Receive timeout. If no data (including heartbeats) is received within this time,
+    /// the connection is considered lost. Should be greater than the server's HeartbeatInterval
+    /// to avoid false timeouts. Default: 60 seconds
     /// </summary>
     public TimeSpan ReceiveTimeout { get; set; } = TimeSpan.FromSeconds(60);
 

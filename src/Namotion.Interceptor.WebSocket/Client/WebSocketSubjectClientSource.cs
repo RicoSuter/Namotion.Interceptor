@@ -386,7 +386,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                         {
                             case MessageType.Update:
                                 var update = _serializer.Deserialize<UpdatePayload>(payloadBytes);
-                                if (!_sequenceTracker.IsUpdateValid(update.Sequence ?? 0))
+                                if (update.Sequence is not null && !_sequenceTracker.IsUpdateValid(update.Sequence.Value))
                                 {
                                     _logger.LogWarning(
                                         "Sequence gap detected: expected {Expected}, received {Received}. Triggering reconnection.",

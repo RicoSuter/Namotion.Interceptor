@@ -17,7 +17,6 @@ namespace Namotion.Interceptor.WebSocket.Server;
 /// </summary>
 internal sealed class WebSocketClientConnection : IAsyncDisposable
 {
-    private const int SendBufferShrinkThreshold = 256 * 1024;
     private const int MaxPendingUpdates = 1000;
 
     private readonly System.Net.WebSockets.WebSocket _webSocket;
@@ -25,7 +24,7 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
     private readonly CancellationTokenSource _cts = new();
     private readonly IWebSocketSerializer _serializer = JsonWebSocketSerializer.Instance;
     private readonly SemaphoreSlim _sendLock = new(1, 1);
-    private ArrayBufferWriter<byte> _sendBuffer = new(4096);
+    private ArrayBufferWriter<byte>? _sendBuffer = new(4096);
     private readonly long _maxMessageSize;
     private readonly TimeSpan _helloTimeout;
     private readonly Queue<(byte[] Message, long Sequence)> _pendingUpdates = new();
@@ -109,11 +108,12 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
                 Sequence = sequence
             };
 
-            _sendBuffer.Clear();
+            _sendBuffer!.Clear();
             _serializer.SerializeMessageTo(_sendBuffer, MessageType.Welcome, welcome);
             await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
 
-            MaybeShrinkSendBuffer();
+            // Send buffer is only used for Welcome; release it after sending.
+            _sendBuffer = null;
 
             // Mark welcome as sent and flush any queued pre-serialized updates.
             // Only send updates with sequence > welcomeSequence, since the Welcome
@@ -337,11 +337,4 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         _cts.Dispose();
     }
 
-    private void MaybeShrinkSendBuffer()
-    {
-        if (_sendBuffer is { Capacity: > SendBufferShrinkThreshold, WrittenCount: < SendBufferShrinkThreshold / 4 })
-        {
-            _sendBuffer = new ArrayBufferWriter<byte>(4096);
-        }
-    }
 }
