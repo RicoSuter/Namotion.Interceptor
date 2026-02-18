@@ -29,25 +29,30 @@ public class WebSocketSubjectHandlerSequenceTests
     [Fact]
     public void CurrentSequence_ShouldStartAtZero()
     {
+        // Act
         var handler = CreateHandler();
 
+        // Assert
         Assert.Equal(0L, handler.CurrentSequence);
     }
 
     [Fact]
     public async Task BroadcastChanges_WithNoConnections_ShouldNotIncrementSequence()
     {
+        // Arrange
         var handler = CreateHandler();
 
-        // BroadcastChangesAsync short-circuits when no connections exist
+        // Act - BroadcastChangesAsync short-circuits when no connections exist
         await handler.BroadcastChangesAsync(ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>.Empty, CancellationToken.None);
 
+        // Assert
         Assert.Equal(0L, handler.CurrentSequence);
     }
 
     [Fact]
     public async Task RunHeartbeatLoopAsync_WithZeroInterval_ShouldReturnImmediately()
     {
+        // Arrange
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
@@ -59,25 +64,26 @@ public class WebSocketSubjectHandlerSequenceTests
             new WebSocketServerConfiguration { HeartbeatInterval = TimeSpan.Zero },
             NullLogger.Instance);
 
-        // Should return immediately without blocking
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+
+        // Act - Should return immediately without blocking
         await handler.RunHeartbeatLoopAsync(cts.Token);
 
-        // If we get here, the method returned immediately (heartbeat disabled)
+        // Assert - If we get here, the method returned immediately (heartbeat disabled)
     }
 
     [Fact]
     public async Task RunHeartbeatLoopAsync_ShouldRespectCancellation()
     {
+        // Arrange
         var handler = CreateHandler();
-
         using var cts = new CancellationTokenSource();
         var task = handler.RunHeartbeatLoopAsync(cts.Token);
 
-        // Cancel quickly
+        // Act - Cancel quickly
         await cts.CancelAsync();
 
-        // Should complete without throwing
+        // Assert - Should complete without throwing
         await task;
     }
 }

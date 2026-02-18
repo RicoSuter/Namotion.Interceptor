@@ -24,12 +24,12 @@ public class MalformedMessageTests
     [Fact]
     public async Task MalformedMessage_ShouldReceiveErrorResponse()
     {
+        // Arrange
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketTestServer<TestRoot>(_output);
 
         await server.StartAsync(context => new TestRoot(context), port: portLease.Port);
 
-        // Connect and do handshake
         using var rawClient = new ClientWebSocket();
         await rawClient.ConnectAsync(new Uri($"ws://localhost:{portLease.Port}/ws"), CancellationToken.None);
 
@@ -38,16 +38,15 @@ public class MalformedMessageTests
         _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, hello);
         await rawClient.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
 
-        // Read Welcome
         var receiveBuffer = new byte[64 * 1024];
-        await rawClient.ReceiveAsync(receiveBuffer, CancellationToken.None);
+        await rawClient.ReceiveAsync(receiveBuffer, CancellationToken.None); // Read Welcome
 
-        // Send malformed message (not valid JSON array envelope)
+        // Act - Send malformed message (not valid JSON array envelope)
         var malformed = "not valid json at all"u8.ToArray();
         await rawClient.SendAsync(malformed, WebSocketMessageType.Text, true, CancellationToken.None);
 
-        // Server should handle gracefully: send Error, Close, or forcibly disconnect.
-        // All three are acceptable — the key is no server crash.
+        // Assert - Server should handle gracefully: send Error, Close, or forcibly disconnect.
+        // All three are acceptable -- the key is no server crash.
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         try
         {
@@ -59,7 +58,7 @@ public class MalformedMessageTests
         }
         catch (WebSocketException)
         {
-            // Server forcibly closed the connection — also acceptable
+            // Server forcibly closed the connection -- also acceptable
         }
     }
 }

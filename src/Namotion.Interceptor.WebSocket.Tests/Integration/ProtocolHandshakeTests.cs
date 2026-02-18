@@ -24,6 +24,7 @@ public class ProtocolHandshakeTests
     [Fact]
     public async Task Hello_WithWrongProtocolVersion_ShouldReceiveErrorAndClose()
     {
+        // Arrange
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketTestServer<TestRoot>(_output);
 
@@ -32,16 +33,17 @@ public class ProtocolHandshakeTests
         using var rawClient = new ClientWebSocket();
         await rawClient.ConnectAsync(new Uri($"ws://localhost:{portLease.Port}/ws"), CancellationToken.None);
 
-        // Send Hello with wrong version
         var hello = new HelloPayload { Version = 999, Format = WebSocketFormat.Json };
         var sendBuffer = new ArrayBufferWriter<byte>(256);
         _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, hello);
+
+        // Act
         await rawClient.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
 
-        // Should receive Error message
         var receiveBuffer = new byte[4096];
         var result = await rawClient.ReceiveAsync(receiveBuffer, CancellationToken.None);
 
+        // Assert
         Assert.Equal(WebSocketMessageType.Text, result.MessageType);
         var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(
             new ReadOnlySpan<byte>(receiveBuffer, 0, result.Count));
@@ -69,6 +71,7 @@ public class ProtocolHandshakeTests
     [Fact]
     public async Task Hello_WithCorrectVersion_ShouldReceiveWelcomeWithState()
     {
+        // Arrange
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketTestServer<TestRoot>(_output);
 
@@ -83,11 +86,14 @@ public class ProtocolHandshakeTests
         var hello = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
         var sendBuffer = new ArrayBufferWriter<byte>(256);
         _serializer.SerializeMessageTo(sendBuffer, MessageType.Hello, hello);
+
+        // Act
         await rawClient.SendAsync(sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, CancellationToken.None);
 
         var receiveBuffer = new byte[64 * 1024];
         var result = await rawClient.ReceiveAsync(receiveBuffer, CancellationToken.None);
 
+        // Assert
         var (messageType, payloadStart, payloadLength) = _serializer.DeserializeMessageEnvelope(
             new ReadOnlySpan<byte>(receiveBuffer, 0, result.Count));
         Assert.Equal(MessageType.Welcome, messageType);
@@ -117,6 +123,7 @@ public class ProtocolHandshakeTests
     [Fact]
     public async Task NoHello_WithinTimeout_ShouldCloseConnection()
     {
+        // Arrange
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketTestServer<TestRoot>(_output);
 
@@ -128,7 +135,7 @@ public class ProtocolHandshakeTests
         using var rawClient = new ClientWebSocket();
         await rawClient.ConnectAsync(new Uri($"ws://localhost:{portLease.Port}/ws"), CancellationToken.None);
 
-        // Don't send Hello -- wait for server timeout.
+        // Act - Don't send Hello -- wait for server timeout.
         // The server will close the connection after HelloTimeout expires.
         // Depending on timing, we may receive a graceful Close frame or a WebSocketException
         // (if the server aborts the socket after the close handshake times out).
@@ -147,6 +154,7 @@ public class ProtocolHandshakeTests
             connectionClosed = true;
         }
 
+        // Assert
         Assert.True(connectionClosed, "Server should close the connection when no Hello is received within the timeout");
     }
 }

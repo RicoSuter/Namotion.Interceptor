@@ -23,6 +23,7 @@ public class SendUpdateRaceTests
     [Fact]
     public async Task UpdatesDuringWelcome_ShouldNotBeLost()
     {
+        // Arrange
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketTestServer<TestRoot>(_output);
         await using var client = new WebSocketTestClient<TestRoot>(_output);
@@ -38,13 +39,13 @@ public class SendUpdateRaceTests
             () => client.Root!.Name == "Initial",
             message: "Client should receive initial state");
 
-        // Rapidly fire updates to exercise the Welcome/broadcast window
+        // Act - Rapidly fire updates to exercise the Welcome/broadcast window
         for (var i = 0; i < 20; i++)
         {
             server.Root!.Name = $"Rapid-{i}";
         }
 
-        // Final value should eventually arrive
+        // Assert - Final value should eventually arrive
         await AsyncTestHelpers.WaitUntilAsync(
             () => client.Root!.Name == "Rapid-19",
             timeout: TimeSpan.FromSeconds(10),
