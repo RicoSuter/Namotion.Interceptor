@@ -33,7 +33,7 @@ public class PerformanceProfiler : IDisposable
         _lastAllThroughputTime = _startTime;
         _windowStartTotalAllocatedBytes = GC.GetTotalAllocatedBytes(precise: true);
 
-        // Use lock-free queue instead of Observable
+        // Use queue subscription instead of Observable
         _subscription = context.CreatePropertyChangeQueueSubscription();
 
         // Background thread to consume changes
@@ -104,6 +104,7 @@ public class PerformanceProfiler : IDisposable
         List<double> allThroughputSamplesCopy;
         DateTimeOffset windowStartTimeCopy;
         int totalPublishedChangesCopy;
+        long windowStartTotalAllocatedBytesCopy;
 
         lock (_syncLock)
         {
@@ -112,6 +113,7 @@ public class PerformanceProfiler : IDisposable
             allThroughputSamplesCopy = [.. _allThroughputSamples];
             windowStartTimeCopy = _windowStartTime;
             totalPublishedChangesCopy = _totalPublishedChanges;
+            windowStartTotalAllocatedBytesCopy = _windowStartTotalAllocatedBytes;
 
             _allChangedLatencies.Clear();
             _allReceivedLatencies.Clear();
@@ -121,29 +123,28 @@ public class PerformanceProfiler : IDisposable
 
             _windowStartTime = _startTime + TimeSpan.FromSeconds(10) + index * TimeSpan.FromSeconds(60);
             _lastAllThroughputTime = _windowStartTime;
+            _windowStartTotalAllocatedBytes = GC.GetTotalAllocatedBytes(precise: true);
         }
 
         if (index == 0)
         {
-            PrintStats("Benchmark - Intermediate (10 seconds)", windowStartTimeCopy, allChangedLatenciesCopy, allReceivedLatenciesCopy, allThroughputSamplesCopy, totalPublishedChangesCopy);
+            PrintStats("Benchmark - Intermediate (10 seconds)", windowStartTimeCopy, windowStartTotalAllocatedBytesCopy, allChangedLatenciesCopy, allReceivedLatenciesCopy, allThroughputSamplesCopy, totalPublishedChangesCopy);
         }
         else
         {
-            PrintStats("Benchmark - 1 minute", windowStartTimeCopy, allChangedLatenciesCopy, allReceivedLatenciesCopy, allThroughputSamplesCopy, totalPublishedChangesCopy);
+            PrintStats("Benchmark - 1 minute", windowStartTimeCopy, windowStartTotalAllocatedBytesCopy, allChangedLatenciesCopy, allReceivedLatenciesCopy, allThroughputSamplesCopy, totalPublishedChangesCopy);
         }
-
-        _windowStartTotalAllocatedBytes = GC.GetTotalAllocatedBytes(precise: true);
     }
 
-    private void PrintStats(string title, DateTimeOffset windowStartTimeCopy, List<double> changedLatencyData, List<double> receivedLatencyData, List<double> throughputData, int publishedCount)
+    private void PrintStats(string title, DateTimeOffset windowStartTimeCopy, long windowStartTotalAllocatedBytes, List<double> changedLatencyData, List<double> receivedLatencyData, List<double> throughputData, int publishedCount)
     {
-        var proc = Process.GetCurrentProcess();
+        using var proc = Process.GetCurrentProcess();
         var workingSetMb = proc.WorkingSet64 / (1024.0 * 1024.0);
         var totalMemoryMb = GC.GetTotalMemory(forceFullCollection: false) / (1024.0 * 1024.0);
         var now = DateTimeOffset.UtcNow;
-        var elapsedSec = Math.Round((now - windowStartTimeCopy).TotalSeconds, 0);
+        var elapsedSec = Math.Max(1.0, Math.Round((now - windowStartTimeCopy).TotalSeconds, 0));
         var totalAllocatedBytesNow = GC.GetTotalAllocatedBytes(precise: true);
-        var allocatedBytesDelta = Math.Max(0, totalAllocatedBytesNow - _windowStartTotalAllocatedBytes);
+        var allocatedBytesDelta = Math.Max(0, totalAllocatedBytesNow - windowStartTotalAllocatedBytes);
         var allocRateBytesPerSec = allocatedBytesDelta / elapsedSec;
         var allocRateMbPerSec = allocRateBytesPerSec / (1024.0 * 1024.0);
 
@@ -180,7 +181,7 @@ public class PerformanceProfiler : IDisposable
         PrintLatency("End-to-end latency (ms)", changedLatencyData);
     }
 
-    private void PrintLatency(string label, IEnumerable<double> doubles)
+    private void PrintLatency(string label, List<double> doubles)
     {
         var sortedLatencies = doubles.OrderBy(t => t).ToArray();
         if (sortedLatencies.Length > 0)
