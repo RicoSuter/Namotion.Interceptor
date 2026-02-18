@@ -270,4 +270,85 @@ public class SubjectUpdateDictionaryTests
         // Either as an Insert operation or as a sparse update with full data
         await Verify(update);
     }
+
+    [Fact]
+    public async Task WhenDictionarySetToNull_ThenCompleteUpdateHasValueKindWithNull()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var node = new CycleTestNode(context) { Name = "Root", Lookup = null! };
+
+        // Act
+        var update = SubjectUpdate.CreateCompleteUpdate(node, []);
+
+        // Assert - Lookup should be Value kind with null, not Dictionary kind
+        Assert.NotNull(update.Subjects);
+        Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
+        Assert.True(rootProperties!.TryGetValue("Lookup", out var lookupUpdate));
+        Assert.Equal(SubjectPropertyUpdateKind.Value, lookupUpdate!.Kind);
+        Assert.Null(lookupUpdate.Value);
+
+        await Verify(update);
+    }
+
+    [Fact]
+    public void WhenDictionarySetToNull_ThenPartialUpdateHasValueKindWithNull()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var item1 = new CycleTestNode { Name = "Item1" };
+        var node = new CycleTestNode(context)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = item1 }
+        };
+
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
+
+        // Act - set dictionary to null
+        node.Lookup = null!;
+
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
+
+        // Assert - Lookup should be Value kind with null
+        Assert.NotNull(update.Subjects);
+        Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
+        Assert.True(rootProperties!.TryGetValue("Lookup", out var lookupUpdate));
+        Assert.Equal(SubjectPropertyUpdateKind.Value, lookupUpdate!.Kind);
+        Assert.Null(lookupUpdate.Value);
+    }
+
+    [Fact]
+    public void WhenNullDictionaryApplied_ThenTargetDictionaryBecomesNull()
+    {
+        // Arrange - create source with dictionary then set to null
+        var sourceContext = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var item1 = new CycleTestNode { Name = "Item1" };
+        var source = new CycleTestNode(sourceContext)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = item1 }
+        };
+
+        var changes = new List<SubjectPropertyChange>();
+        sourceContext.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
+
+        source.Lookup = null!;
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
+
+        // Create target with populated dictionary
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new CycleTestNode(targetContext)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = new CycleTestNode { Name = "Item1" } }
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Null(target.Lookup);
+    }
 }
