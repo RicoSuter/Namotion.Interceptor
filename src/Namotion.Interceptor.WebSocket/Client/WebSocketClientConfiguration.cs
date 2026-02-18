@@ -65,6 +65,19 @@ public class WebSocketClientConfiguration
     public int WriteBatchSize { get; set; } = 1000;
 
     /// <summary>
+    /// Number of consecutive reconnection failures before the circuit breaker opens.
+    /// Default is 5 failures. When open, reconnection attempts are paused for the cooldown period.
+    /// Set to 0 to disable the circuit breaker.
+    /// </summary>
+    public int CircuitBreakerFailureThreshold { get; set; } = 5;
+
+    /// <summary>
+    /// Cooldown period after the circuit breaker opens. Default is 60 seconds.
+    /// During cooldown, no reconnection attempts are made. After cooldown, one retry is allowed.
+    /// </summary>
+    public TimeSpan CircuitBreakerCooldown { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
     /// Path provider for property filtering/mapping.
     /// </summary>
     public PathProviderBase? PathProvider { get; set; }
@@ -127,6 +140,16 @@ public class WebSocketClientConfiguration
         if (WriteBatchSize < 0)
         {
             throw new ArgumentException($"WriteBatchSize must be non-negative, got: {WriteBatchSize}", nameof(WriteBatchSize));
+        }
+
+        if (CircuitBreakerFailureThreshold < 0)
+        {
+            throw new ArgumentException($"CircuitBreakerFailureThreshold must be non-negative, got: {CircuitBreakerFailureThreshold}", nameof(CircuitBreakerFailureThreshold));
+        }
+
+        if (CircuitBreakerCooldown <= TimeSpan.Zero && CircuitBreakerFailureThreshold > 0)
+        {
+            throw new ArgumentException($"CircuitBreakerCooldown must be positive when circuit breaker is enabled, got: {CircuitBreakerCooldown}", nameof(CircuitBreakerCooldown));
         }
     }
 }

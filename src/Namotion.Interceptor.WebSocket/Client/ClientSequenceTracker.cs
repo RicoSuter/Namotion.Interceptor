@@ -1,3 +1,5 @@
+using System.Threading;
+
 namespace Namotion.Interceptor.WebSocket.Client;
 
 /// <summary>
@@ -10,8 +12,9 @@ internal sealed class ClientSequenceTracker
 
     /// <summary>
     /// Gets the next sequence number expected from the server.
+    /// Thread-safe: uses Volatile.Read for cross-thread visibility (e.g., logging from other contexts).
     /// </summary>
-    public long ExpectedNextSequence => _expectedNextSequence;
+    public long ExpectedNextSequence => Volatile.Read(ref _expectedNextSequence);
 
     /// <summary>
     /// Initializes tracking from the Welcome message's sequence number.
@@ -19,7 +22,7 @@ internal sealed class ClientSequenceTracker
     /// </summary>
     public void InitializeFromWelcome(long welcomeSequence)
     {
-        _expectedNextSequence = welcomeSequence + 1;
+        Volatile.Write(ref _expectedNextSequence, welcomeSequence + 1);
     }
 
     /// <summary>
@@ -30,12 +33,12 @@ internal sealed class ClientSequenceTracker
     /// <param name="sequence">The sequence from the Update message.</param>
     public bool IsUpdateValid(long sequence)
     {
-        if (sequence != _expectedNextSequence)
+        if (sequence != Volatile.Read(ref _expectedNextSequence))
         {
             return false;
         }
 
-        _expectedNextSequence = sequence + 1;
+        Volatile.Write(ref _expectedNextSequence, sequence + 1);
         return true;
     }
 
@@ -48,6 +51,6 @@ internal sealed class ClientSequenceTracker
     {
         // Server sequence should be strictly less than our expected next.
         // If server is at or past expected, we missed updates.
-        return sequence < _expectedNextSequence;
+        return sequence < Volatile.Read(ref _expectedNextSequence);
     }
 }

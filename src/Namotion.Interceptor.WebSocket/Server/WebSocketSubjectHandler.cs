@@ -82,7 +82,8 @@ public sealed class WebSocketSubjectHandler
             webSocket,
             _logger,
             _configuration.MaxMessageSize,
-            _configuration.HelloTimeout);
+            _configuration.HelloTimeout,
+            _configuration.SendLockTimeout);
 
         var registered = false;
         try
@@ -248,12 +249,18 @@ public sealed class WebSocketSubjectHandler
     /// Must be called sequentially (not concurrently) to guarantee in-order
     /// sequence delivery to clients. This is ensured by ChangeQueueProcessor
     /// which calls BroadcastChangesAsync from a single flush thread.
+    /// The sequence increment is guarded by _applyUpdateLock to prevent a Welcome
+    /// snapshot from reading a mid-batch sequence number during multi-batch broadcasts.
     /// </remarks>
     private async Task BroadcastUpdateAsync(SubjectUpdate update, CancellationToken cancellationToken)
     {
         if (_connections.IsEmpty) return;
 
-        var sequence = Interlocked.Increment(ref _sequence);
+        long sequence;
+        lock (_applyUpdateLock)
+        {
+            sequence = Interlocked.Increment(ref _sequence);
+        }
 
         var updatePayload = new UpdatePayload
         {
@@ -359,13 +366,8 @@ public sealed class WebSocketSubjectHandler
     }
 
     public ChangeQueueProcessor CreateChangeQueueProcessor(ILogger logger) =>
-        new(source: this, Context, propertyFilter: IsPropertyIncluded,
+        new(source: this, Context, propertyFilter: property => _configuration.PathProvider?.IsPropertyIncluded(property) ?? true,
             writeHandler: BroadcastChangesAsync, BufferTime, logger);
-
-    public bool IsPropertyIncluded(RegisteredSubjectProperty property)
-    {
-        return _configuration.PathProvider?.IsPropertyIncluded(property) ?? true;
-    }
 
     public async ValueTask CloseAllConnectionsAsync()
     {

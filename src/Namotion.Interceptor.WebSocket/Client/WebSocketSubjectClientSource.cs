@@ -8,6 +8,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.IO;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Resilience;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
@@ -39,6 +40,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     private CancellationTokenSource? _receiveCts;
     private TaskCompletionSource? _receiveLoopCompleted;
     private readonly SourceOwnershipManager _ownership;
+    private readonly CircuitBreaker? _circuitBreaker;
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
 
     private readonly ClientSequenceTracker _sequenceTracker = new();
@@ -65,6 +67,13 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         _logger = logger;
         _processors = configuration.Processors;
         _ownership = new SourceOwnershipManager(this);
+
+        if (configuration.CircuitBreakerFailureThreshold > 0)
+        {
+            _circuitBreaker = new CircuitBreaker(
+                configuration.CircuitBreakerFailureThreshold,
+                configuration.CircuitBreakerCooldown);
+        }
 
         configuration.Validate();
     }
@@ -551,6 +560,21 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
                 _propertyWriter?.StartBuffering();
 
+                // Circuit breaker: pause reconnection if too many consecutive failures
+                if (_circuitBreaker is not null && !_circuitBreaker.ShouldAttempt())
+                {
+                    var cooldownRemaining = _circuitBreaker.GetCooldownRemaining();
+                    _logger.LogWarning(
+                        "Circuit breaker open after {TripCount} trips. Pausing reconnection attempts for {Cooldown}s.",
+                        _circuitBreaker.TripCount,
+                        (int)cooldownRemaining.TotalSeconds);
+
+                    await Task.Delay(cooldownRemaining, linkedToken).ConfigureAwait(false);
+
+                    // Reset backoff after cooldown so the first retry is fast
+                    reconnectDelay = _configuration.ReconnectDelay;
+                }
+
                 await Task.Delay(reconnectDelay, linkedToken).ConfigureAwait(false);
 
                 reconnectDelay = await ReconnectAndResumeAsync(
@@ -595,6 +619,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         {
             await ConnectAsync(stoppingToken).ConfigureAwait(false);
 
+            _circuitBreaker?.RecordSuccess();
             _logger.LogInformation(successMessage);
 
             if (_propertyWriter is not null)
@@ -611,6 +636,15 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to reconnect to WebSocket server");
+
+            if (_circuitBreaker is not null && _circuitBreaker.RecordFailure())
+            {
+                _logger.LogWarning(
+                    "Circuit breaker tripped after {Threshold} consecutive failures. " +
+                    "Pausing reconnection attempts for {Cooldown}s.",
+                    _configuration.CircuitBreakerFailureThreshold,
+                    (int)_configuration.CircuitBreakerCooldown.TotalSeconds);
+            }
 
             // Exponential backoff with equal jitter (0.5 to 1.0) to decorrelate reconnection attempts
             var jitter = Random.Shared.NextDouble() * 0.5 + 0.5;
