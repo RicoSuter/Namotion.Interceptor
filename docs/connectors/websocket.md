@@ -470,30 +470,32 @@ The library includes optimizations:
 
 ## Benchmark Results
 
-```
-Server Benchmark - 1 minute - [2026-02-08 00:43:54.182]
+Intel(R) Core(TM) Ultra 7 258V
 
-Total received changes:          1199599
-Total published changes:         1199600
-Process memory:                  339.89 MB (193.69 MB in .NET heap)
-Avg allocations over last 60s:   77.16 MB/s
+```
+Server Benchmark - 1 minute - [2026-02-18 22:19:57.430]
+
+Total received changes:          1197999
+Total published changes:         1196897
+Process memory:                  366.27 MB (188.56 MB in .NET heap)
+Avg allocations over last 60s:   78.49 MB/s
 
 Metric                               Avg        P50        P90        P95        P99      P99.9        Max        Min     StdDev      Count
 -------------------------------------------------------------------------------------------------------------------------------------------
-Received (changes/s)            19986.61   19977.31   20264.37   20358.98   20395.47   20395.47   20395.47   19284.34     241.02          -
-End-to-end latency (ms)            19.84      17.97      27.82      30.58      35.96      55.13      63.49       0.54       5.52    1199599
+Received (changes/s)            19966.69   19952.27   20330.10   20395.31   20694.54   20694.54   20694.54   19240.79     299.87          -
+End-to-end latency (ms)            21.78      18.33      34.56      38.97      48.64     107.65     152.63       0.22       9.26    1197999
 ```
 
 ```
-Client Benchmark - 1 minute - [2026-02-08 00:43:49.966]
+Client Benchmark - 1 minute - [2026-02-18 22:19:59.994]
 
-Total received changes:          1199619
-Total published changes:         1199600
-Process memory:                  324.68 MB (167.66 MB in .NET heap)
-Avg allocations over last 60s:   70.98 MB/s
+Total received changes:          1198798
+Total published changes:         1198000
+Process memory:                  314.71 MB (166.21 MB in .NET heap)
+Avg allocations over last 60s:   72.03 MB/s
 
 Metric                               Avg        P50        P90        P95        P99      P99.9        Max        Min     StdDev      Count
 -------------------------------------------------------------------------------------------------------------------------------------------
-Received (changes/s)            19992.14   19962.97   20394.59   20527.46   20592.19   20592.19   20592.19   19413.39     294.82          -
-End-to-end latency (ms)            21.05      18.98      29.77      32.76      42.28      54.79      64.70       0.70       6.53    1199619
+Received (changes/s)            19990.74   19933.24   20515.98   20677.66   21017.99   21017.99   21017.99   18971.91     399.01          -
+End-to-end latency (ms)            22.45      19.17      36.27      40.33      51.50      70.56      85.93       0.24       9.65    1198798
 ```
