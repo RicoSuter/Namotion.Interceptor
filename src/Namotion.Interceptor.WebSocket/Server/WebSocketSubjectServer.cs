@@ -13,6 +13,7 @@ namespace Namotion.Interceptor.WebSocket.Server;
 /// <summary>
 /// Standalone WebSocket server that exposes subject updates to connected clients.
 /// Uses Kestrel for cross-platform support without elevation.
+/// On Kill, restarts both the HTTP listener and the processing layer (matching real crash behavior).
 /// For embedding in an existing ASP.NET app, use MapWebSocketSubjectHandler extension instead.
 /// </summary>
 public sealed class WebSocketSubjectServer : BackgroundService, ISubjectConnector, IFaultInjectable, IAsyncDisposable
@@ -72,9 +73,6 @@ public sealed class WebSocketSubjectServer : BackgroundService, ISubjectConnecto
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var retryDelay = TimeSpan.FromSeconds(5);
-        var maxRetryDelay = TimeSpan.FromSeconds(60);
-
         while (!stoppingToken.IsCancellationRequested)
         {
             var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
@@ -83,35 +81,93 @@ public sealed class WebSocketSubjectServer : BackgroundService, ISubjectConnecto
 
             try
             {
-                await RunServerAsync(linkedToken).ConfigureAwait(false);
-                break;
+                // Build a new WebApplication each iteration because IHost doesn't support
+                // Start/Stop cycles. On Kill, the entire Kestrel instance is torn down and
+                // rebuilt, matching real crash behavior (like MQTT restarts its broker).
+                _app = BuildWebApplication(linkedToken);
+
+                var url = _configuration.BindAddress is not null
+                    ? $"http://{_configuration.BindAddress}:{_configuration.Port}"
+                    : $"http://localhost:{_configuration.Port}";
+
+                _logger.LogInformation("WebSocket server starting on {Url}{Path}", url, _configuration.Path);
+                await _app.StartAsync(stoppingToken).ConfigureAwait(false);
+
+                using var changeQueueProcessor = new ChangeQueueProcessor(
+                    source: _handler,
+                    _handler.Context,
+                    propertyFilter: _handler.IsPropertyIncluded,
+                    writeHandler: _handler.BroadcastChangesAsync,
+                    _handler.BufferTime,
+                    _logger);
+
+                var processorTask = changeQueueProcessor.ProcessAsync(linkedToken);
+                var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedToken);
+
+                try
+                {
+                    await Task.WhenAll(processorTask, heartbeatTask).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
+                {
+                    // Kill: linkedToken canceled and tasks propagated OCE
+                }
+
+                // Both tasks completed — either normally (tasks catch OCE internally and
+                // return) or via caught OCE above. Check why we stopped:
+                if (stoppingToken.IsCancellationRequested)
+                {
+                    break;
+                }
+
+                // linkedToken was canceled (Kill) or unexpected completion — restart.
+                if (_isForceKill)
+                {
+                    _logger.LogWarning("WebSocket server force-killed. Restarting...");
+                }
+                else
+                {
+                    _logger.LogWarning("WebSocket server processing completed unexpectedly. Restarting...");
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 break;
             }
-            catch (OperationCanceledException) when (_isForceKill)
-            {
-                _logger.LogWarning("WebSocket server force-killed. Restarting...");
-            }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "WebSocket server failed. Retrying in {Delay}...", retryDelay);
-                await Task.Delay(retryDelay, stoppingToken).ConfigureAwait(false);
-
-                var jitter = Random.Shared.NextDouble() * 0.1 + 0.95;
-                retryDelay = TimeSpan.FromMilliseconds(
-                    Math.Min(retryDelay.TotalMilliseconds * 2 * jitter, maxRetryDelay.TotalMilliseconds));
+                _logger.LogError(ex, "WebSocket server processing failed. Restarting...");
             }
             finally
             {
+                await _handler.CloseAllConnectionsAsync().ConfigureAwait(false);
+
+                if (_app is not null)
+                {
+                    // Use a short timeout to avoid the default 30-second ASP.NET graceful
+                    // shutdown. Connections are already closed above, so Kestrel should stop
+                    // quickly. The timeout is just a safety net.
+                    using var shutdownCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                    try
+                    {
+                        await _app.StopAsync(shutdownCts.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        // Shutdown timed out — DisposeAsync will force-release the port
+                    }
+
+                    await _app.DisposeAsync().ConfigureAwait(false);
+                    _app = null;
+                }
+
                 _isForceKill = false;
                 cts.Dispose();
             }
         }
     }
 
-    private async Task RunServerAsync(CancellationToken stoppingToken)
+    private WebApplication BuildWebApplication(CancellationToken requestHandlingToken)
     {
         var builder = WebApplication.CreateSlimBuilder();
 
@@ -122,24 +178,18 @@ public sealed class WebSocketSubjectServer : BackgroundService, ISubjectConnecto
         builder.WebHost.UseUrls(url);
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
-        // Dispose previous WebApplication on retry
-        if (_app is not null)
-        {
-            await _app.DisposeAsync().ConfigureAwait(false);
-        }
-
-        _app = builder.Build();
-        _app.UseWebSockets(new WebSocketOptions
+        var app = builder.Build();
+        app.UseWebSockets(new WebSocketOptions
         {
             KeepAliveInterval = TimeSpan.FromSeconds(30)
         });
 
-        _app.Map(_configuration.Path, async context =>
+        app.Map(_configuration.Path, async context =>
         {
             if (context.WebSockets.IsWebSocketRequest)
             {
                 var webSocket = await context.WebSockets.AcceptWebSocketAsync().ConfigureAwait(false);
-                await _handler.HandleClientAsync(webSocket, stoppingToken).ConfigureAwait(false);
+                await _handler.HandleClientAsync(webSocket, requestHandlingToken).ConfigureAwait(false);
             }
             else
             {
@@ -147,37 +197,14 @@ public sealed class WebSocketSubjectServer : BackgroundService, ISubjectConnecto
             }
         });
 
-        _logger.LogInformation("WebSocket server starting on {Url}{Path}", url, _configuration.Path);
-
-        using var changeQueueProcessor = new ChangeQueueProcessor(
-            source: _handler,
-            _handler.Context,
-            propertyFilter: _handler.IsPropertyIncluded,
-            writeHandler: _handler.BroadcastChangesAsync,
-            _handler.BufferTime,
-            _logger);
-
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-
-        var processorTask = changeQueueProcessor.ProcessAsync(linkedCts.Token);
-        var serverTask = _app.RunAsync(linkedCts.Token);
-        var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedCts.Token);
-
-        var tasks = new[] { processorTask, serverTask, heartbeatTask };
-        var completed = await Task.WhenAny(tasks).ConfigureAwait(false);
-        if (completed.IsFaulted)
-        {
-            await linkedCts.CancelAsync().ConfigureAwait(false);
-        }
-
-        await Task.WhenAll(tasks).ConfigureAwait(false);
+        return app;
     }
 
     public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
 
-        // Stop ExecuteAsync if called directly (not via hosting) (I6)
+        // Stop ExecuteAsync if called directly (not via hosting)
         try
         {
             using var stopCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
