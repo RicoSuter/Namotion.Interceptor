@@ -77,7 +77,7 @@ public class WebSocketClientConfiguration
     /// <summary>
     /// Update processors for filtering/transforming updates.
     /// </summary>
-    public ISubjectUpdateProcessor[]? Processors { get; set; }
+    public ISubjectUpdateProcessor[] Processors { get; set; } = [];
 
     /// <summary>
     /// Validates the configuration and throws if invalid.

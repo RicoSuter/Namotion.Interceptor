@@ -33,7 +33,7 @@ public class WebSocketServerConfigurationTests
         Assert.Null(configuration.BindAddress);
         Assert.Null(configuration.PathProvider);
         Assert.Null(configuration.SubjectFactory);
-        Assert.Null(configuration.Processors);
+        Assert.Empty(configuration.Processors);
     }
 
     [Fact]

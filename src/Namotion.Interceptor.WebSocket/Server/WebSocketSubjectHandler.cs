@@ -46,11 +46,15 @@ public sealed class WebSocketSubjectHandler
         WebSocketServerConfiguration configuration,
         ILogger logger)
     {
-        _subject = subject ?? throw new ArgumentNullException(nameof(subject));
-        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        ArgumentNullException.ThrowIfNull(subject);
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        _subject = subject;
+        _configuration = configuration;
+        _logger = logger;
         Context = subject.Context;
-        _processors = configuration.Processors ?? [];
+        _processors = configuration.Processors;
     }
     
     public async Task HandleClientAsync(System.Net.WebSockets.WebSocket webSocket, CancellationToken stoppingToken)
@@ -258,27 +262,11 @@ public sealed class WebSocketSubjectHandler
             Sequence = sequence
         };
 
-        // Serialize once for all connections
         var serializedMessage = _serializer.SerializeMessage(MessageType.Update, updatePayload);
 
-        var tasks = new List<Task>(_connections.Count);
-        foreach (var connection in _connections.Values)
-        {
-            tasks.Add(connection.SendUpdateAsync(serializedMessage, sequence, cancellationToken));
-        }
-
-        try
-        {
-            await Task.WhenAll(tasks).WaitAsync(_configuration.BroadcastTimeout, cancellationToken).ConfigureAwait(false);
-        }
-        catch (TimeoutException)
-        {
-            _logger.LogWarning("Broadcast to {Count} client(s) timed out after {Timeout}", _connections.Count, _configuration.BroadcastTimeout);
-        }
-        finally
-        {
-            await RemoveZombieConnectionsAsync().ConfigureAwait(false);
-        }
+        await BroadcastToAllAsync(
+            connection => connection.SendUpdateAsync(serializedMessage, sequence, cancellationToken),
+            cancellationToken).ConfigureAwait(false);
     }
 
     public async Task RunHeartbeatLoopAsync(CancellationToken cancellationToken)
@@ -328,13 +316,19 @@ public sealed class WebSocketSubjectHandler
             Sequence = Volatile.Read(ref _sequence)
         };
 
-        // Serialize once for all connections
         var serializedMessage = _serializer.SerializeMessage(MessageType.Heartbeat, heartbeat);
 
+        await BroadcastToAllAsync(
+            connection => connection.SendHeartbeatAsync(serializedMessage, cancellationToken),
+            cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task BroadcastToAllAsync(Func<WebSocketClientConnection, Task> sendAsync, CancellationToken cancellationToken)
+    {
         var tasks = new List<Task>(_connections.Count);
         foreach (var connection in _connections.Values)
         {
-            tasks.Add(connection.SendHeartbeatAsync(serializedMessage, cancellationToken));
+            tasks.Add(sendAsync(connection));
         }
 
         try
@@ -343,7 +337,7 @@ public sealed class WebSocketSubjectHandler
         }
         catch (TimeoutException)
         {
-            _logger.LogWarning("Heartbeat broadcast to {Count} client(s) timed out after {Timeout}", _connections.Count, _configuration.BroadcastTimeout);
+            _logger.LogWarning("Broadcast to {Count} client(s) timed out after {Timeout}", _connections.Count, _configuration.BroadcastTimeout);
         }
         finally
         {
@@ -363,6 +357,10 @@ public sealed class WebSocketSubjectHandler
             }
         }
     }
+
+    public ChangeQueueProcessor CreateChangeQueueProcessor(ILogger logger) =>
+        new(source: this, Context, propertyFilter: IsPropertyIncluded,
+            writeHandler: BroadcastChangesAsync, BufferTime, logger);
 
     public bool IsPropertyIncluded(RegisteredSubjectProperty property)
     {

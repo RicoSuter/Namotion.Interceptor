@@ -31,13 +31,7 @@ public sealed class WebSocketSubjectChangeProcessor : BackgroundService
         {
             try
             {
-                using var changeQueueProcessor = new ChangeQueueProcessor(
-                    source: _handler,
-                    _handler.Context,
-                    propertyFilter: _handler.IsPropertyIncluded,
-                    writeHandler: _handler.BroadcastChangesAsync,
-                    _handler.BufferTime,
-                    _logger);
+                using var changeQueueProcessor = _handler.CreateChangeQueueProcessor(_logger);
 
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 

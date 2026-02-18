@@ -175,6 +175,6 @@ public class WebSocketClientConfigurationTests
         Assert.Equal(1000, configuration.WriteBatchSize);
         Assert.Null(configuration.PathProvider);
         Assert.Null(configuration.SubjectFactory);
-        Assert.Null(configuration.Processors);
+        Assert.Empty(configuration.Processors);
     }
 }
