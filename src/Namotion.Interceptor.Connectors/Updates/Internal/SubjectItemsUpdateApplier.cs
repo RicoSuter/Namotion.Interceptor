@@ -64,7 +64,7 @@ internal static class SubjectItemsUpdateApplier
                 var snapshot = workingItems.ToArray();
                 foreach (var operation in propertyUpdate.Operations)
                 {
-                    if (operation.Action == SubjectCollectionOperationType.Move && operation.FromIndex.HasValue)
+                    if (operation is { Action: SubjectCollectionOperationType.Move, FromIndex: not null })
                     {
                         var toIndex = ConvertIndexToInt(operation.Index);
                         var fromIndex = operation.FromIndex.Value;
@@ -138,6 +138,7 @@ internal static class SubjectItemsUpdateApplier
         SubjectUpdateApplyContext context)
     {
         var existingDictionary = property.GetValue() as IDictionary;
+        var targetKeyType = property.Type.GenericTypeArguments[0];
         var workingDictionary = new Dictionary<object, IInterceptorSubject>();
         var structureChanged = false;
 
@@ -155,7 +156,7 @@ internal static class SubjectItemsUpdateApplier
         {
             foreach (var operation in propertyUpdate.Operations)
             {
-                var key = ConvertDictionaryKey(operation.Index);
+                var key = ConvertDictionaryKey(operation.Index, targetKeyType);
                 switch (operation.Action)
                 {
                     case SubjectCollectionOperationType.Remove:
@@ -180,7 +181,7 @@ internal static class SubjectItemsUpdateApplier
         {
             foreach (var collUpdate in propertyUpdate.Items)
             {
-                var key = ConvertDictionaryKey(collUpdate.Index);
+                var key = ConvertDictionaryKey(collUpdate.Index, targetKeyType);
 
                 if (collUpdate.Id is not null &&
                     context.Subjects.TryGetValue(collUpdate.Id, out var itemProps))
@@ -219,10 +220,8 @@ internal static class SubjectItemsUpdateApplier
         _ => Convert.ToInt32(index)
     };
 
-    private static object ConvertDictionaryKey(object key)
-    {
-        return key is JsonElement jsonElement ? jsonElement.GetString() ?? jsonElement.ToString() : key;
-    }
+    private static object ConvertDictionaryKey(object key, Type targetKeyType)
+        => DictionaryKeyConverter.Convert(key, targetKeyType);
 
     private static IInterceptorSubject CreateAndApplyItem(
         IInterceptorSubject parent,

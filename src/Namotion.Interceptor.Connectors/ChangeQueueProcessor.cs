@@ -28,7 +28,7 @@ public class ChangeQueueProcessor : IDisposable
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
     private int _flushGate; // 0 = free, 1 = flushing
-    private volatile bool _disposed;
+    private int _disposed; // 0 = not disposed, 1 = disposed (use Interlocked for thread-safe check)
 
     // Scratch buffers used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
@@ -249,7 +249,7 @@ public class ChangeQueueProcessor : IDisposable
             // SubjectPropertyChange contains object references (Source, boxed values) that must be released.
             Array.Clear(_flushDedupedBuffer, 0, _flushDedupedBuffer.Length);
 
-            if (_disposed)
+            if (Volatile.Read(ref _disposed) == 1)
             {
                 // Disposed while flushing - return buffer to pool now
                 ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
@@ -272,12 +272,12 @@ public class ChangeQueueProcessor : IDisposable
     /// </summary>
     public void Dispose()
     {
-        if (_disposed)
+        // Atomic check-and-set to prevent double-dispose race condition
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
         {
             return;
         }
 
-        _disposed = true;
         _subscription.Dispose();
 
         // Try to acquire gate once - if flush is in progress, it will handle cleanup when it sees _disposed
