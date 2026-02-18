@@ -20,7 +20,7 @@ namespace Namotion.Interceptor.WebSocket.Client;
 /// <summary>
 /// WebSocket client source that connects to a WebSocket server and synchronizes subjects.
 /// </summary>
-public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSource, ISubjectConnector, IFaultInjectable, IAsyncDisposable
+public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSource, IFaultInjectable, IAsyncDisposable
 {
     private const int SendBufferShrinkThreshold = 256 * 1024;
 
@@ -77,19 +77,21 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
         _isStarted = true;
 
-        var capturedSocket = _webSocket;
         return new ConnectionLifetime(async () =>
         {
-            if (capturedSocket?.State == WebSocketState.Open)
+            // Read the current socket (not a stale captured reference) so that
+            // after reconnection, we close the active connection.
+            var currentSocket = _webSocket;
+            if (currentSocket?.State == WebSocketState.Open)
             {
                 try
                 {
                     using var closeCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                    await capturedSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Client closing", closeCts.Token).ConfigureAwait(false);
+                    await currentSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Client closing", closeCts.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException)
                 {
-                    capturedSocket.Abort();
+                    currentSocket.Abort();
                 }
                 catch (Exception ex)
                 {
@@ -210,9 +212,13 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         }
         finally
         {
-            // Signal completion if receive loop wasn't started (to prevent ExecuteAsync from hanging)
             if (!receiveLoopStarted)
             {
+                // Dispose the socket to avoid holding resources during backoff delay
+                _webSocket?.Dispose();
+                _webSocket = null;
+
+                // Signal completion to prevent ExecuteAsync from hanging
                 _receiveLoopCompleted.TrySetResult();
             }
         }
@@ -346,7 +352,9 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
         try
         {
-            while (!cancellationToken.IsCancellationRequested && _webSocket?.State == WebSocketState.Open)
+            // Capture once — this receive loop is tied to a single connection.
+            var webSocket = _webSocket;
+            while (!cancellationToken.IsCancellationRequested && webSocket?.State == WebSocketState.Open)
             {
                 try
                 {
@@ -368,7 +376,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
                         // Use shared utility for fragmented message receive
                         var readResult = await WebSocketMessageReader.ReadMessageIntoStreamAsync(
-                            _webSocket, buffer, messageStream, _configuration.MaxMessageSize, linkedCts.Token).ConfigureAwait(false);
+                            webSocket, buffer, messageStream, _configuration.MaxMessageSize, linkedCts.Token).ConfigureAwait(false);
 
                         if (readResult.IsCloseMessage)
                         {

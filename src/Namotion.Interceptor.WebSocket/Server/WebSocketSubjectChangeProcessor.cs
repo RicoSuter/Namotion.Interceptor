@@ -3,7 +3,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Namotion.Interceptor.Connectors;
 
 namespace Namotion.Interceptor.WebSocket.Server;
 
@@ -38,6 +37,10 @@ public sealed class WebSocketSubjectChangeProcessor : BackgroundService
                 var processorTask = changeQueueProcessor.ProcessAsync(linkedCts.Token);
                 var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedCts.Token);
 
+                // When either task completes (normally or faulted), cancel the other
+                // to prevent Task.WhenAll from blocking forever.
+                var firstCompleted = await Task.WhenAny(processorTask, heartbeatTask).ConfigureAwait(false);
+                await linkedCts.CancelAsync().ConfigureAwait(false);
                 await Task.WhenAll(processorTask, heartbeatTask).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
