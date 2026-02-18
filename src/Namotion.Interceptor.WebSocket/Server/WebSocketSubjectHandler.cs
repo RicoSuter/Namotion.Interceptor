@@ -66,8 +66,9 @@ public sealed class WebSocketSubjectHandler
             {
                 await webSocket.CloseAsync(System.Net.WebSockets.WebSocketCloseStatus.PolicyViolation, "Server at capacity", closeCts.Token).ConfigureAwait(false);
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogWarning(ex, "Failed to close WebSocket gracefully, aborting");
                 webSocket.Abort();
             }
             return;
@@ -239,16 +240,15 @@ public sealed class WebSocketSubjectHandler
         }
     }
 
+    /// <remarks>
+    /// Must be called sequentially (not concurrently) to guarantee in-order
+    /// sequence delivery to clients. This is ensured by ChangeQueueProcessor
+    /// which calls BroadcastChangesAsync from a single flush thread.
+    /// </remarks>
     private async Task BroadcastUpdateAsync(SubjectUpdate update, CancellationToken cancellationToken)
     {
         if (_connections.IsEmpty) return;
 
-        // Incremented outside _applyUpdateLock intentionally. The per-connection
-        // welcomeSequence comparison in SendUpdateAsync handles the race where a
-        // broadcast's sequence was already included in a Welcome snapshot. Moving
-        // this inside _applyUpdateLock would risk deadlock since BroadcastChangesAsync
-        // is called from the flush timer while the lock may be held by
-        // ReceiveUpdatesAsync on another thread.
         var sequence = Interlocked.Increment(ref _sequence);
 
         var updatePayload = new UpdatePayload
@@ -402,6 +402,7 @@ public sealed class WebSocketSubjectHandler
     {
         try
         {
+            await connection.CloseAsync("Server shutting down").ConfigureAwait(false);
             await connection.DisposeAsync().ConfigureAwait(false);
         }
         catch (Exception ex)

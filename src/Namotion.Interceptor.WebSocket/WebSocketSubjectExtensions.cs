@@ -41,6 +41,7 @@ public static class WebSocketSubjectExtensions
             {
                 var configuration = new WebSocketServerConfiguration();
                 configure(configuration);
+                configuration.Validate();
                 return configuration;
             })
             .AddKeyedSingleton(key, (serviceProvider, _) => subjectSelector(serviceProvider))

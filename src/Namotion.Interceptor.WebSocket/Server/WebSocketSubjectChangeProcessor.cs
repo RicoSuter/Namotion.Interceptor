@@ -1,3 +1,4 @@
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
@@ -9,6 +10,7 @@ namespace Namotion.Interceptor.WebSocket.Server;
 /// <summary>
 /// Background service that processes subject changes and broadcasts them via WebSocket.
 /// Used in embedded mode where the WebSocket endpoint is mapped into an existing ASP.NET app.
+/// Automatically restarts on transient faults.
 /// </summary>
 public sealed class WebSocketSubjectChangeProcessor : BackgroundService
 {
@@ -25,26 +27,34 @@ public sealed class WebSocketSubjectChangeProcessor : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var changeQueueProcessor = new ChangeQueueProcessor(
-            source: _handler,
-            _handler.Context,
-            propertyFilter: _handler.IsPropertyIncluded,
-            writeHandler: _handler.BroadcastChangesAsync,
-            _handler.BufferTime,
-            _logger);
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                using var changeQueueProcessor = new ChangeQueueProcessor(
+                    source: _handler,
+                    _handler.Context,
+                    propertyFilter: _handler.IsPropertyIncluded,
+                    writeHandler: _handler.BroadcastChangesAsync,
+                    _handler.BufferTime,
+                    _logger);
 
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
-        var processorTask = changeQueueProcessor.ProcessAsync(linkedCts.Token);
-        var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedCts.Token);
+                var processorTask = changeQueueProcessor.ProcessAsync(linkedCts.Token);
+                var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedCts.Token);
 
-        var tasks = new[] { processorTask, heartbeatTask };
-        var completed = await Task.WhenAny(tasks).ConfigureAwait(false);
-
-        // Always cancel the other task when either completes (e.g., heartbeat loop
-        // returns immediately when disabled, or a task faults).
-        await linkedCts.CancelAsync().ConfigureAwait(false);
-
-        await Task.WhenAll(tasks).ConfigureAwait(false);
+                await Task.WhenAll(processorTask, heartbeatTask).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Change processor faulted, restarting in 5 seconds");
+                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
+            }
+        }
     }
 }
