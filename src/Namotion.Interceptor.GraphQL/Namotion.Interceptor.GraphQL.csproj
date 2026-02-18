@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Namotion.Interceptor.Tracking\Namotion.Interceptor.Tracking.csproj" />
+    <ProjectReference Include="..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
   </ItemGroup>
 
 </Project>
