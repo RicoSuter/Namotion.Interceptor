@@ -19,12 +19,12 @@ public class ServerWorker : BackgroundService
         // Each batch of 400 persons is updated in parallel
 
         var batchCount = 50;
-        var personsPerBatch = _root.Persons.Length / batchCount;
         var batchInterval = TimeSpan.FromMilliseconds(1000 / batchCount); // 20ms
 
         using var timer = new PeriodicTimer(batchInterval);
         var batchIndex = 0;
         var persons = _root.Persons;
+        var personsPerBatch = persons.Length / batchCount;
 
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
