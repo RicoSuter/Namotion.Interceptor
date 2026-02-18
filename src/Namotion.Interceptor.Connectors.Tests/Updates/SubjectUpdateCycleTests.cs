@@ -576,7 +576,7 @@ public class SubjectUpdateCycleTests
     }
 
     [Fact]
-    public void WhenNonRootSubjectsFormCycleInParentPath_ThenBuildPathToRootTerminates()
+    public async Task WhenNonRootSubjectsFormCycleInParentPath_ThenBuildPathToRootTerminates()
     {
         // Arrange - Create a cycle among non-root subjects where none are the root
         // root -> A (via Father), A -> B (via Father), B -> A (via Father) -- cycle!
@@ -602,8 +602,9 @@ public class SubjectUpdateCycleTests
             .CreatePartialUpdateFromChanges(root, changes, []);
 
         // Assert
-        var json = System.Text.Json.JsonSerializer.Serialize(partialUpdate);
+        var json = JsonSerializer.Serialize(partialUpdate);
         Assert.NotNull(json);
+        await Verify(partialUpdate).DisableDateCounting();
     }
 
     /// <summary>
