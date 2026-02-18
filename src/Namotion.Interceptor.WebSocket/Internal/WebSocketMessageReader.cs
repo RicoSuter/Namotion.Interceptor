@@ -14,7 +14,7 @@ namespace Namotion.Interceptor.WebSocket.Internal;
 internal static class WebSocketMessageReader
 {
     private const int DefaultBufferSize = 64 * 1024;
-    private static readonly RecyclableMemoryStreamManager MemoryStreamManager = new();
+    internal static readonly RecyclableMemoryStreamManager MemoryStreamManager = new();
 
     /// <summary>
     /// Result of a WebSocket message read operation. Must be disposed after use to return pooled resources.

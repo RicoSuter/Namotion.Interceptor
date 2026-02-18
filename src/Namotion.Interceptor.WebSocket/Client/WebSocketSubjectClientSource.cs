@@ -24,7 +24,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 {
     private const int SendBufferShrinkThreshold = 256 * 1024;
 
-    private static readonly RecyclableMemoryStreamManager MemoryStreamManager = new();
+    private static RecyclableMemoryStreamManager MemoryStreamManager => WebSocketMessageReader.MemoryStreamManager;
 
     private readonly IInterceptorSubject _subject;
     private readonly WebSocketClientConfiguration _configuration;
@@ -56,10 +56,14 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         WebSocketClientConfiguration configuration,
         ILogger<WebSocketSubjectClientSource> logger)
     {
-        _subject = subject ?? throw new ArgumentNullException(nameof(subject));
-        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _processors = configuration.Processors ?? [];
+        ArgumentNullException.ThrowIfNull(subject);
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        _subject = subject;
+        _configuration = configuration;
+        _logger = logger;
+        _processors = configuration.Processors;
         _ownership = new SourceOwnershipManager(this);
 
         configuration.Validate();
@@ -537,41 +541,12 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
                 _logger.LogWarning("WebSocket connection lost. Attempting reconnection in {Delay}...", reconnectDelay);
 
-                // Start buffering changes during reconnection
                 _propertyWriter?.StartBuffering();
 
-                // Wait before reconnecting
                 await Task.Delay(reconnectDelay, linkedToken).ConfigureAwait(false);
 
-                try
-                {
-                    await ConnectAsync(stoppingToken).ConfigureAwait(false);
-
-                    _logger.LogInformation("WebSocket reconnected successfully");
-
-                    // LoadInitialStateAndResumeAsync will call LoadInitialStateAsync which applies the initial state,
-                    // then replays any buffered updates received during reconnection
-                    if (_propertyWriter is not null)
-                    {
-                        await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
-                    }
-
-                    // Success - reset reconnect delay
-                    reconnectDelay = _configuration.ReconnectDelay;
-                }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to reconnect to WebSocket server");
-
-                    // Exponential backoff with equal jitter (0.5 to 1.0) to decorrelate reconnection attempts
-                    var jitter = Random.Shared.NextDouble() * 0.5 + 0.5;
-                    reconnectDelay = TimeSpan.FromMilliseconds(
-                        Math.Min(reconnectDelay.TotalMilliseconds * 2 * jitter, maxDelay.TotalMilliseconds));
-                }
+                reconnectDelay = await ReconnectAndResumeAsync(
+                    "WebSocket reconnected successfully", reconnectDelay, maxDelay, stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -582,30 +557,10 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                 _logger.LogWarning("WebSocket client force-killed. Restarting...");
                 _webSocket?.Abort();
 
-                // Start buffering during force-kill recovery
                 _propertyWriter?.StartBuffering();
 
-                try
-                {
-                    await ConnectAsync(stoppingToken).ConfigureAwait(false);
-
-                    _logger.LogInformation("WebSocket reconnected after force-kill");
-
-                    if (_propertyWriter is not null)
-                    {
-                        await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
-                    }
-
-                    reconnectDelay = _configuration.ReconnectDelay;
-                }
-                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to reconnect after force-kill");
-                }
+                reconnectDelay = await ReconnectAndResumeAsync(
+                    "WebSocket reconnected after force-kill", reconnectDelay, maxDelay, stoppingToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -622,6 +577,37 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         if (_receiveCts is not null)
         {
             await _receiveCts.CancelAsync().ConfigureAwait(false);
+        }
+    }
+
+    private async Task<TimeSpan> ReconnectAndResumeAsync(
+        string successMessage, TimeSpan reconnectDelay, TimeSpan maxDelay, CancellationToken stoppingToken)
+    {
+        try
+        {
+            await ConnectAsync(stoppingToken).ConfigureAwait(false);
+
+            _logger.LogInformation(successMessage);
+
+            if (_propertyWriter is not null)
+            {
+                await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
+            }
+
+            return _configuration.ReconnectDelay;
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to reconnect to WebSocket server");
+
+            // Exponential backoff with equal jitter (0.5 to 1.0) to decorrelate reconnection attempts
+            var jitter = Random.Shared.NextDouble() * 0.5 + 0.5;
+            return TimeSpan.FromMilliseconds(
+                Math.Min(reconnectDelay.TotalMilliseconds * 2 * jitter, maxDelay.TotalMilliseconds));
         }
     }
 

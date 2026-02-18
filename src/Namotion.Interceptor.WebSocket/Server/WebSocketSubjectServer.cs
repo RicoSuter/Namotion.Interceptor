@@ -90,22 +90,12 @@ public sealed class WebSocketSubjectServer : BackgroundService, ISubjectConnecto
                 // Build a new WebApplication each iteration because IHost doesn't support
                 // Start/Stop cycles. On Kill, the entire Kestrel instance is torn down and
                 // rebuilt, matching real crash behavior (like MQTT restarts its broker).
-                _app = BuildWebApplication(linkedToken);
+                _app = BuildWebApplication(linkedToken, out var listenUrl);
 
-                var url = _configuration.BindAddress is not null
-                    ? $"http://{_configuration.BindAddress}:{_configuration.Port}"
-                    : $"http://localhost:{_configuration.Port}";
-
-                _logger.LogInformation("WebSocket server starting on {Url}{Path}", url, _configuration.Path);
+                _logger.LogInformation("WebSocket server starting on {Url}{Path}", listenUrl, _configuration.Path);
                 await _app.StartAsync(stoppingToken).ConfigureAwait(false);
 
-                using var changeQueueProcessor = new ChangeQueueProcessor(
-                    source: _handler,
-                    _handler.Context,
-                    propertyFilter: _handler.IsPropertyIncluded,
-                    writeHandler: _handler.BroadcastChangesAsync,
-                    _handler.BufferTime,
-                    _logger);
+                using var changeQueueProcessor = _handler.CreateChangeQueueProcessor(_logger);
 
                 var processorTask = changeQueueProcessor.ProcessAsync(linkedToken);
                 var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedToken);
@@ -173,15 +163,15 @@ public sealed class WebSocketSubjectServer : BackgroundService, ISubjectConnecto
         }
     }
 
-    private WebApplication BuildWebApplication(CancellationToken requestHandlingToken)
+    private WebApplication BuildWebApplication(CancellationToken requestHandlingToken, out string listenUrl)
     {
         var builder = WebApplication.CreateSlimBuilder();
 
-        var url = _configuration.BindAddress is not null
+        listenUrl = _configuration.BindAddress is not null
             ? $"http://{_configuration.BindAddress}:{_configuration.Port}"
             : $"http://localhost:{_configuration.Port}";
 
-        builder.WebHost.UseUrls(url);
+        builder.WebHost.UseUrls(listenUrl);
         builder.Logging.SetMinimumLevel(LogLevel.Warning);
 
         var app = builder.Build();
