@@ -1,5 +1,4 @@
 using System.Collections;
-using System.Globalization;
 using System.Text.Json;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -222,19 +221,7 @@ internal static class SubjectItemsUpdateApplier
     };
 
     private static object ConvertDictionaryKey(object key, Type targetKeyType)
-    {
-        if (targetKeyType.IsInstanceOfType(key))
-            return key;
-
-        if (key is JsonElement jsonElement)
-            return jsonElement.Deserialize(targetKeyType)
-                ?? throw new InvalidOperationException($"Cannot convert null JSON element to dictionary key type '{targetKeyType.Name}'.");
-
-        if (targetKeyType.IsEnum)
-            return Enum.Parse(targetKeyType, Convert.ToString(key, CultureInfo.InvariantCulture)!, ignoreCase: true);
-
-        return Convert.ChangeType(key, targetKeyType, CultureInfo.InvariantCulture);
-    }
+        => DictionaryKeyConverter.Convert(key, targetKeyType);
 
     private static IInterceptorSubject CreateAndApplyItem(
         IInterceptorSubject parent,
