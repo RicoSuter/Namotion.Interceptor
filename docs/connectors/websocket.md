@@ -442,18 +442,6 @@ Tiered error handling preserves connections when possible:
 
 Unlike MQTT and OPC UA connectors which maintain per-property topic/node caches that require cleanup on subject detach (see [Subject Lifecycle Tracking](../tracking.md#subject-lifecycle-tracking)), the WebSocket connector synchronizes the entire subject graph as a unit. There are no per-property caches to clean up — the server builds a fresh snapshot for each new client connection, and broadcast updates are derived from the change tracking layer. Connection-level resources (WebSocket, send lock, cancellation tokens) are cleaned up when a client disconnects or the server stops.
 
-## Target Use Cases
-
-- **Industrial / SCADA**: High reliability, structured data, audit trails
-- **Digital Twin**: Multiple nodes co-authoring state, high update frequency
-- **IoT / Home Automation**: Many devices, frequent small updates, occasional disconnections
-
-## Topology Support
-
-- **Single server, many clients**: Primary use case
-- **Hierarchical**: Edge servers aggregate local devices, sync upstream to central server
-- **Peer-to-peer mesh**: Future extensibility
-
 ## Known Limitations
 
 - **Snapshot lock during client connection**: When a new client connects, the server builds a full state snapshot under the same lock used for applying updates. This blocks incoming updates for the duration of the snapshot, which is proportional to graph size. This is acceptable because new-client connections are infrequent relative to the update rate, but could become a concern with very large subject graphs and frequent client reconnections.

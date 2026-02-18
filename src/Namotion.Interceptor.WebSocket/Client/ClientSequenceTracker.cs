@@ -27,15 +27,9 @@ internal sealed class ClientSequenceTracker
     /// Returns true if valid (no gap), false if a gap is detected.
     /// When valid and sequence is non-zero, advances the tracker.
     /// </summary>
-    /// <param name="sequence">The sequence from the Update message. Zero means unassigned (backward compatibility).</param>
+    /// <param name="sequence">The sequence from the Update message.</param>
     public bool IsUpdateValid(long sequence)
     {
-        // Backward compatibility: seq == 0 means the server doesn't assign sequences
-        if (sequence == 0)
-        {
-            return true;
-        }
-
         if (sequence != _expectedNextSequence)
         {
             return false;

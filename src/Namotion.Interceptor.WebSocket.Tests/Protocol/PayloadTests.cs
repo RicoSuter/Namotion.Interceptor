@@ -10,8 +10,10 @@ public class PayloadTests
     [Fact]
     public void HelloPayload_ShouldHaveDefaultValues()
     {
+        // Act
         var payload = new HelloPayload();
 
+        // Assert
         Assert.Equal(1, payload.Version);
         Assert.Equal(WebSocketFormat.Json, payload.Format);
     }
@@ -19,8 +21,10 @@ public class PayloadTests
     [Fact]
     public void WelcomePayload_ShouldHaveDefaultValues()
     {
+        // Act
         var payload = new WelcomePayload();
 
+        // Assert
         Assert.Equal(1, payload.Version);
         Assert.Equal(WebSocketFormat.Json, payload.Format);
         Assert.Null(payload.State);
@@ -29,28 +33,34 @@ public class PayloadTests
     [Fact]
     public void WelcomePayload_ShouldDefaultSequenceToZero()
     {
+        // Act
         var payload = new WelcomePayload();
 
+        // Assert
         Assert.Equal(0L, payload.Sequence);
     }
 
     [Fact]
     public void HeartbeatPayload_ShouldHaveDefaultValues()
     {
+        // Act
         var payload = new HeartbeatPayload();
 
+        // Assert
         Assert.Equal(0L, payload.Sequence);
     }
 
     [Fact]
     public void MessageType_ShouldIncludeHeartbeat()
     {
+        // Act & Assert
         Assert.Equal(4, (int)MessageType.Heartbeat);
     }
 
     [Fact]
     public void ErrorPayload_ShouldSupportMultipleFailures()
     {
+        // Act
         var payload = new ErrorPayload
         {
             Code = 100,
@@ -62,6 +72,7 @@ public class PayloadTests
             ]
         };
 
+        // Assert
         Assert.Equal(100, payload.Code);
         Assert.Equal(2, payload.Failures!.Count);
         Assert.Equal("Motor/Speed", payload.Failures[0].Path);
@@ -70,6 +81,7 @@ public class PayloadTests
     [Fact]
     public void UpdatePayload_ShouldInheritFromSubjectUpdate()
     {
+        // Act
         var payload = new UpdatePayload
         {
             Sequence = 42,
@@ -77,6 +89,7 @@ public class PayloadTests
             Subjects = { ["1"] = new Dictionary<string, SubjectPropertyUpdate>() }
         };
 
+        // Assert
         Assert.Equal(42, payload.Sequence);
         Assert.Equal("1", payload.Root);
         Assert.IsAssignableFrom<SubjectUpdate>(payload);
@@ -85,7 +98,10 @@ public class PayloadTests
     [Fact]
     public void UpdatePayload_SequenceShouldDefaultToNull()
     {
+        // Act
         var payload = new UpdatePayload();
+
+        // Assert
         Assert.Null(payload.Sequence);
     }
 }

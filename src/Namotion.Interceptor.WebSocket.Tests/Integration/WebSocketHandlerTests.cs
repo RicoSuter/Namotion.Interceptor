@@ -23,6 +23,7 @@ public class WebSocketHandlerTests
     [Fact]
     public async Task EmbeddedServer_ServerWriteProperty_ShouldUpdateClient()
     {
+        // Arrange
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketEmbeddedTestServer<TestRoot>(_output);
         await using var client = new WebSocketTestClient<TestRoot>(_output);
@@ -38,9 +39,10 @@ public class WebSocketHandlerTests
             () => client.Root!.Name == "Initial",
             message: "Client should receive initial state");
 
-        // Server updates property
+        // Act
         server.Root!.Name = "Updated from Server";
 
+        // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => client.Root!.Name == "Updated from Server",
             message: "Client should receive server update");
@@ -49,6 +51,7 @@ public class WebSocketHandlerTests
     [Fact]
     public async Task EmbeddedServer_ClientWriteProperty_ShouldUpdateServer()
     {
+        // Arrange
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketEmbeddedTestServer<TestRoot>(_output);
         await using var client = new WebSocketTestClient<TestRoot>(_output);
@@ -60,14 +63,14 @@ public class WebSocketHandlerTests
 
         await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
 
-        // Wait for connection to be established
         await AsyncTestHelpers.WaitUntilAsync(
             () => client.Root!.Name == "Initial",
             message: "Client should receive initial state");
 
-        // Client updates property
+        // Act
         client.Root!.Name = "Updated from Client";
 
+        // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => server.Root!.Name == "Updated from Client",
             message: "Server should receive client update");
@@ -76,6 +79,7 @@ public class WebSocketHandlerTests
     [Fact]
     public async Task EmbeddedServer_NumericProperty_ShouldSyncBidirectionally()
     {
+        // Arrange
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketEmbeddedTestServer<TestRoot>(_output);
         await using var client = new WebSocketTestClient<TestRoot>(_output);
@@ -83,14 +87,18 @@ public class WebSocketHandlerTests
         await server.StartAsync(context => new TestRoot(context), port: portLease.Port);
         await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
 
-        // Server updates
+        // Act - Server updates
         server.Root!.Number = 123.45m;
+
+        // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => client.Root!.Number == 123.45m,
             message: "Client should receive server's number update");
 
-        // Client updates
+        // Act - Client updates
         client.Root!.Number = 678.90m;
+
+        // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => server.Root.Number == 678.90m,
             message: "Server should receive client's number update");
@@ -99,6 +107,7 @@ public class WebSocketHandlerTests
     [Fact]
     public async Task EmbeddedServer_MultipleClients_ShouldAllReceiveUpdates()
     {
+        // Arrange
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketEmbeddedTestServer<TestRoot>(_output);
         await using var client1 = new WebSocketTestClient<TestRoot>(_output);
@@ -108,8 +117,10 @@ public class WebSocketHandlerTests
         await client1.StartAsync(context => new TestRoot(context), port: portLease.Port);
         await client2.StartAsync(context => new TestRoot(context), port: portLease.Port);
 
+        // Act
         server.Root!.Name = "Broadcast Test";
 
+        // Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => client1.Root!.Name == "Broadcast Test" &&
                   client2.Root!.Name == "Broadcast Test",
@@ -119,6 +130,7 @@ public class WebSocketHandlerTests
     [Fact]
     public async Task EmbeddedServer_WithCollectionItems_ShouldSyncCollection()
     {
+        // Arrange
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketEmbeddedTestServer<TestRoot>(_output);
         await using var client = new WebSocketTestClient<TestRoot>(_output);
@@ -139,7 +151,7 @@ public class WebSocketHandlerTests
 
         await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
 
-        // Wait for initial sync
+        // Act & Assert
         await AsyncTestHelpers.WaitUntilAsync(
             () => client.Root!.Items.Length == 2,
             timeout: TimeSpan.FromSeconds(10),
@@ -154,6 +166,7 @@ public class WebSocketHandlerTests
     [Fact]
     public async Task EmbeddedServer_Restart_ClientRecovers()
     {
+        // Arrange
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketEmbeddedTestServer<TestRoot>(_output);
         await using var client = new WebSocketTestClient<TestRoot>(_output);
@@ -171,15 +184,14 @@ public class WebSocketHandlerTests
 
         _output.WriteLine("Initial sync verified");
 
-        // Restart server
+        // Act - Restart server
         _output.WriteLine("Restarting embedded server...");
         await server.StopAsync();
         await server.RestartAsync();
 
-        // Update server state after restart
         server.Root!.Name = "AfterRestart";
 
-        // Wait for client to reconnect and sync
+        // Assert - Wait for client to reconnect and sync
         await AsyncTestHelpers.WaitUntilAsync(
             () => client.Root!.Name == "AfterRestart",
             timeout: TimeSpan.FromSeconds(30),
@@ -191,12 +203,14 @@ public class WebSocketHandlerTests
     [Fact]
     public async Task EmbeddedServer_Handler_IsAccessible()
     {
+        // Arrange
         using var portLease = await WebSocketTestPortPool.AcquireAsync();
         await using var server = new WebSocketEmbeddedTestServer<TestRoot>(_output);
 
+        // Act
         await server.StartAsync(context => new TestRoot(context), port: portLease.Port);
 
-        // Verify handler is accessible
+        // Assert
         Assert.NotNull(server.Handler);
     }
 }
