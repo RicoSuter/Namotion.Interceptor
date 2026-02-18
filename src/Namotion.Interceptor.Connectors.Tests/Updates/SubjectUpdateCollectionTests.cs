@@ -551,4 +551,73 @@ public class SubjectUpdateCollectionTests
         Assert.Equal("B", target.Items[1].Name);
         Assert.Equal("D", target.Items[2].Name);
     }
+
+    [Fact]
+    public async Task WhenCollectionSetToNull_ThenCompleteUpdateHasValueKindWithNull()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var node = new CycleTestNode(context) { Name = "Root", Items = null! };
+
+        // Act
+        var update = SubjectUpdate.CreateCompleteUpdate(node, []);
+
+        // Assert - Items should be Value kind with null, not Collection kind
+        Assert.NotNull(update.Subjects);
+        Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
+        Assert.True(rootProperties!.TryGetValue("Items", out var itemsUpdate));
+        Assert.Equal(SubjectPropertyUpdateKind.Value, itemsUpdate!.Kind);
+        Assert.Null(itemsUpdate.Value);
+
+        await Verify(update);
+    }
+
+    [Fact]
+    public void WhenCollectionSetToNull_ThenPartialUpdateHasValueKindWithNull()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var child1 = new CycleTestNode { Name = "Child1" };
+        var node = new CycleTestNode(context) { Name = "Root", Items = [child1] };
+
+        var changes = new List<SubjectPropertyChange>();
+        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
+
+        // Act - set collection to null
+        node.Items = null!;
+
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
+
+        // Assert - Items should be Value kind with null
+        Assert.NotNull(update.Subjects);
+        Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
+        Assert.True(rootProperties!.TryGetValue("Items", out var itemsUpdate));
+        Assert.Equal(SubjectPropertyUpdateKind.Value, itemsUpdate!.Kind);
+        Assert.Null(itemsUpdate.Value);
+    }
+
+    [Fact]
+    public void WhenNullCollectionApplied_ThenTargetCollectionBecomesNull()
+    {
+        // Arrange - create source with null collection
+        var sourceContext = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var child1 = new CycleTestNode { Name = "Child1" };
+        var source = new CycleTestNode(sourceContext) { Name = "Root", Items = [child1] };
+
+        var changes = new List<SubjectPropertyChange>();
+        sourceContext.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
+
+        source.Items = null!;
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
+
+        // Create target with populated collection
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new CycleTestNode(targetContext) { Name = "Root", Items = [new CycleTestNode { Name = "Child1" }] };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert
+        Assert.Null(target.Items);
+    }
 }

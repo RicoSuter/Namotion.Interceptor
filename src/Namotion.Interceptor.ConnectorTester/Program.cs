@@ -17,6 +17,7 @@ using Namotion.Interceptor.ConnectorTester.Engine;
 using Namotion.Interceptor.ConnectorTester.Logging;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.WebSocket;
 
 // Tick-precision timestamp serializers (not default Unix milliseconds) to ensure
 // exact timestamp convergence in snapshot comparison.
@@ -137,6 +138,17 @@ switch (configuration.Connector.ToLowerInvariant())
                 SourceTimestampDeserializer = DeserializeTickTimestamp
             });
         break;
+
+    case "websocket":
+        builder.Services.AddSingleton(serverRoot);
+        builder.Services.AddWebSocketSubjectServer(
+            _ => serverRoot,
+            config =>
+            {
+                config.Port = serverPort;
+                config.PathProvider = new AttributeBasedPathProvider("ws");
+            });
+        break;
 }
 
 // --- Client Setup ---
@@ -210,6 +222,18 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
                     HealthCheckInterval = TimeSpan.FromSeconds(5),
                     CircuitBreakerFailureThreshold = 3,
                     CircuitBreakerCooldown = TimeSpan.FromSeconds(10),
+                });
+            break;
+
+        case "websocket":
+            builder.Services.AddWebSocketSubjectClientSource(
+                _ => clientRoot,
+                config =>
+                {
+                    config.ServerUri = new Uri($"ws://localhost:{serverPort}/ws");
+                    config.ReconnectDelay = TimeSpan.FromSeconds(1);
+                    config.MaxReconnectDelay = TimeSpan.FromSeconds(10);
+                    config.PathProvider = new AttributeBasedPathProvider("ws");
                 });
             break;
     }

@@ -265,3 +265,39 @@ The library includes optimizations:
 - Object pooling for change buffers and user property lists
 - Fast path for retained message handling
 - Efficient topic-to-property caching with lazy cleanup
+
+## Benchmark Results
+
+MQTTnet has currently serious performance issues:
+
+Intel(R) Core(TM) Ultra 7 258V
+
+```
+Server Benchmark - 1 minute - [2026-02-18 22:15:10.262]
+
+Total received changes:          206800
+Total published changes:         1196400
+Process memory:                  329.44 MB (161.17 MB in .NET heap)
+Avg allocations over last 60s:   86.49 MB/s
+
+Metric                               Avg        P50        P90        P95        P99      P99.9        Max        Min     StdDev      Count
+-------------------------------------------------------------------------------------------------------------------------------------------
+Received (changes/s)             3451.56    3519.77    3768.97    3815.79    3861.35    3861.35    3861.35    2057.52     314.58          -
+Processing latency (ms)             0.04       0.01       0.03       0.05       0.47       1.38      24.47       0.00       0.39     206800
+End-to-end latency (ms)          3468.57    3510.97    5277.64    5530.69    5888.33    6458.14    6555.45    1058.94    1331.77     206800
+```
+
+```
+Client Benchmark - 1 minute - [2026-02-18 22:15:13.630]
+
+Total received changes:          1402251
+Total published changes:         1183600
+Process memory:                  549.1 MB (314.15 MB in .NET heap)
+Avg allocations over last 60s:   63.86 MB/s
+
+Metric                               Avg        P50        P90        P95        P99      P99.9        Max        Min     StdDev      Count
+-------------------------------------------------------------------------------------------------------------------------------------------
+Received (changes/s)            23375.11   23411.68   24244.79   24403.03   24940.71   24940.71   24940.71   20190.70     817.26          -
+Processing latency (ms)             0.06       0.01       0.04       0.26       0.85       2.12      38.53       0.00       0.55    1402251
+End-to-end latency (ms)           544.87      42.58    2581.02    4165.70    5476.68    6132.41    6682.53       4.70    1315.95    1402251
+```

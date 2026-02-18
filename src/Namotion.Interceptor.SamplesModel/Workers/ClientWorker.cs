@@ -11,14 +11,14 @@ public class ClientWorker : BackgroundService
     {
         _root = root;
     }
-    
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         // Expected updates/second = number of persons (20k) = 1.2M per minute
         // Updates are distributed across 50 batches per second (every 20ms)
+        // Each batch of 400 persons is updated in parallel
 
         var batchCount = 50;
-        var personsPerBatch = _root.Persons.Length / batchCount;
         var batchInterval = TimeSpan.FromMilliseconds(1000 / batchCount); // 20ms
 
         using var timer = new PeriodicTimer(batchInterval);
@@ -26,15 +26,20 @@ public class ClientWorker : BackgroundService
 
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
-            var startIndex = batchIndex * personsPerBatch;
-            var endIndex = (batchIndex == batchCount - 1)
-                ? _root.Persons.Length  // Last batch gets any remainder
-                : startIndex + personsPerBatch;
+            var persons = _root.Persons; // Read each tick (populated by Welcome message)
+            if (persons.Length == 0)
+                continue;
 
-            for (var i = startIndex; i < endIndex; i++)
+            var actualPersonsPerBatch = persons.Length / batchCount;
+            var startIndex = batchIndex * actualPersonsPerBatch;
+            var endIndex = (batchIndex == batchCount - 1)
+                ? persons.Length  // Last batch gets any remainder
+                : startIndex + actualPersonsPerBatch;
+
+            Parallel.For(startIndex, endIndex, i =>
             {
-                _root.Persons[i].LastName = Stopwatch.GetTimestamp().ToString();
-            }
+                persons[i].LastName = Stopwatch.GetTimestamp().ToString();
+            });
 
             batchIndex = (batchIndex + 1) % batchCount;
         }

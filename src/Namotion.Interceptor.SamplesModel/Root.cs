@@ -8,14 +8,17 @@ public partial class Root
 {
     [Path("opc", "Name")]
     [Path("mqtt", "Name")]
+    [Path("ws", "Name")]
     public partial string Name { get; set; }
 
     [Path("opc", "Number")]
     [Path("mqtt", "Number")]
+    [Path("ws", "Number")]
     public partial decimal Number { get; set; }
 
     [Path("opc", "Persons")]
     [Path("mqtt", "Persons")]
+    [Path("ws", "Persons")]
     public partial Person[] Persons { get; set; }
 
     public Root()

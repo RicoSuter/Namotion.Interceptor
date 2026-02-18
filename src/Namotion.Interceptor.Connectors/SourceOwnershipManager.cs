@@ -22,7 +22,7 @@ public class SourceOwnershipManager : IDisposable
     private readonly Lock _lock = new();
     private readonly LifecycleInterceptor _lifecycle;
 
-    private bool _disposed;
+    private int _disposed;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SourceOwnershipManager"/> class.
@@ -126,12 +126,10 @@ public class SourceOwnershipManager : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        if (_disposed)
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
         {
             return;
         }
-
-        _disposed = true;
 
         _lifecycle.SubjectDetaching -= OnSubjectDetaching;
 

@@ -1,5 +1,6 @@
 using System.Collections;
 using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor.Connectors.Updates.Internal;
 
 namespace Namotion.Interceptor.Connectors;
 
@@ -60,8 +61,7 @@ public class DefaultSubjectFactory : ISubjectFactory
         var dictionary = (IDictionary)Activator.CreateInstance(dictionaryType)!;
         foreach (var entry in entries)
         {
-            // Convert key to the target key type if needed
-            var key = Convert.ChangeType(entry.Key, keyType);
+            var key = DictionaryKeyConverter.Convert(entry.Key, keyType);
             dictionary.Add(key, entry.Value);
         }
 
