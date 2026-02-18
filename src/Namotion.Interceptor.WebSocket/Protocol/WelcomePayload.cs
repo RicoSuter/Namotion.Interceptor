@@ -10,7 +10,7 @@ public class WelcomePayload
     /// <summary>
     /// Protocol version.
     /// </summary>
-    public int Version { get; set; } = 1;
+    public int Version { get; set; } = WebSocketProtocol.Version;
 
     /// <summary>
     /// Negotiated serialization format.

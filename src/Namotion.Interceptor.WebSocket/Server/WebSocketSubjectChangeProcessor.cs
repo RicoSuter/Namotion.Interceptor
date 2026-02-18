@@ -40,10 +40,10 @@ public sealed class WebSocketSubjectChangeProcessor : BackgroundService
 
         var tasks = new[] { processorTask, heartbeatTask };
         var completed = await Task.WhenAny(tasks).ConfigureAwait(false);
-        if (completed.IsFaulted)
-        {
-            await linkedCts.CancelAsync().ConfigureAwait(false);
-        }
+
+        // Always cancel the other task when either completes (e.g., heartbeat loop
+        // returns immediately when disabled, or a task faults).
+        await linkedCts.CancelAsync().ConfigureAwait(false);
 
         await Task.WhenAll(tasks).ConfigureAwait(false);
     }

@@ -6,9 +6,9 @@ namespace Namotion.Interceptor.WebSocket.Protocol;
 public class HelloPayload
 {
     /// <summary>
-    /// Protocol version. Default is 1.
+    /// Protocol version.
     /// </summary>
-    public int Version { get; set; } = 1;
+    public int Version { get; set; } = WebSocketProtocol.Version;
 
     /// <summary>
     /// Preferred serialization format. Reserved for future format negotiation.

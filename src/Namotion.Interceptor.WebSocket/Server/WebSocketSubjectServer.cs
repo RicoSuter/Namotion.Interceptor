@@ -30,8 +30,14 @@ public sealed class WebSocketSubjectServer : BackgroundService, ISubjectConnecto
     /// <inheritdoc />
     public IInterceptorSubject RootSubject { get; }
 
+    /// <summary>
+    /// Gets the number of currently connected WebSocket clients.
+    /// </summary>
     public int ConnectionCount => _handler.ConnectionCount;
 
+    /// <summary>
+    /// Gets the current broadcast sequence number.
+    /// </summary>
     public long CurrentSequence => _handler.CurrentSequence;
 
     public WebSocketSubjectServer(

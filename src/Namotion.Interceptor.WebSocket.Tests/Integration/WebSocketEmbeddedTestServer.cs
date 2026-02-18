@@ -1,8 +1,10 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Registry;
@@ -77,10 +79,16 @@ public class WebSocketEmbeddedTestServer<TRoot> : IAsyncDisposable
         _app.UseWebSockets();
         _app.MapWebSocketSubjectHandler("/ws");
 
+        var lifetime = _app.Services.GetRequiredService<IHostApplicationLifetime>();
+        var readyTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        lifetime.ApplicationStarted.Register(() => readyTcs.TrySetResult());
+
         await _app.StartAsync();
 
         // Wait for server to be ready
-        await Task.Delay(500);
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        timeoutCts.Token.Register(() => readyTcs.TrySetCanceled());
+        await readyTcs.Task;
     }
 
     public async Task StopAsync()
