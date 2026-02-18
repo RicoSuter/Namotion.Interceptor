@@ -20,7 +20,7 @@ namespace Namotion.Interceptor.WebSocket.Server;
 /// </summary>
 public sealed class WebSocketSubjectHandler
 {
-    private const int SupportedProtocolVersion = 1;
+    private const int SupportedProtocolVersion = WebSocketProtocol.Version;
 
     private int _connectionCount;
     private long _sequence;
@@ -243,6 +243,12 @@ public sealed class WebSocketSubjectHandler
     {
         if (_connections.IsEmpty) return;
 
+        // Incremented outside _applyUpdateLock intentionally. The per-connection
+        // welcomeSequence comparison in SendUpdateAsync handles the race where a
+        // broadcast's sequence was already included in a Welcome snapshot. Moving
+        // this inside _applyUpdateLock would risk deadlock since BroadcastChangesAsync
+        // is called from the flush timer while the lock may be held by
+        // ReceiveUpdatesAsync on another thread.
         var sequence = Interlocked.Increment(ref _sequence);
 
         var updatePayload = new UpdatePayload

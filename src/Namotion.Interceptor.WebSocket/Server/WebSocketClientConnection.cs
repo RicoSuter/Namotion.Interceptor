@@ -104,7 +104,6 @@ internal sealed class WebSocketClientConnection : IAsyncDisposable
         {
             var welcome = new WelcomePayload
             {
-                Version = 1,
                 Format = WebSocketFormat.Json,
                 State = initialState,
                 Sequence = sequence

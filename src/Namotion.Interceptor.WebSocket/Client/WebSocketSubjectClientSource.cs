@@ -22,6 +22,8 @@ namespace Namotion.Interceptor.WebSocket.Client;
 /// </summary>
 public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSource, ISubjectConnector, IFaultInjectable, IAsyncDisposable
 {
+    private const int SendBufferShrinkThreshold = 256 * 1024;
+
     private static readonly RecyclableMemoryStreamManager MemoryStreamManager = new();
 
     private readonly IInterceptorSubject _subject;
@@ -29,7 +31,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     private readonly ILogger _logger;
     private readonly ISubjectUpdateProcessor[] _processors;
     private readonly IWebSocketSerializer _serializer = JsonWebSocketSerializer.Instance;
-    private readonly ArrayBufferWriter<byte> _sendBuffer = new(4096);
+    private ArrayBufferWriter<byte> _sendBuffer = new(4096);
 
     private volatile ClientWebSocket? _webSocket;
     private volatile SubjectPropertyWriter? _propertyWriter;
@@ -151,7 +153,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             await _webSocket.ConnectAsync(_configuration.ServerUri!, connectCts.Token).ConfigureAwait(false);
 
             // Send Hello using reusable buffer
-            var hello = new HelloPayload { Version = 1, Format = WebSocketFormat.Json };
+            var hello = new HelloPayload { Format = WebSocketFormat.Json };
             _sendBuffer.Clear();
             _serializer.SerializeMessageTo(_sendBuffer, MessageType.Hello, hello);
             await _webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
@@ -188,9 +190,9 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             }
 
             var welcome = _serializer.Deserialize<WelcomePayload>(readResult.MessageBytes.Span.Slice(payloadStart, payloadLength));
-            if (welcome.Version != 1)
+            if (welcome.Version != WebSocketProtocol.Version)
             {
-                throw new InvalidOperationException($"Unsupported server protocol version {welcome.Version}. Client supports version 1.");
+                throw new InvalidOperationException($"Unsupported server protocol version {welcome.Version}. Client supports version {WebSocketProtocol.Version}.");
             }
 
             _initialState = welcome.State;
@@ -306,6 +308,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             _logger.LogDebug("Sending {ByteCount} bytes ({SubjectCount} subjects) to server",
                 _sendBuffer.WrittenCount, update.Subjects.Count);
             await webSocket.SendAsync(_sendBuffer.WrittenMemory, WebSocketMessageType.Text, true, cancellationToken).ConfigureAwait(false);
+            MaybeShrinkSendBuffer();
             _logger.LogDebug("Sent update successfully");
             return WriteResult.Success;
         }
@@ -671,6 +674,14 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         _connectionLock.Dispose();
 
         Dispose();
+    }
+
+    private void MaybeShrinkSendBuffer()
+    {
+        if (_sendBuffer is { Capacity: > SendBufferShrinkThreshold, WrittenCount: < SendBufferShrinkThreshold / 4 })
+        {
+            _sendBuffer = new ArrayBufferWriter<byte>(4096);
+        }
     }
 
     private sealed class ConnectionLifetime(Func<Task> onDispose) : IDisposable, IAsyncDisposable

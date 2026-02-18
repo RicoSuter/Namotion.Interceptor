@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -15,7 +16,6 @@ namespace Namotion.Interceptor.WebSocket.Tests.Integration;
 public class WebSocketTestServer<TRoot> : IAsyncDisposable
     where TRoot : class, IInterceptorSubject
 {
-    private readonly ITestOutputHelper _output;
     private IHost? _host;
 
     private Func<IInterceptorSubjectContext, TRoot>? _createRoot;
@@ -28,7 +28,6 @@ public class WebSocketTestServer<TRoot> : IAsyncDisposable
 
     public WebSocketTestServer(ITestOutputHelper output)
     {
-        _output = output;
     }
 
     public async Task StartAsync(
@@ -77,10 +76,16 @@ public class WebSocketTestServer<TRoot> : IAsyncDisposable
             .OfType<WebSocketSubjectServer>()
             .FirstOrDefault();
 
+        var lifetime = _host.Services.GetRequiredService<IHostApplicationLifetime>();
+        var readyTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        lifetime.ApplicationStarted.Register(() => readyTcs.TrySetResult());
+
         await _host.StartAsync();
 
         // Wait for server to be ready
-        await Task.Delay(500);
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        timeoutCts.Token.Register(() => readyTcs.TrySetCanceled());
+        await readyTcs.Task;
     }
 
     public async Task StopAsync()

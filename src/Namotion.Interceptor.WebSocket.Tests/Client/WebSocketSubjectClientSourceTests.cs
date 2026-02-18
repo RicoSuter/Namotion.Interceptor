@@ -18,7 +18,8 @@ public class WebSocketSubjectClientSourceTests
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
-            .WithRegistry();
+            .WithRegistry()
+            .WithLifecycle();
 
         var subject = new TestRoot(context);
         var configuration = new WebSocketClientConfiguration
@@ -80,7 +81,8 @@ public class WebSocketSubjectClientSourceTests
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
-            .WithRegistry();
+            .WithRegistry()
+            .WithLifecycle();
 
         var subject = new TestRoot(context);
 
@@ -96,7 +98,8 @@ public class WebSocketSubjectClientSourceTests
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
-            .WithRegistry();
+            .WithRegistry()
+            .WithLifecycle();
 
         var subject = new TestRoot(context);
         var configuration = new WebSocketClientConfiguration
@@ -116,7 +119,8 @@ public class WebSocketSubjectClientSourceTests
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
-            .WithRegistry();
+            .WithRegistry()
+            .WithLifecycle();
 
         var subject = new TestRoot(context);
         var configuration = new WebSocketClientConfiguration(); // Missing ServerUri

@@ -148,6 +148,9 @@ builder.Services.AddWebSocketSubjectServer<Device>(configuration =>
     // Heartbeat / sequence numbers
     configuration.HeartbeatInterval = TimeSpan.FromSeconds(30);  // Default: 30s (0 to disable)
 
+    // Broadcast
+    configuration.BroadcastTimeout = TimeSpan.FromSeconds(10);  // Default: 10s
+
     // Path mapping
     configuration.PathProvider = new AttributeBasedPathProvider("ws");
 
@@ -260,9 +263,9 @@ Client                                 Server
 
 The server registers the connection for broadcasts **before** building and sending the Welcome snapshot. This follows the buffer-flush-load-replay pattern (see [Connectors](../connectors.md)) and ensures eventual consistency:
 
-1. **Register**: Connection is added to the broadcast list. Any concurrent property changes are **queued per-connection** (not sent yet). The client does not receive any messages until the Welcome is sent.
+1. **Register**: Connection is added to the broadcast list. Any concurrent property changes are **queued per-connection** along with their sequence numbers (not sent yet). The client does not receive any messages until the Welcome is sent.
 2. **Snapshot**: The server builds the complete state snapshot under `_applyUpdateLock`, the same lock used when applying client updates. This ensures the snapshot is a consistent cut: every update applied before the lock is included, every update applied after will be sent as a separate Update message.
-3. **Welcome**: The snapshot is sent to the client. Immediately after (under the same send lock), any queued updates are flushed. The client always sees Welcome as the first message, followed by any updates that occurred during snapshot build.
+3. **Welcome**: The snapshot is sent to the client with the current sequence number. Immediately after (under the same send lock), queued updates are flushed — but only those with a sequence **greater than** the Welcome sequence are sent, since the snapshot already includes all earlier changes. After Welcome, any further broadcasts whose sequence is ≤ the Welcome sequence are also skipped. The client always sees Welcome as the first message, followed by only the updates that were not yet included in the snapshot.
 4. **Buffer replay**: The client applies the snapshot as a baseline, then replays all buffered updates (received between connection and snapshot application) to catch up to current state.
 
 The snapshot does not need to be fully up-to-date — it is just a baseline. The buffered updates are what guarantee correctness. After replay, the client is fully caught up and subsequent updates flow directly.
@@ -383,7 +386,7 @@ The server maintains a monotonically increasing sequence counter that is increme
 - A null or zero sequence is treated as "unassigned" for client-to-server messages which do not carry sequence numbers.
 
 **Recovery flow on gap detection:**
-Gap detected -> receive loop exits -> `ExecuteAsync` detects connection lost -> `StartBuffering` -> exponential backoff delay -> `ConnectAsync` -> Welcome with full state + new sequence -> `CompleteInitializationAsync` (buffer-load-replay). No new recovery logic is needed; the existing reconnection flow handles everything.
+Gap detected -> receive loop exits -> `ExecuteAsync` detects connection lost -> `StartBuffering` -> exponential backoff delay -> `ConnectAsync` -> Welcome with full state + new sequence -> `LoadInitialStateAndResumeAsync` (buffer-load-replay). No new recovery logic is needed; the existing reconnection flow handles everything.
 
 **Why only server-to-client messages carry sequence numbers:**
 Client-to-server writes are covered by the write retry queue (ring buffer, oldest-dropped-when-full) and flush-before-load on reconnection. The server applies updates synchronously under a lock, so silent drops within the server are impossible.

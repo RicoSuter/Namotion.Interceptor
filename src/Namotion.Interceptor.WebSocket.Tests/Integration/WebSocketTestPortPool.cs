@@ -54,7 +54,7 @@ public static class WebSocketTestPortPool
 /// </summary>
 public sealed class PortLease : IDisposable
 {
-    private bool _disposed;
+    private int _disposed;
 
     public int Port { get; }
 
@@ -67,9 +67,8 @@ public sealed class PortLease : IDisposable
 
     public void Dispose()
     {
-        if (!_disposed)
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
-            _disposed = true;
             WebSocketTestPortPool.Release();
         }
     }
