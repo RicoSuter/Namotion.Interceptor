@@ -65,7 +65,7 @@ internal sealed class DerivedPropertyRecorder
         {
             var newBuffer = _pool.Rent(buffer.Length * 2);
             Array.Copy(buffer, newBuffer, frame.Count);
-            _pool.Return(buffer, clearArray: false);
+            _pool.Return(buffer, clearArray: true);
             frame.Buffer = newBuffer;
             buffer = newBuffer;
         }
@@ -76,7 +76,8 @@ internal sealed class DerivedPropertyRecorder
 
     /// <summary>
     /// Completes recording session and returns recorded dependencies as a span.
-    /// <para><b>Important:</b> Span is only valid until next StartRecording() call on this thread.</para>
+    /// <para><b>Important:</b> Span is only valid until <see cref="ClearLastRecording"/> or next
+    /// <see cref="StartRecording"/> call on this thread.</para>
     /// </summary>
     public ReadOnlySpan<PropertyReference> FinishRecording()
     {
@@ -85,5 +86,20 @@ internal sealed class DerivedPropertyRecorder
 
         // Return span view into pooled buffer (zero allocation)
         return new ReadOnlySpan<PropertyReference>(frame.Buffer, 0, frame.Count);
+    }
+
+    /// <summary>
+    /// Clears stale PropertyReference values from the last finished recording's buffer.
+    /// Must be called after the span from <see cref="FinishRecording"/> is no longer in use.
+    /// Prevents the thread-static recorder from holding strong references to detached subjects.
+    /// </summary>
+    public void ClearLastRecording()
+    {
+        ref var frame = ref _frames[_depth];
+        if (frame.Count > 0)
+        {
+            Array.Clear(frame.Buffer!, 0, frame.Count);
+            frame.Count = 0;
+        }
     }
 }
