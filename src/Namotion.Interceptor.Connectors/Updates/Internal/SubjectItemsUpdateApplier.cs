@@ -118,6 +118,14 @@ internal static class SubjectItemsUpdateApplier
             }
         }
 
+        // Trim excess items when update declares a smaller count than current state
+        // (e.g., Welcome replaces an ObjectRef with a new empty node, count=0)
+        if (propertyUpdate.Count.HasValue && workingItems.Count > propertyUpdate.Count.Value)
+        {
+            workingItems.RemoveRange(propertyUpdate.Count.Value, workingItems.Count - propertyUpdate.Count.Value);
+            structureChanged = true;
+        }
+
         if (structureChanged)
         {
             var collection = context.SubjectFactory.CreateSubjectCollection(property.Type, workingItems);
@@ -201,6 +209,36 @@ internal static class SubjectItemsUpdateApplier
                     }
                 }
             }
+        }
+
+        // Remove dictionary entries not mentioned in the update when Count doesn't match.
+        // For complete updates (Welcome): all keys are in Items, so unmentioned keys are stale.
+        // For partial updates: Operations (Remove/Insert) adjust the count, so the guard
+        // only fires if operations left a count mismatch (safety net).
+        if (propertyUpdate.Count.HasValue && workingDictionary.Count != propertyUpdate.Count.Value)
+        {
+            var updatedKeys = new HashSet<object>();
+            if (propertyUpdate.Operations is { Count: > 0 })
+            {
+                foreach (var operation in propertyUpdate.Operations)
+                {
+                    if (operation.Action == SubjectCollectionOperationType.Insert)
+                        updatedKeys.Add(ConvertDictionaryKey(operation.Index, targetKeyType));
+                }
+            }
+
+            if (propertyUpdate.Items is { Count: > 0 })
+            {
+                foreach (var item in propertyUpdate.Items)
+                    updatedKeys.Add(ConvertDictionaryKey(item.Index, targetKeyType));
+            }
+
+            var keysToRemove = workingDictionary.Keys.Where(k => !updatedKeys.Contains(k)).ToList();
+            foreach (var key in keysToRemove)
+                workingDictionary.Remove(key);
+
+            if (keysToRemove.Count > 0)
+                structureChanged = true;
         }
 
         if (structureChanged)

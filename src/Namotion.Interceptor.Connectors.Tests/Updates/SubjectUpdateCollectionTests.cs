@@ -620,4 +620,120 @@ public class SubjectUpdateCollectionTests
         // Assert
         Assert.Null(target.Items);
     }
+
+    /// <summary>
+    /// Regression test: When a complete update (e.g., Welcome after reconnect) declares fewer
+    /// items than the target currently has, the excess items must be trimmed.
+    /// Bug scenario: Server reconnects with a new ObjectRef whose Collection has 1 item,
+    /// but the client still has the old ObjectRef with 3 items. Without trimming, the
+    /// client would keep the stale extra items.
+    /// </summary>
+    [Fact]
+    public void WhenCompleteUpdateHasFewerItems_ThenTargetCollectionIsTrimmed()
+    {
+        // Arrange - source has 1 item
+        var sourceContext = InterceptorSubjectContext.Create().WithRegistry();
+        var sourceChild = new CycleTestNode(sourceContext) { Name = "SourceChild1" };
+        var source = new CycleTestNode(sourceContext) { Name = "Root", Items = [sourceChild] };
+
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+
+        // Arrange - target has 3 items (stale state from before reconnect)
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new CycleTestNode(targetContext)
+        {
+            Name = "Root",
+            Items =
+            [
+                new CycleTestNode { Name = "StaleChild1" },
+                new CycleTestNode { Name = "StaleChild2" },
+                new CycleTestNode { Name = "StaleChild3" }
+            ]
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert - target should have exactly 1 item matching the source
+        var singleItem = Assert.Single(target.Items);
+        Assert.Equal("SourceChild1", singleItem.Name);
+    }
+
+    /// <summary>
+    /// Regression test: When a complete update declares count=0 (empty collection),
+    /// the target's existing items must all be removed.
+    /// Bug scenario: Server's ObjectRef points to a new TestNode with empty Collection (count=0),
+    /// but client's ObjectRef still has the old TestNode with 3 children. The Welcome sends
+    /// count=0 for Collection, but without the fix the client never trims its items.
+    /// </summary>
+    [Fact]
+    public void WhenCompleteUpdateHasEmptyCollection_ThenTargetCollectionIsCleared()
+    {
+        // Arrange - source has empty collection
+        var sourceContext = InterceptorSubjectContext.Create().WithRegistry();
+        var source = new CycleTestNode(sourceContext) { Name = "Root", Items = [] };
+
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+
+        // Arrange - target has 3 items (stale state)
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new CycleTestNode(targetContext)
+        {
+            Name = "Root",
+            Items =
+            [
+                new CycleTestNode { Name = "StaleChild1" },
+                new CycleTestNode { Name = "StaleChild2" },
+                new CycleTestNode { Name = "StaleChild3" }
+            ]
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert - target collection should be completely empty
+        Assert.NotNull(target.Items);
+        Assert.Empty(target.Items);
+    }
+
+    /// <summary>
+    /// Regression test (inverse case): When a complete update declares more items than
+    /// the target currently has, the target collection should be extended.
+    /// This should already work without the trimming fix - this test guards against regressions.
+    /// </summary>
+    [Fact]
+    public void WhenCompleteUpdateHasMoreItems_ThenTargetCollectionIsExtended()
+    {
+        // Arrange - source has 3 items
+        var sourceContext = InterceptorSubjectContext.Create().WithRegistry();
+        var source = new CycleTestNode(sourceContext)
+        {
+            Name = "Root",
+            Items =
+            [
+                new CycleTestNode(sourceContext) { Name = "Child1" },
+                new CycleTestNode(sourceContext) { Name = "Child2" },
+                new CycleTestNode(sourceContext) { Name = "Child3" }
+            ]
+        };
+
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+
+        // Arrange - target has only 1 item
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new CycleTestNode(targetContext)
+        {
+            Name = "Root",
+            Items = [new CycleTestNode { Name = "ExistingChild" }]
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert - target should have all 3 items from source
+        Assert.Equal(3, target.Items.Count);
+        Assert.Equal("Child1", target.Items[0].Name);
+        Assert.Equal("Child2", target.Items[1].Name);
+        Assert.Equal("Child3", target.Items[2].Name);
+    }
 }

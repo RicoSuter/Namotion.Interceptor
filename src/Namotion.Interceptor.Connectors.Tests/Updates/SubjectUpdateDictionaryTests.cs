@@ -342,7 +342,7 @@ public class SubjectUpdateDictionaryTests
         var target = new CycleTestNode(targetContext)
         {
             Name = "Root",
-            Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = new CycleTestNode { Name = "Item1" } }
+            Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = new() { Name = "Item1" } }
         };
 
         // Act
@@ -350,5 +350,138 @@ public class SubjectUpdateDictionaryTests
 
         // Assert
         Assert.Null(target.Lookup);
+    }
+
+    /// <summary>
+    /// Regression test: When a complete update (e.g., Welcome after reconnect) declares fewer
+    /// dictionary entries than the target currently has, entries not mentioned in the update
+    /// must be removed.
+    /// Bug scenario: Server reconnects with a new ObjectRef whose dictionary has 1 entry,
+    /// but the client still has 3 entries. Without trimming, the client keeps stale entries.
+    /// </summary>
+    [Fact]
+    public void WhenCompleteUpdateHasFewerEntries_ThenTargetDictionaryIsTrimmed()
+    {
+        // Arrange - source has only key1
+        var sourceContext = InterceptorSubjectContext.Create().WithRegistry();
+        var source = new CycleTestNode(sourceContext)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode>
+            {
+                ["key1"] = new(sourceContext) { Name = "Item1" }
+            }
+        };
+
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+
+        // Arrange - target has key1, key2, key3 (stale state from before reconnect)
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new CycleTestNode(targetContext)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode>
+            {
+                ["key1"] = new() { Name = "OldItem1" },
+                ["key2"] = new() { Name = "OldItem2" },
+                ["key3"] = new() { Name = "OldItem3" }
+            }
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert - target should have only key1 with source's value
+        Assert.Single(target.Lookup);
+        Assert.True(target.Lookup.ContainsKey("key1"));
+        Assert.Equal("Item1", target.Lookup["key1"].Name);
+        Assert.False(target.Lookup.ContainsKey("key2"));
+        Assert.False(target.Lookup.ContainsKey("key3"));
+    }
+
+    /// <summary>
+    /// Regression test: When a complete update declares count=0 (empty dictionary),
+    /// all target entries must be removed.
+    /// Bug scenario: Server's ObjectRef points to a new TestNode with empty dictionary (count=0),
+    /// but client's ObjectRef still has the old TestNode with 2 entries. The Welcome sends
+    /// count=0, but without the fix the client never removes its stale entries.
+    /// </summary>
+    [Fact]
+    public void WhenCompleteUpdateHasEmptyDictionary_ThenTargetDictionaryIsCleared()
+    {
+        // Arrange - source has empty dictionary
+        var sourceContext = InterceptorSubjectContext.Create().WithRegistry();
+        var source = new CycleTestNode(sourceContext)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode>()
+        };
+
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+
+        // Arrange - target has 2 entries (stale state)
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new CycleTestNode(targetContext)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode>
+            {
+                ["key1"] = new() { Name = "StaleItem1" },
+                ["key2"] = new() { Name = "StaleItem2" }
+            }
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert - target dictionary should be completely empty
+        Assert.NotNull(target.Lookup);
+        Assert.Empty(target.Lookup);
+    }
+
+    /// <summary>
+    /// Regression test: When a complete update has different keys than the target,
+    /// keys not in the update should be removed and new keys should be added.
+    /// This tests both trimming of stale keys and addition of new keys in a single update.
+    /// </summary>
+    [Fact]
+    public void WhenCompleteUpdateHasDifferentKeys_ThenTargetDictionaryMatchesSource()
+    {
+        // Arrange - source has key2 and key3 (no key1)
+        var sourceContext = InterceptorSubjectContext.Create().WithRegistry();
+        var source = new CycleTestNode(sourceContext)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode>
+            {
+                ["key2"] = new(sourceContext) { Name = "Item2" },
+                ["key3"] = new(sourceContext) { Name = "Item3" }
+            }
+        };
+
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+
+        // Arrange - target has key1 and key2 (no key3)
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new CycleTestNode(targetContext)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode>
+            {
+                ["key1"] = new() { Name = "OldItem1" },
+                ["key2"] = new() { Name = "OldItem2" }
+            }
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert - target should have key2 and key3, key1 removed
+        Assert.Equal(2, target.Lookup.Count);
+        Assert.False(target.Lookup.ContainsKey("key1"));
+        Assert.True(target.Lookup.ContainsKey("key2"));
+        Assert.True(target.Lookup.ContainsKey("key3"));
+        Assert.Equal("Item2", target.Lookup["key2"].Name);
+        Assert.Equal("Item3", target.Lookup["key3"].Name);
     }
 }

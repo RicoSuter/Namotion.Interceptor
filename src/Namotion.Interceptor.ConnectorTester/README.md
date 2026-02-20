@@ -138,7 +138,6 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
 {
   "ConnectorTester": {
     "Connector": "opcua",
-    "EnableStructuralMutations": false,
     "MutatePhaseDuration": "00:01:00",
     "ConvergenceTimeout": "00:05:00",
     "Server": {
@@ -191,7 +190,6 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `Connector` | string | `"opcua"` | Protocol to test: `"opcua"`, `"mqtt"`, or `"websocket"` |
-| `EnableStructuralMutations` | bool | `false` | Reserved for future collection/dictionary mutations |
 | `MutatePhaseDuration` | TimeSpan | `00:01:00` | How long mutations run before convergence check |
 | `ConvergenceTimeout` | TimeSpan | `00:01:00` | Max time to wait for all snapshots to match |
 | `Server` | object | - | Server participant configuration |
@@ -203,7 +201,8 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `Name` | string | `""` | Participant identifier (appears in logs) |
-| `MutationRate` | int | `50` | Target mutations per second |
+| `MutationRate` | int | `50` | Target value mutations per second |
+| `StructuralMutationRate` | int | `0` | Structural mutations per second (collection/dictionary/object ref changes). `0` = disabled |
 | `Chaos` | object? | `null` | Chaos configuration (`null` = no chaos) |
 
 ### Chaos Configuration
