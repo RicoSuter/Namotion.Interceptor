@@ -23,6 +23,11 @@ public class VerificationEngine : BackgroundService
         WriteIndented = false
     };
 
+    private static readonly JsonSerializerOptions IndentedJsonOptions = new()
+    {
+        WriteIndented = true
+    };
+
     private readonly ConnectorTesterConfiguration _configuration;
     private readonly TestCycleCoordinator _coordinator;
     private readonly Dictionary<string, TestNode> _participants;
@@ -86,7 +91,8 @@ public class VerificationEngine : BackgroundService
             string.Join(", ", _participants.Select(p => p.Key)));
         foreach (var engine in _mutationEngines)
         {
-            _logger.LogInformation("  {Name}: {Rate} mutations/sec", engine.Name, engine.MutationRate);
+            _logger.LogInformation("  {Name}: {Rate} value mutations/sec, {StructuralRate} structural mutations/sec",
+                engine.Name, engine.MutationRate, engine.StructuralMutationRate);
         }
 
         if (_configuration.ChaosProfiles.Count > 0)
@@ -197,7 +203,7 @@ public class VerificationEngine : BackgroundService
                 _logger.LogError("=== Cycle {Cycle}: FAIL (did not converge within {Timeout}) ===",
                     _cycleNumber, _configuration.ConvergenceTimeout);
 
-                // Log snapshot diffs
+                // Log snapshot diffs and write per-participant JSON files
                 var referenceSnapshot = snapshots[0];
                 foreach (var snapshot in snapshots.Skip(1))
                 {
@@ -208,10 +214,14 @@ public class VerificationEngine : BackgroundService
                     }
                 }
 
-                // Log full snapshots
+                // Write formatted JSON snapshots for easy diffing
                 foreach (var snapshot in snapshots)
                 {
-                    _logger.LogError("Snapshot [{Name}]: {Snapshot}", snapshot.Name, snapshot.Snapshot);
+                    var fileName = $"cycle{_cycleNumber:D3}-fail-{snapshot.Name}.json";
+                    var filePath = Path.Combine(Path.GetDirectoryName(MemoryLogPath)!, fileName);
+                    var formattedJson = FormatSnapshotJson(snapshot.Snapshot);
+                    File.WriteAllText(filePath, formattedJson);
+                    _logger.LogError("Snapshot [{Name}] written to {FilePath}", snapshot.Name, filePath);
                 }
 
                 WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, "FAIL");
@@ -256,23 +266,24 @@ public class VerificationEngine : BackgroundService
 
     private void WriteStatistics(TimeSpan cycleDuration, TimeSpan convergeDuration, string result)
     {
-        var totalMutations = _mutationEngines.Sum(engine => engine.ValueMutationCount);
+        var totalValueMutations = _mutationEngines.Sum(engine => engine.ValueMutationCount);
+        var totalStructuralMutations = _mutationEngines.Sum(engine => engine.StructuralMutationCount);
         var totalChaos = _chaosEngines.Sum(engine => engine.ChaosEventCount);
 
         _logger.LogInformation("""
             --- Cycle {Cycle} Statistics ---
             Duration: {CycleDuration:F0}s (converged in {ConvergeDuration:F1}s)
-            Total mutations: {TotalMutations:N0} | Total chaos events: {TotalChaos}
+            Total mutations: {TotalValueMutations:N0} value + {TotalStructuralMutations:N0} structural | Total chaos events: {TotalChaos}
             Result: {Result}
             """,
             _cycleNumber, cycleDuration.TotalSeconds, convergeDuration.TotalSeconds,
-            totalMutations, totalChaos, result);
+            totalValueMutations, totalStructuralMutations, totalChaos, result);
 
         // Per-participant breakdown
         foreach (var engine in _mutationEngines)
         {
-            _logger.LogInformation("  {Name}: {Values:N0} value mutations",
-                engine.Name, engine.ValueMutationCount);
+            _logger.LogInformation("  {Name}: {Values:N0} value + {Structural:N0} structural mutations",
+                engine.Name, engine.ValueMutationCount, engine.StructuralMutationCount);
         }
 
         // Chaos event timeline
@@ -306,6 +317,12 @@ public class VerificationEngine : BackgroundService
             DateTimeOffset.UtcNow, _cycleNumber, profile, result, workingSetMb, heapMb);
 
         File.AppendAllText(MemoryLogPath, line + Environment.NewLine);
+    }
+
+    private static string FormatSnapshotJson(string compactJson)
+    {
+        using var document = JsonDocument.Parse(compactJson);
+        return JsonSerializer.Serialize(document, IndentedJsonOptions);
     }
 
     private string? ApplyChaosProfile()

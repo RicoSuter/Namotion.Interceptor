@@ -5,8 +5,6 @@ public class ConnectorTesterConfiguration
     /// <summary>"opcua", "mqtt", or "websocket"</summary>
     public string Connector { get; set; } = "opcua";
 
-    public bool EnableStructuralMutations { get; set; } = false;
-
     public TimeSpan MutatePhaseDuration { get; set; } = TimeSpan.FromMinutes(1);
     public TimeSpan ConvergenceTimeout { get; set; } = TimeSpan.FromMinutes(1);
 
