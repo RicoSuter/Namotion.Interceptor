@@ -218,7 +218,7 @@ public class ChangeQueueProcessor : IDisposable
                 else
                 {
                     // Earlier occurrence: merge its old value into the kept (later) change
-                    _flushDedupedBuffer[existingIndex] = change.MergeWith(_flushDedupedBuffer[existingIndex]);
+                    _flushDedupedBuffer[existingIndex] = change.MergeWithNewer(_flushDedupedBuffer[existingIndex]);
                 }
             }
 
