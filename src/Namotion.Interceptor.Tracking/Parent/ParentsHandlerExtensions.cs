@@ -71,6 +71,45 @@ public static class ParentsHandlerExtensions
     }
 
     /// <summary>
+    /// Finds the first ancestor of the specified type by traversing the parent hierarchy (BFS).
+    /// </summary>
+    /// <typeparam name="T">The type to search for.</typeparam>
+    /// <param name="subject">The subject to start searching from.</param>
+    /// <returns>The first matching ancestor, or null if not found.</returns>
+    public static T? TryFindFirstParent<T>(this IInterceptorSubject subject)
+        where T : class
+    {
+        var visited = new HashSet<IInterceptorSubject>();
+        var queue = new Queue<IInterceptorSubject>();
+        queue.Enqueue(subject);
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+
+            if (!visited.Add(current))
+            {
+                continue;
+            }
+
+            if (current is T match && !ReferenceEquals(current, subject))
+            {
+                return match;
+            }
+
+            foreach (var parent in current.GetParents())
+            {
+                if (!parent.Equals(default))
+                {
+                    queue.Enqueue(parent.Property.Subject);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Thread-safe collection with O(1) writes and zero-allocation reads via cached ImmutableArray.
     /// </summary>
     private sealed class ParentsSet

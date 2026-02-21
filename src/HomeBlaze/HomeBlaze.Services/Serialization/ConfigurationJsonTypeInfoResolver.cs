@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor;
 
 namespace HomeBlaze.Services.Serialization;
 
@@ -25,8 +26,8 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
     {
         var typeInfo = base.GetTypeInfo(type, options);
 
-        // Set up polymorphism on IConfigurableSubject base type
-        if (type == typeof(IConfigurableSubject))
+        // Set up polymorphism on IConfigurableSubject and IInterceptorSubject base types
+        if (type == typeof(IConfigurableSubject) || type == typeof(IInterceptorSubject))
         {
             typeInfo.PolymorphismOptions = new JsonPolymorphismOptions
             {
