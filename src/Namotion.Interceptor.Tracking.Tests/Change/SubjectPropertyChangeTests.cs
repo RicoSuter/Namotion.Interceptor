@@ -572,4 +572,91 @@ public class SubjectPropertyChangeTests
         // Assert
         Assert.Null(change.ReceivedTimestamp);
     }
+
+    [Fact]
+    public void MergeWithNewer_WithInlineValues_KeepsOldFromEarlierAndNewFromLater()
+    {
+        // Arrange
+        var earlierSource = new object();
+        var laterSource = new object();
+        var earlierTimestamp = DateTimeOffset.UtcNow.AddSeconds(-1);
+        var laterTimestamp = DateTimeOffset.UtcNow;
+
+        var earlier = SubjectPropertyChange.Create(
+            _property, earlierSource, earlierTimestamp, earlierTimestamp,
+            10, 20);
+        var later = SubjectPropertyChange.Create(
+            _property, laterSource, laterTimestamp, laterTimestamp,
+            20, 30);
+
+        // Act
+        var merged = earlier.MergeWithNewer(later);
+
+        // Assert
+        Assert.Equal(10, merged.GetOldValue<int>());
+        Assert.Equal(30, merged.GetNewValue<int>());
+        Assert.Same(laterSource, merged.Source);
+        Assert.Equal(laterTimestamp, merged.ChangedTimestamp);
+    }
+
+    [Fact]
+    public void MergeWithNewer_WithStrings_KeepsOldFromEarlierAndNewFromLater()
+    {
+        // Arrange
+        var earlier = SubjectPropertyChange.Create(
+            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            "original", "intermediate");
+        var later = SubjectPropertyChange.Create(
+            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            "intermediate", "final");
+
+        // Act
+        var merged = earlier.MergeWithNewer(later);
+
+        // Assert
+        Assert.Equal("original", merged.GetOldValue<string>());
+        Assert.Equal("final", merged.GetNewValue<string>());
+    }
+
+    [Fact]
+    public void MergeWithNewer_WithNullStringOldValue_PreservesNull()
+    {
+        // Arrange
+        var earlier = SubjectPropertyChange.Create(
+            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            null, "intermediate");
+        var later = SubjectPropertyChange.Create<string?>(
+            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            "intermediate", "final");
+
+        // Act
+        var merged = earlier.MergeWithNewer(later);
+
+        // Assert
+        Assert.Null(merged.GetOldValue<string>());
+        Assert.Equal("final", merged.GetNewValue<string>());
+    }
+
+    [Fact]
+    public void MergeWithNewer_WithBoxedReferenceTypes_KeepsOldFromEarlierAndNewFromLater()
+    {
+        // Arrange
+        var oldObj = new CustomClass { Id = 1, Name = "Old" };
+        var midObj = new CustomClass { Id = 2, Name = "Mid" };
+        var newObj = new CustomClass { Id = 3, Name = "New" };
+
+        var earlier = SubjectPropertyChange.Create(
+            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            oldObj, midObj);
+        var later = SubjectPropertyChange.Create(
+            _property, source: null, _changedTimestamp, _receivedTimestamp,
+            midObj, newObj);
+
+        // Act
+        var merged = earlier.MergeWithNewer(later);
+
+        // Assert
+        Assert.Same(oldObj, merged.GetOldValue<CustomClass>());
+        Assert.Same(newObj, merged.GetNewValue<CustomClass>());
+    }
 }

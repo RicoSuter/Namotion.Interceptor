@@ -18,7 +18,6 @@ public class ChangeQueueProcessor : IDisposable
     private const int FlushDedupedBufferMinSize = 256;
     private const int FlushDedupedBufferMaxSize = 1024;
 
-    private readonly IInterceptorSubjectContext _context;
     private readonly Func<RegisteredSubjectProperty, bool> _propertyFilter;
     private readonly Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> _writeHandler;
     private readonly object? _source;
@@ -32,7 +31,7 @@ public class ChangeQueueProcessor : IDisposable
 
     // Scratch buffers used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
-    private readonly HashSet<PropertyReference> _flushTouchedChanges = new(PropertyReference.Comparer);
+    private readonly Dictionary<PropertyReference, int> _flushPropertyIndices = new(PropertyReference.Comparer);
 
     // Reusable buffer for deduped changes (rented from ArrayPool to avoid allocations on resize)
     private SubjectPropertyChange[] _flushDedupedBuffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(FlushDedupedBufferMinSize);
@@ -64,7 +63,6 @@ public class ChangeQueueProcessor : IDisposable
         ILogger logger)
     {
         _source = source;
-        _context = context;
         _propertyFilter = propertyFilter;
         _writeHandler = writeHandler;
         _logger = logger;
@@ -72,7 +70,7 @@ public class ChangeQueueProcessor : IDisposable
 
         try
         {
-            _subscription = _context.CreatePropertyChangeQueueSubscription();
+            _subscription = context.CreatePropertyChangeQueueSubscription();
         }
         catch
         {
@@ -194,11 +192,11 @@ public class ChangeQueueProcessor : IDisposable
                 return;
             }
 
-            _flushTouchedChanges.Clear();
+            _flushPropertyIndices.Clear();
             _flushDedupedCount = 0;
 
             // Pre-size to avoid resizes under bursts
-            _flushTouchedChanges.EnsureCapacity(_flushChanges.Count);
+            _flushPropertyIndices.EnsureCapacity(_flushChanges.Count);
 
             // Ensure the buffer is large enough (rent from pool to avoid allocations)
             if (_flushDedupedBuffer.Length < _flushChanges.Count)
@@ -207,17 +205,24 @@ public class ChangeQueueProcessor : IDisposable
                 _flushDedupedBuffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(_flushChanges.Count);
             }
 
-            // Deduplicate by Property, keeping the last write, and preserve order of last occurrences
+            // Deduplicate by Property: keep oldest old value, use newest new value.
+            // Backward iteration finds last occurrences first, preserving last-occurrence order.
             for (var i = _flushChanges.Count - 1; i >= 0; i--)
             {
                 var change = _flushChanges[i];
-                if (_flushTouchedChanges.Add(change.Property))
+                if (!_flushPropertyIndices.TryGetValue(change.Property, out var existingIndex))
                 {
+                    _flushPropertyIndices[change.Property] = _flushDedupedCount;
                     _flushDedupedBuffer[_flushDedupedCount++] = change;
+                }
+                else
+                {
+                    // Earlier occurrence: merge its old value into the kept (later) change
+                    _flushDedupedBuffer[existingIndex] = change.MergeWithNewer(_flushDedupedBuffer[existingIndex]);
                 }
             }
 
-            // Reverse in place to keep the ascending order of last occurrences without allocations
+            // Reverse to restore chronological order of last occurrences
             if (_flushDedupedCount > 1)
             {
                 Array.Reverse(_flushDedupedBuffer, 0, _flushDedupedCount);
@@ -243,7 +248,7 @@ public class ChangeQueueProcessor : IDisposable
         {
             // Clear buffers to allow GC of SubjectPropertyChange objects
             _flushChanges.Clear();
-            _flushTouchedChanges.Clear();
+            _flushPropertyIndices.Clear();
 
             // Clear entire rented array before potential return to pool.
             // SubjectPropertyChange contains object references (Source, boxed values) that must be released.
