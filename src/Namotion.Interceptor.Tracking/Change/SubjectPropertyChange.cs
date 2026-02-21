@@ -185,7 +185,7 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     /// diff baseline while reflecting the latest state.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public SubjectPropertyChange MergeWith(SubjectPropertyChange newerChange)
+    public SubjectPropertyChange MergeWithNewer(SubjectPropertyChange newerChange)
     {
         return new SubjectPropertyChange(
             Property,

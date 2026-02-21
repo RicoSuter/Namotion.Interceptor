@@ -574,7 +574,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void MergeWith_WithInlineValues_KeepsOldFromEarlierAndNewFromLater()
+    public void MergeWithNewer_WithInlineValues_KeepsOldFromEarlierAndNewFromLater()
     {
         // Arrange
         var earlierSource = new object();
@@ -590,7 +590,7 @@ public class SubjectPropertyChangeTests
             20, 30);
 
         // Act
-        var merged = earlier.MergeWith(later);
+        var merged = earlier.MergeWithNewer(later);
 
         // Assert
         Assert.Equal(10, merged.GetOldValue<int>());
@@ -600,7 +600,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void MergeWith_WithStrings_KeepsOldFromEarlierAndNewFromLater()
+    public void MergeWithNewer_WithStrings_KeepsOldFromEarlierAndNewFromLater()
     {
         // Arrange
         var earlier = SubjectPropertyChange.Create(
@@ -611,7 +611,7 @@ public class SubjectPropertyChangeTests
             "intermediate", "final");
 
         // Act
-        var merged = earlier.MergeWith(later);
+        var merged = earlier.MergeWithNewer(later);
 
         // Assert
         Assert.Equal("original", merged.GetOldValue<string>());
@@ -619,10 +619,10 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void MergeWith_WithNullStringOldValue_PreservesNull()
+    public void MergeWithNewer_WithNullStringOldValue_PreservesNull()
     {
         // Arrange
-        var earlier = SubjectPropertyChange.Create<string?>(
+        var earlier = SubjectPropertyChange.Create(
             _property, source: null, _changedTimestamp, _receivedTimestamp,
             null, "intermediate");
         var later = SubjectPropertyChange.Create<string?>(
@@ -630,7 +630,7 @@ public class SubjectPropertyChangeTests
             "intermediate", "final");
 
         // Act
-        var merged = earlier.MergeWith(later);
+        var merged = earlier.MergeWithNewer(later);
 
         // Assert
         Assert.Null(merged.GetOldValue<string>());
@@ -638,7 +638,7 @@ public class SubjectPropertyChangeTests
     }
 
     [Fact]
-    public void MergeWith_WithBoxedReferenceTypes_KeepsOldFromEarlierAndNewFromLater()
+    public void MergeWithNewer_WithBoxedReferenceTypes_KeepsOldFromEarlierAndNewFromLater()
     {
         // Arrange
         var oldObj = new CustomClass { Id = 1, Name = "Old" };
@@ -653,7 +653,7 @@ public class SubjectPropertyChangeTests
             midObj, newObj);
 
         // Act
-        var merged = earlier.MergeWith(later);
+        var merged = earlier.MergeWithNewer(later);
 
         // Assert
         Assert.Same(oldObj, merged.GetOldValue<CustomClass>());
