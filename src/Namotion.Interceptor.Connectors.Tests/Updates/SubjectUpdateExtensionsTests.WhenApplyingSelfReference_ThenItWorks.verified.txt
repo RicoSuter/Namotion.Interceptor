@@ -1,18 +1,7 @@
 ﻿{
-  Root: 1,
+  Root: SubjectId_1,
   Subjects: {
-    1: {
-      Child: {
-        Kind: Object
-      },
-      Items: {
-        Kind: Collection,
-        Count: 0
-      },
-      Lookup: {
-        Kind: Dictionary,
-        Count: 0
-      },
+    SubjectId_1: {
       Name: {
         Kind: Value,
         Value: SelfRef,
@@ -24,13 +13,24 @@
           }
         }
       },
-      Parent: {
-        Kind: Object
-      },
       Self: {
         Kind: Object,
         Timestamp: DateTimeOffset_2,
-        Id: 1
+        Id: SubjectId_1
+      },
+      Parent: {
+        Kind: Object
+      },
+      Child: {
+        Kind: Object
+      },
+      Items: {
+        Kind: Collection,
+        Count: 0
+      },
+      Lookup: {
+        Kind: Dictionary,
+        Count: 0
       }
     }
   }

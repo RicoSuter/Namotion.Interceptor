@@ -1,31 +1,7 @@
 ﻿{
-  Root: 1,
+  Root: SubjectId_1,
   Subjects: {
-    1: {
-      children: {
-        Kind: Collection,
-        Timestamp: {Scrubbed},
-        Items: [
-          {
-            Index: 0,
-            Id: 4
-          },
-          {
-            Index: 1,
-            Id: 5
-          },
-          {
-            Index: 2,
-            Id: 6
-          }
-        ],
-        Count: 3
-      },
-      father: {
-        Kind: Object,
-        Timestamp: {Scrubbed},
-        Id: 2
-      },
+    SubjectId_1: {
       firstName: {
         Kind: Value,
         Value: NewPerson,
@@ -43,29 +19,43 @@
           }
         }
       },
-      fullName: {
-        Kind: Value,
-        Value: NewPerson NewLn
-      },
       lastName: {
         Kind: Value,
         Value: NewLn,
         Timestamp: {Scrubbed}
       },
+      fullName: {
+        Kind: Value,
+        Value: NewPerson NewLn
+      },
+      father: {
+        Kind: Object,
+        Timestamp: {Scrubbed},
+        Id: SubjectId_2
+      },
       mother: {
         Kind: Object,
         Timestamp: {Scrubbed},
-        Id: 3
-      }
-    },
-    2: {
+        Id: SubjectId_3
+      },
       children: {
         Kind: Collection,
-        Count: 0
-      },
-      father: {
-        Kind: Object
-      },
+        Timestamp: {Scrubbed},
+        Items: [
+          {
+            Id: SubjectId_4
+          },
+          {
+            Id: SubjectId_5
+          },
+          {
+            Id: SubjectId_6
+          }
+        ],
+        Count: 3
+      }
+    },
+    SubjectId_2: {
       firstName: {
         Kind: Value,
         Value: NewFather,
@@ -83,25 +73,25 @@
           }
         }
       },
+      lastName: {
+        Kind: Value
+      },
       fullName: {
         Kind: Value,
         Value: NewFather 
       },
-      lastName: {
-        Kind: Value
-      },
-      mother: {
-        Kind: Object
-      }
-    },
-    3: {
-      children: {
-        Kind: Collection,
-        Count: 0
-      },
       father: {
         Kind: Object
       },
+      mother: {
+        Kind: Object
+      },
+      children: {
+        Kind: Collection,
+        Count: 0
+      }
+    },
+    SubjectId_3: {
       firstName: {
         Kind: Value,
         Value: Mother,
@@ -118,25 +108,25 @@
           }
         }
       },
+      lastName: {
+        Kind: Value
+      },
       fullName: {
         Kind: Value,
         Value: Mother 
       },
-      lastName: {
-        Kind: Value
-      },
-      mother: {
-        Kind: Object
-      }
-    },
-    4: {
-      children: {
-        Kind: Collection,
-        Count: 0
-      },
       father: {
         Kind: Object
       },
+      mother: {
+        Kind: Object
+      },
+      children: {
+        Kind: Collection,
+        Count: 0
+      }
+    },
+    SubjectId_4: {
       firstName: {
         Kind: Value,
         Value: NewChild1,
@@ -154,25 +144,25 @@
           }
         }
       },
+      lastName: {
+        Kind: Value
+      },
       fullName: {
         Kind: Value,
         Value: NewChild1 
       },
-      lastName: {
-        Kind: Value
-      },
-      mother: {
-        Kind: Object
-      }
-    },
-    5: {
-      children: {
-        Kind: Collection,
-        Count: 0
-      },
       father: {
         Kind: Object
       },
+      mother: {
+        Kind: Object
+      },
+      children: {
+        Kind: Collection,
+        Count: 0
+      }
+    },
+    SubjectId_5: {
       firstName: {
         Kind: Value,
         Value: Child2,
@@ -189,25 +179,25 @@
           }
         }
       },
+      lastName: {
+        Kind: Value
+      },
       fullName: {
         Kind: Value,
         Value: Child2 
       },
-      lastName: {
-        Kind: Value
-      },
-      mother: {
-        Kind: Object
-      }
-    },
-    6: {
-      children: {
-        Kind: Collection,
-        Count: 0
-      },
       father: {
         Kind: Object
       },
+      mother: {
+        Kind: Object
+      },
+      children: {
+        Kind: Collection,
+        Count: 0
+      }
+    },
+    SubjectId_6: {
       firstName: {
         Kind: Value,
         Value: NewChild3,
@@ -225,15 +215,22 @@
           }
         }
       },
+      lastName: {
+        Kind: Value
+      },
       fullName: {
         Kind: Value,
         Value: NewChild3 
       },
-      lastName: {
-        Kind: Value
+      father: {
+        Kind: Object
       },
       mother: {
         Kind: Object
+      },
+      children: {
+        Kind: Collection,
+        Count: 0
       }
     }
   }

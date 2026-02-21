@@ -1,5 +1,5 @@
 using System.Collections;
-using System.Text.Json;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
@@ -11,7 +11,7 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 internal static class SubjectItemsUpdateApplier
 {
     /// <summary>
-    /// Applies a collection (array/list) update to a property.
+    /// Applies a collection update to a property using stable ID-based operations.
     /// </summary>
     internal static void ApplyCollectionUpdate(
         IInterceptorSubject parent,
@@ -22,105 +22,131 @@ internal static class SubjectItemsUpdateApplier
         var workingItems = (property.GetValue() as IEnumerable<IInterceptorSubject>)?.ToList() ?? [];
         var structureChanged = false;
 
-        // Apply structural operations in two phases:
-        // Phase 1: Remove and Insert operations (applied sequentially)
-        // Phase 2: Move operations (applied atomically using snapshot)
+        // Apply structural operations (ID-based)
         if (propertyUpdate.Operations is { Count: > 0 })
         {
-            // Phase 1: Apply Remove and Insert operations sequentially
-            // Removes should be in descending order so they don't affect each other's indices
             foreach (var operation in propertyUpdate.Operations)
             {
-                var index = ConvertIndexToInt(operation.Index);
                 switch (operation.Action)
                 {
                     case SubjectCollectionOperationType.Remove:
-                        if (index >= 0 && index < workingItems.Count)
+                    {
+                        var index = FindItemIndexById(workingItems, operation.Id);
+                        if (index >= 0)
                         {
                             workingItems.RemoveAt(index);
                             structureChanged = true;
                         }
                         break;
+                    }
 
                     case SubjectCollectionOperationType.Insert:
-                        if (operation.Id is not null && context.Subjects.TryGetValue(operation.Id, out var itemProps))
+                    {
+                        // Idempotent: skip if item already exists in collection (echo protection)
+                        if (FindItemIndexById(workingItems, operation.Id) >= 0)
+                            break;
+
+                        IInterceptorSubject? newItem = null;
+
+                        // Try to reuse an existing subject by stable ID
+                        var registry = parent.Context.TryGetService<ISubjectRegistry>();
+                        if (registry is not null && registry.TryGetSubjectByStableId(operation.Id, out var existing))
                         {
-                            var newItem = CreateAndApplyItem(parent, property, index, operation.Id, itemProps, context);
-                            if (index >= workingItems.Count)
-                                workingItems.Add(newItem);
-                            else
-                                workingItems.Insert(index, newItem);
+                            newItem = existing;
+                        }
+
+                        if (newItem is null && context.Subjects.TryGetValue(operation.Id, out var itemProps))
+                        {
+                            newItem = CreateAndApplyItem(parent, property, 0, operation.Id, itemProps, context);
+                        }
+
+                        if (newItem is null)
+                            break;
+
+                        // Apply properties if available and not yet processed
+                        if (context.Subjects.TryGetValue(operation.Id, out var props) && context.TryMarkAsProcessed(operation.Id))
+                        {
+                            SubjectUpdateApplier.ApplyPropertyUpdates(newItem, props, context);
+                        }
+
+                        var insertIndex = FindInsertPosition(workingItems, operation.AfterId);
+                        workingItems.Insert(insertIndex, newItem);
+                        structureChanged = true;
+                        break;
+                    }
+
+                    case SubjectCollectionOperationType.Move:
+                    {
+                        var currentIndex = FindItemIndexById(workingItems, operation.Id);
+                        if (currentIndex >= 0)
+                        {
+                            var item = workingItems[currentIndex];
+                            workingItems.RemoveAt(currentIndex);
+                            var insertIndex = FindInsertPosition(workingItems, operation.AfterId);
+                            workingItems.Insert(insertIndex, item);
                             structureChanged = true;
                         }
                         break;
-                }
-            }
-
-            // Phase 2: Apply Move operations atomically using snapshot
-            // Move indices reference the state after removes/inserts, and moves are applied simultaneously
-            var hasMoves = propertyUpdate.Operations.Any(op => op.Action == SubjectCollectionOperationType.Move);
-            if (hasMoves)
-            {
-                var snapshot = workingItems.ToArray();
-                foreach (var operation in propertyUpdate.Operations)
-                {
-                    if (operation is { Action: SubjectCollectionOperationType.Move, FromIndex: not null })
-                    {
-                        var toIndex = ConvertIndexToInt(operation.Index);
-                        var fromIndex = operation.FromIndex.Value;
-                        if (fromIndex >= 0 && fromIndex < snapshot.Length && toIndex >= 0 && toIndex < workingItems.Count)
-                        {
-                            workingItems[toIndex] = snapshot[fromIndex];
-                            structureChanged = true;
-                        }
                     }
                 }
             }
         }
 
-        // Apply sparse property updates
-        if (propertyUpdate.Items is { Count: > 0 })
+        // Complete collection from items (when no operations = complete state)
+        if (propertyUpdate.Operations is null && propertyUpdate.Items is { Count: > 0 })
         {
-            foreach (var collectionUpdate in propertyUpdate.Items)
+            var newItems = new List<IInterceptorSubject>(propertyUpdate.Items.Count);
+            foreach (var itemUpdate in propertyUpdate.Items)
             {
-                var index = ConvertIndexToInt(collectionUpdate.Index);
+                IInterceptorSubject? item = null;
 
-                // Validate index against declared count - if count is specified, index must be < count
-                if (propertyUpdate.Count.HasValue && index >= propertyUpdate.Count.Value)
+                // Try to reuse existing subject by stable ID
+                var registry = parent.Context.TryGetService<ISubjectRegistry>();
+                if (registry is not null && registry.TryGetSubjectByStableId(itemUpdate.Id, out var existing))
                 {
-                    throw new InvalidOperationException(
-                        $"Invalid collection update: index {index} is out of bounds for declared count {propertyUpdate.Count.Value}. " +
-                        "The index in a sparse update must be less than the declared count.");
+                    item = existing;
                 }
 
-                if (collectionUpdate.Id is not null &&
-                    context.Subjects.TryGetValue(collectionUpdate.Id, out var itemProps))
+                if (item is null && context.Subjects.TryGetValue(itemUpdate.Id, out var itemProps))
                 {
-                    if (index >= 0 && index < workingItems.Count)
+                    item = CreateAndApplyItem(parent, property, newItems.Count, itemUpdate.Id, itemProps, context);
+                }
+
+                if (item is not null)
+                {
+                    if (context.Subjects.TryGetValue(itemUpdate.Id, out var props) && context.TryMarkAsProcessed(itemUpdate.Id))
                     {
-                        // Update existing item
-                        if (context.TryMarkAsProcessed(collectionUpdate.Id))
-                        {
-                            SubjectUpdateApplier.ApplyPropertyUpdates(workingItems[index], itemProps, context);
-                        }
+                        SubjectUpdateApplier.ApplyPropertyUpdates(item, props, context);
                     }
-                    else if (index >= 0 && index <= workingItems.Count)
+                    newItems.Add(item);
+                }
+            }
+
+            workingItems = newItems;
+            structureChanged = true;
+        }
+
+        // Sparse property updates (items with operations present — update existing items by ID)
+        if (propertyUpdate.Operations is not null && propertyUpdate.Items is { Count: > 0 })
+        {
+            foreach (var itemUpdate in propertyUpdate.Items)
+            {
+                if (context.Subjects.TryGetValue(itemUpdate.Id, out var itemProps))
+                {
+                    var item = FindItemById(workingItems, itemUpdate.Id);
+                    if (item is not null && context.TryMarkAsProcessed(itemUpdate.Id))
                     {
-                        // Create new item at append position (for complete updates rebuilding the collection)
-                        var newItem = CreateAndApplyItem(parent, property, index, collectionUpdate.Id, itemProps, context);
-                        if (index >= workingItems.Count)
-                            workingItems.Add(newItem);
-                        else
-                            workingItems[index] = newItem;
-                        structureChanged = true;
+                        SubjectUpdateApplier.ApplyPropertyUpdates(item, itemProps, context);
                     }
                 }
             }
         }
 
-        // Trim excess items when update declares a smaller count than current state
-        // (e.g., Welcome replaces an ObjectRef with a new empty node, count=0)
-        if (propertyUpdate.Count.HasValue && workingItems.Count > propertyUpdate.Count.Value)
+        // Trim excess items when a complete update declares a smaller count.
+        // Only apply for complete updates (no operations) to avoid removing items
+        // added by other participants in a multi-source scenario.
+        if (propertyUpdate.Operations is null &&
+            propertyUpdate.Count.HasValue && workingItems.Count > propertyUpdate.Count.Value)
         {
             workingItems.RemoveRange(propertyUpdate.Count.Value, workingItems.Count - propertyUpdate.Count.Value);
             structureChanged = true;
@@ -137,7 +163,7 @@ internal static class SubjectItemsUpdateApplier
     }
 
     /// <summary>
-    /// Applies a dictionary update to a property.
+    /// Applies a dictionary update to a property using stable ID-based operations.
     /// </summary>
     internal static void ApplyDictionaryUpdate(
         IInterceptorSubject parent,
@@ -164,18 +190,38 @@ internal static class SubjectItemsUpdateApplier
         {
             foreach (var operation in propertyUpdate.Operations)
             {
-                var key = ConvertDictionaryKey(operation.Index, targetKeyType);
                 switch (operation.Action)
                 {
                     case SubjectCollectionOperationType.Remove:
-                        if (workingDictionary.Remove(key))
-                            structureChanged = true;
+                        if (operation.Key is not null)
+                        {
+                            var key = ConvertDictionaryKey(operation.Key, targetKeyType);
+                            if (workingDictionary.Remove(key))
+                                structureChanged = true;
+                        }
                         break;
 
                     case SubjectCollectionOperationType.Insert:
-                        if (operation.Id is not null && context.Subjects.TryGetValue(operation.Id, out var itemProps))
+                        if (operation.Key is not null && context.Subjects.TryGetValue(operation.Id, out var itemProps))
                         {
-                            var newItem = CreateAndApplyItem(parent, property, key, operation.Id, itemProps, context);
+                            var key = ConvertDictionaryKey(operation.Key, targetKeyType);
+                            IInterceptorSubject newItem;
+
+                            // Try to reuse by stable ID
+                            var registry = parent.Context.TryGetService<ISubjectRegistry>();
+                            if (registry is not null && registry.TryGetSubjectByStableId(operation.Id, out var existing))
+                            {
+                                newItem = existing;
+                                if (context.TryMarkAsProcessed(operation.Id))
+                                {
+                                    SubjectUpdateApplier.ApplyPropertyUpdates(newItem, itemProps, context);
+                                }
+                            }
+                            else
+                            {
+                                newItem = CreateAndApplyItem(parent, property, key, operation.Id, itemProps, context);
+                            }
+
                             workingDictionary[key] = newItem;
                             structureChanged = true;
                         }
@@ -189,13 +235,17 @@ internal static class SubjectItemsUpdateApplier
         {
             foreach (var collUpdate in propertyUpdate.Items)
             {
-                var key = ConvertDictionaryKey(collUpdate.Index, targetKeyType);
+                if (collUpdate.Key is null)
+                    continue;
 
-                if (collUpdate.Id is not null &&
-                    context.Subjects.TryGetValue(collUpdate.Id, out var itemProps))
+                var key = ConvertDictionaryKey(collUpdate.Key, targetKeyType);
+
+                if (context.Subjects.TryGetValue(collUpdate.Id, out var itemProps))
                 {
                     if (workingDictionary.TryGetValue(key, out var existing))
                     {
+                        // Set stable ID on pre-existing dictionary item to match the sender's ID.
+                        existing.SetSubjectId(collUpdate.Id);
                         if (context.TryMarkAsProcessed(collUpdate.Id))
                         {
                             SubjectUpdateApplier.ApplyPropertyUpdates(existing, itemProps, context);
@@ -203,7 +253,21 @@ internal static class SubjectItemsUpdateApplier
                     }
                     else
                     {
-                        var newItem = CreateAndApplyItem(parent, property, key, collUpdate.Id, itemProps, context);
+                        // Try reuse by stable ID
+                        var registry = parent.Context.TryGetService<ISubjectRegistry>();
+                        IInterceptorSubject newItem;
+                        if (registry is not null && registry.TryGetSubjectByStableId(collUpdate.Id, out var existingSubject))
+                        {
+                            newItem = existingSubject;
+                            if (context.TryMarkAsProcessed(collUpdate.Id))
+                            {
+                                SubjectUpdateApplier.ApplyPropertyUpdates(newItem, itemProps, context);
+                            }
+                        }
+                        else
+                        {
+                            newItem = CreateAndApplyItem(parent, property, key, collUpdate.Id, itemProps, context);
+                        }
                         workingDictionary[key] = newItem;
                         structureChanged = true;
                     }
@@ -211,26 +275,29 @@ internal static class SubjectItemsUpdateApplier
             }
         }
 
-        // Remove dictionary entries not mentioned in the update when Count doesn't match.
-        // For complete updates (Welcome): all keys are in Items, so unmentioned keys are stale.
-        // For partial updates: Operations (Remove/Insert) adjust the count, so the guard
-        // only fires if operations left a count mismatch (safety net).
-        if (propertyUpdate.Count.HasValue && workingDictionary.Count != propertyUpdate.Count.Value)
+        // Remove dictionary entries not mentioned in update when count doesn't match.
+        // Only apply for complete updates (no operations) to avoid removing entries
+        // added by other participants in a multi-source scenario.
+        if (propertyUpdate.Operations is null &&
+            propertyUpdate.Count.HasValue && workingDictionary.Count != propertyUpdate.Count.Value)
         {
             var updatedKeys = new HashSet<object>();
             if (propertyUpdate.Operations is { Count: > 0 })
             {
                 foreach (var operation in propertyUpdate.Operations)
                 {
-                    if (operation.Action == SubjectCollectionOperationType.Insert)
-                        updatedKeys.Add(ConvertDictionaryKey(operation.Index, targetKeyType));
+                    if (operation is { Action: SubjectCollectionOperationType.Insert, Key: not null })
+                        updatedKeys.Add(ConvertDictionaryKey(operation.Key, targetKeyType));
                 }
             }
 
             if (propertyUpdate.Items is { Count: > 0 })
             {
                 foreach (var item in propertyUpdate.Items)
-                    updatedKeys.Add(ConvertDictionaryKey(item.Index, targetKeyType));
+                {
+                    if (item.Key is not null)
+                        updatedKeys.Add(ConvertDictionaryKey(item.Key, targetKeyType));
+                }
             }
 
             var keysToRemove = workingDictionary.Keys.Where(k => !updatedKeys.Contains(k)).ToList();
@@ -251,12 +318,39 @@ internal static class SubjectItemsUpdateApplier
         }
     }
 
-    private static int ConvertIndexToInt(object index) => index switch
+    private static int FindItemIndexById(List<IInterceptorSubject> items, string stableId)
     {
-        int i => i,
-        JsonElement json => json.GetInt32(),
-        _ => Convert.ToInt32(index)
-    };
+        for (var i = 0; i < items.Count; i++)
+        {
+            if (items[i].GetOrAddSubjectId() == stableId)
+                return i;
+        }
+        return -1;
+    }
+
+    private static IInterceptorSubject? FindItemById(List<IInterceptorSubject> items, string stableId)
+    {
+        for (var i = 0; i < items.Count; i++)
+        {
+            if (items[i].GetOrAddSubjectId() == stableId)
+                return items[i];
+        }
+        return null;
+    }
+
+    private static int FindInsertPosition(List<IInterceptorSubject> items, string? afterId)
+    {
+        if (afterId is null)
+            return 0; // Insert at head
+
+        for (var i = 0; i < items.Count; i++)
+        {
+            if (items[i].GetOrAddSubjectId() == afterId)
+                return i + 1; // Insert after this item
+        }
+
+        return items.Count; // afterId not found, append to end
+    }
 
     private static object ConvertDictionaryKey(object key, Type targetKeyType)
         => DictionaryKeyConverter.Convert(key, targetKeyType);
@@ -271,6 +365,7 @@ internal static class SubjectItemsUpdateApplier
     {
         var newItem = context.SubjectFactory.CreateCollectionSubject(property, indexOrKey);
         newItem.Context.AddFallbackContext(parent.Context);
+        newItem.SetSubjectId(subjectId);
         if (context.TryMarkAsProcessed(subjectId))
         {
             SubjectUpdateApplier.ApplyPropertyUpdates(newItem, properties, context);

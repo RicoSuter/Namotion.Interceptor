@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
@@ -8,7 +9,6 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// </summary>
 internal sealed class SubjectUpdateBuilder
 {
-    private int _nextId;
     private readonly Dictionary<IInterceptorSubject, string> _subjectToId = new();
     private readonly Dictionary<SubjectPropertyUpdate, (RegisteredSubjectProperty Property, IDictionary<string, SubjectPropertyUpdate> Parent)> _propertyUpdates = new();
 
@@ -17,8 +17,6 @@ internal sealed class SubjectUpdateBuilder
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = new();
 
     public HashSet<IInterceptorSubject> ProcessedSubjects { get; } = [];
-
-    public HashSet<IInterceptorSubject> PathVisited { get; } = [];
 
     public void Initialize(IInterceptorSubject rootSubject, ISubjectUpdateProcessor[] processors)
     {
@@ -30,7 +28,7 @@ internal sealed class SubjectUpdateBuilder
     {
         if (!_subjectToId.TryGetValue(subject, out var id))
         {
-            id = (++_nextId).ToString();
+            id = subject.GetOrAddSubjectId();
             _subjectToId[subject] = id;
         }
         return id;
@@ -47,7 +45,7 @@ internal sealed class SubjectUpdateBuilder
             return (id, false);
         }
 
-        id = (++_nextId).ToString();
+        id = subject.GetOrAddSubjectId();
         _subjectToId[subject] = id;
         return (id, true);
     }
@@ -71,6 +69,12 @@ internal sealed class SubjectUpdateBuilder
         return false;
     }
 
+    /// <summary>
+    /// Gets all subject-to-ID pairs tracked by this builder.
+    /// </summary>
+    public IEnumerable<KeyValuePair<IInterceptorSubject, string>> GetSubjectIdPairs()
+        => _subjectToId;
+
     public void TrackPropertyUpdate(
         SubjectPropertyUpdate update,
         RegisteredSubjectProperty property,
@@ -85,15 +89,32 @@ internal sealed class SubjectUpdateBuilder
     /// <summary>
     /// Builds the final SubjectUpdate, applying all transformations.
     /// </summary>
-    public SubjectUpdate Build(IInterceptorSubject subject)
+    public SubjectUpdate Build(IInterceptorSubject subject, bool includeRoot = true)
     {
         ApplyTransformations();
 
         var rootId = GetOrCreateId(subject);
+
+        // Build an ordered dictionary with root entry first for deterministic output.
+        var orderedSubjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>();
+        if (Subjects.TryGetValue(rootId, out var rootProps))
+        {
+            orderedSubjects[rootId] = rootProps;
+        }
+        foreach (var (key, value) in Subjects)
+        {
+            if (key != rootId)
+            {
+                orderedSubjects[key] = value;
+            }
+        }
+
+        // Always include the root subject's stable ID so the applier can map
+        // the root entry to the target subject, even for partial updates.
         var update = new SubjectUpdate
         {
             Root = rootId,
-            Subjects = Subjects
+            Subjects = orderedSubjects
         };
 
         for (var i = 0; i < Processors.Length; i++)
@@ -109,11 +130,9 @@ internal sealed class SubjectUpdateBuilder
     /// </summary>
     public void Clear()
     {
-        _nextId = 0;
         _subjectToId.Clear();
         _propertyUpdates.Clear();
         ProcessedSubjects.Clear();
-        PathVisited.Clear();
         Subjects = new(); // create a fresh dictionary, old one transferred to result
         Processors = [];
     }

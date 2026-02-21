@@ -145,11 +145,10 @@ public class SubjectUpdateCollectionTests
     }
 
     /// <summary>
-    /// Regression test for BuildPathToRoot bug where only the first item's path was included
-    /// when multiple items in the same collection had property changes in the same batch.
-    /// Previously, after the first item was processed, subsequent items were skipped because
-    /// the parent property already existed in the update - but we should APPEND to the
-    /// collection update, not skip entirely.
+    /// When many collection items have property changes in a single batch,
+    /// each changed item should have its own subject entry in the partial update.
+    /// The applier uses stable ID lookup to find and update each target item.
+    /// (No parent collection update is created because the collection structure did not change.)
     /// </summary>
     [Fact]
     public void WhenManyCollectionItemsHavePropertyChanges_ThenAllAreReferencedInParentCollection()
@@ -170,22 +169,30 @@ public class SubjectUpdateCollectionTests
 
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
 
-        // Assert - ALL 100 items should be referenced in the parent's collection update
+        // Assert - each changed item should have its own subject entry keyed by stable ID.
+        // With stable IDs, property-only changes on items do not create a parent collection update;
+        // instead, each item is referenced directly by its stable ID in the Subjects dictionary.
         Assert.NotNull(update.Subjects);
-        Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
-        Assert.True(rootProperties!.TryGetValue("Items", out var itemsUpdate));
-        Assert.Equal(SubjectPropertyUpdateKind.Collection, itemsUpdate!.Kind);
-        Assert.NotNull(itemsUpdate.Items);
 
-        // This was the bug: only 1 item was included instead of all 100
-        Assert.Equal(100, itemsUpdate.Items.Count);
+        // All 100 items should have subject entries (plus root)
+        // Root may or may not have properties, but it should be referenced
+        Assert.True(update.Subjects.Count >= 100); // at least 100 item entries
 
-        // Verify all indices are present
-        var indices = itemsUpdate.Items.Select(c => (int)c.Index!).OrderBy(i => i).ToList();
-        Assert.Equal(Enumerable.Range(0, 100).ToList(), indices);
+        // Collect all subject IDs that have a "Name" property update (i.e., the changed items)
+        var itemSubjectIds = update.Subjects
+            .Where(kvp => kvp.Value.ContainsKey("Name"))
+            .Select(kvp => kvp.Key)
+            .ToList();
+        Assert.Equal(100, itemSubjectIds.Count);
 
-        // Verify all items have their property updates
-        Assert.Equal(101, update.Subjects.Count); // 1 root + 100 items
+        // Verify all IDs are unique 22-char base62 strings
+        var ids = itemSubjectIds.ToHashSet();
+        Assert.Equal(100, ids.Count);
+        Assert.All(ids, id =>
+        {
+            Assert.Equal(22, id!.Length);
+            Assert.All(id.ToCharArray(), c => Assert.True(char.IsLetterOrDigit(c)));
+        });
     }
 
     [Fact]
@@ -463,16 +470,15 @@ public class SubjectUpdateCollectionTests
         var moves = itemsUpdate.Operations.Where(op => op.Action == SubjectCollectionOperationType.Move).ToList();
 
         Assert.Single(removes);
-        Assert.Equal(0, removes[0].Index); // A was at index 0
+        // Remove references childA by its stable ID
+        Assert.Equal(22, removes[0].Id.Length);
+        Assert.All(removes[0].Id.ToCharArray(), c => Assert.True(char.IsLetterOrDigit(c)));
 
-        // Key assertion: Move indices must be valid AFTER the remove
-        // After removing A at index 0, array is [B, C] with indices [0, 1]
-        // Move indices should reference this intermediate state
+        // Move operations reference subjects by stable ID with AfterId for positioning
         foreach (var move in moves)
         {
-            var fromIndex = move.FromIndex!.Value;
-            // After remove, max valid index is 1 (array has 2 items)
-            Assert.True(fromIndex <= 1, $"Move fromIndex {fromIndex} should be <= 1 after remove");
+            Assert.Equal(22, move.Id.Length);
+            // AfterId can be null (move to head) or a valid stable ID
         }
     }
 
@@ -486,19 +492,17 @@ public class SubjectUpdateCollectionTests
         var childC = new CycleTestNode { Name = "ChildC" };
         var source = new CycleTestNode(sourceContext) { Name = "Root", Items = [childA, childB, childC] };
 
+        // Create target by applying a complete update (so stable IDs match for operations)
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new CycleTestNode(targetContext);
+        target.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(source, []), DefaultSubjectFactory.Instance);
+
         var changes = new List<SubjectPropertyChange>();
         sourceContext.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
 
         // Act - remove A and reorder to [C, B]
         source.Items = [childC, childB];
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
-
-        // Create target with same initial state
-        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
-        var targetA = new CycleTestNode { Name = "ChildA" };
-        var targetB = new CycleTestNode { Name = "ChildB" };
-        var targetC = new CycleTestNode { Name = "ChildC" };
-        var target = new CycleTestNode(targetContext) { Name = "Root", Items = [targetA, targetB, targetC] };
 
         // Apply update
         target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
@@ -513,36 +517,28 @@ public class SubjectUpdateCollectionTests
     public void WhenMultipleRemovesAndMove_ThenIndicesAccountForAllRemovals()
     {
         // Arrange: [A, B, C, D, E] -> remove A and C, reorder remaining to [E, B, D]
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var sourceContext = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
         var childA = new CycleTestNode { Name = "A" };
         var childB = new CycleTestNode { Name = "B" };
         var childC = new CycleTestNode { Name = "C" };
         var childD = new CycleTestNode { Name = "D" };
         var childE = new CycleTestNode { Name = "E" };
-        var node = new CycleTestNode(context) { Name = "Root", Items = [childA, childB, childC, childD, childE] };
+        var source = new CycleTestNode(sourceContext) { Name = "Root", Items = [childA, childB, childC, childD, childE] };
+
+        // Create target by applying a complete update (so stable IDs match for operations)
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new CycleTestNode(targetContext);
+        target.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(source, []), DefaultSubjectFactory.Instance);
 
         var changes = new List<SubjectPropertyChange>();
-        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
+        sourceContext.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
 
         // Act - remove A, C and reorder to [E, B, D]
-        node.Items = [childE, childB, childD];
+        source.Items = [childE, childB, childD];
 
-        var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
 
-        // Create target and apply
-        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
-        var target = new CycleTestNode(targetContext)
-        {
-            Name = "Root",
-            Items = [
-                new CycleTestNode { Name = "A" },
-                new CycleTestNode { Name = "B" },
-                new CycleTestNode { Name = "C" },
-                new CycleTestNode { Name = "D" },
-                new CycleTestNode { Name = "E" }
-            ]
-        };
-
+        // Apply to target
         target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
 
         // Assert

@@ -13,6 +13,7 @@ internal static class SubjectItemsUpdateFactory
 
     /// <summary>
     /// Builds a complete collection update with all items.
+    /// Items array order defines collection ordering.
     /// </summary>
     internal static void BuildCollectionComplete(
         SubjectPropertyUpdate update,
@@ -36,14 +37,14 @@ internal static class SubjectItemsUpdateFactory
 
             update.Items.Add(new SubjectPropertyItemUpdate
             {
-                Index = i,
                 Id = itemId
             });
         }
     }
 
     /// <summary>
-    /// Builds a diff collection update with Insert, Remove, Move operations and sparse property updates.
+    /// Builds a diff collection update with ID-based Insert, Remove, Move operations
+    /// and sparse property updates for common items.
     /// </summary>
     internal static void BuildCollectionDiff(
         SubjectPropertyUpdate update,
@@ -65,14 +66,30 @@ internal static class SubjectItemsUpdateFactory
         {
             changeBuilder.GetCollectionChanges(
                 oldItems, newItems,
-                out var operations,
-                out var newItemsToProcess,
-                out var reorderedItems);
+                out var removedItems,
+                out var insertedItems,
+                out var movedItems);
 
-            // Add Insert operations for new items
-            if (newItemsToProcess is not null)
+            List<SubjectCollectionOperation>? operations = null;
+
+            // Add Remove operations
+            if (removedItems is not null)
             {
-                foreach (var (index, item) in newItemsToProcess)
+                foreach (var item in removedItems)
+                {
+                    operations ??= [];
+                    operations.Add(new SubjectCollectionOperation
+                    {
+                        Action = SubjectCollectionOperationType.Remove,
+                        Id = builder.GetOrCreateId(item)
+                    });
+                }
+            }
+
+            // Add Insert operations with afterId
+            if (insertedItems is not null)
+            {
+                foreach (var (item, afterItem) in insertedItems)
                 {
                     var itemId = builder.GetOrCreateId(item);
                     SubjectUpdateFactory.ProcessSubjectComplete(item, builder);
@@ -81,23 +98,23 @@ internal static class SubjectItemsUpdateFactory
                     operations.Add(new SubjectCollectionOperation
                     {
                         Action = SubjectCollectionOperationType.Insert,
-                        Index = index,
-                        Id = itemId
+                        Id = itemId,
+                        AfterId = afterItem is not null ? builder.GetOrCreateId(afterItem) : null
                     });
                 }
             }
 
-            // Add Move operations for reordered items
-            if (reorderedItems is not null)
+            // Add Move operations with afterId
+            if (movedItems is not null)
             {
-                foreach (var (oldIndex, newIndex, _) in reorderedItems)
+                foreach (var (item, afterItem) in movedItems)
                 {
                     operations ??= [];
                     operations.Add(new SubjectCollectionOperation
                     {
                         Action = SubjectCollectionOperationType.Move,
-                        FromIndex = oldIndex,
-                        Index = newIndex
+                        Id = builder.GetOrCreateId(item),
+                        AfterId = afterItem is not null ? builder.GetOrCreateId(afterItem) : null
                     });
                 }
             }
@@ -109,11 +126,9 @@ internal static class SubjectItemsUpdateFactory
                 if (builder.SubjectHasUpdates(item))
                 {
                     var itemId = builder.GetOrCreateId(item);
-                    var newIndex = changeBuilder.GetNewIndex(item);
                     updates ??= [];
                     updates.Add(new SubjectPropertyItemUpdate
                     {
-                        Index = newIndex,
                         Id = itemId
                     });
                 }
@@ -131,6 +146,7 @@ internal static class SubjectItemsUpdateFactory
 
     /// <summary>
     /// Builds a complete dictionary update with all entries.
+    /// Each item includes id + key.
     /// </summary>
     internal static void BuildDictionaryComplete(
         SubjectPropertyUpdate update,
@@ -154,15 +170,16 @@ internal static class SubjectItemsUpdateFactory
 
                 update.Items.Add(new SubjectPropertyItemUpdate
                 {
-                    Index = entry.Key,
-                    Id = itemId
+                    Id = itemId,
+                    Key = entry.Key.ToString()
                 });
             }
         }
     }
 
     /// <summary>
-    /// Builds a diff dictionary update with Insert, Remove operations and sparse property updates.
+    /// Builds a diff dictionary update with ID-based Insert, Remove operations
+    /// and sparse property updates for existing items.
     /// </summary>
     internal static void BuildDictionaryDiff(
         SubjectPropertyUpdate update,
@@ -182,9 +199,29 @@ internal static class SubjectItemsUpdateFactory
         {
             changeBuilder.GetDictionaryChanges(
                 oldDict, newDict,
-                out var operations,
+                out _,
                 out var newItemsToProcess,
                 out var removedKeys);
+
+            List<SubjectCollectionOperation>? operations = null;
+
+            // Add Remove operations for removed keys
+            if (removedKeys is not null && oldDict is not null)
+            {
+                foreach (var removedKey in removedKeys)
+                {
+                    if (oldDict[removedKey] is IInterceptorSubject oldItem)
+                    {
+                        operations ??= [];
+                        operations.Add(new SubjectCollectionOperation
+                        {
+                            Action = SubjectCollectionOperationType.Remove,
+                            Id = builder.GetOrCreateId(oldItem),
+                            Key = removedKey.ToString()
+                        });
+                    }
+                }
+            }
 
             // Add Insert operations for new items
             if (newItemsToProcess is not null)
@@ -198,28 +235,13 @@ internal static class SubjectItemsUpdateFactory
                     operations.Add(new SubjectCollectionOperation
                     {
                         Action = SubjectCollectionOperationType.Insert,
-                        Index = key,
-                        Id = itemId
-                    });
-                }
-            }
-
-            // Add Remove operations
-            if (removedKeys is not null)
-            {
-                foreach (var removedKey in removedKeys)
-                {
-                    operations ??= [];
-                    operations.Add(new SubjectCollectionOperation
-                    {
-                        Action = SubjectCollectionOperationType.Remove,
-                        Index = removedKey
+                        Id = itemId,
+                        Key = key.ToString()
                     });
                 }
             }
 
             // Check for property updates on existing items
-            // Build HashSet for O(1) lookup instead of O(n) Any() per iteration
             HashSet<object>? newKeysSet = null;
             if (newItemsToProcess is not null)
             {
@@ -245,8 +267,8 @@ internal static class SubjectItemsUpdateFactory
                     updates ??= [];
                     updates.Add(new SubjectPropertyItemUpdate
                     {
-                        Index = key,
-                        Id = itemId
+                        Id = itemId,
+                        Key = key.ToString()
                     });
                 }
             }

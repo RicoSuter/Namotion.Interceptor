@@ -32,7 +32,7 @@ public class ChangeQueueProcessor : IDisposable
 
     // Scratch buffers used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
-    private readonly HashSet<PropertyReference> _flushTouchedChanges = new(PropertyReference.Comparer);
+    private readonly Dictionary<PropertyReference, int> _flushPropertyIndices = new(PropertyReference.Comparer);
 
     // Reusable buffer for deduped changes (rented from ArrayPool to avoid allocations on resize)
     private SubjectPropertyChange[] _flushDedupedBuffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(FlushDedupedBufferMinSize);
@@ -194,11 +194,11 @@ public class ChangeQueueProcessor : IDisposable
                 return;
             }
 
-            _flushTouchedChanges.Clear();
+            _flushPropertyIndices.Clear();
             _flushDedupedCount = 0;
 
             // Pre-size to avoid resizes under bursts
-            _flushTouchedChanges.EnsureCapacity(_flushChanges.Count);
+            _flushPropertyIndices.EnsureCapacity(_flushChanges.Count);
 
             // Ensure the buffer is large enough (rent from pool to avoid allocations)
             if (_flushDedupedBuffer.Length < _flushChanges.Count)
@@ -207,13 +207,21 @@ public class ChangeQueueProcessor : IDisposable
                 _flushDedupedBuffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(_flushChanges.Count);
             }
 
-            // Deduplicate by Property, keeping the last write, and preserve order of last occurrences
+            // Deduplicate by Property, keeping the last write's new value
+            // but the first write's old value to preserve the correct diff baseline.
+            // The receiver's state corresponds to the earliest old value.
             for (var i = _flushChanges.Count - 1; i >= 0; i--)
             {
                 var change = _flushChanges[i];
-                if (_flushTouchedChanges.Add(change.Property))
+                if (!_flushPropertyIndices.TryGetValue(change.Property, out var existingIndex))
                 {
+                    _flushPropertyIndices[change.Property] = _flushDedupedCount;
                     _flushDedupedBuffer[_flushDedupedCount++] = change;
+                }
+                else
+                {
+                    // Earlier occurrence found — merge its old value into the kept (later) change
+                    _flushDedupedBuffer[existingIndex] = _flushDedupedBuffer[existingIndex].WithOldValueFrom(change);
                 }
             }
 
@@ -243,7 +251,7 @@ public class ChangeQueueProcessor : IDisposable
         {
             // Clear buffers to allow GC of SubjectPropertyChange objects
             _flushChanges.Clear();
-            _flushTouchedChanges.Clear();
+            _flushPropertyIndices.Clear();
 
             // Clear entire rented array before potential return to pool.
             // SubjectPropertyChange contains object references (Source, boxed values) that must be released.

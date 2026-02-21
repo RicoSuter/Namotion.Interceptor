@@ -8,6 +8,7 @@ namespace Namotion.Interceptor.Registry;
 public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLifecycleHandler
 {
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
+    private readonly Dictionary<string, IInterceptorSubject> _stableIdToSubject = new();
     
     /// <inheritdoc />
     public IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> KnownSubjects
@@ -26,6 +27,33 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
         lock (_knownSubjects)
         {
             return _knownSubjects.GetValueOrDefault(subject);
+        }
+    }
+
+    /// <inheritdoc />
+    public void RegisterStableId(string stableId, IInterceptorSubject subject)
+    {
+        lock (_knownSubjects)
+        {
+            _stableIdToSubject[stableId] = subject;
+        }
+    }
+
+    /// <inheritdoc />
+    public void UnregisterStableId(string stableId)
+    {
+        lock (_knownSubjects)
+        {
+            _stableIdToSubject.Remove(stableId);
+        }
+    }
+
+    /// <inheritdoc />
+    public bool TryGetSubjectByStableId(string stableId, out IInterceptorSubject subject)
+    {
+        lock (_knownSubjects)
+        {
+            return _stableIdToSubject.TryGetValue(stableId, out subject!);
         }
     }
 
@@ -88,6 +116,20 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                     if (change.IsContextDetach)
                     {
                         _knownSubjects.Remove(change.Subject);
+
+                        // Clean up stable ID reverse index
+                        // TODO: subject.TryGetSubjectId and then remove instead of looping through all items here?
+                        string? stableIdToRemove = null;
+                        foreach (var (id, s) in _stableIdToSubject)
+                        {
+                            if (ReferenceEquals(s, change.Subject))
+                            {
+                                stableIdToRemove = id;
+                                break;
+                            }
+                        }
+                        if (stableIdToRemove is not null)
+                            _stableIdToSubject.Remove(stableIdToRemove);
                     }
                 }
             }

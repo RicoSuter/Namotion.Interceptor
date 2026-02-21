@@ -1,4 +1,5 @@
 ﻿using System.Linq.Expressions;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -6,6 +7,21 @@ namespace Namotion.Interceptor.Registry;
 
 public static class SubjectRegistryExtensions
 {
+    internal const string SubjectIdKey = "Namotion.Interceptor.SubjectId";
+
+    public static string GenerateSubjectId()
+    {
+        const string chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+        var value = new BigInteger(Guid.NewGuid().ToByteArray(), isUnsigned: true);
+        var result = new char[22];
+        for (var i = 21; i >= 0; i--)
+        {
+            value = BigInteger.DivRem(value, 62, out var remainder);
+            result[i] = chars[(int)remainder];
+        }
+        return new string(result);
+    }
+
     /// <summary>
     /// Gets all registered properties of the subject and child subjects.
     /// </summary>
@@ -133,5 +149,46 @@ public static class SubjectRegistryExtensions
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Gets or lazily generates a stable subject ID for the given subject.
+    /// The ID is stored in the subject's Data dictionary and auto-registered
+    /// in the registry's reverse index if available.
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <returns>The stable subject ID.</returns>
+    public static string GetOrAddSubjectId(this IInterceptorSubject subject)
+    {
+        return (string)subject.Data.GetOrAdd(
+            (null, SubjectIdKey),
+            static (_, s) =>
+            {
+                var id = GenerateSubjectId();
+                s.Context.TryGetService<ISubjectRegistry>()?.RegisterStableId(id, s);
+                return id;
+            },
+            subject)!;
+    }
+
+    /// <summary>
+    /// Assigns a known stable ID to a subject (from an incoming update).
+    /// Auto-registers in the reverse index if available.
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <param name="id">The stable ID to assign.</param>
+    public static void SetSubjectId(this IInterceptorSubject subject, string id)
+    {
+        var registry = subject.Context.TryGetService<ISubjectRegistry>();
+
+        // Unregister old ID from the reverse index if the subject already has a different one.
+        if (subject.Data.TryGetValue((null, SubjectIdKey), out var existingId) &&
+            existingId is string oldId && oldId != id)
+        {
+            registry?.UnregisterStableId(oldId);
+        }
+
+        subject.Data[(null, SubjectIdKey)] = id;
+        registry?.RegisterStableId(id, subject);
     }
 }

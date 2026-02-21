@@ -1,7 +1,24 @@
 ﻿{
-  Root: 1,
+  Root: SubjectId_1,
   Subjects: {
-    1: {
+    SubjectId_1: {
+      Name: {
+        Kind: Value,
+        Value: Root,
+        Timestamp: DateTimeOffset_1,
+        Attributes: {
+          Status: {
+            Kind: Value,
+            Value: active
+          }
+        }
+      },
+      Self: {
+        Kind: Object
+      },
+      Parent: {
+        Kind: Object
+      },
       Child: {
         Kind: Object
       },
@@ -11,24 +28,7 @@
       },
       Lookup: {
         Kind: Value,
-        Timestamp: DateTimeOffset_1
-      },
-      Name: {
-        Kind: Value,
-        Value: Root,
-        Timestamp: DateTimeOffset_2,
-        Attributes: {
-          Status: {
-            Kind: Value,
-            Value: active
-          }
-        }
-      },
-      Parent: {
-        Kind: Object
-      },
-      Self: {
-        Kind: Object
+        Timestamp: DateTimeOffset_2
       }
     }
   }

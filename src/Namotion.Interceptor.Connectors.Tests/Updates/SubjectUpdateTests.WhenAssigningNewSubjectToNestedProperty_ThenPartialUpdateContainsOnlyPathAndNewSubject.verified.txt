@@ -3,29 +3,16 @@
     Person.Father
   ],
   Update: {
-    Root: 1,
+    Root: SubjectId_1,
     Subjects: {
-      1: {
-        mother: {
-          Kind: Object,
-          Id: 2
-        }
-      },
-      2: {
+      SubjectId_2: {
         father: {
           Kind: Object,
           Timestamp: {Scrubbed},
-          Id: 3
+          Id: SubjectId_3
         }
       },
-      3: {
-        children: {
-          Kind: Collection,
-          Count: 0
-        },
-        father: {
-          Kind: Object
-        },
+      SubjectId_3: {
         firstName: {
           Kind: Value,
           Value: NewFather,
@@ -42,16 +29,23 @@
             }
           }
         },
+        lastName: {
+          Kind: Value
+        },
         fullName: {
           Kind: Value,
           Value: NewFather ,
           Timestamp: {Scrubbed}
         },
-        lastName: {
-          Kind: Value
+        father: {
+          Kind: Object
         },
         mother: {
           Kind: Object
+        },
+        children: {
+          Kind: Collection,
+          Count: 0
         }
       }
     }

@@ -167,18 +167,19 @@ public partial class SubjectUpdateExtensionsTests
     public async Task WhenApplyingCollectionRemove_ThenItemIsRemoved()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var child1 = new Person(context) { FirstName = "Child1" };
-        var child2 = new Person(context) { FirstName = "Child2" };
-        var source = new Person(context) { FirstName = "Parent", Children = [child1, child2] };
+        var sourceContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var child1 = new Person(sourceContext) { FirstName = "Child1" };
+        var child2 = new Person(sourceContext) { FirstName = "Child2" };
+        var source = new Person(sourceContext) { FirstName = "Parent", Children = [child1, child2] };
 
-        var targetChild1 = new Person(context) { FirstName = "Child1" };
-        var targetChild2 = new Person(context) { FirstName = "Child2" };
-        var target = new Person(context) { FirstName = "Parent", Children = [targetChild1, targetChild2] };
+        // Create target by applying a complete update (so IDs match)
+        var targetContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var target = new Person(targetContext);
+        target.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(source, []), DefaultSubjectFactory.Instance);
 
         // Make a change - remove first child
         var changes = new List<SubjectPropertyChange>();
-        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+        using (sourceContext.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
             .Subscribe(c => changes.Add(c)))
         {
             source.Children = [child2];
@@ -198,20 +199,20 @@ public partial class SubjectUpdateExtensionsTests
     public async Task WhenApplyingCollectionMove_ThenItemIsMoved()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var child1 = new Person(context) { FirstName = "Child1" };
-        var child2 = new Person(context) { FirstName = "Child2" };
-        var child3 = new Person(context) { FirstName = "Child3" };
-        var source = new Person(context) { FirstName = "Parent", Children = [child1, child2, child3] };
+        var sourceContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var child1 = new Person(sourceContext) { FirstName = "Child1" };
+        var child2 = new Person(sourceContext) { FirstName = "Child2" };
+        var child3 = new Person(sourceContext) { FirstName = "Child3" };
+        var source = new Person(sourceContext) { FirstName = "Parent", Children = [child1, child2, child3] };
 
-        var targetChild1 = new Person(context) { FirstName = "Child1" };
-        var targetChild2 = new Person(context) { FirstName = "Child2" };
-        var targetChild3 = new Person(context) { FirstName = "Child3" };
-        var target = new Person(context) { FirstName = "Parent", Children = [targetChild1, targetChild2, targetChild3] };
+        // Create target by applying a complete update (so IDs match)
+        var targetContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var target = new Person(targetContext);
+        target.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(source, []), DefaultSubjectFactory.Instance);
 
         // Make a change - move child3 to front
         var changes = new List<SubjectPropertyChange>();
-        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+        using (sourceContext.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
             .Subscribe(c => changes.Add(c)))
         {
             source.Children = [child3, child1, child2];
@@ -233,16 +234,18 @@ public partial class SubjectUpdateExtensionsTests
     public async Task WhenApplyingNestedPropertyUpdate_ThenNestedItemIsUpdated()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var child = new Person(context) { FirstName = "OriginalChild" };
-        var source = new Person(context) { FirstName = "Parent", Children = [child] };
+        var sourceContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var child = new Person(sourceContext) { FirstName = "OriginalChild" };
+        var source = new Person(sourceContext) { FirstName = "Parent", Children = [child] };
 
-        var targetChild = new Person(context) { FirstName = "OriginalChild" };
-        var target = new Person(context) { FirstName = "Parent", Children = [targetChild] };
+        // Create target by applying a complete update (so IDs match for partial apply)
+        var targetContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var target = new Person(targetContext);
+        target.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(source, []), DefaultSubjectFactory.Instance);
 
         // Make a change - update nested child's property
         var changes = new List<SubjectPropertyChange>();
-        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+        using (sourceContext.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
             .Subscribe(c => changes.Add(c)))
         {
             child.FirstName = "UpdatedChild";
@@ -254,7 +257,6 @@ public partial class SubjectUpdateExtensionsTests
         target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
 
         // Assert
-        Assert.Same(targetChild, target.Children[0]); // Same instance reused
         Assert.Equal("UpdatedChild", target.Children[0].FirstName);
     }
 
@@ -529,7 +531,7 @@ public partial class SubjectUpdateExtensionsTests
     }
 
     [Fact]
-    public void WhenApplyingUpdateWithEmptyRoot_ThenNothingHappens()
+    public void WhenApplyingUpdateWithNullRoot_ThenNothingHappens()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
@@ -537,7 +539,7 @@ public partial class SubjectUpdateExtensionsTests
 
         var update = new SubjectUpdate
         {
-            Root = string.Empty,
+            Root = null,
             Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
             {
                 ["1"] = new()
@@ -554,7 +556,7 @@ public partial class SubjectUpdateExtensionsTests
         // Act
         target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
 
-        // Assert - nothing should change
+        // Assert - nothing should change (no registry to resolve stable IDs)
         Assert.Equal("Original", target.FirstName);
     }
 
@@ -589,7 +591,7 @@ public partial class SubjectUpdateExtensionsTests
     }
 
     [Fact]
-    public void WhenApplyingCollectionUpdateWithInvalidIndex_ThenItIsIgnored()
+    public void WhenApplyingCollectionUpdateWithUnknownId_ThenItIsIgnored()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
@@ -617,7 +619,7 @@ public partial class SubjectUpdateExtensionsTests
                             new SubjectCollectionOperation
                             {
                                 Action = SubjectCollectionOperationType.Remove,
-                                Index = 999 // Invalid index - way out of bounds
+                                Id = "nonexistent_stable_id_12345" // Unknown stable ID
                             }
                         ],
                         Count = 1
@@ -665,67 +667,69 @@ public partial class SubjectUpdateExtensionsTests
     }
 
     [Fact]
-    public void WhenApplyingSparseUpdateWithIndexExceedingCount_ThenExceptionIsThrown()
+    public void WhenApplyingSparseUpdateWithUnknownItemId_ThenItemIsIgnored()
     {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var target = new Person(context)
+        // Arrange - create source and target via complete update so IDs match
+        var sourceContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var source = new Person(sourceContext)
         {
             FirstName = "Parent",
-            Children = [new Person(context) { FirstName = "Child1" }] // Only 1 item
+            Children = [new Person(sourceContext) { FirstName = "Child1" }]
         };
 
-        // Create an update with index 5 but count 1 - this is invalid (index must be < count)
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new Person(targetContext);
+        target.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(source, []), DefaultSubjectFactory.Instance);
+
+        // Create a sparse update with an unknown item ID - should be ignored gracefully.
+        // Operations = [] signals this is a sparse update (not a complete collection).
+        var rootId = source.GetOrAddSubjectId();
         var update = new SubjectUpdate
         {
-            Root = "1",
+            Root = rootId,
             Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
             {
-                ["1"] = new()
+                [rootId] = new()
                 {
                     ["Children"] = new SubjectPropertyUpdate
                     {
                         Kind = SubjectPropertyUpdateKind.Collection,
+                        Operations = [],
                         Items =
                         [
                             new SubjectPropertyItemUpdate
                             {
-                                Index = 5, // Invalid: index >= count
-                                Id = "2"
+                                Id = "unknown_stable_id_12345"
                             }
                         ],
-                        Count = 1 // Final size is 1, so only index 0 is valid
-                    }
-                },
-                ["2"] = new()
-                {
-                    ["FirstName"] = new SubjectPropertyUpdate
-                    {
-                        Kind = SubjectPropertyUpdateKind.Value,
-                        Value = "NewChild"
+                        Count = 1
                     }
                 }
             }
         };
 
-        // Act & Assert - should throw because index >= count
-        var exception = Assert.Throws<InvalidOperationException>(
-            () => target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance));
-        Assert.Contains("out of bounds", exception.Message.ToLower());
+        // Act - should not throw; unknown item IDs in sparse updates are ignored
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert - collection unchanged
+        Assert.Single(target.Children);
+        Assert.Equal("Child1", target.Children[0].FirstName);
     }
 
     [Fact]
-    public void WhenApplyingSparseUpdateAtNextIndex_ThenItemIsAppended()
+    public void WhenApplyingCompleteCollectionWithNewItem_ThenItemIsAppended()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
         var target = new Person(context)
         {
             FirstName = "Parent",
-            Children = [new Person(context) { FirstName = "Child1" }] // 1 item at index 0
+            Children = [new Person(context) { FirstName = "Child1" }] // 1 item
         };
 
-        // Create an update that adds at index 1 (next available position - valid)
+        // Create a complete collection update with two items (existing + new)
+        var child1Id = "child1_stable_id_test01";
+        var child2Id = "child2_stable_id_test02";
         var update = new SubjectUpdate
         {
             Root = "1",
@@ -738,16 +742,21 @@ public partial class SubjectUpdateExtensionsTests
                         Kind = SubjectPropertyUpdateKind.Collection,
                         Items =
                         [
-                            new SubjectPropertyItemUpdate
-                            {
-                                Index = 1, // Append position - valid
-                                Id = "2"
-                            }
+                            new SubjectPropertyItemUpdate { Id = child1Id },
+                            new SubjectPropertyItemUpdate { Id = child2Id }
                         ],
                         Count = 2
                     }
                 },
-                ["2"] = new()
+                [child1Id] = new()
+                {
+                    ["FirstName"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Child1"
+                    }
+                },
+                [child2Id] = new()
                 {
                     ["FirstName"] = new SubjectPropertyUpdate
                     {
@@ -758,7 +767,7 @@ public partial class SubjectUpdateExtensionsTests
             }
         };
 
-        // Act - should not throw
+        // Act
         target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
 
         // Assert
@@ -768,7 +777,7 @@ public partial class SubjectUpdateExtensionsTests
     }
 
     [Fact]
-    public void WhenApplyingMoveWithNegativeFromIndex_ThenItIsIgnored()
+    public void WhenApplyingMoveWithUnknownId_ThenItIsIgnored()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
@@ -791,8 +800,8 @@ public partial class SubjectUpdateExtensionsTests
                             new SubjectCollectionOperation
                             {
                                 Action = SubjectCollectionOperationType.Move,
-                                FromIndex = -1, // Invalid negative index
-                                Index = 0
+                                Id = "unknown_stable_id_99999", // Unknown stable ID
+                                AfterId = null
                             }
                         ],
                         Count = 2
@@ -811,7 +820,7 @@ public partial class SubjectUpdateExtensionsTests
     }
 
     [Fact]
-    public void WhenApplyingRemoveAtNegativeIndex_ThenItIsIgnored()
+    public void WhenApplyingRemoveWithUnknownId_ThenItIsIgnored()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
@@ -836,7 +845,7 @@ public partial class SubjectUpdateExtensionsTests
                             new SubjectCollectionOperation
                             {
                                 Action = SubjectCollectionOperationType.Remove,
-                                Index = -1 // Invalid negative index
+                                Id = "unknown_stable_id_99999" // Unknown stable ID
                             }
                         ],
                         Count = 1
@@ -878,8 +887,8 @@ public partial class SubjectUpdateExtensionsTests
                             new SubjectCollectionOperation
                             {
                                 Action = SubjectCollectionOperationType.Insert,
-                                Index = 0,
-                                Id = "2"
+                                Id = "2",
+                                AfterId = null // Insert at head
                             }
                         ],
                         Count = 1
@@ -971,7 +980,8 @@ public partial class SubjectUpdateExtensionsTests
         var update = SubjectUpdate.CreateCompleteUpdate(source, []);
 
         // Assert
-        var rootProps = update.Subjects[update.Root];
+        Assert.NotNull(update.Root);
+        var rootProps = update.Subjects[update.Root!];
         Assert.True(rootProps.ContainsKey("Children"));
         Assert.Equal(SubjectPropertyUpdateKind.Value, rootProps["Children"].Kind);
         Assert.Null(rootProps["Children"].Value);
@@ -1019,29 +1029,26 @@ public partial class SubjectUpdateExtensionsTests
     [Fact]
     public void WhenApplyingDictionaryItemPropertyChangeViaJsonRoundTrip_ThenUpdateIsAppliedCorrectly()
     {
-        // Arrange - this tests the BuildPathToRoot code path: when a property on a
-        // dictionary item changes, the partial update must use Kind=Dictionary (not Collection).
-        // After JSON round-trip, dictionary keys become JsonElement strings, so using
-        // Kind=Collection would cause ConvertIndexToInt to fail on the string key.
-        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var item1 = new CycleTestNode(context) { Name = "Item1" };
-        var source = new CycleTestNode(context)
+        // Arrange - when a property on a dictionary item changes, the partial update
+        // only contains an entry for the changed item subject. After JSON round-trip,
+        // the target must have matching stable IDs (via complete update initialization)
+        // so the applier can find the correct subject via stable ID lookup.
+        var sourceContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var item1 = new CycleTestNode(sourceContext) { Name = "Item1" };
+        var source = new CycleTestNode(sourceContext)
         {
             Name = "Root",
             Lookup = new Dictionary<string, CycleTestNode> { ["myKey"] = item1 }
         };
-        var target = new CycleTestNode(context)
-        {
-            Name = "Root",
-            Lookup = new Dictionary<string, CycleTestNode>
-            {
-                ["myKey"] = new(context) { Name = "Item1" }
-            }
-        };
 
-        // Change a property on the dictionary item (triggers BuildPathToRoot)
+        // Create target by applying a complete update (so IDs match)
+        var targetContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var target = new CycleTestNode(targetContext);
+        target.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(source, []), DefaultSubjectFactory.Instance);
+
+        // Change a property on the dictionary item
         var changes = new List<SubjectPropertyChange>();
-        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+        using (sourceContext.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
             .Subscribe(c => changes.Add(c)))
         {
             item1.Name = "Item1Updated";
@@ -1052,8 +1059,8 @@ public partial class SubjectUpdateExtensionsTests
         var json = JsonSerializer.Serialize(update);
         var deserialized = JsonSerializer.Deserialize<SubjectUpdate>(json)!;
 
-        // Act - apply the deserialized update (this is where the bug manifested:
-        // Kind=Collection with a string JsonElement key caused ConvertIndexToInt to throw)
+        // Act - apply the deserialized update; the applier uses stable ID lookup
+        // to find the target item since the root entry is not in Subjects
         target.ApplySubjectUpdate(deserialized, DefaultSubjectFactory.Instance);
 
         // Assert

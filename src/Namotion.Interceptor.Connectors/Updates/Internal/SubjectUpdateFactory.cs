@@ -43,7 +43,8 @@ internal static class SubjectUpdateFactory
     public static SubjectUpdate CreatePartialUpdateFromChanges(
         IInterceptorSubject rootSubject,
         ReadOnlySpan<SubjectPropertyChange> propertyChanges,
-        ISubjectUpdateProcessor[] processors)
+        ISubjectUpdateProcessor[] processors,
+        bool useCompleteStructuralState = false)
     {
         var builder = BuilderPool.Rent();
         try
@@ -52,7 +53,7 @@ internal static class SubjectUpdateFactory
 
             for (var i = 0; i < propertyChanges.Length; i++)
             {
-                ProcessPropertyChange(propertyChanges[i], rootSubject, builder);
+                ProcessPropertyChange(propertyChanges[i], builder, useCompleteStructuralState);
             }
 
             return builder.Build(rootSubject);
@@ -75,7 +76,13 @@ internal static class SubjectUpdateFactory
 
         var registeredSubject = subject.TryGetRegisteredSubject();
         if (registeredSubject is null)
+        {
+            // Subject is detached (concurrent mutation removed it from the graph).
+            // Still create an empty properties entry so the client can instantiate the
+            // subject from its type metadata. Future updates will populate properties.
+            builder.GetOrCreateProperties(subjectId);
             return;
+        }
 
         var properties = builder.GetOrCreateProperties(subjectId);
 
@@ -96,8 +103,8 @@ internal static class SubjectUpdateFactory
 
     private static void ProcessPropertyChange(
         SubjectPropertyChange change,
-        IInterceptorSubject rootSubject,
-        SubjectUpdateBuilder builder)
+        SubjectUpdateBuilder builder,
+        bool useCompleteStructuralState)
     {
         var changedSubject = change.Property.Subject;
         var registeredProperty = change.Property.TryGetRegisteredProperty();
@@ -125,11 +132,9 @@ internal static class SubjectUpdateFactory
             }
 
             // Update the property value in place (preserves any existing attributes)
-            ApplyPropertyChangeToUpdate(propertyUpdate, registeredProperty, change, builder);
+            ApplyPropertyChangeToUpdate(propertyUpdate, registeredProperty, change, builder, useCompleteStructuralState);
             builder.TrackPropertyUpdate(propertyUpdate, registeredProperty, properties);
         }
-
-        BuildPathToRoot(changedSubject, rootSubject, builder);
     }
 
     private static SubjectPropertyUpdate CreatePropertyUpdate(
@@ -184,46 +189,96 @@ internal static class SubjectUpdateFactory
     /// Applies a property change to an existing update in place.
     /// This preserves any existing attributes on the update.
     /// </summary>
+    /// <remarks>
+    /// When <paramref name="useCompleteStructuralState"/> is true, structural properties
+    /// (Collection, Dictionary, ObjectRef) read the current live property value instead of
+    /// the change's snapshot. This minimizes the race window where a concurrent mutation
+    /// detaches a subject between change capture and update building, causing
+    /// ProcessSubjectComplete to fail (TryGetRegisteredSubject returns null).
+    /// </remarks>
     private static void ApplyPropertyChangeToUpdate(
         SubjectPropertyUpdate update,
         RegisteredSubjectProperty property,
         SubjectPropertyChange change,
-        SubjectUpdateBuilder builder)
+        SubjectUpdateBuilder builder,
+        bool useCompleteStructuralState = false)
     {
         update.Timestamp = change.ChangedTimestamp;
 
         if (property.IsSubjectDictionary)
         {
-            var newValue = change.GetNewValue<IDictionary?>();
-            if (newValue is null)
+            if (useCompleteStructuralState)
             {
-                update.Kind = SubjectPropertyUpdateKind.Value;
-                update.Value = null;
+                // Read current live value to minimize race with concurrent detachments.
+                var currentValue = property.GetValue() as IDictionary;
+                if (currentValue is null)
+                {
+                    update.Kind = SubjectPropertyUpdateKind.Value;
+                    update.Value = null;
+                }
+                else
+                {
+                    SubjectItemsUpdateFactory.BuildDictionaryComplete(update, currentValue, builder);
+                }
             }
             else
             {
-                SubjectItemsUpdateFactory.BuildDictionaryDiff(update, change.GetOldValue<IDictionary?>(),
-                    newValue, builder);
+                var newValue = change.GetNewValue<IDictionary?>();
+                if (newValue is null)
+                {
+                    update.Kind = SubjectPropertyUpdateKind.Value;
+                    update.Value = null;
+                }
+                else
+                {
+                    SubjectItemsUpdateFactory.BuildDictionaryDiff(update, change.GetOldValue<IDictionary?>(),
+                        newValue, builder);
+                }
             }
         }
         else if (property.IsSubjectCollection)
         {
-            var newValue = change.GetNewValue<IEnumerable<IInterceptorSubject>?>();
-            if (newValue is null)
+            if (useCompleteStructuralState)
             {
-                update.Kind = SubjectPropertyUpdateKind.Value;
-                update.Value = null;
+                // Read current live value to minimize race with concurrent detachments.
+                var currentValue = property.GetValue() as IEnumerable<IInterceptorSubject>;
+                if (currentValue is null)
+                {
+                    update.Kind = SubjectPropertyUpdateKind.Value;
+                    update.Value = null;
+                }
+                else
+                {
+                    SubjectItemsUpdateFactory.BuildCollectionComplete(update, currentValue, builder);
+                }
             }
             else
             {
-                SubjectItemsUpdateFactory.BuildCollectionDiff(update,
-                    change.GetOldValue<IEnumerable<IInterceptorSubject>?>(),
-                    newValue, builder);
+                var newValue = change.GetNewValue<IEnumerable<IInterceptorSubject>?>();
+                if (newValue is null)
+                {
+                    update.Kind = SubjectPropertyUpdateKind.Value;
+                    update.Value = null;
+                }
+                else
+                {
+                    SubjectItemsUpdateFactory.BuildCollectionDiff(update,
+                        change.GetOldValue<IEnumerable<IInterceptorSubject>?>(),
+                        newValue, builder);
+                }
             }
         }
         else if (property.IsSubjectReference)
         {
-            BuildObjectReference(update, change.GetNewValue<IInterceptorSubject?>(), builder);
+            if (useCompleteStructuralState)
+            {
+                // Read current live value to minimize race with concurrent detachments.
+                BuildObjectReference(update, property.GetValue() as IInterceptorSubject, builder);
+            }
+            else
+            {
+                BuildObjectReference(update, change.GetNewValue<IInterceptorSubject?>(), builder);
+            }
         }
         else
         {
@@ -254,100 +309,6 @@ internal static class SubjectUpdateFactory
             {
                 ProcessSubjectComplete(item, builder);
             }
-        }
-    }
-
-    /// <summary>
-    /// Builds the path from a changed subject up to the root subject by adding
-    /// property references for each parent in the hierarchy.
-    /// Only traverses the first parent (canonical registration path) in DAG structures.
-    /// </summary>
-    private static void BuildPathToRoot(
-        IInterceptorSubject subject,
-        IInterceptorSubject rootSubject,
-        SubjectUpdateBuilder builder)
-    {
-        builder.PathVisited.Clear();
-        var current = subject.TryGetRegisteredSubject();
-
-        while (current is not null && current.Subject != rootSubject)
-        {
-            if (!builder.PathVisited.Add(current.Subject))
-                break;
-
-            if (current.Parents.Length == 0)
-                break;
-
-            var parentInfo = current.Parents[0];
-            var parentProperty = parentInfo.Property;
-            var parentSubject = parentProperty.Parent;
-
-            var parentId = builder.GetOrCreateId(parentSubject.Subject);
-            var parentProperties = builder.GetOrCreateProperties(parentId);
-            var childId = builder.GetOrCreateId(current.Subject);
-
-            if (parentInfo.Index is not null)
-            {
-                var kind = parentProperty.IsSubjectDictionary
-                    ? SubjectPropertyUpdateKind.Dictionary
-                    : SubjectPropertyUpdateKind.Collection;
-                AddCollectionOrDictionaryItemToParent(parentProperties, parentProperty.Name, parentInfo.Index, childId, kind);
-            }
-            else
-            {
-                AddSingleReferenceToParent(parentProperties, parentProperty.Name, childId);
-            }
-
-            current = parentSubject;
-        }
-    }
-
-    /// <summary>
-    /// Adds a collection or dictionary item reference to the parent's property update.
-    /// Appends to an existing update or creates a new one with the specified kind.
-    /// </summary>
-    private static void AddCollectionOrDictionaryItemToParent(
-        Dictionary<string, SubjectPropertyUpdate> parentProperties,
-        string propertyName,
-        object index,
-        string childId,
-        SubjectPropertyUpdateKind kind)
-    {
-        if (parentProperties.TryGetValue(propertyName, out var existingUpdate))
-        {
-            existingUpdate.Items ??= [];
-            existingUpdate.Items.Add(new SubjectPropertyItemUpdate
-            {
-                Index = index,
-                Id = childId
-            });
-        }
-        else
-        {
-            parentProperties[propertyName] = new SubjectPropertyUpdate
-            {
-                Kind = kind,
-                Items = [new SubjectPropertyItemUpdate { Index = index, Id = childId }]
-            };
-        }
-    }
-
-    /// <summary>
-    /// Adds a single item reference to the parent's property update.
-    /// Skips if the property already exists (avoids overwriting).
-    /// </summary>
-    private static void AddSingleReferenceToParent(
-        Dictionary<string, SubjectPropertyUpdate> parentProperties,
-        string propertyName,
-        string childId)
-    {
-        if (!parentProperties.ContainsKey(propertyName))
-        {
-            parentProperties[propertyName] = new SubjectPropertyUpdate
-            {
-                Kind = SubjectPropertyUpdateKind.Object,
-                Id = childId
-            };
         }
     }
 

@@ -68,37 +68,42 @@ public class SubjectUpdateFlowTests
     [Fact]
     public void WelcomePayload_SerializeAndApply_CollectionGrows_ShouldReuseExistingAndAddNew()
     {
-        // Arrange - Server with more items than client
+        // Arrange - Server with initial 2 items
         var serverContext = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
             .WithRegistry();
 
+        var serverItem1 = new TestItem(serverContext) { Label = "OldFirst", Value = 1 };
+        var serverItem2 = new TestItem(serverContext) { Label = "OldSecond", Value = 2 };
         var serverRoot = new TestRoot(serverContext)
         {
-            Name = "ServerWithMoreItems",
-            Items =
-            [
-                new TestItem(serverContext) { Label = "UpdatedFirst", Value = 10 },
-                new TestItem(serverContext) { Label = "UpdatedSecond", Value = 20 },
-                new TestItem(serverContext) { Label = "NewThird", Value = 30 }
-            ]
+            Name = "InitialRoot",
+            Items = [serverItem1, serverItem2]
         };
 
-        // Arrange - Client with existing items
+        // Arrange - Client initialized via complete update (so stable IDs match)
         var clientContext = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
             .WithRegistry();
 
-        var existingItem0 = new TestItem(clientContext) { Label = "OldFirst", Value = 1 };
-        var existingItem1 = new TestItem(clientContext) { Label = "OldSecond", Value = 2 };
-        var clientRoot = new TestRoot(clientContext)
-        {
-            Items = [existingItem0, existingItem1]
-        };
+        var clientRoot = new TestRoot(clientContext);
+        clientRoot.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(serverRoot, []), DefaultSubjectFactory.Instance);
 
-        // Act - Serialize and apply
+        // Capture references to the client items (created by complete update apply)
+        var existingItem0 = clientRoot.Items[0];
+        var existingItem1 = clientRoot.Items[1];
+
+        // Now server grows: update existing items and add a new third item
+        serverItem1.Label = "UpdatedFirst";
+        serverItem1.Value = 10;
+        serverItem2.Label = "UpdatedSecond";
+        serverItem2.Value = 20;
+        serverRoot.Name = "ServerWithMoreItems";
+        serverRoot.Items = [serverItem1, serverItem2, new TestItem(serverContext) { Label = "NewThird", Value = 30 }];
+
+        // Act - Serialize and apply the updated complete state
         var serializer = new JsonWebSocketSerializer();
         var update = SubjectUpdate.CreateCompleteUpdate(serverRoot, []);
         var welcome = new WelcomePayload { Version = 1, Format = WebSocketFormat.Json, State = update };
@@ -155,7 +160,8 @@ public class SubjectUpdateFlowTests
         var update = SubjectUpdate.CreateCompleteUpdate(serverRoot, []);
 
         // Verify the original update has the property
-        var rootProps = update.Subjects[update.Root];
+        Assert.NotNull(update.Root);
+        var rootProps = update.Subjects[update.Root!];
         Assert.True(rootProps.ContainsKey("Name"), "Original update should contain Name");
         Assert.Equal("Initial", rootProps["Name"].Value);
 
@@ -170,7 +176,8 @@ public class SubjectUpdateFlowTests
 
         // Verify deserialized update has the property
         Assert.NotNull(deserializedWelcome.State);
-        var deserializedRootProps = deserializedWelcome.State.Subjects[deserializedWelcome.State.Root];
+        Assert.NotNull(deserializedWelcome.State.Root);
+        var deserializedRootProps = deserializedWelcome.State.Subjects[deserializedWelcome.State.Root!];
         Assert.True(deserializedRootProps.ContainsKey("Name"), "Deserialized update should contain Name");
 
         var nameUpdate = deserializedRootProps["Name"];
@@ -228,12 +235,10 @@ public class SubjectUpdateFlowTests
         var item2 = new TestItem(serverContext) { Label = "Second", Value = 2 };
         var serverRoot = new TestRoot(serverContext) { Name = "Root", Items = [item1, item2] };
 
+        // Initialize client via complete update so stable IDs match
         var clientContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var clientRoot = new TestRoot(clientContext)
-        {
-            Name = "Root",
-            Items = [new TestItem(clientContext) { Label = "First", Value = 1 }, new TestItem(clientContext) { Label = "Second", Value = 2 }]
-        };
+        var clientRoot = new TestRoot(clientContext);
+        clientRoot.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(serverRoot, []), DefaultSubjectFactory.Instance);
 
         // Make change - remove first item
         var changes = new List<SubjectPropertyChange>();
@@ -267,17 +272,10 @@ public class SubjectUpdateFlowTests
         var item3 = new TestItem(serverContext) { Label = "C", Value = 3 };
         var serverRoot = new TestRoot(serverContext) { Name = "Root", Items = [item1, item2, item3] };
 
+        // Initialize client via complete update so stable IDs match
         var clientContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var clientRoot = new TestRoot(clientContext)
-        {
-            Name = "Root",
-            Items =
-            [
-                new TestItem(clientContext) { Label = "A", Value = 1 },
-                new TestItem(clientContext) { Label = "B", Value = 2 },
-                new TestItem(clientContext) { Label = "C", Value = 3 }
-            ]
-        };
+        var clientRoot = new TestRoot(clientContext);
+        clientRoot.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(serverRoot, []), DefaultSubjectFactory.Instance);
 
         // Make change - move C to front: [C, A, B]
         var changes = new List<SubjectPropertyChange>();

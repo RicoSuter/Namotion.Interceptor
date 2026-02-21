@@ -1,24 +1,11 @@
 ﻿{
-  Root: 1,
+  Root: SubjectId_1,
   Subjects: {
-    1: {
-      Child: {
-        Kind: Object,
-        Timestamp: DateTimeOffset_1,
-        Id: 2
-      },
-      Items: {
-        Kind: Collection,
-        Count: 0
-      },
-      Lookup: {
-        Kind: Dictionary,
-        Count: 0
-      },
+    SubjectId_1: {
       Name: {
         Kind: Value,
         Value: Parent,
-        Timestamp: DateTimeOffset_2,
+        Timestamp: DateTimeOffset_1,
         Attributes: {
           Status: {
             Kind: Value,
@@ -26,16 +13,16 @@
           }
         }
       },
+      Self: {
+        Kind: Object
+      },
       Parent: {
         Kind: Object
       },
-      Self: {
-        Kind: Object
-      }
-    },
-    2: {
       Child: {
-        Kind: Object
+        Kind: Object,
+        Timestamp: DateTimeOffset_2,
+        Id: SubjectId_2
       },
       Items: {
         Kind: Collection,
@@ -44,7 +31,9 @@
       Lookup: {
         Kind: Dictionary,
         Count: 0
-      },
+      }
+    },
+    SubjectId_2: {
       Name: {
         Kind: Value,
         Value: Child,
@@ -56,13 +45,24 @@
           }
         }
       },
+      Self: {
+        Kind: Object
+      },
       Parent: {
         Kind: Object,
         Timestamp: DateTimeOffset_4,
-        Id: 1
+        Id: SubjectId_1
       },
-      Self: {
+      Child: {
         Kind: Object
+      },
+      Items: {
+        Kind: Collection,
+        Count: 0
+      },
+      Lookup: {
+        Kind: Dictionary,
+        Count: 0
       }
     }
   }

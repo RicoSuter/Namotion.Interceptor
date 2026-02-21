@@ -179,6 +179,26 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     }
 
     /// <summary>
+    /// Creates a merged change that keeps this (later) change's new value, timestamp,
+    /// and metadata, but uses the old value from the specified earlier change.
+    /// Used during dedup to preserve the correct diff baseline: the receiver's state
+    /// corresponds to the earliest old value, not the intermediate states.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal SubjectPropertyChange WithOldValueFrom(SubjectPropertyChange earlierChange)
+    {
+        return new SubjectPropertyChange(
+            Property,
+            Source,
+            ChangedTimestamp,
+            ReceivedTimestamp,
+            earlierChange._oldValueStorage,
+            _newValueStorage,
+            earlierChange._oldBoxedHolder,
+            _newBoxedHolder);
+    }
+
+    /// <summary>
     /// Equality based on PropertyReference only for efficient HashSet/Dictionary usage.
     /// </summary>
     public bool Equals(SubjectPropertyChange other) => Property.Equals(other.Property);

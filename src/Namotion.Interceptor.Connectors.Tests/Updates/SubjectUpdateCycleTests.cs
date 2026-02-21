@@ -407,7 +407,8 @@ public class SubjectUpdateCycleTests
         Assert.NotNull(json);
 
         // Verify "last wins" for root.Name
-        var rootProperties = partialUpdate.Subjects[partialUpdate.Root];
+        var rootId = ((IInterceptorSubject)root).GetOrAddSubjectId();
+        var rootProperties = partialUpdate.Subjects[rootId];
         Assert.True(rootProperties.ContainsKey("name"));
         Assert.Equal("Root_Final", rootProperties["name"].Value);
 
@@ -454,7 +455,8 @@ public class SubjectUpdateCycleTests
         Assert.NotNull(json);
 
         // Verify we have Operations with Inserts
-        var rootProperties = partialUpdate.Subjects[partialUpdate.Root];
+        var rootId = ((IInterceptorSubject)root).GetOrAddSubjectId();
+        var rootProperties = partialUpdate.Subjects[rootId];
         Assert.NotNull(rootProperties["items"].Operations);
         Assert.Equal(2, rootProperties["items"].Operations!.Count);
     }
@@ -495,7 +497,8 @@ public class SubjectUpdateCycleTests
 
         // With flat structure, the insert operation has an Id that references
         // the subject in the Subjects dictionary
-        var rootProperties = partialUpdate.Subjects[partialUpdate.Root];
+        var rootId = ((IInterceptorSubject)root).GetOrAddSubjectId();
+        var rootProperties = partialUpdate.Subjects[rootId];
         var operations = rootProperties["items"].Operations;
         Assert.NotNull(operations);
         Assert.Single(operations);
@@ -509,7 +512,7 @@ public class SubjectUpdateCycleTests
         // The child's parent property should reference the root by Id
         var childProperties = partialUpdate.Subjects[insertOp.Id];
         Assert.True(childProperties.ContainsKey("parent"));
-        Assert.Equal(partialUpdate.Root, childProperties["parent"].Id);
+        Assert.Equal(rootId, childProperties["parent"].Id);
     }
 
     [Fact]

@@ -17,23 +17,24 @@ internal sealed class CollectionDiffBuilder
     private readonly HashSet<object> _oldKeys = [];
 
     /// <summary>
-    /// Builds collection change operations.
+    /// Builds collection change operations using subject references (not indices).
+    /// The caller converts references to stable IDs.
     /// </summary>
     /// <param name="oldItems">The old collection items.</param>
     /// <param name="newItems">The new collection items.</param>
-    /// <param name="operations">Output: structural operations (Insert/Remove/Move), or null if none.</param>
-    /// <param name="newItemsToProcess">Output: items that are new and need full processing, or null if none.</param>
-    /// <param name="reorderedItems">Output: items that were reordered (for Move operations), or null if none.</param>
+    /// <param name="removedItems">Output: items removed from old that are not in new.</param>
+    /// <param name="insertedItems">Output: new items with their predecessor in the new collection (null = head).</param>
+    /// <param name="movedItems">Output: items present in both but at different relative positions, with new predecessor.</param>
     public void GetCollectionChanges(
         IReadOnlyList<IInterceptorSubject> oldItems,
         IReadOnlyList<IInterceptorSubject> newItems,
-        out List<SubjectCollectionOperation>? operations,
-        out List<(int index, IInterceptorSubject item)>? newItemsToProcess,
-        out List<(int oldIndex, int newIndex, IInterceptorSubject item)>? reorderedItems)
+        out List<IInterceptorSubject>? removedItems,
+        out List<(IInterceptorSubject item, IInterceptorSubject? afterItem)>? insertedItems,
+        out List<(IInterceptorSubject item, IInterceptorSubject? afterItem)>? movedItems)
     {
-        operations = null;
-        newItemsToProcess = null;
-        reorderedItems = null;
+        removedItems = null;
+        insertedItems = null;
+        movedItems = null;
 
         // Build index maps
         _oldIndexMap.Clear();
@@ -43,36 +44,30 @@ internal sealed class CollectionDiffBuilder
         for (var i = 0; i < newItems.Count; i++)
             _newIndexMap[newItems[i]] = i;
 
-        // Generate Remove operations in descending order.
-        // Descending order ensures each remove doesn't affect indices of subsequent removes
-        // when applied sequentially.
-        for (var i = oldItems.Count - 1; i >= 0; i--)
+        // Removed items: in old but not in new
+        for (var i = 0; i < oldItems.Count; i++)
         {
             var item = oldItems[i];
             if (!_newIndexMap.ContainsKey(item))
             {
-                operations ??= [];
-                operations.Add(new SubjectCollectionOperation
-                {
-                    Action = SubjectCollectionOperationType.Remove,
-                    Index = i
-                });
+                removedItems ??= [];
+                removedItems.Add(item);
             }
         }
-        // Keep descending order - do NOT reverse
 
-        // Generate Insert operations for new items
+        // Inserted items: in new but not in old, with predecessor from new list
         for (var i = 0; i < newItems.Count; i++)
         {
             var item = newItems[i];
             if (!_oldIndexMap.ContainsKey(item))
             {
-                newItemsToProcess ??= [];
-                newItemsToProcess.Add((i, item));
+                var afterItem = i > 0 ? newItems[i - 1] : null;
+                insertedItems ??= [];
+                insertedItems.Add((item, afterItem));
             }
         }
 
-        // Build common order lists to detect reordering
+        // Detect reordering among common items
         _oldCommonOrder.Clear();
         _newCommonOrder.Clear();
         for (var i = 0; i < oldItems.Count; i++)
@@ -86,26 +81,11 @@ internal sealed class CollectionDiffBuilder
                 _newCommonOrder.Add(newItems[i]);
         }
 
-        // Detect reordering and compute intermediate indices for moves
         if (_oldCommonOrder.Count > 0 && !_oldCommonOrder.SequenceEqual(_newCommonOrder))
         {
             _oldCommonIndexMap.Clear();
             for (var i = 0; i < _oldCommonOrder.Count; i++)
                 _oldCommonIndexMap[_oldCommonOrder[i]] = i;
-
-            // Build set of removed indices to compute index shifts for moves
-            HashSet<int>? removedIndices = null;
-            if (operations is not null)
-            {
-                foreach (var op in operations)
-                {
-                    if (op.Action == SubjectCollectionOperationType.Remove)
-                    {
-                        removedIndices ??= [];
-                        removedIndices.Add((int)op.Index);
-                    }
-                }
-            }
 
             for (var i = 0; i < _newCommonOrder.Count; i++)
             {
@@ -113,36 +93,14 @@ internal sealed class CollectionDiffBuilder
                 var oldCommonIndex = _oldCommonIndexMap[item];
                 if (oldCommonIndex != i)
                 {
-                    var originalOldIndex = _oldIndexMap[item];
-                    var originalNewIndex = _newIndexMap[item];
-
-                    // Compute intermediate fromIndex: original index minus removes before it
-                    // This accounts for index shifts after removes are applied
-                    var removesBeforeOldIndex = CountRemovesBefore(removedIndices, originalOldIndex);
-                    var intermediateFromIndex = originalOldIndex - removesBeforeOldIndex;
-
-                    reorderedItems ??= [];
-                    reorderedItems.Add((intermediateFromIndex, originalNewIndex, item));
+                    // Find predecessor in full new list
+                    var newIndex = _newIndexMap[item];
+                    var afterItem = newIndex > 0 ? newItems[newIndex - 1] : null;
+                    movedItems ??= [];
+                    movedItems.Add((item, afterItem));
                 }
             }
         }
-    }
-
-    /// <summary>
-    /// Counts how many removed indices are less than the given index.
-    /// </summary>
-    private static int CountRemovesBefore(HashSet<int>? removedIndices, int index)
-    {
-        if (removedIndices is null)
-            return 0;
-
-        var count = 0;
-        foreach (var removedIndex in removedIndices)
-        {
-            if (removedIndex < index)
-                count++;
-        }
-        return count;
     }
 
     /// <summary>
@@ -212,12 +170,6 @@ internal sealed class CollectionDiffBuilder
             removedKeys = keysToRemove;
         }
     }
-
-    /// <summary>
-    /// Gets the new index for an item.
-    /// </summary>
-    public int GetNewIndex(IInterceptorSubject item) =>
-        _newIndexMap.GetValueOrDefault(item, -1);
 
     /// <summary>
     /// Gets items that exist in both old and new collections.

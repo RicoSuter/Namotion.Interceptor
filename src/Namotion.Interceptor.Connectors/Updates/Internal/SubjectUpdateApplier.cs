@@ -18,18 +18,43 @@ internal static class SubjectUpdateApplier
         ISubjectFactory subjectFactory,
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
     {
-        if (string.IsNullOrEmpty(update.Root))
-            return;
-
-        if (!update.Subjects.TryGetValue(update.Root, out var rootProperties))
-            return;
-
         var context = ContextPool.Rent();
         try
         {
             context.Initialize(update.Subjects, subjectFactory, transformValueBeforeApply);
-            context.TryMarkAsProcessed(update.Root);
-            ApplyPropertyUpdates(subject, rootProperties, context);
+
+            if (update.Root is not null && update.Subjects.TryGetValue(update.Root, out var rootProperties))
+            {
+                // Complete update or rooted partial update with root entry — apply from root.
+                // Set the root's stable ID to match the sender's ID so snapshots converge.
+                subject.SetSubjectId(update.Root);
+                context.TryMarkAsProcessed(update.Root);
+                ApplyPropertyUpdates(subject, rootProperties, context);
+            }
+
+            // Always process remaining subjects by stable ID lookup.
+            // When the root path ran above, it recursively processed subjects reachable
+            // from the root's structural properties. But partial updates can contain changes
+            // to subjects NOT reachable from the root's changed properties (e.g., a deeply
+            // nested ObjectRef change in the same batch as a root scalar change).
+            // TryMarkAsProcessed ensures no subject is processed twice.
+            var registry = subject.Context.TryGetService<ISubjectRegistry>();
+            if (registry is not null)
+            {
+                foreach (var (subjectId, properties) in update.Subjects)
+                {
+                    if (registry.TryGetSubjectByStableId(subjectId, out var targetSubject))
+                    {
+                        if (context.TryMarkAsProcessed(subjectId))
+                        {
+                            ApplyPropertyUpdates(targetSubject, properties, context);
+                        }
+                    }
+                    // If subject not found, do NOT mark as processed.
+                    // The subject may be created later by a structural operation
+                    // (e.g., Collection Insert) which will apply its properties.
+                }
+            }
         }
         finally
         {
@@ -108,37 +133,64 @@ internal static class SubjectUpdateApplier
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        if (propertyUpdate.Id is not null &&
-            context.Subjects.TryGetValue(propertyUpdate.Id, out var itemProperties))
-        {
-            if (property.GetValue() is IInterceptorSubject existingItem)
-            {
-                if (context.TryMarkAsProcessed(propertyUpdate.Id))
-                {
-                    ApplyPropertyUpdates(existingItem, itemProperties, context);
-                }
-            }
-            else
-            {
-                var newItem = context.SubjectFactory.CreateSubject(property);
-                newItem.Context.AddFallbackContext(parent.Context);
-
-                if (context.TryMarkAsProcessed(propertyUpdate.Id))
-                {
-                    ApplyPropertyUpdates(newItem, itemProperties, context);
-                }
-
-                using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
-                {
-                    property.SetValue(newItem);
-                }
-            }
-        }
-        else
+        if (propertyUpdate.Id is null)
         {
             using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
             {
                 property.SetValue(null);
+            }
+            return;
+        }
+
+        context.Subjects.TryGetValue(propertyUpdate.Id, out var itemProperties);
+
+        var existingItem = property.GetValue() as IInterceptorSubject;
+        IInterceptorSubject? targetItem;
+
+        // Check if the existing item is the SAME logical subject (matching stable ID)
+        // or a DIFFERENT subject that needs to be replaced.
+        var isSameSubject = existingItem is not null &&
+            existingItem.Data.TryGetValue((null, "Namotion.Interceptor.SubjectId"), out var existingId) &&
+            existingId is string existingIdStr &&
+            existingIdStr == propertyUpdate.Id;
+
+        if (existingItem is not null && isSameSubject)
+        {
+            // Same logical subject — keep the existing CLR object.
+            targetItem = existingItem;
+        }
+        else
+        {
+            // Either no existing item, or existing item is a DIFFERENT subject (replacement).
+            // Try to reuse an existing subject by stable ID (may exist elsewhere in the graph).
+            targetItem = null;
+            var registry = parent.Context.TryGetService<ISubjectRegistry>();
+            if (registry is not null && registry.TryGetSubjectByStableId(propertyUpdate.Id, out var existing))
+            {
+                targetItem = existing;
+            }
+
+            if (targetItem is null && itemProperties is not null)
+            {
+                targetItem = context.SubjectFactory.CreateSubject(property);
+                targetItem.Context.AddFallbackContext(parent.Context);
+                targetItem.SetSubjectId(propertyUpdate.Id);
+            }
+        }
+
+        if (targetItem is not null)
+        {
+            if (itemProperties is not null && context.TryMarkAsProcessed(propertyUpdate.Id))
+            {
+                ApplyPropertyUpdates(targetItem, itemProperties, context);
+            }
+
+            if (existingItem != targetItem)
+            {
+                using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
+                {
+                    property.SetValue(targetItem);
+                }
             }
         }
     }

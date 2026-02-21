@@ -1,33 +1,11 @@
 ﻿{
-  Root: 1,
+  Root: SubjectId_1,
   Subjects: {
-    1: {
-      Child: {
-        Kind: Object
-      },
-      Items: {
-        Kind: Collection,
-        Timestamp: DateTimeOffset_1,
-        Items: [
-          {
-            Index: 0,
-            Id: 2
-          },
-          {
-            Index: 1,
-            Id: 3
-          }
-        ],
-        Count: 2
-      },
-      Lookup: {
-        Kind: Dictionary,
-        Count: 0
-      },
+    SubjectId_1: {
       Name: {
         Kind: Value,
         Value: Root,
-        Timestamp: DateTimeOffset_2,
+        Timestamp: DateTimeOffset_1,
         Attributes: {
           Status: {
             Kind: Value,
@@ -35,25 +13,34 @@
           }
         }
       },
+      Self: {
+        Kind: Object
+      },
       Parent: {
         Kind: Object
       },
-      Self: {
-        Kind: Object
-      }
-    },
-    2: {
       Child: {
         Kind: Object
       },
       Items: {
         Kind: Collection,
-        Count: 0
+        Timestamp: DateTimeOffset_2,
+        Items: [
+          {
+            Id: SubjectId_2
+          },
+          {
+            Id: SubjectId_3
+          }
+        ],
+        Count: 2
       },
       Lookup: {
         Kind: Dictionary,
         Count: 0
-      },
+      }
+    },
+    SubjectId_2: {
       Name: {
         Kind: Value,
         Value: Child1,
@@ -64,14 +51,12 @@
           }
         }
       },
+      Self: {
+        Kind: Object
+      },
       Parent: {
         Kind: Object
       },
-      Self: {
-        Kind: Object
-      }
-    },
-    3: {
       Child: {
         Kind: Object
       },
@@ -82,7 +67,9 @@
       Lookup: {
         Kind: Dictionary,
         Count: 0
-      },
+      }
+    },
+    SubjectId_3: {
       Name: {
         Kind: Value,
         Value: Child2,
@@ -93,11 +80,22 @@
           }
         }
       },
+      Self: {
+        Kind: Object
+      },
       Parent: {
         Kind: Object
       },
-      Self: {
+      Child: {
         Kind: Object
+      },
+      Items: {
+        Kind: Collection,
+        Count: 0
+      },
+      Lookup: {
+        Kind: Dictionary,
+        Count: 0
       }
     }
   }

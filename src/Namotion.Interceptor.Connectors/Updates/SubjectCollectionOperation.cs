@@ -3,7 +3,8 @@ using System.Text.Json.Serialization;
 namespace Namotion.Interceptor.Connectors.Updates;
 
 /// <summary>
-/// Represents a structural operation on a collection.
+/// Represents a structural operation on a collection or dictionary.
+/// All operations reference subjects by stable ID.
 /// </summary>
 public class SubjectCollectionOperation
 {
@@ -15,23 +16,25 @@ public class SubjectCollectionOperation
     public SubjectCollectionOperationType Action { get; init; }
 
     /// <summary>
-    /// Target index (int for arrays) or key (string for dictionaries).
+    /// The stable ID of the target subject (required for all operations).
+    /// Also the key in the Subjects dictionary for Insert operations.
     /// </summary>
-    [JsonPropertyName("index")]
-    public required object Index { get; init; }
-
-    /// <summary>
-    /// Source index for Move operations (arrays only).
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("fromIndex")]
-    public int? FromIndex { get; init; }
-
-    /// <summary>
-    /// The subject ID for Insert operations.
-    /// References a subject in the Subjects dictionary.
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("id")]
-    public string? Id { get; init; }
+    public required string Id { get; init; }
+
+    /// <summary>
+    /// For Insert and Move: the stable ID of the predecessor item.
+    /// Null means place at head of collection.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("afterId")]
+    public string? AfterId { get; init; }
+
+    /// <summary>
+    /// Optional key for dictionary operations (Insert/Remove).
+    /// Not used for collection operations.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [JsonPropertyName("key")]
+    public string? Key { get; init; }
 }
