@@ -179,6 +179,26 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     }
 
     /// <summary>
+    /// Merges this (earlier) change with a newer change to the same property.
+    /// Keeps this change's old value and takes the newer change's new value,
+    /// source, and timestamps. Used during deduplication to preserve the correct
+    /// diff baseline while reflecting the latest state.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public SubjectPropertyChange MergeWith(SubjectPropertyChange newerChange)
+    {
+        return new SubjectPropertyChange(
+            Property,
+            newerChange.Source,
+            newerChange.ChangedTimestamp,
+            newerChange.ReceivedTimestamp,
+            _oldValueStorage,
+            newerChange._newValueStorage,
+            _oldBoxedHolder,
+            newerChange._newBoxedHolder);
+    }
+
+    /// <summary>
     /// Equality based on PropertyReference only for efficient HashSet/Dictionary usage.
     /// </summary>
     public bool Equals(SubjectPropertyChange other) => Property.Equals(other.Property);
