@@ -2,15 +2,20 @@
   PrivateInternalProperty: {
     Name: PrivateInternalProperty,
     Type: int,
+    Attributes: [
+      {
+        TypeId: InterceptedAttribute
+      }
+    ],
     GetValue: {
       Type: Func<IInterceptorSubject, object>,
       Target: Car.<>c,
-      Method: System.Object .cctor(Namotion.Interceptor.IInterceptorSubject)
+      Method: System.Object __GetPropertyAccessors(Namotion.Interceptor.IInterceptorSubject)
     },
     SetValue: {
       Type: Action<IInterceptorSubject, object>,
       Target: Car.<>c,
-      Method: Void .cctor(Namotion.Interceptor.IInterceptorSubject, System.Object)
+      Method: Void __GetPropertyAccessors(Namotion.Interceptor.IInterceptorSubject, System.Object)
     },
     IsIntercepted: true,
     IsDynamic: false,
@@ -24,12 +29,12 @@
     GetValue: {
       Type: Func<IInterceptorSubject, object>,
       Target: Car.<>c,
-      Method: System.Object .cctor(Namotion.Interceptor.IInterceptorSubject)
+      Method: System.Object __GetPropertyAccessors(Namotion.Interceptor.IInterceptorSubject)
     },
     SetValue: {
       Type: Action<IInterceptorSubject, object>,
       Target: Car.<>c,
-      Method: Void .cctor(Namotion.Interceptor.IInterceptorSubject, System.Object)
+      Method: Void __GetPropertyAccessors(Namotion.Interceptor.IInterceptorSubject, System.Object)
     },
     IsIntercepted: false,
     IsDynamic: false,
@@ -40,15 +45,20 @@
   ProtectedInternalProperty: {
     Name: ProtectedInternalProperty,
     Type: int,
+    Attributes: [
+      {
+        TypeId: InterceptedAttribute
+      }
+    ],
     GetValue: {
       Type: Func<IInterceptorSubject, object>,
       Target: Car.<>c,
-      Method: System.Object .cctor(Namotion.Interceptor.IInterceptorSubject)
+      Method: System.Object __GetPropertyAccessors(Namotion.Interceptor.IInterceptorSubject)
     },
     SetValue: {
       Type: Action<IInterceptorSubject, object>,
       Target: Car.<>c,
-      Method: Void .cctor(Namotion.Interceptor.IInterceptorSubject, System.Object)
+      Method: Void __GetPropertyAccessors(Namotion.Interceptor.IInterceptorSubject, System.Object)
     },
     IsIntercepted: true,
     IsDynamic: false,
@@ -62,12 +72,12 @@
     GetValue: {
       Type: Func<IInterceptorSubject, object>,
       Target: Car.<>c,
-      Method: System.Object .cctor(Namotion.Interceptor.IInterceptorSubject)
+      Method: System.Object __GetPropertyAccessors(Namotion.Interceptor.IInterceptorSubject)
     },
     SetValue: {
       Type: Action<IInterceptorSubject, object>,
       Target: Car.<>c,
-      Method: Void .cctor(Namotion.Interceptor.IInterceptorSubject, System.Object)
+      Method: Void __GetPropertyAccessors(Namotion.Interceptor.IInterceptorSubject, System.Object)
     },
     IsIntercepted: false,
     IsDynamic: false,
@@ -78,15 +88,20 @@
   Speed: {
     Name: Speed,
     Type: int,
+    Attributes: [
+      {
+        TypeId: InterceptedAttribute
+      }
+    ],
     GetValue: {
       Type: Func<IInterceptorSubject, object>,
       Target: Car.<>c,
-      Method: System.Object .cctor(Namotion.Interceptor.IInterceptorSubject)
+      Method: System.Object __GetPropertyAccessors(Namotion.Interceptor.IInterceptorSubject)
     },
     SetValue: {
       Type: Action<IInterceptorSubject, object>,
       Target: Car.<>c,
-      Method: Void .cctor(Namotion.Interceptor.IInterceptorSubject, System.Object)
+      Method: Void __GetPropertyAccessors(Namotion.Interceptor.IInterceptorSubject, System.Object)
     },
     IsIntercepted: true,
     IsDynamic: false,
