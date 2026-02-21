@@ -179,23 +179,23 @@ public readonly struct SubjectPropertyChange : IEquatable<SubjectPropertyChange>
     }
 
     /// <summary>
-    /// Creates a merged change that keeps this (later) change's new value, timestamp,
-    /// and metadata, but uses the old value from the specified earlier change.
-    /// Used during dedup to preserve the correct diff baseline: the receiver's state
-    /// corresponds to the earliest old value, not the intermediate states.
+    /// Merges this (earlier) change with a newer change to the same property.
+    /// Keeps this change's old value and takes the newer change's new value,
+    /// source, and timestamps. Used during deduplication to preserve the correct
+    /// diff baseline while reflecting the latest state.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal SubjectPropertyChange WithOldValueFrom(SubjectPropertyChange earlierChange)
+    public SubjectPropertyChange MergeWithNewer(SubjectPropertyChange newerChange)
     {
         return new SubjectPropertyChange(
             Property,
-            Source,
-            ChangedTimestamp,
-            ReceivedTimestamp,
-            earlierChange._oldValueStorage,
-            _newValueStorage,
-            earlierChange._oldBoxedHolder,
-            _newBoxedHolder);
+            newerChange.Source,
+            newerChange.ChangedTimestamp,
+            newerChange.ReceivedTimestamp,
+            _oldValueStorage,
+            newerChange._newValueStorage,
+            _oldBoxedHolder,
+            newerChange._newBoxedHolder);
     }
 
     /// <summary>

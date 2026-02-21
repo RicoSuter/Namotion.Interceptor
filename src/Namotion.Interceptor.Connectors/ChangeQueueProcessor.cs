@@ -18,7 +18,6 @@ public class ChangeQueueProcessor : IDisposable
     private const int FlushDedupedBufferMinSize = 256;
     private const int FlushDedupedBufferMaxSize = 1024;
 
-    private readonly IInterceptorSubjectContext _context;
     private readonly Func<RegisteredSubjectProperty, bool> _propertyFilter;
     private readonly Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> _writeHandler;
     private readonly object? _source;
@@ -64,7 +63,6 @@ public class ChangeQueueProcessor : IDisposable
         ILogger logger)
     {
         _source = source;
-        _context = context;
         _propertyFilter = propertyFilter;
         _writeHandler = writeHandler;
         _logger = logger;
@@ -72,7 +70,7 @@ public class ChangeQueueProcessor : IDisposable
 
         try
         {
-            _subscription = _context.CreatePropertyChangeQueueSubscription();
+            _subscription = context.CreatePropertyChangeQueueSubscription();
         }
         catch
         {
@@ -207,9 +205,8 @@ public class ChangeQueueProcessor : IDisposable
                 _flushDedupedBuffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(_flushChanges.Count);
             }
 
-            // Deduplicate by Property, keeping the last write's new value
-            // but the first write's old value to preserve the correct diff baseline.
-            // The receiver's state corresponds to the earliest old value.
+            // Deduplicate by Property: keep oldest old value, use newest new value.
+            // Backward iteration finds last occurrences first, preserving last-occurrence order.
             for (var i = _flushChanges.Count - 1; i >= 0; i--)
             {
                 var change = _flushChanges[i];
@@ -220,12 +217,12 @@ public class ChangeQueueProcessor : IDisposable
                 }
                 else
                 {
-                    // Earlier occurrence found — merge its old value into the kept (later) change
-                    _flushDedupedBuffer[existingIndex] = _flushDedupedBuffer[existingIndex].WithOldValueFrom(change);
+                    // Earlier occurrence: merge its old value into the kept (later) change
+                    _flushDedupedBuffer[existingIndex] = change.MergeWithNewer(_flushDedupedBuffer[existingIndex]);
                 }
             }
 
-            // Reverse in place to keep the ascending order of last occurrences without allocations
+            // Reverse to restore chronological order of last occurrences
             if (_flushDedupedCount > 1)
             {
                 Array.Reverse(_flushDedupedBuffer, 0, _flushDedupedCount);
