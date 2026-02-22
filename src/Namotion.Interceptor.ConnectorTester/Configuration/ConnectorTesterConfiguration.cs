@@ -11,7 +11,7 @@ public class ConnectorTesterConfiguration
     public ParticipantConfiguration Server { get; set; } = new()
     {
         Name = "server",
-        MutationRate = 1000
+        ValueMutationRate = 1000
     };
 
     public List<ParticipantConfiguration> Clients { get; set; } = [];
