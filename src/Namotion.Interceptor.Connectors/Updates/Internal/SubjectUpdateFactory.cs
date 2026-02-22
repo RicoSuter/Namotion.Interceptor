@@ -43,8 +43,7 @@ internal static class SubjectUpdateFactory
     public static SubjectUpdate CreatePartialUpdateFromChanges(
         IInterceptorSubject rootSubject,
         ReadOnlySpan<SubjectPropertyChange> propertyChanges,
-        ISubjectUpdateProcessor[] processors,
-        bool useCompleteStructuralState = false)
+        ISubjectUpdateProcessor[] processors)
     {
         var builder = BuilderPool.Rent();
         try
@@ -53,7 +52,7 @@ internal static class SubjectUpdateFactory
 
             for (var i = 0; i < propertyChanges.Length; i++)
             {
-                ProcessPropertyChange(propertyChanges[i], builder, useCompleteStructuralState);
+                ProcessPropertyChange(propertyChanges[i], builder);
             }
 
             return builder.Build(rootSubject);
@@ -103,8 +102,7 @@ internal static class SubjectUpdateFactory
 
     private static void ProcessPropertyChange(
         SubjectPropertyChange change,
-        SubjectUpdateBuilder builder,
-        bool useCompleteStructuralState)
+        SubjectUpdateBuilder builder)
     {
         var changedSubject = change.Property.Subject;
         var registeredProperty = change.Property.TryGetRegisteredProperty();
@@ -132,7 +130,7 @@ internal static class SubjectUpdateFactory
             }
 
             // Update the property value in place (preserves any existing attributes)
-            ApplyPropertyChangeToUpdate(propertyUpdate, registeredProperty, change, builder, useCompleteStructuralState);
+            ApplyPropertyChangeToUpdate(propertyUpdate, registeredProperty, change, builder);
             builder.TrackPropertyUpdate(propertyUpdate, registeredProperty, properties);
         }
     }
@@ -189,96 +187,46 @@ internal static class SubjectUpdateFactory
     /// Applies a property change to an existing update in place.
     /// This preserves any existing attributes on the update.
     /// </summary>
-    /// <remarks>
-    /// When <paramref name="useCompleteStructuralState"/> is true, structural properties
-    /// (Collection, Dictionary, ObjectRef) read the current live property value instead of
-    /// the change's snapshot. This minimizes the race window where a concurrent mutation
-    /// detaches a subject between change capture and update building, causing
-    /// ProcessSubjectComplete to fail (TryGetRegisteredSubject returns null).
-    /// </remarks>
     private static void ApplyPropertyChangeToUpdate(
         SubjectPropertyUpdate update,
         RegisteredSubjectProperty property,
         SubjectPropertyChange change,
-        SubjectUpdateBuilder builder,
-        bool useCompleteStructuralState = false)
+        SubjectUpdateBuilder builder)
     {
         update.Timestamp = change.ChangedTimestamp;
 
         if (property.IsSubjectDictionary)
         {
-            if (useCompleteStructuralState)
+            var newValue = change.GetNewValue<IDictionary?>();
+            if (newValue is null)
             {
-                // Read current live value to minimize race with concurrent detachments.
-                var currentValue = property.GetValue() as IDictionary;
-                if (currentValue is null)
-                {
-                    update.Kind = SubjectPropertyUpdateKind.Value;
-                    update.Value = null;
-                }
-                else
-                {
-                    SubjectItemsUpdateFactory.BuildDictionaryComplete(update, currentValue, builder);
-                }
+                update.Kind = SubjectPropertyUpdateKind.Value;
+                update.Value = null;
             }
             else
             {
-                var newValue = change.GetNewValue<IDictionary?>();
-                if (newValue is null)
-                {
-                    update.Kind = SubjectPropertyUpdateKind.Value;
-                    update.Value = null;
-                }
-                else
-                {
-                    SubjectItemsUpdateFactory.BuildDictionaryDiff(update, change.GetOldValue<IDictionary?>(),
-                        newValue, builder);
-                }
+                SubjectItemsUpdateFactory.BuildDictionaryDiff(update, change.GetOldValue<IDictionary?>(),
+                    newValue, builder);
             }
         }
         else if (property.IsSubjectCollection)
         {
-            if (useCompleteStructuralState)
+            var newValue = change.GetNewValue<IEnumerable<IInterceptorSubject>?>();
+            if (newValue is null)
             {
-                // Read current live value to minimize race with concurrent detachments.
-                var currentValue = property.GetValue() as IEnumerable<IInterceptorSubject>;
-                if (currentValue is null)
-                {
-                    update.Kind = SubjectPropertyUpdateKind.Value;
-                    update.Value = null;
-                }
-                else
-                {
-                    SubjectItemsUpdateFactory.BuildCollectionComplete(update, currentValue, builder);
-                }
+                update.Kind = SubjectPropertyUpdateKind.Value;
+                update.Value = null;
             }
             else
             {
-                var newValue = change.GetNewValue<IEnumerable<IInterceptorSubject>?>();
-                if (newValue is null)
-                {
-                    update.Kind = SubjectPropertyUpdateKind.Value;
-                    update.Value = null;
-                }
-                else
-                {
-                    SubjectItemsUpdateFactory.BuildCollectionDiff(update,
-                        change.GetOldValue<IEnumerable<IInterceptorSubject>?>(),
-                        newValue, builder);
-                }
+                SubjectItemsUpdateFactory.BuildCollectionDiff(update,
+                    change.GetOldValue<IEnumerable<IInterceptorSubject>?>(),
+                    newValue, builder);
             }
         }
         else if (property.IsSubjectReference)
         {
-            if (useCompleteStructuralState)
-            {
-                // Read current live value to minimize race with concurrent detachments.
-                BuildObjectReference(update, property.GetValue() as IInterceptorSubject, builder);
-            }
-            else
-            {
-                BuildObjectReference(update, change.GetNewValue<IInterceptorSubject?>(), builder);
-            }
+            BuildObjectReference(update, change.GetNewValue<IInterceptorSubject?>(), builder);
         }
         else
         {

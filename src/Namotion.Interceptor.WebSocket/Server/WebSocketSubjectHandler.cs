@@ -230,7 +230,7 @@ public sealed class WebSocketSubjectHandler
         {
             // Single batch — use complete structural state because multiple concurrent writers
             // (server mutations + client updates) can cause dedup-based diffs to be incorrect.
-            var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, changes.Span, _processors, useCompleteStructuralState: true);
+            var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, changes.Span, _processors);
             await BroadcastUpdateAsync(update, cancellationToken).ConfigureAwait(false);
         }
         else
@@ -240,7 +240,7 @@ public sealed class WebSocketSubjectHandler
             {
                 var currentBatchSize = Math.Min(batchSize, changes.Length - i);
                 var batch = changes.Slice(i, currentBatchSize);
-                var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, batch.Span, _processors, useCompleteStructuralState: true);
+                var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, batch.Span, _processors);
                 await BroadcastUpdateAsync(update, cancellationToken).ConfigureAwait(false);
             }
         }

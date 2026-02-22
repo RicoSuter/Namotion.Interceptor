@@ -1,6 +1,5 @@
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Connectors.Updates.Internal;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Updates;
@@ -44,16 +43,10 @@ public class SubjectUpdate
     /// <param name="subject">The root subject.</param>
     /// <param name="propertyChanges">The changes to look up within the object graph.</param>
     /// <param name="processors">The update processors to filter and transform updates.</param>
-    /// <param name="useCompleteStructuralState">
-    /// When true, structural properties (Collection, Dictionary) send the complete state
-    /// instead of diff operations. Use this for server broadcasts where multiple writers
-    /// may concurrently modify the same properties, making diff-based updates unreliable.
-    /// </param>
     /// <returns>The update.</returns>
     public static SubjectUpdate CreatePartialUpdateFromChanges(
         IInterceptorSubject subject,
         ReadOnlySpan<SubjectPropertyChange> propertyChanges,
-        ISubjectUpdateProcessor[] processors,
-        bool useCompleteStructuralState = false)
-        => SubjectUpdateFactory.CreatePartialUpdateFromChanges(subject, propertyChanges, processors, useCompleteStructuralState);
+        ISubjectUpdateProcessor[] processors)
+        => SubjectUpdateFactory.CreatePartialUpdateFromChanges(subject, propertyChanges, processors);
 }

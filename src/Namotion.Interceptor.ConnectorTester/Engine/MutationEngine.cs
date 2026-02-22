@@ -1,6 +1,5 @@
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Model;
-using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.ConnectorTester.Engine;
 
@@ -35,7 +34,7 @@ public class MutationEngine : BackgroundService
     private long _structuralMutationCount;
 
     public string Name => _configuration.Name;
-    public int MutationRate => _configuration.MutationRate;
+    public int ValueMutationRate => _configuration.ValueMutationRate;
     public int StructuralMutationRate => _configuration.StructuralMutationRate;
     public long ValueMutationCount => Interlocked.Read(ref _valueMutationCount);
     public long StructuralMutationCount => Interlocked.Read(ref _structuralMutationCount);
@@ -63,7 +62,7 @@ public class MutationEngine : BackgroundService
     {
         _logger.LogInformation(
             "MutationEngine [{Name}] started at {Rate} value mutations/sec, {StructuralRate} structural mutations/sec",
-            _configuration.Name, _configuration.MutationRate, _configuration.StructuralMutationRate);
+            _configuration.Name, _configuration.ValueMutationRate, _configuration.StructuralMutationRate);
 
         RebuildKnownNodes();
 
@@ -79,7 +78,7 @@ public class MutationEngine : BackgroundService
 
     private async Task RunValueMutationsAsync(CancellationToken stoppingToken)
     {
-        var delayMilliseconds = 1000 / Math.Max(1, _configuration.MutationRate);
+        var delayMilliseconds = 1000 / Math.Max(1, _configuration.ValueMutationRate);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -342,12 +341,13 @@ public class MutationEngine : BackgroundService
     private TestNode CreateNewNode()
     {
         var context = ((IInterceptorSubject)_root).Context;
-        var node = new TestNode(context);
-
-        // Re-assign defaults to trigger write interceptor and record timestamps.
-        node.StringValue = string.Empty;
-        node.DecimalValue = 0;
-        node.IntValue = 0;
+        var node = new TestNode(context)
+        {
+            // Re-assign defaults to trigger write interceptor and record timestamps.
+            StringValue = string.Empty,
+            DecimalValue = 0,
+            IntValue = 0
+        };
 
         return node;
     }

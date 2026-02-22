@@ -92,7 +92,7 @@ public class VerificationEngine : BackgroundService
         foreach (var engine in _mutationEngines)
         {
             _logger.LogInformation("  {Name}: {Rate} value mutations/sec, {StructuralRate} structural mutations/sec",
-                engine.Name, engine.MutationRate, engine.StructuralMutationRate);
+                engine.Name, engine.ValueMutationRate, engine.StructuralMutationRate);
         }
 
         if (_configuration.ChaosProfiles.Count > 0)
