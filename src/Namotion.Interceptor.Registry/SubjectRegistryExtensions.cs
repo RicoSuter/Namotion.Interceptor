@@ -214,6 +214,8 @@ public static class SubjectRegistryExtensions
     /// <param name="id">The subject ID to assign.</param>
     public static void SetSubjectId(this IInterceptorSubject subject, string id)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+
         // Delegate to registry writer for atomic Data + reverse-index update
         var writer = subject.Context.TryGetService<ISubjectIdRegistryWriter>();
         if (writer is not null)
