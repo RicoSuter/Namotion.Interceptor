@@ -11,7 +11,7 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 internal static class SubjectItemsUpdateApplier
 {
     /// <summary>
-    /// Applies a collection update to a property using stable ID-based operations.
+    /// Applies a collection update to a property using subject ID-based operations.
     /// </summary>
     internal static void ApplyCollectionUpdate(
         IInterceptorSubject parent,
@@ -48,9 +48,9 @@ internal static class SubjectItemsUpdateApplier
 
                         IInterceptorSubject? newItem = null;
 
-                        // Try to reuse an existing subject by stable ID
+                        // Try to reuse an existing subject by subject ID
                         var registry = parent.Context.TryGetService<ISubjectRegistry>();
-                        if (registry is not null && registry.TryGetSubjectByStableId(operation.Id, out var existing))
+                        if (registry is not null && registry.TryGetSubjectById(operation.Id, out var existing))
                         {
                             newItem = existing;
                         }
@@ -100,9 +100,9 @@ internal static class SubjectItemsUpdateApplier
             {
                 IInterceptorSubject? item = null;
 
-                // Try to reuse existing subject by stable ID
+                // Try to reuse existing subject by subject ID
                 var registry = parent.Context.TryGetService<ISubjectRegistry>();
-                if (registry is not null && registry.TryGetSubjectByStableId(itemUpdate.Id, out var existing))
+                if (registry is not null && registry.TryGetSubjectById(itemUpdate.Id, out var existing))
                 {
                     item = existing;
                 }
@@ -163,7 +163,7 @@ internal static class SubjectItemsUpdateApplier
     }
 
     /// <summary>
-    /// Applies a dictionary update to a property using stable ID-based operations.
+    /// Applies a dictionary update to a property using subject ID-based operations.
     /// </summary>
     internal static void ApplyDictionaryUpdate(
         IInterceptorSubject parent,
@@ -207,9 +207,9 @@ internal static class SubjectItemsUpdateApplier
                             var key = ConvertDictionaryKey(operation.Key, targetKeyType);
                             IInterceptorSubject newItem;
 
-                            // Try to reuse by stable ID
+                            // Try to reuse by subject ID
                             var registry = parent.Context.TryGetService<ISubjectRegistry>();
-                            if (registry is not null && registry.TryGetSubjectByStableId(operation.Id, out var existing))
+                            if (registry is not null && registry.TryGetSubjectById(operation.Id, out var existing))
                             {
                                 newItem = existing;
                                 if (context.TryMarkAsProcessed(operation.Id))
@@ -244,7 +244,7 @@ internal static class SubjectItemsUpdateApplier
                 {
                     if (workingDictionary.TryGetValue(key, out var existing))
                     {
-                        // Set stable ID on pre-existing dictionary item to match the sender's ID.
+                        // Set subject ID on pre-existing dictionary item to match the sender's ID.
                         existing.SetSubjectId(collUpdate.Id);
                         if (context.TryMarkAsProcessed(collUpdate.Id))
                         {
@@ -253,10 +253,10 @@ internal static class SubjectItemsUpdateApplier
                     }
                     else
                     {
-                        // Try reuse by stable ID
+                        // Try reuse by subject ID
                         var registry = parent.Context.TryGetService<ISubjectRegistry>();
                         IInterceptorSubject newItem;
-                        if (registry is not null && registry.TryGetSubjectByStableId(collUpdate.Id, out var existingSubject))
+                        if (registry is not null && registry.TryGetSubjectById(collUpdate.Id, out var existingSubject))
                         {
                             newItem = existingSubject;
                             if (context.TryMarkAsProcessed(collUpdate.Id))

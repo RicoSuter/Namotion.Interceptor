@@ -26,13 +26,13 @@ internal static class SubjectUpdateApplier
             if (update.Root is not null && update.Subjects.TryGetValue(update.Root, out var rootProperties))
             {
                 // Complete update or rooted partial update with root entry — apply from root.
-                // Set the root's stable ID to match the sender's ID so snapshots converge.
+                // Set the root's subject ID to match the sender's ID so snapshots converge.
                 subject.SetSubjectId(update.Root);
                 context.TryMarkAsProcessed(update.Root);
                 ApplyPropertyUpdates(subject, rootProperties, context);
             }
 
-            // Always process remaining subjects by stable ID lookup.
+            // Always process remaining subjects by subject ID lookup.
             // When the root path ran above, it recursively processed subjects reachable
             // from the root's structural properties. But partial updates can contain changes
             // to subjects NOT reachable from the root's changed properties (e.g., a deeply
@@ -43,7 +43,7 @@ internal static class SubjectUpdateApplier
             {
                 foreach (var (subjectId, properties) in update.Subjects)
                 {
-                    if (registry.TryGetSubjectByStableId(subjectId, out var targetSubject))
+                    if (registry.TryGetSubjectById(subjectId, out var targetSubject))
                     {
                         if (context.TryMarkAsProcessed(subjectId))
                         {
@@ -147,7 +147,7 @@ internal static class SubjectUpdateApplier
         var existingItem = property.GetValue() as IInterceptorSubject;
         IInterceptorSubject? targetItem;
 
-        // Check if the existing item is the SAME logical subject (matching stable ID)
+        // Check if the existing item is the SAME logical subject (matching subject ID)
         // or a DIFFERENT subject that needs to be replaced.
         var isSameSubject = existingItem is not null &&
             existingItem.Data.TryGetValue((null, "Namotion.Interceptor.SubjectId"), out var existingId) &&
@@ -162,10 +162,10 @@ internal static class SubjectUpdateApplier
         else
         {
             // Either no existing item, or existing item is a DIFFERENT subject (replacement).
-            // Try to reuse an existing subject by stable ID (may exist elsewhere in the graph).
+            // Try to reuse an existing subject by subject ID (may exist elsewhere in the graph).
             targetItem = null;
             var registry = parent.Context.TryGetService<ISubjectRegistry>();
-            if (registry is not null && registry.TryGetSubjectByStableId(propertyUpdate.Id, out var existing))
+            if (registry is not null && registry.TryGetSubjectById(propertyUpdate.Id, out var existing))
             {
                 targetItem = existing;
             }

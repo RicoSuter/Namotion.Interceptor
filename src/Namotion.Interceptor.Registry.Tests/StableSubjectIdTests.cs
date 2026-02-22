@@ -3,7 +3,7 @@ using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Registry.Tests;
 
-public class StableSubjectIdTests
+public class SubjectIdTests
 {
     [Fact]
     public void GenerateSubjectId_Returns22CharBase62String()
@@ -26,42 +26,42 @@ public class StableSubjectIdTests
     }
 
     [Fact]
-    public void RegisterStableId_ThenTryGetSubjectByStableId_ReturnsSubject()
+    public void RegisterSubjectId_ThenTryGetSubjectById_ReturnsSubject()
     {
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var person = new Models.Person(context) { FirstName = "Test" };
         var registry = context.GetService<ISubjectRegistry>();
 
-        registry.RegisterStableId("testId123", (IInterceptorSubject)person);
+        registry.RegisterSubjectId("testId123", (IInterceptorSubject)person);
 
-        Assert.True(registry.TryGetSubjectByStableId("testId123", out var found));
+        Assert.True(registry.TryGetSubjectById("testId123", out var found));
         Assert.Same(person, found);
     }
 
     [Fact]
-    public void TryGetSubjectByStableId_WithUnknownId_ReturnsFalse()
+    public void TryGetSubjectById_WithUnknownId_ReturnsFalse()
     {
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var registry = context.GetService<ISubjectRegistry>();
 
-        Assert.False(registry.TryGetSubjectByStableId("unknown", out _));
+        Assert.False(registry.TryGetSubjectById("unknown", out _));
     }
 
     [Fact]
-    public void RegisterStableId_WhenSubjectDetached_RemovesFromReverseIndex()
+    public void RegisterSubjectId_WhenSubjectDetached_RemovesFromReverseIndex()
     {
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var child = new Models.Person { FirstName = "Child" };
         var parent = new Models.Person(context) { FirstName = "Parent", Mother = child };
         var registry = context.GetService<ISubjectRegistry>();
 
-        registry.RegisterStableId("childId", (IInterceptorSubject)child);
-        Assert.True(registry.TryGetSubjectByStableId("childId", out _));
+        registry.RegisterSubjectId("childId", (IInterceptorSubject)child);
+        Assert.True(registry.TryGetSubjectById("childId", out _));
 
         // Detach by setting to null
         parent.Mother = null;
 
-        Assert.False(registry.TryGetSubjectByStableId("childId", out _));
+        Assert.False(registry.TryGetSubjectById("childId", out _));
     }
 
     [Fact]
@@ -88,7 +88,7 @@ public class StableSubjectIdTests
 
         var id = subject.GetOrAddSubjectId();
 
-        Assert.True(registry.TryGetSubjectByStableId(id, out var found));
+        Assert.True(registry.TryGetSubjectById(id, out var found));
         Assert.Same(person, found);
     }
 
@@ -115,7 +115,7 @@ public class StableSubjectIdTests
 
         subject.SetSubjectId("assignedId");
 
-        Assert.True(registry.TryGetSubjectByStableId("assignedId", out var found));
+        Assert.True(registry.TryGetSubjectById("assignedId", out var found));
         Assert.Same(person, found);
     }
 
