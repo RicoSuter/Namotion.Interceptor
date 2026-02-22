@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.Registry;
 
 public static class SubjectRegistryExtensions
 {
-    private const string SubjectIdKey = "Namotion.Interceptor.SubjectId";
+    internal const string SubjectIdKey = "Namotion.Interceptor.SubjectId";
 
     internal static string GenerateSubjectId()
     {
@@ -178,15 +178,19 @@ public static class SubjectRegistryExtensions
     /// <returns>The subject ID.</returns>
     public static string GetOrAddSubjectId(this IInterceptorSubject subject)
     {
+        // Fast path: ID already assigned (lock-free ConcurrentDictionary read)
+        if (subject.Data.TryGetValue((null, SubjectIdKey), out var existing) && existing is string existingId)
+            return existingId;
+
+        // Slow path: delegate to registry writer for atomic Data + reverse-index update
+        var writer = subject.Context.TryGetService<ISubjectIdRegistryWriter>();
+        if (writer is not null)
+            return writer.GetOrAddSubjectId(subject);
+
+        // No registry - ConcurrentDictionary.GetOrAdd is sufficient (no reverse index to corrupt)
         return (string)subject.Data.GetOrAdd(
             (null, SubjectIdKey),
-            static (_, s) =>
-            {
-                var id = GenerateSubjectId();
-                s.Context.TryGetService<ISubjectIdRegistryWriter>()?.RegisterSubjectId(id, s);
-                return id;
-            },
-            subject)!;
+            static _ => GenerateSubjectId())!;
     }
 
     /// <summary>
@@ -203,20 +207,22 @@ public static class SubjectRegistryExtensions
 
     /// <summary>
     /// Assigns a known subject ID (e.g., from an incoming update).
-    /// Auto-registers in the reverse index if an <see cref="ISubjectIdRegistryWriter"/> is available.
-    /// This method is thread-safe.
+    /// When a registry is configured, both the subject's Data store and the
+    /// reverse index are updated atomically under the registry's lock.
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <param name="id">The subject ID to assign.</param>
     public static void SetSubjectId(this IInterceptorSubject subject, string id)
     {
-        // Read old ID before overwriting — ConcurrentDictionary ops are individually atomic.
-        subject.Data.TryGetValue((null, SubjectIdKey), out var existingValue);
-        var oldId = existingValue as string;
+        // Delegate to registry writer for atomic Data + reverse-index update
+        var writer = subject.Context.TryGetService<ISubjectIdRegistryWriter>();
+        if (writer is not null)
+        {
+            writer.SetSubjectId(subject, id);
+            return;
+        }
 
+        // No registry - just store in Data
         subject.Data[(null, SubjectIdKey)] = id;
-
-        // Registry atomically unregisters old + registers new under its own lock.
-        subject.Context.TryGetService<ISubjectIdRegistryWriter>()?.RegisterSubjectId(id, subject, oldId);
     }
 }

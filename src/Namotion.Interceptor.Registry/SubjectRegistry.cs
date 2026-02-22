@@ -31,25 +31,34 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     }
 
     /// <inheritdoc />
-    void ISubjectIdRegistryWriter.RegisterSubjectId(string subjectId, IInterceptorSubject subject, string? oldSubjectId)
+    string ISubjectIdRegistryWriter.GetOrAddSubjectId(IInterceptorSubject subject)
     {
         lock (_knownSubjects)
         {
-            if (oldSubjectId is not null && oldSubjectId != subjectId)
-            {
-                _subjectIdToSubject.Remove(oldSubjectId);
-            }
+            var existing = subject.TryGetSubjectId();
+            if (existing is not null)
+                return existing;
 
-            _subjectIdToSubject[subjectId] = subject;
+            var id = SubjectRegistryExtensions.GenerateSubjectId();
+            subject.Data[(null, SubjectRegistryExtensions.SubjectIdKey)] = id;
+            _subjectIdToSubject[id] = subject;
+            return id;
         }
     }
 
     /// <inheritdoc />
-    void ISubjectIdRegistryWriter.UnregisterSubjectId(string subjectId)
+    void ISubjectIdRegistryWriter.SetSubjectId(IInterceptorSubject subject, string id)
     {
         lock (_knownSubjects)
         {
-            _subjectIdToSubject.Remove(subjectId);
+            var oldId = subject.TryGetSubjectId();
+            if (oldId is not null && oldId != id)
+            {
+                _subjectIdToSubject.Remove(oldId);
+            }
+
+            subject.Data[(null, SubjectRegistryExtensions.SubjectIdKey)] = id;
+            _subjectIdToSubject[id] = subject;
         }
     }
 

@@ -17,22 +17,24 @@ public interface ISubjectIdRegistry
 }
 
 /// <summary>
-/// Internal writer interface for managing the subject ID reverse index.
-/// Used by extension methods to register/unregister subject IDs.
+/// Internal writer interface for managing subject IDs and the reverse index atomically.
+/// Both the subject's Data store and the reverse index are updated under a single lock.
 /// </summary>
 internal interface ISubjectIdRegistryWriter
 {
     /// <summary>
-    /// Registers a subject ID in the reverse index, optionally unregistering an old ID atomically.
+    /// Gets an existing subject ID or generates a new one, atomically updating
+    /// both the subject's Data store and the reverse index.
     /// </summary>
-    /// <param name="subjectId">The subject ID.</param>
     /// <param name="subject">The subject.</param>
-    /// <param name="oldSubjectId">The previous subject ID to unregister, or null.</param>
-    void RegisterSubjectId(string subjectId, IInterceptorSubject subject, string? oldSubjectId = null);
+    /// <returns>The existing or newly generated subject ID.</returns>
+    string GetOrAddSubjectId(IInterceptorSubject subject);
 
     /// <summary>
-    /// Removes a subject ID from the reverse index.
+    /// Assigns a known subject ID, atomically updating both the subject's Data store
+    /// and the reverse index (unregistering any previous ID).
     /// </summary>
-    /// <param name="subjectId">The subject ID to remove.</param>
-    void UnregisterSubjectId(string subjectId);
+    /// <param name="subject">The subject.</param>
+    /// <param name="id">The subject ID to assign.</param>
+    void SetSubjectId(IInterceptorSubject subject, string id);
 }
