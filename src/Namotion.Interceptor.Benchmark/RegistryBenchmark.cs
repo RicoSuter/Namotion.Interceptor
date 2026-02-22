@@ -99,4 +99,10 @@ public class RegistryBenchmark
 
         _object.Tires = newTires;
     }
+
+    [Benchmark]
+    public string GetOrAddSubjectId()
+    {
+        return _object.GetOrAddSubjectId();
+    }
 }

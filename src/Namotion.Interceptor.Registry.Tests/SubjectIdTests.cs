@@ -56,7 +56,7 @@ public class SubjectIdTests
         var parent = new Models.Person(context) { FirstName = "Parent", Mother = child };
         var idRegistry = context.GetService<ISubjectIdRegistry>();
 
-        ((IInterceptorSubject)child).SetSubjectId("childId");
+        child.SetSubjectId("childId");
         Assert.True(idRegistry.TryGetSubjectById("childId", out _));
 
         // Detach by setting to null
@@ -132,5 +132,38 @@ public class SubjectIdTests
 
         Assert.Equal(22, id.Length);
         Assert.All(id.ToCharArray(), c => Assert.True(char.IsLetterOrDigit(c)));
+    }
+
+    [Fact]
+    public void SetSubjectId_ReplacingExistingId_UnregistersOldId()
+    {
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var person = new Models.Person(context) { FirstName = "Test" };
+        var subject = (IInterceptorSubject)person;
+        var idRegistry = context.GetService<ISubjectIdRegistry>();
+
+        subject.SetSubjectId("oldId");
+        Assert.True(idRegistry.TryGetSubjectById("oldId", out _));
+
+        subject.SetSubjectId("newId");
+
+        Assert.False(idRegistry.TryGetSubjectById("oldId", out _));
+        Assert.True(idRegistry.TryGetSubjectById("newId", out var found));
+        Assert.Same(person, found);
+    }
+
+    [Fact]
+    public void SetSubjectId_WithSameId_DoesNotFail()
+    {
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var person = new Models.Person(context) { FirstName = "Test" };
+        var subject = (IInterceptorSubject)person;
+        var idRegistry = context.GetService<ISubjectIdRegistry>();
+
+        subject.SetSubjectId("sameId");
+        subject.SetSubjectId("sameId");
+
+        Assert.True(idRegistry.TryGetSubjectById("sameId", out var found));
+        Assert.Same(person, found);
     }
 }

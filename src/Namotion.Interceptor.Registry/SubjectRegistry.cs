@@ -31,10 +31,15 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     }
 
     /// <inheritdoc />
-    void ISubjectIdRegistryWriter.RegisterSubjectId(string subjectId, IInterceptorSubject subject)
+    void ISubjectIdRegistryWriter.RegisterSubjectId(string subjectId, IInterceptorSubject subject, string? oldSubjectId)
     {
         lock (_knownSubjects)
         {
+            if (oldSubjectId is not null && oldSubjectId != subjectId)
+            {
+                _subjectIdToSubject.Remove(oldSubjectId);
+            }
+
             _subjectIdToSubject[subjectId] = subject;
         }
     }
