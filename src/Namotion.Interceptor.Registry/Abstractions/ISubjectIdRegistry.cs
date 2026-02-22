@@ -23,11 +23,12 @@ public interface ISubjectIdRegistry
 internal interface ISubjectIdRegistryWriter
 {
     /// <summary>
-    /// Registers a subject ID in the reverse index.
+    /// Registers a subject ID in the reverse index, optionally unregistering an old ID atomically.
     /// </summary>
     /// <param name="subjectId">The subject ID.</param>
     /// <param name="subject">The subject.</param>
-    void RegisterSubjectId(string subjectId, IInterceptorSubject subject);
+    /// <param name="oldSubjectId">The previous subject ID to unregister, or null.</param>
+    void RegisterSubjectId(string subjectId, IInterceptorSubject subject, string? oldSubjectId = null);
 
     /// <summary>
     /// Removes a subject ID from the reverse index.

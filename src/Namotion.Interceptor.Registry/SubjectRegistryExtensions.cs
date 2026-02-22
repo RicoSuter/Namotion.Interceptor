@@ -1,5 +1,4 @@
 ﻿using System.Linq.Expressions;
-using System.Numerics;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -12,13 +11,32 @@ public static class SubjectRegistryExtensions
     internal static string GenerateSubjectId()
     {
         const string chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-        var value = new BigInteger(Guid.NewGuid().ToByteArray(), isUnsigned: true);
-        var result = new char[22];
+
+        // GUID = 128 bits = 16 bytes. We treat these as a big-endian unsigned
+        // 128-bit integer and repeatedly divide by 62 to produce 22 base62 digits.
+        // Manual long division avoids the BigInteger heap allocation.
+        Span<byte> bytes = stackalloc byte[16];
+        Guid.NewGuid().TryWriteBytes(bytes);
+
+        // Convert to big-endian so the most-significant byte is first,
+        // which is what our long-division loop expects.
+        bytes.Reverse();
+
+        Span<char> result = stackalloc char[22];
         for (var i = 21; i >= 0; i--)
         {
-            value = BigInteger.DivRem(value, 62, out var remainder);
+            // Long division of bytes[] (big-endian) by 62.
+            uint remainder = 0;
+            for (var j = 0; j < 16; j++)
+            {
+                uint dividend = (remainder << 8) | bytes[j];
+                bytes[j] = (byte)(dividend / 62);
+                remainder = dividend % 62;
+            }
+
             result[i] = chars[(int)remainder];
         }
+
         return new string(result);
     }
 
@@ -192,19 +210,13 @@ public static class SubjectRegistryExtensions
     /// <param name="id">The subject ID to assign.</param>
     public static void SetSubjectId(this IInterceptorSubject subject, string id)
     {
-        lock (subject.Data)
-        {
-            var writer = subject.Context.TryGetService<ISubjectIdRegistryWriter>();
+        // Read old ID before overwriting — ConcurrentDictionary ops are individually atomic.
+        subject.Data.TryGetValue((null, SubjectIdKey), out var existingValue);
+        var oldId = existingValue as string;
 
-            // Unregister old ID from the reverse index if the subject already has a different one.
-            if (subject.Data.TryGetValue((null, SubjectIdKey), out var existingId) &&
-                existingId is string oldId && oldId != id)
-            {
-                writer?.UnregisterSubjectId(oldId);
-            }
+        subject.Data[(null, SubjectIdKey)] = id;
 
-            subject.Data[(null, SubjectIdKey)] = id;
-            writer?.RegisterSubjectId(id, subject);
-        }
+        // Registry atomically unregisters old + registers new under its own lock.
+        subject.Context.TryGetService<ISubjectIdRegistryWriter>()?.RegisterSubjectId(id, subject, oldId);
     }
 }
