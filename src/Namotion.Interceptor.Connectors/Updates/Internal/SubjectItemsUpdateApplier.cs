@@ -25,6 +25,7 @@ internal static class SubjectItemsUpdateApplier
         // Apply structural operations (ID-based)
         if (propertyUpdate.Operations is { Count: > 0 })
         {
+            var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
             foreach (var operation in propertyUpdate.Operations)
             {
                 switch (operation.Action)
@@ -49,7 +50,6 @@ internal static class SubjectItemsUpdateApplier
                         IInterceptorSubject? newItem = null;
 
                         // Try to reuse an existing subject by subject ID
-                        var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
                         if (idRegistry.TryGetSubjectById(operation.Id, out var existing))
                         {
                             newItem = existing;
@@ -95,13 +95,13 @@ internal static class SubjectItemsUpdateApplier
         // Complete collection from items (when no operations = complete state)
         if (propertyUpdate.Operations is null && propertyUpdate.Items is { Count: > 0 })
         {
+            var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
             var newItems = new List<IInterceptorSubject>(propertyUpdate.Items.Count);
             foreach (var itemUpdate in propertyUpdate.Items)
             {
                 IInterceptorSubject? item = null;
 
                 // Try to reuse existing subject by subject ID
-                var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
                 if (idRegistry.TryGetSubjectById(itemUpdate.Id, out var existing))
                 {
                     item = existing;
@@ -188,6 +188,7 @@ internal static class SubjectItemsUpdateApplier
         // Apply structural operations
         if (propertyUpdate.Operations is { Count: > 0 })
         {
+            var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
             foreach (var operation in propertyUpdate.Operations)
             {
                 switch (operation.Action)
@@ -208,7 +209,6 @@ internal static class SubjectItemsUpdateApplier
                             IInterceptorSubject newItem;
 
                             // Try to reuse by subject ID
-                            var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
                             if (idRegistry.TryGetSubjectById(operation.Id, out var existing))
                             {
                                 newItem = existing;
@@ -233,6 +233,7 @@ internal static class SubjectItemsUpdateApplier
         // Apply sparse property updates
         if (propertyUpdate.Items is { Count: > 0 })
         {
+            var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
             foreach (var collUpdate in propertyUpdate.Items)
             {
                 if (collUpdate.Key is null)
@@ -254,7 +255,6 @@ internal static class SubjectItemsUpdateApplier
                     else
                     {
                         // Try reuse by subject ID
-                        var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
                         IInterceptorSubject newItem;
                         if (idRegistry.TryGetSubjectById(collUpdate.Id, out var existingSubject))
                         {
@@ -282,15 +282,6 @@ internal static class SubjectItemsUpdateApplier
             propertyUpdate.Count.HasValue && workingDictionary.Count != propertyUpdate.Count.Value)
         {
             var updatedKeys = new HashSet<object>();
-            if (propertyUpdate.Operations is { Count: > 0 })
-            {
-                foreach (var operation in propertyUpdate.Operations)
-                {
-                    if (operation is { Action: SubjectCollectionOperationType.Insert, Key: not null })
-                        updatedKeys.Add(ConvertDictionaryKey(operation.Key, targetKeyType));
-                }
-            }
-
             if (propertyUpdate.Items is { Count: > 0 })
             {
                 foreach (var item in propertyUpdate.Items)

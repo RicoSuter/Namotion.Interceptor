@@ -193,11 +193,11 @@ All changes are **additive** — no existing behavior modified. However:
 
 ### Potential simplifications (not blocking, for later)
 
-- [ ] `SubjectItemsUpdateApplier.ApplyDictionaryUpdate` lines 281-309: The "trim excess" block has an unreachable inner `if (propertyUpdate.Operations is { Count: > 0 })` check — we already checked `Operations is null` on line 281. The `updatedKeys` from Operations will always be empty. Simplify to only collect keys from `Items`.
-- [ ] `SubjectItemsUpdateApplier` resolves `parent.Context.GetService<ISubjectIdRegistry>()` multiple times per loop iteration (once per Insert operation). Resolve once before the loop and pass through.
-- [ ] `SubjectUpdateBuilder`: Remove dead `GetSubjectIdPairs()` method if unused.
-- [ ] `SubjectUpdateBuilder.Build`: Remove unused `includeRoot` parameter.
-- [ ] `SubjectUpdateBuilder`: Remove stale comment "Ensure root subject gets ID '1'".
+- [x] `SubjectItemsUpdateApplier.ApplyDictionaryUpdate`: Removed unreachable `if (propertyUpdate.Operations is { Count: > 0 })` block inside the `Operations is null` guard.
+- [x] `SubjectItemsUpdateApplier`: Hoisted `GetService<ISubjectIdRegistry>()` out of all loops (4 locations).
+- [x] `SubjectUpdateBuilder`: Removed dead `GetSubjectIdPairs()` method.
+- [x] `SubjectUpdateBuilder.Build`: Removed unused `includeRoot` parameter.
+- [x] `SubjectUpdateBuilder`: Removed stale comment "Ensure root subject gets ID '1'".
 
 ## Cleanup Tasks
 

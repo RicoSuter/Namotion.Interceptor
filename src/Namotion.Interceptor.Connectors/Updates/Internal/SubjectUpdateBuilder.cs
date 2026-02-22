@@ -21,7 +21,7 @@ internal sealed class SubjectUpdateBuilder
     public void Initialize(IInterceptorSubject rootSubject, ISubjectUpdateProcessor[] processors)
     {
         Processors = processors;
-        GetOrCreateId(rootSubject); // Ensure root subject gets ID "1"
+        GetOrCreateId(rootSubject);
     }
 
     public string GetOrCreateId(IInterceptorSubject subject)
@@ -69,12 +69,6 @@ internal sealed class SubjectUpdateBuilder
         return false;
     }
 
-    /// <summary>
-    /// Gets all subject-to-ID pairs tracked by this builder.
-    /// </summary>
-    public IEnumerable<KeyValuePair<IInterceptorSubject, string>> GetSubjectIdPairs()
-        => _subjectToId;
-
     public void TrackPropertyUpdate(
         SubjectPropertyUpdate update,
         RegisteredSubjectProperty property,
@@ -89,7 +83,7 @@ internal sealed class SubjectUpdateBuilder
     /// <summary>
     /// Builds the final SubjectUpdate, applying all transformations.
     /// </summary>
-    public SubjectUpdate Build(IInterceptorSubject subject, bool includeRoot = true)
+    public SubjectUpdate Build(IInterceptorSubject subject)
     {
         ApplyTransformations();
 
