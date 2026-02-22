@@ -118,10 +118,13 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ILifecycleH
                         _knownSubjects.Remove(change.Subject);
 
                         // Clean up subject ID reverse index via direct lookup (O(1))
-                        var subjectId = change.Subject.TryGetSubjectId();
-                        if (subjectId is not null)
+                        if (_subjectIdToSubject.Count > 0)
                         {
-                            _subjectIdToSubject.Remove(subjectId);
+                            var subjectId = change.Subject.TryGetSubjectId();
+                            if (subjectId is not null)
+                            {
+                                _subjectIdToSubject.Remove(subjectId);
+                            }
                         }
                     }
                 }

@@ -224,6 +224,40 @@ The following bugs were found and fixed but lack dedicated unit tests to prevent
 - [ ] **Fix 2 — Collection count trim guards**: Test that a Remove operation for a non-existent ID is safely ignored (no exception, no side effects).
 - [ ] **Stress test with higher structural mutation rates**: Run ConnectorTester with 10x structural mutation rates (20 structural/sec server, 10/sec clients) to increase the likelihood of concurrent structural operations overlapping. Value mutation rates are already high enough. Also try shorter buffer times (1-2ms) to stress the dedup logic with more frequent flushes during structural changes.
 
+## Benchmark Comparison (SubjectUpdateBenchmark)
+
+**Date:** 2026-02-22 | **Machine:** Apple M4 Max, .NET 9.0.10
+
+| Method               | Branch | Mean (μs) | Allocated |
+|----------------------|--------|----------:|----------:|
+| CreateCompleteUpdate | master | 3.546 | 5.77 KB |
+| CreateCompleteUpdate | feature | 3.721 | 6.13 KB |
+| CreatePartialUpdate  | master | 1.158 | 2.59 KB |
+| CreatePartialUpdate  | feature | 1.028 | 2.55 KB |
+
+**Summary:** CreateCompleteUpdate is ~5% slower (+0.18 μs) with +0.36 KB allocation (due to stable ID tracking overhead). CreatePartialUpdate is ~11% faster (-0.13 μs) with -0.04 KB allocation (cleanup optimizations). No significant regression.
+
+### RegistryBenchmark
+
+| Method | Branch | Mean | Allocated |
+|---|---|---:|---:|
+| WriteToRegistrySubjects | master | 1,996,131 ns | 0 B |
+| WriteToRegistrySubjects | feature | 2,050,818 ns | 0 B |
+| AddLotsOfPreviousCars | master | 33,498,116 ns | 24,065,372 B |
+| AddLotsOfPreviousCars | feature | 33,561,774 ns | 24,065,313 B |
+| IncrementDerivedAverage | master | 4,440 ns | 256 B |
+| IncrementDerivedAverage | feature | 4,404 ns | 256 B |
+| Write | master | 190 ns | 0 B |
+| Write | feature | 187 ns | 0 B |
+| Read | master | 253 ns | 0 B |
+| Read | feature | 247 ns | 0 B |
+| DerivedAverage | master | 160 ns | 0 B |
+| DerivedAverage | feature | 165 ns | 0 B |
+| ChangeAllTires | master | 7,226 ns | 17,664 B |
+| ChangeAllTires | feature | 7,371 ns | 17,664 B |
+
+**Summary:** Core operations (Read, Write, DerivedAverage) are within noise (~1-3%). WriteToRegistrySubjects ~3% slower. ChangeAllTires ~2% slower (within noise, after adding `Count > 0` guard to skip ID cleanup when no IDs registered). AddLotsOfPreviousCars unchanged. Zero allocation regressions. No regression.
+
 ## Key Source Files
 
 | File | Role |
