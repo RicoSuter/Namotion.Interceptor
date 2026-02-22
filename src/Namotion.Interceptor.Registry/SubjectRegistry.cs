@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Registry;
 public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLifecycleHandler
 {
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
-    private readonly Dictionary<string, IInterceptorSubject> _stableIdToSubject = new();
+    private readonly Dictionary<string, IInterceptorSubject> _subjectIdToSubject = new();
     
     /// <inheritdoc />
     public IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> KnownSubjects
@@ -31,29 +31,29 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     }
 
     /// <inheritdoc />
-    public void RegisterStableId(string stableId, IInterceptorSubject subject)
+    public void RegisterSubjectId(string subjectId, IInterceptorSubject subject)
     {
         lock (_knownSubjects)
         {
-            _stableIdToSubject[stableId] = subject;
+            _subjectIdToSubject[subjectId] = subject;
         }
     }
 
     /// <inheritdoc />
-    public void UnregisterStableId(string stableId)
+    public void UnregisterSubjectId(string subjectId)
     {
         lock (_knownSubjects)
         {
-            _stableIdToSubject.Remove(stableId);
+            _subjectIdToSubject.Remove(subjectId);
         }
     }
 
     /// <inheritdoc />
-    public bool TryGetSubjectByStableId(string stableId, out IInterceptorSubject subject)
+    public bool TryGetSubjectById(string subjectId, out IInterceptorSubject subject)
     {
         lock (_knownSubjects)
         {
-            return _stableIdToSubject.TryGetValue(stableId, out subject!);
+            return _subjectIdToSubject.TryGetValue(subjectId, out subject!);
         }
     }
 
@@ -117,19 +117,13 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                     {
                         _knownSubjects.Remove(change.Subject);
 
-                        // Clean up stable ID reverse index
-                        // TODO: subject.TryGetSubjectId and then remove instead of looping through all items here?
-                        string? stableIdToRemove = null;
-                        foreach (var (id, s) in _stableIdToSubject)
+                        // Clean up subject ID reverse index via direct lookup (O(1))
+                        if (change.Subject.Data.TryGetValue(
+                                (null, SubjectRegistryExtensions.SubjectIdKey), out var idValue) &&
+                            idValue is string subjectId)
                         {
-                            if (ReferenceEquals(s, change.Subject))
-                            {
-                                stableIdToRemove = id;
-                                break;
-                            }
+                            _subjectIdToSubject.Remove(subjectId);
                         }
-                        if (stableIdToRemove is not null)
-                            _stableIdToSubject.Remove(stableIdToRemove);
                     }
                 }
             }

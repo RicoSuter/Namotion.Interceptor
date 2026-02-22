@@ -18,23 +18,23 @@ public interface ISubjectRegistry
     RegisteredSubject? TryGetRegisteredSubject(IInterceptorSubject subject);
 
     /// <summary>
-    /// Registers a stable ID for a subject in the reverse index.
+    /// Registers a subject ID in the reverse index.
     /// </summary>
-    /// <param name="stableId">The stable ID.</param>
+    /// <param name="subjectId">The subject ID.</param>
     /// <param name="subject">The subject.</param>
-    void RegisterStableId(string stableId, IInterceptorSubject subject);
+    void RegisterSubjectId(string subjectId, IInterceptorSubject subject);
 
     /// <summary>
-    /// Removes a stable ID from the reverse index.
+    /// Removes a subject ID from the reverse index.
     /// </summary>
-    /// <param name="stableId">The stable ID to remove.</param>
-    void UnregisterStableId(string stableId);
+    /// <param name="subjectId">The subject ID to remove.</param>
+    void UnregisterSubjectId(string subjectId);
 
     /// <summary>
-    /// Tries to get a subject by its stable ID from the reverse index.
+    /// Tries to get a subject by its ID from the reverse index.
     /// </summary>
-    /// <param name="stableId">The stable ID.</param>
+    /// <param name="subjectId">The subject ID.</param>
     /// <param name="subject">The subject if found.</param>
-    /// <returns>True if a subject with the given stable ID was found.</returns>
-    bool TryGetSubjectByStableId(string stableId, out IInterceptorSubject subject);
+    /// <returns>True if a subject with the given ID was found.</returns>
+    bool TryGetSubjectById(string subjectId, out IInterceptorSubject subject);
 }

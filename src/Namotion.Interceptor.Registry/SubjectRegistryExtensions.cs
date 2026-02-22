@@ -165,7 +165,7 @@ public static class SubjectRegistryExtensions
             static (_, s) =>
             {
                 var id = GenerateSubjectId();
-                s.Context.TryGetService<ISubjectRegistry>()?.RegisterStableId(id, s);
+                s.Context.TryGetService<ISubjectRegistry>()?.RegisterSubjectId(id, s);
                 return id;
             },
             subject)!;
@@ -185,10 +185,10 @@ public static class SubjectRegistryExtensions
         if (subject.Data.TryGetValue((null, SubjectIdKey), out var existingId) &&
             existingId is string oldId && oldId != id)
         {
-            registry?.UnregisterStableId(oldId);
+            registry?.UnregisterSubjectId(oldId);
         }
 
         subject.Data[(null, SubjectIdKey)] = id;
-        registry?.RegisterStableId(id, subject);
+        registry?.RegisterSubjectId(id, subject);
     }
 }
