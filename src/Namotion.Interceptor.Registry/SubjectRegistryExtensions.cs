@@ -152,12 +152,12 @@ public static class SubjectRegistryExtensions
     }
 
     /// <summary>
-    /// Gets or lazily generates a stable subject ID for the given subject.
+    /// Gets or lazily generates a subject ID for the given subject.
     /// The ID is stored in the subject's Data dictionary and auto-registered
-    /// in the registry's reverse index if available.
+    /// in the reverse index if an <see cref="ISubjectIdRegistry"/> is available.
     /// </summary>
     /// <param name="subject">The subject.</param>
-    /// <returns>The stable subject ID.</returns>
+    /// <returns>The subject ID.</returns>
     public static string GetOrAddSubjectId(this IInterceptorSubject subject)
     {
         return (string)subject.Data.GetOrAdd(
@@ -165,30 +165,46 @@ public static class SubjectRegistryExtensions
             static (_, s) =>
             {
                 var id = GenerateSubjectId();
-                s.Context.TryGetService<ISubjectRegistry>()?.RegisterSubjectId(id, s);
+                s.Context.TryGetService<ISubjectIdRegistry>()?.RegisterSubjectId(id, s);
                 return id;
             },
             subject)!;
     }
 
     /// <summary>
-    /// Assigns a known stable ID to a subject (from an incoming update).
-    /// Auto-registers in the reverse index if available.
+    /// Gets the subject ID if one has been assigned, or null if none exists.
     /// </summary>
     /// <param name="subject">The subject.</param>
-    /// <param name="id">The stable ID to assign.</param>
+    /// <returns>The subject ID, or null.</returns>
+    public static string? TryGetSubjectId(this IInterceptorSubject subject)
+    {
+        return subject.Data.TryGetValue((null, SubjectIdKey), out var value) && value is string id
+            ? id
+            : null;
+    }
+
+    /// <summary>
+    /// Assigns a known subject ID (e.g., from an incoming update).
+    /// Auto-registers in the reverse index if an <see cref="ISubjectIdRegistry"/> is available.
+    /// This method is thread-safe.
+    /// </summary>
+    /// <param name="subject">The subject.</param>
+    /// <param name="id">The subject ID to assign.</param>
     public static void SetSubjectId(this IInterceptorSubject subject, string id)
     {
-        var registry = subject.Context.TryGetService<ISubjectRegistry>();
-
-        // Unregister old ID from the reverse index if the subject already has a different one.
-        if (subject.Data.TryGetValue((null, SubjectIdKey), out var existingId) &&
-            existingId is string oldId && oldId != id)
+        lock (subject.Data)
         {
-            registry?.UnregisterSubjectId(oldId);
-        }
+            var idRegistry = subject.Context.TryGetService<ISubjectIdRegistry>();
 
-        subject.Data[(null, SubjectIdKey)] = id;
-        registry?.RegisterSubjectId(id, subject);
+            // Unregister old ID from the reverse index if the subject already has a different one.
+            if (subject.Data.TryGetValue((null, SubjectIdKey), out var existingId) &&
+                existingId is string oldId && oldId != id)
+            {
+                idRegistry?.UnregisterSubjectId(oldId);
+            }
+
+            subject.Data[(null, SubjectIdKey)] = id;
+            idRegistry?.RegisterSubjectId(id, subject);
+        }
     }
 }

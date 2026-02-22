@@ -5,7 +5,7 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry;
 
-public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLifecycleHandler
+public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ILifecycleHandler, IPropertyLifecycleHandler
 {
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
     private readonly Dictionary<string, IInterceptorSubject> _subjectIdToSubject = new();
@@ -118,9 +118,8 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                         _knownSubjects.Remove(change.Subject);
 
                         // Clean up subject ID reverse index via direct lookup (O(1))
-                        if (change.Subject.Data.TryGetValue(
-                                (null, SubjectRegistryExtensions.SubjectIdKey), out var idValue) &&
-                            idValue is string subjectId)
+                        var subjectId = change.Subject.TryGetSubjectId();
+                        if (subjectId is not null)
                         {
                             _subjectIdToSubject.Remove(subjectId);
                         }

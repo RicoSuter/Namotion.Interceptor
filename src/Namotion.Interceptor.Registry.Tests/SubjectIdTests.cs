@@ -30,11 +30,11 @@ public class SubjectIdTests
     {
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var person = new Models.Person(context) { FirstName = "Test" };
-        var registry = context.GetService<ISubjectRegistry>();
+        var idRegistry = context.GetService<ISubjectIdRegistry>();
 
-        registry.RegisterSubjectId("testId123", (IInterceptorSubject)person);
+        idRegistry.RegisterSubjectId("testId123", (IInterceptorSubject)person);
 
-        Assert.True(registry.TryGetSubjectById("testId123", out var found));
+        Assert.True(idRegistry.TryGetSubjectById("testId123", out var found));
         Assert.Same(person, found);
     }
 
@@ -42,9 +42,9 @@ public class SubjectIdTests
     public void TryGetSubjectById_WithUnknownId_ReturnsFalse()
     {
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var registry = context.GetService<ISubjectRegistry>();
+        var idRegistry = context.GetService<ISubjectIdRegistry>();
 
-        Assert.False(registry.TryGetSubjectById("unknown", out _));
+        Assert.False(idRegistry.TryGetSubjectById("unknown", out _));
     }
 
     [Fact]
@@ -53,15 +53,15 @@ public class SubjectIdTests
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var child = new Models.Person { FirstName = "Child" };
         var parent = new Models.Person(context) { FirstName = "Parent", Mother = child };
-        var registry = context.GetService<ISubjectRegistry>();
+        var idRegistry = context.GetService<ISubjectIdRegistry>();
 
-        registry.RegisterSubjectId("childId", (IInterceptorSubject)child);
-        Assert.True(registry.TryGetSubjectById("childId", out _));
+        ((IInterceptorSubject)child).SetSubjectId("childId");
+        Assert.True(idRegistry.TryGetSubjectById("childId", out _));
 
         // Detach by setting to null
         parent.Mother = null;
 
-        Assert.False(registry.TryGetSubjectById("childId", out _));
+        Assert.False(idRegistry.TryGetSubjectById("childId", out _));
     }
 
     [Fact]
@@ -84,11 +84,11 @@ public class SubjectIdTests
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var person = new Models.Person(context) { FirstName = "Test" };
         var subject = (IInterceptorSubject)person;
-        var registry = context.GetService<ISubjectRegistry>();
+        var idRegistry = context.GetService<ISubjectIdRegistry>();
 
         var id = subject.GetOrAddSubjectId();
 
-        Assert.True(registry.TryGetSubjectById(id, out var found));
+        Assert.True(idRegistry.TryGetSubjectById(id, out var found));
         Assert.Same(person, found);
     }
 
@@ -111,11 +111,11 @@ public class SubjectIdTests
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var person = new Models.Person(context) { FirstName = "Test" };
         var subject = (IInterceptorSubject)person;
-        var registry = context.GetService<ISubjectRegistry>();
+        var idRegistry = context.GetService<ISubjectIdRegistry>();
 
         subject.SetSubjectId("assignedId");
 
-        Assert.True(registry.TryGetSubjectById("assignedId", out var found));
+        Assert.True(idRegistry.TryGetSubjectById("assignedId", out var found));
         Assert.Same(person, found);
     }
 

@@ -49,8 +49,8 @@ internal static class SubjectItemsUpdateApplier
                         IInterceptorSubject? newItem = null;
 
                         // Try to reuse an existing subject by subject ID
-                        var registry = parent.Context.TryGetService<ISubjectRegistry>();
-                        if (registry is not null && registry.TryGetSubjectById(operation.Id, out var existing))
+                        var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
+                        if (idRegistry.TryGetSubjectById(operation.Id, out var existing))
                         {
                             newItem = existing;
                         }
@@ -101,8 +101,8 @@ internal static class SubjectItemsUpdateApplier
                 IInterceptorSubject? item = null;
 
                 // Try to reuse existing subject by subject ID
-                var registry = parent.Context.TryGetService<ISubjectRegistry>();
-                if (registry is not null && registry.TryGetSubjectById(itemUpdate.Id, out var existing))
+                var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
+                if (idRegistry.TryGetSubjectById(itemUpdate.Id, out var existing))
                 {
                     item = existing;
                 }
@@ -208,8 +208,8 @@ internal static class SubjectItemsUpdateApplier
                             IInterceptorSubject newItem;
 
                             // Try to reuse by subject ID
-                            var registry = parent.Context.TryGetService<ISubjectRegistry>();
-                            if (registry is not null && registry.TryGetSubjectById(operation.Id, out var existing))
+                            var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
+                            if (idRegistry.TryGetSubjectById(operation.Id, out var existing))
                             {
                                 newItem = existing;
                                 if (context.TryMarkAsProcessed(operation.Id))
@@ -254,9 +254,9 @@ internal static class SubjectItemsUpdateApplier
                     else
                     {
                         // Try reuse by subject ID
-                        var registry = parent.Context.TryGetService<ISubjectRegistry>();
+                        var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
                         IInterceptorSubject newItem;
-                        if (registry is not null && registry.TryGetSubjectById(collUpdate.Id, out var existingSubject))
+                        if (idRegistry.TryGetSubjectById(collUpdate.Id, out var existingSubject))
                         {
                             newItem = existingSubject;
                             if (context.TryMarkAsProcessed(collUpdate.Id))

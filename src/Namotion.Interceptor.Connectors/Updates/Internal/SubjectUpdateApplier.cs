@@ -38,22 +38,19 @@ internal static class SubjectUpdateApplier
             // to subjects NOT reachable from the root's changed properties (e.g., a deeply
             // nested ObjectRef change in the same batch as a root scalar change).
             // TryMarkAsProcessed ensures no subject is processed twice.
-            var registry = subject.Context.TryGetService<ISubjectRegistry>();
-            if (registry is not null)
+            var idRegistry = subject.Context.GetService<ISubjectIdRegistry>();
+            foreach (var (subjectId, properties) in update.Subjects)
             {
-                foreach (var (subjectId, properties) in update.Subjects)
+                if (idRegistry.TryGetSubjectById(subjectId, out var targetSubject))
                 {
-                    if (registry.TryGetSubjectById(subjectId, out var targetSubject))
+                    if (context.TryMarkAsProcessed(subjectId))
                     {
-                        if (context.TryMarkAsProcessed(subjectId))
-                        {
-                            ApplyPropertyUpdates(targetSubject, properties, context);
-                        }
+                        ApplyPropertyUpdates(targetSubject, properties, context);
                     }
-                    // If subject not found, do NOT mark as processed.
-                    // The subject may be created later by a structural operation
-                    // (e.g., Collection Insert) which will apply its properties.
                 }
+                // If subject not found, do NOT mark as processed.
+                // The subject may be created later by a structural operation
+                // (e.g., Collection Insert) which will apply its properties.
             }
         }
         finally
@@ -150,9 +147,7 @@ internal static class SubjectUpdateApplier
         // Check if the existing item is the SAME logical subject (matching subject ID)
         // or a DIFFERENT subject that needs to be replaced.
         var isSameSubject = existingItem is not null &&
-            existingItem.Data.TryGetValue((null, "Namotion.Interceptor.SubjectId"), out var existingId) &&
-            existingId is string existingIdStr &&
-            existingIdStr == propertyUpdate.Id;
+            existingItem.TryGetSubjectId() == propertyUpdate.Id;
 
         if (existingItem is not null && isSameSubject)
         {
@@ -164,8 +159,8 @@ internal static class SubjectUpdateApplier
             // Either no existing item, or existing item is a DIFFERENT subject (replacement).
             // Try to reuse an existing subject by subject ID (may exist elsewhere in the graph).
             targetItem = null;
-            var registry = parent.Context.TryGetService<ISubjectRegistry>();
-            if (registry is not null && registry.TryGetSubjectById(propertyUpdate.Id, out var existing))
+            var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
+            if (idRegistry.TryGetSubjectById(propertyUpdate.Id, out var existing))
             {
                 targetItem = existing;
             }
