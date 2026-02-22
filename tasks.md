@@ -194,14 +194,22 @@ All changes are **additive** — no existing behavior modified. However:
 ### Potential simplifications (not blocking, for later)
 
 - [ ] `SubjectItemsUpdateApplier.ApplyDictionaryUpdate` lines 281-309: The "trim excess" block has an unreachable inner `if (propertyUpdate.Operations is { Count: > 0 })` check — we already checked `Operations is null` on line 281. The `updatedKeys` from Operations will always be empty. Simplify to only collect keys from `Items`.
-- [ ] `SubjectItemsUpdateApplier` resolves `parent.Context.TryGetService<ISubjectRegistry>()` multiple times per call (once per Insert operation). Could resolve once and pass through.
+- [ ] `SubjectItemsUpdateApplier` resolves `parent.Context.GetService<ISubjectIdRegistry>()` multiple times per loop iteration (once per Insert operation). Resolve once before the loop and pass through.
+- [ ] `SubjectUpdateBuilder`: Remove dead `GetSubjectIdPairs()` method if unused.
+- [ ] `SubjectUpdateBuilder.Build`: Remove unused `includeRoot` parameter.
+- [ ] `SubjectUpdateBuilder`: Remove stale comment "Ensure root subject gets ID '1'".
 
 ## Cleanup Tasks
 
-- [ ] **Add `TryGetSubjectId` extension method**: `SubjectUpdateApplier` currently accesses `subject.Data.TryGetValue((null, "Namotion.Interceptor.SubjectId"), ...)` directly, leaking internal knowledge of how stable IDs are stored. Add a `TryGetSubjectId(this IInterceptorSubject subject, out string? id)` extension method to `SubjectRegistryExtensions` alongside the existing `GetOrAddSubjectId` and `SetSubjectId` methods. Then update the applier to use it.
-- [ ] **Eliminate `useCompleteStructuralState`** (see section above)
-- [ ] **Remove magic string duplication**: The `SubjectIdKey` constant is `internal` in `Namotion.Interceptor.Registry`. Either make it `public` or provide proper public API surface.
-- [ ] **Update docs with updated protocol**: Update documentation in `docs/` to reflect the new stable-ID-based protocol (base62 subject IDs, ID-based collection/dictionary operations, ObjectRef replacement semantics, `useCompleteStructuralState` behavior).
+- [x] **Add `TryGetSubjectId` extension method**: Added to `SubjectRegistryExtensions`. Updated applier to use it instead of magic string access.
+- [x] **Eliminate `useCompleteStructuralState`**: Removed parameter and all branches. Validated with 14 PASS cycles including 10x stress test.
+- [x] **Remove magic string duplication**: `TryGetSubjectId()` extension method encapsulates the internal key. Appliers no longer reference the magic string.
+- [x] **Extract `ISubjectIdRegistry` interface**: Separated ID registry methods from `ISubjectRegistry` (ISP). `SubjectRegistry` implements both.
+- [x] **Fix O(n) detach cleanup**: Uses `TryGetSubjectId()` for O(1) lookup instead of linear scan.
+- [x] **Thread-safe `SetSubjectId`**: Added `lock(subject.Data)` around multi-step operation.
+- [x] **Use `GetService` instead of `TryGetService` for `ISubjectIdRegistry`**: Registry is always required for SubjectUpdate applier.
+- [ ] **Update registry.md docs**: Document the new `ISubjectIdRegistry` interface, `TryGetSubjectId`, `SetSubjectId`, `GetOrAddSubjectId` extensions, and subject ID lifecycle.
+- [ ] **Update docs with updated protocol**: Update documentation in `docs/` to reflect the new stable-ID-based protocol (base62 subject IDs, ID-based collection/dictionary operations, ObjectRef replacement semantics).
 
 ## Regression Test Coverage Needed
 
