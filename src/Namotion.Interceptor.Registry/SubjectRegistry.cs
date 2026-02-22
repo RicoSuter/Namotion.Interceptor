@@ -5,9 +5,10 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry;
 
-public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLifecycleHandler
+public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
 {
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
+    private readonly Dictionary<string, IInterceptorSubject> _subjectIdToSubject = new();
     
     /// <inheritdoc />
     public IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> KnownSubjects
@@ -30,6 +31,33 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     }
 
     /// <inheritdoc />
+    void ISubjectIdRegistryWriter.RegisterSubjectId(string subjectId, IInterceptorSubject subject)
+    {
+        lock (_knownSubjects)
+        {
+            _subjectIdToSubject[subjectId] = subject;
+        }
+    }
+
+    /// <inheritdoc />
+    void ISubjectIdRegistryWriter.UnregisterSubjectId(string subjectId)
+    {
+        lock (_knownSubjects)
+        {
+            _subjectIdToSubject.Remove(subjectId);
+        }
+    }
+
+    /// <inheritdoc />
+    public bool TryGetSubjectById(string subjectId, out IInterceptorSubject subject)
+    {
+        lock (_knownSubjects)
+        {
+            return _subjectIdToSubject.TryGetValue(subjectId, out subject!);
+        }
+    }
+
+    /// <inheritdoc />
     void ILifecycleHandler.HandleLifecycleChange(SubjectLifecycleChange change)
     {
         lock (_knownSubjects)
@@ -39,6 +67,14 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                 if (!_knownSubjects.TryGetValue(change.Subject, out var registeredSubject))
                 {
                     registeredSubject = RegisterSubject(change.Subject);
+                }
+
+                // Auto-register subject ID in reverse index if the subject already has one
+                // (e.g., ID was set before attachment to a context with a registry)
+                var subjectId = change.Subject.TryGetSubjectId();
+                if (subjectId is not null)
+                {
+                    _subjectIdToSubject[subjectId] = change.Subject;
                 }
 
                 if (change is { IsPropertyReferenceAdded: true, Property: { } property })
@@ -88,6 +124,16 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                     if (change.IsContextDetach)
                     {
                         _knownSubjects.Remove(change.Subject);
+
+                        // Clean up subject ID reverse index via direct lookup (O(1))
+                        if (_subjectIdToSubject.Count > 0)
+                        {
+                            var subjectId = change.Subject.TryGetSubjectId();
+                            if (subjectId is not null)
+                            {
+                                _subjectIdToSubject.Remove(subjectId);
+                            }
+                        }
                     }
                 }
             }
