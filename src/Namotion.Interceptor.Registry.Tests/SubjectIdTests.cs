@@ -166,4 +166,17 @@ public class SubjectIdTests
         Assert.True(idRegistry.TryGetSubjectById("sameId", out var found));
         Assert.Same(person, found);
     }
+
+    [Fact]
+    public void SetSubjectId_WithIdAlreadyUsedByDifferentSubject_Throws()
+    {
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var person1 = new Models.Person(context) { FirstName = "Person1" };
+        var person2 = new Models.Person(context) { FirstName = "Person2" };
+
+        person1.SetSubjectId("sharedId");
+
+        Assert.Throws<InvalidOperationException>(() =>
+            person2.SetSubjectId("sharedId"));
+    }
 }
