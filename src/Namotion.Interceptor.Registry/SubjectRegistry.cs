@@ -51,6 +51,12 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     {
         lock (_knownSubjects)
         {
+            if (_subjectIdToSubject.TryGetValue(id, out var existing) && !ReferenceEquals(existing, subject))
+            {
+                throw new InvalidOperationException(
+                    $"Subject ID '{id}' is already in use by a different subject.");
+            }
+
             var oldId = subject.TryGetSubjectId();
             if (oldId is not null && oldId != id)
             {
@@ -83,12 +89,15 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                     registeredSubject = RegisterSubject(change.Subject);
                 }
 
-                // Auto-register subject ID in reverse index if the subject already has one
-                // (e.g., ID was set before attachment to a context with a registry)
-                var subjectId = change.Subject.TryGetSubjectId();
-                if (subjectId is not null)
+                if (change.IsContextAttach)
                 {
-                    _subjectIdToSubject[subjectId] = change.Subject;
+                    // Auto-register subject ID in reverse index if the subject already has one
+                    // (e.g., ID was set before attachment to a context with a registry)
+                    var subjectId = change.Subject.TryGetSubjectId();
+                    if (subjectId is not null)
+                    {
+                        _subjectIdToSubject[subjectId] = change.Subject;
+                    }
                 }
 
                 if (change is { IsPropertyReferenceAdded: true, Property: { } property })
