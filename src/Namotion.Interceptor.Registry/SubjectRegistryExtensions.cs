@@ -8,6 +8,14 @@ public static class SubjectRegistryExtensions
 {
     internal const string SubjectIdKey = "Namotion.Interceptor.SubjectId";
 
+    /// <summary>
+    /// Performance optimization: guards <see cref="TryGetSubjectId"/> to avoid
+    /// per-subject dictionary lookups on every lifecycle event (attach/detach)
+    /// when no subject ID has ever been assigned. Set to true on the first call to
+    /// <see cref="SetSubjectId"/> or <see cref="GetOrAddSubjectId"/> and never reset.
+    /// </summary>
+    internal static volatile bool HasSubjectIds;
+
     internal static string GenerateSubjectId()
     {
         const string chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
@@ -188,9 +196,11 @@ public static class SubjectRegistryExtensions
             return writer.GetOrAddSubjectId(subject);
 
         // No registry - ConcurrentDictionary.GetOrAdd is sufficient (no reverse index to corrupt)
-        return (string)subject.Data.GetOrAdd(
+        var id = (string)subject.Data.GetOrAdd(
             (null, SubjectIdKey),
             static _ => GenerateSubjectId())!;
+        HasSubjectIds = true;
+        return id;
     }
 
     /// <summary>
@@ -200,6 +210,9 @@ public static class SubjectRegistryExtensions
     /// <returns>The subject ID, or null.</returns>
     public static string? TryGetSubjectId(this IInterceptorSubject subject)
     {
+        if (!HasSubjectIds)
+            return null;
+
         return subject.Data.TryGetValue((null, SubjectIdKey), out var value) && value is string id
             ? id
             : null;
@@ -226,5 +239,6 @@ public static class SubjectRegistryExtensions
 
         // No registry - just store in Data
         subject.Data[(null, SubjectIdKey)] = id;
+        HasSubjectIds = true;
     }
 }

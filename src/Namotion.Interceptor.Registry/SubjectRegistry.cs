@@ -42,6 +42,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
             var id = SubjectRegistryExtensions.GenerateSubjectId();
             subject.Data[(null, SubjectRegistryExtensions.SubjectIdKey)] = id;
             _subjectIdToSubject[id] = subject;
+            SubjectRegistryExtensions.HasSubjectIds = true;
             return id;
         }
     }
@@ -65,6 +66,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
 
             subject.Data[(null, SubjectRegistryExtensions.SubjectIdKey)] = id;
             _subjectIdToSubject[id] = subject;
+            SubjectRegistryExtensions.HasSubjectIds = true;
         }
     }
 
