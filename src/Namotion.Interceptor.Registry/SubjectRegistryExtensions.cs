@@ -208,6 +208,7 @@ public static class SubjectRegistryExtensions
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <returns>The subject ID, or null.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static string? TryGetSubjectId(this IInterceptorSubject subject)
     {
         if (!HasSubjectIds)
