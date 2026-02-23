@@ -98,6 +98,13 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                     var subjectId = change.Subject.TryGetSubjectId();
                     if (subjectId is not null)
                     {
+                        if (_subjectIdToSubject.TryGetValue(subjectId, out var existingSubject)
+                            && !ReferenceEquals(existingSubject, change.Subject))
+                        {
+                            throw new InvalidOperationException(
+                                $"Subject ID '{subjectId}' is already in use by a different subject.");
+                        }
+
                         _subjectIdToSubject[subjectId] = change.Subject;
                     }
                 }
