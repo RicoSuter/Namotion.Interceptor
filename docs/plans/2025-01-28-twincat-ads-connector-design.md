@@ -1,7 +1,7 @@
 # TwinCAT ADS Connector Design
 
 **Date:** 2025-01-28
-**Updated:** 2025-01-29
+**Updated:** 2025-02-25
 **Status:** Ready for Implementation
 **Package:** `Namotion.Interceptor.Connectors.TwinCAT`
 
@@ -30,7 +30,9 @@ Benefits: Lower latency, no OPC UA license required, direct control over read st
 | **Writes During Disconnect** | Queue in `WriteRetryQueue`, flush after reconnection |
 | **Notification Limit** | Configurable, default 500 |
 | **Demotion Order** | Priority attribute first, then CycleTime (higher = demoted first) |
-| **Polling** | Use `PollValues` from Reactive extensions |
+| **Polling** | Batch polling via `SumSymbolRead` on a timer (not per-symbol `PollValues`) |
+| **Batch Writes** | Use `SumSymbolWrite` for batched writes in single ADS call |
+| **Batch Initial Load** | Use `SumSymbolRead` for initial state load |
 | **String Encoding** | Auto-detect from PLC symbol metadata (STRING vs WSTRING) |
 | **Null Handling** | Return PLC's actual value, no null interpretation |
 | **Collection Size** | Use PLC metadata if empty, otherwise existing collection size |
@@ -676,19 +678,28 @@ _session.ConnectionStateChanged += OnConnectionStateChanged;
 _connection.AdsStateChanged += OnAdsStateChanged;
 ```
 
-Use the Reactive extensions for notifications and polling:
+Use the Reactive extensions for notifications and Sum Commands for batch operations:
 
 ```csharp
-// For notifications - use WhenNotification
+// For notifications - use WhenNotification (push-based, efficient for real-time updates)
 IDisposable subscription = _connection
     .WhenNotification<T>(symbolPath, notificationSettings)
     .Subscribe(value => OnValueReceived(propertyReference, value));
 
-// For polling - use PollValues
-IDisposable subscription = symbol
-    .PollValues(pollingInterval)
-    .Subscribe(value => OnValueReceived(propertyReference, value));
+// For polling - use SumSymbolRead on a timer (batch all polled symbols in one ADS call)
+// Instead of per-symbol PollValues, we collect all polled symbols into a SymbolCollection
+// and read them in a single ADS roundtrip on each polling interval.
+var symbolCollection = new SymbolCollection(polledSymbols);
+var sumRead = new SumSymbolRead(_connection, symbolCollection);
+object[] values = sumRead.Read();  // Single ADS call for all polled symbols
+
+// For batch writes - use SumSymbolWrite (batch all changes in one ADS call)
+var symbolCollection = new SymbolCollection(symbolsToWrite);
+var sumWrite = new SumSymbolWrite(_connection, symbolCollection);
+sumWrite.Write(valuesToWrite);  // Single ADS call for all writes
 ```
+
+**Note:** `SumSymbolRead.Read()` and `SumSymbolWrite.Write()` are synchronous APIs. This is fine because they are called from background threads (`ChangeQueueProcessor` for writes, polling timer for reads) where blocking is acceptable.
 
 ### ISubjectSource Methods
 
@@ -756,6 +767,8 @@ private async Task FullRescanAsync(CancellationToken cancellationToken)
 
     _subjectLoader.LoadSubjectGraph(_subject);
 
+    var polledSymbols = new List<(RegisteredSubjectProperty Property, string SymbolPath)>();
+
     foreach (var property in registeredSubject.GetAllProperties())
     {
         if (!IsPropertyIncluded(property)) continue;
@@ -767,14 +780,19 @@ private async Task FullRescanAsync(CancellationToken cancellationToken)
         if (mode == AdsReadMode.Notification)
             RegisterNotification(property, symbolPath);
         else
-            RegisterPolling(property, symbolPath);
+            polledSymbols.Add((property, symbolPath));
     }
+
+    // Register all polled symbols for batch polling via SumSymbolRead
+    if (polledSymbols.Count > 0)
+        StartBatchPolling(polledSymbols);
 }
 
-public async Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
+public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
 {
-    // Read current values from PLC for all owned properties
-    var values = new Dictionary<RegisteredSubjectProperty, object?>();
+    // Batch read all owned properties in a single ADS call using SumSymbolRead
+    var properties = new List<RegisteredSubjectProperty>();
+    var symbols = new List<ISymbol>();
 
     foreach (var propertyRef in _ownership.Properties)
     {
@@ -782,46 +800,72 @@ public async Task<Action?> LoadInitialStateAsync(CancellationToken cancellationT
         if (registeredProperty is null) continue;
 
         var symbolPath = GetSymbolPath(registeredProperty);
-        var adsValue = await _client.ReadValueAsync(symbolPath, cancellationToken);
-
-        // Convert ADS value to .NET type
-        var value = _configuration.ValueConverter.ConvertToPropertyValue(adsValue, registeredProperty);
-        values[registeredProperty] = value;
+        var symbol = _symbolLoader.Symbols[symbolPath];
+        properties.Add(registeredProperty);
+        symbols.Add(symbol);
     }
 
-    return () =>
+    if (symbols.Count == 0)
+        return Task.FromResult<Action?>(null);
+
+    // Single ADS roundtrip for all values (synchronous - called from background thread)
+    var symbolCollection = new SymbolCollection(symbols);
+    var sumRead = new SumSymbolRead(_connection, symbolCollection);
+    var adsValues = sumRead.Read();
+
+    // Convert all values
+    var values = new (RegisteredSubjectProperty Property, object? Value)[properties.Count];
+    for (var i = 0; i < properties.Count; i++)
     {
+        values[i] = (properties[i],
+            _configuration.ValueConverter.ConvertToPropertyValue(adsValues[i], properties[i]));
+    }
+
+    return Task.FromResult<Action?>(() =>
+    {
+        var now = DateTimeOffset.UtcNow;
         foreach (var (property, value) in values)
         {
-            property.SetValueFromSource(this, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, value);
+            property.SetValueFromSource(this, now, now, value);
         }
-    };
+    });
 }
 
-public async ValueTask<WriteResult> WriteChangesAsync(
+public ValueTask<WriteResult> WriteChangesAsync(
     ReadOnlyMemory<SubjectPropertyChange> changes,
     CancellationToken cancellationToken)
 {
     // See "Error Classification" section below for full implementation with
     // per-change error handling and transient/permanent error classification.
     // Simplified version shown here for clarity.
+    //
+    // Uses SumSymbolWrite for batched writes in a single ADS call.
+    // Synchronous API is fine - called from ChangeQueueProcessor background thread.
     try
     {
+        var symbols = new List<ISymbol>();
+        var values = new List<object?>();
+
         foreach (var change in changes.Span)
         {
             var registeredProperty = change.Property.TryGetRegisteredProperty();
             if (registeredProperty is null) continue;
 
             var symbolPath = GetSymbolPath(registeredProperty);
-            var adsValue = _configuration.ValueConverter.ConvertToAdsValue(
-                change.GetNewValue<object?>(), registeredProperty);
-            await _client.WriteValueAsync(symbolPath, adsValue, cancellationToken);
+            symbols.Add(_symbolLoader.Symbols[symbolPath]);
+            values.Add(_configuration.ValueConverter.ConvertToAdsValue(
+                change.GetNewValue<object?>(), registeredProperty));
         }
-        return WriteResult.Success;
+
+        var symbolCollection = new SymbolCollection(symbols);
+        var sumWrite = new SumSymbolWrite(_connection, symbolCollection);
+        sumWrite.Write(values.ToArray());
+
+        return new ValueTask<WriteResult>(WriteResult.Success);
     }
     catch (Exception ex)
     {
-        return WriteResult.Failure(changes, ex);
+        return new ValueTask<WriteResult>(WriteResult.Failure(changes, ex));
     }
 }
 ```
@@ -1190,43 +1234,53 @@ internal static class AdsErrorClassifier
 }
 ```
 
-Used in `WriteChangesAsync` to classify partial failures:
+Used in `WriteChangesAsync` to classify failures. With `SumSymbolWrite`, the batch either succeeds entirely or fails as a whole. Individual symbol errors from `TryWrite()` can be inspected for partial failure classification:
 
 ```csharp
-public async ValueTask<WriteResult> WriteChangesAsync(
+public ValueTask<WriteResult> WriteChangesAsync(
     ReadOnlyMemory<SubjectPropertyChange> changes,
     CancellationToken cancellationToken)
 {
-    var failedChanges = new List<SubjectPropertyChange>();
-    var transientCount = 0;
-
-    foreach (var change in changes.Span)
+    // Batch all writes into a single ADS call using SumSymbolWrite.
+    // Synchronous API is fine - called from ChangeQueueProcessor background thread.
+    try
     {
-        try
+        var symbols = new List<ISymbol>();
+        var values = new List<object?>();
+        var changeList = new List<SubjectPropertyChange>();
+
+        foreach (var change in changes.Span)
         {
+            var registeredProperty = change.Property.TryGetRegisteredProperty();
+            if (registeredProperty is null) continue;
+
             var symbolPath = GetSymbolPath(change.Property);
-            var value = _configuration.ValueConverter.ConvertToAdsValue(
-                change.GetNewValue<object?>(),
-                change.Property.TryGetRegisteredProperty()!);
-            await _client.WriteValueAsync(symbolPath, value, cancellationToken);
+            symbols.Add(_symbolLoader.Symbols[symbolPath]);
+            values.Add(_configuration.ValueConverter.ConvertToAdsValue(
+                change.GetNewValue<object?>(), registeredProperty));
+            changeList.Add(change);
         }
-        catch (AdsException ex)
-        {
-            failedChanges.Add(change);
-            if (AdsErrorClassifier.IsTransientError(ex.ErrorCode))
-                transientCount++;
-        }
+
+        var symbolCollection = new SymbolCollection(symbols);
+        var sumWrite = new SumSymbolWrite(_connection, symbolCollection);
+        sumWrite.Write(values.ToArray());
+
+        return new ValueTask<WriteResult>(WriteResult.Success);
     }
-
-    if (failedChanges.Count == 0)
-        return WriteResult.Success;
-
-    var error = new AdsWriteException(transientCount, failedChanges.Count - transientCount, changes.Length);
-    return failedChanges.Count == changes.Length
-        ? WriteResult.Failure(failedChanges.ToArray(), error)
-        : WriteResult.PartialFailure(failedChanges.ToArray(), error);
+    catch (AdsException ex)
+    {
+        // Entire batch failed - classify error
+        var isTransient = AdsErrorClassifier.IsTransientError(ex.ErrorCode);
+        var error = new AdsWriteException(
+            isTransient ? changes.Length : 0,
+            isTransient ? 0 : changes.Length,
+            changes.Length);
+        return new ValueTask<WriteResult>(WriteResult.Failure(changes, error));
+    }
 }
 ```
+
+**Note:** With `SumSymbolWrite`, partial failures (some symbols succeed, some fail) may need to be handled via `TryWrite()` if available. Investigation during implementation will determine if per-symbol error reporting is possible with the batch API. If not, falling back to individual writes on batch failure is a viable strategy.
 
 ## ADS Concepts Integration
 
@@ -1309,15 +1363,60 @@ temperature : REAL;  // Comment: Main temperature sensor
 
 **Decision:** v1 uses static C# model with `[AdsVariable]` attributes. Dynamic discovery is a future enhancement.
 
+## Batch Operations (Sum Commands)
+
+The connector uses ADS Sum Commands (`SumSymbolRead` / `SumSymbolWrite`) from the `TwinCAT.Ads.SumCommand` namespace to batch multiple read/write operations into single ADS calls, minimizing network roundtrips.
+
+### Batch Reads (Polling + Initial Load)
+
+Instead of per-symbol `PollValues`, polled variables are read in bulk:
+
+```csharp
+private void StartBatchPolling(List<(RegisteredSubjectProperty Property, string SymbolPath)> polledSymbols)
+{
+    var symbols = polledSymbols
+        .Select(p => _symbolLoader.Symbols[p.SymbolPath])
+        .ToList();
+    var symbolCollection = new SymbolCollection(symbols);
+
+    // Timer-based batch polling on background thread
+    var timer = new Timer(_ =>
+    {
+        try
+        {
+            var sumRead = new SumSymbolRead(_connection, symbolCollection);
+            var values = sumRead.Read();  // Single ADS call for all polled symbols
+
+            for (var i = 0; i < polledSymbols.Count; i++)
+            {
+                var value = _configuration.ValueConverter.ConvertToPropertyValue(
+                    values[i], polledSymbols[i].Property);
+                OnValueReceived(polledSymbols[i].Property.Reference, value);
+            }
+        }
+        catch (Exception ex)
+        {
+            LogFirstOccurrence("BatchPoll", ex, "Batch polling failed.");
+        }
+    }, null, TimeSpan.Zero, _configuration.PollingInterval);
+
+    _subscriptions.Add(Disposable.Create(() => timer.Dispose()));
+}
+```
+
+### Batch Writes
+
+All property changes are written in a single ADS call via `SumSymbolWrite` (see `WriteChangesAsync` implementation above).
+
+### Fallback Strategy
+
+If `SumSymbolRead`/`SumSymbolWrite` encounters issues during implementation (e.g., API limitations with certain data types), fall back to individual reads/writes per symbol. This should be investigated during implementation.
+
 ## Future Enhancements
-
-### SumSymbolRead Batching
-
-Current implementation uses `PollValues` which polls each symbol individually. For very large variable sets (1000+), implement bulk reads using ADS Sum commands (Index Group 0xF080).
 
 ### Symbol Handle Caching
 
-Cache variable handles (`CreateVariableHandle`) instead of using symbol paths for read/write operations. Handles provide faster repeated access.
+Cache variable handles (`CreateVariableHandle`) instead of using symbol paths for read/write operations. Handles provide faster repeated access. Consider `SumHandleRead`/`SumHandleWrite` for handle-based batch operations.
 
 ### Dynamic Symbol Discovery
 
@@ -1895,9 +1994,14 @@ The mock library can also replay recorded ADS communication from `.cap` files (T
 14. Write user-facing documentation (`docs/connectors/twincat.md`)
 15. Add to `docs/connectors.md` index
 
+## Resolved Questions
+
+1. **Does `PollValues` batch internally?** — No, it polls per-symbol. **Resolution:** Use `SumSymbolRead` on a timer for batch polling instead.
+2. **ADS notification limits?** — Hardware-dependent. **Resolution:** Configurable `MaxNotifications` with default 500.
+3. **Sum commands for writes?** — Yes. **Resolution:** Use `SumSymbolWrite` for batch writes, `SumSymbolRead` for batch polling and initial load. Promoted from future enhancement to v1.
+4. **`WhenNotification` during resurrection?** — **Resolution:** Safe variant — full rescan (dispose subscriptions, reload, re-register) on AdsSession resurrection.
+
 ## Open Questions
 
-1. Does `PollValues` batch internally or poll each symbol individually? (Assumed individual based on API shape)
-2. What are the exact ADS notification limits on various TwinCAT versions? (We use configurable `MaxNotifications` with default 500)
-3. Should we support ADS sum commands for writes as well as reads? (Future enhancement)
-4. How does `WhenNotification` behave during `AdsSession` resurrection? (Assumed subscriptions need recreation)
+1. Does `SumSymbolWrite.TryWrite()` provide per-symbol error information for partial failure classification? (Investigate during implementation; fall back to individual writes on batch failure if not.)
+2. Are there data type limitations with `SumSymbolRead`/`SumSymbolWrite` (e.g., strings, arrays)? (Investigate during implementation; fall back per-symbol if needed.)
