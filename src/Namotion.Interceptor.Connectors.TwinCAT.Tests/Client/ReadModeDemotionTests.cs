@@ -34,7 +34,7 @@ public class ReadModeDemotionTests
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - limit of 0 notifications available
-        var result = TwinCatSubjectClientSource.DetermineEffectiveReadModes(
+        var result = AdsSubscriptionManager.DetermineEffectiveReadModes(
             mappings, AdsReadMode.Auto, 100, maxNotifications: 0);
 
         // Assert - Notification mode is protected, never demoted
@@ -52,7 +52,7 @@ public class ReadModeDemotionTests
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - plenty of notification slots available
-        var result = TwinCatSubjectClientSource.DetermineEffectiveReadModes(
+        var result = AdsSubscriptionManager.DetermineEffectiveReadModes(
             mappings, AdsReadMode.Auto, 100, maxNotifications: 1000);
 
         // Assert - Polled mode stays polled
@@ -70,7 +70,7 @@ public class ReadModeDemotionTests
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - sufficient notification slots
-        var result = TwinCatSubjectClientSource.DetermineEffectiveReadModes(
+        var result = AdsSubscriptionManager.DetermineEffectiveReadModes(
             mappings, AdsReadMode.Auto, 100, maxNotifications: 100);
 
         // Assert - Auto mode gets notification when within limit
@@ -88,7 +88,7 @@ public class ReadModeDemotionTests
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - no notification slots (limit of 0)
-        var result = TwinCatSubjectClientSource.DetermineEffectiveReadModes(
+        var result = AdsSubscriptionManager.DetermineEffectiveReadModes(
             mappings, AdsReadMode.Auto, 100, maxNotifications: 0);
 
         // Assert - Auto mode demoted to polled
@@ -106,7 +106,7 @@ public class ReadModeDemotionTests
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - allow only 2 notifications (3 must be demoted)
-        var result = TwinCatSubjectClientSource.DetermineEffectiveReadModes(
+        var result = AdsSubscriptionManager.DetermineEffectiveReadModes(
             mappings, AdsReadMode.Auto, 100, maxNotifications: 2);
 
         // Assert - properties with highest Priority value should be demoted first
@@ -136,7 +136,7 @@ public class ReadModeDemotionTests
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - allow 4 notifications (only 1 must be demoted)
-        var result = TwinCatSubjectClientSource.DetermineEffectiveReadModes(
+        var result = AdsSubscriptionManager.DetermineEffectiveReadModes(
             mappings, AdsReadMode.Auto, 100, maxNotifications: 4);
 
         var resultBySymbol = result.ToDictionary(
@@ -161,7 +161,7 @@ public class ReadModeDemotionTests
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - allow only 1 notification (4 must be demoted)
-        var result = TwinCatSubjectClientSource.DetermineEffectiveReadModes(
+        var result = AdsSubscriptionManager.DetermineEffectiveReadModes(
             mappings, AdsReadMode.Auto, 100, maxNotifications: 1);
 
         var resultBySymbol = result.ToDictionary(
@@ -191,7 +191,7 @@ public class ReadModeDemotionTests
         // Act - limit of 1 notification
         // Notification + 2 Auto = 3 notification candidates
         // 1 is protected Notification, so only Auto properties can be demoted
-        var result = TwinCatSubjectClientSource.DetermineEffectiveReadModes(
+        var result = AdsSubscriptionManager.DetermineEffectiveReadModes(
             mappings, AdsReadMode.Auto, 100, maxNotifications: 1);
 
         var resultBySymbol = result.ToDictionary(
@@ -219,7 +219,7 @@ public class ReadModeDemotionTests
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - limit of 10 notifications (plenty)
-        var result = TwinCatSubjectClientSource.DetermineEffectiveReadModes(
+        var result = AdsSubscriptionManager.DetermineEffectiveReadModes(
             mappings, AdsReadMode.Auto, 100, maxNotifications: 10);
 
         var resultBySymbol = result.ToDictionary(
@@ -249,7 +249,7 @@ public class ReadModeDemotionTests
         // Act - limit of 2 notifications
         // NotificationVar (protected) takes 1 slot
         // AutoVar1 (Priority=0, CycleTime=50) and AutoVar2 (Priority=5, CycleTime=500) compete for 1 slot
-        var result = TwinCatSubjectClientSource.DetermineEffectiveReadModes(
+        var result = AdsSubscriptionManager.DetermineEffectiveReadModes(
             mappings, AdsReadMode.Auto, 100, maxNotifications: 2);
 
         var resultBySymbol = result.ToDictionary(
@@ -270,7 +270,7 @@ public class ReadModeDemotionTests
         var mappings = Array.Empty<(RegisteredSubjectProperty, string)>();
 
         // Act
-        var result = TwinCatSubjectClientSource.DetermineEffectiveReadModes(
+        var result = AdsSubscriptionManager.DetermineEffectiveReadModes(
             mappings, AdsReadMode.Auto, 100, maxNotifications: 500);
 
         // Assert
@@ -287,7 +287,7 @@ public class ReadModeDemotionTests
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - default read mode is Polled (overrides Auto's default behavior)
-        var result = TwinCatSubjectClientSource.DetermineEffectiveReadModes(
+        var result = AdsSubscriptionManager.DetermineEffectiveReadModes(
             mappings, AdsReadMode.Polled, 100, maxNotifications: 500);
 
         // Assert - defaultReadMode=Polled should make Auto properties become Polled
@@ -305,7 +305,7 @@ public class ReadModeDemotionTests
         var property = registeredSubject.Properties.First();
 
         // Act
-        var readMode = TwinCatSubjectClientSource.GetConfiguredReadMode(property, AdsReadMode.Polled);
+        var readMode = AdsSubscriptionManager.GetConfiguredReadMode(property, AdsReadMode.Polled);
 
         // Assert - explicit Notification overrides default Polled
         Assert.Equal(AdsReadMode.Notification, readMode);
@@ -321,7 +321,7 @@ public class ReadModeDemotionTests
         var property = registeredSubject.Properties.First();
 
         // Act
-        var readMode = TwinCatSubjectClientSource.GetConfiguredReadMode(property, AdsReadMode.Polled);
+        var readMode = AdsSubscriptionManager.GetConfiguredReadMode(property, AdsReadMode.Polled);
 
         // Assert - Auto uses default
         Assert.Equal(AdsReadMode.Polled, readMode);
@@ -337,7 +337,7 @@ public class ReadModeDemotionTests
         var property = registeredSubject.Properties.First();
 
         // Act
-        var cycleTime = TwinCatSubjectClientSource.GetConfiguredCycleTime(property, 200);
+        var cycleTime = AdsSubscriptionManager.GetConfiguredCycleTime(property, 200);
 
         // Assert - explicit CycleTime=50 overrides default 200
         Assert.Equal(50, cycleTime);
@@ -353,7 +353,7 @@ public class ReadModeDemotionTests
         var property = registeredSubject.Properties.First();
 
         // Act
-        var cycleTime = TwinCatSubjectClientSource.GetConfiguredCycleTime(property, 200);
+        var cycleTime = AdsSubscriptionManager.GetConfiguredCycleTime(property, 200);
 
         // Assert - no explicit CycleTime, uses default 200
         Assert.Equal(200, cycleTime);
@@ -370,7 +370,7 @@ public class ReadModeDemotionTests
             property => property.Name == nameof(DemotionTestModel.FastHighPriority));
 
         // Act
-        var priority = TwinCatSubjectClientSource.GetConfiguredPriority(property);
+        var priority = AdsSubscriptionManager.GetConfiguredPriority(property);
 
         // Assert
         Assert.Equal(-1, priority);
@@ -386,7 +386,7 @@ public class ReadModeDemotionTests
         var property = registeredSubject.Properties.First();
 
         // Act
-        var priority = TwinCatSubjectClientSource.GetConfiguredPriority(property);
+        var priority = AdsSubscriptionManager.GetConfiguredPriority(property);
 
         // Assert
         Assert.Equal(0, priority);
@@ -402,7 +402,7 @@ public class ReadModeDemotionTests
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - limit way above count of properties
-        var result = TwinCatSubjectClientSource.DetermineEffectiveReadModes(
+        var result = AdsSubscriptionManager.DetermineEffectiveReadModes(
             mappings, AdsReadMode.Auto, 100, maxNotifications: 1000);
 
         // Assert - no demotion needed
@@ -419,7 +419,7 @@ public class ReadModeDemotionTests
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - limit exactly equals count of properties (5)
-        var result = TwinCatSubjectClientSource.DetermineEffectiveReadModes(
+        var result = AdsSubscriptionManager.DetermineEffectiveReadModes(
             mappings, AdsReadMode.Auto, 100, maxNotifications: 5);
 
         // Assert - no demotion needed (exactly at limit)
