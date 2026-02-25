@@ -322,6 +322,26 @@ Circular references are handled naturally by the flat structure. Each subject ap
 
 No special `reference` field is needed - the `id` field always points to a subject in the dictionary.
 
+## Null Collections and Dictionaries
+
+When a collection or dictionary property is set to `null`, it is represented as `Kind=Value, Value=null` — the same as any other null property value:
+
+```json
+{
+  "kind": "Value",
+  "value": null
+}
+```
+
+Note: In partial updates, `Kind=Collection/Dictionary` entries with no operations are **path nodes** — they describe the structural parent-to-child reference so the apply side can navigate the tree, not the collection's new state. An empty collection in a complete update is represented with `count: 0` and no items.
+
+## Limitations
+
+- **No "clear collection" operation** — clearing N items emits N individual Remove operations.
+- **Non-subject collections** (`List<int>`, `Dictionary<string, string>`) use value-replacement semantics (full replacement, no granular diffing). Only `IInterceptorSubject` collections support structural diffs.
+- **Conflict resolution** is last-applied-wins by message arrival order with eventual consistency via reconnection.
+- **Dictionary keys** are normalized to strings during transport; non-string keys (int, enum) must be convertible via `Convert.ChangeType` or `Enum.Parse`.
+
 ## Attributes
 
 Properties can have attributes (metadata) that are updated alongside values:

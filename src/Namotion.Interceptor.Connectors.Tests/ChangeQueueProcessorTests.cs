@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Tests;
@@ -13,6 +14,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
+        context.WithPropertyChangeQueue();
 
         var subject = new Person(context);
         var writtenChanges = new List<SubjectPropertyChange>();
@@ -40,7 +42,9 @@ public class ChangeQueueProcessorTests
         processor.Dispose();
 
         // Assert - only the last value should be written (deduplication)
+        // Merged change keeps oldest old value ("Value1") and newest new value ("Value4")
         Assert.Single(writtenChanges);
+        Assert.Equal("Value1", writtenChanges[0].GetOldValue<string>());
         Assert.Equal("Value4", writtenChanges[0].GetNewValue<string>());
     }
 
@@ -50,6 +54,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
+        context.WithPropertyChangeQueue();
 
         var subject = new Person(context);
         var writtenChanges = new List<SubjectPropertyChange>();
@@ -82,11 +87,12 @@ public class ChangeQueueProcessorTests
     }
 
     [Fact]
-    public async Task WhenDeduplicating_ThenOrderOfLastOccurrencesIsPreserved()
+    public async Task WhenDeduplicating_ThenOrderOfLastOccurrencesIsPreservedAndValuesAreMerged()
     {
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
+        context.WithPropertyChangeQueue();
 
         var subject = new Person(context);
         var writtenChanges = new List<SubjectPropertyChange>();
@@ -115,10 +121,12 @@ public class ChangeQueueProcessorTests
 
         processor.Dispose();
 
-        // Assert - order should be: LastName (first unique), FirstName (last occurrence)
+        // Assert - order of last occurrences: LastName, then FirstName (A's last change was after B)
+        // Merged change keeps oldest old value (null) and newest new value ("First2")
         Assert.Equal(2, writtenChanges.Count);
         Assert.Equal(nameof(Person.LastName), writtenChanges[0].Property.Name);
         Assert.Equal(nameof(Person.FirstName), writtenChanges[1].Property.Name);
+        Assert.Null(writtenChanges[1].GetOldValue<string>());
         Assert.Equal("First2", writtenChanges[1].GetNewValue<string>());
     }
 
@@ -128,6 +136,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
+        context.WithPropertyChangeQueue();
 
         var writeHandlerCalled = false;
 
@@ -158,6 +167,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
+        context.WithPropertyChangeQueue();
 
         var processor = new ChangeQueueProcessor(
             source: null,
@@ -178,6 +188,7 @@ public class ChangeQueueProcessorTests
         // Arrange
         var context = new InterceptorSubjectContext();
         context.WithRegistry();
+        context.WithPropertyChangeQueue();
 
         var subject = new Person(context);
         var flushCount = 0;

@@ -90,6 +90,105 @@ public partial class Teacher : Person
         return Verify(generatedSource);
     }
 
+    [Fact]
+    public Task WhenGeneratingNestedClass_ThenPartialClassIsGeneratedWithContainingTypes()
+    {
+        // Arrange
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+
+namespace TestNamespace
+{
+    public partial class OuterClass
+    {
+        [InterceptorSubject]
+        public partial class NestedSubject
+        {
+            public partial string Name { get; set; }
+        }
+    }
+}";
+
+        // Act
+        var generated = GeneratedSourceCode(source);
+
+        // Assert
+        var generatedSource = generated.Single().SourceText.ToString();
+        return Verify(generatedSource);
+    }
+
+    [Fact]
+    public Task WhenGeneratingDeepNestedClass_ThenPartialClassIsGeneratedWithAllContainingTypes()
+    {
+        // Arrange
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+
+namespace TestNamespace
+{
+    public partial class Level1
+    {
+        public partial class Level2
+        {
+            [InterceptorSubject]
+            public partial class DeepNestedSubject
+            {
+                public partial int Value { get; set; }
+            }
+        }
+    }
+}";
+
+        // Act
+        var generated = GeneratedSourceCode(source);
+
+        // Assert
+        var generatedSource = generated.Single().SourceText.ToString();
+        return Verify(generatedSource);
+    }
+
+    [Fact]
+    public Task WhenGeneratingClassWithProtectedInternalProperty_ThenPropertyCorrectlyGenerated()
+    {
+        // Arrange
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+
+[InterceptorSubject]
+public partial class SampleSubject
+{
+    protected internal partial string Name { get; set; }
+}";
+
+        // Act
+        var generated = GeneratedSourceCode(source);
+
+        // Assert
+        var generatedSource = generated.Single().SourceText.ToString();
+        return Verify(generatedSource);
+    }
+
+    [Fact]
+    public Task WhenGeneratingClassWithPrivateProtectedProperty_ThenPropertyCorrectlyGenerated()
+    {
+        // Arrange
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+
+[InterceptorSubject]
+public partial class SampleSubject
+{
+    private protected partial string Name { get; set; }
+}";
+
+        // Act
+        var generated = GeneratedSourceCode(source);
+
+        // Assert
+        var generatedSource = generated.Single().SourceText.ToString();
+        return Verify(generatedSource);
+    }
+
     private static IEnumerable<GeneratedSourceResult> GeneratedSourceCode(string source)
     {
         var syntaxTree = CSharpSyntaxTree.ParseText(source);

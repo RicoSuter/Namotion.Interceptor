@@ -56,7 +56,7 @@ public readonly record struct SubjectPropertyMetadata
     /// Gets the PropertyInfo for the property, if available.
     /// </summary>
     public PropertyInfo? PropertyInfo { get; }
-    
+
     public SubjectPropertyMetadata(
         PropertyInfo propertyInfo, 
         Func<IInterceptorSubject, object?>? getValue, 
@@ -66,7 +66,7 @@ public readonly record struct SubjectPropertyMetadata
         : this(
             propertyInfo.Name,
             propertyInfo.PropertyType,
-            propertyInfo.GetCustomAttributes().ToArray(),
+            propertyInfo.GetCustomAttributesIncludingInterfaces(),
             getValue,
             setValue,
             isIntercepted,

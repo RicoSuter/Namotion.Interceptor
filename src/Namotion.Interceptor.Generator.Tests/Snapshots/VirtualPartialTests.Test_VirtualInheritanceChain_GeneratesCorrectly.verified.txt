@@ -56,16 +56,15 @@ namespace YourDefaultNamespace
             new Dictionary<string, SubjectPropertyMetadata>
             {
                 {
-                    "Name",       
+                    "Name",
                     new SubjectPropertyMetadata(
-                        typeof(BaseEntity).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
-                        (o) => ((BaseEntity)o).Name, 
-                        (o, v) => ((BaseEntity)o).Name = (string)v, 
+                        typeof(BaseEntity).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((BaseEntity)o).Name,
+                        (o, v) => ((BaseEntity)o).Name = (string)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
             }
-            
             .ToFrozenDictionary();
 
         public BaseEntity()
@@ -81,11 +80,11 @@ namespace YourDefaultNamespace
 
         public virtual partial string Name
         {
-             get
+            get
             {
                 return GetPropertyValue<string>(nameof(Name), static (o) => ((BaseEntity)o)._Name);
             }
-             set
+            set
             {
                 var newValue = value;
                 var cancel = false;
@@ -156,8 +155,6 @@ namespace YourDefaultNamespace
 {
     public partial class Person : IInterceptorSubject
     {
-        
-
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
@@ -184,20 +181,20 @@ namespace YourDefaultNamespace
             new Dictionary<string, SubjectPropertyMetadata>
             {
                 {
-                    "Name",       
+                    "Name",
                     new SubjectPropertyMetadata(
-                        typeof(Person).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
-                        (o) => ((Person)o).Name, 
-                        (o, v) => ((Person)o).Name = (string)v, 
+                        typeof(Person).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((Person)o).Name,
+                        (o, v) => ((Person)o).Name = (string)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
                 {
-                    "Age",       
+                    "Age",
                     new SubjectPropertyMetadata(
-                        typeof(Person).GetProperty(nameof(Age), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
-                        (o) => ((Person)o).Age, 
-                        (o, v) => ((Person)o).Age = (int)v, 
+                        typeof(Person).GetProperty(nameof(Age), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((Person)o).Age,
+                        (o, v) => ((Person)o).Age = (int)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
@@ -218,11 +215,11 @@ namespace YourDefaultNamespace
 
         public override partial string Name
         {
-             get
+            get
             {
                 return GetPropertyValue<string>(nameof(Name), static (o) => ((Person)o)._Name);
             }
-             set
+            set
             {
                 var newValue = value;
                 var cancel = false;
@@ -243,11 +240,11 @@ namespace YourDefaultNamespace
 
         public virtual partial int Age
         {
-             get
+            get
             {
                 return GetPropertyValue<int>(nameof(Age), static (o) => ((Person)o)._Age);
             }
-             set
+            set
             {
                 var newValue = value;
                 var cancel = false;
@@ -318,8 +315,6 @@ namespace YourDefaultNamespace
 {
     public partial class Employee : IInterceptorSubject
     {
-        
-
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
@@ -346,11 +341,11 @@ namespace YourDefaultNamespace
             new Dictionary<string, SubjectPropertyMetadata>
             {
                 {
-                    "Age",       
+                    "Age",
                     new SubjectPropertyMetadata(
-                        typeof(Employee).GetProperty(nameof(Age), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
-                        (o) => ((Employee)o).Age, 
-                        (o, v) => ((Employee)o).Age = (int)v, 
+                        typeof(Employee).GetProperty(nameof(Age), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((Employee)o).Age,
+                        (o, v) => ((Employee)o).Age = (int)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
@@ -371,11 +366,11 @@ namespace YourDefaultNamespace
 
         public override partial int Age
         {
-             get
+            get
             {
                 return GetPropertyValue<int>(nameof(Age), static (o) => ((Employee)o)._Age);
             }
-             set
+            set
             {
                 var newValue = value;
                 var cancel = false;

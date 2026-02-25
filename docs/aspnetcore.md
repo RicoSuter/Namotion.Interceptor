@@ -9,7 +9,7 @@ ASP.NET Core integration for exposing interceptor subjects as REST APIs with aut
 Add the `Namotion.Interceptor.AspNetCore` package to your ASP.NET Core project:
 
 ```xml
-<PackageReference Include="Namotion.Interceptor.AspNetCore" Version="0.1.0" />
+<PackageReference Include="Namotion.Interceptor.AspNetCore" />
 ```
 
 ### Basic Usage
@@ -19,31 +19,43 @@ Map your subject to REST endpoints using `MapSubjectWebApis`:
 ```csharp
 var builder = WebApplication.CreateBuilder(args);
 
-// Register your subject
-builder.Services.AddSingleton(sp =>
-{
-    var context = InterceptorSubjectContext
-        .Create()
-        .WithFullPropertyTracking();
+// Create the context with required extensions
+var context = InterceptorSubjectContext
+    .Create()
+    .WithFullPropertyTracking()
+    .WithRegistry()
+    .WithDataAnnotationValidation();
 
-    return new Sensor(context);
-});
+// Create and register your subject
+var car = new Car(context);
+builder.Services.AddSingleton(car);
+builder.Services.AddSingleton(context);
 
 var app = builder.Build();
 
 // Map REST endpoints
-app.MapSubjectWebApis<Sensor>("/api/sensor");
+app.MapSubjectWebApis<Car>("api/car");
 
 app.Run();
 ```
+
+**Required context extensions:**
+- `WithFullPropertyTracking()` - Enables property change detection
+- `WithRegistry()` - Enables object graph navigation and dynamic properties in JSON output
+
+**Optional extensions:**
+- `WithParents()` - Required if using `GetJsonPath()` for JSON path resolution from child to root
+- `WithDataAnnotationValidation()` - Enables validation via data annotations
+- `WithLifecycle()` - Enables attach/detach callbacks
+- `WithHostedServices(builder.Services)` - Registers subjects implementing `BackgroundService`
 
 This creates three endpoints:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/sensor` | Returns the subject as JSON |
-| `POST` | `/api/sensor` | Updates properties via JSON path |
-| `GET` | `/api/sensor/structure` | Returns the subject structure as `SubjectUpdate` |
+| `GET` | `/api/car` | Returns the subject as JSON |
+| `POST` | `/api/car` | Updates properties via JSON path |
+| `GET` | `/api/car/structure` | Returns the subject structure as `SubjectUpdate` |
 
 ## Features
 
@@ -52,18 +64,20 @@ This creates three endpoints:
 Returns the entire subject graph as JSON, using camelCase property names:
 
 ```http
-GET /api/sensor
+GET /api/car
 ```
 
 Response:
 ```json
 {
-  "temperature": 25.5,
-  "humidity": 60,
-  "location": {
-    "building": "A",
-    "room": "101"
-  }
+  "name": "My Car",
+  "tires": [
+    { "pressure": 2.5 },
+    { "pressure": 2.4 },
+    { "pressure": 2.6 },
+    { "pressure": 2.5 }
+  ],
+  "averagePressure": 2.5
 }
 ```
 
@@ -74,12 +88,12 @@ Nested subjects and collections are serialized recursively.
 Update one or more properties using JSON paths:
 
 ```http
-POST /api/sensor
+POST /api/car
 Content-Type: application/json
 
 {
-  "temperature": 26.0,
-  "location.room": "102"
+  "name": "Updated Car",
+  "tires[0].pressure": 2.8
 }
 ```
 
@@ -103,7 +117,7 @@ The endpoint:
 ```json
 {
   "detail": "Attempted to change read only property.",
-  "readOnlyPaths": ["derivedValue"]
+  "readOnlyPaths": ["averagePressure"]
 }
 ```
 
@@ -112,7 +126,7 @@ The endpoint:
 {
   "detail": "Property updates have invalid values.",
   "errors": {
-    "temperature": ["Value must be between -40 and 100"]
+    "tires[0].pressure": ["Value must be between 0 and 10"]
   }
 }
 ```
@@ -122,7 +136,7 @@ The endpoint:
 Returns a `SubjectUpdate` with complete type information and structure:
 
 ```http
-GET /api/sensor/structure
+GET /api/car/structure
 ```
 
 Useful for clients that need to discover the subject schema dynamically.
@@ -132,53 +146,75 @@ Useful for clients that need to discover the subject schema dynamically.
 ### MapSubjectWebApis
 
 ```csharp
-// Use registered service
+// Use registered service (subject must be registered with exact type TSubject)
 app.MapSubjectWebApis<TSubject>(string path);
 
-// Use custom selector
+// Use custom selector (for more control over subject resolution)
 app.MapSubjectWebApis<TSubject>(
     Func<IServiceProvider, IInterceptorSubject> subjectSelector,
     string path);
+```
+
+**Example with custom selector:**
+```csharp
+// Expose a nested subject
+app.MapSubjectWebApis<Tire>(
+    sp => sp.GetRequiredService<Car>().Tires[0],
+    "api/tire/front-left");
 ```
 
 ### Extension Methods
 
 #### ToJsonObject
 
-Converts a subject to a `JsonObject`:
+Converts a subject to a `JsonObject`, including both static and dynamic properties:
 
 ```csharp
 var json = subject.ToJsonObject(jsonSerializerOptions);
 ```
 
-#### GetJsonPath
-
-Gets the JSON path for a property reference:
-
-```csharp
-var path = propertyReference.GetJsonPath(jsonSerializerOptions);
-// Returns: "location.room" or "motors[0].speed"
-```
-
-Requires `WithParents()` to be configured on the context.
+Requires `WithRegistry()` for dynamic properties to be included.
 
 #### FindPropertyFromJsonPath
 
 Resolves a JSON path to a property:
 
 ```csharp
-var (subject, property) = rootSubject.FindPropertyFromJsonPath("location.room");
+var (subject, property) = rootSubject.FindPropertyFromJsonPath("tires[0].pressure");
+// subject: the Tire instance at index 0
+// property: the Pressure property metadata
 ```
+
+Returns `(null, default)` if the path cannot be resolved.
 
 ## Validation Integration
 
-Register `IPropertyValidator` implementations to validate incoming updates:
+The POST endpoint automatically validates incoming updates using registered `IPropertyValidator` implementations.
 
+**Recommended approach** - use the context extension:
+```csharp
+var context = InterceptorSubjectContext
+    .Create()
+    .WithFullPropertyTracking()
+    .WithDataAnnotationValidation();  // Registers DataAnnotationsValidator
+```
+
+**Alternative** - register validators via DI:
 ```csharp
 builder.Services.AddSingleton<IPropertyValidator, DataAnnotationsValidator>();
 ```
 
 The `DataAnnotationsValidator` from `Namotion.Interceptor.Validation` validates against data annotations like `[Range]`, `[Required]`, etc.
+
+**Example subject with validation:**
+```csharp
+[InterceptorSubject]
+public partial class Tire
+{
+    [Range(0, 10)]
+    public partial decimal Pressure { get; set; }
+}
+```
 
 ## JSON Serialization
 
@@ -195,9 +231,94 @@ builder.Services.Configure<JsonOptions>(options =>
 
 ## OpenAPI Integration
 
-Endpoints are automatically tagged with the subject type name for Swagger/OpenAPI grouping:
+Endpoints are automatically tagged with the subject type name for Swagger/OpenAPI grouping.
 
+**Setup OpenAPI/Swagger:**
 ```csharp
-app.MapSubjectWebApis<Sensor>("/api/sensor");
-// Swagger shows endpoints under "Sensor" tag
+var builder = WebApplication.CreateBuilder(args);
+
+// Add OpenAPI services
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddOpenApiDocument();
+
+var app = builder.Build();
+
+// Map subject endpoints (tagged as "Car")
+app.MapSubjectWebApis<Car>("api/car");
+
+// Enable OpenAPI UI
+app.UseOpenApi();
+app.UseSwaggerUi();
+
+app.Run();
 ```
+
+**OpenAPI behavior:**
+- All endpoints are tagged with `typeof(TSubject).Name` (e.g., "Car")
+- The GET endpoint declares `.Produces<TSubject>()` so Swagger displays the subject's schema
+- The POST endpoint documents `Dictionary<string, JsonElement>` as input and `ProblemDetails` for errors
+
+## Complete Example
+
+Here's a complete example based on the `Namotion.Interceptor.SampleWeb` project:
+
+**Subject definitions:**
+```csharp
+[InterceptorSubject]
+public partial class Car
+{
+    public partial string Name { get; set; }
+    public partial Tire[] Tires { get; set; }
+
+    [Derived]
+    public decimal AveragePressure => Tires.Average(t => t.Pressure);
+
+    public Car()
+    {
+        Tires = Enumerable.Range(1, 4).Select(_ => new Tire()).ToArray();
+        Name = "My Car";
+    }
+}
+
+[InterceptorSubject]
+public partial class Tire
+{
+    public partial decimal Pressure { get; set; }
+}
+```
+
+**Program.cs:**
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+
+// Create context with all required extensions
+var context = InterceptorSubjectContext
+    .Create()
+    .WithFullPropertyTracking()
+    .WithRegistry()
+    .WithParents()
+    .WithLifecycle()
+    .WithDataAnnotationValidation();
+
+// Create and register subject
+var car = new Car(context);
+builder.Services.AddSingleton(car);
+builder.Services.AddSingleton(context);
+
+// Add OpenAPI support
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddOpenApiDocument();
+
+var app = builder.Build();
+
+// Expose subject via REST API
+app.MapSubjectWebApis<Car>("api/car");
+
+// Enable Swagger UI
+app.UseOpenApi();
+app.UseSwaggerUi();
+
+app.Run();
+```
+
+See also: `src/Namotion.Interceptor.SampleWeb` for a working example with OPC UA, MQTT, and GraphQL integration.
