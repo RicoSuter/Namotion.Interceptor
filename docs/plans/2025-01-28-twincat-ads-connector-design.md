@@ -637,6 +637,10 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
     // Caches - keyed by PropertyReference (stable), not RegisteredSubjectProperty (can become stale)
     private readonly ConcurrentDictionary<string, PropertyReference?> _symbolToProperty = new();
     private readonly ConcurrentDictionary<PropertyReference, uint> _propertyToHandle = new();
+    private readonly ConcurrentDictionary<PropertyReference, IDisposable> _notificationSubscriptions = new();
+    private readonly ConcurrentDictionary<PropertyReference, string> _polledProperties = new();  // PropertyRef -> symbolPath
+    private volatile bool _pollingCollectionDirty;
+    private SumSymbolRead? _currentSumRead;
     private readonly CompositeDisposable _subscriptions = new();
 
     // First-occurrence logging state (Warning → Debug until resolved)
@@ -870,31 +874,55 @@ public ValueTask<WriteResult> WriteChangesAsync(
 }
 ```
 
-### Cache Invalidation Pattern
+### Cleanup on Subject Detach / Property Release
 
-Critical for handling detached subjects:
+When subjects are detached or properties removed from the graph, the connector must clean up all associated state. This follows the same pattern as MQTT and OPC UA connectors using `SourceOwnershipManager` callbacks.
 
-1. **Cache `PropertyReference`, not `RegisteredSubjectProperty`** - `PropertyReference` is a stable identifier, while `RegisteredSubjectProperty` can become invalid when subjects are detached.
+**Cleanup responsibilities (layered):**
 
-2. **Re-fetch on every callback** - When receiving ADS notifications or poll results, always re-fetch via `propertyReference.TryGetRegisteredProperty()` and skip if null.
+1. **`onReleasing` (per-property):** Remove property from notification subscriptions, polling collections, handle caches, and symbol lookup caches.
+2. **`onSubjectDetaching` (per-subject):** Bulk cleanup of all properties belonging to the detached subject. Calls into the same cleanup logic.
+3. **Rebuild batch collections:** After removing polled symbols, mark the `SumSymbolRead` batch as dirty so it gets rebuilt on the next polling cycle.
+4. **Runtime null-check:** Always re-fetch via `TryGetRegisteredProperty()` and skip if null, as a safety net.
 
-3. **Validate after cache add** - To handle race conditions, add to cache first, then validate the subject is still attached. Remove if stale.
-
-4. **Proactive cleanup on detach** - Use `SourceOwnershipManager.onSubjectDetaching` to clean up caches.
+**Cache key rule:** Cache `PropertyReference` (stable identifier), not `RegisteredSubjectProperty` (can become invalid on detach).
 
 ```csharp
+// Tracking state for cleanup
+private readonly ConcurrentDictionary<string, PropertyReference?> _symbolToProperty = new();
+private readonly ConcurrentDictionary<PropertyReference, uint> _propertyToHandle = new();
+private readonly ConcurrentDictionary<PropertyReference, IDisposable> _notificationSubscriptions = new();
+private readonly ConcurrentDictionary<PropertyReference, string> _polledProperties = new();  // PropertyRef -> symbolPath
+private volatile bool _pollingCollectionDirty;
+
 // Constructor setup
 _ownership = new SourceOwnershipManager(
     this,
     onReleasing: property =>
     {
-        // Release ADS handle
+        // 1. Dispose ADS notification subscription for this property
+        if (_notificationSubscriptions.TryRemove(property, out var subscription))
+            subscription.Dispose();
+
+        // 2. Remove from batch polling collection
+        if (_polledProperties.TryRemove(property, out _))
+            _pollingCollectionDirty = true;  // Rebuild SumSymbolRead on next cycle
+
+        // 3. Release ADS variable handle
         if (_propertyToHandle.TryRemove(property, out var handle))
-            _client?.DeleteVariableHandle(handle);
+            _connection?.DeleteVariableHandle(handle);
+
+        // 4. Remove from symbol-to-property lookup
+        foreach (var kvp in _symbolToProperty)
+        {
+            if (kvp.Value == property)
+                _symbolToProperty.TryRemove(kvp.Key, out _);
+        }
     },
     onSubjectDetaching: subject =>
     {
-        // Clean up symbol caches for detached subject
+        // Bulk cleanup: remove all symbol cache entries for the detached subject
+        // (Individual property cleanup happens via onReleasing for each property)
         foreach (var kvp in _symbolToProperty)
         {
             if (kvp.Value?.Subject == subject)
@@ -902,7 +930,22 @@ _ownership = new SourceOwnershipManager(
         }
     });
 
-// On notification received
+// Batch polling rebuilds when dirty
+private void PollBatch()
+{
+    if (_pollingCollectionDirty)
+    {
+        RebuildPollingCollection();
+        _pollingCollectionDirty = false;
+    }
+
+    if (_currentSumRead is null) return;
+
+    var values = _currentSumRead.Read();
+    // ... process values
+}
+
+// On notification received (safety net)
 private void OnValueReceived(PropertyReference propertyReference, object adsValue)
 {
     var registeredProperty = propertyReference.TryGetRegisteredProperty();
@@ -1412,26 +1455,47 @@ All property changes are written in a single ADS call via `SumSymbolWrite` (see 
 
 If `SumSymbolRead`/`SumSymbolWrite` encounters issues during implementation (e.g., API limitations with certain data types), fall back to individual reads/writes per symbol. This should be investigated during implementation.
 
-## Future Enhancements
+## Future Enhancements (Create GitHub Issues Post-v1)
 
-### Symbol Handle Caching
+The following improvements should be tracked as GitHub issues after v1 is implemented.
 
-Cache variable handles (`CreateVariableHandle`) instead of using symbol paths for read/write operations. Handles provide faster repeated access. Consider `SumHandleRead`/`SumHandleWrite` for handle-based batch operations.
+### 1. Dynamic Subject Attachment (All Connectors)
 
-### Dynamic Symbol Discovery
+**Scope:** Cross-connector improvement (TwinCAT, MQTT, OPC UA)
 
-Like OPC UA, support discovering PLC symbols at runtime and adding them as dynamic properties:
+Listen to `LifecycleInterceptor.SubjectAttached` to register new properties for notification/polling when subjects are dynamically added to the graph at runtime. Currently all connectors treat the graph as static after startup.
+
+- Register new properties for notification or batch polling on attach
+- Rebuild `SumSymbolRead` polling collection when polled properties change
+- Handle mid-cycle registration safely
+- Also update MQTT and OPC UA connectors for consistency
+
+### 2. Dynamic Symbol Discovery
+
+**Scope:** TwinCAT connector
+
+Support discovering PLC symbols at runtime and adding them as dynamic properties:
 - Browse symbols via `SymbolLoaderFactory`
 - Create dynamic properties for symbols not in C# model
 - Read configuration from PLC attributes (e.g., `{attribute 'ReadMode' := 'Notification'}`)
 
-### Dynamic Structural Synchronization
+### 3. IHealthCheck Implementation
 
-Support dynamic addition/removal of variables at runtime. This requires careful design across all connectors to ensure consistent behavior.
+**Scope:** TwinCAT connector (operations)
 
-### IHealthCheck Implementation
+Add optional ASP.NET Core health check integration for Kubernetes/Docker health probes via `IHealthCheck`.
 
-Add optional ASP.NET Core health check integration for Kubernetes/Docker health probes.
+### 4. Investigate Symbol Handle Caching
+
+**Scope:** TwinCAT connector (performance investigation)
+
+Investigate whether using `SumHandleRead`/`SumHandleWrite` with pre-acquired `uint` handles instead of `SumSymbolRead`/`SumSymbolWrite` with `ISymbol` objects provides measurable performance improvement. Profile first — symbol resolution overhead may be negligible compared to ADS network roundtrip time.
+
+### 5. ADS Server Mode
+
+**Scope:** TwinCAT connector (new feature)
+
+Expose C# objects as ADS variables (server mode), complementing the current client-only connector.
 
 ## Error Logging Strategy
 
