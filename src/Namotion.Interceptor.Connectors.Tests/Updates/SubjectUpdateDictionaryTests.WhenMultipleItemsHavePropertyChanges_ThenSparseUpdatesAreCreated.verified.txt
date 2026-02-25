@@ -3,7 +3,7 @@
   Subjects: {
     1: {
       Lookup: {
-        Kind: Collection,
+        Kind: Dictionary,
         Items: [
           {
             Index: key1,

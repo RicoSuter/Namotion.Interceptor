@@ -10,6 +10,10 @@
 		<NoWarn>$(NoWarn);NU5128</NoWarn>
 	</PropertyGroup>
 
+	<ItemGroup>
+		<InternalsVisibleTo Include="Namotion.Interceptor.Generator.Tests" />
+	</ItemGroup>
+
 	<PropertyGroup>
 		<IncludeBuildOutput>false</IncludeBuildOutput>
 	</PropertyGroup>
