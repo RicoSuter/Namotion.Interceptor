@@ -37,13 +37,13 @@ public class AdsSubscriptionManagerTests
         return new AdsSubscriptionManager(CreateConfiguration(), new Mock<ILogger>().Object);
     }
 
-    #region Constructor
-
     [Fact]
     public void Constructor_WithNullConfiguration_ShouldThrow()
     {
+        // Arrange
         var logger = new Mock<ILogger>().Object;
 
+        // Act & Assert
         Assert.Throws<ArgumentNullException>(() =>
             new AdsSubscriptionManager(null!, logger));
     }
@@ -51,8 +51,10 @@ public class AdsSubscriptionManagerTests
     [Fact]
     public void Constructor_WithNullLogger_ShouldThrow()
     {
+        // Arrange
         var configuration = CreateConfiguration();
 
+        // Act & Assert
         Assert.Throws<ArgumentNullException>(() =>
             new AdsSubscriptionManager(configuration, null!));
     }
@@ -60,128 +62,134 @@ public class AdsSubscriptionManagerTests
     [Fact]
     public void Constructor_WithValidParameters_ShouldCreate()
     {
+        // Arrange & Act
         var manager = CreateManager();
 
+        // Assert
         Assert.NotNull(manager);
     }
-
-    #endregion
-
-    #region Initial State
 
     [Fact]
     public void NotificationCount_Initially_Zero()
     {
+        // Arrange & Act
         var manager = CreateManager();
 
+        // Assert
         Assert.Equal(0, manager.NotificationCount);
     }
 
     [Fact]
     public void PolledCount_Initially_Zero()
     {
+        // Arrange & Act
         var manager = CreateManager();
 
+        // Assert
         Assert.Equal(0, manager.PolledCount);
     }
 
     [Fact]
     public void IsPollingCollectionDirty_Initially_False()
     {
+        // Arrange & Act
         var manager = CreateManager();
 
+        // Assert
         Assert.False(manager.IsPollingCollectionDirty);
     }
 
     [Fact]
     public void Subscriptions_Initially_NotNull()
     {
+        // Arrange & Act
         var manager = CreateManager();
 
+        // Assert
         Assert.NotNull(manager.Subscriptions);
     }
-
-    #endregion
-
-    #region GetSymbolPath
 
     [Fact]
     public void GetSymbolPath_UnknownProperty_ReturnsNull()
     {
+        // Arrange
         var manager = CreateManager();
         var context = CreateContext();
         var model = new TestPlcModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First();
 
+        // Act
         var result = manager.GetSymbolPath(property.Reference);
 
+        // Assert
         Assert.Null(result);
     }
 
     [Fact]
     public void GetSymbolPath_MultipleUnknownProperties_AllReturnNull()
     {
+        // Arrange
         var manager = CreateManager();
         var context = CreateContext();
         var model = new TestPlcModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
 
+        // Act & Assert
         foreach (var property in registeredSubject.Properties)
         {
             Assert.Null(manager.GetSymbolPath(property.Reference));
         }
     }
 
-    #endregion
-
-    #region TryGetSymbol (static)
-
     [Fact]
     public void TryGetSymbol_NoSymbolLoader_ReturnsNull()
     {
+        // Arrange & Act
         var result = AdsSubscriptionManager.TryGetSymbol(null, "GVL.SomeSymbol");
 
+        // Assert
         Assert.Null(result);
     }
 
     [Fact]
     public void TryGetSymbol_SymbolsPropertyThrows_ReturnsNull()
     {
-        // SymbolCollection.TryGetInstance is non-virtual, so we can only test the
-        // exception path by making the Symbols property itself throw.
+        // Arrange
         var mockLoader = new Mock<ISymbolLoader>();
         mockLoader.Setup(l => l.Symbols).Throws(new InvalidOperationException("Not loaded"));
 
+        // Act
         var result = AdsSubscriptionManager.TryGetSymbol(mockLoader.Object, "GVL.Broken");
 
+        // Assert
         Assert.Null(result);
     }
 
     [Fact]
     public void TryGetSymbol_SymbolsPropertyReturnsNull_ReturnsNull()
     {
+        // Arrange
         var mockLoader = new Mock<ISymbolLoader>();
         mockLoader.Setup(l => l.Symbols).Returns((SymbolCollection)null!);
 
-        // Should handle null Symbols gracefully (NullReferenceException caught)
+        // Act
         var result = AdsSubscriptionManager.TryGetSymbol(mockLoader.Object, "GVL.SomeSymbol");
 
+        // Assert
         Assert.Null(result);
     }
-
-    #endregion
-
-    #region ClearAll
 
     [Fact]
     public void ClearAll_ResetsAllCaches()
     {
+        // Arrange
         var manager = CreateManager();
 
-        // ClearAll should not throw on empty state
+        // Act
         manager.ClearAll();
 
+        // Assert
         Assert.Equal(0, manager.NotificationCount);
         Assert.Equal(0, manager.PolledCount);
     }
@@ -189,22 +197,28 @@ public class AdsSubscriptionManagerTests
     [Fact]
     public void ClearAll_SetsPollingDirtyFlag()
     {
+        // Arrange
         var manager = CreateManager();
 
+        // Act
         manager.ClearAll();
 
+        // Assert
         Assert.True(manager.IsPollingCollectionDirty);
     }
 
     [Fact]
     public void ClearAll_CalledMultipleTimes_DoesNotThrow()
     {
+        // Arrange
         var manager = CreateManager();
 
+        // Act
         manager.ClearAll();
         manager.ClearAll();
         manager.ClearAll();
 
+        // Assert
         Assert.Equal(0, manager.NotificationCount);
         Assert.Equal(0, manager.PolledCount);
     }
@@ -212,44 +226,45 @@ public class AdsSubscriptionManagerTests
     [Fact]
     public void ClearAll_AfterClear_GetSymbolPathReturnsNull()
     {
+        // Arrange
         var manager = CreateManager();
         var context = CreateContext();
         var model = new TestPlcModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First();
 
+        // Act
         manager.ClearAll();
 
-        // Even after clear, unknown properties still return null
+        // Assert
         Assert.Null(manager.GetSymbolPath(property.Reference));
     }
-
-    #endregion
-
-    #region OnPropertyReleasing
 
     [Fact]
     public void OnPropertyReleasing_UnknownProperty_DoesNotThrow()
     {
+        // Arrange
         var manager = CreateManager();
         var context = CreateContext();
         var model = new TestPlcModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First();
 
-        // Should not throw even for unknown property
+        // Act & Assert
         manager.OnPropertyReleasing(property.Reference);
     }
 
     [Fact]
     public void OnPropertyReleasing_CalledTwiceForSameProperty_DoesNotThrow()
     {
+        // Arrange
         var manager = CreateManager();
         var context = CreateContext();
         var model = new TestPlcModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First();
 
+        // Act & Assert
         manager.OnPropertyReleasing(property.Reference);
         manager.OnPropertyReleasing(property.Reference);
     }
@@ -257,39 +272,40 @@ public class AdsSubscriptionManagerTests
     [Fact]
     public void OnPropertyReleasing_MultipleProperties_DoesNotThrow()
     {
+        // Arrange
         var manager = CreateManager();
         var context = CreateContext();
         var model = new TestPlcModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
 
+        // Act & Assert
         foreach (var property in registeredSubject.Properties)
         {
             manager.OnPropertyReleasing(property.Reference);
         }
     }
 
-    #endregion
-
-    #region OnSubjectDetaching
-
     [Fact]
     public void OnSubjectDetaching_UnknownSubject_DoesNotThrow()
     {
+        // Arrange
         var manager = CreateManager();
         var context = CreateContext();
         var model = new TestPlcModel(context);
 
-        // Should not throw even for unknown subject
+        // Act & Assert
         manager.OnSubjectDetaching(model);
     }
 
     [Fact]
     public void OnSubjectDetaching_CalledTwice_DoesNotThrow()
     {
+        // Arrange
         var manager = CreateManager();
         var context = CreateContext();
         var model = new TestPlcModel(context);
 
+        // Act & Assert
         manager.OnSubjectDetaching(model);
         manager.OnSubjectDetaching(model);
     }
@@ -297,185 +313,210 @@ public class AdsSubscriptionManagerTests
     [Fact]
     public void OnSubjectDetaching_DifferentSubjects_DoesNotThrow()
     {
+        // Arrange
         var manager = CreateManager();
         var context = CreateContext();
         var model1 = new TestPlcModel(context);
         var model2 = new TestPlcModel(context);
 
+        // Act & Assert
         manager.OnSubjectDetaching(model1);
         manager.OnSubjectDetaching(model2);
     }
 
-    #endregion
-
-    #region Static Read Mode Helpers
-
     [Fact]
     public void DetermineEffectiveReadModes_EmptyMappings_ReturnsEmpty()
     {
+        // Arrange
         var mappings = Array.Empty<(RegisteredSubjectProperty, string)>();
 
+        // Act
         var result = AdsSubscriptionManager.DetermineEffectiveReadModes(
             mappings, AdsReadMode.Auto, 100, 500);
 
+        // Assert
         Assert.Empty(result);
     }
 
     [Fact]
     public void GetConfiguredMaxDelay_WithExplicitMaxDelay_ReturnsAttribute()
     {
+        // Arrange
         var context = CreateContext();
         var model = new NotificationOnlyModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First();
 
-        // NotificationOnlyModel has CycleTime=50 but no explicit MaxDelay, so it should use default
+        // Act
         var maxDelay = AdsSubscriptionManager.GetConfiguredMaxDelay(property, 200);
 
-        // AdsVariableAttribute in NotificationOnlyModel doesn't set MaxDelay, so default 200 should be used
+        // Assert - NotificationOnlyModel doesn't set MaxDelay, so default 200 should be used
         Assert.Equal(200, maxDelay);
     }
 
     [Fact]
     public void GetConfiguredMaxDelay_WithoutAttribute_ReturnsDefault()
     {
+        // Arrange
         var context = CreateContext();
         var model = new AutoModeModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First();
 
+        // Act
         var maxDelay = AdsSubscriptionManager.GetConfiguredMaxDelay(property, 500);
 
+        // Assert
         Assert.Equal(500, maxDelay);
     }
 
     [Fact]
     public void GetConfiguredReadMode_NotificationAttribute_ReturnsNotification()
     {
+        // Arrange
         var context = CreateContext();
         var model = new NotificationOnlyModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First();
 
+        // Act
         var readMode = AdsSubscriptionManager.GetConfiguredReadMode(property, AdsReadMode.Polled);
 
-        // Explicit Notification overrides default Polled
+        // Assert - explicit Notification overrides default Polled
         Assert.Equal(AdsReadMode.Notification, readMode);
     }
 
     [Fact]
     public void GetConfiguredReadMode_PolledAttribute_ReturnsPolled()
     {
+        // Arrange
         var context = CreateContext();
         var model = new PolledOnlyModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First();
 
+        // Act
         var readMode = AdsSubscriptionManager.GetConfiguredReadMode(property, AdsReadMode.Notification);
 
-        // Explicit Polled overrides default Notification
+        // Assert - explicit Polled overrides default Notification
         Assert.Equal(AdsReadMode.Polled, readMode);
     }
 
     [Fact]
     public void GetConfiguredReadMode_AutoAttribute_ReturnsDefault()
     {
+        // Arrange
         var context = CreateContext();
         var model = new AutoModeModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First();
 
+        // Act
         var readMode = AdsSubscriptionManager.GetConfiguredReadMode(property, AdsReadMode.Polled);
 
-        // Auto returns the default
+        // Assert
         Assert.Equal(AdsReadMode.Polled, readMode);
     }
 
     [Fact]
     public void GetConfiguredCycleTime_WithExplicitValue_ReturnsAttribute()
     {
+        // Arrange
         var context = CreateContext();
         var model = new NotificationOnlyModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First();
 
+        // Act
         var cycleTime = AdsSubscriptionManager.GetConfiguredCycleTime(property, 999);
 
-        // NotificationOnlyModel has CycleTime=50
+        // Assert - NotificationOnlyModel has CycleTime=50
         Assert.Equal(50, cycleTime);
     }
 
     [Fact]
     public void GetConfiguredCycleTime_WithoutExplicit_ReturnsDefault()
     {
+        // Arrange
         var context = CreateContext();
         var model = new AutoModeModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First();
 
+        // Act
         var cycleTime = AdsSubscriptionManager.GetConfiguredCycleTime(property, 999);
 
+        // Assert
         Assert.Equal(999, cycleTime);
     }
 
     [Fact]
     public void GetConfiguredPriority_WithExplicitValue_ReturnsAttribute()
     {
+        // Arrange
         var context = CreateContext();
         var model = new DemotionTestModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First(
             property => property.Name == nameof(DemotionTestModel.FastHighPriority));
 
+        // Act
         var priority = AdsSubscriptionManager.GetConfiguredPriority(property);
 
+        // Assert
         Assert.Equal(-1, priority);
     }
 
     [Fact]
     public void GetConfiguredPriority_WithoutExplicit_ReturnsZero()
     {
+        // Arrange
         var context = CreateContext();
         var model = new AutoModeModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First();
 
+        // Act
         var priority = AdsSubscriptionManager.GetConfiguredPriority(property);
 
+        // Assert
         Assert.Equal(0, priority);
     }
 
     [Fact]
     public void GetConfiguredPriority_LowPriorityProperty_ReturnsHighValue()
     {
+        // Arrange
         var context = CreateContext();
         var model = new DemotionTestModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First(
             property => property.Name == nameof(DemotionTestModel.SlowLowPriority));
 
+        // Act
         var priority = AdsSubscriptionManager.GetConfiguredPriority(property);
 
+        // Assert
         Assert.Equal(10, priority);
     }
-
-    #endregion
-
-    #region Dispose
 
     [Fact]
     public async Task DisposeAsync_ShouldComplete()
     {
+        // Arrange
         var manager = CreateManager();
 
+        // Act & Assert
         await manager.DisposeAsync();
     }
 
     [Fact]
     public async Task DisposeAsync_Idempotent()
     {
+        // Arrange
         var manager = CreateManager();
 
+        // Act & Assert
         await manager.DisposeAsync();
         await manager.DisposeAsync();
         await manager.DisposeAsync();
@@ -484,10 +525,13 @@ public class AdsSubscriptionManagerTests
     [Fact]
     public async Task DisposeAsync_PropertiesStillAccessible()
     {
+        // Arrange
         var manager = CreateManager();
+
+        // Act
         await manager.DisposeAsync();
 
-        // Properties should still be readable after dispose
+        // Assert
         Assert.Equal(0, manager.NotificationCount);
         Assert.Equal(0, manager.PolledCount);
     }
@@ -495,11 +539,11 @@ public class AdsSubscriptionManagerTests
     [Fact]
     public async Task DisposeAsync_AfterClearAll_ShouldComplete()
     {
+        // Arrange
         var manager = CreateManager();
         manager.ClearAll();
 
+        // Act & Assert
         await manager.DisposeAsync();
     }
-
-    #endregion
 }

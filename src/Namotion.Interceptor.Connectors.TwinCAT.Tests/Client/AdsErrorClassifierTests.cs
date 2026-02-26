@@ -15,7 +15,7 @@ public class AdsErrorClassifierTests
     [InlineData(AdsErrorCode.DeviceInvalidOffset)]
     public void IsTransientError_WithPermanentError_ReturnsFalse(AdsErrorCode errorCode)
     {
-        // Act
+        // Arrange & Act
         var result = AdsErrorClassifier.IsTransientError(errorCode);
 
         // Assert
@@ -31,7 +31,7 @@ public class AdsErrorClassifierTests
     [InlineData(AdsErrorCode.DeviceBusy)]
     public void IsTransientError_WithTransientError_ReturnsTrue(AdsErrorCode errorCode)
     {
-        // Act
+        // Arrange & Act
         var result = AdsErrorClassifier.IsTransientError(errorCode);
 
         // Assert
@@ -41,7 +41,7 @@ public class AdsErrorClassifierTests
     [Fact]
     public void IsTransientError_WithUnknownErrorCode_ReturnsTrue()
     {
-        // Arrange - use an error code not explicitly handled in the switch
+        // Arrange
         var unknownCode = (AdsErrorCode)99999;
 
         // Act
@@ -54,7 +54,7 @@ public class AdsErrorClassifierTests
     [Fact]
     public void IsTransientError_WithNoError_ReturnsTrue()
     {
-        // Arrange - NoError is not explicitly handled, falls through to default
+        // Arrange
         var errorCode = AdsErrorCode.NoError;
 
         // Act

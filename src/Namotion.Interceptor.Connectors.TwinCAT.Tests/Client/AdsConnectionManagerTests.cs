@@ -26,13 +26,13 @@ public class AdsConnectionManagerTests
             (mockLogger ?? new Mock<ILogger>()).Object);
     }
 
-    #region Constructor
-
     [Fact]
     public void Constructor_WithNullConfiguration_ShouldThrow()
     {
+        // Arrange
         var logger = new Mock<ILogger>().Object;
 
+        // Act & Assert
         Assert.Throws<ArgumentNullException>(() =>
             new AdsConnectionManager(null!, logger));
     }
@@ -40,8 +40,10 @@ public class AdsConnectionManagerTests
     [Fact]
     public void Constructor_WithNullLogger_ShouldThrow()
     {
+        // Arrange
         var configuration = CreateConfiguration();
 
+        // Act & Assert
         Assert.Throws<ArgumentNullException>(() =>
             new AdsConnectionManager(configuration, null!));
     }
@@ -49,131 +51,148 @@ public class AdsConnectionManagerTests
     [Fact]
     public void Constructor_WithValidParameters_ShouldCreate()
     {
+        // Arrange & Act
         var manager = CreateManager();
 
+        // Assert
         Assert.NotNull(manager);
     }
-
-    #endregion
-
-    #region Initial State
 
     [Fact]
     public void Connection_Initially_ShouldBeNull()
     {
+        // Arrange & Act
         var manager = CreateManager();
 
+        // Assert
         Assert.Null(manager.Connection);
     }
 
     [Fact]
     public void SymbolLoader_Initially_ShouldBeNull()
     {
+        // Arrange & Act
         var manager = CreateManager();
 
+        // Assert
         Assert.Null(manager.SymbolLoader);
     }
 
     [Fact]
     public void CurrentAdsState_Initially_ShouldBeNull()
     {
+        // Arrange & Act
         var manager = CreateManager();
 
+        // Assert
         Assert.Null(manager.CurrentAdsState);
     }
 
     [Fact]
     public void IsConnected_Initially_ShouldBeFalse()
     {
+        // Arrange & Act
         var manager = CreateManager();
 
+        // Assert
         Assert.False(manager.IsConnected);
     }
 
     [Fact]
     public void TotalReconnectionAttempts_Initially_Zero()
     {
+        // Arrange & Act
         var manager = CreateManager();
 
+        // Assert
         Assert.Equal(0, manager.TotalReconnectionAttempts);
     }
 
     [Fact]
     public void SuccessfulReconnections_Initially_Zero()
     {
+        // Arrange & Act
         var manager = CreateManager();
 
+        // Assert
         Assert.Equal(0, manager.SuccessfulReconnections);
     }
 
     [Fact]
     public void FailedReconnections_Initially_Zero()
     {
+        // Arrange & Act
         var manager = CreateManager();
 
+        // Assert
         Assert.Equal(0, manager.FailedReconnections);
     }
 
     [Fact]
     public void LastConnectedAt_Initially_Null()
     {
+        // Arrange & Act
         var manager = CreateManager();
 
+        // Assert
         Assert.Null(manager.LastConnectedAt);
     }
 
     [Fact]
     public void CircuitBreaker_Initially_Closed()
     {
+        // Arrange & Act
         var manager = CreateManager();
 
+        // Assert
         Assert.False(manager.IsCircuitBreakerOpen);
         Assert.Equal(0, manager.CircuitBreakerTripCount);
     }
 
-    #endregion
-
-    #region RecreateSymbolLoader
-
     [Fact]
     public void RecreateSymbolLoader_WhenNoSession_ShouldNotThrow()
     {
+        // Arrange
         var manager = CreateManager();
 
-        // No session established, should be a no-op
+        // Act
         manager.RecreateSymbolLoader();
 
+        // Assert
         Assert.Null(manager.SymbolLoader);
     }
 
     [Fact]
     public void RecreateSymbolLoader_WhenNoSession_ShouldKeepSymbolLoaderNull()
     {
+        // Arrange
         var manager = CreateManager();
 
+        // Act
         manager.RecreateSymbolLoader();
         manager.RecreateSymbolLoader();
 
+        // Assert
         Assert.Null(manager.SymbolLoader);
     }
-
-    #endregion
-
-    #region Dispose
 
     [Fact]
     public async Task DisposeAsync_ShouldComplete()
     {
+        // Arrange
         var manager = CreateManager();
 
+        // Act & Assert
         await manager.DisposeAsync();
     }
 
     [Fact]
     public async Task DisposeAsync_Idempotent()
     {
+        // Arrange
         var manager = CreateManager();
 
+        // Act & Assert
         await manager.DisposeAsync();
         await manager.DisposeAsync();
         await manager.DisposeAsync();
@@ -182,29 +201,31 @@ public class AdsConnectionManagerTests
     [Fact]
     public async Task DisposeAsync_PropertiesStillAccessible()
     {
+        // Arrange
         var manager = CreateManager();
+
+        // Act
         await manager.DisposeAsync();
 
-        // Properties should still be readable after dispose without throwing
+        // Assert
         Assert.Null(manager.Connection);
         Assert.Null(manager.SymbolLoader);
         Assert.Null(manager.CurrentAdsState);
         Assert.False(manager.IsConnected);
     }
 
-    #endregion
-
-    #region First-Occurrence Logging (without exception)
-
     [Fact]
     public void LogFirstOccurrence_FirstCall_LogsWarning()
     {
+        // Arrange
         var mockLogger = new Mock<ILogger>();
         mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
         var manager = CreateManager(mockLogger);
 
+        // Act
         manager.LogFirstOccurrence("TestCategory", null, "Test message");
 
+        // Assert
         mockLogger.Verify(
             l => l.Log(
                 LogLevel.Warning,
@@ -218,13 +239,16 @@ public class AdsConnectionManagerTests
     [Fact]
     public void LogFirstOccurrence_SecondCall_LogsDebug()
     {
+        // Arrange
         var mockLogger = new Mock<ILogger>();
         mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
         var manager = CreateManager(mockLogger);
 
+        // Act
         manager.LogFirstOccurrence("TestCategory", null, "Test message");
         manager.LogFirstOccurrence("TestCategory", null, "Test message");
 
+        // Assert
         mockLogger.Verify(
             l => l.Log(
                 LogLevel.Warning,
@@ -247,14 +271,17 @@ public class AdsConnectionManagerTests
     [Fact]
     public void LogFirstOccurrence_ThirdCall_StillLogsDebug()
     {
+        // Arrange
         var mockLogger = new Mock<ILogger>();
         mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
         var manager = CreateManager(mockLogger);
 
+        // Act
         manager.LogFirstOccurrence("TestCategory", null, "Test message");
         manager.LogFirstOccurrence("TestCategory", null, "Test message");
         manager.LogFirstOccurrence("TestCategory", null, "Test message");
 
+        // Assert
         mockLogger.Verify(
             l => l.Log(
                 LogLevel.Warning,
@@ -277,15 +304,17 @@ public class AdsConnectionManagerTests
     [Fact]
     public void ClearFirstOccurrenceLog_ResetsToWarning()
     {
+        // Arrange
         var mockLogger = new Mock<ILogger>();
         mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
         var manager = CreateManager(mockLogger);
 
+        // Act
         manager.LogFirstOccurrence("TestCategory", null, "Test message");
         manager.ClearFirstOccurrenceLog("TestCategory");
         manager.LogFirstOccurrence("TestCategory", null, "Test message");
 
-        // Should have 2 warnings (first call + after clear) and 0 debug
+        // Assert - should have 2 warnings (first call + after clear) and 0 debug
         mockLogger.Verify(
             l => l.Log(
                 LogLevel.Warning,
@@ -299,26 +328,26 @@ public class AdsConnectionManagerTests
     [Fact]
     public void ClearFirstOccurrenceLog_NonExistentCategory_DoesNotThrow()
     {
+        // Arrange
         var manager = CreateManager();
 
-        // Should not throw when clearing a category that was never logged
+        // Act & Assert
         manager.ClearFirstOccurrenceLog("NonExistentCategory");
     }
-
-    #endregion
-
-    #region First-Occurrence Logging (with exception)
 
     [Fact]
     public void LogFirstOccurrence_WithException_FirstCall_LogsWarning()
     {
+        // Arrange
         var mockLogger = new Mock<ILogger>();
         mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
         var manager = CreateManager(mockLogger);
         var exception = new InvalidOperationException("Test error");
 
+        // Act
         manager.LogFirstOccurrence("TestCategory", exception, "Error occurred");
 
+        // Assert
         mockLogger.Verify(
             l => l.Log(
                 LogLevel.Warning,
@@ -332,15 +361,18 @@ public class AdsConnectionManagerTests
     [Fact]
     public void LogFirstOccurrence_WithException_SecondCall_LogsDebug()
     {
+        // Arrange
         var mockLogger = new Mock<ILogger>();
         mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
         var manager = CreateManager(mockLogger);
         var exception1 = new InvalidOperationException("First error");
         var exception2 = new InvalidOperationException("Second error");
 
+        // Act
         manager.LogFirstOccurrence("TestCategory", exception1, "Error occurred");
         manager.LogFirstOccurrence("TestCategory", exception2, "Error occurred");
 
+        // Assert
         mockLogger.Verify(
             l => l.Log(
                 LogLevel.Warning,
@@ -363,16 +395,18 @@ public class AdsConnectionManagerTests
     [Fact]
     public void LogFirstOccurrence_WithException_AfterClear_LogsWarningAgain()
     {
+        // Arrange
         var mockLogger = new Mock<ILogger>();
         mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
         var manager = CreateManager(mockLogger);
         var exception = new InvalidOperationException("Test error");
 
+        // Act
         manager.LogFirstOccurrence("TestCategory", exception, "Error occurred");
         manager.ClearFirstOccurrenceLog("TestCategory");
         manager.LogFirstOccurrence("TestCategory", exception, "Error occurred");
 
-        // Two warnings, zero debug
+        // Assert - two warnings, zero debug
         mockLogger.Verify(
             l => l.Log(
                 LogLevel.Warning,
@@ -383,22 +417,20 @@ public class AdsConnectionManagerTests
             Times.Exactly(2));
     }
 
-    #endregion
-
-    #region Multiple Categories
-
     [Fact]
     public void LogFirstOccurrence_DifferentCategories_TrackedIndependently()
     {
+        // Arrange
         var mockLogger = new Mock<ILogger>();
         mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
         var manager = CreateManager(mockLogger);
 
+        // Act
         manager.LogFirstOccurrence("Connection", null, "Connection error");
         manager.LogFirstOccurrence("BatchPoll", null, "Polling error");
         manager.LogFirstOccurrence("HealthCheck", null, "Health check error");
 
-        // Each category gets its own first-occurrence warning
+        // Assert - each category gets its own first-occurrence warning
         mockLogger.Verify(
             l => l.Log(
                 LogLevel.Warning,
@@ -412,18 +444,18 @@ public class AdsConnectionManagerTests
     [Fact]
     public void LogFirstOccurrence_DifferentCategories_SecondCallPerCategory_LogsDebug()
     {
+        // Arrange
         var mockLogger = new Mock<ILogger>();
         mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
         var manager = CreateManager(mockLogger);
 
-        // First call for each category: warning
+        // Act
+        manager.LogFirstOccurrence("Connection", null, "Connection error");
+        manager.LogFirstOccurrence("BatchPoll", null, "Polling error");
         manager.LogFirstOccurrence("Connection", null, "Connection error");
         manager.LogFirstOccurrence("BatchPoll", null, "Polling error");
 
-        // Second call for each category: debug
-        manager.LogFirstOccurrence("Connection", null, "Connection error");
-        manager.LogFirstOccurrence("BatchPoll", null, "Polling error");
-
+        // Assert
         mockLogger.Verify(
             l => l.Log(
                 LogLevel.Warning,
@@ -446,21 +478,19 @@ public class AdsConnectionManagerTests
     [Fact]
     public void ClearFirstOccurrenceLog_OnlyAffectsSpecifiedCategory()
     {
+        // Arrange
         var mockLogger = new Mock<ILogger>();
         mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
         var manager = CreateManager(mockLogger);
 
+        // Act
         manager.LogFirstOccurrence("Connection", null, "Connection error");
         manager.LogFirstOccurrence("BatchPoll", null, "Polling error");
-
-        // Clear only "Connection"
         manager.ClearFirstOccurrenceLog("Connection");
-
-        // "Connection" resets to warning, "BatchPoll" stays as debug
         manager.LogFirstOccurrence("Connection", null, "Connection error");
         manager.LogFirstOccurrence("BatchPoll", null, "Polling error");
 
-        // 3 warnings total: Connection(1st), BatchPoll(1st), Connection(after clear)
+        // Assert - 3 warnings: Connection(1st), BatchPoll(1st), Connection(after clear)
         mockLogger.Verify(
             l => l.Log(
                 LogLevel.Warning,
@@ -481,22 +511,18 @@ public class AdsConnectionManagerTests
             Times.Once);
     }
 
-    #endregion
-
-    #region ConnectWithRetryAsync
-
     [Fact]
     public async Task ConnectWithRetryAsync_WhenCancelledImmediately_ShouldReturn()
     {
+        // Arrange
         var manager = CreateManager();
         using var cancellationTokenSource = new CancellationTokenSource();
-        cancellationTokenSource.Cancel();
+        await cancellationTokenSource.CancelAsync();
 
-        // Should not throw, just return when already cancelled
+        // Act
         await manager.ConnectWithRetryAsync(cancellationTokenSource.Token);
 
+        // Assert
         Assert.Equal(0, manager.TotalReconnectionAttempts);
     }
-
-    #endregion
 }

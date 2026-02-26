@@ -23,6 +23,7 @@ public class AdsClientDiagnosticsTests
     [Fact]
     public void Properties_ShouldDelegateToSource()
     {
+        // Arrange
         var lastConnected = new DateTimeOffset(2025, 1, 28, 12, 0, 0, TimeSpan.Zero);
         var source = new TestDiagnosticsSource
         {
@@ -38,8 +39,10 @@ public class AdsClientDiagnosticsTests
             CircuitBreakerTripCount = 1
         };
 
+        // Act
         var diagnostics = new AdsClientDiagnostics(source);
 
+        // Assert
         Assert.Equal(AdsState.Run, diagnostics.State);
         Assert.True(diagnostics.IsConnected);
         Assert.Equal(42, diagnostics.NotificationVariableCount);
@@ -55,14 +58,17 @@ public class AdsClientDiagnosticsTests
     [Fact]
     public void Properties_WithNullState_ShouldReturnNull()
     {
+        // Arrange
         var source = new TestDiagnosticsSource
         {
             CurrentState = null,
             LastConnectedAt = null
         };
 
+        // Act
         var diagnostics = new AdsClientDiagnostics(source);
 
+        // Assert
         Assert.Null(diagnostics.State);
         Assert.Null(diagnostics.LastConnectedAt);
     }
