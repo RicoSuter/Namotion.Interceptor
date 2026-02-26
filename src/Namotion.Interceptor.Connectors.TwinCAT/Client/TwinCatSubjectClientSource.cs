@@ -102,8 +102,6 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
     /// </summary>
     internal AdsSubscriptionManager SubscriptionManager => _subscriptionManager;
 
-    #region ISubjectSource Implementation
-
     /// <inheritdoc />
     public IInterceptorSubject RootSubject => _subject;
 
@@ -416,10 +414,6 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
                 : WriteResult.Failure(failedChanges.ToArray(), error));
     }
 
-    #endregion
-
-    #region Full Rescan
-
     private Task FullRescanAsync(CancellationToken cancellationToken)
     {
         _subscriptionManager.ClearAll();
@@ -456,10 +450,6 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
         }
     }
 
-    #endregion
-
-    #region Health Check Loop (ExecuteAsync)
-
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -483,14 +473,10 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
         }
     }
 
-    #endregion
-
     /// <summary>
     /// Gets diagnostic information about the client connection state.
     /// </summary>
     public AdsClientDiagnostics Diagnostics => _diagnostics ??= new AdsClientDiagnostics(this);
-
-    #region Dispose
 
     /// <inheritdoc />
     public async ValueTask DisposeAsync()
@@ -506,5 +492,4 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
         Dispose();
     }
 
-    #endregion
 }

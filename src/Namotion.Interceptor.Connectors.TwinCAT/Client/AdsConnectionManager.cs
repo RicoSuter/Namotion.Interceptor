@@ -187,8 +187,6 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
         }
     }
 
-    #region First-Occurrence Logging
-
     internal void LogFirstOccurrence(string category, Exception? exception, string message, params object[] arguments)
     {
         if (_loggedErrors.TryAdd(category, true))
@@ -219,10 +217,6 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
     {
         _loggedErrors.TryRemove(category, out _);
     }
-
-    #endregion
-
-    #region Event Handlers
 
     internal void OnConnectionStateChanged(object? sender, ConnectionStateChangedEventArgs eventArgs)
     {
@@ -262,10 +256,6 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
         SymbolVersionChanged?.Invoke();
     }
 
-    #endregion
-
-    #region Dispose
-
     /// <inheritdoc />
     public ValueTask DisposeAsync()
     {
@@ -299,6 +289,4 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
 
         return ValueTask.CompletedTask;
     }
-
-    #endregion
 }

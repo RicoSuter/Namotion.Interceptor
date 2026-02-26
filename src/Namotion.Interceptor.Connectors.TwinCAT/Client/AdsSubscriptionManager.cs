@@ -143,9 +143,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     /// </summary>
     internal string? GetSymbolPath(PropertyReference propertyReference)
     {
-        return _propertyToSymbol.TryGetValue(propertyReference, out var symbolPath)
-            ? symbolPath
-            : null;
+        return _propertyToSymbol.GetValueOrDefault(propertyReference);
     }
 
     /// <summary>
@@ -172,8 +170,6 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
 
         return null;
     }
-
-    #region Cleanup Callbacks
 
     /// <summary>
     /// Cleanup callback for when a property is being released from ownership.
@@ -213,10 +209,6 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             }
         }
     }
-
-    #endregion
-
-    #region Read Mode Demotion
 
     /// <summary>
     /// Determines the effective read mode for each property, applying the two-pass auto-demotion algorithm.
@@ -326,10 +318,6 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         return defaultMaxDelay;
     }
 
-    #endregion
-
-    #region Notification Registration
-
     private void RegisterNotification(
         RegisteredSubjectProperty property,
         string symbolPath,
@@ -360,10 +348,6 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         _notificationSubscriptions[propertyReference] = subscription;
         _subscriptions.Add(subscription);
     }
-
-    #endregion
-
-    #region Batch Polling
 
     private void StartBatchPolling(
         List<(RegisteredSubjectProperty Property, string SymbolPath)> polledSymbols,
@@ -467,10 +451,6 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         _subscriptions.Add(Disposable.Create(() => timer.Dispose()));
     }
 
-    #endregion
-
-    #region Value Processing
-
     private void OnValueReceived(PropertyReference propertyReference, object? adsValue, SubjectPropertyWriter? propertyWriter, ISubjectSource source)
     {
         var registeredProperty = propertyReference.TryGetRegisteredProperty();
@@ -490,10 +470,6 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
                 state.convertedValue));
     }
 
-    #endregion
-
-    #region Dispose
-
     /// <inheritdoc />
     public ValueTask DisposeAsync()
     {
@@ -506,6 +482,4 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
 
         return ValueTask.CompletedTask;
     }
-
-    #endregion
 }
