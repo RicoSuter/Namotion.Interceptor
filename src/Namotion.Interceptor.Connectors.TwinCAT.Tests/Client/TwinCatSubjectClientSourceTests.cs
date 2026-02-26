@@ -252,7 +252,7 @@ public class TwinCatSubjectClientSourceTests
 
         var source = new TwinCatSubjectClientSource(subject, configuration, logger);
 
-        var changes = new Namotion.Interceptor.Tracking.Change.SubjectPropertyChange[1];
+        var changes = new Tracking.Change.SubjectPropertyChange[1];
 
         // Act
         var result = await source.WriteChangesAsync(changes.AsMemory(), CancellationToken.None);

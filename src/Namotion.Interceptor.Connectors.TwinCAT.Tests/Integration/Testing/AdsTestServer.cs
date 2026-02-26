@@ -1,12 +1,12 @@
 using System.Net;
 using System.Text;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using TwinCAT.Ads;
 using TwinCAT.Ads.Server;
 using TwinCAT.Ads.Server.TypeSystem;
 using TwinCAT.Ads.TcpRouter;
 using TwinCAT.Ads.TypeSystem;
-using TwinCAT.Ams;
 using TwinCAT.TypeSystem;
 
 namespace Namotion.Interceptor.Connectors.TwinCAT.Tests.Integration.Testing;
@@ -18,6 +18,7 @@ public sealed class AdsTestServer : IAsyncDisposable
 {
     private const string AmsNetIdValue = "1.2.3.4.5.6";
     private const ushort AmsPort = 25000;
+    private const int LoopbackPort = 44236;
 
     private readonly TestSymbol[] _symbols;
     private AmsTcpIpRouter? _router;
@@ -36,12 +37,27 @@ public sealed class AdsTestServer : IAsyncDisposable
     public int ServerPort => AmsPort;
 
     /// <summary>
+    /// Gets the router configuration for the in-process AMS TCP/IP router.
+    /// Used to configure custom loopback port so tests work without TwinCAT installed.
+    /// </summary>
+    public IConfiguration RouterConfiguration { get; }
+
+    /// <summary>
     /// Initializes a new instance of the <see cref="AdsTestServer"/> class.
     /// </summary>
     /// <param name="symbols">The symbols to register on the server.</param>
     public AdsTestServer(TestSymbol[] symbols)
     {
         _symbols = symbols;
+
+        RouterConfiguration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["AmsRouter:Name"] = "TestRouter",
+                ["AmsRouter:NetId"] = AmsNetIdValue,
+                ["AmsRouter:LoopbackPort"] = LoopbackPort.ToString(),
+            })
+            .Build();
     }
 
     /// <summary>
@@ -52,15 +68,22 @@ public sealed class AdsTestServer : IAsyncDisposable
         _routerCts = new CancellationTokenSource();
         _serverCts = new CancellationTokenSource();
 
-        // Create and start the in-process TCP/IP router
-        _router = new AmsTcpIpRouter(new AmsNetId(AmsNetIdValue));
+        // Create and start the in-process TCP/IP router with custom loopback port
+        _router = new AmsTcpIpRouter(
+            AmsNetId.Parse(AmsNetIdValue),
+            externalPort: 0,
+            loopbackIP: IPAddress.Loopback,
+            loopbackPort: LoopbackPort,
+            loopbackCommunicationIPs: null,
+            udpDiscoveryPort: 0,
+            loggerFactory: null);
         _ = _router.StartAsync(_routerCts.Token);
 
         // Wait for the router to start up
         await Task.Delay(500);
 
         // Create and start the symbolic server
-        _server = new TestAdsSymbolicServer(AmsPort, "TestServer", _symbols, null);
+        _server = new TestAdsSymbolicServer(AmsPort, "TestServer", _symbols, RouterConfiguration, null);
         _ = _server.ConnectServerAndWaitAsync(_serverCts.Token);
 
         // Wait until the server is connected
@@ -148,7 +171,7 @@ public sealed class AdsTestServer : IAsyncDisposable
         await StopAsync();
 
         _serverCts = new CancellationTokenSource();
-        _server = new TestAdsSymbolicServer(AmsPort, "TestServer", _symbols, null);
+        _server = new TestAdsSymbolicServer(AmsPort, "TestServer", _symbols, RouterConfiguration, null);
         _ = _server.ConnectServerAndWaitAsync(_serverCts.Token);
 
         var timeout = DateTime.UtcNow.AddSeconds(10);
@@ -202,13 +225,15 @@ internal sealed class TestAdsSymbolicServer : AdsSymbolicServer
     /// <param name="port">The AMS port to register on.</param>
     /// <param name="name">The server name.</param>
     /// <param name="symbols">The symbols to register.</param>
+    /// <param name="configuration">Optional router configuration for custom loopback port.</param>
     /// <param name="loggerFactory">Optional logger factory.</param>
     public TestAdsSymbolicServer(
         ushort port,
         string name,
         TestSymbol[] symbols,
+        IConfiguration? configuration,
         ILoggerFactory? loggerFactory)
-        : base(port, name, loggerFactory)
+        : base(port, name, configuration, loggerFactory)
     {
         _testSymbols = symbols;
     }
@@ -238,7 +263,7 @@ internal sealed class TestAdsSymbolicServer : AdsSymbolicServer
     /// <returns>The current value.</returns>
     public object? ReadValue(string path)
     {
-        var symbol = this.Symbols[path];
+        var symbol = Symbols[path];
         if (symbol is not null && _symbolValues.TryGetValue(symbol, out var value))
         {
             return value;
@@ -261,18 +286,18 @@ internal sealed class TestAdsSymbolicServer : AdsSymbolicServer
             if (!addedTypes.Contains(testSymbol.DataType))
             {
                 var beckhoffType = MapToBeckhoffType(testSymbol.DataType);
-                base.symbolFactory!.AddType(beckhoffType);
+                symbolFactory!.AddType(beckhoffType);
                 addedTypes.Add(testSymbol.DataType);
             }
         }
 
-        base.symbolFactory!.AddDataArea(globals);
+        symbolFactory!.AddDataArea(globals);
 
         // Register symbols
         foreach (var testSymbol in _testSymbols)
         {
             var beckhoffType = MapToBeckhoffType(testSymbol.DataType);
-            base.symbolFactory!.AddSymbol(testSymbol.Path, beckhoffType, globals);
+            symbolFactory!.AddSymbol(testSymbol.Path, beckhoffType, globals);
         }
 
         // Set initial values
@@ -280,11 +305,11 @@ internal sealed class TestAdsSymbolicServer : AdsSymbolicServer
         {
             if (testSymbol.InitialValue is not null)
             {
-                _symbolValues[this.Symbols[testSymbol.Path]] = testSymbol.InitialValue;
+                _symbolValues[Symbols[testSymbol.Path]] = testSymbol.InitialValue;
             }
             else
             {
-                _symbolValues[this.Symbols[testSymbol.Path]] = GetDefaultValue(testSymbol.DataType);
+                _symbolValues[Symbols[testSymbol.Path]] = GetDefaultValue(testSymbol.DataType);
             }
         }
     }

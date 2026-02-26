@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Namotion.Interceptor.Registry.Paths;
 using TwinCAT.Ads;
 
@@ -97,6 +98,13 @@ public class AdsClientConfiguration
     /// Gets or sets the value converter for ADS/PLC type conversions.
     /// </summary>
     public AdsValueConverter ValueConverter { get; set; } = new();
+
+    /// <summary>
+    /// Gets or sets the optional router configuration for the ADS client.
+    /// When set, the ADS client uses a custom loopback port (useful for testing without TwinCAT installed).
+    /// When null, the default ADS client behavior is used.
+    /// </summary>
+    public IConfiguration? RouterConfiguration { get; set; }
 
     /// <summary>
     /// Validates the configuration and throws if invalid.

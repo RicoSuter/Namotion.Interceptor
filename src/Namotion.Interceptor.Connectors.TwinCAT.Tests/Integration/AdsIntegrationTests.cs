@@ -52,6 +52,7 @@ public class AdsIntegrationTests
             AmsPort = server.ServerPort,
             PathProvider = new AttributeBasedPathProvider(AdsConstants.DefaultConnectorName, '.'),
             HealthCheckInterval = TimeSpan.FromSeconds(1),
+            RouterConfiguration = server.RouterConfiguration,
         };
     }
 

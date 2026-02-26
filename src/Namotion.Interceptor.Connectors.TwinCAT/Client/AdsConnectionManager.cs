@@ -139,8 +139,11 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
 
                     var amsNetId = AmsNetId.Parse(_configuration.AmsNetId);
 
-                    _client = new AdsClient();
-                    _client.Connect(amsNetId, _configuration.AmsPort);
+                    _client = _configuration.RouterConfiguration is not null
+                        ? new AdsClient(_configuration.RouterConfiguration, null)
+                        : new AdsClient();
+                  
+                    await _client.ConnectAsync(amsNetId, _configuration.AmsPort, cancellationToken);
                     _connection = _client;
 
                     // Subscribe to connection state, ADS state, and symbol version changes
