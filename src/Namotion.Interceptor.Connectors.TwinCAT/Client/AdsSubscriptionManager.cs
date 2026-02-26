@@ -5,6 +5,7 @@ using Namotion.Interceptor.Connectors.TwinCAT.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
+using TwinCAT;
 using TwinCAT.Ads;
 using TwinCAT.Ads.Reactive;
 using TwinCAT.Ads.SumCommand;
@@ -112,6 +113,9 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         {
             StartBatchPolling(polledSymbols, connection, symbolLoader, propertyWriter, source, connectionManager);
         }
+
+        // Reset dirty flag after registration is complete so the polling timer can run
+        _pollingCollectionDirty = false;
 
         _logger.LogInformation(
             "Registered {NotificationCount} notification and {PolledCount} polled variables.",
@@ -351,7 +355,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         var propertyReference = property.Reference;
         var subscription = connection
             .WhenNotification(symbol, notificationSettings)
-            .Subscribe(symbolValue => OnValueReceived(propertyReference, symbolValue, propertyWriter, source));
+            .Subscribe(notification => OnValueReceived(propertyReference, notification.Value, propertyWriter, source));
 
         _notificationSubscriptions[propertyReference] = subscription;
         _subscriptions.Add(subscription);
@@ -387,6 +391,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             return;
         }
 
+        var useFallback = false;
         var timer = new Timer(_ =>
         {
             try
@@ -398,24 +403,59 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
                     return;
                 }
 
-                var sumRead = new SumSymbolRead(connection, symbols);
-                var readResult = sumRead.TryRead(out var values, out var errorCodes);
-
-                if (readResult != AdsErrorCode.NoError || values is null)
+                if (!useFallback)
                 {
-                    connectionManager.LogFirstOccurrence("BatchPoll", null, "Batch polling failed with error: {ErrorCode}", readResult);
-                    return;
+                    try
+                    {
+                        var sumRead = new SumSymbolRead(connection, symbols);
+                        var readResult = sumRead.ReadAsResult();
+
+                        if (readResult.ErrorCode == AdsErrorCode.DeviceServiceNotSupported)
+                        {
+                            _logger.LogDebug("SumSymbolRead not supported for polling, falling back to individual reads.");
+                            useFallback = true;
+                        }
+                        else if (readResult.ErrorCode != AdsErrorCode.NoError || readResult.Values is null)
+                        {
+                            connectionManager.LogFirstOccurrence("BatchPoll", null, "Batch polling failed with error: {ErrorCode}", readResult.ErrorCode);
+                            return;
+                        }
+                        else
+                        {
+                            var values = readResult.Values;
+                            var errorCodes = readResult.SubErrors;
+                            for (var index = 0; index < validEntries.Count && index < values.Length; index++)
+                            {
+                                if (errorCodes is not null && errorCodes[index] != AdsErrorCode.NoError)
+                                {
+                                    continue;
+                                }
+
+                                OnValueReceived(validEntries[index].Property.Reference, values[index], propertyWriter, source);
+                            }
+
+                            return;
+                        }
+                    }
+                    catch (AdsException exception) when ((AdsErrorCode)exception.HResult == AdsErrorCode.DeviceServiceNotSupported)
+                    {
+                        _logger.LogDebug("SumSymbolRead threw DeviceServiceNotSupported for polling, falling back to individual reads.");
+                        useFallback = true;
+                    }
                 }
 
-                for (var index = 0; index < validEntries.Count && index < values.Length; index++)
+                // Individual read fallback
+                for (var index = 0; index < symbols.Count; index++)
                 {
-                    if (errorCodes is not null && errorCodes[index] != AdsErrorCode.NoError)
+                    try
                     {
-                        continue;
+                        var value = ((IValueSymbol)symbols[index]).ReadValue();
+                        OnValueReceived(validEntries[index].Property.Reference, value, propertyWriter, source);
                     }
-
-                    // Pass raw ADS value — OnValueReceived handles conversion
-                    OnValueReceived(validEntries[index].Property.Reference, values[index], propertyWriter, source);
+                    catch (Exception exception)
+                    {
+                        connectionManager.LogFirstOccurrence("BatchPoll", exception, "Failed to read polled symbol '{SymbolPath}'.", validEntries[index].SymbolPath);
+                    }
                 }
             }
             catch (Exception exception)

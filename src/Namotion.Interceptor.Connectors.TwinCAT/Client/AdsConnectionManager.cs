@@ -9,7 +9,7 @@ using TwinCAT.TypeSystem;
 namespace Namotion.Interceptor.Connectors.TwinCAT.Client;
 
 /// <summary>
-/// Manages the ADS connection lifecycle including session creation, circuit breaker,
+/// Manages the ADS connection lifecycle including client creation, circuit breaker,
 /// event subscriptions, reconnection tracking, and ADS state monitoring.
 /// </summary>
 internal sealed class AdsConnectionManager : IAsyncDisposable
@@ -18,8 +18,8 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
     private readonly ILogger _logger;
     private readonly CircuitBreaker _circuitBreaker;
 
-    // ADS connection objects
-    private AdsSession? _session;
+    // ADS connection objects — uses AdsClient directly (not AdsSession) for reliable dispose in 7.0.x
+    private AdsClient? _client;
     private IAdsConnection? _connection;
     private ISymbolLoader? _symbolLoader;
 
@@ -100,7 +100,7 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
     /// Gets whether the ADS client is currently connected.
     /// </summary>
     internal bool IsConnected =>
-        _connection is AdsClient client && client.IsConnected;
+        _connection is IConnection { IsConnected: true };
 
     internal long TotalReconnectionAttempts =>
         Interlocked.Read(ref _totalReconnectionAttempts);
@@ -138,27 +138,15 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
                     Interlocked.Increment(ref _totalReconnectionAttempts);
 
                     var amsNetId = AmsNetId.Parse(_configuration.AmsNetId);
-                    var amsAddress = new AmsAddress(amsNetId, _configuration.AmsPort);
 
-                    _session = _configuration.SessionSettings is not null
-                        ? new AdsSession(amsAddress, _configuration.SessionSettings)
-                        : new AdsSession(amsAddress);
+                    _client = new AdsClient();
+                    _client.Connect(amsNetId, _configuration.AmsPort);
+                    _connection = _client;
 
-                    var sessionConnection = _session.Connect();
-                    _connection = _session.Connection as IAdsConnection;
-
-                    // Subscribe to connection state changes
-                    if (_connection is AdsConnection adsConnection)
-                    {
-                        adsConnection.ConnectionStateChanged += OnConnectionStateChanged;
-                    }
-
-                    // Subscribe to ADS state changes via the underlying client
-                    if (_connection is AdsClient adsClient)
-                    {
-                        adsClient.AdsStateChanged += OnAdsStateChanged;
-                        adsClient.AdsSymbolVersionChanged += OnSymbolVersionChanged;
-                    }
+                    // Subscribe to connection state, ADS state, and symbol version changes
+                    _client.ConnectionStateChanged += OnConnectionStateChanged;
+                    _client.AdsStateChanged += OnAdsStateChanged;
+                    _client.AdsSymbolVersionChanged += OnSymbolVersionChanged;
 
                     Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
                     _circuitBreaker.RecordSuccess();
@@ -187,14 +175,14 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
     }
 
     /// <summary>
-    /// Creates a new symbol loader from the current session/connection.
+    /// Creates a new symbol loader from the current connection.
     /// </summary>
     internal void RecreateSymbolLoader()
     {
-        if (_session is not null)
+        if (_connection is not null)
         {
             _symbolLoader = SymbolLoaderFactory.Create(
-                _connection!,
+                _connection,
                 new SymbolLoaderSettings(SymbolsLoadMode.DynamicTree));
         }
     }
@@ -286,31 +274,24 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
             return ValueTask.CompletedTask;
         }
 
-        // Unsubscribe from events
-        if (_connection is AdsConnection adsConnection)
+        // Unsubscribe from events and dispose the ADS client
+        if (_client is not null)
         {
-            adsConnection.ConnectionStateChanged -= OnConnectionStateChanged;
-        }
+            _client.ConnectionStateChanged -= OnConnectionStateChanged;
+            _client.AdsStateChanged -= OnAdsStateChanged;
+            _client.AdsSymbolVersionChanged -= OnSymbolVersionChanged;
 
-        if (_connection is AdsClient adsClient)
-        {
-            adsClient.AdsStateChanged -= OnAdsStateChanged;
-            adsClient.AdsSymbolVersionChanged -= OnSymbolVersionChanged;
-        }
-
-        // Dispose session (which disposes connection)
-        if (_session is not null)
-        {
             try
             {
-                _session.Dispose();
+                _client.Disconnect();
+                _client.Dispose();
             }
             catch (Exception exception)
             {
-                _logger.LogDebug(exception, "Error disposing ADS session.");
+                _logger.LogDebug(exception, "Error disposing ADS client.");
             }
 
-            _session = null;
+            _client = null;
             _connection = null;
         }
 

@@ -151,30 +151,42 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             return Task.FromResult<Action?>(null);
         }
 
-        // Batch read via SumSymbolRead - synchronous API, called from background thread
-        var symbols = properties.Select(item => item.Symbol).ToList();
-        var sumRead = new SumSymbolRead(connection, symbols);
-        var readResult = sumRead.TryRead(out var adsValues, out var errorCodes);
-
-        if (readResult != AdsErrorCode.NoError || adsValues is null)
-        {
-            _logger.LogWarning("Failed to read initial state from PLC. Error: {ErrorCode}", readResult);
-            return Task.FromResult<Action?>(null);
-        }
-
+        // Try batch read via SumSymbolRead first, fall back to individual reads
         var values = new (RegisteredSubjectProperty Property, object? Value)[properties.Count];
-        for (var index = 0; index < properties.Count; index++)
+        var symbols = properties.Select(item => item.Symbol).ToList();
+
+        try
         {
-            if (errorCodes is not null && errorCodes[index] != AdsErrorCode.NoError)
+            var sumRead = new SumSymbolRead(connection, symbols);
+            var readResult = sumRead.ReadAsResult();
+
+            if (readResult.ErrorCode == AdsErrorCode.NoError && readResult.Values is not null)
             {
-                continue;
+                var errorCodes = readResult.SubErrors;
+                for (var index = 0; index < properties.Count; index++)
+                {
+                    if (errorCodes is not null && errorCodes[index] != AdsErrorCode.NoError)
+                    {
+                        continue;
+                    }
+
+                    values[index] = (properties[index].Property,
+                        _configuration.ValueConverter.ConvertToPropertyValue(readResult.Values[index], properties[index].Property));
+                }
+
+                _logger.LogInformation("Successfully batch-read {Count} ADS symbols from PLC.", properties.Count);
             }
-
-            values[index] = (properties[index].Property,
-                _configuration.ValueConverter.ConvertToPropertyValue(adsValues[index], properties[index].Property));
+            else
+            {
+                _logger.LogDebug("SumSymbolRead not supported (Error: {ErrorCode}), falling back to individual reads.", readResult.ErrorCode);
+                ReadIndividualValues(properties, values);
+            }
         }
-
-        _logger.LogInformation("Successfully read {Count} ADS symbols from PLC.", properties.Count);
+        catch (Exception exception)
+        {
+            _logger.LogDebug(exception, "SumSymbolRead failed, falling back to individual reads.");
+            ReadIndividualValues(properties, values);
+        }
 
         return Task.FromResult<Action?>(() =>
         {
@@ -189,6 +201,27 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
 
             _logger.LogInformation("Updated {Count} properties with PLC values.", properties.Count);
         });
+    }
+
+    private void ReadIndividualValues(
+        List<(RegisteredSubjectProperty Property, ISymbol Symbol)> properties,
+        (RegisteredSubjectProperty Property, object? Value)[] values)
+    {
+        for (var index = 0; index < properties.Count; index++)
+        {
+            try
+            {
+                var value = ((IValueSymbol)properties[index].Symbol).ReadValue();
+                values[index] = (properties[index].Property,
+                    _configuration.ValueConverter.ConvertToPropertyValue(value, properties[index].Property));
+            }
+            catch (Exception exception)
+            {
+                _logger.LogDebug(exception, "Failed to read symbol '{SymbolPath}'.", properties[index].Symbol.InstancePath);
+            }
+        }
+
+        _logger.LogInformation("Successfully read {Count} ADS symbols individually from PLC.", properties.Count);
     }
 
     /// <inheritdoc />
@@ -241,53 +274,70 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
                 return new ValueTask<WriteResult>(WriteResult.Success);
             }
 
-            var sumWrite = new SumSymbolWrite(connection, symbols);
-            var writeResult = sumWrite.TryWrite(writeValues.ToArray(), out var errorCodes);
-
-            if (writeResult == AdsErrorCode.NoError && errorCodes is not null)
+            // Try batch write via SumSymbolWrite, fall back to individual writes
+            try
             {
-                // Check individual results
-                var failedChanges = new List<SubjectPropertyChange>();
-                var transientCount = 0;
-                var permanentCount = 0;
+                var sumWrite = new SumSymbolWrite(connection, symbols);
+                var sumResult = sumWrite.Write(writeValues.ToArray());
+                var batchErrorCode = sumResult.ErrorCode;
+                var errorCodes = sumResult.SubErrors;
 
-                for (var index = 0; index < errorCodes.Length && index < validChanges.Count; index++)
+                if (batchErrorCode == AdsErrorCode.NoError && errorCodes is not null)
                 {
-                    if (errorCodes[index] != AdsErrorCode.NoError)
+                    // Check individual results
+                    var failedChanges = new List<SubjectPropertyChange>();
+                    var transientCount = 0;
+                    var permanentCount = 0;
+
+                    for (var index = 0; index < errorCodes.Length && index < validChanges.Count; index++)
                     {
-                        failedChanges.Add(validChanges[index]);
-                        if (AdsErrorClassifier.IsTransientError(errorCodes[index]))
+                        if (errorCodes[index] != AdsErrorCode.NoError)
                         {
-                            transientCount++;
-                        }
-                        else
-                        {
-                            permanentCount++;
+                            failedChanges.Add(validChanges[index]);
+                            if (AdsErrorClassifier.IsTransientError(errorCodes[index]))
+                            {
+                                transientCount++;
+                            }
+                            else
+                            {
+                                permanentCount++;
+                            }
                         }
                     }
+
+                    if (failedChanges.Count == 0)
+                    {
+                        return new ValueTask<WriteResult>(WriteResult.Success);
+                    }
+
+                    var error = new AdsWriteException(transientCount, permanentCount, validChanges.Count);
+                    var successCount = validChanges.Count - failedChanges.Count;
+                    return new ValueTask<WriteResult>(
+                        successCount > 0
+                            ? WriteResult.PartialFailure(failedChanges.ToArray(), error)
+                            : WriteResult.Failure(failedChanges.ToArray(), error));
                 }
 
-                if (failedChanges.Count == 0)
+                if (batchErrorCode == AdsErrorCode.DeviceServiceNotSupported)
                 {
-                    return new ValueTask<WriteResult>(WriteResult.Success);
+                    _logger.LogDebug("SumSymbolWrite not supported, falling back to individual writes.");
+                    return WriteIndividualValues(symbols, writeValues, validChanges, changes);
                 }
 
-                var error = new AdsWriteException(transientCount, permanentCount, validChanges.Count);
-                var successCount = validChanges.Count - failedChanges.Count;
-                return new ValueTask<WriteResult>(
-                    successCount > 0
-                        ? WriteResult.PartialFailure(failedChanges.ToArray(), error)
-                        : WriteResult.Failure(failedChanges.ToArray(), error));
+                if (batchErrorCode != AdsErrorCode.NoError)
+                {
+                    var isTransient = AdsErrorClassifier.IsTransientError(batchErrorCode);
+                    var error = new AdsWriteException(
+                        isTransient ? changes.Length : 0,
+                        isTransient ? 0 : changes.Length,
+                        changes.Length);
+                    return new ValueTask<WriteResult>(WriteResult.Failure(changes, error));
+                }
             }
-
-            if (writeResult != AdsErrorCode.NoError)
+            catch (AdsException exception) when ((AdsErrorCode)exception.HResult == AdsErrorCode.DeviceServiceNotSupported)
             {
-                var isTransient = AdsErrorClassifier.IsTransientError(writeResult);
-                var error = new AdsWriteException(
-                    isTransient ? changes.Length : 0,
-                    isTransient ? 0 : changes.Length,
-                    changes.Length);
-                return new ValueTask<WriteResult>(WriteResult.Failure(changes, error));
+                _logger.LogDebug("SumSymbolWrite threw DeviceServiceNotSupported, falling back to individual writes.");
+                return WriteIndividualValues(symbols, writeValues, validChanges, changes);
             }
 
             return new ValueTask<WriteResult>(WriteResult.Success);
@@ -306,6 +356,54 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
         {
             return new ValueTask<WriteResult>(WriteResult.Failure(changes, exception));
         }
+    }
+
+    private ValueTask<WriteResult> WriteIndividualValues(
+        List<ISymbol> symbols,
+        List<object> writeValues,
+        List<SubjectPropertyChange> validChanges,
+        ReadOnlyMemory<SubjectPropertyChange> allChanges)
+    {
+        var failedChanges = new List<SubjectPropertyChange>();
+        var transientCount = 0;
+        var permanentCount = 0;
+
+        for (var index = 0; index < symbols.Count; index++)
+        {
+            try
+            {
+                ((IValueSymbol)symbols[index]).WriteValue(writeValues[index]);
+            }
+            catch (AdsException exception)
+            {
+                failedChanges.Add(validChanges[index]);
+                if (AdsErrorClassifier.IsTransientError((AdsErrorCode)exception.HResult))
+                {
+                    transientCount++;
+                }
+                else
+                {
+                    permanentCount++;
+                }
+            }
+            catch (Exception)
+            {
+                failedChanges.Add(validChanges[index]);
+                permanentCount++;
+            }
+        }
+
+        if (failedChanges.Count == 0)
+        {
+            return new ValueTask<WriteResult>(WriteResult.Success);
+        }
+
+        var error = new AdsWriteException(transientCount, permanentCount, validChanges.Count);
+        var successCount = validChanges.Count - failedChanges.Count;
+        return new ValueTask<WriteResult>(
+            successCount > 0
+                ? WriteResult.PartialFailure(failedChanges.ToArray(), error)
+                : WriteResult.Failure(failedChanges.ToArray(), error));
     }
 
     #endregion
