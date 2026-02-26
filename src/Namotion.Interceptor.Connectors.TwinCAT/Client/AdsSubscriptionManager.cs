@@ -343,7 +343,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         var propertyReference = property.Reference;
         var subscription = connection
             .WhenNotification(symbol, notificationSettings)
-            .Subscribe(notification => OnValueReceived(propertyReference, notification.Value, propertyWriter, source));
+            .Subscribe(notification => OnValueReceived(propertyReference, notification.Value, notification.TimeStamp, propertyWriter, source));
 
         _notificationSubscriptions[propertyReference] = subscription;
         _subscriptions.Add(subscription);
@@ -415,7 +415,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
                                     continue;
                                 }
 
-                                OnValueReceived(validEntries[index].Property.Reference, values[index], propertyWriter, source);
+                                OnValueReceived(validEntries[index].Property.Reference, values[index], null, propertyWriter, source);
                             }
 
                             return;
@@ -434,7 +434,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
                     try
                     {
                         var value = ((IValueSymbol)symbols[index]).ReadValue();
-                        OnValueReceived(validEntries[index].Property.Reference, value, propertyWriter, source);
+                        OnValueReceived(validEntries[index].Property.Reference, value, null, propertyWriter, source);
                     }
                     catch (Exception exception)
                     {
@@ -451,7 +451,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         _subscriptions.Add(Disposable.Create(() => timer.Dispose()));
     }
 
-    private void OnValueReceived(PropertyReference propertyReference, object? adsValue, SubjectPropertyWriter? propertyWriter, ISubjectSource source)
+    private void OnValueReceived(PropertyReference propertyReference, object? adsValue, DateTimeOffset? sourceTimestamp, SubjectPropertyWriter? propertyWriter, ISubjectSource source)
     {
         var registeredProperty = propertyReference.TryGetRegisteredProperty();
         if (registeredProperty is null)
@@ -462,10 +462,10 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         var convertedValue = _configuration.ValueConverter.ConvertToPropertyValue(adsValue, registeredProperty);
 
         propertyWriter?.Write(
-            (propertyReference, convertedValue, source),
+            (propertyReference, convertedValue, source, sourceTimestamp),
             static state => state.propertyReference.SetValueFromSource(
                 state.source,
-                DateTimeOffset.UtcNow,
+                state.sourceTimestamp ?? DateTimeOffset.UtcNow,
                 DateTimeOffset.UtcNow,
                 state.convertedValue));
     }
