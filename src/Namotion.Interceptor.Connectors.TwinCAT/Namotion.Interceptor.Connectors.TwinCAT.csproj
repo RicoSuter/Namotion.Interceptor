@@ -13,8 +13,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Beckhoff.TwinCAT.Ads" Version="6.1.312" />
-    <PackageReference Include="Beckhoff.TwinCAT.Ads.Reactive" Version="6.1.312" />
+    <PackageReference Include="Beckhoff.TwinCAT.Ads" Version="7.0.152" />
+    <PackageReference Include="Beckhoff.TwinCAT.Ads.Reactive" Version="7.0.152" />
   </ItemGroup>
 
   <ItemGroup>
