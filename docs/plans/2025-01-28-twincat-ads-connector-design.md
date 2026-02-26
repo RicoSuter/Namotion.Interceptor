@@ -2039,7 +2039,9 @@ The mock library can also replay recorded ADS communication from `.cap` files (T
     - Symbol version monitoring for PLC program changes
     - Full rescan on resurrection/state change/symbol change
     - Notification registration via `WhenNotification`
-    - Polling registration via `PollValues`
+    - Batch polling via `SumSymbolRead` on timer
+    - Batch writes via `SumSymbolWrite`
+    - Cleanup on subject detach (notifications, polling collection, caches)
     - Demotion logic: Priority first, then CycleTime
     - First-occurrence logging pattern
     - Cache invalidation on detach
