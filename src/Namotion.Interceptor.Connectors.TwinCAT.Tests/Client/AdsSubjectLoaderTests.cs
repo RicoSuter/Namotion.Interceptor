@@ -159,10 +159,9 @@ public class AdsSubjectLoaderTests
     }
 
     [Fact]
-    public void LoadSubjectGraph_WithEmptySubject_ReturnsEmptyList()
+    public void LoadSubjectGraph_WithLeafSubject_ReturnsScalarProperties()
     {
         // Arrange - Motor has no children, just scalar properties
-        // Use a subject that has no [AdsVariable] attributes with the correct connector name
         var context = CreateContext();
         var motor = new Motor(context);
         var loader = CreateLoader();
@@ -170,7 +169,7 @@ public class AdsSubjectLoaderTests
         // Act
         var mappings = loader.LoadSubjectGraph(motor);
 
-        // Assert - Motor has scalar properties that should be mapped
+        // Assert
         Assert.Equal(2, mappings.Count);
         Assert.Contains(mappings, mapping => mapping.Property.Name == nameof(Motor.Speed));
         Assert.Contains(mappings, mapping => mapping.Property.Name == nameof(Motor.Torque));

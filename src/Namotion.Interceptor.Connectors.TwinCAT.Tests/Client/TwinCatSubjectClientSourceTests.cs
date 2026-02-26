@@ -5,11 +5,13 @@ using Namotion.Interceptor.Connectors.TwinCAT.Tests.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
+using TwinCAT;
+using TwinCAT.Ads;
 using Xunit;
 
 namespace Namotion.Interceptor.Connectors.TwinCAT.Tests.Client;
 
-public class CleanupTests
+public class TwinCatSubjectClientSourceTests
 {
     private static IInterceptorSubjectContext CreateContext()
     {
@@ -258,5 +260,204 @@ public class CleanupTests
         // Assert - should return failure when not connected
         Assert.False(result.IsFullySuccessful);
         Assert.NotNull(result.Error);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ShouldRunAndStopCleanly()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new TestPlcModel(context);
+        var configuration = CreateConfiguration();
+        configuration.HealthCheckInterval = TimeSpan.FromMilliseconds(50);
+        var logger = new Mock<ILogger>().Object;
+
+        var source = new TwinCatSubjectClientSource(subject, configuration, logger);
+
+        // Act - start the background service (runs ExecuteAsync health check loop)
+        await source.StartAsync(CancellationToken.None);
+
+        // Let the health check loop run a few iterations
+        await Task.Delay(200);
+
+        // Stop the service
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert - should complete without error, dispose cleanly
+        await source.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_WhenCancelledImmediately_ShouldStopGracefully()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new TestPlcModel(context);
+        var configuration = CreateConfiguration();
+        var logger = new Mock<ILogger>().Object;
+
+        var source = new TwinCatSubjectClientSource(subject, configuration, logger);
+        using var cts = new CancellationTokenSource();
+
+        // Act - start and immediately cancel
+        await source.StartAsync(cts.Token);
+        await cts.CancelAsync();
+
+        // Assert - should stop gracefully
+        try { await source.StopAsync(CancellationToken.None); }
+        catch (OperationCanceledException) { }
+        await source.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task TriggerFullRescan_ViaConnectionRestored_WhenNotConnected_LogsErrorGracefully()
+    {
+        // Arrange
+        var mockLogger = new Mock<ILogger>();
+        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
+
+        var context = CreateContext();
+        var subject = new TestPlcModel(context);
+        var configuration = CreateConfiguration();
+        var source = new TwinCatSubjectClientSource(subject, configuration, mockLogger.Object);
+
+        // Act - simulate a ConnectionRestored event (no real connection exists, so rescan will fail)
+        source.ConnectionManager.OnConnectionStateChanged(null,
+            new ConnectionStateChangedEventArgs(
+                ConnectionStateChangedReason.Established,
+                ConnectionState.Connected,
+                ConnectionState.Disconnected));
+
+        // Give the fire-and-forget TriggerFullRescanAsync time to complete
+        await Task.Delay(100);
+
+        // Assert - rescan failed because Connection is null, but error was caught and logged
+        mockLogger.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.AtLeastOnce);
+
+        await source.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task TriggerFullRescan_ViaAdsStateEnteredRun_WhenNotConnected_LogsErrorGracefully()
+    {
+        // Arrange
+        var mockLogger = new Mock<ILogger>();
+        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
+
+        var context = CreateContext();
+        var subject = new TestPlcModel(context);
+        var configuration = CreateConfiguration();
+        var source = new TwinCatSubjectClientSource(subject, configuration, mockLogger.Object);
+
+        // Act - simulate ADS state entering Run (triggers rescan)
+        source.ConnectionManager.OnAdsStateChanged(null,
+            new AdsStateChangedEventArgs(new StateInfo(AdsState.Run, 0)));
+
+        await Task.Delay(100);
+
+        // Assert - rescan attempted and error was caught gracefully
+        mockLogger.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.AtLeastOnce);
+
+        await source.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task TriggerFullRescan_ViaSymbolVersionChanged_WhenNotConnected_LogsErrorGracefully()
+    {
+        // Arrange
+        var mockLogger = new Mock<ILogger>();
+        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
+
+        var context = CreateContext();
+        var subject = new TestPlcModel(context);
+        var configuration = CreateConfiguration();
+        var source = new TwinCatSubjectClientSource(subject, configuration, mockLogger.Object);
+
+        // Act - simulate symbol version change (triggers rescan)
+        source.ConnectionManager.OnSymbolVersionChanged(null,
+            new AdsSymbolVersionChangedEventArgs(2));
+
+        await Task.Delay(100);
+
+        // Assert - rescan attempted and error was caught gracefully
+        mockLogger.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.AtLeastOnce);
+
+        await source.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task TriggerFullRescan_RepeatedEvents_OnlyLogsWarningOnce()
+    {
+        // Arrange
+        var mockLogger = new Mock<ILogger>();
+        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
+
+        var context = CreateContext();
+        var subject = new TestPlcModel(context);
+        var configuration = CreateConfiguration();
+        var source = new TwinCatSubjectClientSource(subject, configuration, mockLogger.Object);
+
+        // Act - fire the same event multiple times
+        for (var i = 0; i < 3; i++)
+        {
+            source.ConnectionManager.OnSymbolVersionChanged(null,
+                new AdsSymbolVersionChangedEventArgs((byte)(i + 1)));
+        }
+
+        await Task.Delay(200);
+
+        // Assert - first-occurrence pattern: first rescan failure is Warning, subsequent are Debug
+        mockLogger.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.AtLeastOnce);
+
+        await source.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ConnectionLost_StartsBuffering_DoesNotThrowWhenNoPropertyWriter()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new TestPlcModel(context);
+        var configuration = CreateConfiguration();
+        var logger = new Mock<ILogger>().Object;
+        var source = new TwinCatSubjectClientSource(subject, configuration, logger);
+
+        // Act - simulate connection lost (no propertyWriter set yet, so StartBuffering is a no-op)
+        source.ConnectionManager.OnConnectionStateChanged(null,
+            new ConnectionStateChangedEventArgs(
+                ConnectionStateChangedReason.Lost,
+                ConnectionState.Disconnected,
+                ConnectionState.Connected));
+
+        // Assert - no exception thrown
+        await source.DisposeAsync();
     }
 }

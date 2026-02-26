@@ -14,7 +14,7 @@ namespace Namotion.Interceptor.Connectors.TwinCAT.Client;
 /// Connects a subject graph to a Beckhoff TwinCAT PLC via ADS protocol.
 /// Thin orchestrator composing <see cref="AdsConnectionManager"/> and <see cref="AdsSubscriptionManager"/>.
 /// </summary>
-internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSource, IAdsClientDiagnosticsSource, IAsyncDisposable
+internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSource, IAsyncDisposable
 {
     private readonly IInterceptorSubject _subject;
     private readonly AdsClientConfiguration _configuration;
@@ -92,6 +92,16 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
     /// </summary>
     internal AdsClientConfiguration Configuration => _configuration;
 
+    /// <summary>
+    /// Gets the connection manager (internal for testing and diagnostics).
+    /// </summary>
+    internal AdsConnectionManager ConnectionManager => _connectionManager;
+
+    /// <summary>
+    /// Gets the subscription manager (internal for diagnostics).
+    /// </summary>
+    internal AdsSubscriptionManager SubscriptionManager => _subscriptionManager;
+
     #region ISubjectSource Implementation
 
     /// <inheritdoc />
@@ -160,7 +170,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             var sumRead = new SumSymbolRead(connection, symbols);
             var readResult = sumRead.ReadAsResult();
 
-            if (readResult.ErrorCode == AdsErrorCode.NoError && readResult.Values is not null)
+            if (readResult is { ErrorCode: AdsErrorCode.NoError, Values: not null })
             {
                 var errorCodes = readResult.SubErrors;
                 for (var index = 0; index < properties.Count; index++)
@@ -475,34 +485,10 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
 
     #endregion
 
-    #region IAdsClientDiagnosticsSource Implementation
-
     /// <summary>
     /// Gets diagnostic information about the client connection state.
     /// </summary>
     public AdsClientDiagnostics Diagnostics => _diagnostics ??= new AdsClientDiagnostics(this);
-
-    AdsState? IAdsClientDiagnosticsSource.CurrentState => _connectionManager.CurrentAdsState;
-
-    bool IAdsClientDiagnosticsSource.IsConnected => _connectionManager.IsConnected;
-
-    int IAdsClientDiagnosticsSource.NotificationCount => _subscriptionManager.NotificationCount;
-
-    int IAdsClientDiagnosticsSource.PolledCount => _subscriptionManager.PolledCount;
-
-    long IAdsClientDiagnosticsSource.TotalReconnectionAttempts => _connectionManager.TotalReconnectionAttempts;
-
-    long IAdsClientDiagnosticsSource.SuccessfulReconnections => _connectionManager.SuccessfulReconnections;
-
-    long IAdsClientDiagnosticsSource.FailedReconnections => _connectionManager.FailedReconnections;
-
-    DateTimeOffset? IAdsClientDiagnosticsSource.LastConnectedAt => _connectionManager.LastConnectedAt;
-
-    bool IAdsClientDiagnosticsSource.IsCircuitBreakerOpen => _connectionManager.IsCircuitBreakerOpen;
-
-    long IAdsClientDiagnosticsSource.CircuitBreakerTripCount => _connectionManager.CircuitBreakerTripCount;
-
-    #endregion
 
     #region Dispose
 

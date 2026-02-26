@@ -60,52 +60,16 @@ public class AdsSubscriptionManagerTests
     }
 
     [Fact]
-    public void Constructor_WithValidParameters_ShouldCreate()
+    public void InitialState_AllPropertiesHaveDefaultValues()
     {
         // Arrange & Act
         var manager = CreateManager();
 
         // Assert
         Assert.NotNull(manager);
-    }
-
-    [Fact]
-    public void NotificationCount_Initially_Zero()
-    {
-        // Arrange & Act
-        var manager = CreateManager();
-
-        // Assert
         Assert.Equal(0, manager.NotificationCount);
-    }
-
-    [Fact]
-    public void PolledCount_Initially_Zero()
-    {
-        // Arrange & Act
-        var manager = CreateManager();
-
-        // Assert
         Assert.Equal(0, manager.PolledCount);
-    }
-
-    [Fact]
-    public void IsPollingCollectionDirty_Initially_False()
-    {
-        // Arrange & Act
-        var manager = CreateManager();
-
-        // Assert
         Assert.False(manager.IsPollingCollectionDirty);
-    }
-
-    [Fact]
-    public void Subscriptions_Initially_NotNull()
-    {
-        // Arrange & Act
-        var manager = CreateManager();
-
-        // Assert
         Assert.NotNull(manager.Subscriptions);
     }
 

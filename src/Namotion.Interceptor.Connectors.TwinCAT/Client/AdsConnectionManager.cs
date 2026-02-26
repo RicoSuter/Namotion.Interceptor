@@ -224,7 +224,7 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
 
     #region Event Handlers
 
-    private void OnConnectionStateChanged(object? sender, ConnectionStateChangedEventArgs eventArgs)
+    internal void OnConnectionStateChanged(object? sender, ConnectionStateChangedEventArgs eventArgs)
     {
         if (eventArgs.NewState == ConnectionState.Connected &&
             eventArgs.OldState != ConnectionState.Connected)
@@ -239,7 +239,7 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
         }
     }
 
-    private void OnAdsStateChanged(object? sender, AdsStateChangedEventArgs eventArgs)
+    internal void OnAdsStateChanged(object? sender, AdsStateChangedEventArgs eventArgs)
     {
         var newState = eventArgs.State.AdsState;
         Volatile.Write(ref _currentAdsState, (int)newState);
@@ -257,7 +257,7 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
         _previousAdsState = newState;
     }
 
-    private void OnSymbolVersionChanged(object? sender, AdsSymbolVersionChangedEventArgs eventArgs)
+    internal void OnSymbolVersionChanged(object? sender, AdsSymbolVersionChangedEventArgs eventArgs)
     {
         SymbolVersionChanged?.Invoke();
     }
