@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
 using Namotion.Interceptor.Connectors.TwinCAT.Tests.Integration.Models;
 using Namotion.Interceptor.Connectors.TwinCAT.Tests.Integration.Testing;
@@ -10,7 +9,6 @@ using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Xunit;
 using Xunit.Abstractions;
-
 
 namespace Namotion.Interceptor.Connectors.TwinCAT.Tests.Integration;
 
@@ -25,6 +23,9 @@ public class AdsIntegrationCollection : ICollectionFixture<SharedAdsServerFixtur
 [Collection("ADS Integration")]
 public class AdsIntegrationTests
 {
+    private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(30);
+    private static readonly TimeSpan WaitTimeout = TimeSpan.FromSeconds(15);
+
     private readonly ITestOutputHelper _output;
     private readonly SharedAdsServerFixture _fixture;
 
@@ -80,6 +81,30 @@ public class AdsIntegrationTests
         return (clientSource, backgroundService);
     }
 
+    private async Task RunIntegrationTestAsync(
+        IInterceptorSubject model,
+        Func<TwinCatSubjectClientSource, CancellationToken, Task> testBody)
+    {
+        _fixture.ResetSymbolValues();
+        var context = model.Context!;
+        var (clientSource, backgroundService) = CreateClientWithBackgroundService(model, _fixture.Server, context);
+        using var cts = new CancellationTokenSource(TestTimeout);
+
+        try
+        {
+            await backgroundService.StartAsync(cts.Token);
+            await testBody(clientSource, cts.Token);
+        }
+        finally
+        {
+            await cts.CancelAsync();
+            try { await backgroundService.StopAsync(CancellationToken.None); }
+            catch (OperationCanceledException) { }
+            backgroundService.Dispose();
+            await clientSource.DisposeAsync();
+        }
+    }
+
     [Fact]
     [Trait("Category", "Integration")]
     public async Task ConnectToServer_ShouldEstablishConnection()
@@ -119,252 +144,156 @@ public class AdsIntegrationTests
     [Trait("Category", "Integration")]
     public async Task ReadInitialState_ShouldPopulateProperties()
     {
-        // Arrange: server starts with known initial values
-        _fixture.ResetSymbolValues();
-        var server = _fixture.Server;
+        // Arrange
+        var model = new IntegrationTestModel(CreateContext());
 
-        var context = CreateContext();
-        var model = new IntegrationTestModel(context);
-
-        var (clientSource, backgroundService) = CreateClientWithBackgroundService(model, server, context);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-
-        try
+        // Act & Assert
+        await RunIntegrationTestAsync(model, async (clientSource, cancellationToken) =>
         {
-            // Act: start the background service (handles full lifecycle: connect, subscribe, load, change processing)
-            await backgroundService.StartAsync(cts.Token);
-
-            // Wait for connection
             await AsyncTestHelpers.WaitUntilAsync(
                 () => clientSource.Diagnostics.IsConnected,
-                timeout: TimeSpan.FromSeconds(15),
+                timeout: WaitTimeout,
                 message: "Client should connect before reading initial state");
 
             _output.WriteLine($"Connected. NotificationVariableCount={clientSource.Diagnostics.NotificationVariableCount}");
 
-            // Assert: model properties should be populated from server initial values via
-            // AdsTransMode.OnChange notifications (which deliver the initial value on subscription)
             await AsyncTestHelpers.WaitUntilAsync(
                 () => Math.Abs(model.Temperature - 25.0) < 0.001 &&
                       model.MachineName == "TestPLC" &&
                       model.IsRunning &&
                       model.Counter == 42,
-                timeout: TimeSpan.FromSeconds(15),
+                timeout: WaitTimeout,
                 message: $"Model properties should match server initial values. " +
                          $"Current: Temperature={model.Temperature}, MachineName={model.MachineName}, " +
                          $"IsRunning={model.IsRunning}, Counter={model.Counter}");
 
             _output.WriteLine(
                 $"Temperature={model.Temperature}, MachineName={model.MachineName}, IsRunning={model.IsRunning}, Counter={model.Counter}");
-        }
-        finally
-        {
-            await cts.CancelAsync();
-            try { await backgroundService.StopAsync(CancellationToken.None); }
-            catch (OperationCanceledException) { }
-            backgroundService.Dispose();
-            await clientSource.DisposeAsync();
-        }
+        });
     }
 
     [Fact]
     [Trait("Category", "Integration")]
     public async Task Notification_ServerValueChange_UpdatesClientProperty()
     {
-        // Arrange: server starts with Temperature=25.0
-        _fixture.ResetSymbolValues();
-        var server = _fixture.Server;
+        // Arrange
+        var model = new IntegrationTestModel(CreateContext());
 
-        var context = CreateContext();
-        var model = new IntegrationTestModel(context);
-
-        var (clientSource, backgroundService) = CreateClientWithBackgroundService(model, server, context);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-
-        try
+        await RunIntegrationTestAsync(model, async (clientSource, cancellationToken) =>
         {
-            // Start the background service
-            await backgroundService.StartAsync(cts.Token);
-
-            // Wait for connection and initial state
             await AsyncTestHelpers.WaitUntilAsync(
                 () => clientSource.Diagnostics.IsConnected &&
                       Math.Abs(model.Temperature - 25.0) < 0.001,
-                timeout: TimeSpan.FromSeconds(15),
+                timeout: WaitTimeout,
                 message: "Client should connect and load initial Temperature=25.0");
 
-            // Act: server changes the Temperature value
-            server.SetSymbolValue("GVL.Temperature", 42.0);
+            // Act
+            _fixture.Server.SetSymbolValue("GVL.Temperature", 42.0);
 
-            // Assert: client model should receive the updated value via notification
+            // Assert
             await AsyncTestHelpers.WaitUntilAsync(
                 () => Math.Abs(model.Temperature - 42.0) < 0.001,
-                timeout: TimeSpan.FromSeconds(15),
+                timeout: WaitTimeout,
                 message: "Client Temperature should update to 42.0 after server notification");
 
             _output.WriteLine($"Temperature updated to {model.Temperature} via notification");
-        }
-        finally
-        {
-            await cts.CancelAsync();
-            try { await backgroundService.StopAsync(CancellationToken.None); }
-            catch (OperationCanceledException) { }
-            backgroundService.Dispose();
-            await clientSource.DisposeAsync();
-        }
+        });
     }
 
     [Fact]
     [Trait("Category", "Integration")]
     public async Task WriteProperty_ShouldUpdateServerSymbol()
     {
-        // Arrange: server starts with known values
-        _fixture.ResetSymbolValues();
-        var server = _fixture.Server;
+        // Arrange
+        var model = new IntegrationTestModel(CreateContext());
 
-        var context = CreateContext();
-        var model = new IntegrationTestModel(context);
-
-        var (clientSource, backgroundService) = CreateClientWithBackgroundService(model, server, context);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-
-        try
+        await RunIntegrationTestAsync(model, async (clientSource, cancellationToken) =>
         {
-            // Start the background service (handles connect + subscribe + change processing)
-            await backgroundService.StartAsync(cts.Token);
-
-            // Wait for connection and initial state
             await AsyncTestHelpers.WaitUntilAsync(
                 () => clientSource.Diagnostics.IsConnected && model.Counter == 42,
-                timeout: TimeSpan.FromSeconds(15),
+                timeout: WaitTimeout,
                 message: "Client should connect and load initial Counter=42");
 
-            // Act: change model property (triggers change tracking -> ChangeQueueProcessor -> WriteChangesAsync)
+            // Act
             model.Counter = 999;
 
-            // Assert: server should receive the updated value
+            // Assert
             await AsyncTestHelpers.WaitUntilAsync(
                 () =>
                 {
-                    var serverValue = server.GetSymbolValue("GVL.Counter");
+                    var serverValue = _fixture.Server.GetSymbolValue("GVL.Counter");
                     return serverValue is int intValue && intValue == 999;
                 },
-                timeout: TimeSpan.FromSeconds(15),
+                timeout: WaitTimeout,
                 message: "Server Counter should update to 999 after client write");
 
-            _output.WriteLine($"Counter written to server: {server.GetSymbolValue("GVL.Counter")}");
-        }
-        finally
-        {
-            await cts.CancelAsync();
-            try { await backgroundService.StopAsync(CancellationToken.None); }
-            catch (OperationCanceledException) { }
-            backgroundService.Dispose();
-            await clientSource.DisposeAsync();
-        }
+            _output.WriteLine($"Counter written to server: {_fixture.Server.GetSymbolValue("GVL.Counter")}");
+        });
     }
 
     [Fact]
     [Trait("Category", "Integration")]
     public async Task MultipleNotifications_ServerChangesMultipleValues_AllUpdateOnClient()
     {
-        // Arrange: server starts with known initial values
-        _fixture.ResetSymbolValues();
-        var server = _fixture.Server;
+        // Arrange
+        var model = new IntegrationTestModel(CreateContext());
 
-        var context = CreateContext();
-        var model = new IntegrationTestModel(context);
-
-        var (clientSource, backgroundService) = CreateClientWithBackgroundService(model, server, context);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-
-        try
+        await RunIntegrationTestAsync(model, async (clientSource, cancellationToken) =>
         {
-            // Start the background service
-            await backgroundService.StartAsync(cts.Token);
-
-            // Wait for connection and initial state
             await AsyncTestHelpers.WaitUntilAsync(
                 () => clientSource.Diagnostics.IsConnected &&
                       Math.Abs(model.Temperature - 25.0) < 0.001 &&
                       model.Counter == 42 &&
                       model.IsRunning,
-                timeout: TimeSpan.FromSeconds(15),
+                timeout: WaitTimeout,
                 message: "Client should connect and load initial values");
 
-            // Act: server changes multiple values
-            server.SetSymbolValue("GVL.Temperature", 99.5);
-            server.SetSymbolValue("GVL.Counter", 100);
-            server.SetSymbolValue("GVL.IsRunning", false);
+            // Act
+            _fixture.Server.SetSymbolValue("GVL.Temperature", 99.5);
+            _fixture.Server.SetSymbolValue("GVL.Counter", 100);
+            _fixture.Server.SetSymbolValue("GVL.IsRunning", false);
 
-            // Assert: all model properties should update via notifications
+            // Assert
             await AsyncTestHelpers.WaitUntilAsync(
                 () => Math.Abs(model.Temperature - 99.5) < 0.001 &&
                       model.Counter == 100 &&
                       !model.IsRunning,
-                timeout: TimeSpan.FromSeconds(15),
+                timeout: WaitTimeout,
                 message: "All client properties should update after server changes multiple values");
 
             _output.WriteLine(
                 $"Temperature={model.Temperature}, Counter={model.Counter}, IsRunning={model.IsRunning}");
-        }
-        finally
-        {
-            await cts.CancelAsync();
-            try { await backgroundService.StopAsync(CancellationToken.None); }
-            catch (OperationCanceledException) { }
-            backgroundService.Dispose();
-            await clientSource.DisposeAsync();
-        }
+        });
     }
 
     [Fact]
     [Trait("Category", "Integration")]
     public async Task BatchPolling_PolledProperty_ReceivesUpdates()
     {
-        // Arrange: server starts with PolledCounter=0
-        _fixture.ResetSymbolValues();
-        var server = _fixture.Server;
+        // Arrange
+        var model = new PolledIntegrationTestModel(CreateContext());
 
-        var context = CreateContext();
-        var model = new PolledIntegrationTestModel(context);
-
-        var (clientSource, backgroundService) = CreateClientWithBackgroundService(model, server, context);
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-
-        try
+        await RunIntegrationTestAsync(model, async (clientSource, cancellationToken) =>
         {
-            // Start the background service
-            await backgroundService.StartAsync(cts.Token);
-
-            // Wait for connection and initial value via polling
             await AsyncTestHelpers.WaitUntilAsync(
                 () => clientSource.Diagnostics.IsConnected &&
                       clientSource.Diagnostics.PolledVariableCount > 0,
-                timeout: TimeSpan.FromSeconds(15),
+                timeout: WaitTimeout,
                 message: "Client should connect and register polled variables");
 
             _output.WriteLine($"Connected. PolledVariableCount={clientSource.Diagnostics.PolledVariableCount}");
 
-            // Act: server changes the polled value
-            server.SetSymbolValue("GVL.PolledCounter", 99);
+            // Act
+            _fixture.Server.SetSymbolValue("GVL.PolledCounter", 99);
 
-            // Assert: model should receive the updated value via batch polling
+            // Assert
             await AsyncTestHelpers.WaitUntilAsync(
                 () => model.PolledCounter == 99,
-                timeout: TimeSpan.FromSeconds(15),
+                timeout: WaitTimeout,
                 message: $"PolledCounter should update to 99 via batch polling. Current: {model.PolledCounter}");
 
             _output.WriteLine($"PolledCounter updated to {model.PolledCounter} via polling");
-        }
-        finally
-        {
-            await cts.CancelAsync();
-            try { await backgroundService.StopAsync(CancellationToken.None); }
-            catch (OperationCanceledException) { }
-            backgroundService.Dispose();
-            await clientSource.DisposeAsync();
-        }
+        });
     }
 
     // Note: Reconnection tests (ServerRestart_ClientReconnects, ServerRestart_PropertiesResyncAfterReconnection)

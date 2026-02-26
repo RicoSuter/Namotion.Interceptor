@@ -2,6 +2,8 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
 using Namotion.Interceptor.Registry.Paths;
+using TwinCAT;
+using TwinCAT.Ads;
 using Xunit;
 
 namespace Namotion.Interceptor.Connectors.TwinCAT.Tests.Client;
@@ -49,102 +51,21 @@ public class AdsConnectionManagerTests
     }
 
     [Fact]
-    public void Constructor_WithValidParameters_ShouldCreate()
+    public void InitialState_AllPropertiesHaveDefaultValues()
     {
         // Arrange & Act
         var manager = CreateManager();
 
         // Assert
         Assert.NotNull(manager);
-    }
-
-    [Fact]
-    public void Connection_Initially_ShouldBeNull()
-    {
-        // Arrange & Act
-        var manager = CreateManager();
-
-        // Assert
         Assert.Null(manager.Connection);
-    }
-
-    [Fact]
-    public void SymbolLoader_Initially_ShouldBeNull()
-    {
-        // Arrange & Act
-        var manager = CreateManager();
-
-        // Assert
         Assert.Null(manager.SymbolLoader);
-    }
-
-    [Fact]
-    public void CurrentAdsState_Initially_ShouldBeNull()
-    {
-        // Arrange & Act
-        var manager = CreateManager();
-
-        // Assert
         Assert.Null(manager.CurrentAdsState);
-    }
-
-    [Fact]
-    public void IsConnected_Initially_ShouldBeFalse()
-    {
-        // Arrange & Act
-        var manager = CreateManager();
-
-        // Assert
         Assert.False(manager.IsConnected);
-    }
-
-    [Fact]
-    public void TotalReconnectionAttempts_Initially_Zero()
-    {
-        // Arrange & Act
-        var manager = CreateManager();
-
-        // Assert
         Assert.Equal(0, manager.TotalReconnectionAttempts);
-    }
-
-    [Fact]
-    public void SuccessfulReconnections_Initially_Zero()
-    {
-        // Arrange & Act
-        var manager = CreateManager();
-
-        // Assert
         Assert.Equal(0, manager.SuccessfulReconnections);
-    }
-
-    [Fact]
-    public void FailedReconnections_Initially_Zero()
-    {
-        // Arrange & Act
-        var manager = CreateManager();
-
-        // Assert
         Assert.Equal(0, manager.FailedReconnections);
-    }
-
-    [Fact]
-    public void LastConnectedAt_Initially_Null()
-    {
-        // Arrange & Act
-        var manager = CreateManager();
-
-        // Assert
         Assert.Null(manager.LastConnectedAt);
-    }
-
-    [Fact]
-    public void CircuitBreaker_Initially_Closed()
-    {
-        // Arrange & Act
-        var manager = CreateManager();
-
-        // Assert
         Assert.False(manager.IsCircuitBreakerOpen);
         Assert.Equal(0, manager.CircuitBreakerTripCount);
     }
@@ -524,5 +445,177 @@ public class AdsConnectionManagerTests
 
         // Assert
         Assert.Equal(0, manager.TotalReconnectionAttempts);
+    }
+
+    [Fact]
+    public void OnConnectionStateChanged_ToConnected_FiresConnectionRestored()
+    {
+        // Arrange
+        var manager = CreateManager();
+        var fired = false;
+        manager.ConnectionRestored += () => fired = true;
+        var eventArgs = new ConnectionStateChangedEventArgs(
+            ConnectionStateChangedReason.Established,
+            ConnectionState.Connected,
+            ConnectionState.Disconnected);
+
+        // Act
+        manager.OnConnectionStateChanged(null, eventArgs);
+
+        // Assert
+        Assert.True(fired);
+    }
+
+    [Fact]
+    public void OnConnectionStateChanged_ToConnected_IncrementsSuccessfulReconnections()
+    {
+        // Arrange
+        var manager = CreateManager();
+        var eventArgs = new ConnectionStateChangedEventArgs(
+            ConnectionStateChangedReason.Established,
+            ConnectionState.Connected,
+            ConnectionState.Disconnected);
+
+        // Act
+        manager.OnConnectionStateChanged(null, eventArgs);
+
+        // Assert
+        Assert.Equal(1, manager.SuccessfulReconnections);
+    }
+
+    [Fact]
+    public void OnConnectionStateChanged_ToDisconnected_FiresConnectionLost()
+    {
+        // Arrange
+        var manager = CreateManager();
+        var fired = false;
+        manager.ConnectionLost += () => fired = true;
+        var eventArgs = new ConnectionStateChangedEventArgs(
+            ConnectionStateChangedReason.Lost,
+            ConnectionState.Disconnected,
+            ConnectionState.Connected);
+
+        // Act
+        manager.OnConnectionStateChanged(null, eventArgs);
+
+        // Assert
+        Assert.True(fired);
+    }
+
+    [Fact]
+    public void OnConnectionStateChanged_ToDisconnected_ClearsConnectionLog()
+    {
+        // Arrange
+        var mockLogger = new Mock<ILogger>();
+        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
+        var manager = CreateManager(mockLogger);
+
+        // Log a connection error first (uses Warning)
+        manager.LogFirstOccurrence("Connection", null, "Error");
+
+        var eventArgs = new ConnectionStateChangedEventArgs(
+            ConnectionStateChangedReason.Lost,
+            ConnectionState.Disconnected,
+            ConnectionState.Connected);
+
+        // Act
+        manager.OnConnectionStateChanged(null, eventArgs);
+
+        // Log again after disconnect cleared the log - should be Warning again
+        manager.LogFirstOccurrence("Connection", null, "Error");
+
+        // Assert - two warnings (first + after clear), zero debug
+        mockLogger.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                null,
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Exactly(2));
+    }
+
+    [Fact]
+    public void OnConnectionStateChanged_ConnectedToConnected_DoesNotFireConnectionRestored()
+    {
+        // Arrange
+        var manager = CreateManager();
+        var fired = false;
+        manager.ConnectionRestored += () => fired = true;
+        var eventArgs = new ConnectionStateChangedEventArgs(
+            ConnectionStateChangedReason.Established,
+            ConnectionState.Connected,
+            ConnectionState.Connected);
+
+        // Act
+        manager.OnConnectionStateChanged(null, eventArgs);
+
+        // Assert - no transition, so event should not fire
+        Assert.False(fired);
+    }
+
+    [Fact]
+    public void OnAdsStateChanged_ToRun_FiresAdsStateEnteredRun()
+    {
+        // Arrange
+        var manager = CreateManager();
+        var fired = false;
+        manager.AdsStateEnteredRun += () => fired = true;
+        var stateInfo = new StateInfo(AdsState.Run, 0);
+        var eventArgs = new AdsStateChangedEventArgs(stateInfo);
+
+        // Act
+        manager.OnAdsStateChanged(null, eventArgs);
+
+        // Assert
+        Assert.True(fired);
+        Assert.Equal(AdsState.Run, manager.CurrentAdsState);
+    }
+
+    [Fact]
+    public void OnAdsStateChanged_FromRunToRun_DoesNotFireAdsStateEnteredRun()
+    {
+        // Arrange
+        var manager = CreateManager();
+
+        // First transition to Run
+        manager.OnAdsStateChanged(null, new AdsStateChangedEventArgs(new StateInfo(AdsState.Run, 0)));
+
+        var fired = false;
+        manager.AdsStateEnteredRun += () => fired = true;
+
+        // Act - Run to Run transition
+        manager.OnAdsStateChanged(null, new AdsStateChangedEventArgs(new StateInfo(AdsState.Run, 0)));
+
+        // Assert
+        Assert.False(fired);
+    }
+
+    [Fact]
+    public void OnAdsStateChanged_ToStop_UpdatesCurrentAdsState()
+    {
+        // Arrange
+        var manager = CreateManager();
+
+        // Act
+        manager.OnAdsStateChanged(null, new AdsStateChangedEventArgs(new StateInfo(AdsState.Stop, 0)));
+
+        // Assert
+        Assert.Equal(AdsState.Stop, manager.CurrentAdsState);
+    }
+
+    [Fact]
+    public void OnSymbolVersionChanged_FiresSymbolVersionChanged()
+    {
+        // Arrange
+        var manager = CreateManager();
+        var fired = false;
+        manager.SymbolVersionChanged += () => fired = true;
+
+        // Act
+        manager.OnSymbolVersionChanged(null, new AdsSymbolVersionChangedEventArgs(1));
+
+        // Assert
+        Assert.True(fired);
     }
 }

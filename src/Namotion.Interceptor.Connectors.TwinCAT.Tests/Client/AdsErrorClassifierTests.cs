@@ -52,7 +52,7 @@ public class AdsErrorClassifierTests
     }
 
     [Fact]
-    public void IsTransientError_WithNoError_ReturnsTrue()
+    public void IsTransientError_WithNoError_FallsThroughToDefaultTrue()
     {
         // Arrange
         var errorCode = AdsErrorCode.NoError;
@@ -60,7 +60,7 @@ public class AdsErrorClassifierTests
         // Act
         var result = AdsErrorClassifier.IsTransientError(errorCode);
 
-        // Assert - falls through to default case which returns true
+        // Assert - NoError falls through to default case which returns true (not classified as permanent)
         Assert.True(result);
     }
 }

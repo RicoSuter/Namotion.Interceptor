@@ -7,9 +7,9 @@ namespace Namotion.Interceptor.Connectors.TwinCAT.Client;
 /// </summary>
 public class AdsClientDiagnostics
 {
-    private readonly IAdsClientDiagnosticsSource _source;
+    private readonly TwinCatSubjectClientSource _source;
 
-    internal AdsClientDiagnostics(IAdsClientDiagnosticsSource source)
+    internal AdsClientDiagnostics(TwinCatSubjectClientSource source)
     {
         _source = source;
     }
@@ -17,86 +17,50 @@ public class AdsClientDiagnostics
     /// <summary>
     /// Gets the current PLC state.
     /// </summary>
-    public AdsState? State => _source.CurrentState;
+    public AdsState? State => _source.ConnectionManager.CurrentAdsState;
 
     /// <summary>
     /// Gets whether the ADS client is currently connected.
     /// </summary>
-    public bool IsConnected => _source.IsConnected;
+    public bool IsConnected => _source.ConnectionManager.IsConnected;
 
     /// <summary>
     /// Gets the number of variables using notification mode.
     /// </summary>
-    public int NotificationVariableCount => _source.NotificationCount;
+    public int NotificationVariableCount => _source.SubscriptionManager.NotificationCount;
 
     /// <summary>
     /// Gets the number of variables using polling mode.
     /// </summary>
-    public int PolledVariableCount => _source.PolledCount;
+    public int PolledVariableCount => _source.SubscriptionManager.PolledCount;
 
     /// <summary>
     /// Gets the total reconnection attempts since startup.
     /// </summary>
-    public long TotalReconnectionAttempts => _source.TotalReconnectionAttempts;
+    public long TotalReconnectionAttempts => _source.ConnectionManager.TotalReconnectionAttempts;
 
     /// <summary>
     /// Gets the successful reconnections since startup.
     /// </summary>
-    public long SuccessfulReconnections => _source.SuccessfulReconnections;
+    public long SuccessfulReconnections => _source.ConnectionManager.SuccessfulReconnections;
 
     /// <summary>
     /// Gets the failed reconnections since startup.
     /// </summary>
-    public long FailedReconnections => _source.FailedReconnections;
+    public long FailedReconnections => _source.ConnectionManager.FailedReconnections;
 
     /// <summary>
     /// Gets the last successful connection time.
     /// </summary>
-    public DateTimeOffset? LastConnectedAt => _source.LastConnectedAt;
+    public DateTimeOffset? LastConnectedAt => _source.ConnectionManager.LastConnectedAt;
 
     /// <summary>
     /// Gets whether the circuit breaker is currently open.
     /// </summary>
-    public bool IsCircuitBreakerOpen => _source.IsCircuitBreakerOpen;
+    public bool IsCircuitBreakerOpen => _source.ConnectionManager.IsCircuitBreakerOpen;
 
     /// <summary>
     /// Gets the number of times the circuit breaker has tripped.
     /// </summary>
-    public long CircuitBreakerTripCount => _source.CircuitBreakerTripCount;
-}
-
-/// <summary>
-/// Internal interface for providing diagnostic data to <see cref="AdsClientDiagnostics"/>.
-/// </summary>
-internal interface IAdsClientDiagnosticsSource
-{
-    /// <summary>Gets the current PLC state.</summary>
-    AdsState? CurrentState { get; }
-
-    /// <summary>Gets whether the client is connected.</summary>
-    bool IsConnected { get; }
-
-    /// <summary>Gets the number of notification variables.</summary>
-    int NotificationCount { get; }
-
-    /// <summary>Gets the number of polled variables.</summary>
-    int PolledCount { get; }
-
-    /// <summary>Gets the total reconnection attempts.</summary>
-    long TotalReconnectionAttempts { get; }
-
-    /// <summary>Gets the successful reconnection count.</summary>
-    long SuccessfulReconnections { get; }
-
-    /// <summary>Gets the failed reconnection count.</summary>
-    long FailedReconnections { get; }
-
-    /// <summary>Gets the last successful connection time.</summary>
-    DateTimeOffset? LastConnectedAt { get; }
-
-    /// <summary>Gets whether the circuit breaker is open.</summary>
-    bool IsCircuitBreakerOpen { get; }
-
-    /// <summary>Gets the circuit breaker trip count.</summary>
-    long CircuitBreakerTripCount { get; }
+    public long CircuitBreakerTripCount => _source.ConnectionManager.CircuitBreakerTripCount;
 }

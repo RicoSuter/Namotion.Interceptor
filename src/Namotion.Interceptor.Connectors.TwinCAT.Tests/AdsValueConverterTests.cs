@@ -168,4 +168,39 @@ public class AdsValueConverterTests
         // Assert
         Assert.Same(values, result);
     }
+
+    [Fact]
+    public void CustomSubclass_CanOverrideConversion()
+    {
+        // Arrange
+        var converter = new ScalingValueConverter(scaleFactor: 10.0);
+        var property = GetProperty(nameof(TestPlcModel.Temperature));
+
+        // Act
+        var toProperty = converter.ConvertToPropertyValue(5.0, property);
+        var toAds = converter.ConvertToAdsValue(50.0, property);
+
+        // Assert
+        Assert.Equal(50.0, toProperty);
+        Assert.Equal(5.0, toAds);
+    }
+
+    private class ScalingValueConverter(double scaleFactor) : AdsValueConverter
+    {
+        public override object? ConvertToPropertyValue(object? adsValue, RegisteredSubjectProperty property)
+        {
+            if (adsValue is double value)
+                return value * scaleFactor;
+
+            return base.ConvertToPropertyValue(adsValue, property);
+        }
+
+        public override object? ConvertToAdsValue(object? propertyValue, RegisteredSubjectProperty property)
+        {
+            if (propertyValue is double value)
+                return value / scaleFactor;
+
+            return base.ConvertToAdsValue(propertyValue, property);
+        }
+    }
 }
