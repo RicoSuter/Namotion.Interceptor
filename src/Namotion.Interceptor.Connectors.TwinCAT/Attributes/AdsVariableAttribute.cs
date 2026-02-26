@@ -16,6 +16,7 @@ public class AdsVariableAttribute : PathAttribute
     public AdsVariableAttribute(string symbolPath, string? connectorName = null)
         : base(connectorName ?? AdsConstants.DefaultConnectorName, symbolPath)
     {
+        ArgumentNullException.ThrowIfNull(symbolPath);
         SymbolPath = symbolPath;
     }
 
@@ -46,5 +47,5 @@ public class AdsVariableAttribute : PathAttribute
     /// Higher values are demoted first when the notification limit is reached.
     /// Default: 0 (normal priority).
     /// </summary>
-    public int Priority { get; init; } = 0;
+    public int Priority { get; init; }
 }
