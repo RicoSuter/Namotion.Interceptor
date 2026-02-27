@@ -116,7 +116,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
         _propertyWriter = propertyWriter;
 
         await _connectionManager.ConnectWithRetryAsync(cancellationToken).ConfigureAwait(false);
-        await FullRescanAsync(cancellationToken).ConfigureAwait(false);
+        FullRescan();
 
         _isStarted = true;
         return _subscriptionManager.Subscriptions;
@@ -246,9 +246,11 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
 
         try
         {
-            var symbols = new List<ISymbol>();
-            var writeValues = new List<object>();
-            var validChanges = new List<SubjectPropertyChange>();
+            var capacity = changes.Length;
+            var symbols = new List<ISymbol>(capacity);
+            var writeValues = new object[capacity];
+            var writeCount = 0;
+            var validChanges = new List<SubjectPropertyChange>(capacity);
 
             foreach (var change in changes.Span)
             {
@@ -273,7 +275,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
                 symbols.Add(symbol);
                 var convertedValue = _configuration.ValueConverter.ConvertToAdsValue(
                     change.GetNewValue<object?>(), registeredProperty);
-                writeValues.Add(convertedValue ?? DBNull.Value);
+                writeValues[writeCount++] = convertedValue ?? DBNull.Value;
                 validChanges.Add(change);
             }
 
@@ -282,18 +284,21 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
                 return new ValueTask<WriteResult>(WriteResult.Success);
             }
 
+            // Trim writeValues to exact count only if some changes were skipped
+            var writeArray = writeCount == capacity ? writeValues : writeValues[..writeCount];
+
             // Try batch write via SumSymbolWrite, fall back to individual writes
             try
             {
                 var sumWrite = new SumSymbolWrite(connection, symbols);
-                var sumResult = sumWrite.Write(writeValues.ToArray());
+                var sumResult = sumWrite.Write(writeArray);
                 var batchErrorCode = sumResult.ErrorCode;
                 var errorCodes = sumResult.SubErrors;
 
                 if (batchErrorCode == AdsErrorCode.NoError && errorCodes is not null)
                 {
                     // Check individual results
-                    var failedChanges = new List<SubjectPropertyChange>();
+                    List<SubjectPropertyChange>? failedChanges = null;
                     var transientCount = 0;
                     var permanentCount = 0;
 
@@ -301,7 +306,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
                     {
                         if (errorCodes[index] != AdsErrorCode.NoError)
                         {
-                            failedChanges.Add(validChanges[index]);
+                            (failedChanges ??= []).Add(validChanges[index]);
                             if (AdsErrorClassifier.IsTransientError(errorCodes[index]))
                             {
                                 transientCount++;
@@ -313,7 +318,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
                         }
                     }
 
-                    if (failedChanges.Count == 0)
+                    if (failedChanges is null)
                     {
                         return new ValueTask<WriteResult>(WriteResult.Success);
                     }
@@ -329,7 +334,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
                 if (batchErrorCode == AdsErrorCode.DeviceServiceNotSupported)
                 {
                     _logger.LogDebug("SumSymbolWrite not supported, falling back to individual writes.");
-                    return WriteIndividualValues(symbols, writeValues, validChanges, changes);
+                    return WriteIndividualValues(symbols, writeArray, validChanges, changes);
                 }
 
                 if (batchErrorCode != AdsErrorCode.NoError)
@@ -345,7 +350,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             catch (AdsException exception) when ((AdsErrorCode)exception.HResult == AdsErrorCode.DeviceServiceNotSupported)
             {
                 _logger.LogDebug("SumSymbolWrite threw DeviceServiceNotSupported, falling back to individual writes.");
-                return WriteIndividualValues(symbols, writeValues, validChanges, changes);
+                return WriteIndividualValues(symbols, writeArray, validChanges, changes);
             }
 
             return new ValueTask<WriteResult>(WriteResult.Success);
@@ -368,11 +373,11 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
 
     private ValueTask<WriteResult> WriteIndividualValues(
         List<ISymbol> symbols,
-        List<object> writeValues,
+        object[] writeValues,
         List<SubjectPropertyChange> validChanges,
         ReadOnlyMemory<SubjectPropertyChange> allChanges)
     {
-        var failedChanges = new List<SubjectPropertyChange>();
+        List<SubjectPropertyChange>? failedChanges = null;
         var transientCount = 0;
         var permanentCount = 0;
 
@@ -384,7 +389,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             }
             catch (AdsException exception)
             {
-                failedChanges.Add(validChanges[index]);
+                (failedChanges ??= []).Add(validChanges[index]);
                 if (AdsErrorClassifier.IsTransientError((AdsErrorCode)exception.HResult))
                 {
                     transientCount++;
@@ -396,12 +401,12 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             }
             catch (Exception)
             {
-                failedChanges.Add(validChanges[index]);
+                (failedChanges ??= []).Add(validChanges[index]);
                 permanentCount++;
             }
         }
 
-        if (failedChanges.Count == 0)
+        if (failedChanges is null)
         {
             return new ValueTask<WriteResult>(WriteResult.Success);
         }
@@ -414,7 +419,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
                 : WriteResult.Failure(failedChanges.ToArray(), error));
     }
 
-    private Task FullRescanAsync(CancellationToken cancellationToken)
+    private void FullRescan()
     {
         _subscriptionManager.ClearAll();
         _connectionManager.RecreateSymbolLoader();
@@ -431,8 +436,6 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             _propertyWriter,
             this,
             _connectionManager);
-
-        return Task.CompletedTask;
     }
 
     private async Task TriggerFullRescanAsync()
@@ -440,7 +443,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
         try
         {
             _propertyWriter?.StartBuffering();
-            await FullRescanAsync(CancellationToken.None).ConfigureAwait(false);
+            FullRescan();
             await (_propertyWriter?.LoadInitialStateAndResumeAsync(CancellationToken.None)
                 ?? Task.CompletedTask).ConfigureAwait(false);
         }
