@@ -232,9 +232,10 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         for (var index = 0; index < mappings.Count; index++)
         {
             var (property, symbolPath) = mappings[index];
-            var readMode = GetConfiguredReadMode(property, defaultReadMode);
-            var cycleTime = GetConfiguredCycleTime(property, defaultCycleTime);
-            var priority = GetConfiguredPriority(property);
+            var attribute = TryGetAdsVariableAttribute(property);
+            var readMode = GetConfiguredReadMode(attribute, defaultReadMode);
+            var cycleTime = GetConfiguredCycleTime(attribute, defaultCycleTime);
+            var priority = GetConfiguredPriority(attribute);
 
             if (readMode == AdsReadMode.Notification)
             {
@@ -279,9 +280,16 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         return result;
     }
 
-    internal static AdsReadMode GetConfiguredReadMode(RegisteredSubjectProperty property, AdsReadMode defaultReadMode)
+    private static AdsVariableAttribute? TryGetAdsVariableAttribute(RegisteredSubjectProperty property)
     {
-        var attribute = property.ReflectionAttributes.OfType<AdsVariableAttribute>().FirstOrDefault();
+        return property.ReflectionAttributes.OfType<AdsVariableAttribute>().FirstOrDefault();
+    }
+
+    internal static AdsReadMode GetConfiguredReadMode(RegisteredSubjectProperty property, AdsReadMode defaultReadMode)
+        => GetConfiguredReadMode(TryGetAdsVariableAttribute(property), defaultReadMode);
+
+    private static AdsReadMode GetConfiguredReadMode(AdsVariableAttribute? attribute, AdsReadMode defaultReadMode)
+    {
         if (attribute is not null && attribute.ReadMode != AdsReadMode.Auto)
         {
             return attribute.ReadMode;
@@ -291,8 +299,10 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     }
 
     internal static int GetConfiguredCycleTime(RegisteredSubjectProperty property, int defaultCycleTime)
+        => GetConfiguredCycleTime(TryGetAdsVariableAttribute(property), defaultCycleTime);
+
+    private static int GetConfiguredCycleTime(AdsVariableAttribute? attribute, int defaultCycleTime)
     {
-        var attribute = property.ReflectionAttributes.OfType<AdsVariableAttribute>().FirstOrDefault();
         if (attribute is not null && attribute.CycleTime != int.MinValue)
         {
             return attribute.CycleTime;
@@ -302,14 +312,18 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     }
 
     internal static int GetConfiguredPriority(RegisteredSubjectProperty property)
+        => GetConfiguredPriority(TryGetAdsVariableAttribute(property));
+
+    private static int GetConfiguredPriority(AdsVariableAttribute? attribute)
     {
-        var attribute = property.ReflectionAttributes.OfType<AdsVariableAttribute>().FirstOrDefault();
         return attribute?.Priority ?? 0;
     }
 
     internal static int GetConfiguredMaxDelay(RegisteredSubjectProperty property, int defaultMaxDelay)
+        => GetConfiguredMaxDelay(TryGetAdsVariableAttribute(property), defaultMaxDelay);
+
+    private static int GetConfiguredMaxDelay(AdsVariableAttribute? attribute, int defaultMaxDelay)
     {
-        var attribute = property.ReflectionAttributes.OfType<AdsVariableAttribute>().FirstOrDefault();
         if (attribute is not null && attribute.MaxDelay != int.MinValue)
         {
             return attribute.MaxDelay;
@@ -335,8 +349,9 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             return;
         }
 
-        var cycleTime = GetConfiguredCycleTime(property, _configuration.DefaultCycleTime);
-        var maxDelay = GetConfiguredMaxDelay(property, _configuration.DefaultMaxDelay);
+        var attribute = TryGetAdsVariableAttribute(property);
+        var cycleTime = GetConfiguredCycleTime(attribute, _configuration.DefaultCycleTime);
+        var maxDelay = GetConfiguredMaxDelay(attribute, _configuration.DefaultMaxDelay);
         var notificationSettings = new NotificationSettings(
             AdsTransMode.OnChange, cycleTime, maxDelay);
 

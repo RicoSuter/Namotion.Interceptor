@@ -26,9 +26,6 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
 
     private SubjectPropertyWriter? _propertyWriter;
 
-#pragma warning disable CS0414 // Field assigned but not read — used for diagnostics/future health checks
-    private volatile bool _isStarted;
-#pragma warning restore CS0414
     private AdsClientDiagnostics? _diagnostics;
     private int _disposed; // 0 = false, 1 = true
 
@@ -118,7 +115,6 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
         await _connectionManager.ConnectWithRetryAsync(cancellationToken).ConfigureAwait(false);
         FullRescan();
 
-        _isStarted = true;
         return _subscriptionManager.Subscriptions;
     }
 
@@ -132,6 +128,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
         }
 
         var properties = new List<(RegisteredSubjectProperty Property, ISymbol Symbol)>();
+        var symbols = new List<ISymbol>();
 
         foreach (var propertyReference in _ownership.Properties)
         {
@@ -151,6 +148,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             if (symbol is not null)
             {
                 properties.Add((registeredProperty, symbol));
+                symbols.Add(symbol);
             }
         }
 
@@ -161,7 +159,6 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
 
         // Try batch read via SumSymbolRead first, fall back to individual reads
         var values = new (RegisteredSubjectProperty Property, object? Value)[properties.Count];
-        var symbols = properties.Select(item => item.Symbol).ToList();
 
         try
         {
@@ -334,7 +331,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
                 if (batchErrorCode == AdsErrorCode.DeviceServiceNotSupported)
                 {
                     _logger.LogDebug("SumSymbolWrite not supported, falling back to individual writes.");
-                    return WriteIndividualValues(symbols, writeArray, validChanges, changes);
+                    return WriteIndividualValues(symbols, writeArray, validChanges);
                 }
 
                 if (batchErrorCode != AdsErrorCode.NoError)
@@ -350,7 +347,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             catch (AdsException exception) when ((AdsErrorCode)exception.HResult == AdsErrorCode.DeviceServiceNotSupported)
             {
                 _logger.LogDebug("SumSymbolWrite threw DeviceServiceNotSupported, falling back to individual writes.");
-                return WriteIndividualValues(symbols, writeArray, validChanges, changes);
+                return WriteIndividualValues(symbols, writeArray, validChanges);
             }
 
             return new ValueTask<WriteResult>(WriteResult.Success);
@@ -374,8 +371,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
     private ValueTask<WriteResult> WriteIndividualValues(
         List<ISymbol> symbols,
         object[] writeValues,
-        List<SubjectPropertyChange> validChanges,
-        ReadOnlyMemory<SubjectPropertyChange> allChanges)
+        List<SubjectPropertyChange> validChanges)
     {
         List<SubjectPropertyChange>? failedChanges = null;
         var transientCount = 0;
