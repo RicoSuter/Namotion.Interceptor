@@ -274,7 +274,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
                 symbols.Add(symbol);
                 var convertedValue = _configuration.ValueConverter.ConvertToAdsValue(
                     change.GetNewValue<object?>(), registeredProperty);
-                writeValues[writeCount++] = convertedValue ?? DBNull.Value;
+                writeValues[writeCount++] = convertedValue!; // null handling with real PLC TBD
                 validChanges.Add(change);
             }
 
@@ -431,13 +431,17 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
         catch (SemaphoreFullException) { }
     }
 
-    private void FullRescan()
+    /// <summary>
+    /// Performs a full rescan: clears subscriptions, reloads symbols, re-registers.
+    /// Returns true if the rescan was executed, false if skipped (e.g., no connection).
+    /// </summary>
+    private bool FullRescan()
     {
         var connection = _connectionManager.Connection;
         if (connection is null)
         {
             _logger.LogDebug("Skipping rescan: ADS connection is not established.");
-            return;
+            return false;
         }
 
         _subscriptionManager.ClearAll();
@@ -455,6 +459,8 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             _propertyWriter,
             this,
             _connectionManager);
+
+        return true;
     }
 
     /// <inheritdoc />
@@ -486,6 +492,12 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             catch (Exception exception)
             {
                 _connectionManager.LogFirstOccurrence("Rescan", exception, "Rescan failed.");
+
+                // Re-stamp the request so the debounce period acts as a retry backoff
+                if (Interlocked.Read(ref _lastRescanRequestedAtTicks) > 0)
+                {
+                    Interlocked.Exchange(ref _lastRescanRequestedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
+                }
             }
         }
     }
@@ -517,13 +529,16 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             break;
         }
 
-        // Clear the request and execute the rescan
-        Interlocked.Exchange(ref _lastRescanRequestedAtTicks, 0);
-
+        // Execute the rescan. Only clear the request after success so that
+        // a transient failure (or missing connection) causes a retry on the next loop iteration.
         _logger.LogInformation("Executing debounced rescan.");
-        FullRescan();
-        await (_propertyWriter?.LoadInitialStateAndResumeAsync(stoppingToken)
-            ?? Task.CompletedTask).ConfigureAwait(false);
+        if (FullRescan())
+        {
+            await (_propertyWriter?.LoadInitialStateAndResumeAsync(stoppingToken)
+                ?? Task.CompletedTask).ConfigureAwait(false);
+
+            Interlocked.Exchange(ref _lastRescanRequestedAtTicks, 0);
+        }
     }
 
     private static async Task WaitForSignalOrTimeoutAsync(
@@ -545,11 +560,14 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             return;
         }
 
+        // Stop BackgroundService first so ExecuteAsync loop exits before
+        // disposing the resources it uses (_rescanSignal, _subscriptionManager, etc.)
+        Dispose();
+
         await _subscriptionManager.DisposeAsync().ConfigureAwait(false);
         await _connectionManager.DisposeAsync().ConfigureAwait(false);
         _ownership.Dispose();
         _rescanSignal.Dispose();
-        Dispose();
     }
 
 }

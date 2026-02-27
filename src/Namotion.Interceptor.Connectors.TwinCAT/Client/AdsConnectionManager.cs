@@ -32,9 +32,9 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
     private long _failedReconnections;
     private long _lastConnectedAtTicks;
 
-    // ADS state tracking
-    private int _currentAdsState = -1; // -1 = not set, otherwise cast to AdsState
-    private AdsState? _previousAdsState;
+    // ADS state tracking (-1 = not set, otherwise cast to AdsState)
+    private int _currentAdsState = -1;
+    private int _previousAdsState = -1;
 
     private int _disposed; // 0 = false, 1 = true
 
@@ -139,17 +139,29 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
 
                     var amsNetId = AmsNetId.Parse(_configuration.AmsNetId);
 
-                    _client = _configuration.RouterConfiguration is not null
+                    var client = _configuration.RouterConfiguration is not null
                         ? new AdsClient(_configuration.RouterConfiguration, null)
                         : new AdsClient();
-                  
-                    await _client.ConnectAsync(amsNetId, _configuration.AmsPort, cancellationToken);
-                    _connection = _client;
+
+                    try
+                    {
+                        await client.ConnectAsync(amsNetId, _configuration.AmsPort, cancellationToken);
+                    }
+                    catch
+                    {
+                        client.Dispose();
+                        throw;
+                    }
+
+                    client.Timeout = (int)_configuration.Timeout.TotalMilliseconds;
+
+                    _client = client;
+                    _connection = client;
 
                     // Subscribe to connection state, ADS state, and symbol version changes
-                    _client.ConnectionStateChanged += OnConnectionStateChanged;
-                    _client.AdsStateChanged += OnAdsStateChanged;
-                    _client.AdsSymbolVersionChanged += OnSymbolVersionChanged;
+                    client.ConnectionStateChanged += OnConnectionStateChanged;
+                    client.AdsStateChanged += OnAdsStateChanged;
+                    client.AdsSymbolVersionChanged += OnSymbolVersionChanged;
 
                     Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
                     _circuitBreaker.RecordSuccess();
@@ -239,7 +251,8 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
         var newState = eventArgs.State.AdsState;
         Volatile.Write(ref _currentAdsState, (int)newState);
 
-        if (newState == AdsState.Run && _previousAdsState != AdsState.Run)
+        var previousState = (AdsState)Interlocked.Exchange(ref _previousAdsState, (int)newState);
+        if (newState == AdsState.Run && previousState != AdsState.Run)
         {
             AdsStateEnteredRun?.Invoke();
         }
@@ -248,8 +261,6 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
             LogFirstOccurrence("PlcState", null,
                 "PLC left Run state: {State}. Writes paused.", newState);
         }
-
-        _previousAdsState = newState;
     }
 
     internal void OnSymbolVersionChanged(object? sender, AdsSymbolVersionChangedEventArgs eventArgs)

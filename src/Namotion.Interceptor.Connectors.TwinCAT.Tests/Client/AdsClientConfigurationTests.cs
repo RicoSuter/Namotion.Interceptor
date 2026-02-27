@@ -26,7 +26,6 @@ public class AdsClientConfigurationTests
         // Assert
         Assert.Equal(851, configuration.AmsPort);
         Assert.Equal(TimeSpan.FromSeconds(5), configuration.Timeout);
-        Assert.Null(configuration.SessionSettings);
         Assert.Equal(AdsReadMode.Auto, configuration.DefaultReadMode);
         Assert.Equal(100, configuration.DefaultCycleTime);
         Assert.Equal(0, configuration.DefaultMaxDelay);

@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Configuration;
 using Namotion.Interceptor.Registry.Paths;
-using TwinCAT.Ads;
 
 namespace Namotion.Interceptor.Connectors.TwinCAT.Client;
 
@@ -28,11 +27,6 @@ public class AdsClientConfiguration
     /// Gets or sets the ADS communication timeout.
     /// </summary>
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(5);
-
-    /// <summary>
-    /// Gets or sets custom ADS session settings for advanced users. Null uses defaults.
-    /// </summary>
-    public SessionSettings? SessionSettings { get; set; }
 
     /// <summary>
     /// Gets or sets the path provider for property-to-symbol mapping.
@@ -128,10 +122,28 @@ public class AdsClientConfiguration
         if (AmsPort <= 0)
             throw new ArgumentOutOfRangeException(nameof(AmsPort), "AmsPort must be positive.");
 
+        if (Timeout <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(Timeout), "Timeout must be positive.");
+
+        if (DefaultCycleTime <= 0)
+            throw new ArgumentOutOfRangeException(nameof(DefaultCycleTime), "DefaultCycleTime must be positive.");
+
         if (MaxNotifications <= 0)
             throw new ArgumentOutOfRangeException(nameof(MaxNotifications), "MaxNotifications must be positive.");
 
         if (PollingInterval <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(PollingInterval), "PollingInterval must be positive.");
+
+        if (WriteRetryQueueSize < 0)
+            throw new ArgumentOutOfRangeException(nameof(WriteRetryQueueSize), "WriteRetryQueueSize must be non-negative.");
+
+        if (HealthCheckInterval <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(HealthCheckInterval), "HealthCheckInterval must be positive.");
+
+        if (CircuitBreakerFailureThreshold <= 0)
+            throw new ArgumentOutOfRangeException(nameof(CircuitBreakerFailureThreshold), "CircuitBreakerFailureThreshold must be positive.");
+
+        if (CircuitBreakerCooldown <= TimeSpan.Zero)
+            throw new ArgumentOutOfRangeException(nameof(CircuitBreakerCooldown), "CircuitBreakerCooldown must be positive.");
     }
 }

@@ -197,6 +197,9 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
 
     /// <summary>
     /// Cleanup callback for when a subject is being detached from the graph.
+    /// Called by SourceOwnershipManager before OnPropertyReleasing for each property.
+    /// This eagerly removes _symbolToProperty entries; OnPropertyReleasing handles
+    /// the remaining dictionaries (_notificationSubscriptions, _polledProperties, _propertyToSymbol).
     /// </summary>
     internal void OnSubjectDetaching(IInterceptorSubject subject)
     {
@@ -333,7 +336,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         var symbol = TryGetSymbol(symbolLoader, symbolPath);
         if (symbol is null)
         {
-            connectionManager.LogFirstOccurrence($"Symbol:{symbolPath}", null,
+            connectionManager.LogFirstOccurrence("SymbolNotFound", null,
                 "Symbol '{SymbolPath}' not found in PLC. Skipping notification.", symbolPath);
             return;
         }
@@ -382,7 +385,11 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
 
         var useFallback = false;
         var sumRead = new SumSymbolRead(connection, symbols);
-        var timer = new Timer(_ =>
+        var pollingInterval = _configuration.PollingInterval;
+
+        // One-shot timer that re-arms in finally to prevent overlapping callbacks.
+        Timer? timer = null;
+        timer = new Timer(_ =>
         {
             try
             {
@@ -404,15 +411,17 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
                         }
                     }
 
-                    if (newSymbols.Count == 0)
-                    {
-                        return;
-                    }
-
                     symbols = newSymbols;
                     pollingEntries = newEntries;
-                    sumRead = new SumSymbolRead(connection, newSymbols);
+                    sumRead = newSymbols.Count > 0
+                        ? new SumSymbolRead(connection, newSymbols)
+                        : null;
                     useFallback = false;
+                }
+
+                if (sumRead is null || symbols.Count == 0)
+                {
+                    return;
                 }
 
                 if (!useFallback)
@@ -472,7 +481,18 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             {
                 connectionManager.LogFirstOccurrence("BatchPoll", exception, "Batch polling failed.");
             }
-        }, null, TimeSpan.Zero, _configuration.PollingInterval);
+            finally
+            {
+                try
+                {
+                    timer?.Change(pollingInterval, Timeout.InfiniteTimeSpan);
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Timer was disposed (ClearAll/DisposeAsync), stop polling
+                }
+            }
+        }, null, TimeSpan.Zero, Timeout.InfiniteTimeSpan);
 
         _subscriptions.Add(Disposable.Create(() => timer.Dispose()));
     }
