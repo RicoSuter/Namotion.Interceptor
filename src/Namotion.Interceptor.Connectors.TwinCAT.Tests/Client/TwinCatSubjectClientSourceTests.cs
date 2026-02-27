@@ -33,17 +33,52 @@ public class TwinCatSubjectClientSourceTests
         };
     }
 
+    private static TwinCatSubjectClientSource CreateSource(
+        TestPlcModel? subject = null,
+        AdsClientConfiguration? configuration = null,
+        ILogger? logger = null)
+    {
+        var context = CreateContext();
+        return new TwinCatSubjectClientSource(
+            subject ?? new TestPlcModel(context),
+            configuration ?? CreateConfiguration(),
+            logger ?? new Mock<ILogger>().Object);
+    }
+
+    private static (TwinCatSubjectClientSource Source, Mock<ILogger> MockLogger) CreateSourceWithFastRescan()
+    {
+        var configuration = CreateConfiguration();
+        configuration.RescanDebounceTime = TimeSpan.FromMilliseconds(50);
+        configuration.HealthCheckInterval = TimeSpan.FromMilliseconds(50);
+
+        var mockLogger = new Mock<ILogger>();
+        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
+
+        var source = CreateSource(configuration: configuration, logger: mockLogger.Object);
+        return (source, mockLogger);
+    }
+
+    private static void VerifyLogContains(Mock<ILogger> mockLogger, LogLevel level, string messageSubstring)
+    {
+        mockLogger.Verify(
+            l => l.Log(
+                level,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((value, _) => value.ToString()!.Contains(messageSubstring)),
+                null,
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.AtLeastOnce);
+    }
+
     [Fact]
     public void Constructor_ShouldCreateSourceSuccessfully()
     {
         // Arrange
         var context = CreateContext();
         var subject = new TestPlcModel(context);
-        var configuration = CreateConfiguration();
-        var logger = new Mock<ILogger>().Object;
 
         // Act
-        var source = new TwinCatSubjectClientSource(subject, configuration, logger);
+        var source = CreateSource(subject);
 
         // Assert
         Assert.NotNull(source);
@@ -54,12 +89,7 @@ public class TwinCatSubjectClientSourceTests
     public void WriteBatchSize_ShouldBeZero()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new TestPlcModel(context);
-        var configuration = CreateConfiguration();
-        var logger = new Mock<ILogger>().Object;
-
-        var source = new TwinCatSubjectClientSource(subject, configuration, logger);
+        var source = CreateSource();
 
         // Act & Assert
         Assert.Equal(0, source.WriteBatchSize);
@@ -69,49 +99,27 @@ public class TwinCatSubjectClientSourceTests
     public void Diagnostics_ShouldReturnNonNull()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new TestPlcModel(context);
-        var configuration = CreateConfiguration();
-        var logger = new Mock<ILogger>().Object;
+        var source = CreateSource();
 
-        var source = new TwinCatSubjectClientSource(subject, configuration, logger);
-
-        // Act
-        var diagnostics = source.Diagnostics;
-
-        // Assert
-        Assert.NotNull(diagnostics);
+        // Act & Assert
+        Assert.NotNull(source.Diagnostics);
     }
 
     [Fact]
     public void Diagnostics_ShouldReturnSameInstance()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new TestPlcModel(context);
-        var configuration = CreateConfiguration();
-        var logger = new Mock<ILogger>().Object;
+        var source = CreateSource();
 
-        var source = new TwinCatSubjectClientSource(subject, configuration, logger);
-
-        // Act
-        var diagnostics1 = source.Diagnostics;
-        var diagnostics2 = source.Diagnostics;
-
-        // Assert
-        Assert.Same(diagnostics1, diagnostics2);
+        // Act & Assert
+        Assert.Same(source.Diagnostics, source.Diagnostics);
     }
 
     [Fact]
     public void Diagnostics_InitialState_ShouldHaveZeroCounts()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new TestPlcModel(context);
-        var configuration = CreateConfiguration();
-        var logger = new Mock<ILogger>().Object;
-
-        var source = new TwinCatSubjectClientSource(subject, configuration, logger);
+        var source = CreateSource();
 
         // Act
         var diagnostics = source.Diagnostics;
@@ -133,12 +141,7 @@ public class TwinCatSubjectClientSourceTests
     public async Task DisposeAsync_ShouldCompleteWithoutError()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new TestPlcModel(context);
-        var configuration = CreateConfiguration();
-        var logger = new Mock<ILogger>().Object;
-
-        var source = new TwinCatSubjectClientSource(subject, configuration, logger);
+        var source = CreateSource();
 
         // Act & Assert - should not throw
         await source.DisposeAsync();
@@ -148,12 +151,7 @@ public class TwinCatSubjectClientSourceTests
     public async Task DisposeAsync_CalledMultipleTimes_ShouldBeIdempotent()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new TestPlcModel(context);
-        var configuration = CreateConfiguration();
-        var logger = new Mock<ILogger>().Object;
-
-        var source = new TwinCatSubjectClientSource(subject, configuration, logger);
+        var source = CreateSource();
 
         // Act & Assert - should not throw on repeated dispose
         await source.DisposeAsync();
@@ -227,12 +225,7 @@ public class TwinCatSubjectClientSourceTests
     public async Task LoadInitialStateAsync_WhenNotConnected_ShouldReturnNull()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new TestPlcModel(context);
-        var configuration = CreateConfiguration();
-        var logger = new Mock<ILogger>().Object;
-
-        var source = new TwinCatSubjectClientSource(subject, configuration, logger);
+        var source = CreateSource();
 
         // Act - no connection established
         var result = await source.LoadInitialStateAsync(CancellationToken.None);
@@ -245,13 +238,7 @@ public class TwinCatSubjectClientSourceTests
     public async Task WriteChangesAsync_WhenNotConnected_ShouldReturnFailure()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new TestPlcModel(context);
-        var configuration = CreateConfiguration();
-        var logger = new Mock<ILogger>().Object;
-
-        var source = new TwinCatSubjectClientSource(subject, configuration, logger);
-
+        var source = CreateSource();
         var changes = new Tracking.Change.SubjectPropertyChange[1];
 
         // Act
@@ -266,13 +253,9 @@ public class TwinCatSubjectClientSourceTests
     public async Task ExecuteAsync_ShouldRunAndStopCleanly()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new TestPlcModel(context);
         var configuration = CreateConfiguration();
         configuration.HealthCheckInterval = TimeSpan.FromMilliseconds(50);
-        var logger = new Mock<ILogger>().Object;
-
-        var source = new TwinCatSubjectClientSource(subject, configuration, logger);
+        var source = CreateSource(configuration: configuration);
 
         // Act - start the background service (runs ExecuteAsync health check loop)
         await source.StartAsync(CancellationToken.None);
@@ -291,12 +274,7 @@ public class TwinCatSubjectClientSourceTests
     public async Task ExecuteAsync_WhenCancelledImmediately_ShouldStopGracefully()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new TestPlcModel(context);
-        var configuration = CreateConfiguration();
-        var logger = new Mock<ILogger>().Object;
-
-        var source = new TwinCatSubjectClientSource(subject, configuration, logger);
+        var source = CreateSource();
         using var cts = new CancellationTokenSource();
 
         // Act - start and immediately cancel
@@ -313,17 +291,7 @@ public class TwinCatSubjectClientSourceTests
     public async Task RequestRescan_ViaConnectionRestored_WhenNotConnected_SkipsGracefully()
     {
         // Arrange
-        var mockLogger = new Mock<ILogger>();
-        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
-
-        var context = CreateContext();
-        var subject = new TestPlcModel(context);
-        var configuration = CreateConfiguration();
-        configuration.RescanDebounceTime = TimeSpan.FromMilliseconds(50);
-        configuration.HealthCheckInterval = TimeSpan.FromMilliseconds(50);
-        var source = new TwinCatSubjectClientSource(subject, configuration, mockLogger.Object);
-
-        // Start the background service so ExecuteAsync loop is running
+        var (source, mockLogger) = CreateSourceWithFastRescan();
         await source.StartAsync(CancellationToken.None);
 
         try
@@ -339,14 +307,7 @@ public class TwinCatSubjectClientSourceTests
             await Task.Delay(300);
 
             // Assert - rescan skipped because Connection is null, logged as debug
-            mockLogger.Verify(
-                l => l.Log(
-                    LogLevel.Debug,
-                    It.IsAny<EventId>(),
-                    It.Is<It.IsAnyType>((value, _) => value.ToString()!.Contains("Skipping rescan")),
-                    null,
-                    It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-                Times.AtLeastOnce);
+            VerifyLogContains(mockLogger, LogLevel.Debug, "Skipping rescan");
         }
         finally
         {
@@ -359,16 +320,7 @@ public class TwinCatSubjectClientSourceTests
     public async Task RequestRescan_ViaAdsStateEnteredRun_WhenNotConnected_SkipsGracefully()
     {
         // Arrange
-        var mockLogger = new Mock<ILogger>();
-        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
-
-        var context = CreateContext();
-        var subject = new TestPlcModel(context);
-        var configuration = CreateConfiguration();
-        configuration.RescanDebounceTime = TimeSpan.FromMilliseconds(50);
-        configuration.HealthCheckInterval = TimeSpan.FromMilliseconds(50);
-        var source = new TwinCatSubjectClientSource(subject, configuration, mockLogger.Object);
-
+        var (source, mockLogger) = CreateSourceWithFastRescan();
         await source.StartAsync(CancellationToken.None);
 
         try
@@ -380,14 +332,7 @@ public class TwinCatSubjectClientSourceTests
             await Task.Delay(300);
 
             // Assert - rescan skipped because Connection is null
-            mockLogger.Verify(
-                l => l.Log(
-                    LogLevel.Debug,
-                    It.IsAny<EventId>(),
-                    It.Is<It.IsAnyType>((value, _) => value.ToString()!.Contains("Skipping rescan")),
-                    null,
-                    It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-                Times.AtLeastOnce);
+            VerifyLogContains(mockLogger, LogLevel.Debug, "Skipping rescan");
         }
         finally
         {
@@ -400,16 +345,7 @@ public class TwinCatSubjectClientSourceTests
     public async Task RequestRescan_ViaSymbolVersionChanged_WhenNotConnected_SkipsGracefully()
     {
         // Arrange
-        var mockLogger = new Mock<ILogger>();
-        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
-
-        var context = CreateContext();
-        var subject = new TestPlcModel(context);
-        var configuration = CreateConfiguration();
-        configuration.RescanDebounceTime = TimeSpan.FromMilliseconds(50);
-        configuration.HealthCheckInterval = TimeSpan.FromMilliseconds(50);
-        var source = new TwinCatSubjectClientSource(subject, configuration, mockLogger.Object);
-
+        var (source, mockLogger) = CreateSourceWithFastRescan();
         await source.StartAsync(CancellationToken.None);
 
         try
@@ -421,14 +357,7 @@ public class TwinCatSubjectClientSourceTests
             await Task.Delay(300);
 
             // Assert - rescan skipped because Connection is null
-            mockLogger.Verify(
-                l => l.Log(
-                    LogLevel.Debug,
-                    It.IsAny<EventId>(),
-                    It.Is<It.IsAnyType>((value, _) => value.ToString()!.Contains("Skipping rescan")),
-                    null,
-                    It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-                Times.AtLeastOnce);
+            VerifyLogContains(mockLogger, LogLevel.Debug, "Skipping rescan");
         }
         finally
         {
@@ -441,15 +370,13 @@ public class TwinCatSubjectClientSourceTests
     public async Task RequestRescan_MultipleRapidEvents_CoalescedIntoSingleRescan()
     {
         // Arrange
-        var mockLogger = new Mock<ILogger>();
-        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
-
-        var context = CreateContext();
-        var subject = new TestPlcModel(context);
         var configuration = CreateConfiguration();
         configuration.RescanDebounceTime = TimeSpan.FromMilliseconds(100);
         configuration.HealthCheckInterval = TimeSpan.FromMilliseconds(50);
-        var source = new TwinCatSubjectClientSource(subject, configuration, mockLogger.Object);
+
+        var mockLogger = new Mock<ILogger>();
+        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
+        var source = CreateSource(configuration: configuration, logger: mockLogger.Object);
 
         await source.StartAsync(CancellationToken.None);
 
@@ -473,24 +400,8 @@ public class TwinCatSubjectClientSourceTests
 
             // Assert - the 3 rapid events should coalesce: we see "Executing debounced rescan"
             // at least once (proves coalescing), and "Skipping rescan" (proves retry when no connection).
-            // Without coalescing we'd see 3 separate rescans; with coalescing we see fewer.
-            mockLogger.Verify(
-                l => l.Log(
-                    LogLevel.Information,
-                    It.IsAny<EventId>(),
-                    It.Is<It.IsAnyType>((value, _) => value.ToString()!.Contains("Executing debounced rescan")),
-                    null,
-                    It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-                Times.AtLeastOnce);
-
-            mockLogger.Verify(
-                l => l.Log(
-                    LogLevel.Debug,
-                    It.IsAny<EventId>(),
-                    It.Is<It.IsAnyType>((value, _) => value.ToString()!.Contains("Skipping rescan")),
-                    null,
-                    It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-                Times.AtLeastOnce);
+            VerifyLogContains(mockLogger, LogLevel.Information, "Executing debounced rescan");
+            VerifyLogContains(mockLogger, LogLevel.Debug, "Skipping rescan");
         }
         finally
         {
@@ -503,11 +414,7 @@ public class TwinCatSubjectClientSourceTests
     public void RequestRescan_WithoutBackgroundService_DoesNotThrow()
     {
         // Arrange - tests that RequestRescan is safe to call even if ExecuteAsync isn't running
-        var context = CreateContext();
-        var subject = new TestPlcModel(context);
-        var configuration = CreateConfiguration();
-        var logger = new Mock<ILogger>().Object;
-        var source = new TwinCatSubjectClientSource(subject, configuration, logger);
+        var source = CreateSource();
 
         // Act & Assert - should not throw
         source.RequestRescan();
@@ -519,11 +426,7 @@ public class TwinCatSubjectClientSourceTests
     public async Task ConnectionLost_StartsBuffering_DoesNotThrowWhenNoPropertyWriter()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new TestPlcModel(context);
-        var configuration = CreateConfiguration();
-        var logger = new Mock<ILogger>().Object;
-        var source = new TwinCatSubjectClientSource(subject, configuration, logger);
+        var source = CreateSource();
 
         // Act - simulate connection lost (no propertyWriter set yet, so StartBuffering is a no-op)
         source.ConnectionManager.OnConnectionStateChanged(null,

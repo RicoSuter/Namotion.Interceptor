@@ -277,40 +277,29 @@ internal sealed class TestAdsSymbolicServer : AdsSymbolicServer
         // Create a data area for all test symbols
         var globals = new DataArea("Globals", 0x02, 0x1000, 0x10000);
 
-        // Track which types have been added to avoid duplicates
         var addedTypes = new HashSet<Type>();
 
-        // Register types and add the data area
+        // Register types
         foreach (var testSymbol in _testSymbols)
         {
-            if (!addedTypes.Contains(testSymbol.DataType))
+            if (addedTypes.Add(testSymbol.DataType))
             {
-                var beckhoffType = MapToBeckhoffType(testSymbol.DataType);
-                symbolFactory!.AddType(beckhoffType);
-                addedTypes.Add(testSymbol.DataType);
+                symbolFactory!.AddType(MapToBeckhoffType(testSymbol.DataType));
             }
         }
 
         symbolFactory!.AddDataArea(globals);
 
-        // Register symbols
+        // Register symbols and set initial values
         foreach (var testSymbol in _testSymbols)
         {
-            var beckhoffType = MapToBeckhoffType(testSymbol.DataType);
-            symbolFactory!.AddSymbol(testSymbol.Path, beckhoffType, globals);
+            symbolFactory!.AddSymbol(testSymbol.Path, MapToBeckhoffType(testSymbol.DataType), globals);
         }
 
-        // Set initial values
         foreach (var testSymbol in _testSymbols)
         {
-            if (testSymbol.InitialValue is not null)
-            {
-                _symbolValues[Symbols[testSymbol.Path]] = testSymbol.InitialValue;
-            }
-            else
-            {
-                _symbolValues[Symbols[testSymbol.Path]] = GetDefaultValue(testSymbol.DataType);
-            }
+            _symbolValues[Symbols[testSymbol.Path]] =
+                testSymbol.InitialValue ?? GetDefaultValue(testSymbol.DataType);
         }
     }
 
@@ -355,12 +344,10 @@ internal sealed class TestAdsSymbolicServer : AdsSymbolicServer
     {
         valueChanged = false;
 
-        if (!_symbolValues.ContainsKey(symbol))
+        if (!_symbolValues.TryGetValue(symbol, out var oldValue))
         {
             return AdsErrorCode.DeviceSymbolNotFound;
         }
-
-        var oldValue = _symbolValues[symbol];
 
         if (oldValue is null || !oldValue.Equals(value))
         {
