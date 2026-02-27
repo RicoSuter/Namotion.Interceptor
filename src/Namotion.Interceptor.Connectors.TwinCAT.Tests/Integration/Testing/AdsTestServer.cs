@@ -152,11 +152,11 @@ public sealed class AdsTestServer : IAsyncDisposable
     /// <summary>
     /// Stops the ADS server (but not the router), useful for testing reconnection.
     /// </summary>
-    public async Task StopAsync()
+    private async Task StopAsync()
     {
         if (_server is not null)
         {
-            _serverCts.Cancel();
+            await _serverCts.CancelAsync();
             await Task.Delay(200);
             _server.Dispose();
             _server = null;
@@ -386,51 +386,20 @@ internal sealed class TestAdsSymbolicServer : AdsSymbolicServer
 
     private static DataType MapToBeckhoffType(Type type)
     {
-        if (type == typeof(bool))
-        {
-            return new PrimitiveType("BOOL", typeof(bool));
-        }
-
-        if (type == typeof(short))
-        {
-            return new PrimitiveType("INT", typeof(short));
-        }
-
-        if (type == typeof(int))
-        {
-            return new PrimitiveType("DINT", typeof(int));
-        }
-
-        if (type == typeof(float))
-        {
-            return new PrimitiveType("REAL", typeof(float));
-        }
-
-        if (type == typeof(double))
-        {
-            return new PrimitiveType("LREAL", typeof(double));
-        }
-
-        if (type == typeof(string))
-        {
-            return new StringType(80, Encoding.Unicode);
-        }
+        if (type == typeof(bool)) return new PrimitiveType("BOOL", typeof(bool));
+        if (type == typeof(short)) return new PrimitiveType("INT", typeof(short));
+        if (type == typeof(int)) return new PrimitiveType("DINT", typeof(int));
+        if (type == typeof(float)) return new PrimitiveType("REAL", typeof(float));
+        if (type == typeof(double)) return new PrimitiveType("LREAL", typeof(double));
+        if (type == typeof(string)) return new StringType(80, Encoding.Unicode);
 
         throw new ArgumentException($"Unsupported type: {type.FullName}", nameof(type));
     }
 
     private static object? GetDefaultValue(Type type)
     {
-        if (type == typeof(string))
-        {
-            return string.Empty;
-        }
-
-        if (type.IsValueType)
-        {
-            return Activator.CreateInstance(type);
-        }
-
+        if (type == typeof(string)) return string.Empty;
+        if (type.IsValueType) return Activator.CreateInstance(type);
         return null;
     }
 }

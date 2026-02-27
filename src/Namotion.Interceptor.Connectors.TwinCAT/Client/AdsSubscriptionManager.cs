@@ -291,22 +291,12 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
 
     private static AdsReadMode GetConfiguredReadMode(AdsVariableAttribute? attribute, AdsReadMode defaultReadMode)
     {
-        if (attribute is not null && attribute.ReadMode != AdsReadMode.Auto)
-        {
-            return attribute.ReadMode;
-        }
-
-        return defaultReadMode;
+        return attribute is { ReadMode: not AdsReadMode.Auto } ? attribute.ReadMode : defaultReadMode;
     }
 
     private static int GetConfiguredCycleTime(AdsVariableAttribute? attribute, int defaultCycleTime)
     {
-        if (attribute is not null && attribute.CycleTime != int.MinValue)
-        {
-            return attribute.CycleTime;
-        }
-
-        return defaultCycleTime;
+        return attribute is { CycleTime: not int.MinValue } ? attribute.CycleTime : defaultCycleTime;
     }
 
     private static int GetConfiguredPriority(AdsVariableAttribute? attribute)
@@ -316,12 +306,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
 
     private static int GetConfiguredMaxDelay(AdsVariableAttribute? attribute, int defaultMaxDelay)
     {
-        if (attribute is not null && attribute.MaxDelay != int.MinValue)
-        {
-            return attribute.MaxDelay;
-        }
-
-        return defaultMaxDelay;
+        return attribute is { MaxDelay: not int.MinValue } ? attribute.MaxDelay : defaultMaxDelay;
     }
 
     private void RegisterNotification(
@@ -445,7 +430,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
                             var errorCodes = readResult.SubErrors;
                             for (var index = 0; index < pollingEntries.Count && index < values.Length; index++)
                             {
-                                if (errorCodes is not null && errorCodes[index] != AdsErrorCode.NoError)
+                                if (errorCodes is not null && index < errorCodes.Length && errorCodes[index] != AdsErrorCode.NoError)
                                 {
                                     continue;
                                 }
