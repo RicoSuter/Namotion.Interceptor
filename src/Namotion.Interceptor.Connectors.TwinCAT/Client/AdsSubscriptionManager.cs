@@ -376,6 +376,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         }
 
         var useFallback = false;
+        var sumRead = new SumSymbolRead(connection, symbols);
         var timer = new Timer(_ =>
         {
             try
@@ -391,9 +392,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
                 {
                     try
                     {
-                        var sumRead = new SumSymbolRead(connection, symbols);
                         var readResult = sumRead.ReadAsResult();
-
                         if (readResult.ErrorCode == AdsErrorCode.DeviceServiceNotSupported)
                         {
                             _logger.LogDebug("SumSymbolRead not supported for polling, falling back to individual reads.");
