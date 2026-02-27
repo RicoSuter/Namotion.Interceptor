@@ -158,12 +158,10 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
                         _configuration.AmsNetId, _configuration.AmsPort);
                     return;
                 }
-                else
-                {
-                    _logger.LogDebug(
-                        "Circuit breaker open, skipping connection attempt. Cooldown remaining: {Remaining}",
-                        _circuitBreaker.GetCooldownRemaining());
-                }
+
+                _logger.LogDebug(
+                    "Circuit breaker open, skipping connection attempt. Cooldown remaining: {Remaining}",
+                    _circuitBreaker.GetCooldownRemaining());
             }
             catch (Exception exception)
             {
