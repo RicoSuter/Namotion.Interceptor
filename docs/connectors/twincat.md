@@ -270,11 +270,11 @@ Write failures are classified as **transient** (retry-safe) or **permanent** (do
 
 | Classification | Error Codes | Behavior |
 |---------------|-------------|----------|
-| **Permanent** | SymbolNotFound, InvalidSize, InvalidData, ServiceNotSupported, InvalidAccess, InvalidOffset | Not retried |
+| **Permanent** | SymbolNotFound, InvalidSize, InvalidData, ServiceNotSupported, InvalidAccess, InvalidOffset | Logged and dropped |
 | **Transient** | PortNotFound, MachineNotFound, ClientPortNotOpen, DeviceError, Timeout, Busy | Retried via write queue |
 | **Unknown** | All other codes | Treated as transient (safer) |
 
-Write results include `TransientCount` and `PermanentCount` to inform the retry queue about what can be retried.
+Only transient failures are returned to the retry queue. Permanent failures are logged at Warning level and excluded from retry, preventing indefinite retry loops for invalid writes.
 
 ## Type Conversions
 
@@ -343,6 +343,16 @@ new AdsClientConfiguration
 - Ring buffer semantics: drops oldest when full
 - Automatic flush after reconnection
 - Set to 0 to disable
+
+### Write Behavior During Rescan
+
+When a rescan is in progress (triggered by connection restore, PLC state change, or symbol version change), the symbol path cache is temporarily cleared. Writes that arrive during this window are handled as follows:
+
+- **Unresolved symbol paths** (cache temporarily cleared): Treated as transient failures and queued for retry. After the rescan completes and the symbol cache is rebuilt, the retry succeeds.
+- **Transient ADS errors** (timeout, busy, port not found): Queued for retry via the write retry queue.
+- **Permanent ADS errors** (symbol not found, invalid size/data): Logged at Warning level and dropped — not retried. This prevents indefinite retry of writes for symbols that no longer exist on the PLC (e.g., after a PLC program update).
+
+This ensures that configuration changes and command triggers are not silently lost during brief rescan windows, while writes to permanently removed symbols are cleaned up automatically.
 
 ### Debounced Rescan
 

@@ -19,9 +19,8 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
     private readonly CircuitBreaker _circuitBreaker;
 
     // ADS connection objects — uses AdsClient directly (not AdsSession) for reliable dispose in 7.0.x
-    private AdsClient? _client;
-    private IAdsConnection? _connection;
-    private ISymbolLoader? _symbolLoader;
+    private volatile AdsClient? _client;
+    private volatile ISymbolLoader? _symbolLoader;
 
     // First-occurrence logging state (Warning first, then Debug until cleared)
     private readonly ConcurrentDictionary<string, bool> _loggedErrors = new();
@@ -34,7 +33,6 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
 
     // ADS state tracking (-1 = not set, otherwise cast to AdsState)
     private int _currentAdsState = -1;
-    private int _previousAdsState = -1;
 
     private int _disposed; // 0 = false, 1 = true
 
@@ -77,7 +75,7 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
     /// <summary>
     /// Gets the current ADS connection, or null if not connected.
     /// </summary>
-    internal IAdsConnection? Connection => _connection;
+    internal IAdsConnection? Connection => _client;
 
     /// <summary>
     /// Gets the current symbol loader, or null if not loaded.
@@ -100,7 +98,7 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
     /// Gets whether the ADS client is currently connected.
     /// </summary>
     internal bool IsConnected =>
-        _connection is IConnection { IsConnected: true };
+        _client is IConnection { IsConnected: true };
 
     internal long TotalReconnectionAttempts =>
         Interlocked.Read(ref _totalReconnectionAttempts);
@@ -126,9 +124,20 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
 
     /// <summary>
     /// Connects to the PLC with retry and circuit breaker logic.
+    /// If already connected, returns immediately. If a previous client exists
+    /// but is disconnected, it is disposed before creating a new one.
     /// </summary>
     internal async Task ConnectWithRetryAsync(CancellationToken cancellationToken)
     {
+        // If already connected, reuse the existing connection
+        if (IsConnected)
+        {
+            return;
+        }
+
+        // Dispose stale client before creating a new one
+        DisconnectAndDisposeClient();
+
         while (!cancellationToken.IsCancellationRequested)
         {
             try
@@ -156,7 +165,6 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
                     client.Timeout = (int)_configuration.Timeout.TotalMilliseconds;
 
                     _client = client;
-                    _connection = client;
 
                     // Subscribe to connection state, ADS state, and symbol version changes
                     client.ConnectionStateChanged += OnConnectionStateChanged;
@@ -192,38 +200,18 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
     /// </summary>
     internal void RecreateSymbolLoader()
     {
-        if (_connection is not null)
+        if (_client is not null)
         {
             _symbolLoader = SymbolLoaderFactory.Create(
-                _connection,
+                _client,
                 new SymbolLoaderSettings(SymbolsLoadMode.DynamicTree));
         }
     }
 
     internal void LogFirstOccurrence(string category, Exception? exception, string message, params object[] arguments)
     {
-        if (_loggedErrors.TryAdd(category, true))
-        {
-            if (exception is not null)
-            {
-                _logger.LogWarning(exception, message, arguments);
-            }
-            else
-            {
-                _logger.LogWarning(message, arguments);
-            }
-        }
-        else
-        {
-            if (exception is not null)
-            {
-                _logger.LogDebug(exception, message, arguments);
-            }
-            else
-            {
-                _logger.LogDebug(message, arguments);
-            }
-        }
+        var level = _loggedErrors.TryAdd(category, true) ? LogLevel.Warning : LogLevel.Debug;
+        _logger.Log(level, exception, message, arguments);
     }
 
     internal void ClearFirstOccurrenceLog(string category)
@@ -249,9 +237,8 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
     internal void OnAdsStateChanged(object? sender, AdsStateChangedEventArgs eventArgs)
     {
         var newState = eventArgs.State.AdsState;
-        Volatile.Write(ref _currentAdsState, (int)newState);
+        var previousState = (AdsState)Interlocked.Exchange(ref _currentAdsState, (int)newState);
 
-        var previousState = (AdsState)Interlocked.Exchange(ref _previousAdsState, (int)newState);
         if (newState == AdsState.Run && previousState != AdsState.Run)
         {
             AdsStateEnteredRun?.Invoke();
@@ -268,15 +255,12 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
         SymbolVersionChanged?.Invoke();
     }
 
-    /// <inheritdoc />
-    public ValueTask DisposeAsync()
+    /// <summary>
+    /// Unsubscribes event handlers, disconnects, and disposes the current ADS client.
+    /// Safe to call when no client exists (no-op).
+    /// </summary>
+    private void DisconnectAndDisposeClient()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) == 1)
-        {
-            return ValueTask.CompletedTask;
-        }
-
-        // Unsubscribe from events and dispose the ADS client
         if (_client is not null)
         {
             _client.ConnectionStateChanged -= OnConnectionStateChanged;
@@ -294,10 +278,20 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
             }
 
             _client = null;
-            _connection = null;
         }
 
         _symbolLoader = null;
+    }
+
+    /// <inheritdoc />
+    public ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        DisconnectAndDisposeClient();
 
         return ValueTask.CompletedTask;
     }

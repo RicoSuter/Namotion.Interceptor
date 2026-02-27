@@ -1,3 +1,4 @@
+using System.Reactive.Disposables;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Registry;
@@ -24,8 +25,9 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
     private readonly AdsConnectionManager _connectionManager;
     private readonly AdsSubscriptionManager _subscriptionManager;
     private readonly SemaphoreSlim _rescanSignal = new(0, 1);
+    private readonly Lock _rescanLock = new();
 
-    private SubjectPropertyWriter? _propertyWriter;
+    private volatile SubjectPropertyWriter? _propertyWriter;
     private long _lastRescanRequestedAtTicks; // DateTimeOffset.UtcNow.UtcTicks, 0 = no pending request
 
     private AdsClientDiagnostics? _diagnostics;
@@ -117,16 +119,19 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
         await _connectionManager.ConnectWithRetryAsync(cancellationToken).ConfigureAwait(false);
         FullRescan();
 
-        return _subscriptionManager.Subscriptions;
+        // Return a wrapper that calls ClearAll() instead of the raw CompositeDisposable.
+        // CompositeDisposable.Dispose() is permanent (future Add() calls immediately dispose),
+        // while ClearAll() uses Clear() which keeps the CompositeDisposable reusable.
+        return Disposable.Create(() => _subscriptionManager.ClearAll());
     }
 
     /// <inheritdoc />
-    public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
+    public async Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
     {
         var connection = _connectionManager.Connection;
         if (connection is null)
         {
-            return Task.FromResult<Action?>(null);
+            return null;
         }
 
         var properties = new List<(RegisteredSubjectProperty Property, ISymbol Symbol)>();
@@ -156,7 +161,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
 
         if (properties.Count == 0)
         {
-            return Task.FromResult<Action?>(null);
+            return null;
         }
 
         // Try batch read via SumSymbolRead first, fall back to individual reads
@@ -165,14 +170,15 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
         try
         {
             var sumRead = new SumSymbolRead(connection, symbols);
-            var readResult = sumRead.ReadAsResult();
+            var readResult = await sumRead.ReadAsync(cancellationToken).ConfigureAwait(false);
 
             if (readResult is { ErrorCode: AdsErrorCode.NoError, Values: not null })
             {
                 var errorCodes = readResult.SubErrors;
-                for (var index = 0; index < properties.Count; index++)
+                var valueCount = Math.Min(properties.Count, readResult.Values.Length);
+                for (var index = 0; index < valueCount; index++)
                 {
-                    if (errorCodes is not null && errorCodes[index] != AdsErrorCode.NoError)
+                    if (errorCodes is not null && index < errorCodes.Length && errorCodes[index] != AdsErrorCode.NoError)
                     {
                         continue;
                     }
@@ -186,16 +192,16 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             else
             {
                 _logger.LogDebug("SumSymbolRead not supported (Error: {ErrorCode}), falling back to individual reads.", readResult.ErrorCode);
-                ReadIndividualValues(properties, values);
+                await ReadIndividualValuesAsync(properties, values, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (Exception exception)
         {
             _logger.LogDebug(exception, "SumSymbolRead failed, falling back to individual reads.");
-            ReadIndividualValues(properties, values);
+            await ReadIndividualValuesAsync(properties, values, cancellationToken).ConfigureAwait(false);
         }
 
-        return Task.FromResult<Action?>(() =>
+        return () =>
         {
             var now = DateTimeOffset.UtcNow;
             foreach (var (property, value) in values)
@@ -207,20 +213,25 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             }
 
             _logger.LogInformation("Updated {Count} properties with PLC values.", properties.Count);
-        });
+        };
     }
 
-    private void ReadIndividualValues(
+    private async Task ReadIndividualValuesAsync(
         List<(RegisteredSubjectProperty Property, ISymbol Symbol)> properties,
-        (RegisteredSubjectProperty Property, object? Value)[] values)
+        (RegisteredSubjectProperty Property, object? Value)[] values,
+        CancellationToken cancellationToken)
     {
         for (var index = 0; index < properties.Count; index++)
         {
             try
             {
-                var value = ((IValueSymbol)properties[index].Symbol).ReadValue();
-                values[index] = (properties[index].Property,
-                    _configuration.ValueConverter.ConvertToPropertyValue(value, properties[index].Property));
+                var readResult = await ((IValueSymbol)properties[index].Symbol)
+                    .ReadValueAsync(cancellationToken).ConfigureAwait(false);
+                if ((AdsErrorCode)readResult.ErrorCode == AdsErrorCode.NoError)
+                {
+                    values[index] = (properties[index].Property,
+                        _configuration.ValueConverter.ConvertToPropertyValue(readResult.Value, properties[index].Property));
+                }
             }
             catch (Exception exception)
             {
@@ -250,6 +261,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             var writeValues = new object[capacity];
             var writeCount = 0;
             var validChanges = new List<SubjectPropertyChange>(capacity);
+            List<SubjectPropertyChange>? unresolvedChanges = null;
 
             foreach (var change in changes.Span)
             {
@@ -262,25 +274,43 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
                 var symbolPath = _subscriptionManager.GetSymbolPath(change.Property);
                 if (symbolPath is null)
                 {
+                    // Symbol path not cached — likely a rescan is in progress.
+                    // Treat as transient so the retry queue picks it up.
+                    (unresolvedChanges ??= []).Add(change);
                     continue;
                 }
 
                 var symbol = AdsSubscriptionManager.TryGetSymbol(_connectionManager.SymbolLoader, symbolPath);
                 if (symbol is null)
                 {
+                    (unresolvedChanges ??= []).Add(change);
+                    continue;
+                }
+
+                var convertedValue = _configuration.ValueConverter.ConvertToAdsValue(
+                    change.GetNewValue<object?>(), registeredProperty);
+                if (convertedValue is null)
+                {
+                    _logger.LogDebug("Skipping write of null value to ADS symbol '{SymbolPath}'.", symbolPath);
                     continue;
                 }
 
                 symbols.Add(symbol);
-                var convertedValue = _configuration.ValueConverter.ConvertToAdsValue(
-                    change.GetNewValue<object?>(), registeredProperty);
-                writeValues[writeCount++] = convertedValue!; // null handling with real PLC TBD
+                writeValues[writeCount++] = convertedValue;
                 validChanges.Add(change);
+            }
+
+            if (symbols.Count == 0 && unresolvedChanges is null)
+            {
+                return new ValueTask<WriteResult>(WriteResult.Success);
             }
 
             if (symbols.Count == 0)
             {
-                return new ValueTask<WriteResult>(WriteResult.Success);
+                _logger.LogDebug("Deferring {Count} writes: symbol paths not available (rescan in progress?).", unresolvedChanges!.Count);
+                return new ValueTask<WriteResult>(
+                    WriteResult.Failure(unresolvedChanges.ToArray(),
+                        new AdsWriteException(unresolvedChanges.Count, 0, unresolvedChanges.Count)));
             }
 
             // Trim writeValues to exact count only if some changes were skipped
@@ -296,63 +326,47 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
 
                 if (batchErrorCode == AdsErrorCode.NoError && errorCodes is not null)
                 {
-                    // Check individual results
-                    List<SubjectPropertyChange>? failedChanges = null;
-                    var transientCount = 0;
-                    var permanentCount = 0;
-
-                    for (var index = 0; index < errorCodes.Length && index < validChanges.Count; index++)
-                    {
-                        if (errorCodes[index] != AdsErrorCode.NoError)
-                        {
-                            (failedChanges ??= []).Add(validChanges[index]);
-                            if (AdsErrorClassifier.IsTransientError(errorCodes[index]))
-                            {
-                                transientCount++;
-                            }
-                            else
-                            {
-                                permanentCount++;
-                            }
-                        }
-                    }
-
-                    if (failedChanges is null)
-                    {
-                        return new ValueTask<WriteResult>(WriteResult.Success);
-                    }
-
-                    var error = new AdsWriteException(transientCount, permanentCount, validChanges.Count);
-                    var successCount = validChanges.Count - failedChanges.Count;
-                    return new ValueTask<WriteResult>(
-                        successCount > 0
-                            ? WriteResult.PartialFailure(failedChanges.ToArray(), error)
-                            : WriteResult.Failure(failedChanges.ToArray(), error));
+                    var result = ClassifyWriteErrors(errorCodes, validChanges, unresolvedChanges);
+                    return new ValueTask<WriteResult>(result);
                 }
 
                 if (batchErrorCode == AdsErrorCode.DeviceServiceNotSupported)
                 {
                     _logger.LogDebug("SumSymbolWrite not supported, falling back to individual writes.");
-                    return WriteIndividualValues(symbols, writeArray, validChanges);
+                    return WriteIndividualValues(symbols, writeArray, validChanges, unresolvedChanges);
                 }
 
                 if (batchErrorCode != AdsErrorCode.NoError)
                 {
                     var isTransient = AdsErrorClassifier.IsTransientError(batchErrorCode);
-                    var error = new AdsWriteException(
-                        isTransient ? changes.Length : 0,
-                        isTransient ? 0 : changes.Length,
-                        changes.Length);
-                    return new ValueTask<WriteResult>(WriteResult.Failure(changes, error));
+                    if (!isTransient)
+                    {
+                        _logger.LogWarning("Permanent ADS batch write error: {ErrorCode}. Dropping {Count} writes.",
+                            batchErrorCode, validChanges.Count);
+
+                        // Only return unresolved changes (transient) for retry
+                        return new ValueTask<WriteResult>(BuildUnresolvedOnlyResult(unresolvedChanges, validChanges.Count));
+                    }
+
+                    // Transient batch error — all changes (valid + unresolved) should be retried
+                    var allFailed = new List<SubjectPropertyChange>(validChanges);
+                    if (unresolvedChanges is not null)
+                    {
+                        allFailed.AddRange(unresolvedChanges);
+                    }
+
+                    var error = new AdsWriteException(allFailed.Count, 0, allFailed.Count);
+                    return new ValueTask<WriteResult>(WriteResult.Failure(allFailed.ToArray(), error));
                 }
             }
             catch (AdsException exception) when ((AdsErrorCode)exception.HResult == AdsErrorCode.DeviceServiceNotSupported)
             {
                 _logger.LogDebug("SumSymbolWrite threw DeviceServiceNotSupported, falling back to individual writes.");
-                return WriteIndividualValues(symbols, writeArray, validChanges);
+                return WriteIndividualValues(symbols, writeArray, validChanges, unresolvedChanges);
             }
 
-            return new ValueTask<WriteResult>(WriteResult.Success);
+            // Batch succeeded — only return unresolved changes for retry if any
+            return new ValueTask<WriteResult>(BuildUnresolvedOnlyResult(unresolvedChanges, validChanges.Count));
         }
         catch (AdsException exception)
         {
@@ -362,7 +376,15 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
                 isTransient ? changes.Length : 0,
                 isTransient ? 0 : changes.Length,
                 changes.Length);
-            return new ValueTask<WriteResult>(WriteResult.Failure(changes, error));
+
+            if (isTransient)
+            {
+                return new ValueTask<WriteResult>(WriteResult.Failure(changes, error));
+            }
+
+            _logger.LogWarning("Permanent ADS write error: {ErrorCode}. Dropping {Count} writes.",
+                errorCode, changes.Length);
+            return new ValueTask<WriteResult>(WriteResult.Success);
         }
         catch (Exception exception)
         {
@@ -370,13 +392,46 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
         }
     }
 
+    /// <summary>
+    /// Classifies per-symbol write errors from a batch result.
+    /// Transient failures and unresolved changes are returned for retry.
+    /// Permanent failures are logged and dropped.
+    /// </summary>
+    private WriteResult ClassifyWriteErrors(
+        AdsErrorCode[] errorCodes,
+        List<SubjectPropertyChange> validChanges,
+        List<SubjectPropertyChange>? unresolvedChanges)
+    {
+        List<SubjectPropertyChange>? transientFailures = null;
+        var permanentCount = 0;
+
+        for (var index = 0; index < errorCodes.Length && index < validChanges.Count; index++)
+        {
+            if (errorCodes[index] == AdsErrorCode.NoError)
+            {
+                continue;
+            }
+
+            if (AdsErrorClassifier.IsTransientError(errorCodes[index]))
+            {
+                (transientFailures ??= []).Add(validChanges[index]);
+            }
+            else
+            {
+                permanentCount++;
+            }
+        }
+
+        return BuildWriteResult(transientFailures, permanentCount, validChanges.Count, unresolvedChanges);
+    }
+
     private ValueTask<WriteResult> WriteIndividualValues(
         List<ISymbol> symbols,
         object[] writeValues,
-        List<SubjectPropertyChange> validChanges)
+        List<SubjectPropertyChange> validChanges,
+        List<SubjectPropertyChange>? unresolvedChanges)
     {
-        List<SubjectPropertyChange>? failedChanges = null;
-        var transientCount = 0;
+        List<SubjectPropertyChange>? transientFailures = null;
         var permanentCount = 0;
 
         for (var index = 0; index < symbols.Count; index++)
@@ -387,10 +442,9 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             }
             catch (AdsException exception)
             {
-                (failedChanges ??= []).Add(validChanges[index]);
                 if (AdsErrorClassifier.IsTransientError((AdsErrorCode)exception.HResult))
                 {
-                    transientCount++;
+                    (transientFailures ??= []).Add(validChanges[index]);
                 }
                 else
                 {
@@ -399,22 +453,81 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             }
             catch (Exception)
             {
-                (failedChanges ??= []).Add(validChanges[index]);
                 permanentCount++;
             }
         }
 
-        if (failedChanges is null)
+        return new ValueTask<WriteResult>(
+            BuildWriteResult(transientFailures, permanentCount, validChanges.Count, unresolvedChanges));
+    }
+
+    /// <summary>
+    /// Builds a WriteResult from classified write failures.
+    /// Logs permanent errors, merges transient and unresolved changes for retry.
+    /// </summary>
+    private WriteResult BuildWriteResult(
+        List<SubjectPropertyChange>? transientFailures,
+        int permanentCount,
+        int validChangeCount,
+        List<SubjectPropertyChange>? unresolvedChanges)
+    {
+        if (permanentCount > 0)
         {
-            return new ValueTask<WriteResult>(WriteResult.Success);
+            _logger.LogWarning("Dropped {Count} writes due to permanent ADS errors.", permanentCount);
         }
 
-        var error = new AdsWriteException(transientCount, permanentCount, validChanges.Count);
-        var successCount = validChanges.Count - failedChanges.Count;
-        return new ValueTask<WriteResult>(
-            successCount > 0
-                ? WriteResult.PartialFailure(failedChanges.ToArray(), error)
-                : WriteResult.Failure(failedChanges.ToArray(), error));
+        var retryChanges = MergeRetryChanges(transientFailures, unresolvedChanges);
+        if (retryChanges is null)
+        {
+            return WriteResult.Success;
+        }
+
+        var transientCount = (transientFailures?.Count ?? 0) + (unresolvedChanges?.Count ?? 0);
+        var error = new AdsWriteException(transientCount, permanentCount, validChangeCount);
+        var successCount = validChangeCount - (transientFailures?.Count ?? 0) - permanentCount;
+        return successCount > 0
+            ? WriteResult.PartialFailure(retryChanges, error)
+            : WriteResult.Failure(retryChanges, error);
+    }
+
+    private static SubjectPropertyChange[]? MergeRetryChanges(
+        List<SubjectPropertyChange>? transientFailures,
+        List<SubjectPropertyChange>? unresolvedChanges)
+    {
+        if (transientFailures is null && unresolvedChanges is null)
+        {
+            return null;
+        }
+
+        var totalCount = (transientFailures?.Count ?? 0) + (unresolvedChanges?.Count ?? 0);
+        var result = new SubjectPropertyChange[totalCount];
+        var offset = 0;
+
+        if (transientFailures is not null)
+        {
+            transientFailures.CopyTo(result, offset);
+            offset += transientFailures.Count;
+        }
+
+        if (unresolvedChanges is not null)
+        {
+            unresolvedChanges.CopyTo(result, offset);
+        }
+
+        return result;
+    }
+
+    private static WriteResult BuildUnresolvedOnlyResult(
+        List<SubjectPropertyChange>? unresolvedChanges,
+        int totalCount)
+    {
+        if (unresolvedChanges is null || unresolvedChanges.Count == 0)
+        {
+            return WriteResult.Success;
+        }
+
+        var error = new AdsWriteException(unresolvedChanges.Count, 0, totalCount);
+        return WriteResult.PartialFailure(unresolvedChanges.ToArray(), error);
     }
 
     /// <summary>
@@ -434,33 +547,38 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
     /// <summary>
     /// Performs a full rescan: clears subscriptions, reloads symbols, re-registers.
     /// Returns true if the rescan was executed, false if skipped (e.g., no connection).
+    /// Synchronized via <see cref="_rescanLock"/> to prevent concurrent execution
+    /// from the SBBS thread (StartListeningAsync) and the TwinCAT ExecuteAsync thread.
     /// </summary>
     private bool FullRescan()
     {
-        var connection = _connectionManager.Connection;
-        if (connection is null)
+        lock (_rescanLock)
         {
-            _logger.LogDebug("Skipping rescan: ADS connection is not established.");
-            return false;
+            var connection = _connectionManager.Connection;
+            if (connection is null)
+            {
+                _logger.LogDebug("Skipping rescan: ADS connection is not established.");
+                return false;
+            }
+
+            _subscriptionManager.ClearAll();
+            _connectionManager.RecreateSymbolLoader();
+
+            // Load subject graph
+            var graphMappings = _subjectLoader.LoadSubjectGraph(_subject);
+
+            // Register subscriptions (determines read modes, registers notifications + polling)
+            _subscriptionManager.RegisterSubscriptions(
+                graphMappings,
+                connection,
+                _connectionManager.SymbolLoader,
+                _ownership,
+                _propertyWriter,
+                this,
+                _connectionManager);
+
+            return true;
         }
-
-        _subscriptionManager.ClearAll();
-        _connectionManager.RecreateSymbolLoader();
-
-        // Load subject graph
-        var graphMappings = _subjectLoader.LoadSubjectGraph(_subject);
-
-        // Register subscriptions (determines read modes, registers notifications + polling)
-        _subscriptionManager.RegisterSubscriptions(
-            graphMappings,
-            connection,
-            _connectionManager.SymbolLoader,
-            _ownership,
-            _propertyWriter,
-            this,
-            _connectionManager);
-
-        return true;
     }
 
     /// <inheritdoc />
@@ -475,8 +593,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             try
             {
                 // Wait for either a rescan signal or the health check interval
-                await WaitForSignalOrTimeoutAsync(
-                    _rescanSignal, _configuration.HealthCheckInterval, stoppingToken).ConfigureAwait(false);
+                await _rescanSignal.WaitAsync(_configuration.HealthCheckInterval, stoppingToken).ConfigureAwait(false);
 
                 // Process pending rescan with debounce
                 var requestedAtTicks = Interlocked.Read(ref _lastRescanRequestedAtTicks);
@@ -514,8 +631,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
 
             if (remaining > TimeSpan.Zero)
             {
-                await WaitForSignalOrTimeoutAsync(
-                    _rescanSignal, remaining, stoppingToken).ConfigureAwait(false);
+                await _rescanSignal.WaitAsync(remaining, stoppingToken).ConfigureAwait(false);
 
                 // Check if a newer request arrived during the wait
                 var newTicks = Interlocked.Read(ref _lastRescanRequestedAtTicks);
@@ -539,12 +655,6 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
 
             Interlocked.Exchange(ref _lastRescanRequestedAtTicks, 0);
         }
-    }
-
-    private static async Task WaitForSignalOrTimeoutAsync(
-        SemaphoreSlim signal, TimeSpan timeout, CancellationToken cancellationToken)
-    {
-        await signal.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
