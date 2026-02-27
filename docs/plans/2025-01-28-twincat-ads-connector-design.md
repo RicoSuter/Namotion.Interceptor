@@ -21,9 +21,9 @@ Benefits: Lower latency, no OPC UA license required, direct control over read st
 
 | Category | Decision |
 |----------|----------|
-| **Connection** | Use `AdsSession` with built-in resurrection (not raw `AdsClient`) |
-| **Session Settings** | Expose full `SessionSettings` for advanced users |
-| **After Resurrection** | Full recreation - dispose subscriptions, reload, re-register |
+| **Connection** | Use `AdsClient` directly (not `AdsSession` — see [Implementation Note](#implementation-note-adsclient-vs-adssession)) |
+| **Session Settings** | Expose `SessionSettings` for advanced users (passed to `AdsClient` constructor) |
+| **After Reconnection** | Full recreation - dispose subscriptions, reload, re-register |
 | **PLC State Change** | Full rescan when PLC returns to Run state |
 | **Symbol Version Change** | Monitor and trigger full rescan on change |
 | **Initial Connection** | Retry indefinitely with backoff |
@@ -42,7 +42,7 @@ Benefits: Lower latency, no OPC UA license required, direct control over read st
 
 ## Dependencies
 
-- `Beckhoff.TwinCAT.Ads` (7.0+) - Core ADS client library with `AdsSession` support
+- `Beckhoff.TwinCAT.Ads` (7.0+) - Core ADS client library
 - `Beckhoff.TwinCAT.Ads.Reactive` (7.0+) - Reactive extensions for notifications and polling
 - `Namotion.Interceptor.Connectors` - Base connector infrastructure
 
@@ -237,13 +237,13 @@ Custom converters can be provided for:
 ```csharp
 public class AdsClientConfiguration
 {
-    // Connection (uses AdsSession for built-in resurrection/self-healing)
+    // Connection (uses AdsClient directly — see Implementation Note below)
     public required string Host { get; set; }       // IP or hostname, e.g., "192.168.1.100" or "plc.local"
     public required string AmsNetId { get; set; }   // ADS device ID, e.g., "192.168.1.100.1.1" (typically IP + ".1.1")
     public int AmsPort { get; set; } = 851;         // TwinCAT3 PLC runtime port
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(5);  // ADS communication timeout
 
-    // AdsSession settings (for resurrection/self-healing)
+    // AdsClient session settings
     // Expose full SessionSettings for advanced users who need fine-grained control
     public SessionSettings? SessionSettings { get; set; }  // null = use defaults
 
@@ -629,9 +629,9 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
     private readonly CircuitBreaker _circuitBreaker;
     private readonly AdsSubjectLoader _subjectLoader;
 
-    // AdsSession for built-in resurrection/self-healing (preferred over raw AdsClient)
-    private AdsSession? _session;
-    private AdsConnection? _connection;
+    // AdsClient for direct connection (see Implementation Note: AdsClient vs AdsSession)
+    private AdsClient? _client;
+    private IAdsConnection? _connection;
     private SubjectPropertyWriter? _propertyWriter;
 
     // Caches - keyed by PropertyReference (stable), not RegisteredSubjectProperty (can become stale)
@@ -667,19 +667,18 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
 
 ### ADS Library Integration
 
-Use `AdsSession` for connection management with built-in resurrection:
+Use `AdsClient` for direct connection management (see [Implementation Note](#implementation-note-adsclient-vs-adssession)):
 
 ```csharp
-// Create session with resurrection support
-var settings = _configuration.SessionSettings ?? new SessionSettings(AmsNetId.Parse(_configuration.AmsNetId));
-_session = new AdsSession(_configuration.Host, _configuration.AmsPort, settings);
-_connection = _session.Connect();
+// Create client with direct connection
+var client = new AdsClient();
+client.Connect(_configuration.Host, _configuration.AmsPort);
 
 // Subscribe to connection state changes for monitoring
-_session.ConnectionStateChanged += OnConnectionStateChanged;
+client.ConnectionStateChanged += OnConnectionStateChanged;
 
 // Subscribe to ADS state changes (Run/Stop/Config transitions)
-_connection.AdsStateChanged += OnAdsStateChanged;
+client.AdsStateChanged += OnAdsStateChanged;
 ```
 
 Use the Reactive extensions for notifications and Sum Commands for batch operations:
@@ -714,7 +713,7 @@ public async Task<IDisposable?> StartListeningAsync(
 {
     _propertyWriter = propertyWriter;
 
-    // Connect to PLC via AdsSession (built-in resurrection/self-healing)
+    // Connect to PLC via AdsClient
     await ConnectWithRetryAsync(cancellationToken);
 
     // Load subject graph and register notifications/polling
@@ -733,13 +732,11 @@ private async Task ConnectWithRetryAsync(CancellationToken cancellationToken)
         {
             if (_circuitBreaker.ShouldAttempt())
             {
-                var settings = _configuration.SessionSettings
-                    ?? new SessionSettings(AmsNetId.Parse(_configuration.AmsNetId));
-                _session = new AdsSession(_configuration.Host, _configuration.AmsPort, settings);
-                _connection = _session.Connect();
+                var client = new AdsClient();
+                client.Connect(_configuration.Host, _configuration.AmsPort);
 
-                _session.ConnectionStateChanged += OnConnectionStateChanged;
-                _connection.AdsStateChanged += OnAdsStateChanged;
+                client.ConnectionStateChanged += OnConnectionStateChanged;
+                client.AdsStateChanged += OnAdsStateChanged;
 
                 Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
                 _circuitBreaker.RecordSuccess();
@@ -1111,19 +1108,16 @@ Access via `TwinCatSubjectClientSource.Diagnostics` property.
 
 ## Resilience Features
 
-### Connection Strategy: AdsSession with Built-in Resurrection
+### Connection Strategy: AdsClient with Manual Reconnection
 
-The connector uses `AdsSession` instead of raw `AdsClient` for connection management. `AdsSession` provides:
+The connector uses `AdsClient` directly for connection management with a signal-based debounced rescan mechanism in the `ExecuteAsync` loop.
 
-- **Automatic resurrection** after communication timeouts
-- **Faster error detection** via `IFailFastHandler`
-- **Connection state monitoring** via `ConnectionStateChanged` event
-- **Resurrection diagnostics** via `ResurrectingTries` and `Resurrections` properties
+> **Implementation Note (AdsClient vs AdsSession):** The original design specified `AdsSession` for its built-in resurrection feature. However, `AdsSession.Dispose()` throws `InvalidCastException` in Beckhoff.TwinCAT.Ads 7.0.x due to an internal casting bug. The implementation uses `AdsClient` directly, with reconnection handled by the connector's own `AdsConnectionManager` and circuit breaker. This provides equivalent reliability with explicit control over the reconnection lifecycle. This can be revisited when the Beckhoff SDK fix is confirmed.
 
 ### Reconnection Flow
 
 **Triggers for full rescan:**
-1. `AdsSession` resurrection completes (connection restored)
+1. Connection restored (detected via `ConnectionStateChanged` event)
 2. PLC state changes from non-Run → Run (e.g., after program download)
 3. Symbol version changes (PLC program updated)
 
@@ -1141,7 +1135,7 @@ private void OnConnectionStateChanged(object? sender, ConnectionStateChangedEven
 {
     if (e.NewState == ConnectionState.Connected && e.OldState != ConnectionState.Connected)
     {
-        _logger.LogInformation("AdsSession resurrected. Triggering full rescan.");
+        _logger.LogInformation("Connection restored. Triggering full rescan.");
         Interlocked.Increment(ref _successfulReconnections);
         _ = TriggerFullRescanAsync();
     }
@@ -2032,12 +2026,12 @@ The mock library can also replay recorded ADS communication from `.cap` files (T
     - Hybrid array size: use PLC metadata if empty, otherwise existing size
     - Path building for nested subjects, collections, dictionaries
 11. Implement `TwinCatSubjectClientSource`:
-    - Use `AdsSession` for connection (not raw `AdsClient`)
+    - Use `AdsClient` for connection (see Implementation Note above)
     - Implement `ISubjectSource` interface
-    - `ConnectionStateChanged` handling for resurrection detection
+    - `ConnectionStateChanged` handling for reconnection detection
     - `AdsStateChanged` handling for PLC Run/Stop transitions
     - Symbol version monitoring for PLC program changes
-    - Full rescan on resurrection/state change/symbol change
+    - Full rescan on reconnection/state change/symbol change
     - Notification registration via `WhenNotification`
     - Batch polling via `SumSymbolRead` on timer
     - Batch writes via `SumSymbolWrite`
@@ -2065,7 +2059,7 @@ The mock library can also replay recorded ADS communication from `.cap` files (T
 1. **Does `PollValues` batch internally?** — No, it polls per-symbol. **Resolution:** Use `SumSymbolRead` on a timer for batch polling instead.
 2. **ADS notification limits?** — Hardware-dependent. **Resolution:** Configurable `MaxNotifications` with default 500.
 3. **Sum commands for writes?** — Yes. **Resolution:** Use `SumSymbolWrite` for batch writes, `SumSymbolRead` for batch polling and initial load. Promoted from future enhancement to v1.
-4. **`WhenNotification` during resurrection?** — **Resolution:** Safe variant — full rescan (dispose subscriptions, reload, re-register) on AdsSession resurrection.
+4. **`WhenNotification` during reconnection?** — **Resolution:** Safe variant — full rescan (dispose subscriptions, reload, re-register) on connection restored.
 
 ## Open Questions
 

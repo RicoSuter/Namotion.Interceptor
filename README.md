@@ -8,7 +8,7 @@ Namotion.Interceptor is a .NET library for building reactive applications with a
 
 Simply mark your classes with `[InterceptorSubject]` and declare properties as `partial`. The source generator handles the rest: creating interception logic, change detection, derived property updates, and lifecycle management. Your domain models remain clean POCOs while gaining powerful reactive capabilities.
 
-The library supports **bidirectional synchronization** with external systems. When a property changes locally, connectors propagate the change outward. When external data arrives, your object model updates and triggers change notifications. Built-in integrations include MQTT, OPC UA, ASP.NET Core, Blazor, and GraphQL - useful for IoT dashboards, industrial HMIs, real-time web apps, and data synchronization services.
+The library supports **bidirectional synchronization** with external systems. When a property changes locally, connectors propagate the change outward. When external data arrives, your object model updates and triggers change notifications. Built-in integrations include MQTT, OPC UA, TwinCAT ADS, ASP.NET Core, Blazor, and GraphQL - useful for IoT dashboards, industrial HMIs, real-time web apps, and data synchronization services.
 
 ![](features.png)
 
@@ -224,7 +224,7 @@ sensor.Temperature = 25.5m;
 // (and trigger change notifications)
 ```
 
-Similar patterns work with OPC UA, databases, and other external systems. See the [MQTT](docs/connectors/mqtt.md), [OPC UA](docs/connectors/opcua.md), and [Connectors](docs/connectors.md) documentation for details.
+Similar patterns work with OPC UA, TwinCAT ADS, databases, and other external systems. See the [MQTT](docs/connectors/mqtt.md), [OPC UA](docs/connectors/opcua.md), [TwinCAT ADS](docs/connectors/twincat.md), and [Connectors](docs/connectors.md) documentation for details.
 
 ## Extensibility
 
@@ -263,6 +263,7 @@ Namotion.Interceptor is designed to be extended:
 | **Namotion.Interceptor.Connectors** | Base infrastructure for external system integration | [Connectors](docs/connectors.md) |
 | **Namotion.Interceptor.Mqtt** | Bidirectional MQTT synchronization | [MQTT](docs/connectors/mqtt.md) |
 | **Namotion.Interceptor.OpcUa** | OPC UA client and server integration | [OPC UA](docs/connectors/opcua.md) |
+| **Namotion.Interceptor.Connectors.TwinCAT** | TwinCAT ADS client integration for Beckhoff PLCs | [TwinCAT ADS](docs/connectors/twincat.md) |
 | **Namotion.Interceptor.WebSocket** | Real-time WebSocket synchronization | [WebSocket](docs/connectors/websocket.md) |
 
 ### Integrations
