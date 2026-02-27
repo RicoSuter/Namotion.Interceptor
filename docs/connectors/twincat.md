@@ -490,3 +490,19 @@ When an individual property is released:
 4. The `ExecuteAsync` background loop handles health checks and debounced rescans
 5. Inbound notifications and polling updates are applied via `SubjectPropertyWriter`
 6. Outbound property changes are written via `WriteChangesAsync()` with batch operations
+
+## Known Limitations
+
+The following items are known limitations of the current implementation. They are tracked for future improvement.
+
+### No active health probing
+
+The connector relies on the `AdsClient`'s internal connection state machine for reconnection. If the `AdsClient` instance itself becomes unresponsive (e.g., due to a Beckhoff SDK bug or ADS router restart), no `ConnectionStateChanged` event fires and the system stays disconnected. The `ExecuteAsync` loop of the `BackgroundService` already runs periodically on the `HealthCheckInterval` and would be the natural place to add active health probing (e.g., periodic `ReadStateAsync` calls to detect a dead `AdsClient` and recreate it).
+
+### Subject detach performance
+
+When a subject is detached from the object graph, `OnSubjectDetaching` iterates all entries in the symbol-to-property cache (`O(n)` scan) to find and remove entries belonging to the detached subject. For very large symbol sets (thousands of variables) with frequent detach operations, this could become a bottleneck. A reverse lookup (subject to symbol paths) would improve this to `O(1)` per subject.
+
+### Null value write behavior
+
+When a C# property value is `null`, the converted value is passed through to `SumSymbolWrite` as-is. The behavior of the Beckhoff SDK when writing `null` to a PLC symbol has not been validated with a real PLC. PLCs generally do not have a concept of `null`, so this may result in a write error or unexpected behavior depending on the symbol type.

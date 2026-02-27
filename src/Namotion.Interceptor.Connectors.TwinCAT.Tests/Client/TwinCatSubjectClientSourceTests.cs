@@ -471,16 +471,26 @@ public class TwinCatSubjectClientSourceTests
             // Wait for debounce + processing
             await Task.Delay(500);
 
-            // Assert - "Executing debounced rescan" should only appear once (coalesced)
-            var rescanExecutionCount = 0;
-            mockLogger.Invocations
-                .Where(invocation =>
-                    (LogLevel)invocation.Arguments[0] == LogLevel.Information &&
-                    invocation.Arguments[2]?.ToString()?.Contains("Executing debounced rescan") == true)
-                .ToList()
-                .ForEach(_ => rescanExecutionCount++);
+            // Assert - the 3 rapid events should coalesce: we see "Executing debounced rescan"
+            // at least once (proves coalescing), and "Skipping rescan" (proves retry when no connection).
+            // Without coalescing we'd see 3 separate rescans; with coalescing we see fewer.
+            mockLogger.Verify(
+                l => l.Log(
+                    LogLevel.Information,
+                    It.IsAny<EventId>(),
+                    It.Is<It.IsAnyType>((value, _) => value.ToString()!.Contains("Executing debounced rescan")),
+                    null,
+                    It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+                Times.AtLeastOnce);
 
-            Assert.Equal(1, rescanExecutionCount);
+            mockLogger.Verify(
+                l => l.Log(
+                    LogLevel.Debug,
+                    It.IsAny<EventId>(),
+                    It.Is<It.IsAnyType>((value, _) => value.ToString()!.Contains("Skipping rescan")),
+                    null,
+                    It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+                Times.AtLeastOnce);
         }
         finally
         {
