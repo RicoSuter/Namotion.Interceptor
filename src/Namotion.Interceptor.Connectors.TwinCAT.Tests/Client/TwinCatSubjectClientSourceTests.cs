@@ -210,7 +210,7 @@ public class TwinCatSubjectClientSourceTests
         {
             Host = "", // Invalid - empty
             AmsNetId = "127.0.0.1.1.1",
-            PathProvider = new AttributeBasedPathProvider(AdsConstants.DefaultConnectorName, '.')
+            PathProvider = new AttributeBasedPathProvider(AdsConstants.DefaultConnectorName)
         };
 
         // Act & Assert
@@ -310,7 +310,7 @@ public class TwinCatSubjectClientSourceTests
     }
 
     [Fact]
-    public async Task TriggerFullRescan_ViaConnectionRestored_WhenNotConnected_LogsErrorGracefully()
+    public async Task RequestRescan_ViaConnectionRestored_WhenNotConnected_SkipsGracefully()
     {
         // Arrange
         var mockLogger = new Mock<ILogger>();
@@ -319,125 +319,190 @@ public class TwinCatSubjectClientSourceTests
         var context = CreateContext();
         var subject = new TestPlcModel(context);
         var configuration = CreateConfiguration();
+        configuration.RescanDebounceTime = TimeSpan.FromMilliseconds(50);
+        configuration.HealthCheckInterval = TimeSpan.FromMilliseconds(50);
         var source = new TwinCatSubjectClientSource(subject, configuration, mockLogger.Object);
 
-        // Act - simulate a ConnectionRestored event (no real connection exists, so rescan will fail)
-        source.ConnectionManager.OnConnectionStateChanged(null,
-            new ConnectionStateChangedEventArgs(
-                ConnectionStateChangedReason.Established,
-                ConnectionState.Connected,
-                ConnectionState.Disconnected));
+        // Start the background service so ExecuteAsync loop is running
+        await source.StartAsync(CancellationToken.None);
 
-        // Give the fire-and-forget TriggerFullRescanAsync time to complete
-        await Task.Delay(100);
-
-        // Assert - rescan failed because Connection is null, but error was caught and logged
-        mockLogger.Verify(
-            l => l.Log(
-                LogLevel.Warning,
-                It.IsAny<EventId>(),
-                It.IsAny<It.IsAnyType>(),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.AtLeastOnce);
-
-        await source.DisposeAsync();
-    }
-
-    [Fact]
-    public async Task TriggerFullRescan_ViaAdsStateEnteredRun_WhenNotConnected_LogsErrorGracefully()
-    {
-        // Arrange
-        var mockLogger = new Mock<ILogger>();
-        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
-
-        var context = CreateContext();
-        var subject = new TestPlcModel(context);
-        var configuration = CreateConfiguration();
-        var source = new TwinCatSubjectClientSource(subject, configuration, mockLogger.Object);
-
-        // Act - simulate ADS state entering Run (triggers rescan)
-        source.ConnectionManager.OnAdsStateChanged(null,
-            new AdsStateChangedEventArgs(new StateInfo(AdsState.Run, 0)));
-
-        await Task.Delay(100);
-
-        // Assert - rescan attempted and error was caught gracefully
-        mockLogger.Verify(
-            l => l.Log(
-                LogLevel.Warning,
-                It.IsAny<EventId>(),
-                It.IsAny<It.IsAnyType>(),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.AtLeastOnce);
-
-        await source.DisposeAsync();
-    }
-
-    [Fact]
-    public async Task TriggerFullRescan_ViaSymbolVersionChanged_WhenNotConnected_LogsErrorGracefully()
-    {
-        // Arrange
-        var mockLogger = new Mock<ILogger>();
-        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
-
-        var context = CreateContext();
-        var subject = new TestPlcModel(context);
-        var configuration = CreateConfiguration();
-        var source = new TwinCatSubjectClientSource(subject, configuration, mockLogger.Object);
-
-        // Act - simulate symbol version change (triggers rescan)
-        source.ConnectionManager.OnSymbolVersionChanged(null,
-            new AdsSymbolVersionChangedEventArgs(2));
-
-        await Task.Delay(100);
-
-        // Assert - rescan attempted and error was caught gracefully
-        mockLogger.Verify(
-            l => l.Log(
-                LogLevel.Warning,
-                It.IsAny<EventId>(),
-                It.IsAny<It.IsAnyType>(),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.AtLeastOnce);
-
-        await source.DisposeAsync();
-    }
-
-    [Fact]
-    public async Task TriggerFullRescan_RepeatedEvents_OnlyLogsWarningOnce()
-    {
-        // Arrange
-        var mockLogger = new Mock<ILogger>();
-        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
-
-        var context = CreateContext();
-        var subject = new TestPlcModel(context);
-        var configuration = CreateConfiguration();
-        var source = new TwinCatSubjectClientSource(subject, configuration, mockLogger.Object);
-
-        // Act - fire the same event multiple times
-        for (var i = 0; i < 3; i++)
+        try
         {
-            source.ConnectionManager.OnSymbolVersionChanged(null,
-                new AdsSymbolVersionChangedEventArgs((byte)(i + 1)));
+            // Act - simulate a ConnectionRestored event (no real connection exists)
+            source.ConnectionManager.OnConnectionStateChanged(null,
+                new ConnectionStateChangedEventArgs(
+                    ConnectionStateChangedReason.Established,
+                    ConnectionState.Connected,
+                    ConnectionState.Disconnected));
+
+            // Wait for debounce + processing
+            await Task.Delay(300);
+
+            // Assert - rescan skipped because Connection is null, logged as debug
+            mockLogger.Verify(
+                l => l.Log(
+                    LogLevel.Debug,
+                    It.IsAny<EventId>(),
+                    It.Is<It.IsAnyType>((value, _) => value.ToString()!.Contains("Skipping rescan")),
+                    null,
+                    It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+                Times.AtLeastOnce);
         }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+            await source.DisposeAsync();
+        }
+    }
 
-        await Task.Delay(200);
+    [Fact]
+    public async Task RequestRescan_ViaAdsStateEnteredRun_WhenNotConnected_SkipsGracefully()
+    {
+        // Arrange
+        var mockLogger = new Mock<ILogger>();
+        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
 
-        // Assert - first-occurrence pattern: first rescan failure is Warning, subsequent are Debug
-        mockLogger.Verify(
-            l => l.Log(
-                LogLevel.Warning,
-                It.IsAny<EventId>(),
-                It.IsAny<It.IsAnyType>(),
-                It.IsAny<Exception>(),
-                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
-            Times.AtLeastOnce);
+        var context = CreateContext();
+        var subject = new TestPlcModel(context);
+        var configuration = CreateConfiguration();
+        configuration.RescanDebounceTime = TimeSpan.FromMilliseconds(50);
+        configuration.HealthCheckInterval = TimeSpan.FromMilliseconds(50);
+        var source = new TwinCatSubjectClientSource(subject, configuration, mockLogger.Object);
 
-        await source.DisposeAsync();
+        await source.StartAsync(CancellationToken.None);
+
+        try
+        {
+            // Act - simulate ADS state entering Run
+            source.ConnectionManager.OnAdsStateChanged(null,
+                new AdsStateChangedEventArgs(new StateInfo(AdsState.Run, 0)));
+
+            await Task.Delay(300);
+
+            // Assert - rescan skipped because Connection is null
+            mockLogger.Verify(
+                l => l.Log(
+                    LogLevel.Debug,
+                    It.IsAny<EventId>(),
+                    It.Is<It.IsAnyType>((value, _) => value.ToString()!.Contains("Skipping rescan")),
+                    null,
+                    It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+                Times.AtLeastOnce);
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+            await source.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task RequestRescan_ViaSymbolVersionChanged_WhenNotConnected_SkipsGracefully()
+    {
+        // Arrange
+        var mockLogger = new Mock<ILogger>();
+        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
+
+        var context = CreateContext();
+        var subject = new TestPlcModel(context);
+        var configuration = CreateConfiguration();
+        configuration.RescanDebounceTime = TimeSpan.FromMilliseconds(50);
+        configuration.HealthCheckInterval = TimeSpan.FromMilliseconds(50);
+        var source = new TwinCatSubjectClientSource(subject, configuration, mockLogger.Object);
+
+        await source.StartAsync(CancellationToken.None);
+
+        try
+        {
+            // Act - simulate symbol version change
+            source.ConnectionManager.OnSymbolVersionChanged(null,
+                new AdsSymbolVersionChangedEventArgs(2));
+
+            await Task.Delay(300);
+
+            // Assert - rescan skipped because Connection is null
+            mockLogger.Verify(
+                l => l.Log(
+                    LogLevel.Debug,
+                    It.IsAny<EventId>(),
+                    It.Is<It.IsAnyType>((value, _) => value.ToString()!.Contains("Skipping rescan")),
+                    null,
+                    It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+                Times.AtLeastOnce);
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+            await source.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task RequestRescan_MultipleRapidEvents_CoalescedIntoSingleRescan()
+    {
+        // Arrange
+        var mockLogger = new Mock<ILogger>();
+        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
+
+        var context = CreateContext();
+        var subject = new TestPlcModel(context);
+        var configuration = CreateConfiguration();
+        configuration.RescanDebounceTime = TimeSpan.FromMilliseconds(100);
+        configuration.HealthCheckInterval = TimeSpan.FromMilliseconds(50);
+        var source = new TwinCatSubjectClientSource(subject, configuration, mockLogger.Object);
+
+        await source.StartAsync(CancellationToken.None);
+
+        try
+        {
+            // Act - fire multiple events in rapid succession (simulates reconnection burst)
+            source.ConnectionManager.OnConnectionStateChanged(null,
+                new ConnectionStateChangedEventArgs(
+                    ConnectionStateChangedReason.Established,
+                    ConnectionState.Connected,
+                    ConnectionState.Disconnected));
+
+            source.ConnectionManager.OnAdsStateChanged(null,
+                new AdsStateChangedEventArgs(new StateInfo(AdsState.Run, 0)));
+
+            source.ConnectionManager.OnSymbolVersionChanged(null,
+                new AdsSymbolVersionChangedEventArgs(2));
+
+            // Wait for debounce + processing
+            await Task.Delay(500);
+
+            // Assert - "Executing debounced rescan" should only appear once (coalesced)
+            var rescanExecutionCount = 0;
+            mockLogger.Invocations
+                .Where(invocation =>
+                    (LogLevel)invocation.Arguments[0] == LogLevel.Information &&
+                    invocation.Arguments[2]?.ToString()?.Contains("Executing debounced rescan") == true)
+                .ToList()
+                .ForEach(_ => rescanExecutionCount++);
+
+            Assert.Equal(1, rescanExecutionCount);
+        }
+        finally
+        {
+            await source.StopAsync(CancellationToken.None);
+            await source.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public void RequestRescan_WithoutBackgroundService_DoesNotThrow()
+    {
+        // Arrange - tests that RequestRescan is safe to call even if ExecuteAsync isn't running
+        var context = CreateContext();
+        var subject = new TestPlcModel(context);
+        var configuration = CreateConfiguration();
+        var logger = new Mock<ILogger>().Object;
+        var source = new TwinCatSubjectClientSource(subject, configuration, logger);
+
+        // Act & Assert - should not throw
+        source.RequestRescan();
+        source.RequestRescan();
+        source.RequestRescan();
     }
 
     [Fact]

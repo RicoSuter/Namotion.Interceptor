@@ -75,6 +75,14 @@ public class AdsClientConfiguration
     public TimeSpan HealthCheckInterval { get; set; } = TimeSpan.FromSeconds(5);
 
     /// <summary>
+    /// Gets or sets the debounce time for rescan requests.
+    /// When multiple events (connection restored, PLC state change, symbol version change) fire
+    /// in rapid succession, the rescan waits until this time has elapsed since the last request
+    /// before executing, coalescing multiple events into a single rescan.
+    /// </summary>
+    public TimeSpan RescanDebounceTime { get; set; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>
     /// Gets or sets the buffer time for batching inbound updates.
     /// </summary>
     public TimeSpan BufferTime { get; set; } = TimeSpan.FromMilliseconds(8);

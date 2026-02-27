@@ -23,8 +23,10 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
     private readonly AdsSubjectLoader _subjectLoader;
     private readonly AdsConnectionManager _connectionManager;
     private readonly AdsSubscriptionManager _subscriptionManager;
+    private readonly SemaphoreSlim _rescanSignal = new(0, 1);
 
     private SubjectPropertyWriter? _propertyWriter;
+    private long _lastRescanRequestedAtTicks; // DateTimeOffset.UtcNow.UtcTicks, 0 = no pending request
 
     private AdsClientDiagnostics? _diagnostics;
     private int _disposed; // 0 = false, 1 = true
@@ -59,11 +61,11 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             onReleasing: _subscriptionManager.OnPropertyReleasing,
             onSubjectDetaching: _subscriptionManager.OnSubjectDetaching);
 
-        // Wire connection events to orchestration actions
+        // Wire connection events to request debounced rescan via ExecuteAsync loop
         _connectionManager.ConnectionRestored += () =>
         {
-            _logger.LogInformation("ADS connection restored. Triggering full rescan.");
-            _ = TriggerFullRescanAsync();
+            _logger.LogInformation("ADS connection restored. Requesting rescan.");
+            RequestRescan();
         };
 
         _connectionManager.ConnectionLost += () =>
@@ -73,14 +75,14 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
 
         _connectionManager.AdsStateEnteredRun += () =>
         {
-            _logger.LogInformation("PLC entered Run state. Triggering full rescan.");
-            _ = TriggerFullRescanAsync();
+            _logger.LogInformation("PLC entered Run state. Requesting rescan.");
+            RequestRescan();
         };
 
         _connectionManager.SymbolVersionChanged += () =>
         {
-            _logger.LogInformation("Symbol version changed. Triggering full rescan.");
-            _ = TriggerFullRescanAsync();
+            _logger.LogInformation("Symbol version changed. Requesting rescan.");
+            RequestRescan();
         };
     }
 
@@ -415,8 +417,29 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
                 : WriteResult.Failure(failedChanges.ToArray(), error));
     }
 
+    /// <summary>
+    /// Requests a debounced rescan. Multiple rapid calls are coalesced into a single rescan
+    /// by the <see cref="ExecuteAsync"/> loop after the configured debounce time elapses.
+    /// </summary>
+    internal void RequestRescan()
+    {
+        _propertyWriter?.StartBuffering();
+        Interlocked.Exchange(ref _lastRescanRequestedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
+
+        // Signal the loop; ignore if already signaled (SemaphoreSlim capped at 1)
+        try { _rescanSignal.Release(); }
+        catch (SemaphoreFullException) { }
+    }
+
     private void FullRescan()
     {
+        var connection = _connectionManager.Connection;
+        if (connection is null)
+        {
+            _logger.LogDebug("Skipping rescan: ADS connection is not established.");
+            return;
+        }
+
         _subscriptionManager.ClearAll();
         _connectionManager.RecreateSymbolLoader();
 
@@ -426,7 +449,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
         // Register subscriptions (determines read modes, registers notifications + polling)
         _subscriptionManager.RegisterSubscriptions(
             graphMappings,
-            _connectionManager.Connection!,
+            connection,
             _connectionManager.SymbolLoader,
             _ownership,
             _propertyWriter,
@@ -434,32 +457,27 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             _connectionManager);
     }
 
-    private async Task TriggerFullRescanAsync()
-    {
-        try
-        {
-            _propertyWriter?.StartBuffering();
-            FullRescan();
-            await (_propertyWriter?.LoadInitialStateAndResumeAsync(CancellationToken.None)
-                ?? Task.CompletedTask).ConfigureAwait(false);
-        }
-        catch (Exception exception)
-        {
-            _connectionManager.LogFirstOccurrence("Rescan", exception, "Full rescan failed.");
-        }
-    }
-
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Health check loop. Connection monitoring and reconnection are handled by
-        // AdsSession resurrection and event handlers (ConnectionStateChanged, AdsStateChanged,
-        // AdsSymbolVersionChanged). This loop serves as a periodic heartbeat for future extensions.
+        // This loop handles debounced rescans and periodic health monitoring.
+        // Event handlers (ConnectionRestored, AdsStateEnteredRun, SymbolVersionChanged)
+        // signal _rescanSignal to wake the loop immediately. A debounce period ensures
+        // that rapid successive events are coalesced into a single rescan.
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                await Task.Delay(_configuration.HealthCheckInterval, stoppingToken).ConfigureAwait(false);
+                // Wait for either a rescan signal or the health check interval
+                await WaitForSignalOrTimeoutAsync(
+                    _rescanSignal, _configuration.HealthCheckInterval, stoppingToken).ConfigureAwait(false);
+
+                // Process pending rescan with debounce
+                var requestedAtTicks = Interlocked.Read(ref _lastRescanRequestedAtTicks);
+                if (requestedAtTicks > 0)
+                {
+                    await DebounceAndRescanAsync(requestedAtTicks, stoppingToken).ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -467,9 +485,51 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             }
             catch (Exception exception)
             {
-                _connectionManager.LogFirstOccurrence("HealthCheck", exception, "Health check failed.");
+                _connectionManager.LogFirstOccurrence("Rescan", exception, "Rescan failed.");
             }
         }
+    }
+
+    private async Task DebounceAndRescanAsync(long requestedAtTicks, CancellationToken stoppingToken)
+    {
+        // Wait until the debounce period has elapsed since the last request.
+        // If new requests arrive during the wait, restart the debounce timer.
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            var requestedAt = new DateTimeOffset(requestedAtTicks, TimeSpan.Zero);
+            var elapsed = DateTimeOffset.UtcNow - requestedAt;
+            var remaining = _configuration.RescanDebounceTime - elapsed;
+
+            if (remaining > TimeSpan.Zero)
+            {
+                await WaitForSignalOrTimeoutAsync(
+                    _rescanSignal, remaining, stoppingToken).ConfigureAwait(false);
+
+                // Check if a newer request arrived during the wait
+                var newTicks = Interlocked.Read(ref _lastRescanRequestedAtTicks);
+                if (newTicks > requestedAtTicks)
+                {
+                    requestedAtTicks = newTicks;
+                    continue; // Restart debounce with the new timestamp
+                }
+            }
+
+            break;
+        }
+
+        // Clear the request and execute the rescan
+        Interlocked.Exchange(ref _lastRescanRequestedAtTicks, 0);
+
+        _logger.LogInformation("Executing debounced rescan.");
+        FullRescan();
+        await (_propertyWriter?.LoadInitialStateAndResumeAsync(stoppingToken)
+            ?? Task.CompletedTask).ConfigureAwait(false);
+    }
+
+    private static async Task WaitForSignalOrTimeoutAsync(
+        SemaphoreSlim signal, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        await signal.WaitAsync(timeout, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -488,6 +548,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
         await _subscriptionManager.DisposeAsync().ConfigureAwait(false);
         await _connectionManager.DisposeAsync().ConfigureAwait(false);
         _ownership.Dispose();
+        _rescanSignal.Dispose();
         Dispose();
     }
 

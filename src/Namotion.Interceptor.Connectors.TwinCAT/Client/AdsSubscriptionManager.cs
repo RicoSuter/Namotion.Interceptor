@@ -285,9 +285,6 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         return property.ReflectionAttributes.OfType<AdsVariableAttribute>().FirstOrDefault();
     }
 
-    internal static AdsReadMode GetConfiguredReadMode(RegisteredSubjectProperty property, AdsReadMode defaultReadMode)
-        => GetConfiguredReadMode(TryGetAdsVariableAttribute(property), defaultReadMode);
-
     private static AdsReadMode GetConfiguredReadMode(AdsVariableAttribute? attribute, AdsReadMode defaultReadMode)
     {
         if (attribute is not null && attribute.ReadMode != AdsReadMode.Auto)
@@ -297,9 +294,6 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
 
         return defaultReadMode;
     }
-
-    internal static int GetConfiguredCycleTime(RegisteredSubjectProperty property, int defaultCycleTime)
-        => GetConfiguredCycleTime(TryGetAdsVariableAttribute(property), defaultCycleTime);
 
     private static int GetConfiguredCycleTime(AdsVariableAttribute? attribute, int defaultCycleTime)
     {
@@ -311,16 +305,10 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         return defaultCycleTime;
     }
 
-    internal static int GetConfiguredPriority(RegisteredSubjectProperty property)
-        => GetConfiguredPriority(TryGetAdsVariableAttribute(property));
-
     private static int GetConfiguredPriority(AdsVariableAttribute? attribute)
     {
         return attribute?.Priority ?? 0;
     }
-
-    internal static int GetConfiguredMaxDelay(RegisteredSubjectProperty property, int defaultMaxDelay)
-        => GetConfiguredMaxDelay(TryGetAdsVariableAttribute(property), defaultMaxDelay);
 
     private static int GetConfiguredMaxDelay(AdsVariableAttribute? attribute, int defaultMaxDelay)
     {
