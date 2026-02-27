@@ -2,9 +2,7 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
 using Namotion.Interceptor.Connectors.TwinCAT.Tests.Models;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking;
 using TwinCAT;
 using TwinCAT.Ads;
 using Xunit;
@@ -13,41 +11,21 @@ namespace Namotion.Interceptor.Connectors.TwinCAT.Tests.Client;
 
 public class TwinCatSubjectClientSourceTests
 {
-    private static IInterceptorSubjectContext CreateContext()
-    {
-        return InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking()
-            .WithRegistry()
-            .WithLifecycle();
-    }
-
-    private static AdsClientConfiguration CreateConfiguration()
-    {
-        return new AdsClientConfiguration
-        {
-            Host = "127.0.0.1",
-            AmsNetId = "127.0.0.1.1.1",
-            AmsPort = 851,
-            PathProvider = new AttributeBasedPathProvider(AdsConstants.DefaultConnectorName, '.')
-        };
-    }
-
     private static TwinCatSubjectClientSource CreateSource(
         TestPlcModel? subject = null,
         AdsClientConfiguration? configuration = null,
         ILogger? logger = null)
     {
-        var context = CreateContext();
+        var context = TestHelpers.CreateContextWithLifecycle();
         return new TwinCatSubjectClientSource(
             subject ?? new TestPlcModel(context),
-            configuration ?? CreateConfiguration(),
+            configuration ?? TestHelpers.CreateConfiguration(),
             logger ?? new Mock<ILogger>().Object);
     }
 
     private static (TwinCatSubjectClientSource Source, Mock<ILogger> MockLogger) CreateSourceWithFastRescan()
     {
-        var configuration = CreateConfiguration();
+        var configuration = TestHelpers.CreateConfiguration();
         configuration.RescanDebounceTime = TimeSpan.FromMilliseconds(50);
         configuration.HealthCheckInterval = TimeSpan.FromMilliseconds(50);
 
@@ -74,7 +52,7 @@ public class TwinCatSubjectClientSourceTests
     public void Constructor_ShouldCreateSourceSuccessfully()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContextWithLifecycle();
         var subject = new TestPlcModel(context);
 
         // Act
@@ -163,7 +141,7 @@ public class TwinCatSubjectClientSourceTests
     public void Constructor_WithNullSubject_ShouldThrow()
     {
         // Arrange
-        var configuration = CreateConfiguration();
+        var configuration = TestHelpers.CreateConfiguration();
         var logger = new Mock<ILogger>().Object;
 
         // Act & Assert
@@ -175,7 +153,7 @@ public class TwinCatSubjectClientSourceTests
     public void Constructor_WithNullConfiguration_ShouldThrow()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContextWithLifecycle();
         var subject = new TestPlcModel(context);
         var logger = new Mock<ILogger>().Object;
 
@@ -188,9 +166,9 @@ public class TwinCatSubjectClientSourceTests
     public void Constructor_WithNullLogger_ShouldThrow()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContextWithLifecycle();
         var subject = new TestPlcModel(context);
-        var configuration = CreateConfiguration();
+        var configuration = TestHelpers.CreateConfiguration();
 
         // Act & Assert
         Assert.Throws<ArgumentNullException>(() =>
@@ -201,7 +179,7 @@ public class TwinCatSubjectClientSourceTests
     public void Constructor_WithInvalidConfiguration_ShouldThrow()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContextWithLifecycle();
         var subject = new TestPlcModel(context);
         var logger = new Mock<ILogger>().Object;
         var configuration = new AdsClientConfiguration
@@ -253,7 +231,7 @@ public class TwinCatSubjectClientSourceTests
     public async Task ExecuteAsync_ShouldRunAndStopCleanly()
     {
         // Arrange
-        var configuration = CreateConfiguration();
+        var configuration = TestHelpers.CreateConfiguration();
         configuration.HealthCheckInterval = TimeSpan.FromMilliseconds(50);
         var source = CreateSource(configuration: configuration);
 
@@ -370,7 +348,7 @@ public class TwinCatSubjectClientSourceTests
     public async Task RequestRescan_MultipleRapidEvents_CoalescedIntoSingleRescan()
     {
         // Arrange
-        var configuration = CreateConfiguration();
+        var configuration = TestHelpers.CreateConfiguration();
         configuration.RescanDebounceTime = TimeSpan.FromMilliseconds(100);
         configuration.HealthCheckInterval = TimeSpan.FromMilliseconds(50);
 

@@ -64,28 +64,10 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             onSubjectDetaching: _subscriptionManager.OnSubjectDetaching);
 
         // Wire connection events to request debounced rescan via ExecuteAsync loop
-        _connectionManager.ConnectionRestored += () =>
-        {
-            _logger.LogInformation("ADS connection restored. Requesting rescan.");
-            RequestRescan();
-        };
-
-        _connectionManager.ConnectionLost += () =>
-        {
-            _propertyWriter?.StartBuffering();
-        };
-
-        _connectionManager.AdsStateEnteredRun += () =>
-        {
-            _logger.LogInformation("PLC entered Run state. Requesting rescan.");
-            RequestRescan();
-        };
-
-        _connectionManager.SymbolVersionChanged += () =>
-        {
-            _logger.LogInformation("Symbol version changed. Requesting rescan.");
-            RequestRescan();
-        };
+        _connectionManager.ConnectionRestored += () => RequestRescanWithLog("ADS connection restored.");
+        _connectionManager.ConnectionLost += () => _propertyWriter?.StartBuffering();
+        _connectionManager.AdsStateEnteredRun += () => RequestRescanWithLog("PLC entered Run state.");
+        _connectionManager.SymbolVersionChanged += () => RequestRescanWithLog("Symbol version changed.");
     }
 
     /// <summary>
@@ -530,6 +512,12 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
         return WriteResult.PartialFailure(unresolvedChanges.ToArray(), error);
     }
 
+    private void RequestRescanWithLog(string reason)
+    {
+        _logger.LogInformation("{Reason} Requesting rescan.", reason);
+        RequestRescan();
+    }
+
     /// <summary>
     /// Requests a debounced rescan. Multiple rapid calls are coalesced into a single rescan
     /// by the <see cref="ExecuteAsync"/> loop after the configured debounce time elapses.
@@ -679,5 +667,4 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
         _ownership.Dispose();
         _rescanSignal.Dispose();
     }
-
 }

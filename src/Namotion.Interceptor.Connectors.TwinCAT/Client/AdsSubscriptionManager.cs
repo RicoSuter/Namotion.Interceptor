@@ -504,12 +504,10 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     /// <inheritdoc />
     public ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
-            return ValueTask.CompletedTask;
+            _subscriptions.Dispose();
         }
-
-        _subscriptions.Dispose();
 
         return ValueTask.CompletedTask;
     }

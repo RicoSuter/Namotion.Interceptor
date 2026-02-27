@@ -189,13 +189,7 @@ public sealed class AdsTestServer : IAsyncDisposable
     /// <inheritdoc/>
     public async ValueTask DisposeAsync()
     {
-        if (_server is not null)
-        {
-            _serverCts.Cancel();
-            await Task.Delay(200);
-            _server.Dispose();
-            _server = null;
-        }
+        await StopAsync();
 
         if (_router is not null)
         {

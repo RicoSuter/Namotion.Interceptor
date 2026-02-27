@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Moq;
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
-using Namotion.Interceptor.Registry.Paths;
 using TwinCAT;
 using TwinCAT.Ads;
 using Xunit;
@@ -10,21 +9,10 @@ namespace Namotion.Interceptor.Connectors.TwinCAT.Tests.Client;
 
 public class AdsConnectionManagerTests
 {
-    private static AdsClientConfiguration CreateConfiguration()
-    {
-        return new AdsClientConfiguration
-        {
-            Host = "127.0.0.1",
-            AmsNetId = "127.0.0.1.1.1",
-            AmsPort = 851,
-            PathProvider = new AttributeBasedPathProvider(AdsConstants.DefaultConnectorName, '.')
-        };
-    }
-
     private static AdsConnectionManager CreateManager(Mock<ILogger>? mockLogger = null)
     {
         return new AdsConnectionManager(
-            CreateConfiguration(),
+            TestHelpers.CreateConfiguration(),
             (mockLogger ?? new Mock<ILogger>()).Object);
     }
 
@@ -43,7 +31,7 @@ public class AdsConnectionManagerTests
     public void Constructor_WithNullLogger_ShouldThrow()
     {
         // Arrange
-        var configuration = CreateConfiguration();
+        var configuration = TestHelpers.CreateConfiguration();
 
         // Act & Assert
         Assert.Throws<ArgumentNullException>(() =>
