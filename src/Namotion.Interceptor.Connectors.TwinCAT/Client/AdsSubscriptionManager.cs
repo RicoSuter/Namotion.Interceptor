@@ -200,7 +200,8 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     /// </summary>
     internal void OnSubjectDetaching(IInterceptorSubject subject)
     {
-        // Bulk cleanup: remove all symbol cache entries for the detached subject
+        // TODO(perf): Consider a reverse lookup (subject → symbolPaths) to avoid O(n) scan
+        // for large symbol sets. Currently acceptable because subject detachment is rare.
         foreach (var kvp in _symbolToProperty)
         {
             if (kvp.Value.HasValue && kvp.Value.Value.Subject == subject)
@@ -360,8 +361,9 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         ISubjectSource source,
         AdsConnectionManager connectionManager)
     {
+        // Build initial polling snapshot from the provided symbols
         var symbols = new List<ISymbol>();
-        var validEntries = new List<(RegisteredSubjectProperty Property, string SymbolPath)>();
+        var pollingEntries = new List<(PropertyReference Reference, string SymbolPath)>();
 
         foreach (var (property, symbolPath) in polledSymbols)
         {
@@ -369,7 +371,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             if (symbol is not null)
             {
                 symbols.Add(symbol);
-                validEntries.Add((property, symbolPath));
+                pollingEntries.Add((property.Reference, symbolPath));
             }
         }
 
@@ -386,9 +388,31 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             {
                 if (_pollingCollectionDirty)
                 {
-                    // Polling collection has changed, skip this cycle
-                    // A full rescan will rebuild it
-                    return;
+                    // Rebuild snapshot from _polledProperties (the source of truth)
+                    _pollingCollectionDirty = false;
+
+                    var newSymbols = new List<ISymbol>();
+                    var newEntries = new List<(PropertyReference Reference, string SymbolPath)>();
+
+                    foreach (var kvp in _polledProperties)
+                    {
+                        var symbol = TryGetSymbol(symbolLoader, kvp.Value);
+                        if (symbol is not null)
+                        {
+                            newSymbols.Add(symbol);
+                            newEntries.Add((kvp.Key, kvp.Value));
+                        }
+                    }
+
+                    if (newSymbols.Count == 0)
+                    {
+                        return;
+                    }
+
+                    symbols = newSymbols;
+                    pollingEntries = newEntries;
+                    sumRead = new SumSymbolRead(connection, newSymbols);
+                    useFallback = false;
                 }
 
                 if (!useFallback)
@@ -410,14 +434,14 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
                         {
                             var values = readResult.Values;
                             var errorCodes = readResult.SubErrors;
-                            for (var index = 0; index < validEntries.Count && index < values.Length; index++)
+                            for (var index = 0; index < pollingEntries.Count && index < values.Length; index++)
                             {
                                 if (errorCodes is not null && errorCodes[index] != AdsErrorCode.NoError)
                                 {
                                     continue;
                                 }
 
-                                OnValueReceived(validEntries[index].Property.Reference, values[index], null, propertyWriter, source);
+                                OnValueReceived(pollingEntries[index].Reference, values[index], null, propertyWriter, source);
                             }
 
                             return;
@@ -436,11 +460,11 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
                     try
                     {
                         var value = ((IValueSymbol)symbols[index]).ReadValue();
-                        OnValueReceived(validEntries[index].Property.Reference, value, null, propertyWriter, source);
+                        OnValueReceived(pollingEntries[index].Reference, value, null, propertyWriter, source);
                     }
                     catch (Exception exception)
                     {
-                        connectionManager.LogFirstOccurrence("BatchPoll", exception, "Failed to read polled symbol '{SymbolPath}'.", validEntries[index].SymbolPath);
+                        connectionManager.LogFirstOccurrence("BatchPoll", exception, "Failed to read polled symbol '{SymbolPath}'.", pollingEntries[index].SymbolPath);
                     }
                 }
             }
