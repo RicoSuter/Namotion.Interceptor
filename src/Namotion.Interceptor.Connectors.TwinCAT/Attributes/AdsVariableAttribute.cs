@@ -17,13 +17,12 @@ public class AdsVariableAttribute : PathAttribute
         : base(connectorName ?? AdsConstants.DefaultConnectorName, symbolPath)
     {
         ArgumentNullException.ThrowIfNull(symbolPath);
-        SymbolPath = symbolPath;
     }
 
     /// <summary>
-    /// Gets the ADS symbol path.
+    /// Gets the ADS symbol path (alias for <see cref="PathAttribute.Path"/>).
     /// </summary>
-    public string SymbolPath { get; }
+    public string SymbolPath => Path;
 
     /// <summary>
     /// Gets or sets the read mode for this variable.

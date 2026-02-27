@@ -3,8 +3,6 @@ using Moq;
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
 using Namotion.Interceptor.Connectors.TwinCAT.Tests.Models;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking;
 using TwinCAT.TypeSystem;
 using Xunit;
 
@@ -12,28 +10,9 @@ namespace Namotion.Interceptor.Connectors.TwinCAT.Tests.Client;
 
 public class AdsSubscriptionManagerTests
 {
-    private static AdsClientConfiguration CreateConfiguration()
-    {
-        return new AdsClientConfiguration
-        {
-            Host = "127.0.0.1",
-            AmsNetId = "127.0.0.1.1.1",
-            AmsPort = 851,
-            PathProvider = new AttributeBasedPathProvider(AdsConstants.DefaultConnectorName)
-        };
-    }
-
-    private static IInterceptorSubjectContext CreateContext()
-    {
-        return InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
-    }
-
     private static AdsSubscriptionManager CreateManager()
     {
-        return new AdsSubscriptionManager(CreateConfiguration(), new Mock<ILogger>().Object);
+        return new AdsSubscriptionManager(TestHelpers.CreateConfiguration(), new Mock<ILogger>().Object);
     }
 
     [Fact]
@@ -51,7 +30,7 @@ public class AdsSubscriptionManagerTests
     public void Constructor_WithNullLogger_ShouldThrow()
     {
         // Arrange
-        var configuration = CreateConfiguration();
+        var configuration = TestHelpers.CreateConfiguration();
 
         // Act & Assert
         Assert.Throws<ArgumentNullException>(() =>
@@ -77,7 +56,7 @@ public class AdsSubscriptionManagerTests
     {
         // Arrange
         var manager = CreateManager();
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new TestPlcModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First();
@@ -94,7 +73,7 @@ public class AdsSubscriptionManagerTests
     {
         // Arrange
         var manager = CreateManager();
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new TestPlcModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
 
@@ -191,7 +170,7 @@ public class AdsSubscriptionManagerTests
     {
         // Arrange
         var manager = CreateManager();
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new TestPlcModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First();
@@ -208,7 +187,7 @@ public class AdsSubscriptionManagerTests
     {
         // Arrange
         var manager = CreateManager();
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new TestPlcModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First();
@@ -222,7 +201,7 @@ public class AdsSubscriptionManagerTests
     {
         // Arrange
         var manager = CreateManager();
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new TestPlcModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
         var property = registeredSubject.Properties.First();
@@ -237,7 +216,7 @@ public class AdsSubscriptionManagerTests
     {
         // Arrange
         var manager = CreateManager();
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new TestPlcModel(context);
         var registeredSubject = model.TryGetRegisteredSubject()!;
 
@@ -253,7 +232,7 @@ public class AdsSubscriptionManagerTests
     {
         // Arrange
         var manager = CreateManager();
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new TestPlcModel(context);
 
         // Act & Assert
@@ -265,7 +244,7 @@ public class AdsSubscriptionManagerTests
     {
         // Arrange
         var manager = CreateManager();
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new TestPlcModel(context);
 
         // Act & Assert
@@ -278,7 +257,7 @@ public class AdsSubscriptionManagerTests
     {
         // Arrange
         var manager = CreateManager();
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model1 = new TestPlcModel(context);
         var model2 = new TestPlcModel(context);
 

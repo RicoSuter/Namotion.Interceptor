@@ -2,42 +2,20 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
 using Namotion.Interceptor.Connectors.TwinCAT.Tests.Models;
-using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking;
 using Xunit;
 
 namespace Namotion.Interceptor.Connectors.TwinCAT.Tests.Client;
 
 public class AdsClientDiagnosticsTests
 {
-    private static IInterceptorSubjectContext CreateContext()
-    {
-        return InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking()
-            .WithRegistry()
-            .WithLifecycle();
-    }
-
-    private static AdsClientConfiguration CreateConfiguration()
-    {
-        return new AdsClientConfiguration
-        {
-            Host = "127.0.0.1",
-            AmsNetId = "127.0.0.1.1.1",
-            AmsPort = 851,
-            PathProvider = new AttributeBasedPathProvider(AdsConstants.DefaultConnectorName, '.')
-        };
-    }
 
     [Fact]
     public void Properties_InitialState_ShouldHaveDefaultValues()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContextWithLifecycle();
         var subject = new TestPlcModel(context);
-        var configuration = CreateConfiguration();
+        var configuration = TestHelpers.CreateConfiguration();
         var logger = new Mock<ILogger>().Object;
 
         var source = new TwinCatSubjectClientSource(subject, configuration, logger);

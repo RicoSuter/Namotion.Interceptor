@@ -515,4 +515,4 @@ When a subject is detached from the object graph, `OnSubjectDetaching` iterates 
 
 ### Null value write behavior
 
-When a C# property value is `null`, the converted value is passed through to `SumSymbolWrite` as-is. The behavior of the Beckhoff SDK when writing `null` to a PLC symbol has not been validated with a real PLC. PLCs generally do not have a concept of `null`, so this may result in a write error or unexpected behavior depending on the symbol type.
+When a C# property value converts to `null` via `AdsValueConverter.ConvertToAdsValue`, the write is silently skipped with a Debug-level log message. PLCs generally do not have a concept of `null`, so passing `null` to the Beckhoff SDK could cause unexpected behavior. If you need to write a "zero" or default value, ensure your `AdsValueConverter` returns a non-null default instead of `null`.

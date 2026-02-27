@@ -1,36 +1,20 @@
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
 using Namotion.Interceptor.Connectors.TwinCAT.Tests.Models;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking;
 using Xunit;
 
 namespace Namotion.Interceptor.Connectors.TwinCAT.Tests.Client;
 
 public class ReadModeDemotionTests
 {
-    private static IInterceptorSubjectContext CreateContext()
-    {
-        return InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
-    }
-
-    private static AdsSubjectLoader CreateLoader()
-    {
-        var pathProvider = new AttributeBasedPathProvider(AdsConstants.DefaultConnectorName, '.');
-        return new AdsSubjectLoader(pathProvider);
-    }
 
     [Fact]
     public void NotificationMode_ShouldNeverBeDemoted_EvenWhenLimitIsZero()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new NotificationOnlyModel(context);
-        var loader = CreateLoader();
+        var loader = TestHelpers.CreateLoader();
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - limit of 0 notifications available
@@ -46,9 +30,9 @@ public class ReadModeDemotionTests
     public void PolledMode_ShouldAlwaysRemainPolled_EvenWithPlentyOfSlots()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new PolledOnlyModel(context);
-        var loader = CreateLoader();
+        var loader = TestHelpers.CreateLoader();
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - plenty of notification slots available
@@ -64,9 +48,9 @@ public class ReadModeDemotionTests
     public void AutoMode_ShouldUseNotification_WhenWithinLimit()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new AutoModeModel(context);
-        var loader = CreateLoader();
+        var loader = TestHelpers.CreateLoader();
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - sufficient notification slots
@@ -82,9 +66,9 @@ public class ReadModeDemotionTests
     public void AutoMode_ShouldDemoteToPolled_WhenLimitReached()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new AutoModeModel(context);
-        var loader = CreateLoader();
+        var loader = TestHelpers.CreateLoader();
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - no notification slots (limit of 0)
@@ -100,9 +84,9 @@ public class ReadModeDemotionTests
     public void DemotionOrder_ShouldDemoteHigherPriorityValueFirst()
     {
         // Arrange - 5 Auto mode properties with different priorities
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new DemotionTestModel(context);
-        var loader = CreateLoader();
+        var loader = TestHelpers.CreateLoader();
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - allow only 2 notifications (3 must be demoted)
@@ -130,9 +114,9 @@ public class ReadModeDemotionTests
     public void DemotionOrder_ShouldUseHigherCycleTimeAsTiebreaker()
     {
         // Arrange - 5 Auto mode properties
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new DemotionTestModel(context);
-        var loader = CreateLoader();
+        var loader = TestHelpers.CreateLoader();
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - allow 4 notifications (only 1 must be demoted)
@@ -155,9 +139,9 @@ public class ReadModeDemotionTests
     public void DemotionOrder_FastHighPriority_ShouldBeDemotedLast()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new DemotionTestModel(context);
-        var loader = CreateLoader();
+        var loader = TestHelpers.CreateLoader();
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - allow only 1 notification (4 must be demoted)
@@ -183,9 +167,9 @@ public class ReadModeDemotionTests
     public void MixedModes_ShouldOnlyDemoteAutoProperties()
     {
         // Arrange - Mix of Notification, Polled, and Auto
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new MixedReadModeModel(context);
-        var loader = CreateLoader();
+        var loader = TestHelpers.CreateLoader();
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - limit of 1 notification
@@ -213,9 +197,9 @@ public class ReadModeDemotionTests
     public void MixedModes_WithSufficientSlots_ShouldKeepAutoAsNotification()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new MixedReadModeModel(context);
-        var loader = CreateLoader();
+        var loader = TestHelpers.CreateLoader();
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - limit of 10 notifications (plenty)
@@ -241,9 +225,9 @@ public class ReadModeDemotionTests
     public void MixedModes_WithPartialDemotion_ShouldDemoteByPriorityThenCycleTime()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new MixedReadModeModel(context);
-        var loader = CreateLoader();
+        var loader = TestHelpers.CreateLoader();
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - limit of 2 notifications
@@ -281,9 +265,9 @@ public class ReadModeDemotionTests
     public void DefaultReadMode_ShouldApplyWhenAttributeUsesAuto()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new AutoModeModel(context);
-        var loader = CreateLoader();
+        var loader = TestHelpers.CreateLoader();
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - default read mode is Polled (overrides Auto's default behavior)
@@ -299,9 +283,9 @@ public class ReadModeDemotionTests
     public void AllAutoProperties_WithLimitExceedingCount_ShouldNotDemoteAny()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new DemotionTestModel(context);
-        var loader = CreateLoader();
+        var loader = TestHelpers.CreateLoader();
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - limit way above count of properties
@@ -316,9 +300,9 @@ public class ReadModeDemotionTests
     public void AllAutoProperties_WithExactLimit_ShouldNotDemoteAny()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var model = new DemotionTestModel(context);
-        var loader = CreateLoader();
+        var loader = TestHelpers.CreateLoader();
         var mappings = loader.LoadSubjectGraph(model);
 
         // Act - limit exactly equals count of properties (5)

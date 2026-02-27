@@ -1,32 +1,22 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.TwinCAT;
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
 using Namotion.Interceptor.Connectors.TwinCAT.Tests.Models;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
-using Namotion.Interceptor.Tracking;
 using Xunit;
 
 namespace Namotion.Interceptor.Connectors.TwinCAT.Tests;
 
 public class TwinCatSubjectExtensionsTests
 {
-    private static IInterceptorSubjectContext CreateContext()
-    {
-        return InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
-    }
 
     [Fact]
     public void AddTwinCatSubjectClientSource_GenericOverload_ShouldRegisterBothHostedServices()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<TestPlcModel>(_ => new TestPlcModel(context));
@@ -50,7 +40,7 @@ public class TwinCatSubjectExtensionsTests
     public void AddTwinCatSubjectClientSource_WithCustomConfiguration_ShouldUseProvidedConfiguration()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var services = new ServiceCollection();
         services.AddLogging();
 
@@ -82,7 +72,7 @@ public class TwinCatSubjectExtensionsTests
     public void AddTwinCatSubjectClientSource_DefaultAmsNetId_ShouldAppendOneOne()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<TestPlcModel>(_ => new TestPlcModel(context));
@@ -105,7 +95,7 @@ public class TwinCatSubjectExtensionsTests
     public void AddTwinCatSubjectClientSource_ExplicitAmsNetId_ShouldUseProvidedValue()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<TestPlcModel>(_ => new TestPlcModel(context));
@@ -129,7 +119,7 @@ public class TwinCatSubjectExtensionsTests
     public void AddTwinCatSubjectClientSource_MultipleRegistrations_ShouldRegisterAllServices()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var services = new ServiceCollection();
         services.AddLogging();
 
@@ -167,7 +157,7 @@ public class TwinCatSubjectExtensionsTests
     public void AddTwinCatSubjectClientSource_DefaultAmsPort_ShouldBe851()
     {
         // Arrange
-        var context = CreateContext();
+        var context = TestHelpers.CreateContext();
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<TestPlcModel>(_ => new TestPlcModel(context));

@@ -4,9 +4,20 @@ namespace Namotion.Interceptor.Connectors.TwinCAT.Client;
 
 /// <summary>
 /// Classifies ADS errors as transient (retry) or permanent (don't retry).
+/// Unknown error codes are treated as transient (safer default).
 /// </summary>
 internal static class AdsErrorClassifier
 {
+    private static readonly HashSet<AdsErrorCode> PermanentErrors =
+    [
+        AdsErrorCode.DeviceSymbolNotFound,
+        AdsErrorCode.DeviceInvalidSize,
+        AdsErrorCode.DeviceInvalidData,
+        AdsErrorCode.DeviceServiceNotSupported,
+        AdsErrorCode.DeviceInvalidAccess,
+        AdsErrorCode.DeviceInvalidOffset,
+    ];
+
     /// <summary>
     /// Determines if an ADS error is transient and should be retried.
     /// </summary>
@@ -14,26 +25,6 @@ internal static class AdsErrorClassifier
     /// <returns>True if the error is transient and should be retried; false if permanent.</returns>
     public static bool IsTransientError(AdsErrorCode errorCode)
     {
-        return errorCode switch
-        {
-            // Permanent errors - don't retry
-            AdsErrorCode.DeviceSymbolNotFound => false,
-            AdsErrorCode.DeviceInvalidSize => false,
-            AdsErrorCode.DeviceInvalidData => false,
-            AdsErrorCode.DeviceServiceNotSupported => false,
-            AdsErrorCode.DeviceInvalidAccess => false,
-            AdsErrorCode.DeviceInvalidOffset => false,
-
-            // Transient errors - retry
-            AdsErrorCode.TargetPortNotFound => true,
-            AdsErrorCode.TargetMachineNotFound => true,
-            AdsErrorCode.ClientPortNotOpen => true,
-            AdsErrorCode.DeviceError => true,
-            AdsErrorCode.DeviceTimeOut => true,
-            AdsErrorCode.DeviceBusy => true,
-
-            // Default: treat unknown as transient (safer)
-            _ => true
-        };
+        return !PermanentErrors.Contains(errorCode);
     }
 }

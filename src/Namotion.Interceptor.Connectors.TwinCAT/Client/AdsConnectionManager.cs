@@ -286,12 +286,10 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
     /// <inheritdoc />
     public ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) == 1)
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
-            return ValueTask.CompletedTask;
+            DisconnectAndDisposeClient();
         }
-
-        DisconnectAndDisposeClient();
 
         return ValueTask.CompletedTask;
     }
