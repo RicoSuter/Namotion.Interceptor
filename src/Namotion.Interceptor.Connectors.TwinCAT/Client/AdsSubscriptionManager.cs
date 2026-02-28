@@ -43,7 +43,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         public readonly List<ISymbol> Symbols;
         public readonly List<(PropertyReference Reference, string SymbolPath)> Entries;
         public readonly SumSymbolRead? SumRead;
-        public bool UseFallback; // only mutated by the polling thread
+        public volatile bool UseFallback; // only mutated by the polling thread
 
         public PollingSnapshot(List<ISymbol> symbols, List<(PropertyReference, string)> entries, SumSymbolRead? sumRead)
         {
@@ -158,6 +158,14 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     internal string? GetSymbolPath(PropertyReference propertyReference)
     {
         return _propertyToSymbol.GetValueOrDefault(propertyReference);
+    }
+
+    /// <summary>
+    /// Adds a symbol-path mapping to the cache.
+    /// </summary>
+    internal void SetSymbolPath(PropertyReference propertyReference, string symbolPath)
+    {
+        _propertyToSymbol[propertyReference] = symbolPath;
     }
 
     /// <summary>

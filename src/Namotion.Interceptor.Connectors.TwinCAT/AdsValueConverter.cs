@@ -22,9 +22,9 @@ public class AdsValueConverter
 
         var targetType = property.Type;
 
-        // Handle DATE_AND_TIME -> DateTimeOffset
+        // Handle DATE_AND_TIME -> DateTimeOffset (PLC DateTime values are assumed UTC)
         if (targetType == typeof(DateTimeOffset) && adsValue is DateTime dateTime)
-            return new DateTimeOffset(dateTime, TimeSpan.Zero);
+            return new DateTimeOffset(DateTime.SpecifyKind(dateTime, DateTimeKind.Utc), TimeSpan.Zero);
 
         return adsValue;
     }

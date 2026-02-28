@@ -146,6 +146,9 @@ public class AdsClientConfiguration
         if (CircuitBreakerCooldown <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(CircuitBreakerCooldown), "CircuitBreakerCooldown must be positive.");
 
+        if (DefaultMaxDelay < 0)
+            throw new ArgumentOutOfRangeException(nameof(DefaultMaxDelay), "DefaultMaxDelay must be non-negative.");
+
         if (RescanDebounceTime < TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(nameof(RescanDebounceTime), "RescanDebounceTime must be non-negative.");
     }

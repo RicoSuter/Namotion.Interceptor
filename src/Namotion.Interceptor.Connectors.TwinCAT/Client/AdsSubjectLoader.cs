@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Connectors.TwinCAT.Client;
 /// Recursively loads the subject graph and maps properties to ADS symbol paths.
 /// Pure and testable - no ADS client dependency.
 /// </summary>
-internal class AdsSubjectLoader
+internal sealed class AdsSubjectLoader
 {
     private readonly IPathProvider _pathProvider;
 
