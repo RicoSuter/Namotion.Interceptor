@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor.Connectors.Tests.Models;
@@ -400,5 +401,91 @@ public class SubjectSourceBackgroundServiceTests
 
         // Assert - changes were enqueued and retried
         Assert.True(callCount >= 2);
+    }
+
+    [Fact]
+    public async Task WhenWriteReturnsFailureResult_ThenFailedChangesAreEnqueuedAndRetried()
+    {
+        // Arrange
+        var propertyChangedChannel = new PropertyChangeQueue();
+
+        var context = new InterceptorSubjectContext();
+        context.WithRegistry();
+        context.AddService(propertyChangedChannel);
+
+        var subject = new Person(context);
+        var subjectSourceMock = new Mock<ISubjectSource>();
+
+        // Claim ownership of the property
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(subjectSourceMock.Object);
+
+        subjectSourceMock
+            .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IDisposable?)null);
+
+        subjectSourceMock
+            .Setup(s => s.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Action?)null);
+
+        var allWrittenValues = new ConcurrentBag<string?[]>();
+        var callCount = 0;
+        var firstCallTcs = new TaskCompletionSource();
+        var thirdCallTcs = new TaskCompletionSource();
+        subjectSourceMock
+            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                var current = Interlocked.Increment(ref callCount);
+                allWrittenValues.Add(changes.ToArray().Select(c => c.GetNewValue<string?>()).ToArray());
+
+                if (current == 1)
+                {
+                    firstCallTcs.TrySetResult();
+                    // First write fails — WriteResult.Failure should cause SBBS to enqueue
+                    return new ValueTask<WriteResult>(WriteResult.Failure(changes, new Exception("Transient error")));
+                }
+
+                if (current >= 3)
+                {
+                    thirdCallTcs.TrySetResult();
+                }
+
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        // Act
+        var service = new SubjectSourceBackgroundService(
+            subjectSourceMock.Object, context, NullLogger.Instance,
+            bufferTime: TimeSpan.Zero);
+        await service.StartAsync(CancellationToken.None);
+
+        // First change — will return WriteResult.Failure, should be enqueued for retry
+        var writeContext1 = new PropertyWriteContext<string?>(
+            subject.GetPropertyReference(nameof(Person.FirstName)), null, "FailedValue");
+        propertyChangedChannel.WriteProperty(ref writeContext1, (ref _) => { });
+        await firstCallTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Second change — triggers retry queue flush (retrying first), then writes second
+        var writeContext2 = new PropertyWriteContext<string?>(
+            subject.GetPropertyReference(nameof(Person.FirstName)), "FailedValue", "SecondValue");
+        propertyChangedChannel.WriteProperty(ref writeContext2, (ref _) => { });
+
+        // Wait for retry flush + new write (3 total calls)
+        await thirdCallTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert
+        // 3 calls expected:
+        //   1. "FailedValue" → Failure (enqueued to retry queue)
+        //   2. "FailedValue" → Success (retry from queue flush)
+        //   3. "SecondValue" → Success (new write)
+        Assert.True(callCount >= 3,
+            $"Expected at least 3 write calls (initial + retry + new), got {callCount}");
+
+        // Verify the failed value was retried (appears in at least 2 calls)
+        var failedValueCallCount = allWrittenValues.Count(batch =>
+            batch.Any(v => v == "FailedValue"));
+        Assert.True(failedValueCallCount >= 2,
+            $"Expected 'FailedValue' in at least 2 write calls (original + retry), appeared in {failedValueCallCount}");
     }
 }
