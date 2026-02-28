@@ -392,7 +392,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
     /// Transient failures and unresolved changes are returned for retry.
     /// Permanent failures are logged and dropped.
     /// </summary>
-    private WriteResult ClassifyWriteErrors(
+    internal WriteResult ClassifyWriteErrors(
         AdsErrorCode[] errorCodes,
         List<SubjectPropertyChange> validChanges,
         List<SubjectPropertyChange>? unresolvedChanges)
