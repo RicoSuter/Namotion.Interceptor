@@ -18,6 +18,7 @@ The library supports **bidirectional synchronization** with external systems. Wh
 - **Zero runtime reflection** - All interception logic is generated at compile-time for maximum performance
 - **Bidirectional synchronization** - Connect your object model to MQTT brokers, OPC UA servers, or databases with minimal code
 - **Clean domain models** - Your classes stay as POCOs with simple attributes
+- **INotifyPropertyChanged built-in** - Generated classes implement it automatically, including derived properties, for seamless UI data binding
 
 ## Core Concepts
 
@@ -234,40 +235,40 @@ Namotion.Interceptor is designed to be extended:
 | **Read/Write Interceptors** | Add cross-cutting concerns like logging, caching, or transformation to property access | [Interceptors](docs/interceptor.md) |
 | **Lifecycle Handlers** | React to objects entering or leaving the object graph (cleanup, initialization) | [Tracking](docs/tracking.md) |
 | **Custom Connectors** | Synchronize with any external system (databases, message queues, APIs) | [Connectors](docs/connectors.md) |
-| **Property Validation** | Implement custom validation logic beyond data annotations | [Validation](docs/interceptor.md) |
-| **Dynamic Subjects** | Create trackable objects from interfaces at runtime without source generation | [Dynamic](docs/dynamic.md) |
+| **Custom Property Validation** | Implement custom validation logic beyond data annotations | [Validation](docs/validation.md) |
 
 ## Packages
 
 ### Core
 
-| Package | Description | Docs |
-|---------|-------------|------|
+| Package | Description | Documentation |
+|---------|-------------|---------------|
 | **Namotion.Interceptor** | Property interception with compile-time source generation | [Interceptors](docs/interceptor.md) |
-| **Namotion.Interceptor.Generator** | Source generator for `[InterceptorSubject]` classes (add as analyzer) | |
+| **Namotion.Interceptor.Generator** | Source generator for `[InterceptorSubject]` classes (add as analyzer) | [Generator](docs/generator.md) |
 
 ### Foundation
 
-| Package | Description | Docs |
-|---------|-------------|------|
+| Package | Description | Documentation |
+|---------|-------------|---------------|
 | **Namotion.Interceptor.Tracking** | Change tracking, derived properties, lifecycle events, transactions | [Tracking](docs/tracking.md) |
 | **Namotion.Interceptor.Registry** | Runtime property discovery, metadata, and dynamic properties | [Registry](docs/registry.md) |
-| **Namotion.Interceptor.Validation** | Property validation with data annotation support | |
+| **Namotion.Interceptor.Validation** | Property validation with data annotation support | [Validation](docs/validation.md) |
 | **Namotion.Interceptor.Dynamic** | Create subjects from interfaces at runtime | [Dynamic](docs/dynamic.md) |
-| **Namotion.Interceptor.Hosting** | Hosted service lifecycle management | |
+| **Namotion.Interceptor.Hosting** | Hosted service lifecycle management | [Hosting](docs/hosting.md) |
 
 ### Connectors
 
-| Package | Description | Docs |
-|---------|-------------|------|
+| Package | Description | Documentation |
+|---------|-------------|---------------|
 | **Namotion.Interceptor.Connectors** | Base infrastructure for external system integration | [Connectors](docs/connectors.md) |
 | **Namotion.Interceptor.Mqtt** | Bidirectional MQTT synchronization | [MQTT](docs/connectors/mqtt.md) |
 | **Namotion.Interceptor.OpcUa** | OPC UA client and server integration | [OPC UA](docs/connectors/opcua.md) |
+| **Namotion.Interceptor.WebSocket** | Real-time WebSocket synchronization | [WebSocket](docs/connectors/websocket.md) |
 
 ### Integrations
 
-| Package | Description | Docs |
-|---------|-------------|------|
+| Package | Description | Documentation |
+|---------|-------------|---------------|
 | **Namotion.Interceptor.AspNetCore** | ASP.NET Core integration for web APIs | [ASP.NET Core](docs/aspnetcore.md) |
 | **Namotion.Interceptor.Blazor** | Automatic re-rendering on property changes | [Blazor](docs/blazor.md) |
 | **Namotion.Interceptor.GraphQL** | GraphQL subscriptions for real-time updates | [GraphQL](docs/graphql.md) |

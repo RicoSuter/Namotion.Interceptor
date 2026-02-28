@@ -4,7 +4,7 @@
     1: {
       children: {
         Kind: Collection,
-        Collection: [
+        Items: [
           {
             Index: 0,
             Id: 4
@@ -28,7 +28,7 @@
         Timestamp: {Scrubbed}
       },
       mother: {
-        Kind: Item,
+        Kind: Object,
         Id: 3
       }
     },

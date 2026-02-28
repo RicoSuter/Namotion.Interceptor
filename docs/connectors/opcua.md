@@ -12,7 +12,7 @@ The `Namotion.Interceptor.OpcUa` package provides integration between Namotion.I
 
 ## Client Setup
 
-Connect to an OPC UA server by configuring a client with `AddOpcUaSubjectClient`. The client automatically establishes connections, subscribes to node changes, and synchronizes values with your C# properties.
+Connect to an OPC UA server by configuring a client with `AddOpcUaSubjectClientSource`. The client automatically establishes connections, subscribes to node changes, and synchronizes values with your C# properties.
 
 ```csharp
 [InterceptorSubject]
@@ -25,7 +25,7 @@ public partial class Machine
     public partial decimal Speed { get; set; }
 }
 
-builder.Services.AddOpcUaSubjectClient<Machine>(
+builder.Services.AddOpcUaSubjectClientSource<Machine>(
     serverUrl: "opc.tcp://plc.factory.com:4840",
     sourceName: "opc",
     pathPrefix: null,
@@ -67,12 +67,11 @@ await host.StartAsync();
 For advanced scenarios, use the full configuration API to customize connection behavior, subscription settings, and dynamic property discovery. The required settings include the server URL and infrastructure components, while optional settings allow fine-tuning of reconnection delays, sampling intervals, and performance parameters.
 
 ```csharp
-builder.Services.AddOpcUaSubjectClient(
+builder.Services.AddOpcUaSubjectClientSource(
     subjectSelector: sp => sp.GetRequiredService<MyRoot>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://localhost:4840",
-        PathProvider = new AttributeBasedPathProvider("opc", ".", null),
         TypeResolver = new OpcUaTypeResolver(logger),
         ValueConverter = new OpcUaValueConverter(),
         SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
@@ -83,11 +82,16 @@ builder.Services.AddOpcUaSubjectClient(
         ApplicationName = "MyOpcUaClient",
         ReconnectInterval = TimeSpan.FromSeconds(5),
 
-        // Subscription settings
-        DefaultSamplingInterval = 100,
+        // Subscription settings (null = use OPC UA library defaults)
+        DefaultSamplingInterval = 0,      // 0 = exception-based (immediate), null = server decides
         DefaultPublishingInterval = 100,
         DefaultQueueSize = 10,
         MaximumItemsPerSubscription = 1000,
+
+        // Data change filter (null = use OPC UA library defaults)
+        DefaultDataChangeTrigger = null,  // StatusValue (report on value change)
+        DefaultDeadbandType = null,       // None (report all changes)
+        DefaultDeadbandValue = null,      // 0.0
 
         // Performance tuning
         BufferTime = TimeSpan.FromMilliseconds(10),
@@ -104,16 +108,29 @@ ShouldAddDynamicProperty = async (node, ct) =>
 }
 ```
 
+**Dynamic Attribute Discovery:**
+
+When loading variable nodes, any child properties (HasProperty references) not found in the C# model can be added as dynamic attributes:
+
+```csharp
+ShouldAddDynamicAttribute = async (node, ct) =>
+{
+    // Add standard OPC UA metadata attributes dynamically
+    return node.BrowseName.Name is "EURange" or "EngineeringUnits";
+}
+```
+
+By default, all unknown attributes are added. Set to `null` to disable dynamic attribute discovery.
+
 ### Server Configuration
 
-The server configuration requires minimal setup with source path provider and value converter. Additional options control the application name, namespace URI, certificate management, and performance tuning.
+The server configuration requires minimal setup with value converter. Additional options control the application name, namespace URI, certificate management, and performance tuning.
 
 ```csharp
 builder.Services.AddOpcUaSubjectServer(
     subjectSelector: sp => sp.GetRequiredService<MyRoot>(),
     configurationProvider: sp => new OpcUaServerConfiguration
     {
-        PathProvider = new AttributeBasedPathProvider("opc", ".", null),
         ValueConverter = new OpcUaValueConverter(),
 
         // Optional
@@ -127,62 +144,161 @@ builder.Services.AddOpcUaSubjectServer(
 
 The server automatically configures security policies, authentication, operation limits (MaxNodesPerRead/Write=4000), and companion specification namespaces.
 
-## Attributes
+### Node Mapper
 
-### OpcUaNodeAttribute
+Both client and server configurations include a `NodeMapper` property (`IOpcUaNodeMapper`) that controls how C# properties map to OPC UA nodes. The default is a `CompositeNodeMapper` combining `PathProviderOpcUaNodeMapper` (maps `[Path]` attributes) and `AttributeOpcUaNodeMapper` (maps `[OpcUaNode]` attributes). For custom mapping strategies including fluent configuration and composite mappers, see [OPC UA Mapping Guide](opcua-mapping.md).
 
-Use `[OpcUaNode]` to map properties to specific OPC UA nodes with precise control over browse names, node identifiers, and subscription behavior. This attribute allows you to specify exact node IDs, custom sampling intervals, and queue settings per property.
+## Property Mapping
+
+Map C# properties to OPC UA nodes using attributes. For simple cases, use `[Path]`. For advanced OPC UA-specific configuration, use `[OpcUaNode]` and related attributes.
 
 ```csharp
 [InterceptorSubject]
-public partial class Device
+[OpcUaNode(TypeDefinition = "MachineType")]  // Class-level type definition
+public partial class Machine
 {
-    [OpcUaNode("Temperature")]
+    // Simple property mapping
+    [Path("opc", "Status")]
+    public partial int Status { get; set; }
+
+    // OPC UA-specific mapping with monitoring config
+    [OpcUaNode("Temperature", SamplingInterval = 100, DeadbandType = DeadbandType.Absolute, DeadbandValue = 0.5)]
     public partial double Temperature { get; set; }
 
-    [OpcUaNode("Pressure", "http://factory.com",
-        NodeIdentifier = "ns=2;s=Sensor.Pressure",
-        NodeNamespaceUri = "http://factory.com",
-        SamplingInterval = 50,
-        QueueSize = 5)]
-    public partial double Pressure { get; set; }
+    // Child object with HasComponent reference
+    [OpcUaReference("HasComponent")]
+    [OpcUaNode(BrowseName = "MainMotor")]
+    public partial Motor? Motor { get; set; }
 }
 ```
 
-### OpcUaTypeDefinitionAttribute
+For comprehensive mapping documentation including companion spec support, VariableTypes, and fluent configuration, see [OPC UA Mapping Guide](opcua-mapping.md).
 
-Apply `[OpcUaTypeDefinition]` to classes to use standard OPC UA companion specification types like Device Integration (DI) or Machinery types. This ensures your objects conform to industry-standard OPC UA information models.
+## Monitoring & Subscriptions
+
+### Sampling vs Exception-Based Monitoring
+
+OPC UA supports two monitoring modes for value changes:
+
+**Sampling-based** (`SamplingInterval > 0`): The server checks the value at fixed intervals and reports if it changed since the last sample. Fast changes that occur between samples may be missed.
+
+**Exception-based** (`SamplingInterval = 0`): The server reports immediately whenever the value changes. This requires the server to support exception-based monitoring (indicated by `MinimumSamplingInterval = 0` on the node).
+
+**When to use exception-based monitoring:**
+- Discrete variables (boolean flags, state indicators) where you need to catch every transition
+- Handshake patterns (client writes `true`, PLC sets back to `false`)
+- Any value where missing a transition would cause system failures
 
 ```csharp
-[InterceptorSubject]
-[OpcUaTypeDefinition("FunctionalGroupType", "http://opcfoundation.org/UA/DI/")]
-public partial class DeviceGroup
+// Request exception-based monitoring for a discrete variable
+[OpcUaNode("StartCommand", SamplingInterval = 0)]
+public partial bool StartCommand { get; set; }
+```
+
+**Note:** Even with `SamplingInterval = 0`, the server may revise this based on its capabilities. Check the server's `RevisedSamplingInterval` to verify exception-based monitoring is active.
+
+### Discrete vs Analog Variables
+
+Industrial automation distinguishes between two types of variables:
+
+| Type | Characteristics | Examples | OPC UA Monitoring |
+|------|-----------------|----------|-------------------|
+| **Analog** | Continuous values, gradual changes, sampling is fine | Temperature, pressure, speed | Sampling-based (`SamplingInterval > 0`) with optional deadband |
+| **Discrete** | Binary on/off, every transition matters | Handshake flags, command triggers, state indicators | Exception-based (`SamplingInterval = 0`) |
+
+For **discrete variables**, missing a transition can cause system failures. A classic example is the handshake pattern: client writes `1`, PLC acknowledges by writing `0`. If sampling misses the `1→0` transition (because both samples see `0`), the client never knows the PLC acknowledged.
+
+OPC UA's sampling-based monitoring compares each sample against the *previous sample*, not against what the client knows. When a value changes faster than the sampling rate (e.g., `0→1→0` between samples), the server sees `0` at both sample points and reports no change.
+
+```
+Sampling-based (SamplingInterval = 100ms):
+t=0ms:   Sample value=0, baseline=0 → no change reported
+t=50ms:  Client writes 1 → value=1 (no sample happens)
+t=60ms:  PLC writes 0 → value=0 (no sample happens)
+t=100ms: Sample value=0, baseline=0 → no change reported ❌
+```
+
+This is spec-compliant behavior per [OPC UA Part 4](https://reference.opcfoundation.org/Core/Part4/v104/docs/5.12.1.2), not a bug.
+
+### Data Change Filters
+
+Control which value changes generate notifications:
+
+| Trigger | Reports when... |
+|---------|-----------------|
+| `Status` | Status code changes |
+| `StatusValue` | Status or value changes (default) |
+| `StatusValueTimestamp` | Status, value, or timestamp changes |
+
+| Deadband Type | Filters out... |
+|---------------|----------------|
+| `None` | Nothing - reports all changes (default) |
+| `Absolute` | Changes smaller than the absolute threshold |
+| `Percent` | Changes smaller than the percentage of range |
+
+```csharp
+// Analog sensor - only report changes > 0.5 units
+[OpcUaNode("Temperature",
+    DeadbandType = DeadbandType.Absolute,
+    DeadbandValue = 0.5)]
+public partial double Temperature { get; set; }
+```
+
+### Read After Write Fallback
+
+When a server doesn't support exception-based monitoring, the library provides an automatic read-after-write fallback.
+
+**Solution hierarchy:**
+1. **Best: Exception-based monitoring** (`SamplingInterval = 0`) - Server reports every change immediately
+2. **Fallback: Read-after-write** - When the server revises `SamplingInterval = 0` to non-zero, automatically read values after writes
+
+The library automatically detects when `SamplingInterval = 0` was revised to a non-zero value (common with legacy PLCs or servers that don't support exception-based monitoring). For these properties, after a successful write, it schedules a read-back to catch server-side changes that sampling would miss.
+
+```csharp
+// Mark as discrete variable - request exception-based monitoring
+[OpcUaNode("CommandTrigger", SamplingInterval = 0)]
+public partial bool CommandTrigger { get; set; }
+```
+
+**Configuration:**
+```csharp
+var config = new OpcUaClientConfiguration
 {
-    public partial string Name { get; set; }
-}
+    // Enable/disable read-after-write fallback (default: true)
+    EnableReadAfterWrite = true,
+
+    // Buffer added to revised interval before reading back (default: 50ms)
+    ReadAfterWriteBuffer = TimeSpan.FromMilliseconds(50)
+};
 ```
 
-### OpcUaNodeReferenceTypeAttribute
+**Behavior:**
+- Only triggers for properties where `SamplingInterval = 0` was revised to > 0
+- Multiple rapid writes are coalesced into a single read
+- Reads are batched for efficiency
+- Circuit breaker prevents repeated failures from overwhelming the server
+- Logged when activated so you can verify which properties need this fallback
 
-Control how properties are linked in the OPC UA address space by specifying the reference type. This determines the semantic relationship between parent and child nodes.
+**Limitations:**
+If the server's minimum sampling rate is slower than the value changes, no client-side workaround can help. In that case, consider:
+- Configuring the OPC UA server to support faster sampling or exception-based monitoring
+- Changing the PLC code to use a counter-based pattern instead of boolean handshakes
+- Using OPC UA Methods for command/response patterns (requires PLC support)
 
-```csharp
-[OpcUaNodeReferenceType("Organizes")]
-[Path("opc", "Machines")]
-public partial Machine[] Machines { get; set; }
-```
+### Subscription Configuration
 
-Common types: `HasComponent`, `Organizes`, `HasProperty`
+Configure monitored item behavior at global or per-property level:
 
-### OpcUaNodeItemReferenceTypeAttribute
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `DefaultSamplingInterval` | null | Sampling interval in ms (null = server decides, 0 = exception-based) |
+| `DefaultQueueSize` | null | Values to buffer (null = library default of 1) |
+| `DefaultDiscardOldest` | null | Discard oldest when queue full (null = library default of true) |
+| `DefaultDataChangeTrigger` | null | When to report changes (null = StatusValue) |
+| `DefaultDeadbandType` | null | Deadband filter type (null = None) |
+| `DefaultDeadbandValue` | null | Deadband threshold (null = 0.0) |
 
-For collection properties, specify how individual items are referenced in the OPC UA address space. This controls the reference type used for each element in arrays or collections.
-
-```csharp
-[OpcUaNodeItemReferenceType("HasComponent")]
-[Path("opc", "Parameters")]
-public partial Parameter[] Parameters { get; set; }
-```
+All settings can be overridden per-property using `[OpcUaNode]` attribute.
 
 ## Type Conversions
 
@@ -296,15 +412,6 @@ if (dynamicProperty != null)
 }
 ```
 
-## Performance
-
-The library includes optimizations:
-
-- Batched read/write operations respecting server limits
-- Object pooling for change buffers
-- Fast data change callbacks bypassing caches
-- Buffered updates batching rapid changes
-
 ## Companion Specifications
 
 The server automatically loads embedded NodeSets:
@@ -314,21 +421,22 @@ The server automatically loads embedded NodeSets:
 - Opc.Ua.Machinery.NodeSet2.xml (Machinery)
 - Opc.Ua.Machinery.ProcessValues.NodeSet2.xml (Process values)
 
-Reference these types with `[OpcUaTypeDefinition]`.
+Reference these types with `[OpcUaNode(TypeDefinition = "...", TypeDefinitionNamespace = "...")]`.
 
-## Resilience Features
+For mapping patterns with companion specs, see [OPC UA Mapping Guide — Companion Spec Support](opcua-mapping.md#opc-ua-companion-spec-support).
+
+## Resilience
 
 ### Write Retry Queue During Disconnection
 
 The library automatically queues write operations when the connection is lost, preventing data loss during brief network interruptions. Queued writes are flushed in FIFO order when the connection is restored. This feature is provided by the `SubjectSourceBackgroundService`.
 
 ```csharp
-builder.Services.AddOpcUaSubjectClient(
+builder.Services.AddOpcUaSubjectClientSource(
     subjectSelector: sp => sp.GetRequiredService<Machine>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        PathProvider = new AttributeBasedPathProvider("opc", ".", null),
         WriteRetryQueueSize = 1000 // Buffer up to 1000 writes (default)
     });
 
@@ -346,12 +454,11 @@ machine.Speed = 100; // Queued if disconnected, written immediately if connected
 The library automatically falls back to periodic polling when OPC UA nodes don't support subscriptions. This ensures all properties remain synchronized even with legacy servers or special node types.
 
 ```csharp
-builder.Services.AddOpcUaSubjectClient(
+builder.Services.AddOpcUaSubjectClientSource(
     subjectSelector: sp => sp.GetRequiredService<Machine>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        PathProvider = new AttributeBasedPathProvider("opc", ".", null),
         EnablePollingFallback = true, // Default
         PollingInterval = TimeSpan.FromSeconds(1), // Default: 1 second
         PollingBatchSize = 100 // Default: 100 items per batch
@@ -369,13 +476,12 @@ builder.Services.AddOpcUaSubjectClient(
 The library automatically retries failed subscription items that may succeed later, such as when server resources become available.
 
 ```csharp
-builder.Services.AddOpcUaSubjectClient(
+builder.Services.AddOpcUaSubjectClientSource(
     subjectSelector: sp => sp.GetRequiredService<Machine>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        PathProvider = new AttributeBasedPathProvider("opc", ".", null),
-        SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(10) // Default: 10 seconds
+        SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(5) // Default: 5 seconds
     });
 ```
 
@@ -390,11 +496,119 @@ builder.Services.AddOpcUaSubjectClient(
 - `PollingInterval` minimum of 100 milliseconds enforced
 - Fail-fast with clear error messages on invalid configuration
 
+### Connection Loss Recovery
+
+The client handles connection loss through two cooperating mechanisms: the OPC UA SDK's built-in `SessionReconnectHandler` (automatic) and a health check loop that performs manual reconnection when the SDK handler fails or is insufficient.
+
+**All reconnection paths guarantee eventual consistency** through a full server state read. The client never relies solely on subscription notifications for state synchronization after a reconnection.
+
+#### Reconnection Flows
+
+**Flow A: SDK reconnection with subscription transfer**
+
+When the connection drops, the OPC UA SDK's `SessionReconnectHandler` attempts to reconnect automatically. If it succeeds and transfers existing subscriptions to the new session:
+
+1. Keep-alive detects dead connection and triggers the SDK reconnect handler
+2. SDK creates a new session and transfers subscriptions via `TransferSubscriptions`
+3. `OnReconnectComplete` accepts the new session and sets a `NeedsFullStateSync` flag
+4. The health check loop detects the flag on the next iteration:
+   - Starts buffering incoming subscription notifications
+   - Reads ALL property values from the server
+   - Applies server values, replays the buffer, resumes normal operation
+5. Full consistency is restored
+
+**Flow B: SDK reconnection fails or returns a preserved session**
+
+If the SDK handler cannot transfer subscriptions (e.g., server restarted and old subscriptions are gone), or if it returns the same session object ("preserved session"), the client abandons the session entirely:
+
+1. `OnReconnectComplete` calls `AbandonCurrentSession()` (session nulled, transport killed)
+2. The health check loop detects the dead session and triggers manual reconnection
+3. Manual reconnection creates a fresh session, new subscriptions, and performs a full state read
+4. Full consistency is restored
+
+Preserved sessions are always abandoned because subscriptions may have been silently deleted by the server (subscription lifetime expired during the disconnect period), leaving no mechanism for future data change notifications.
+
+**Flow C: No SDK handler active (session dead without reconnection in progress)**
+
+If the session dies without the SDK handler being active (e.g., after `KillAsync`, `ClearSessionAsync`, or a previous failed reconnection):
+
+1. The health check loop detects the dead session
+2. Triggers manual reconnection: fresh session, new subscriptions, full state read
+3. Full consistency is restored
+
+#### Stall Detection
+
+When the SDK's reconnection handler gets stuck (e.g., server never responds), the client automatically detects the stall and forces a reconnection reset. Configure via `MaxReconnectDuration` (default: 30 seconds). If the SDK reconnection hasn't succeeded within this duration, a full session reset and manual reconnection is triggered.
+
+#### Consistency Guarantees and Trade-offs
+
+**Guarantee**: After any reconnection completes, all client property values will match the server's current state. The full state read (buffer + read all values + replay + resume pattern) ensures no property is left stale, regardless of what happened to subscription notifications during the disconnect.
+
+**Trade-off: brief stale data window after SDK reconnection (Flow A)**
+
+Between the SDK's `OnReconnectComplete` (step 3) and the health check's full state read (step 4), there is a window of up to one health check interval (~5 seconds by default) where:
+
+- Subscription notifications from the transfer may apply partially (some notifications may have been lost due to server-side queue overflow or subscription lifetime expiration)
+- Property values may temporarily reflect incomplete state
+
+This window is bounded and self-correcting: the health check's full state read overwrites all values with the server's current state. For most industrial applications, this brief window is acceptable. If tighter consistency is required, reduce `SubscriptionHealthCheckInterval`.
+
+**No-loss guarantee for writes**: Client-to-server writes during disconnection are buffered in the write retry queue (see above) and flushed after reconnection. Combined with the full state read for server-to-client values, this provides bidirectional eventual consistency.
+
+### Resilience Configuration
+
+For 24/7 production use, the default configuration provides robust resilience:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `KeepAliveInterval` | 5s | How quickly disconnections are detected |
+| `ReconnectInterval` | 5s | Time between SDK reconnection attempts |
+| `MaxReconnectDuration` | 30s | Max time for SDK reconnection before forcing manual reset |
+| `SessionTimeout` | 120s | Server-side session lifetime (should be > OperationTimeout) |
+| `OperationTimeout` | 30s | Timeout for individual OPC UA operations |
+| `SubscriptionHealthCheckInterval` | 5s | Interval for health checks and post-reconnection state sync |
+| `WriteRetryQueueSize` | 1000 | Updates buffered during disconnection |
+| `SessionDisposalTimeout` | 5s | Max wait for graceful session close |
+| `SubscriptionSequentialPublishing` | false | Process subscription messages in order (see Thread Safety) |
+
+## Diagnostics
+
+Monitor client and server health in production via the `Diagnostics` property on `OpcUaSubjectClientSource` and `OpcUaSubjectServerBackgroundService`.
+
+**Client diagnostics** (`OpcUaClientDiagnostics`): Connection state, session ID, subscription/monitored item counts, reconnection metrics, polling statistics.
+
+**Server diagnostics** (`OpcUaServerDiagnostics`): Running state, active session count, start time, consecutive failures, last error.
+
+## Security
+
+**Client security:**
+```csharp
+var config = new OpcUaClientConfiguration
+{
+    ServerUrl = "opc.tcp://plc.factory.com:4840",
+    UseSecurity = true,  // Enable signing and encryption (recommended for production)
+    // ... other settings
+};
+```
+
+When `UseSecurity = true`, the client prefers secure endpoints with message signing and encryption. The default is `false` for development convenience.
+
+**Server security:**
+By default, the server accepts anonymous connections without encryption. For production deployments requiring authentication:
+- Configure custom `UserTokenPolicies` in a derived `OpcUaServerConfiguration`
+- Use certificate-based authentication
+- Enable message signing and encryption
+
 ## Thread Safety
 
 The library ensures thread-safe operations across all OPC UA interactions. Property operations are synchronized via `SyncRoot` when interceptors are present, subscription callbacks use thread-safe concurrent queues, and multiple OPC UA clients can connect concurrently.
 
 Write queue operations use `Interlocked` operations for thread-safe counter updates and flush operations are protected by semaphores to prevent concurrent flush issues.
+
+**Update ordering:**
+By default (`SubscriptionSequentialPublishing = false`), subscription callbacks may be processed in parallel for higher throughput. This means that for the same property, if two rapid updates arrive in different publish responses, they could theoretically be applied out of order. Each update carries a `SourceTimestamp` from the server, but the library does not enforce timestamp-based ordering.
+
+For most use cases (sensor values, status updates), this is acceptable since you typically want the latest value. If your application requires strict ordering guarantees, set `SubscriptionSequentialPublishing = true` to process all subscription messages sequentially at the cost of reduced throughput.
 
 To prevent feedback loops when external sources update properties, use `SubjectChangeContext.WithSource()` to mark the change source:
 
@@ -407,9 +621,9 @@ using (SubjectChangeContext.WithSource(opcUaSource))
 
 ## Lifecycle Management
 
-### Automatic Cleanup on Subject Detach
+The OPC UA integration hooks into the interceptor lifecycle system (see [Subject Lifecycle Tracking](../tracking.md#subject-lifecycle-tracking)) to clean up resources when subjects are detached.
 
-When subjects are detached from the object graph (removed from collections, set to null, etc.), the OPC UA client and server automatically clean up their internal tracking structures to prevent memory leaks.
+### Automatic Cleanup on Subject Detach
 
 **Server behavior:**
 - When a subject is detached, its corresponding entries in `CustomNodeManager._subjects` are removed
@@ -423,14 +637,50 @@ When subjects are detached from the object graph (removed from collections, set 
 - OPC UA subscription items remain on the server until session ends
 - Cleanup is skipped during reconnection to avoid interfering with subscription transfer
 
-**Thread safety:**
-- Cleanup handlers are invoked inside the lifecycle interceptor's lock
-- Handlers use `ConcurrentDictionary.TryRemove` for safe concurrent modification
-- Event handlers are designed to be fast and exception-free
-
 **What this does NOT do:**
 - Does NOT dynamically add new subjects to OPC UA after initialization
 - Does NOT update the OPC UA address space when subjects are attached
 - New subjects added after startup require a restart to appear in OPC UA
 
-This minimal lifecycle integration prevents memory leaks in long-running services with dynamic object graphs.
+## Performance
+
+The library includes optimizations:
+
+- Batched read/write operations respecting server limits
+- Object pooling for change buffers
+- Fast data change callbacks bypassing caches
+- Buffered updates batching rapid changes
+
+## Benchmark Results
+
+Intel(R) Core(TM) Ultra 7 258V
+
+```
+Server Benchmark - 1 minute - [2026-02-18 22:08:35.641]
+
+Total received changes:          1182669
+Total published changes:         1196000
+Process memory:                  645.51 MB (434.04 MB in .NET heap)
+Avg allocations over last 60s:   525.09 MB/s
+
+Metric                               Avg        P50        P90        P95        P99      P99.9        Max        Min     StdDev      Count
+-------------------------------------------------------------------------------------------------------------------------------------------
+Received (changes/s)            19707.66   19691.68   20604.91   20891.21   25145.73   25145.73   25145.73   14275.83    1155.00          -
+Processing latency (ms)             0.05       0.00       0.02       0.07       0.46       8.97     174.59       0.00       0.51    1182669
+End-to-end latency (ms)            36.62      28.49      53.71      74.94     239.75     308.09     328.73       0.37      37.57    1182669
+```
+
+```
+Client Benchmark - 1 minute - [2026-02-18 22:08:38.466]
+
+Total received changes:          1195101
+Total published changes:         1181200
+Process memory:                  475.24 MB (247.02 MB in .NET heap)
+Avg allocations over last 60s:   30.13 MB/s
+
+Metric                               Avg        P50        P90        P95        P99      P99.9        Max        Min     StdDev      Count
+-------------------------------------------------------------------------------------------------------------------------------------------
+Received (changes/s)            19930.38   19932.58   20715.65   20858.03   21507.32   21507.32   21507.32   16980.51     669.75          -
+Processing latency (ms)             1.96       0.86       1.80       2.22      36.11      40.20      41.56       0.00       5.54    1195101
+End-to-end latency (ms)            57.50      52.40      87.15     100.72     154.92     238.92     288.00       1.70      27.17    1195101
+```

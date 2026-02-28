@@ -387,4 +387,80 @@ public class DerivedPropertyChangeHandlerTests
             Update2 = update2,
         });
     }
+
+    [Fact]
+    public void WhenSourcePropertyChanges_ThenDerivedPropertyFiresPropertyChanged()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithDerivedPropertyChangeDetection();
+
+        var person = new Person(context)
+        {
+            FirstName = "John",
+            LastName = "Doe"
+        };
+
+        var firedEvents = new List<string>();
+        person.PropertyChanged += (s, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act
+        person.FirstName = "Jane";
+
+        // Assert
+        Assert.Contains("FirstName", firedEvents);
+        Assert.Contains("FullName", firedEvents);
+    }
+
+    [Fact]
+    public void WhenSourceChanges_ThenNestedDerivedPropertiesFirePropertyChanged()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithDerivedPropertyChangeDetection();
+
+        var person = new Person(context)
+        {
+            FirstName = "John",
+            LastName = "Doe"
+        };
+
+        var firedEvents = new List<string>();
+        person.PropertyChanged += (s, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act
+        person.FirstName = "Jane";
+
+        // Assert - All levels should fire: FirstName -> FullName -> FullNameWithPrefix
+        Assert.Contains("FirstName", firedEvents);
+        Assert.Contains("FullName", firedEvents);
+        Assert.Contains("FullNameWithPrefix", firedEvents);
+    }
+
+    [Fact]
+    public void WhenSourceChanges_ThenAllDependentDerivedPropertiesFirePropertyChangedOnce()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithDerivedPropertyChangeDetection();
+
+        var person = new Person(context)
+        {
+            FirstName = "John",
+            LastName = "Doe"
+        };
+
+        var firedEvents = new List<string>();
+        person.PropertyChanged += (s, e) => firedEvents.Add(e.PropertyName!);
+
+        // Act
+        person.FirstName = "Jane";
+
+        // Assert - Each derived property should fire exactly once (no duplicates)
+        Assert.Single(firedEvents, e => e == "FullName");
+        Assert.Single(firedEvents, e => e == "FullNameWithPrefix");
+    }
 }

@@ -3,14 +3,14 @@
   Subjects: {
     1: {
       Child: {
-        Kind: Item
+        Kind: Object
       },
       Items: {
         Kind: Collection,
         Count: 0
       },
       Lookup: {
-        Kind: Collection,
+        Kind: Dictionary,
         Count: 0
       },
       Name: {
@@ -25,10 +25,10 @@
         }
       },
       Parent: {
-        Kind: Item
+        Kind: Object
       },
       Self: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: DateTimeOffset_2,
         Id: 1
       }

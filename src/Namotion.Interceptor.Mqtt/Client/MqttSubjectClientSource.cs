@@ -21,7 +21,7 @@ namespace Namotion.Interceptor.Mqtt.Client;
 /// <summary>
 /// MQTT client source that subscribes to an MQTT broker and synchronizes properties.
 /// </summary>
-internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSource, IAsyncDisposable
+internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSource, IFaultInjectable, IAsyncDisposable
 {
     // Pool for UserProperties lists to avoid allocations on hot path
     private static readonly ObjectPool<List<MqttUserProperty>> UserPropertiesPool
@@ -44,6 +44,8 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
     private int _disposed;
     private volatile bool _isStarted;
+    private volatile bool _isForceKill;
+    private volatile CancellationTokenSource? _forceKillCts;
 
     public MqttSubjectClientSource(
         IInterceptorSubject subject,
@@ -110,10 +112,10 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             _configuration,
             GetClientOptions,
             async ct => await OnReconnectedAsync(ct).ConfigureAwait(false),
-            async () =>
+            () =>
             {
                 _propertyWriter?.StartBuffering();
-                await Task.CompletedTask;
+                return Task.CompletedTask;
             }, _logger);
 
         _isStarted = true;
@@ -203,7 +205,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
                         userProps.Clear();
                         userProps.Add(new MqttUserProperty(
                             _configuration.SourceTimestampPropertyName!,
-                            _configuration.SourceTimestampConverter(change.ChangedTimestamp)));
+                            _configuration.SourceTimestampSerializer(change.ChangedTimestamp)));
                         message.UserProperties = userProps;
                         userPropertiesArray[messageCount] = userProps;
                     }
@@ -221,7 +223,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 #if USE_LOCAL_MQTTNET
                 try
                 {
-                    await client.PublishManyAsync(
+                    await client.PublishMessagesAsync(
                         new ArraySegment<MqttApplicationMessage>(messages, 0, messageCount),
                         cancellationToken).ConfigureAwait(false);
                 }
@@ -418,7 +420,8 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         var receivedTimestamp = DateTimeOffset.UtcNow;
         var sourceTimestamp = MqttHelper.ExtractSourceTimestamp(
             e.ApplicationMessage.UserProperties,
-            _configuration.SourceTimestampPropertyName) ?? receivedTimestamp;
+            _configuration.SourceTimestampPropertyName,
+            _configuration.SourceTimestampDeserializer) ?? receivedTimestamp;
 
         // Use static delegate to avoid allocations on hot path
         propertyWriter.Write(
@@ -437,9 +440,36 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             await Task.Delay(100, stoppingToken).ConfigureAwait(false);
         }
 
-        if (_connectionMonitor is not null)
+        while (!stoppingToken.IsCancellationRequested)
         {
-            await _connectionMonitor.MonitorConnectionAsync(stoppingToken).ConfigureAwait(false);
+            var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            _forceKillCts = cts;
+            var linkedToken = cts.Token;
+
+            try
+            {
+                if (_connectionMonitor is not null)
+                {
+                    await _connectionMonitor.MonitorConnectionAsync(linkedToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    break;
+                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (OperationCanceledException) when (_isForceKill)
+            {
+                _logger.LogWarning("MQTT client force-killed. Restarting...");
+            }
+            finally
+            {
+                _isForceKill = false;
+                cts.Dispose();
+            }
         }
     }
 
@@ -461,7 +491,30 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         await SubscribeToPropertiesAsync(cancellationToken).ConfigureAwait(false);
         if (_propertyWriter is not null)
         {
-            await _propertyWriter.CompleteInitializationAsync(cancellationToken).ConfigureAwait(false);
+            await _propertyWriter.LoadInitialStateAndResumeAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <inheritdoc />
+    async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)
+    {
+        switch (faultType)
+        {
+            case FaultType.Kill:
+                _isForceKill = true;
+                try { _forceKillCts?.Cancel(); }
+                catch (ObjectDisposedException) { /* CTS disposed between loop iterations */ }
+                break;
+
+            case FaultType.Disconnect:
+                var client = _client;
+                if (client is not null && client.IsConnected)
+                {
+                    await client.DisconnectAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+                }
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(faultType), faultType, null);
         }
     }
 
@@ -484,7 +537,11 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             options.WithCredentials(_configuration.Username, _configuration.Password);
         }
 
-        return options.Build();
+        var clientOptions = options.Build();
+#if USE_LOCAL_MQTTNET
+        clientOptions.AcknowledgeQoS1OnReceive = true;
+#endif
+        return clientOptions;
     }
 
     /// <inheritdoc />

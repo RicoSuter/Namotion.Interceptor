@@ -70,7 +70,7 @@ public partial class Motor
     [State(Position = 2, Unit = StateUnit.DegreeCelsius)]
     public partial double Temperature { get; set; }
 
-    [State(Position = 3)]
+    [State(Position = 3, IsDiscrete = true)]
     public partial MotorStatus Status { get; set; }
 }
 ```
@@ -83,7 +83,7 @@ public partial class Motor
 | `Position` | Sort position in property panel | `1`, `2`, `3` |
 | `Unit` | Formatting unit | `StateUnit.DegreeCelsius` |
 | `IsCumulative` | Value accumulates over time | `true` for energy meters |
-| `IsSignal` | Precise value (not a sensor reading) | `true` for commands |
+| `IsDiscrete` | Discrete variable (binary on/off, every transition matters) vs analog (sensor readings) | `true` for commands, flags |
 | `IsEstimated` | Calculated/estimated value | `true` for predictions |
 
 **Available units:**
