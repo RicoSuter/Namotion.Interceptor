@@ -93,6 +93,9 @@ public class AdsIntegrationTests
 
         try
         {
+            // Start both services matching production DI registration order:
+            // TwinCatSubjectClientSource (rescan + polling loops) then SubjectSourceBackgroundService (listening + writes)
+            await clientSource.StartAsync(cts.Token);
             await backgroundService.StartAsync(cts.Token);
             await testBody(clientSource, cts.Token);
         }
@@ -100,6 +103,8 @@ public class AdsIntegrationTests
         {
             await cts.CancelAsync();
             try { await backgroundService.StopAsync(CancellationToken.None); }
+            catch (OperationCanceledException) { }
+            try { await clientSource.StopAsync(CancellationToken.None); }
             catch (OperationCanceledException) { }
             backgroundService.Dispose();
             await clientSource.DisposeAsync();
@@ -161,8 +166,7 @@ public class AdsIntegrationTests
             await AsyncTestHelpers.WaitUntilAsync(
                 () => Math.Abs(model.Temperature - 25.0) < 0.001 &&
                       model.MachineName == "TestPLC" &&
-                      model.IsRunning &&
-                      model.Counter == 42,
+                      model is { IsRunning: true, Counter: 42 },
                 timeout: WaitTimeout,
                 message: $"Model properties should match server initial values. " +
                          $"Current: Temperature={model.Temperature}, MachineName={model.MachineName}, " +
@@ -223,7 +227,7 @@ public class AdsIntegrationTests
                 () =>
                 {
                     var serverValue = _fixture.Server.GetSymbolValue("GVL.Counter");
-                    return serverValue is int intValue && intValue == 999;
+                    return serverValue is 999;
                 },
                 timeout: WaitTimeout,
                 message: "Server Counter should update to 999 after client write");
@@ -257,8 +261,7 @@ public class AdsIntegrationTests
             // Assert
             await AsyncTestHelpers.WaitUntilAsync(
                 () => Math.Abs(model.Temperature - 99.5) < 0.001 &&
-                      model.Counter == 100 &&
-                      !model.IsRunning,
+                      model is { Counter: 100, IsRunning: false },
                 timeout: WaitTimeout,
                 message: "All client properties should update after server changes multiple values");
 

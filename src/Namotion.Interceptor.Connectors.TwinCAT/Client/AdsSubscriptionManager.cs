@@ -32,6 +32,27 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         = new(PropertyReference.Comparer);
     private volatile bool _pollingCollectionDirty;
 
+    // Polling snapshot — swapped atomically via volatile reference to avoid torn reads.
+    // Only the polling thread mutates UseFallback; all other fields are set once during construction.
+    private volatile PollingSnapshot _pollingSnapshot = PollingSnapshot.Empty;
+
+    private sealed class PollingSnapshot
+    {
+        public static readonly PollingSnapshot Empty = new([], [], null);
+
+        public readonly List<ISymbol> Symbols;
+        public readonly List<(PropertyReference Reference, string SymbolPath)> Entries;
+        public readonly SumSymbolRead? SumRead;
+        public bool UseFallback; // only mutated by the polling thread
+
+        public PollingSnapshot(List<ISymbol> symbols, List<(PropertyReference, string)> entries, SumSymbolRead? sumRead)
+        {
+            Symbols = symbols;
+            Entries = entries;
+            SumRead = sumRead;
+        }
+    }
+
     /// <summary>
     /// Gets whether the polling collection has been marked dirty (for testing).
     /// </summary>
@@ -85,8 +106,6 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             _configuration.DefaultCycleTime,
             _configuration.MaxNotifications);
 
-        var polledSymbols = new List<(RegisteredSubjectProperty Property, string SymbolPath)>();
-
         foreach (var (property, symbolPath, effectiveMode) in effectiveModes)
         {
             if (!ownership.ClaimSource(property.Reference))
@@ -104,18 +123,12 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
             }
             else
             {
-                polledSymbols.Add((property, symbolPath));
                 _polledProperties[property.Reference] = symbolPath;
             }
         }
 
-        if (polledSymbols.Count > 0)
-        {
-            StartBatchPolling(polledSymbols, connection, symbolLoader, propertyWriter, source, connectionManager);
-        }
-
-        // Reset dirty flag after registration is complete so the polling timer can run
-        _pollingCollectionDirty = false;
+        // Mark dirty so the next PollValuesAsync call rebuilds the polling snapshot
+        _pollingCollectionDirty = true;
 
         _logger.LogInformation(
             "Registered {NotificationCount} notification and {PolledCount} polled variables.",
@@ -127,8 +140,9 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
     /// </summary>
     internal void ClearAll()
     {
-        // Mark polling dirty before clearing to guard against in-flight timer callbacks
+        // Mark polling dirty and clear snapshot so in-flight polls stop immediately
         _pollingCollectionDirty = true;
+        _pollingSnapshot = PollingSnapshot.Empty;
 
         // Dispose existing subscriptions (CompositeDisposable.Clear disposes contained items)
         _subscriptions.Clear();
@@ -207,7 +221,7 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         // for large symbol sets. Currently acceptable because subject detachment is rare.
         foreach (var kvp in _symbolToProperty)
         {
-            if (kvp.Value.HasValue && kvp.Value.Value.Subject == subject)
+            if (kvp.Value is { } reference && reference.Subject == subject)
             {
                 _symbolToProperty.TryRemove(kvp.Key, out _);
             }
@@ -335,151 +349,142 @@ internal sealed class AdsSubscriptionManager : IAsyncDisposable
         var propertyReference = property.Reference;
         var subscription = connection
             .WhenNotification(symbol, notificationSettings)
-            .Subscribe(notification => OnValueReceived(propertyReference, notification.Value, notification.TimeStamp, propertyWriter, source));
+            .Subscribe(notification =>
+            {
+                try
+                {
+                    OnValueReceived(propertyReference, notification.Value, notification.TimeStamp, propertyWriter, source);
+                }
+                catch (Exception exception)
+                {
+                    connectionManager.LogFirstOccurrence("NotificationCallback", exception,
+                        "Failed to process notification for symbol '{SymbolPath}'.", symbolPath);
+                }
+            });
 
         _notificationSubscriptions[propertyReference] = subscription;
         _subscriptions.Add(subscription);
     }
 
-    private void StartBatchPolling(
-        List<(RegisteredSubjectProperty Property, string SymbolPath)> polledSymbols,
-        IAdsConnection connection,
-        ISymbolLoader? symbolLoader,
+    /// <summary>
+    /// Performs a single polling cycle: reads all polled properties via batch or individual reads.
+    /// Called periodically by the orchestrator's PeriodicTimer loop.
+    /// </summary>
+    /// <summary>
+    /// Performs a single polling cycle: reads all polled properties via batch or individual reads.
+    /// Called periodically by the orchestrator's PeriodicTimer loop.
+    /// </summary>
+    internal async Task PollValuesAsync(
+        AdsConnectionManager connectionManager,
         SubjectPropertyWriter? propertyWriter,
         ISubjectSource source,
-        AdsConnectionManager connectionManager)
+        CancellationToken cancellationToken)
     {
-        // Build initial polling snapshot from the provided symbols
-        var symbols = new List<ISymbol>();
-        var pollingEntries = new List<(PropertyReference Reference, string SymbolPath)>();
-
-        foreach (var (property, symbolPath) in polledSymbols)
-        {
-            var symbol = TryGetSymbol(symbolLoader, symbolPath);
-            if (symbol is not null)
-            {
-                symbols.Add(symbol);
-                pollingEntries.Add((property.Reference, symbolPath));
-            }
-        }
-
-        if (symbols.Count == 0)
+        if (connectionManager.Connection is null || _polledProperties.IsEmpty)
         {
             return;
         }
 
-        var useFallback = false;
-        var sumRead = new SumSymbolRead(connection, symbols);
-        var pollingInterval = _configuration.PollingInterval;
+        if (_pollingCollectionDirty)
+        {
+            RebuildPollingSnapshot(connectionManager);
+        }
 
-        // One-shot timer that re-arms in finally to prevent overlapping callbacks.
-        Timer? timer = null;
-        timer = new Timer(_ =>
+        // Read snapshot reference once — safe even if another thread swaps it via ClearAll/rebuild.
+        var snapshot = _pollingSnapshot;
+        if (snapshot.SumRead is null || snapshot.Symbols.Count == 0)
+        {
+            return;
+        }
+
+        if (!snapshot.UseFallback)
         {
             try
             {
-                if (_pollingCollectionDirty)
+                var readResult = await snapshot.SumRead.ReadAsync(cancellationToken).ConfigureAwait(false);
+                if (readResult.ErrorCode == AdsErrorCode.DeviceServiceNotSupported)
                 {
-                    // Rebuild snapshot from _polledProperties (the source of truth)
-                    _pollingCollectionDirty = false;
-
-                    var newSymbols = new List<ISymbol>();
-                    var newEntries = new List<(PropertyReference Reference, string SymbolPath)>();
-
-                    foreach (var kvp in _polledProperties)
-                    {
-                        var symbol = TryGetSymbol(symbolLoader, kvp.Value);
-                        if (symbol is not null)
-                        {
-                            newSymbols.Add(symbol);
-                            newEntries.Add((kvp.Key, kvp.Value));
-                        }
-                    }
-
-                    symbols = newSymbols;
-                    pollingEntries = newEntries;
-                    sumRead = newSymbols.Count > 0
-                        ? new SumSymbolRead(connection, newSymbols)
-                        : null;
-                    useFallback = false;
+                    _logger.LogDebug("SumSymbolRead not supported for polling, falling back to individual reads.");
+                    snapshot.UseFallback = true;
                 }
-
-                if (sumRead is null || symbols.Count == 0)
+                else if (readResult.ErrorCode != AdsErrorCode.NoError || readResult.Values is null)
                 {
+                    connectionManager.LogFirstOccurrence("BatchPoll", null, "Batch polling failed with error: {ErrorCode}", readResult.ErrorCode);
                     return;
                 }
-
-                if (!useFallback)
+                else
                 {
-                    try
+                    var resultValues = readResult.Values;
+                    var subErrors = readResult.SubErrors;
+                    for (var index = 0; index < snapshot.Entries.Count && index < resultValues.Length; index++)
                     {
-                        var readResult = sumRead.ReadAsResult();
-                        if (readResult.ErrorCode == AdsErrorCode.DeviceServiceNotSupported)
+                        if (subErrors is not null && index < subErrors.Length && subErrors[index] != AdsErrorCode.NoError)
                         {
-                            _logger.LogDebug("SumSymbolRead not supported for polling, falling back to individual reads.");
-                            useFallback = true;
+                            continue;
                         }
-                        else if (readResult.ErrorCode != AdsErrorCode.NoError || readResult.Values is null)
-                        {
-                            connectionManager.LogFirstOccurrence("BatchPoll", null, "Batch polling failed with error: {ErrorCode}", readResult.ErrorCode);
-                            return;
-                        }
-                        else
-                        {
-                            var values = readResult.Values;
-                            var errorCodes = readResult.SubErrors;
-                            for (var index = 0; index < pollingEntries.Count && index < values.Length; index++)
-                            {
-                                if (errorCodes is not null && index < errorCodes.Length && errorCodes[index] != AdsErrorCode.NoError)
-                                {
-                                    continue;
-                                }
 
-                                OnValueReceived(pollingEntries[index].Reference, values[index], null, propertyWriter, source);
-                            }
+                        OnValueReceived(snapshot.Entries[index].Reference, resultValues[index], null, propertyWriter, source);
+                    }
 
-                            return;
-                        }
-                    }
-                    catch (AdsException exception) when ((AdsErrorCode)exception.HResult == AdsErrorCode.DeviceServiceNotSupported)
-                    {
-                        _logger.LogDebug("SumSymbolRead threw DeviceServiceNotSupported for polling, falling back to individual reads.");
-                        useFallback = true;
-                    }
+                    return;
                 }
+            }
+            catch (AdsException exception) when ((AdsErrorCode)exception.HResult == AdsErrorCode.DeviceServiceNotSupported)
+            {
+                _logger.LogDebug("SumSymbolRead threw DeviceServiceNotSupported for polling, falling back to individual reads.");
+                snapshot.UseFallback = true;
+            }
+        }
 
-                // Individual read fallback
-                for (var index = 0; index < symbols.Count; index++)
+        // Individual read fallback
+        for (var index = 0; index < snapshot.Symbols.Count; index++)
+        {
+            try
+            {
+                var readResult = await ((IValueSymbol)snapshot.Symbols[index])
+                    .ReadValueAsync(cancellationToken).ConfigureAwait(false);
+                if ((AdsErrorCode)readResult.ErrorCode == AdsErrorCode.NoError)
                 {
-                    try
-                    {
-                        var value = ((IValueSymbol)symbols[index]).ReadValue();
-                        OnValueReceived(pollingEntries[index].Reference, value, null, propertyWriter, source);
-                    }
-                    catch (Exception exception)
-                    {
-                        connectionManager.LogFirstOccurrence("BatchPoll", exception, "Failed to read polled symbol '{SymbolPath}'.", pollingEntries[index].SymbolPath);
-                    }
+                    OnValueReceived(snapshot.Entries[index].Reference, readResult.Value, null, propertyWriter, source);
                 }
             }
             catch (Exception exception)
             {
-                connectionManager.LogFirstOccurrence("BatchPoll", exception, "Batch polling failed.");
+                connectionManager.LogFirstOccurrence("BatchPoll", exception, "Failed to read polled symbol '{SymbolPath}'.", snapshot.Entries[index].SymbolPath);
             }
-            finally
-            {
-                try
-                {
-                    timer?.Change(pollingInterval, Timeout.InfiniteTimeSpan);
-                }
-                catch (ObjectDisposedException)
-                {
-                    // Timer was disposed (ClearAll/DisposeAsync), stop polling
-                }
-            }
-        }, null, TimeSpan.Zero, Timeout.InfiniteTimeSpan);
+        }
+    }
 
-        _subscriptions.Add(Disposable.Create(() => timer.Dispose()));
+    private void RebuildPollingSnapshot(AdsConnectionManager connectionManager)
+    {
+        var connection = connectionManager.Connection;
+        if (connection is null)
+        {
+            _pollingSnapshot = PollingSnapshot.Empty;
+            _pollingCollectionDirty = false;
+            return;
+        }
+
+        var newSymbols = new List<ISymbol>();
+        var newEntries = new List<(PropertyReference Reference, string SymbolPath)>();
+
+        foreach (var kvp in _polledProperties)
+        {
+            var symbol = TryGetSymbol(connectionManager.SymbolLoader, kvp.Value);
+            if (symbol is not null)
+            {
+                newSymbols.Add(symbol);
+                newEntries.Add((kvp.Key, kvp.Value));
+            }
+        }
+
+        var sumRead = newSymbols.Count > 0
+            ? new SumSymbolRead(connection, newSymbols)
+            : null;
+
+        // Assign snapshot atomically, then clear dirty flag (I4: clear after build)
+        _pollingSnapshot = new PollingSnapshot(newSymbols, newEntries, sumRead);
+        _pollingCollectionDirty = false;
     }
 
     private void OnValueReceived(PropertyReference propertyReference, object? adsValue, DateTimeOffset? sourceTimestamp, SubjectPropertyWriter? propertyWriter, ISubjectSource source)
