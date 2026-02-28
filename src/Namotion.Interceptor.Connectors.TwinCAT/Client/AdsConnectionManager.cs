@@ -19,7 +19,7 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
     private readonly CircuitBreaker _circuitBreaker;
 
     // ADS connection objects — uses AdsClient directly (not AdsSession) for reliable dispose in 7.0.x
-    private volatile AdsClient? _client;
+    private AdsClient? _client;
     private volatile ISymbolLoader? _symbolLoader;
 
     // First-occurrence logging state (Warning first, then Debug until cleared)
@@ -75,12 +75,20 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
     /// <summary>
     /// Gets the current ADS connection, or null if not connected.
     /// </summary>
-    internal IAdsConnection? Connection => _client;
+    internal IAdsConnection? Connection => Volatile.Read(ref _client);
 
     /// <summary>
     /// Gets the current symbol loader, or null if not loaded.
     /// </summary>
     internal ISymbolLoader? SymbolLoader => _symbolLoader;
+
+    /// <summary>
+    /// Sets the symbol loader directly (e.g. for injecting a mock in tests).
+    /// </summary>
+    internal void SetSymbolLoader(ISymbolLoader symbolLoader)
+    {
+        _symbolLoader = symbolLoader;
+    }
 
     /// <summary>
     /// Gets the current PLC ADS state, or null if not yet known.
@@ -98,7 +106,7 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
     /// Gets whether the ADS client is currently connected.
     /// </summary>
     internal bool IsConnected =>
-        _client is IConnection { IsConnected: true };
+        Volatile.Read(ref _client) is IConnection { IsConnected: true };
 
     internal long TotalReconnectionAttempts =>
         Interlocked.Read(ref _totalReconnectionAttempts);
@@ -171,7 +179,7 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
                     client.AdsSymbolVersionChanged += OnSymbolVersionChanged;
 
                     Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
-                    _client = client;
+                    Volatile.Write(ref _client, client);
                     _circuitBreaker.RecordSuccess();
                     _logger.LogInformation(
                         "Connected to TwinCAT PLC at {AmsNetId}:{Port}.",
@@ -200,10 +208,11 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
     /// </summary>
     internal void RecreateSymbolLoader()
     {
-        if (_client is not null)
+        var client = Volatile.Read(ref _client);
+        if (client is not null)
         {
             _symbolLoader = SymbolLoaderFactory.Create(
-                _client,
+                client,
                 new SymbolLoaderSettings(SymbolsLoadMode.DynamicTree));
         }
     }
@@ -261,23 +270,22 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
     /// </summary>
     private void DisconnectAndDisposeClient()
     {
-        if (_client is not null)
+        var client = Interlocked.Exchange(ref _client, null);
+        if (client is not null)
         {
-            _client.ConnectionStateChanged -= OnConnectionStateChanged;
-            _client.AdsStateChanged -= OnAdsStateChanged;
-            _client.AdsSymbolVersionChanged -= OnSymbolVersionChanged;
+            client.ConnectionStateChanged -= OnConnectionStateChanged;
+            client.AdsStateChanged -= OnAdsStateChanged;
+            client.AdsSymbolVersionChanged -= OnSymbolVersionChanged;
 
             try
             {
-                _client.Disconnect();
-                _client.Dispose();
+                client.Disconnect();
+                client.Dispose();
             }
             catch (Exception exception)
             {
                 _logger.LogDebug(exception, "Error disposing ADS client.");
             }
-
-            _client = null;
         }
 
         _symbolLoader = null;

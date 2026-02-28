@@ -77,6 +77,38 @@ public class AdsValueConverterTests
     }
 
     [Fact]
+    public void ConvertToPropertyValue_WithLocalDateTime_ReturnsUtcDateTimeOffset()
+    {
+        // Arrange
+        var property = GetProperty(nameof(TestPlcModel.Timestamp));
+        var dateTime = new DateTime(2025, 6, 15, 10, 30, 0, DateTimeKind.Local);
+
+        // Act
+        var result = _converter.ConvertToPropertyValue(dateTime, property);
+
+        // Assert — SpecifyKind(Utc) preserves raw ticks as UTC
+        var dateTimeOffset = Assert.IsType<DateTimeOffset>(result);
+        Assert.Equal(TimeSpan.Zero, dateTimeOffset.Offset);
+        Assert.Equal(dateTime.Ticks, dateTimeOffset.Ticks);
+    }
+
+    [Fact]
+    public void ConvertToPropertyValue_WithUnspecifiedDateTime_ReturnsUtcDateTimeOffset()
+    {
+        // Arrange
+        var property = GetProperty(nameof(TestPlcModel.Timestamp));
+        var dateTime = new DateTime(2025, 6, 15, 10, 30, 0, DateTimeKind.Unspecified);
+
+        // Act
+        var result = _converter.ConvertToPropertyValue(dateTime, property);
+
+        // Assert — SpecifyKind(Utc) preserves raw ticks as UTC
+        var dateTimeOffset = Assert.IsType<DateTimeOffset>(result);
+        Assert.Equal(TimeSpan.Zero, dateTimeOffset.Offset);
+        Assert.Equal(dateTime.Ticks, dateTimeOffset.Ticks);
+    }
+
+    [Fact]
     public void ConvertToPropertyValue_WithInt_PassesThrough()
     {
         // Arrange

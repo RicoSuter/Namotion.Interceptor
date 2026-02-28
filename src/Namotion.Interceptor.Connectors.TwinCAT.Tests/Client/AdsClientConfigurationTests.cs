@@ -152,6 +152,30 @@ public class AdsClientConfigurationTests
         configuration.Validate();
     }
 
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(-100)]
+    public void Validate_WithNegativeDefaultMaxDelay_ThrowsArgumentOutOfRangeException(int defaultMaxDelay)
+    {
+        // Arrange
+        var configuration = CreateValidConfiguration();
+        configuration.DefaultMaxDelay = defaultMaxDelay;
+
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(() => configuration.Validate());
+    }
+
+    [Fact]
+    public void Validate_WithZeroDefaultMaxDelay_DoesNotThrow()
+    {
+        // Arrange
+        var configuration = CreateValidConfiguration();
+        configuration.DefaultMaxDelay = 0;
+
+        // Act & Assert - zero means no batching delay, which is valid
+        configuration.Validate();
+    }
+
     [Fact]
     public void Validate_WithCustomValues_DoesNotThrow()
     {

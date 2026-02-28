@@ -2,9 +2,12 @@ using Microsoft.Extensions.Logging;
 using Moq;
 using Namotion.Interceptor.Connectors.TwinCAT.Client;
 using Namotion.Interceptor.Connectors.TwinCAT.Tests.Models;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
+using Namotion.Interceptor.Tracking.Change;
 using TwinCAT;
 using TwinCAT.Ads;
+using TwinCAT.TypeSystem;
 using Xunit;
 
 namespace Namotion.Interceptor.Connectors.TwinCAT.Tests.Client;
@@ -217,7 +220,7 @@ public class TwinCatSubjectClientSourceTests
     {
         // Arrange
         var source = CreateSource();
-        var changes = new Tracking.Change.SubjectPropertyChange[1];
+        var changes = new SubjectPropertyChange[1];
 
         // Act
         var result = await source.WriteChangesAsync(changes.AsMemory(), CancellationToken.None);
@@ -415,5 +418,214 @@ public class TwinCatSubjectClientSourceTests
 
         // Assert - no exception thrown
         await source.DisposeAsync();
+    }
+
+    private static readonly IAdsConnection MockConnection = Mock.Of<IAdsConnection>();
+
+    /// <summary>
+    /// Creates a mock ISymbolLoader that resolves the given symbol path to the given symbol.
+    /// </summary>
+    private static ISymbolLoader CreateMockSymbolLoader(string symbolPath, ISymbol symbol)
+    {
+        var mockInstanceCollection = new Mock<IInstanceCollection<ISymbol>>();
+        ISymbol? outSymbol = symbol;
+        mockInstanceCollection
+            .Setup(s => s.TryGetInstance(symbolPath, out outSymbol))
+            .Returns(true);
+
+        var mockSymbolLoader = new Mock<ISymbolLoader>();
+        mockSymbolLoader
+            .Setup(l => l.Symbols)
+            .Returns(mockInstanceCollection.As<ISymbolCollection<ISymbol>>().Object);
+
+        return mockSymbolLoader.Object;
+    }
+
+    private static SubjectPropertyChange CreateChange(
+        TestPlcModel model,
+        string propertyName,
+        double oldValue = 0.0,
+        double newValue = 42.0)
+    {
+        var propertyReference = new PropertyReference(model, propertyName);
+        return SubjectPropertyChange.Create(
+            propertyReference,
+            null,
+            DateTimeOffset.UtcNow,
+            null,
+            oldValue,
+            newValue);
+    }
+
+    [Fact]
+    public async Task WriteChangesAsyncCore_WithEmptyChanges_ShouldReturnSuccess()
+    {
+        // Arrange
+        var source = CreateSource();
+        var changes = Array.Empty<SubjectPropertyChange>();
+
+        // Act
+        var result = await source.WriteChangesAsyncCore(MockConnection, changes.AsMemory(), CancellationToken.None);
+
+        // Assert
+        Assert.True(result.IsFullySuccessful);
+    }
+
+    [Fact]
+    public async Task WriteChangesAsyncCore_WithDetachedSubjects_ShouldReturnSuccess()
+    {
+        // Arrange — model WITHOUT registry so TryGetRegisteredProperty returns null
+        var source = CreateSource();
+        var detachedContext = InterceptorSubjectContext.Create();
+        var detachedModel = new TestPlcModel(detachedContext);
+        var changes = new[] { CreateChange(detachedModel, nameof(TestPlcModel.Temperature)) };
+
+        // Act
+        var result = await source.WriteChangesAsyncCore(MockConnection, changes.AsMemory(), CancellationToken.None);
+
+        // Assert — all changes skipped (detached) → Success
+        Assert.True(result.IsFullySuccessful);
+    }
+
+    [Fact]
+    public async Task WriteChangesAsyncCore_WithUncachedSymbolPath_ShouldReturnFailure()
+    {
+        // Arrange — registered property but no symbol path in subscription manager
+        var context = TestHelpers.CreateContextWithLifecycle();
+        var model = new TestPlcModel(context);
+        var source = CreateSource(subject: model);
+        var changes = new[] { CreateChange(model, nameof(TestPlcModel.Temperature)) };
+
+        // Act
+        var result = await source.WriteChangesAsyncCore(MockConnection, changes.AsMemory(), CancellationToken.None);
+
+        // Assert
+        Assert.False(result.IsFullySuccessful);
+        Assert.IsType<AdsWriteException>(result.Error);
+    }
+
+    [Fact]
+    public async Task WriteChangesAsyncCore_WithNullConversion_ShouldSkipWrite()
+    {
+        // Arrange
+        var configuration = TestHelpers.CreateConfiguration();
+        configuration.ValueConverter = new NullReturningValueConverter();
+
+        var context = TestHelpers.CreateContextWithLifecycle();
+        var model = new TestPlcModel(context);
+        var source = CreateSource(subject: model, configuration: configuration);
+
+        var propertyReference = new PropertyReference(model, nameof(TestPlcModel.Temperature));
+        source.SubscriptionManager.SetSymbolPath(propertyReference, "GVL.Temperature");
+        source.ConnectionManager.SetSymbolLoader(
+            CreateMockSymbolLoader("GVL.Temperature", Mock.Of<ISymbol>()));
+
+        var changes = new[] { CreateChange(model, nameof(TestPlcModel.Temperature)) };
+
+        // Act
+        var result = await source.WriteChangesAsyncCore(MockConnection, changes.AsMemory(), CancellationToken.None);
+
+        // Assert — null conversion → skipped → Success
+        Assert.True(result.IsFullySuccessful);
+    }
+
+    [Fact]
+    public async Task WriteChangesAsyncCore_WithConversionException_ShouldDropWrite()
+    {
+        // Arrange
+        var configuration = TestHelpers.CreateConfiguration();
+        configuration.ValueConverter = new ThrowingValueConverter();
+
+        var mockLogger = new Mock<ILogger>();
+        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
+
+        var context = TestHelpers.CreateContextWithLifecycle();
+        var model = new TestPlcModel(context);
+        var source = CreateSource(subject: model, configuration: configuration, logger: mockLogger.Object);
+
+        var propertyReference = new PropertyReference(model, nameof(TestPlcModel.Temperature));
+        source.SubscriptionManager.SetSymbolPath(propertyReference, "GVL.Temperature");
+        source.ConnectionManager.SetSymbolLoader(
+            CreateMockSymbolLoader("GVL.Temperature", Mock.Of<ISymbol>()));
+
+        var changes = new[] { CreateChange(model, nameof(TestPlcModel.Temperature)) };
+
+        // Act
+        var result = await source.WriteChangesAsyncCore(MockConnection, changes.AsMemory(), CancellationToken.None);
+
+        // Assert — conversion exception → dropped → Success
+        Assert.True(result.IsFullySuccessful);
+        mockLogger.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((value, _) => value.ToString()!.Contains("Failed to convert value")),
+                It.IsAny<Exception>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task WriteChangesAsyncCore_WithMixedUncachedAndDetached_ShouldReturnCorrectFailure()
+    {
+        // Arrange
+        var context = TestHelpers.CreateContextWithLifecycle();
+        var model = new TestPlcModel(context);
+        var source = CreateSource(subject: model);
+
+        var detachedModel = new TestPlcModel(InterceptorSubjectContext.Create());
+
+        var changes = new[]
+        {
+            CreateChange(model, nameof(TestPlcModel.Temperature)),        // registered, no symbol path → unresolved
+            CreateChange(detachedModel, nameof(TestPlcModel.Pressure)),   // detached → skipped
+        };
+
+        // Act
+        var result = await source.WriteChangesAsyncCore(MockConnection, changes.AsMemory(), CancellationToken.None);
+
+        // Assert — one unresolved change → failure with 1 deferred change
+        Assert.False(result.IsFullySuccessful);
+        Assert.Single(result.FailedChanges);
+    }
+
+    [Fact]
+    public async Task WriteChangesAsyncCore_WithUnresolvedSymbol_ShouldReturnFailure()
+    {
+        // Arrange — symbol path cached but symbol loader can't resolve it
+        var context = TestHelpers.CreateContextWithLifecycle();
+        var model = new TestPlcModel(context);
+        var source = CreateSource(subject: model);
+
+        var propertyReference = new PropertyReference(model, nameof(TestPlcModel.Temperature));
+        source.SubscriptionManager.SetSymbolPath(propertyReference, "GVL.Temperature");
+
+        // Symbol loader that returns no symbols
+        var mockSymbolLoader = new Mock<ISymbolLoader>();
+        mockSymbolLoader
+            .Setup(l => l.Symbols)
+            .Returns(new Mock<IInstanceCollection<ISymbol>>().As<ISymbolCollection<ISymbol>>().Object);
+        source.ConnectionManager.SetSymbolLoader(mockSymbolLoader.Object);
+
+        var changes = new[] { CreateChange(model, nameof(TestPlcModel.Temperature)) };
+
+        // Act
+        var result = await source.WriteChangesAsyncCore(MockConnection, changes.AsMemory(), CancellationToken.None);
+
+        // Assert
+        Assert.False(result.IsFullySuccessful);
+        Assert.IsType<AdsWriteException>(result.Error);
+    }
+
+    private class NullReturningValueConverter : AdsValueConverter
+    {
+        public override object? ConvertToAdsValue(object? propertyValue, RegisteredSubjectProperty property)
+            => null;
+    }
+
+    private class ThrowingValueConverter : AdsValueConverter
+    {
+        public override object? ConvertToAdsValue(object? propertyValue, RegisteredSubjectProperty property)
+            => throw new InvalidOperationException("Simulated conversion failure.");
     }
 }

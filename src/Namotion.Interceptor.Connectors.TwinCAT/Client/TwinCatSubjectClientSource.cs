@@ -204,6 +204,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
         (RegisteredSubjectProperty Property, object? Value)[] values,
         CancellationToken cancellationToken)
     {
+        var successCount = 0;
         for (var index = 0; index < properties.Count; index++)
         {
             try
@@ -214,6 +215,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
                 {
                     values[index] = (properties[index].Property,
                         _configuration.ValueConverter.ConvertToPropertyValue(readResult.Value, properties[index].Property));
+                    successCount++;
                 }
             }
             catch (Exception exception)
@@ -222,7 +224,7 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             }
         }
 
-        _logger.LogInformation("Successfully read {Count} ADS symbols individually from PLC.", properties.Count);
+        _logger.LogInformation("Read {SuccessCount}/{TotalCount} ADS symbols individually from PLC.", successCount, properties.Count);
     }
 
     /// <inheritdoc />
@@ -236,6 +238,19 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             return WriteResult.Failure(changes, new InvalidOperationException("ADS connection is not established."));
         }
 
+        return await WriteChangesAsyncCore(connection, changes, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Core write logic. Separated from <see cref="WriteChangesAsync"/> so that the
+    /// connection-null guard lives in the public entry point while the processing
+    /// logic can be called directly with a mock <see cref="IAdsConnection"/> in tests.
+    /// </summary>
+    internal async ValueTask<WriteResult> WriteChangesAsyncCore(
+        IAdsConnection connection,
+        ReadOnlyMemory<SubjectPropertyChange> changes,
+        CancellationToken cancellationToken)
+    {
         try
         {
             var capacity = changes.Length;
