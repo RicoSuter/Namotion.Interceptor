@@ -5,7 +5,7 @@
       children: {
         Kind: Collection,
         Timestamp: {Scrubbed},
-        Collection: [
+        Items: [
           {
             Index: 0,
             Id: 4
@@ -22,7 +22,7 @@
         Count: 3
       },
       father: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: {Scrubbed},
         Id: 2
       },
@@ -51,7 +51,7 @@
         Kind: Value
       },
       mother: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: {Scrubbed},
         Id: 3
       }
@@ -62,7 +62,7 @@
         Count: 0
       },
       father: {
-        Kind: Item
+        Kind: Object
       },
       firstName: {
         Kind: Value,
@@ -88,7 +88,7 @@
         Kind: Value
       },
       mother: {
-        Kind: Item
+        Kind: Object
       }
     },
     3: {
@@ -97,7 +97,7 @@
         Count: 0
       },
       father: {
-        Kind: Item
+        Kind: Object
       },
       firstName: {
         Kind: Value,
@@ -123,7 +123,7 @@
         Kind: Value
       },
       mother: {
-        Kind: Item
+        Kind: Object
       }
     },
     4: {
@@ -132,7 +132,7 @@
         Count: 0
       },
       father: {
-        Kind: Item
+        Kind: Object
       },
       firstName: {
         Kind: Value,
@@ -158,7 +158,7 @@
         Kind: Value
       },
       mother: {
-        Kind: Item
+        Kind: Object
       }
     },
     5: {
@@ -167,7 +167,7 @@
         Count: 0
       },
       father: {
-        Kind: Item
+        Kind: Object
       },
       firstName: {
         Kind: Value,
@@ -193,7 +193,7 @@
         Kind: Value
       },
       mother: {
-        Kind: Item
+        Kind: Object
       }
     },
     6: {
@@ -202,7 +202,7 @@
         Count: 0
       },
       father: {
-        Kind: Item
+        Kind: Object
       },
       firstName: {
         Kind: Value,
@@ -228,7 +228,7 @@
         Kind: Value
       },
       mother: {
-        Kind: Item
+        Kind: Object
       }
     }
   }

@@ -15,7 +15,7 @@ namespace Namotion.Interceptor.OpcUa.Client.Polling;
 /// Polling fallback for nodes that don't support subscriptions. Circuit breaker prevents resource exhaustion.
 /// Thread-safe. Start() is idempotent. Values reset on reconnection (some data loss during disconnection is expected).
 /// </summary>
-internal sealed class PollingManager : IDisposable
+internal sealed class PollingManager : IAsyncDisposable
 {
     private readonly OpcUaSubjectClientSource _source;
     private readonly ILogger _logger;
@@ -91,8 +91,19 @@ internal sealed class PollingManager : IDisposable
 
     /// <summary>
     /// Gets whether the polling manager is currently running.
+    /// Returns false if disposed or if the polling task has completed/faulted.
     /// </summary>
-    public bool IsRunning => Volatile.Read(ref _pollingTask) != null && Volatile.Read(ref _disposed) == 0;
+    public bool IsRunning
+    {
+        get
+        {
+            if (Volatile.Read(ref _disposed) == 1)
+                return false;
+
+            var task = Volatile.Read(ref _pollingTask);
+            return task is not null && !task.IsCompleted;
+        }
+    }
 
     /// <summary>
     /// Starts the polling loop in the background.
@@ -101,11 +112,12 @@ internal sealed class PollingManager : IDisposable
     /// <exception cref="ObjectDisposedException">Thrown if already disposed</exception>
     public void Start()
     {
-        if (Volatile.Read(ref _disposed) == 1)
-            throw new ObjectDisposedException(nameof(PollingManager));
-
         lock (_startLock)
         {
+            // Check disposal inside lock to prevent race with Dispose()
+            if (Volatile.Read(ref _disposed) == 1)
+                throw new ObjectDisposedException(nameof(PollingManager));
+
             if (Volatile.Read(ref _pollingTask) != null)
             {
                 _logger.LogDebug("Polling manager already started, ignoring duplicate start request");
@@ -116,7 +128,7 @@ internal sealed class PollingManager : IDisposable
             Volatile.Write(ref _pollingTask, task); // Ensure task assignment is visible to all threads
         }
 
-        _logger.LogInformation("OPC UA polling manager started with interval {Interval}ms", _configuration.PollingInterval.TotalMilliseconds);
+        _logger.LogDebug("OPC UA polling manager started with interval {Interval}ms", _configuration.PollingInterval.TotalMilliseconds);
     }
 
     /// <summary>
@@ -150,18 +162,6 @@ internal sealed class PollingManager : IDisposable
     }
 
     /// <summary>
-    /// Removes an item from polling.
-    /// </summary>
-    public void RemoveItem(NodeId nodeId)
-    {
-        var key = nodeId.ToString();
-        if (_pollingItems.TryRemove(key, out _))
-        {
-            _logger.LogDebug("Removed node {NodeId} from polling", key);
-        }
-    }
-
-    /// <summary>
     /// Removes polling items for a detached subject. Idempotent.
     /// </summary>
     public void RemoveItemsForSubject(IInterceptorSubject subject)
@@ -177,20 +177,34 @@ internal sealed class PollingManager : IDisposable
 
     private async Task PollLoopAsync(CancellationToken cancellationToken)
     {
-        try
+        while (!cancellationToken.IsCancellationRequested)
         {
-            while (await _timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+            try
             {
-                await PollItemsAsync(cancellationToken).ConfigureAwait(false);
+                while (await _timer.WaitForNextTickAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    await PollItemsAsync(cancellationToken).ConfigureAwait(false);
+                }
             }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            // Normal shutdown
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Fatal error in polling loop");
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Normal shutdown
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Fatal error in polling loop. Restarting after delay...");
+
+                // Wait before restarting to avoid tight failure loop
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
+                }
+            }
         }
     }
 
@@ -239,7 +253,7 @@ internal sealed class PollingManager : IDisposable
 
         try
         {
-            // Get snapshot of items to poll - creates a copy to avoid concurrent modifications
+            // Get snapshot of items to poll
             var itemsToRead = _pollingItems.Values.ToArray();
 
             // Process in batches using direct indexing
@@ -285,8 +299,9 @@ internal sealed class PollingManager : IDisposable
         // Clear cached values on session change to force re-notification
         // Take snapshot to avoid TOCTOU issues with concurrent modifications
         // Use TryUpdate to handle concurrent removal safely (matching pattern in ProcessValueChange)
-        foreach (var (key, item) in _pollingItems.ToArray())
+        foreach (var item in _pollingItems.Values.ToArray())
         {
+            var key = item.NodeId.ToString();
             _pollingItems.TryUpdate(key, item with { LastValue = null }, item);
             // If TryUpdate fails, item was removed or modified concurrently - skip silently
         }
@@ -410,7 +425,7 @@ internal sealed class PollingManager : IDisposable
         }
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
             return;
@@ -418,17 +433,21 @@ internal sealed class PollingManager : IDisposable
         _logger.LogDebug("Disposing OPC UA polling manager (Total reads: {TotalReads}, Failed: {FailedReads}, Value changes: {ValueChanges}, Slow polls: {SlowPolls}, Circuit breaker trips: {Trips})",
             _metrics.TotalReads, _metrics.FailedReads, _metrics.ValueChanges, _metrics.SlowPolls, _circuitBreaker.TripCount);
 
-        // Stop timer and cancel work
+        // Cancel work and stop timer
+        await _cts.CancelAsync();
         _timer.Dispose();
-        _cts.Cancel();
 
-        // Wait for polling task to complete (with timeout)
+        // Wait for polling task to complete asynchronously (with timeout)
         try
         {
-            if (_pollingTask != null && !_pollingTask.Wait(_configuration.PollingDisposalTimeout))
+            if (_pollingTask != null)
             {
-                _logger.LogWarning("Polling task did not complete within {Timeout} timeout", _configuration.PollingDisposalTimeout);
+                await _pollingTask.WaitAsync(_configuration.PollingDisposalTimeout).ConfigureAwait(false);
             }
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning("Polling task did not complete within {Timeout} timeout", _configuration.PollingDisposalTimeout);
         }
         catch (OperationCanceledException)
         {

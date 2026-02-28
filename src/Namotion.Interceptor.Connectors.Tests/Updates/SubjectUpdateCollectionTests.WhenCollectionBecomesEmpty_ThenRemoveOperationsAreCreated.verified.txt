@@ -7,10 +7,10 @@
         Timestamp: DateTimeOffset_1,
         Operations: [
           {
-            Index: 0
+            Index: 1
           },
           {
-            Index: 1
+            Index: 0
           }
         ],
         Count: 0

@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Cache;
@@ -27,7 +27,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     private readonly HashSet<InterceptorSubjectContext> _fallbackContexts = [];
 
     private InterceptorSubjectContext? _noServicesSingleFallbackContext;
-    
+
     public static InterceptorSubjectContext Create()
     {
         return new InterceptorSubjectContext();
@@ -180,7 +180,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             noServicesSingleFallbackContext.ExecuteInterceptedWrite(ref context, writeValue);
             return;
         }
-        
+
         EnsureInitialized();
         var action = GetWriteInterceptorFunction<TProperty>();
         action(ref context, writeValue);
@@ -194,12 +194,12 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             return noServicesSingleFallbackContext.ExecuteInterceptedInvoke(ref context, invokeMethod);
         }
-        
+
         EnsureInitialized();
         var func = GetMethodInvocationFunction();
         return func(ref context, invokeMethod);
     }
-    
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private ReadFunc<TProperty> GetReadInterceptorFunction<TProperty>()
     {

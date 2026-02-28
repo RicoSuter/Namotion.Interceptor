@@ -3,10 +3,10 @@ using Namotion.Interceptor.Attributes;
 namespace Namotion.Interceptor.Connectors.Tests.Models;
 
 /// <summary>
-/// Test model that simulates a device with OnSet* methods that can throw.
+/// Test model that simulates a device with On*Changing methods that can throw.
 /// Used to test local property failure handling in transactions.
 ///
-/// Note: OnSet* is called BEFORE the interceptor chain, so it's called during both
+/// Note: On*Changing is called BEFORE the interceptor chain, so it's called during both
 /// property capture in transactions AND during commit. Use ThrowingEnabled to control
 /// when exceptions should be thrown (typically enabled just before commit).
 /// </summary>
@@ -32,7 +32,7 @@ public partial class ThrowingDevice
     public partial bool PropertyA { get; set; }
     public partial bool PropertyB { get; set; }
 
-    partial void OnSetPropertyA(ref bool value)
+    partial void OnPropertyAChanging(ref bool newValue, ref bool cancel)
     {
         if (ThrowingEnabled && ShouldThrow?.Invoke(nameof(PropertyA)) == true)
         {
@@ -40,7 +40,7 @@ public partial class ThrowingDevice
         }
     }
 
-    partial void OnSetPropertyB(ref bool value)
+    partial void OnPropertyBChanging(ref bool newValue, ref bool cancel)
     {
         if (ThrowingEnabled && ShouldThrow?.Invoke(nameof(PropertyB)) == true)
         {

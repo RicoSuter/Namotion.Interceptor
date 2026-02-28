@@ -7,13 +7,13 @@
     Subjects: {
       1: {
         mother: {
-          Kind: Item,
+          Kind: Object,
           Id: 2
         }
       },
       2: {
         father: {
-          Kind: Item,
+          Kind: Object,
           Timestamp: {Scrubbed},
           Id: 3
         }
@@ -24,7 +24,7 @@
           Count: 0
         },
         father: {
-          Kind: Item
+          Kind: Object
         },
         firstName: {
           Kind: Value,
@@ -51,7 +51,7 @@
           Kind: Value
         },
         mother: {
-          Kind: Item
+          Kind: Object
         }
       }
     }

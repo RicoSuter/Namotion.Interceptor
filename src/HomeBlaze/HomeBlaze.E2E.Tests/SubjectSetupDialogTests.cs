@@ -8,6 +8,7 @@ namespace HomeBlaze.E2E.Tests;
 /// Tests type selection, name input, wizard navigation, and validation.
 /// </summary>
 [Collection(nameof(PlaywrightCollection))]
+[Trait("Category", "Integration")]
 public class SubjectSetupDialogTests
 {
     private const int PageLoadTimeout = 30000;

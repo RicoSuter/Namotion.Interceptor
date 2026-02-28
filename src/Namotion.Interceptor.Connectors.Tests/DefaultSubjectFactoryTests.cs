@@ -72,9 +72,74 @@ public class DefaultSubjectFactoryTests
         // Act
         var subjectFactory = new DefaultSubjectFactory();
         var myClassCollection = subjectFactory.CreateSubjectCollection(property.Type, new MyClass(1), new MyClass(2)) as IList<MyClass>;
-        
+
         // Assert
         Assert.NotNull(myClassCollection);
         Assert.Equal(2, myClassCollection.Count());
+    }
+
+    [Fact]
+    public void WhenCreatingDictionaryWithCorrectKeyType_ThenNoConversionNeeded()
+    {
+        // Arrange
+        var entries = new Dictionary<object, IInterceptorSubject>
+        {
+            ["key1"] = new MyClass(1),
+            ["key2"] = new MyClass(2)
+        };
+
+        // Act
+        var subjectFactory = new DefaultSubjectFactory();
+        var dictionary = subjectFactory.CreateSubjectDictionary(
+            typeof(Dictionary<string, MyClass>), entries);
+
+        // Assert
+        Assert.Equal(2, dictionary.Count);
+        Assert.Equal(1, ((MyClass)dictionary["key1"]!).Injected);
+        Assert.Equal(2, ((MyClass)dictionary["key2"]!).Injected);
+    }
+
+    [Fact]
+    public void WhenCreatingDictionaryWithIntKeyFromLong_ThenKeysAreConverted()
+    {
+        // Arrange
+        var entries = new Dictionary<object, IInterceptorSubject>
+        {
+            [1L] = new MyClass("a"),
+            [2L] = new MyClass("b")
+        };
+
+        // Act
+        var subjectFactory = new DefaultSubjectFactory();
+        var dictionary = subjectFactory.CreateSubjectDictionary(
+            typeof(Dictionary<int, MyClass>), entries);
+
+        // Assert
+        Assert.Equal(2, dictionary.Count);
+        Assert.Equal("a", ((MyClass)dictionary[1]!).Injected);
+        Assert.Equal("b", ((MyClass)dictionary[2]!).Injected);
+    }
+
+    public enum TestKeyEnum { First, Second }
+
+    [Fact]
+    public void WhenCreatingDictionaryWithEnumKey_ThenKeysAreConverted()
+    {
+        // Arrange
+        var entries = new Dictionary<object, IInterceptorSubject>
+        {
+            ["First"] = new MyClass(1),
+            ["Second"] = new MyClass(2)
+        };
+
+        // Act
+        var subjectFactory = new DefaultSubjectFactory();
+        var dictionary = subjectFactory.CreateSubjectDictionary(
+            typeof(Dictionary<TestKeyEnum, MyClass>), entries);
+
+        // Assert
+        Assert.Equal(2, dictionary.Count);
+        Assert.Equal(1, ((MyClass)dictionary[TestKeyEnum.First]!).Injected);
+        Assert.Equal(2, ((MyClass)dictionary[TestKeyEnum.Second]!).Injected);
     }
 }
