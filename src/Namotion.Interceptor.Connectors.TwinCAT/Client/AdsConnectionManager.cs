@@ -138,6 +138,8 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
         // Dispose stale client before creating a new one
         DisconnectAndDisposeClient();
 
+        var amsNetId = AmsNetId.Parse(_configuration.AmsNetId);
+
         while (!cancellationToken.IsCancellationRequested)
         {
             try
@@ -145,8 +147,6 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
                 if (_circuitBreaker.ShouldAttempt())
                 {
                     Interlocked.Increment(ref _totalReconnectionAttempts);
-
-                    var amsNetId = AmsNetId.Parse(_configuration.AmsNetId);
 
                     var client = _configuration.RouterConfiguration is not null
                         ? new AdsClient(_configuration.RouterConfiguration, null)
@@ -164,14 +164,14 @@ internal sealed class AdsConnectionManager : IAsyncDisposable
 
                     client.Timeout = (int)_configuration.Timeout.TotalMilliseconds;
 
-                    _client = client;
-
-                    // Subscribe to connection state, ADS state, and symbol version changes
+                    // Wire events before publishing _client so that no caller can read
+                    // Connection and find a client whose events are not yet subscribed.
                     client.ConnectionStateChanged += OnConnectionStateChanged;
                     client.AdsStateChanged += OnAdsStateChanged;
                     client.AdsSymbolVersionChanged += OnSymbolVersionChanged;
 
                     Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
+                    _client = client;
                     _circuitBreaker.RecordSuccess();
                     _logger.LogInformation(
                         "Connected to TwinCAT PLC at {AmsNetId}:{Port}.",

@@ -679,9 +679,22 @@ internal sealed class TwinCatSubjectClientSource : BackgroundService, ISubjectSo
             return;
         }
 
-        // Stop BackgroundService first so ExecuteAsync loop exits before
-        // disposing the resources it uses (_rescanSignal, _subscriptionManager, etc.)
+        // Cancel the stoppingToken so ExecuteAsync exits cleanly, then
+        // await the loop task before disposing the resources it uses.
         Dispose();
+
+        try
+        {
+            await (ExecuteTask ?? Task.CompletedTask).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected when stoppingToken is cancelled during DisposeAsync.
+        }
+        catch (Exception exception)
+        {
+            _logger.LogDebug(exception, "ExecuteAsync faulted during disposal.");
+        }
 
         await _subscriptionManager.DisposeAsync().ConfigureAwait(false);
         await _connectionManager.DisposeAsync().ConfigureAwait(false);

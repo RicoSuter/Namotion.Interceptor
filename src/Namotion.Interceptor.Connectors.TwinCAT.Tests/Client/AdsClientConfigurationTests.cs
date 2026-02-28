@@ -131,6 +131,28 @@ public class AdsClientConfigurationTests
     }
 
     [Fact]
+    public void Validate_WithNegativeRescanDebounceTime_ThrowsArgumentOutOfRangeException()
+    {
+        // Arrange
+        var configuration = CreateValidConfiguration();
+        configuration.RescanDebounceTime = TimeSpan.FromMilliseconds(-1);
+
+        // Act & Assert
+        Assert.Throws<ArgumentOutOfRangeException>(() => configuration.Validate());
+    }
+
+    [Fact]
+    public void Validate_WithZeroRescanDebounceTime_DoesNotThrow()
+    {
+        // Arrange
+        var configuration = CreateValidConfiguration();
+        configuration.RescanDebounceTime = TimeSpan.Zero;
+
+        // Act & Assert - zero means no debounce, which is valid
+        configuration.Validate();
+    }
+
+    [Fact]
     public void Validate_WithCustomValues_DoesNotThrow()
     {
         // Arrange
