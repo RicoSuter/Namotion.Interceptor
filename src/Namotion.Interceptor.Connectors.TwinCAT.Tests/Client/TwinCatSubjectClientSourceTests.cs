@@ -617,6 +617,188 @@ public class TwinCatSubjectClientSourceTests
         Assert.IsType<AdsWriteException>(result.Error);
     }
 
+    [Fact]
+    public void ClassifyWriteErrors_AllNoError_ShouldReturnSuccess()
+    {
+        // Arrange
+        var context = TestHelpers.CreateContextWithLifecycle();
+        var model = new TestPlcModel(context);
+        var source = CreateSource(subject: model);
+
+        var errorCodes = new[] { AdsErrorCode.NoError, AdsErrorCode.NoError };
+        var validChanges = new List<SubjectPropertyChange>
+        {
+            CreateChange(model, nameof(TestPlcModel.Temperature)),
+            CreateChange(model, nameof(TestPlcModel.Pressure)),
+        };
+
+        // Act
+        var result = source.ClassifyWriteErrors(errorCodes, validChanges, unresolvedChanges: null);
+
+        // Assert
+        Assert.True(result.IsFullySuccessful);
+    }
+
+    [Fact]
+    public void ClassifyWriteErrors_AllTransient_ShouldReturnFailureWithAllChanges()
+    {
+        // Arrange
+        var context = TestHelpers.CreateContextWithLifecycle();
+        var model = new TestPlcModel(context);
+        var source = CreateSource(subject: model);
+
+        var errorCodes = new[] { AdsErrorCode.DeviceError, AdsErrorCode.DeviceError };
+        var validChanges = new List<SubjectPropertyChange>
+        {
+            CreateChange(model, nameof(TestPlcModel.Temperature)),
+            CreateChange(model, nameof(TestPlcModel.Pressure)),
+        };
+
+        // Act
+        var result = source.ClassifyWriteErrors(errorCodes, validChanges, unresolvedChanges: null);
+
+        // Assert — all transient → all changes returned for retry
+        Assert.False(result.IsFullySuccessful);
+        Assert.False(result.IsPartialFailure);
+        Assert.Equal(2, result.FailedChanges.Length);
+        var error = Assert.IsType<AdsWriteException>(result.Error);
+        Assert.Equal(2, error.TransientCount);
+        Assert.Equal(0, error.PermanentCount);
+    }
+
+    [Fact]
+    public void ClassifyWriteErrors_AllPermanent_ShouldReturnSuccessAndLogWarning()
+    {
+        // Arrange
+        var mockLogger = new Mock<ILogger>();
+        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
+
+        var context = TestHelpers.CreateContextWithLifecycle();
+        var model = new TestPlcModel(context);
+        var source = CreateSource(subject: model, logger: mockLogger.Object);
+
+        var errorCodes = new[] { AdsErrorCode.DeviceSymbolNotFound, AdsErrorCode.DeviceSymbolNotFound };
+        var validChanges = new List<SubjectPropertyChange>
+        {
+            CreateChange(model, nameof(TestPlcModel.Temperature)),
+            CreateChange(model, nameof(TestPlcModel.Pressure)),
+        };
+
+        // Act
+        var result = source.ClassifyWriteErrors(errorCodes, validChanges, unresolvedChanges: null);
+
+        // Assert — permanent errors dropped → Success, warning logged
+        Assert.True(result.IsFullySuccessful);
+        VerifyLogContains(mockLogger, LogLevel.Warning, "Dropped");
+    }
+
+    [Fact]
+    public void ClassifyWriteErrors_MixedTransientAndPermanent_ShouldRetryTransientOnly()
+    {
+        // Arrange
+        var mockLogger = new Mock<ILogger>();
+        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
+
+        var context = TestHelpers.CreateContextWithLifecycle();
+        var model = new TestPlcModel(context);
+        var source = CreateSource(subject: model, logger: mockLogger.Object);
+
+        var errorCodes = new[] { AdsErrorCode.DeviceError, AdsErrorCode.DeviceSymbolNotFound };
+        var validChanges = new List<SubjectPropertyChange>
+        {
+            CreateChange(model, nameof(TestPlcModel.Temperature)),
+            CreateChange(model, nameof(TestPlcModel.Pressure)),
+        };
+
+        // Act
+        var result = source.ClassifyWriteErrors(errorCodes, validChanges, unresolvedChanges: null);
+
+        // Assert — transient retried, permanent dropped, no successes → Failure
+        Assert.False(result.IsFullySuccessful);
+        Assert.False(result.IsPartialFailure);
+        Assert.Single(result.FailedChanges);
+        var error = Assert.IsType<AdsWriteException>(result.Error);
+        Assert.Equal(1, error.TransientCount);
+        Assert.Equal(1, error.PermanentCount);
+    }
+
+    [Fact]
+    public void ClassifyWriteErrors_MixedSuccessAndTransient_ShouldReturnPartialFailure()
+    {
+        // Arrange
+        var context = TestHelpers.CreateContextWithLifecycle();
+        var model = new TestPlcModel(context);
+        var source = CreateSource(subject: model);
+
+        var errorCodes = new[] { AdsErrorCode.NoError, AdsErrorCode.DeviceError };
+        var validChanges = new List<SubjectPropertyChange>
+        {
+            CreateChange(model, nameof(TestPlcModel.Temperature)),
+            CreateChange(model, nameof(TestPlcModel.Pressure)),
+        };
+
+        // Act
+        var result = source.ClassifyWriteErrors(errorCodes, validChanges, unresolvedChanges: null);
+
+        // Assert — one success, one transient → partial failure
+        Assert.False(result.IsFullySuccessful);
+        Assert.True(result.IsPartialFailure);
+        Assert.Single(result.FailedChanges);
+    }
+
+    [Fact]
+    public void ClassifyWriteErrors_MixedSuccessAndPermanent_ShouldReturnSuccess()
+    {
+        // Arrange
+        var mockLogger = new Mock<ILogger>();
+        mockLogger.Setup(l => l.IsEnabled(It.IsAny<LogLevel>())).Returns(true);
+
+        var context = TestHelpers.CreateContextWithLifecycle();
+        var model = new TestPlcModel(context);
+        var source = CreateSource(subject: model, logger: mockLogger.Object);
+
+        var errorCodes = new[] { AdsErrorCode.NoError, AdsErrorCode.DeviceSymbolNotFound };
+        var validChanges = new List<SubjectPropertyChange>
+        {
+            CreateChange(model, nameof(TestPlcModel.Temperature)),
+            CreateChange(model, nameof(TestPlcModel.Pressure)),
+        };
+
+        // Act
+        var result = source.ClassifyWriteErrors(errorCodes, validChanges, unresolvedChanges: null);
+
+        // Assert — permanent dropped, one success → no retry → Success
+        Assert.True(result.IsFullySuccessful);
+        VerifyLogContains(mockLogger, LogLevel.Warning, "Dropped");
+    }
+
+    [Fact]
+    public void ClassifyWriteErrors_WithUnresolvedChanges_ShouldMergeIntoRetry()
+    {
+        // Arrange
+        var context = TestHelpers.CreateContextWithLifecycle();
+        var model = new TestPlcModel(context);
+        var source = CreateSource(subject: model);
+
+        var errorCodes = new[] { AdsErrorCode.NoError };
+        var validChanges = new List<SubjectPropertyChange>
+        {
+            CreateChange(model, nameof(TestPlcModel.Temperature)),
+        };
+        var unresolvedChanges = new List<SubjectPropertyChange>
+        {
+            CreateChange(model, nameof(TestPlcModel.Pressure)),
+        };
+
+        // Act
+        var result = source.ClassifyWriteErrors(errorCodes, validChanges, unresolvedChanges);
+
+        // Assert — valid succeeded, unresolved needs retry → partial failure
+        Assert.False(result.IsFullySuccessful);
+        Assert.True(result.IsPartialFailure);
+        Assert.Single(result.FailedChanges);
+    }
+
     private class NullReturningValueConverter : AdsValueConverter
     {
         public override object? ConvertToAdsValue(object? propertyValue, RegisteredSubjectProperty property)
