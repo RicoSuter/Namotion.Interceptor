@@ -186,4 +186,57 @@ public class SubscriptionFilteringTests
 
         Assert.False(receivedUpdate, "Should not receive update for unsubscribed property");
     }
+
+    [Fact]
+    public async Task Subscription_ConcurrentSubscriptionsWithDifferentSelections_ReceiveIndependentUpdates()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var sensor = new Sensor(context);
+
+        var executor = await new ServiceCollection()
+            .AddSingleton(sensor)
+            .AddGraphQLServer()
+            .AddSubjectGraphQL<Sensor>()
+            .AddInMemorySubscriptions()
+            .BuildRequestExecutorAsync();
+
+        // Subscription 1: only temperature
+        var result1 = await executor.ExecuteAsync("subscription { root { temperature } }");
+        var enumerator1 = ((IResponseStream)result1).ReadResultsAsync().GetAsyncEnumerator();
+
+        // Subscription 2: only humidity
+        var result2 = await executor.ExecuteAsync("subscription { root { humidity } }");
+        var enumerator2 = ((IResponseStream)result2).ReadResultsAsync().GetAsyncEnumerator();
+
+        // Start consuming both streams
+        var moveNext1 = enumerator1.MoveNextAsync().AsTask();
+        var moveNext2 = enumerator2.MoveNextAsync().AsTask();
+        await Task.Delay(100);
+
+        // Act - change only temperature
+        sensor.Temperature = 42.0m;
+
+        // Assert - subscription 1 (temperature) should receive update
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var hasResult1 = await moveNext1.WaitAsync(timeout.Token);
+        Assert.True(hasResult1, "Temperature subscription should receive update");
+
+        // Assert - subscription 2 (humidity) should NOT receive update
+        using var shortTimeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        var receivedOnSub2 = false;
+        try
+        {
+            receivedOnSub2 = await moveNext2.WaitAsync(shortTimeout.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected - humidity subscription should not fire for temperature change
+        }
+
+        Assert.False(receivedOnSub2,
+            "Humidity subscription should not receive update when only temperature changed");
+    }
 }

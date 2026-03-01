@@ -1,3 +1,4 @@
+using System.Buffers;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking.Change;
@@ -9,8 +10,12 @@ namespace Namotion.Interceptor.GraphQL;
 /// </summary>
 public static class GraphQLSelectionMatcher
 {
+    private const int MaxPathDepth = 16;
+    private const char PathSeparator = '.';
+
     /// <summary>
     /// Checks if a property change matches any of the selected paths.
+    /// The paths use '.' as separator, matching the GraphQL field nesting convention.
     /// </summary>
     public static bool IsPropertyInSelection(
         SubjectPropertyChange change,
@@ -24,70 +29,97 @@ public static class GraphQLSelectionMatcher
             return false;
         }
 
-        // Build the path for this property change
-        var pathParts = new List<string>();
-        var current = registeredProperty;
-
-        while (current is not null)
+        // Collect path segments leaf-to-root using a pooled array to avoid List allocation.
+        var segments = ArrayPool<string>.Shared.Rent(MaxPathDepth);
+        try
         {
-            var segment = pathProvider.TryGetPropertySegment(current);
-            if (segment is not null)
+            var segmentCount = 0;
+            var totalLength = 0;
+            var current = registeredProperty;
+
+            while (current is not null)
             {
-                pathParts.Add(segment);
+                var segment = pathProvider.TryGetPropertySegment(current);
+                if (segment is not null)
+                {
+                    if (segmentCount >= MaxPathDepth)
+                    {
+                        // Deeper than expected; fall through to receive all changes.
+                        return true;
+                    }
+
+                    segments[segmentCount++] = segment;
+                    totalLength += segment.Length;
+                }
+
+                if (ReferenceEquals(current.Parent.Subject, rootSubject))
+                {
+                    break;
+                }
+
+                var parents = current.Parent.Parents;
+                current = parents.Length > 0 ? parents[0].Property : null;
             }
 
-            if (ReferenceEquals(current.Parent.Subject, rootSubject))
+            if (segmentCount == 0)
             {
-                break;
+                return false;
             }
 
-            // Navigate to parent
-            var parents = current.Parent.Parents;
-            if (parents.Length > 0)
-            {
-                current = parents[0].Property;
-            }
-            else
-            {
-                break;
-            }
-        }
+            // Reverse to get root-to-leaf order.
+            Array.Reverse(segments, 0, segmentCount);
 
-        pathParts.Reverse();
+            // Build the full path into a stackalloc buffer to avoid string allocation.
+            var pathLength = totalLength + (segmentCount - 1);
+            Span<char> changePath = stackalloc char[pathLength];
+            var position = 0;
 
-        if (pathParts.Count == 0)
-        {
+            for (var i = 0; i < segmentCount; i++)
+            {
+                if (i > 0)
+                {
+                    changePath[position++] = PathSeparator;
+                }
+
+                segments[i].AsSpan().CopyTo(changePath[position..]);
+                position += segments[i].Length;
+            }
+
+            // Check for exact match or prefix match.
+            foreach (var selectedPath in selectedPaths)
+            {
+                var selected = selectedPath.AsSpan();
+
+                // Exact match
+                if (changePath.SequenceEqual(selected))
+                {
+                    return true;
+                }
+
+                // Changed property is parent of selected
+                // (e.g., "location" changed, "location.building" selected)
+                if (selected.Length > changePath.Length
+                    && selected[changePath.Length] == PathSeparator
+                    && selected.StartsWith(changePath))
+                {
+                    return true;
+                }
+
+                // Changed property is child of selected
+                // (e.g., "location.building" changed, "location" selected)
+                if (changePath.Length > selected.Length
+                    && changePath[selected.Length] == PathSeparator
+                    && changePath.StartsWith(selected))
+                {
+                    return true;
+                }
+            }
+
             return false;
         }
-
-        var changePath = string.Join(".", pathParts);
-
-        // Check for exact match or prefix match
-        foreach (var selectedPath in selectedPaths)
+        finally
         {
-            // Exact match
-            if (string.Equals(changePath, selectedPath, StringComparison.Ordinal))
-            {
-                return true;
-            }
-
-            // Changed property is parent of selected (e.g., "location" changed, "location.building" selected)
-            if (selectedPath.Length > changePath.Length
-                && selectedPath[changePath.Length] == '.'
-                && selectedPath.AsSpan().StartsWith(changePath.AsSpan()))
-            {
-                return true;
-            }
-
-            // Changed property is child of selected (e.g., "location.building" changed, "location" selected)
-            if (changePath.Length > selectedPath.Length
-                && changePath[selectedPath.Length] == '.'
-                && changePath.AsSpan().StartsWith(selectedPath.AsSpan()))
-            {
-                return true;
-            }
+            ArrayPool<string>.Shared.Return(segments, clearArray: true);
         }
-
-        return false;
     }
 }

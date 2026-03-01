@@ -74,7 +74,12 @@ public static class SubjectGraphQLExtensions
         var key = Guid.NewGuid().ToString();
 
         builder.Services
-            .AddKeyedSingleton(key, (sp, _) => configurationProvider(sp))
+            .AddKeyedSingleton(key, (sp, _) =>
+            {
+                var configuration = configurationProvider(sp);
+                configuration.Validate();
+                return configuration;
+            })
             .AddKeyedSingleton(key, (sp, _) => subjectSelector(sp));
 
         // Resolve configuration lazily from app services during schema building.
@@ -92,15 +97,17 @@ public static class SubjectGraphQLExtensions
                 {
                     setup.OnConfigureSchemaServicesHooks.Add((context, _) =>
                     {
-                        resolvedConfiguration = context.ApplicationServices
-                            .GetRequiredKeyedService<GraphQLSubjectConfiguration>(key);
+                        Volatile.Write(
+                            ref resolvedConfiguration,
+                            context.ApplicationServices
+                                .GetRequiredKeyedService<GraphQLSubjectConfiguration>(key));
                     });
                 }));
 
         builder
             .AddQueryType(d =>
             {
-                var configuration = resolvedConfiguration
+                var configuration = Volatile.Read(ref resolvedConfiguration)
                     ?? throw new InvalidOperationException(
                         "GraphQL subject configuration was not resolved. " +
                         "Ensure the schema services hook has run before descriptor configuration.");
@@ -110,7 +117,7 @@ public static class SubjectGraphQLExtensions
             })
             .AddSubscriptionType(d =>
             {
-                var configuration = resolvedConfiguration
+                var configuration = Volatile.Read(ref resolvedConfiguration)
                     ?? throw new InvalidOperationException(
                         "GraphQL subject configuration was not resolved. " +
                         "Ensure the schema services hook has run before descriptor configuration.");
@@ -145,6 +152,9 @@ public static class SubjectGraphQLExtensions
         return paths;
     }
 
+    // Note: Only FieldNode is handled. InlineFragmentNode and FragmentSpreadNode
+    // are not currently supported. When fragments are used, no paths are extracted
+    // and the subscription falls back to receiving all property changes.
     private static void ExtractPathsRecursive(
         IReadOnlyList<HotChocolate.Language.ISelectionNode> selections,
         string prefix,
