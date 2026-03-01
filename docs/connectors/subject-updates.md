@@ -1,44 +1,48 @@
 # Subject Updates
 
-Subject updates enable efficient synchronization of object graphs between server and clients. Instead of sending full object state on every change, only the changed properties are transmitted.
+Subject updates enable efficient synchronization of object graphs between participants. Instead of sending full object state on every change, only the changed properties are transmitted. All subjects are identified by **stable subject IDs** (22-character base62-encoded GUIDs) that remain consistent across the lifetime of a subject, enabling correct convergence even under concurrent structural mutations.
 
 ## Flat Structure
 
-Subject updates use a **flat dictionary structure** where all subjects are stored in a single dictionary and referenced by string IDs. This design:
+Subject updates use a **flat dictionary structure** where all subjects are stored in a single dictionary and referenced by stable string IDs. This design:
 
 - Eliminates circular reference issues during serialization
-- Enables O(1) subject lookup
+- Enables O(1) subject lookup by stable ID
 - Makes debugging easier (all subjects visible at top level)
 - Keeps each subject's data in exactly one place
 
-### JSON Format Overview
+### JSON Format
 
 ```json
 {
-  "root": "1",
+  "root": "4mK9xRtL7nPqWzYbC3hJ0A",
   "subjects": {
-    "1": {
+    "4mK9xRtL7nPqWzYbC3hJ0A": {
       "name": { "kind": "Value", "value": "Parent" },
-      "child": { "kind": "Object", "id": "2" }
+      "child": { "kind": "Object", "id": "7fG2sVdN8kMwXyTaE5iQ1B" }
     },
-    "2": {
+    "7fG2sVdN8kMwXyTaE5iQ1B": {
       "name": { "kind": "Value", "value": "Child" },
-      "parent": { "kind": "Object", "id": "1" }
+      "parent": { "kind": "Object", "id": "4mK9xRtL7nPqWzYbC3hJ0A" }
     }
   }
 }
 ```
 
-- `root` - The ID of the root subject
-- `subjects` - Dictionary of all subjects, keyed by string ID
-- Each subject contains property name → property update mappings
-- References to other subjects use `id` (not nested objects)
+- `root` — The stable ID of the root subject. Null when the update only contains changes to non-root subjects (partial update without root).
+- `subjects` — Dictionary of all subjects, keyed by stable subject ID.
+- Each subject contains property name → property update mappings.
+- References to other subjects use `id` pointing to another key in `subjects`.
+
+### Subject IDs
+
+All subjects are identified by stable string IDs. See the [Subject IDs section in the Registry documentation](../registry.md#subject-ids) for details on ID generation, assignment, lookup, and lifecycle management.
 
 ## Creating Updates
 
 ### Complete Update (Full State)
 
-Use for initial synchronization when a client connects:
+Use for initial synchronization:
 
 ```csharp
 var update = SubjectUpdate.CreateCompleteUpdate(rootSubject, processors);
@@ -50,37 +54,33 @@ var json = JsonSerializer.Serialize(update);
 Use for incremental synchronization based on tracked property changes:
 
 ```csharp
-// Collect changes from the tracking system
 var changes = /* SubjectPropertyChange[] from change tracking */;
-
-// Create update containing only changed properties
 var update = SubjectUpdate.CreatePartialUpdateFromChanges(rootSubject, changes, processors);
 var json = JsonSerializer.Serialize(update);
 ```
 
 ## Applying Updates
 
-### Server-Side (C#)
-
 ```csharp
-// Apply update from external source (e.g., WebSocket message from client)
-// The WithSource scope enables echo prevention in change tracking
+// Apply update with source tracking (enables echo prevention)
 using (SubjectChangeContext.WithSource(source))
 {
     subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
 }
-
-// Apply update without source tracking
-subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
 ```
+
+The applier processes updates in two steps:
+
+1. If `root` is set and present in `subjects`, apply the root's properties and set the target's subject ID to `root`.
+2. Process remaining entries in `subjects` by looking up each subject ID in the local registry's reverse index.
 
 ## Property Update Kinds
 
 | Kind | Description |
 |------|-------------|
 | `Value` | Scalar value (string, number, boolean, etc.) |
-| `Object` | Single nested subject (referenced by ID) |
-| `Collection` | Index-based array or list of subjects |
+| `Object` | Single nested subject (referenced by stable ID) |
+| `Collection` | Ordered list of subjects (array/list) |
 | `Dictionary` | Key-based dictionary of subjects |
 
 ### Value Property
@@ -93,14 +93,16 @@ subject.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
 }
 ```
 
+The `timestamp` field is optional and records when the value was last changed.
+
 ### Object Property
 
-References another subject by ID:
+References another subject by stable ID:
 
 ```json
 {
   "kind": "Object",
-  "id": "2"
+  "id": "7fG2sVdN8kMwXyTaE5iQ1B"
 }
 ```
 
@@ -112,9 +114,11 @@ A null reference omits the `id` field:
 }
 ```
 
+When applying, the applier checks if the existing object has the same subject ID (keeps it), otherwise looks up the ID in the registry (reuses if found) or creates a new subject via `ISubjectFactory`.
+
 ### Collection Property
 
-For index-based collections (arrays, lists):
+For ordered collections (arrays, lists). All items are referenced by stable subject ID:
 
 ```json
 {
@@ -127,7 +131,7 @@ For index-based collections (arrays, lists):
 
 ### Dictionary Property
 
-For key-based dictionaries. Works the same as Collection but uses string keys instead of integer indices, and does not support Move operations:
+For key-based dictionaries. Works like Collection but each item also has a `key` field. Does not support Move operations:
 
 ```json
 {
@@ -138,193 +142,210 @@ For key-based dictionaries. Works the same as Collection but uses string keys in
 }
 ```
 
-## How Collection Updates Work
+## Structural Operations
 
-Collections (arrays and dictionaries) use a **two-phase approach** that separates structural changes from property updates. This design:
+All structural operations reference subjects by **stable ID**, not by positional index. This ensures correct behavior under concurrent modifications.
 
-- Minimizes payload size (move operations contain only indices, not full objects)
-- Preserves object identity during reordering
-- Enables efficient sparse updates (only changed items are transmitted)
+### Operation Types
 
-### Phase 1: Structural Operations
+| Operation | Fields | Description |
+|-----------|--------|-------------|
+| `Insert` | `id`, `afterId`, `key`? | Insert a new subject. `afterId` = predecessor ID (null = head). `key` for dictionaries. |
+| `Remove` | `id`, `key`? | Remove the subject with the given ID. `key` for dictionaries. |
+| `Move` | `id`, `afterId` | Move an existing subject to after `afterId` (null = head). Collections only. |
 
-Apply structural changes in two sub-phases:
+### Operation JSON Examples
 
-**Sub-phase 1a: Remove and Insert operations** are applied sequentially in the order they appear:
-- `Remove` operations are sent in **descending index order** so each remove doesn't affect subsequent removes
-- `Insert` operations reference the final target position
-
-**Sub-phase 1b: Move operations** are applied atomically using snapshot semantics:
-- All moves reference the state **after** removes/inserts have been applied
-- Multiple moves are applied simultaneously (each move reads from the snapshot)
-- Move `fromIndex` accounts for prior removes (intermediate index, not original)
-
-| Operation | Index semantics |
-|-----------|-----------------|
-| `Remove` | Original index, descending order |
-| `Insert` | Final target index |
-| `Move` | `fromIndex`: intermediate (after removes), `index`: final target |
-
-**Example: Remove + Move**
-
-Transform `[A, B, C]` → `[C, B]` (remove A, swap remaining):
+**Insert after a specific item:**
 
 ```json
-{
-  "operations": [
-    { "action": "Remove", "index": 0 },
-    { "action": "Move", "fromIndex": 1, "index": 0 }
-  ]
-}
+{ "action": "Insert", "id": "newSubjectId", "afterId": "predecessorId" }
 ```
 
-After `Remove(0)`: `[B, C]` (indices 0, 1)
-After `Move(from=1, to=0)`: `[C, B]`
-
-Note: The move's `fromIndex` is 1 (C's position after the remove), not 2 (C's original position).
-
-### Phase 2: Property Updates
-
-Then, apply sparse property updates. The index/key references the **final position after structural operations**.
-
-### Example: Remove + Property Change
-
-Before: `[A, B, C]` where C.name = "Charlie"
-After: `[A, C]` where C.name = "Charles"
+**Insert at head (first position):**
 
 ```json
-{
-  "kind": "Collection",
-  "operations": [
-    { "action": "Remove", "index": 1 }
-  ],
-  "items": [
-    { "index": 1, "id": "3" }
-  ],
-  "count": 2
-}
+{ "action": "Insert", "id": "newSubjectId", "afterId": null }
 ```
 
-The subject with ID "3" (C) has its property update in the `subjects` dictionary:
+**Remove by stable ID:**
 
 ```json
-{
-  "subjects": {
-    "3": {
-      "name": { "kind": "Value", "value": "Charles" }
-    }
-  }
-}
+{ "action": "Remove", "id": "subjectToRemoveId" }
 ```
 
-Note: The property update uses index `1` (C's final position after B was removed).
-
-### Example: Reorder Without Data
-
-Before: `[A, B, C]`
-After: `[C, A, B]`
+**Move to after a specific item:**
 
 ```json
-{
-  "kind": "Collection",
-  "operations": [
-    { "action": "Move", "fromIndex": 2, "index": 0 }
-  ],
-  "count": 3
-}
+{ "action": "Move", "id": "subjectToMoveId", "afterId": "predecessorId" }
 ```
 
-Move operations contain only indices - no item data is transmitted, keeping payloads small even for large objects.
-
-### Example: Insert New Item
+**Move to head:**
 
 ```json
-{
-  "kind": "Collection",
-  "operations": [
-    { "action": "Insert", "index": 1, "id": "5" }
-  ],
-  "count": 3
-}
+{ "action": "Move", "id": "subjectToMoveId", "afterId": null }
 ```
 
-The new item's data is in the `subjects` dictionary:
+**Dictionary insert with key:**
 
 ```json
-{
-  "subjects": {
-    "5": {
-      "name": { "kind": "Value", "value": "New Item" }
-    }
-  }
-}
+{ "action": "Insert", "id": "newSubjectId", "key": "myKey" }
 ```
 
-### Complete vs Partial Collection Updates
+### Item References
 
-**Partial updates** (incremental changes) have `operations` for structural changes:
+In a complete update (no `operations`), the `items` array lists all items and defines the full ordering. In a partial update (with `operations`), it lists only items whose properties have changed.
+
+**Collection item** (ordering comes from array position):
 
 ```json
-{
-  "kind": "Collection",
-  "operations": [ { "action": "Remove", "index": 1 } ],
-  "items": [ { "index": 0, "id": "2" } ],
-  "count": 2
-}
+{ "id": "subjectId" }
 ```
 
-**Complete updates** (initial sync) have no `operations` - just all items in `items`:
+**Dictionary item** (key identifies the entry):
+
+```json
+{ "id": "subjectId", "key": "myKey" }
+```
+
+## Complete vs Partial Updates
+
+### Complete Collection (Initial Sync)
+
+All items listed in `items`, no `operations`. The `items` array defines the full ordering:
 
 ```json
 {
   "kind": "Collection",
   "items": [
-    { "index": 0, "id": "1" },
-    { "index": 1, "id": "2" }
+    { "id": "child1Id" },
+    { "id": "child2Id" }
   ],
   "count": 2
 }
 ```
 
-### Applying Collection Updates
+### Partial Collection (Incremental)
 
-When applying sparse property updates from the `items` array, the `index` must be valid according to the declared `count`:
+Contains structural changes via `operations` and/or property updates for existing items via `items`. When `operations` is present, the `items` array contains only items whose properties have changed — it does not define ordering or structure (that is handled by the operations):
 
-| Condition | Behavior |
-|-----------|----------|
-| `index < count` | Valid - update or create item at that position |
-| `index >= count` | **Error** - throws `InvalidOperationException` |
-| `count` not specified | Index validated against current collection size |
+```json
+{
+  "kind": "Collection",
+  "operations": [
+    { "action": "Remove", "id": "removedChildId" }
+  ],
+  "items": [
+    { "id": "changedChildId" }
+  ],
+  "count": 2
+}
+```
 
-**Important:** The `count` field declares the final expected size of the collection. Any `index` in the `items` array must satisfy `index < count`. An index >= count indicates a malformed update (bug in the sender) and will throw an exception.
+### Complete Dictionary
 
-For complete updates (no `operations`), items at indices that don't exist locally are created sequentially. For partial updates, indices reference the final position after structural operations have been applied.
+```json
+{
+  "kind": "Dictionary",
+  "items": [
+    { "id": "item1Id", "key": "alpha" },
+    { "id": "item2Id", "key": "beta" }
+  ],
+  "count": 2
+}
+```
+
+## Apply Order
+
+When applying a collection or dictionary update, the behavior depends on whether `operations` is present:
+
+**Partial update** (has `operations`):
+
+1. **Structural operations** are applied first, in order. Each operation uses stable IDs to find subjects in the local registry.
+2. **Sparse item updates** (`items`) are applied after operations. Each item's subject is looked up by ID and its property updates from `subjects` are applied. The `items` array only contains items whose properties changed — it does not affect ordering.
+
+**Complete update** (no `operations`):
+
+1. The `items` array defines the **full ordered state** of the collection. Each item is looked up by ID (reused if found) or created. The array position determines ordering.
+2. The collection is **trimmed to `count`** if it exceeds the declared size, removing excess items from the end.
+
+In both cases:
+- Operations referencing an unknown ID (e.g., `Remove` of a subject not in the local collection) are silently skipped.
+- **Insert is idempotent**: if an item with the same ID already exists in the collection, the Insert operation is skipped. This provides natural echo protection when the same update is applied multiple times.
+
+## Examples
+
+### Insert + Property Update
+
+Before: `[A, B]` → After: `[A, NewItem, B]` where NewItem.name = "Charlie"
+
+```json
+{
+  "root": "rootId",
+  "subjects": {
+    "rootId": {
+      "children": {
+        "kind": "Collection",
+        "operations": [
+          { "action": "Insert", "id": "newItemId", "afterId": "childAId" }
+        ],
+        "count": 3
+      }
+    },
+    "newItemId": {
+      "name": { "kind": "Value", "value": "Charlie" }
+    }
+  }
+}
+```
+
+### Remove + Move
+
+Before: `[A, B, C]` → After: `[C, B]`
+
+```json
+{
+  "root": "rootId",
+  "subjects": {
+    "rootId": {
+      "children": {
+        "kind": "Collection",
+        "operations": [
+          { "action": "Remove", "id": "childAId" },
+          { "action": "Move", "id": "childCId" }
+        ],
+        "count": 2
+      }
+    }
+  }
+}
+```
+
+Operations are applied sequentially: first A is removed, then C is moved to head (no `afterId` = head position).
 
 ## Circular References
 
-Circular references are handled naturally by the flat structure. Each subject appears exactly once in the `subjects` dictionary, and references use string IDs:
+Circular references are handled naturally by the flat structure. Each subject appears exactly once in `subjects`, and references use stable IDs:
 
 ```json
 {
-  "root": "1",
+  "root": "parentId",
   "subjects": {
-    "1": {
+    "parentId": {
       "name": { "kind": "Value", "value": "Parent" },
-      "child": { "kind": "Object", "id": "2" }
+      "child": { "kind": "Object", "id": "childId" }
     },
-    "2": {
+    "childId": {
       "name": { "kind": "Value", "value": "Child" },
-      "parent": { "kind": "Object", "id": "1" }
+      "parent": { "kind": "Object", "id": "parentId" }
     }
   }
 }
 ```
 
-No special `reference` field is needed - the `id` field always points to a subject in the dictionary.
-
 ## Null Collections and Dictionaries
 
-When a collection or dictionary property is set to `null`, it is represented as `Kind=Value, Value=null` — the same as any other null property value:
+When a collection or dictionary property is set to `null`, it is represented as `Kind=Value, Value=null`:
 
 ```json
 {
@@ -333,14 +354,7 @@ When a collection or dictionary property is set to `null`, it is represented as 
 }
 ```
 
-Note: In partial updates, `Kind=Collection/Dictionary` entries with no operations are **path nodes** — they describe the structural parent-to-child reference so the apply side can navigate the tree, not the collection's new state. An empty collection in a complete update is represented with `count: 0` and no items.
-
-## Limitations
-
-- **No "clear collection" operation** — clearing N items emits N individual Remove operations.
-- **Non-subject collections** (`List<int>`, `Dictionary<string, string>`) use value-replacement semantics (full replacement, no granular diffing). Only `IInterceptorSubject` collections support structural diffs.
-- **Conflict resolution** is last-applied-wins by message arrival order with eventual consistency via reconnection.
-- **Dictionary keys** are normalized to strings during transport; non-string keys (int, enum) must be convertible via `Convert.ChangeType` or `Enum.Parse`.
+An empty (non-null) collection uses `count: 0` with no items.
 
 ## Attributes
 
@@ -357,3 +371,65 @@ Properties can have attributes (metadata) that are updated alongside values:
   }
 }
 ```
+
+## Implementing a Custom Client
+
+### Subject ID ↔ Object Mapping
+
+The client must be able to look up local objects by subject ID and vice versa:
+
+- **ID → Object map** (`Map<string, object>`): Used to find local objects when the protocol references a subject by ID (partial updates, collection operations, object references).
+- **Object → ID**: Either store the subject ID directly on each local object (e.g., a `_subjectId` property) or maintain a separate `Map<object, string>`. This is needed so that ID-based Remove/Move operations can find the correct item in a local collection by scanning items and comparing their stored IDs.
+
+Both must be updated whenever objects are created, replaced, or removed.
+
+### When to Register Objects
+
+Register the subject ID ↔ object mapping in these cases:
+
+- **Root subject**: When applying a complete update, register the root object with `update.root`.
+- **Object properties**: When applying a `kind: "Object"` property, register the created/reused object with the `id` from the property update.
+- **Collection/Dictionary items**: When creating a new item via Insert operation or from the `items` array, register it with the item's `id`.
+- **Cleanup**: When a Remove operation removes an item, unregister it from both maps.
+
+### Applying Collection Operations by ID
+
+All collection operations use stable IDs instead of positional indices. To apply them, the client must scan the local collection to find items by their subject ID using the Object → ID map:
+
+- **Remove**: Find the item in the local array whose subject ID matches `operation.id`, then splice it out.
+- **Insert**: If an item with `operation.id` already exists in the collection, skip (idempotent). Otherwise, look up `operation.afterId` in the local array to find the predecessor's position. Insert the new item immediately after it. If `afterId` is null, insert at position 0 (head). If `afterId` is not found, append to end. Register the new object with `operation.id`.
+- **Move**: Find the item with `operation.id` in the local array, remove it, then find `operation.afterId` to determine the insertion position (null = head). Re-insert the item there.
+
+### Applying Dictionary Operations by Key
+
+Dictionary operations use `operation.key` (not `operation.id`) to identify the dictionary entry:
+
+- **Remove**: Delete the entry at `operation.key`.
+- **Insert**: Create a new object, apply its properties from `subjects[operation.id]`, and set it at `dictionary[operation.key]`. Register the new object with `operation.id`.
+
+### Complete Update Items
+
+In a complete collection update (no `operations`), the `items` array defines the **full ordered list** of items. The array position determines collection ordering — there is no `index` field. For each item:
+
+1. Look up `item.id` in the ID → Object map to find an existing local object. If found, reuse it.
+2. If not found, create a new object and register it with `item.id`.
+3. Apply the item's properties from `subjects[item.id]`.
+
+For dictionaries, each item also has a `key` field that determines the dictionary key.
+
+### Echo Prevention and Reconnection
+
+- **Echo prevention**: When applying received updates, mark changes with a source identifier so your own change listener does not re-send them.
+- **Reconnection**: On reconnection, request a fresh complete update to resynchronize. Subject IDs are stable, so existing local objects can be matched by ID after reconnection.
+
+## Limitations
+
+- **No "clear collection" operation** — clearing N items emits N individual Remove operations.
+- **Non-subject collections** (`List<int>`, `Dictionary<string, string>`) use value-replacement semantics (full replacement, no granular diffing). Only `IInterceptorSubject` collections support structural diffs.
+- **Conflict resolution** is last-applied-wins by message arrival order with eventual consistency via reconnection.
+- **Dictionary keys** are normalized to strings during transport; non-string keys (int, enum) must be convertible via `Convert.ChangeType` or `Enum.Parse`.
+- **Move operations** are only supported for Collection kind, not Dictionary kind.
+
+## Transport
+
+This update format is transport-agnostic. It is currently used by the [WebSocket connector](websocket.md) for real-time bidirectional synchronization.
