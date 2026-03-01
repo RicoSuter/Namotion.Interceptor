@@ -1,5 +1,4 @@
 ﻿using System.Linq.Expressions;
-using System.Numerics;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Abstractions;
 
@@ -9,16 +8,43 @@ public static class SubjectRegistryExtensions
 {
     internal const string SubjectIdKey = "Namotion.Interceptor.SubjectId";
 
-    public static string GenerateSubjectId()
+    /// <summary>
+    /// Performance optimization: guards <see cref="TryGetSubjectId"/> to avoid
+    /// per-subject dictionary lookups on every lifecycle event (attach/detach)
+    /// when no subject ID has ever been assigned. Set to true on the first call to
+    /// <see cref="SetSubjectId"/> or <see cref="GetOrAddSubjectId"/> and never reset.
+    /// </summary>
+    internal static volatile bool HasSubjectIds;
+
+    internal static string GenerateSubjectId()
     {
         const string chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-        var value = new BigInteger(Guid.NewGuid().ToByteArray(), isUnsigned: true);
-        var result = new char[22];
+
+        // GUID = 128 bits = 16 bytes. We treat these as a big-endian unsigned
+        // 128-bit integer and repeatedly divide by 62 to produce 22 base62 digits.
+        // Manual long division avoids the BigInteger heap allocation.
+        Span<byte> bytes = stackalloc byte[16];
+        Guid.NewGuid().TryWriteBytes(bytes);
+
+        // Convert to big-endian so the most-significant byte is first,
+        // which is what our long-division loop expects.
+        bytes.Reverse();
+
+        Span<char> result = stackalloc char[22];
         for (var i = 21; i >= 0; i--)
         {
-            value = BigInteger.DivRem(value, 62, out var remainder);
+            // Long division of bytes[] (big-endian) by 62.
+            uint remainder = 0;
+            for (var j = 0; j < 16; j++)
+            {
+                uint dividend = (remainder << 8) | bytes[j];
+                bytes[j] = (byte)(dividend / 62);
+                remainder = dividend % 62;
+            }
+
             result[i] = chars[(int)remainder];
         }
+
         return new string(result);
     }
 
@@ -154,21 +180,27 @@ public static class SubjectRegistryExtensions
     /// <summary>
     /// Gets or lazily generates a subject ID for the given subject.
     /// The ID is stored in the subject's Data dictionary and auto-registered
-    /// in the reverse index if an <see cref="ISubjectIdRegistry"/> is available.
+    /// in the reverse index if an <see cref="ISubjectIdRegistryWriter"/> is available.
+    /// Generated IDs are unique but not cryptographically secure.
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <returns>The subject ID.</returns>
     public static string GetOrAddSubjectId(this IInterceptorSubject subject)
     {
+        // Fast path: ID already assigned (lock-free ConcurrentDictionary read)
+        if (subject.Data.TryGetValue((null, SubjectIdKey), out var existing) && existing is string existingId)
+            return existingId;
+
+        // Slow path: delegate to registry writer for atomic Data + reverse-index update
+        var writer = subject.Context.TryGetService<ISubjectIdRegistryWriter>();
+        if (writer is not null)
+            return writer.GetOrAddSubjectId(subject);
+
+        // No registry - ConcurrentDictionary.GetOrAdd is sufficient (no reverse index to corrupt)
+        HasSubjectIds = true;
         return (string)subject.Data.GetOrAdd(
             (null, SubjectIdKey),
-            static (_, s) =>
-            {
-                var id = GenerateSubjectId();
-                s.Context.TryGetService<ISubjectIdRegistry>()?.RegisterSubjectId(id, s);
-                return id;
-            },
-            subject)!;
+            static _ => GenerateSubjectId())!;
     }
 
     /// <summary>
@@ -176,8 +208,12 @@ public static class SubjectRegistryExtensions
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <returns>The subject ID, or null.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static string? TryGetSubjectId(this IInterceptorSubject subject)
     {
+        if (!HasSubjectIds)
+            return null;
+
         return subject.Data.TryGetValue((null, SubjectIdKey), out var value) && value is string id
             ? id
             : null;
@@ -185,26 +221,25 @@ public static class SubjectRegistryExtensions
 
     /// <summary>
     /// Assigns a known subject ID (e.g., from an incoming update).
-    /// Auto-registers in the reverse index if an <see cref="ISubjectIdRegistry"/> is available.
-    /// This method is thread-safe.
+    /// When a registry is configured, both the subject's Data store and the
+    /// reverse index are updated atomically under the registry's lock.
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <param name="id">The subject ID to assign.</param>
     public static void SetSubjectId(this IInterceptorSubject subject, string id)
     {
-        lock (subject.Data)
+        ArgumentException.ThrowIfNullOrWhiteSpace(id);
+
+        // Delegate to registry writer for atomic Data + reverse-index update
+        var writer = subject.Context.TryGetService<ISubjectIdRegistryWriter>();
+        if (writer is not null)
         {
-            var idRegistry = subject.Context.TryGetService<ISubjectIdRegistry>();
-
-            // Unregister old ID from the reverse index if the subject already has a different one.
-            if (subject.Data.TryGetValue((null, SubjectIdKey), out var existingId) &&
-                existingId is string oldId && oldId != id)
-            {
-                idRegistry?.UnregisterSubjectId(oldId);
-            }
-
-            subject.Data[(null, SubjectIdKey)] = id;
-            idRegistry?.RegisterSubjectId(id, subject);
+            writer.SetSubjectId(subject, id);
+            return;
         }
+
+        // No registry - just store in Data
+        HasSubjectIds = true;
+        subject.Data[(null, SubjectIdKey)] = id;
     }
 }

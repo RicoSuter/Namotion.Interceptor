@@ -5,7 +5,7 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry;
 
-public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ILifecycleHandler, IPropertyLifecycleHandler
+public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
 {
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
     private readonly Dictionary<string, IInterceptorSubject> _subjectIdToSubject = new();
@@ -31,20 +31,42 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ILifecycleH
     }
 
     /// <inheritdoc />
-    public void RegisterSubjectId(string subjectId, IInterceptorSubject subject)
+    string ISubjectIdRegistryWriter.GetOrAddSubjectId(IInterceptorSubject subject)
     {
         lock (_knownSubjects)
         {
-            _subjectIdToSubject[subjectId] = subject;
+            var existing = subject.TryGetSubjectId();
+            if (existing is not null)
+                return existing;
+
+            var id = SubjectRegistryExtensions.GenerateSubjectId();
+            SubjectRegistryExtensions.HasSubjectIds = true;
+            subject.Data[(null, SubjectRegistryExtensions.SubjectIdKey)] = id;
+            _subjectIdToSubject[id] = subject;
+            return id;
         }
     }
 
     /// <inheritdoc />
-    public void UnregisterSubjectId(string subjectId)
+    void ISubjectIdRegistryWriter.SetSubjectId(IInterceptorSubject subject, string id)
     {
         lock (_knownSubjects)
         {
-            _subjectIdToSubject.Remove(subjectId);
+            if (_subjectIdToSubject.TryGetValue(id, out var existing) && !ReferenceEquals(existing, subject))
+            {
+                throw new InvalidOperationException(
+                    $"Subject ID '{id}' is already in use by a different subject.");
+            }
+
+            var oldId = subject.TryGetSubjectId();
+            if (oldId is not null && oldId != id)
+            {
+                _subjectIdToSubject.Remove(oldId);
+            }
+
+            SubjectRegistryExtensions.HasSubjectIds = true;
+            subject.Data[(null, SubjectRegistryExtensions.SubjectIdKey)] = id;
+            _subjectIdToSubject[id] = subject;
         }
     }
 
@@ -67,6 +89,21 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ILifecycleH
                 if (!_knownSubjects.TryGetValue(change.Subject, out var registeredSubject))
                 {
                     registeredSubject = RegisterSubject(change.Subject);
+                }
+
+                if (change.IsContextAttach)
+                {
+                    // Auto-register pre-assigned subject ID in reverse index;
+                    // skip silently on conflict to avoid aborting the lifecycle.
+                    var subjectId = change.Subject.TryGetSubjectId();
+                    if (subjectId is not null)
+                    {
+                        if (!_subjectIdToSubject.TryGetValue(subjectId, out var existingSubject)
+                            || ReferenceEquals(existingSubject, change.Subject))
+                        {
+                            _subjectIdToSubject[subjectId] = change.Subject;
+                        }
+                    }
                 }
 
                 if (change is { IsPropertyReferenceAdded: true, Property: { } property })
@@ -117,7 +154,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ILifecycleH
                     {
                         _knownSubjects.Remove(change.Subject);
 
-                        // Clean up subject ID reverse index via direct lookup (O(1))
+                        // Clean up subject ID reverse index
                         if (_subjectIdToSubject.Count > 0)
                         {
                             var subjectId = change.Subject.TryGetSubjectId();
