@@ -29,6 +29,9 @@ internal static class SubjectItemsUpdateApplier
             var idIndex = BuildIdIndex(workingItems);
             foreach (var operation in propertyUpdate.Operations)
             {
+                if (string.IsNullOrEmpty(operation.Id))
+                    continue;
+
                 switch (operation.Action)
                 {
                     case SubjectCollectionOperationType.Remove:
@@ -37,7 +40,7 @@ internal static class SubjectItemsUpdateApplier
                         if (index >= 0)
                         {
                             workingItems.RemoveAt(index);
-                            idIndex = BuildIdIndex(workingItems);
+                            RemoveFromIdIndex(idIndex, operation.Id, index);
                             structureChanged = true;
                         }
                         break;
@@ -56,7 +59,7 @@ internal static class SubjectItemsUpdateApplier
 
                         var insertIndex = FindInsertPosition(workingItems, idIndex, operation.AfterId);
                         workingItems.Insert(insertIndex, newItem);
-                        idIndex = BuildIdIndex(workingItems);
+                        InsertIntoIdIndex(idIndex, operation.Id, insertIndex);
                         structureChanged = true;
                         break;
                     }
@@ -72,10 +75,10 @@ internal static class SubjectItemsUpdateApplier
                         {
                             var item = workingItems[currentIndex];
                             workingItems.RemoveAt(currentIndex);
-                            idIndex = BuildIdIndex(workingItems);
+                            RemoveFromIdIndex(idIndex, operation.Id, currentIndex);
                             var insertIndex = FindInsertPosition(workingItems, idIndex, operation.AfterId);
                             workingItems.Insert(insertIndex, item);
-                            idIndex = BuildIdIndex(workingItems);
+                            InsertIntoIdIndex(idIndex, operation.Id, insertIndex);
                             structureChanged = true;
                         }
                         break;
@@ -168,6 +171,9 @@ internal static class SubjectItemsUpdateApplier
         {
             foreach (var operation in propertyUpdate.Operations)
             {
+                if (string.IsNullOrEmpty(operation.Id))
+                    continue;
+
                 switch (operation.Action)
                 {
                     case SubjectCollectionOperationType.Remove:
@@ -297,6 +303,34 @@ internal static class SubjectItemsUpdateApplier
             return index + 1; // Insert after this item
 
         return items.Count; // afterId not found, append to end
+    }
+
+    /// <summary>
+    /// Incrementally updates the ID index after removing an item at the given position.
+    /// Decrements indices of all items after the removed position.
+    /// </summary>
+    private static void RemoveFromIdIndex(Dictionary<string, int> idIndex, string removedId, int removedPosition)
+    {
+        idIndex.Remove(removedId);
+        foreach (var key in idIndex.Keys)
+        {
+            if (idIndex[key] > removedPosition)
+                idIndex[key]--;
+        }
+    }
+
+    /// <summary>
+    /// Incrementally updates the ID index after inserting an item at the given position.
+    /// Increments indices of all items at or after the inserted position, then adds the new entry.
+    /// </summary>
+    private static void InsertIntoIdIndex(Dictionary<string, int> idIndex, string insertedId, int insertedPosition)
+    {
+        foreach (var key in idIndex.Keys)
+        {
+            if (idIndex[key] >= insertedPosition)
+                idIndex[key]++;
+        }
+        idIndex[insertedId] = insertedPosition;
     }
 
     /// <summary>

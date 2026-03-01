@@ -201,7 +201,7 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `Name` | string | `""` | Participant identifier (appears in logs) |
-| `MutationRate` | int | `50` | Target value mutations per second |
+| `ValueMutationRate` | int | `50` | Target value mutations per second |
 | `StructuralMutationRate` | int | `0` | Structural mutations per second (collection/dictionary/object ref changes). `0` = disabled |
 | `Chaos` | object? | `null` | Chaos configuration (`null` = no chaos) |
 
