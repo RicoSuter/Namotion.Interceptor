@@ -197,11 +197,10 @@ public static class SubjectRegistryExtensions
             return writer.GetOrAddSubjectId(subject);
 
         // No registry - ConcurrentDictionary.GetOrAdd is sufficient (no reverse index to corrupt)
-        var id = (string)subject.Data.GetOrAdd(
+        HasSubjectIds = true;
+        return (string)subject.Data.GetOrAdd(
             (null, SubjectIdKey),
             static _ => GenerateSubjectId())!;
-        HasSubjectIds = true;
-        return id;
     }
 
     /// <summary>
@@ -240,7 +239,7 @@ public static class SubjectRegistryExtensions
         }
 
         // No registry - just store in Data
-        subject.Data[(null, SubjectIdKey)] = id;
         HasSubjectIds = true;
+        subject.Data[(null, SubjectIdKey)] = id;
     }
 }

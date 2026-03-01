@@ -40,9 +40,9 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                 return existing;
 
             var id = SubjectRegistryExtensions.GenerateSubjectId();
+            SubjectRegistryExtensions.HasSubjectIds = true;
             subject.Data[(null, SubjectRegistryExtensions.SubjectIdKey)] = id;
             _subjectIdToSubject[id] = subject;
-            SubjectRegistryExtensions.HasSubjectIds = true;
             return id;
         }
     }
@@ -64,9 +64,9 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                 _subjectIdToSubject.Remove(oldId);
             }
 
+            SubjectRegistryExtensions.HasSubjectIds = true;
             subject.Data[(null, SubjectRegistryExtensions.SubjectIdKey)] = id;
             _subjectIdToSubject[id] = subject;
-            SubjectRegistryExtensions.HasSubjectIds = true;
         }
     }
 
