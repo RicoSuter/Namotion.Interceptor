@@ -1,4 +1,3 @@
-using Namotion.Interceptor.GraphQL;
 using Namotion.Interceptor.Registry.Paths;
 using Xunit;
 

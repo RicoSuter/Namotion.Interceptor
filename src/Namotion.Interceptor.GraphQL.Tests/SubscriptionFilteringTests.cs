@@ -1,5 +1,7 @@
 using System.Reactive.Concurrency;
-using Namotion.Interceptor.GraphQL;
+using System.Text.Json;
+using HotChocolate.Execution;
+using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor.GraphQL.Tests.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
@@ -103,5 +105,85 @@ public class SubscriptionFilteringTests
         var matches = GraphQLSelectionMatcher.IsPropertyInSelection(
             change, selectedPaths, pathProvider, sensor);
         Assert.True(matches);
+    }
+
+    [Fact]
+    public async Task Subscription_WhenSubscribedPropertyChanges_ReceivesUpdate()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var sensor = new Sensor(context);
+
+        var executor = await new ServiceCollection()
+            .AddSingleton(sensor)
+            .AddGraphQLServer()
+            .AddSubjectGraphQL<Sensor>()
+            .AddInMemorySubscriptions()
+            .BuildRequestExecutorAsync();
+
+        var result = await executor.ExecuteAsync("subscription { root { temperature } }");
+        var stream = ((IResponseStream)result).ReadResultsAsync();
+        var enumerator = stream.GetAsyncEnumerator();
+
+        // Start consuming the stream before changing the property,
+        // so the Rx subscription pipeline is active when the change fires.
+        using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var moveNextTask = enumerator.MoveNextAsync().AsTask();
+
+        // Allow the Rx pipeline to fully subscribe before triggering the change.
+        await Task.Delay(100);
+
+        // Act - change subscribed property
+        sensor.Temperature = 42.0m;
+
+        // Assert - should receive update
+        var hasResult = await moveNextTask.WaitAsync(cancellationTokenSource.Token);
+        Assert.True(hasResult);
+        var json = JsonSerializer.Serialize(enumerator.Current.Data);
+        Assert.Contains("42", json);
+    }
+
+    [Fact]
+    public async Task Subscription_WhenUnsubscribedPropertyChanges_DoesNotReceiveUpdate()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var sensor = new Sensor(context);
+
+        var executor = await new ServiceCollection()
+            .AddSingleton(sensor)
+            .AddGraphQLServer()
+            .AddSubjectGraphQL<Sensor>()
+            .AddInMemorySubscriptions()
+            .BuildRequestExecutorAsync();
+
+        var result = await executor.ExecuteAsync("subscription { root { temperature } }");
+        var stream = ((IResponseStream)result).ReadResultsAsync();
+        var enumerator = stream.GetAsyncEnumerator();
+
+        // Start consuming the stream and allow the Rx pipeline to fully subscribe.
+        var moveNextTask = enumerator.MoveNextAsync().AsTask();
+        await Task.Delay(100);
+
+        // Act - change UNsubscribed property
+        sensor.Humidity = 80.0m;
+
+        // Assert - should NOT receive update within timeout
+        using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        var receivedUpdate = false;
+        try
+        {
+            receivedUpdate = await moveNextTask.WaitAsync(cancellationTokenSource.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected - no update received
+        }
+
+        Assert.False(receivedUpdate, "Should not receive update for unsubscribed property");
     }
 }

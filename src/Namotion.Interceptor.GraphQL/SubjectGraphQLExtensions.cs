@@ -1,11 +1,10 @@
 using System.Reactive.Linq;
 using System.Runtime.CompilerServices;
 using HotChocolate.Execution.Configuration;
-using HotChocolate.Types;
+using Microsoft.Extensions.Options;
 using Namotion.Interceptor;
 using Namotion.Interceptor.GraphQL;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Change;
 
 // ReSharper disable once CheckNamespace
 namespace Microsoft.Extensions.DependencyInjection;
@@ -72,36 +71,63 @@ public static class SubjectGraphQLExtensions
         Func<IServiceProvider, GraphQLSubjectConfiguration> configurationProvider)
         where TSubject : class, IInterceptorSubject
     {
-        // Evaluate config synchronously to get the root name for schema definition
-        var tempConfiguration = configurationProvider(null!);
-        var rootName = tempConfiguration.RootName;
-
         var key = Guid.NewGuid().ToString();
 
         builder.Services
             .AddKeyedSingleton(key, (sp, _) => configurationProvider(sp))
             .AddKeyedSingleton(key, (sp, _) => subjectSelector(sp));
 
-        builder
-            .AddQueryType(d => d
-                .Name("Query")
-                .Field(rootName)
-                .Resolve(ctx => ctx.Services.GetRequiredKeyedService<TSubject>(key)))
-            .AddSubscriptionType(d => d
-                .Name("Subscription")
-                .Field(rootName)
-                .Type<ObjectType<TSubject>>()
-                .Subscribe(ctx =>
+        // Resolve configuration lazily from app services during schema building.
+        // We use OnConfigureSchemaServicesHooks via IConfigureOptions<RequestExecutorSetup>
+        // to capture the resolved configuration before descriptor configuration runs.
+        // This avoids calling configurationProvider(null!) which would fail when the
+        // provider depends on IServiceProvider.
+        // TODO: Replace with builder.ConfigureSchemaServices() when upgrading to HotChocolate v16.
+        GraphQLSubjectConfiguration? resolvedConfiguration = null;
+
+        builder.Services.AddTransient<IConfigureOptions<RequestExecutorSetup>>(
+            _ => new ConfigureNamedOptions<RequestExecutorSetup>(
+                builder.Name,
+                setup =>
                 {
-                    var subject = ctx.Services.GetRequiredKeyedService<TSubject>(key);
-                    var configuration = ctx.Services.GetRequiredKeyedService<GraphQLSubjectConfiguration>(key);
+                    setup.OnConfigureSchemaServicesHooks.Add((context, _) =>
+                    {
+                        resolvedConfiguration = context.ApplicationServices
+                            .GetRequiredKeyedService<GraphQLSubjectConfiguration>(key);
+                    });
+                }));
 
-                    // Extract selected field names from the subscription
-                    var selectedPaths = ExtractSelectionPaths(ctx);
+        builder
+            .AddQueryType(d =>
+            {
+                var configuration = resolvedConfiguration
+                    ?? throw new InvalidOperationException(
+                        "GraphQL subject configuration was not resolved. " +
+                        "Ensure the schema services hook has run before descriptor configuration.");
+                d.Name("Query")
+                    .Field(configuration.RootName)
+                    .Resolve(ctx => ctx.Services.GetRequiredKeyedService<TSubject>(key));
+            })
+            .AddSubscriptionType(d =>
+            {
+                var configuration = resolvedConfiguration
+                    ?? throw new InvalidOperationException(
+                        "GraphQL subject configuration was not resolved. " +
+                        "Ensure the schema services hook has run before descriptor configuration.");
+                d.Name("Subscription")
+                    .Field(configuration.RootName)
+                    .Type<ObjectType<TSubject>>()
+                    .Subscribe(ctx =>
+                    {
+                        var subject = ctx.Services.GetRequiredKeyedService<TSubject>(key);
+                        var runtimeConfiguration = ctx.Services.GetRequiredKeyedService<GraphQLSubjectConfiguration>(key);
 
-                    return CreateFilteredStream(subject, configuration, selectedPaths, ctx.RequestAborted);
-                })
-                .Resolve(ctx => ctx.GetEventMessage<TSubject>()));
+                        var selectedPaths = ExtractSelectionPaths(ctx);
+
+                        return CreateFilteredStream(subject, runtimeConfiguration, selectedPaths, ctx.RequestAborted);
+                    })
+                    .Resolve(ctx => ctx.GetEventMessage<TSubject>());
+            });
 
         return builder;
     }
@@ -110,17 +136,10 @@ public static class SubjectGraphQLExtensions
     {
         var paths = new HashSet<string>(StringComparer.Ordinal);
 
-        try
+        var selections = context.Selection.SelectionSet?.Selections;
+        if (selections != null)
         {
-            var selections = context.Selection.SelectionSet?.Selections;
-            if (selections != null)
-            {
-                ExtractPathsRecursive(selections, "", paths);
-            }
-        }
-        catch
-        {
-            // If we can't extract selections, return empty set (notify for all changes)
+            ExtractPathsRecursive(selections, "", paths);
         }
 
         return paths;
@@ -166,7 +185,7 @@ public static class SubjectGraphQLExtensions
             .Buffer(configuration.BufferTime)
             .Where(batch => batch.Count > 0);
 
-        await foreach (var batch in buffered.ToAsyncEnumerable().WithCancellation(cancellationToken))
+        await foreach (var _ in buffered.ToAsyncEnumerable().WithCancellation(cancellationToken))
         {
             yield return subject;
         }
