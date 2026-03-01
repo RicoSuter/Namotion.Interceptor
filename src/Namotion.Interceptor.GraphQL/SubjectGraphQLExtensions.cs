@@ -1,6 +1,7 @@
 using System.Reactive.Linq;
 using System.Runtime.CompilerServices;
 using HotChocolate.Execution.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Namotion.Interceptor;
 using Namotion.Interceptor.GraphQL;
@@ -128,8 +129,10 @@ public static class SubjectGraphQLExtensions
                     {
                         var subject = ctx.Services.GetRequiredKeyedService<TSubject>(key);
                         var runtimeConfiguration = ctx.Services.GetRequiredKeyedService<GraphQLSubjectConfiguration>(key);
+                        var logger = ctx.Services.GetService<ILoggerFactory>()
+                            ?.CreateLogger(typeof(SubjectGraphQLExtensions));
 
-                        var selectedPaths = ExtractSelectionPaths(ctx);
+                        var selectedPaths = ExtractSelectionPaths(ctx, logger);
 
                         return CreateFilteredStream(subject, runtimeConfiguration, selectedPaths, ctx.RequestAborted);
                     })
@@ -139,26 +142,36 @@ public static class SubjectGraphQLExtensions
         return builder;
     }
 
-    private static IReadOnlySet<string> ExtractSelectionPaths(HotChocolate.Resolvers.IResolverContext context)
+    private static IReadOnlySet<string> ExtractSelectionPaths(
+        HotChocolate.Resolvers.IResolverContext context,
+        ILogger? logger)
     {
         var paths = new HashSet<string>(StringComparer.Ordinal);
+        var hasUnsupportedSelections = false;
 
         var selections = context.Selection.SelectionSet?.Selections;
         if (selections != null)
         {
-            ExtractPathsRecursive(selections, "", paths);
+            ExtractPathsRecursive(selections, "", paths, ref hasUnsupportedSelections);
+        }
+
+        if (hasUnsupportedSelections)
+        {
+            logger?.LogWarning(
+                "GraphQL subscription contains unsupported selection nodes (fragments). " +
+                "Selection-aware filtering is disabled for this subscription; all property changes will be sent. " +
+                "See https://github.com/RicoSuter/Namotion.Interceptor/issues/206");
+            paths.Clear();
         }
 
         return paths;
     }
 
-    // Note: Only FieldNode is handled. InlineFragmentNode and FragmentSpreadNode
-    // are not currently supported. When fragments are used, no paths are extracted
-    // and the subscription falls back to receiving all property changes.
     private static void ExtractPathsRecursive(
         IReadOnlyList<HotChocolate.Language.ISelectionNode> selections,
         string prefix,
-        HashSet<string> paths)
+        HashSet<string> paths,
+        ref bool hasUnsupportedSelections)
     {
         foreach (var selection in selections)
         {
@@ -171,8 +184,12 @@ public static class SubjectGraphQLExtensions
                 // Recurse into nested selections
                 if (field.SelectionSet?.Selections != null)
                 {
-                    ExtractPathsRecursive(field.SelectionSet.Selections, path, paths);
+                    ExtractPathsRecursive(field.SelectionSet.Selections, path, paths, ref hasUnsupportedSelections);
                 }
+            }
+            else
+            {
+                hasUnsupportedSelections = true;
             }
         }
     }

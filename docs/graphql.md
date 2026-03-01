@@ -300,4 +300,4 @@ This subscription will only receive updates when `cpuUsage` or `status` changes.
 ## Limitations
 
 - Single subject per type (multiple subjects of same type not yet supported)
-- GraphQL fragments (`... on Type` and `...FragmentName`) are not supported in selection-aware filtering. When fragments are used, the subscription falls back to receiving all property changes.
+- GraphQL fragments (`... on Type` and `...FragmentName`) are not supported in selection-aware filtering. When fragments are used, the subscription falls back to receiving all property changes and a warning is logged.
