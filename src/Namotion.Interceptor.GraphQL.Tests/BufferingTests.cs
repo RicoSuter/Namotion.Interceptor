@@ -54,7 +54,7 @@ public class BufferingTests
         sensor.Temperature = 20.0m;
         sensor.Temperature = 30.0m;
 
-        // Wait for buffer to flush (buffer is 200ms, so 400ms should be enough)
+        // Wait for buffer to flush (buffer is 500ms)
         using var cancellationTokenSource = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var hasFirst = await firstMoveTask.WaitAsync(cancellationTokenSource.Token);
         Assert.True(hasFirst, "Should receive at least one update");
