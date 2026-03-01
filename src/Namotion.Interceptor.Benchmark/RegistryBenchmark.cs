@@ -105,4 +105,10 @@ public class RegistryBenchmark
     {
         return _object.GetOrAddSubjectId();
     }
+
+    [Benchmark]
+    public string GenerateSubjectId()
+    {
+        return SubjectRegistryExtensions.GenerateSubjectId();
+    }
 }
