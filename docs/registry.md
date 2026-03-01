@@ -195,9 +195,9 @@ if (idRegistry.TryGetSubjectById("my-car-001", out var subject))
 
 Subject IDs are automatically managed during the subject lifecycle:
 
-- **On attach**: If a subject already has an ID (e.g., set before attachment), it is auto-registered in the reverse index
+- **On attach**: If a subject already has an ID (e.g., set before attachment), it is auto-registered in the reverse index. If the ID conflicts with an existing subject, registration is silently skipped to avoid aborting the lifecycle — the caller can resolve the conflict later via `SetSubjectId`
 - **On detach**: The reverse index entry is automatically cleaned up
-- **Duplicate prevention**: Assigning an ID that is already in use by a different subject throws an `InvalidOperationException`
+- **Duplicate prevention**: Calling `SetSubjectId` with an ID that is already in use by a different subject throws an `InvalidOperationException`
 
 ### Without a registry
 

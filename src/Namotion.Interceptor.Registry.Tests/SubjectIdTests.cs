@@ -212,4 +212,71 @@ public class SubjectIdTests
         Assert.Throws<InvalidOperationException>(() =>
             person2.SetSubjectId("sharedId"));
     }
+
+    [Fact]
+    public void SetSubjectId_BeforeAttach_AutoRegistersOnAttach()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var child = new Models.Person { FirstName = "Child" };
+        child.SetSubjectId("preAssignedId");
+        var idRegistry = context.GetService<ISubjectIdRegistry>();
+
+        // Act - attaching the child to a parent with registry triggers auto-registration
+        var parent = new Models.Person(context) { FirstName = "Parent", Mother = child };
+
+        // Assert
+        Assert.True(idRegistry.TryGetSubjectById("preAssignedId", out var found));
+        Assert.Same(child, found);
+    }
+
+    [Fact]
+    public void SetSubjectId_BeforeAttach_DuplicateIdOnAttach_SkipsRegistration()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var parent = new Models.Person(context) { FirstName = "Parent" };
+        parent.SetSubjectId("duplicateId");
+
+        var child = new Models.Person { FirstName = "Child" };
+        child.SetSubjectId("duplicateId");
+        var idRegistry = context.GetService<ISubjectIdRegistry>();
+
+        // Act - attaching a child with a conflicting ID skips reverse index
+        // registration but does not throw, so the lifecycle completes normally
+        parent.Mother = child;
+
+        // Assert - parent keeps the reverse index entry, child is attached but not indexed
+        Assert.Same(child, parent.Mother);
+        Assert.True(idRegistry.TryGetSubjectById("duplicateId", out var found));
+        Assert.Same(parent, found);
+    }
+
+    [Fact]
+    public void SetSubjectId_WithNullOrWhitespace_Throws()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var person = new Models.Person(context) { FirstName = "Test" };
+        var subject = (IInterceptorSubject)person;
+
+        // Act & Assert
+        Assert.Throws<ArgumentException>(() => subject.SetSubjectId(""));
+        Assert.Throws<ArgumentException>(() => subject.SetSubjectId("   "));
+    }
+
+    [Fact]
+    public void TryGetSubjectId_WithNoIdAssigned_ReturnsNull()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var person = new Models.Person(context) { FirstName = "Test" };
+        var subject = (IInterceptorSubject)person;
+
+        // Act
+        var id = subject.TryGetSubjectId();
+
+        // Assert
+        Assert.Null(id);
+    }
 }

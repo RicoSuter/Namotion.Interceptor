@@ -93,19 +93,16 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
 
                 if (change.IsContextAttach)
                 {
-                    // Auto-register subject ID in reverse index if the subject already has one
-                    // (e.g., ID was set before attachment to a context with a registry)
+                    // Auto-register pre-assigned subject ID in reverse index;
+                    // skip silently on conflict to avoid aborting the lifecycle.
                     var subjectId = change.Subject.TryGetSubjectId();
                     if (subjectId is not null)
                     {
-                        if (_subjectIdToSubject.TryGetValue(subjectId, out var existingSubject)
-                            && !ReferenceEquals(existingSubject, change.Subject))
+                        if (!_subjectIdToSubject.TryGetValue(subjectId, out var existingSubject)
+                            || ReferenceEquals(existingSubject, change.Subject))
                         {
-                            throw new InvalidOperationException(
-                                $"Subject ID '{subjectId}' is already in use by a different subject.");
+                            _subjectIdToSubject[subjectId] = change.Subject;
                         }
-
-                        _subjectIdToSubject[subjectId] = change.Subject;
                     }
                 }
 
@@ -157,7 +154,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                     {
                         _knownSubjects.Remove(change.Subject);
 
-                        // Clean up subject ID reverse index via direct lookup (O(1))
+                        // Clean up subject ID reverse index
                         if (_subjectIdToSubject.Count > 0)
                         {
                             var subjectId = change.Subject.TryGetSubjectId();
