@@ -146,6 +146,8 @@ For key-based dictionaries. Works like Collection but each item also has a `key`
 
 All structural operations reference subjects by **stable ID**, not by positional index. This ensures correct behavior under concurrent modifications.
 
+Operations must be **applied sequentially** in the order they appear in the array. Each operation sees the result of all preceding operations. The built-in diff builder emits operations in Remove → Insert → Move order.
+
 ### Operation Types
 
 | Operation | Fields | Description |
@@ -209,6 +211,11 @@ In a complete update (no `operations`), the `items` array lists all items and de
 ```
 
 ## Complete vs Partial Updates
+
+The distinction between complete and partial collection/dictionary updates is determined by the `operations` field:
+
+- **`operations` absent or null** — Complete update. The `items` array defines the full ordered state, replacing the entire collection.
+- **`operations` present (even if empty)** — Partial update. The `items` array contains only items whose properties have changed (sparse property updates).
 
 ### Complete Collection (Initial Sync)
 
@@ -345,12 +352,11 @@ Circular references are handled naturally by the flat structure. Each subject ap
 
 ## Null Collections and Dictionaries
 
-When a collection or dictionary property is set to `null`, it is represented as `Kind=Value, Value=null`:
+When a collection or dictionary property is set to `null`, it is represented as a `Value` kind with no `value` field (the field is omitted when null):
 
 ```json
 {
-  "kind": "Value",
-  "value": null
+  "kind": "Value"
 }
 ```
 

@@ -47,8 +47,9 @@ public class SubjectPropertyUpdate
     public List<SubjectCollectionOperation>? Operations { get; set; }
 
     /// <summary>
-    /// Sparse property updates by final index/key for Collection/Dictionary kinds.
-    /// Applied AFTER structural operations.
+    /// Item references by stable subject ID for Collection/Dictionary kinds.
+    /// In complete updates (no operations): defines the full ordered state.
+    /// In partial updates (with operations): sparse property updates for existing items.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("items")]

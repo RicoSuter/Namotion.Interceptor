@@ -26,16 +26,18 @@ internal static class SubjectItemsUpdateApplier
         if (propertyUpdate.Operations is { Count: > 0 })
         {
             var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
+            var idIndex = BuildIdIndex(workingItems);
             foreach (var operation in propertyUpdate.Operations)
             {
                 switch (operation.Action)
                 {
                     case SubjectCollectionOperationType.Remove:
                     {
-                        var index = FindItemIndexById(workingItems, operation.Id);
+                        var index = FindItemIndexById(idIndex, operation.Id);
                         if (index >= 0)
                         {
                             workingItems.RemoveAt(index);
+                            idIndex = BuildIdIndex(workingItems);
                             structureChanged = true;
                         }
                         break;
@@ -44,7 +46,7 @@ internal static class SubjectItemsUpdateApplier
                     case SubjectCollectionOperationType.Insert:
                     {
                         // Idempotent: skip if item already exists in collection (echo protection)
-                        if (FindItemIndexById(workingItems, operation.Id) >= 0)
+                        if (FindItemIndexById(idIndex, operation.Id) >= 0)
                             break;
 
                         IInterceptorSubject? newItem = null;
@@ -69,21 +71,28 @@ internal static class SubjectItemsUpdateApplier
                             SubjectUpdateApplier.ApplyPropertyUpdates(newItem, props, context);
                         }
 
-                        var insertIndex = FindInsertPosition(workingItems, operation.AfterId);
+                        var insertIndex = FindInsertPosition(workingItems, idIndex, operation.AfterId);
                         workingItems.Insert(insertIndex, newItem);
+                        idIndex = BuildIdIndex(workingItems);
                         structureChanged = true;
                         break;
                     }
 
                     case SubjectCollectionOperationType.Move:
                     {
-                        var currentIndex = FindItemIndexById(workingItems, operation.Id);
+                        // No-op when moving an item after itself
+                        if (operation.Id == operation.AfterId)
+                            break;
+
+                        var currentIndex = FindItemIndexById(idIndex, operation.Id);
                         if (currentIndex >= 0)
                         {
                             var item = workingItems[currentIndex];
                             workingItems.RemoveAt(currentIndex);
-                            var insertIndex = FindInsertPosition(workingItems, operation.AfterId);
+                            idIndex = BuildIdIndex(workingItems);
+                            var insertIndex = FindInsertPosition(workingItems, idIndex, operation.AfterId);
                             workingItems.Insert(insertIndex, item);
+                            idIndex = BuildIdIndex(workingItems);
                             structureChanged = true;
                         }
                         break;
@@ -129,14 +138,15 @@ internal static class SubjectItemsUpdateApplier
         // Sparse property updates (items with operations present — update existing items by ID)
         if (propertyUpdate.Operations is not null && propertyUpdate.Items is { Count: > 0 })
         {
+            var sparseIdIndex = BuildIdIndex(workingItems);
             foreach (var itemUpdate in propertyUpdate.Items)
             {
                 if (context.Subjects.TryGetValue(itemUpdate.Id, out var itemProps))
                 {
-                    var item = FindItemById(workingItems, itemUpdate.Id);
-                    if (item is not null && context.TryMarkAsProcessed(itemUpdate.Id))
+                    var index = FindItemIndexById(sparseIdIndex, itemUpdate.Id);
+                    if (index >= 0 && context.TryMarkAsProcessed(itemUpdate.Id))
                     {
-                        SubjectUpdateApplier.ApplyPropertyUpdates(item, itemProps, context);
+                        SubjectUpdateApplier.ApplyPropertyUpdates(workingItems[index], itemProps, context);
                     }
                 }
             }
@@ -309,36 +319,32 @@ internal static class SubjectItemsUpdateApplier
         }
     }
 
-    private static int FindItemIndexById(List<IInterceptorSubject> items, string stableId)
+    /// <summary>
+    /// Builds a subject ID → index lookup dictionary for O(1) item lookups.
+    /// Must be rebuilt after any structural modification (Insert, Remove, Move).
+    /// </summary>
+    private static Dictionary<string, int> BuildIdIndex(List<IInterceptorSubject> items)
     {
+        var index = new Dictionary<string, int>(items.Count);
         for (var i = 0; i < items.Count; i++)
         {
-            if (items[i].GetOrAddSubjectId() == stableId)
-                return i;
+            index[items[i].GetOrAddSubjectId()] = i;
         }
-        return -1;
+        return index;
     }
 
-    private static IInterceptorSubject? FindItemById(List<IInterceptorSubject> items, string stableId)
+    private static int FindItemIndexById(Dictionary<string, int> idIndex, string stableId)
     {
-        for (var i = 0; i < items.Count; i++)
-        {
-            if (items[i].GetOrAddSubjectId() == stableId)
-                return items[i];
-        }
-        return null;
+        return idIndex.GetValueOrDefault(stableId, -1);
     }
 
-    private static int FindInsertPosition(List<IInterceptorSubject> items, string? afterId)
+    private static int FindInsertPosition(List<IInterceptorSubject> items, Dictionary<string, int> idIndex, string? afterId)
     {
         if (afterId is null)
             return 0; // Insert at head
 
-        for (var i = 0; i < items.Count; i++)
-        {
-            if (items[i].GetOrAddSubjectId() == afterId)
-                return i + 1; // Insert after this item
-        }
+        if (idIndex.TryGetValue(afterId, out var index))
+            return index + 1; // Insert after this item
 
         return items.Count; // afterId not found, append to end
     }
