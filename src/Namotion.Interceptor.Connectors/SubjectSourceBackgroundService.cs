@@ -97,7 +97,12 @@ public class SubjectSourceBackgroundService : BackgroundService
             // No retry queue - write directly
             try
             {
-                await _source.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
+                var result = await _source.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
+                if (!result.IsFullySuccessful)
+                {
+                    _logger.LogError(result.Error, "Failed to write {Count} changes to source.",
+                        result.FailedChanges.Length);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -121,7 +126,13 @@ public class SubjectSourceBackgroundService : BackgroundService
         // Write current changes
         try
         {
-            await _source.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
+            var result = await _source.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
+            if (!result.IsFullySuccessful && !result.FailedChanges.IsEmpty)
+            {
+                _logger.LogWarning(result.Error, "Failed to write {Count} changes to source, queuing for retry.",
+                    result.FailedChanges.Length);
+                _writeRetryQueue.Enqueue(result.FailedChanges.ToArray());
+            }
         }
         catch (OperationCanceledException)
         {
