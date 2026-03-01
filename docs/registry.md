@@ -155,3 +155,50 @@ public partial decimal Temperature { get; set; }
 ```
 
 This pattern allows you to define reusable metadata behaviors that are automatically applied when subjects are registered.
+
+## Subject IDs
+
+The registry provides a subject ID system that assigns stable string identifiers to subjects. This is useful for protocol-level lookups where connectors (e.g., WebSocket) need to identify subjects by string IDs.
+
+### Assign and retrieve IDs
+
+Use `GetOrAddSubjectId` to lazily generate a stable 22-character base62-encoded ID, or `SetSubjectId` to assign a known ID:
+
+```csharp
+var context = InterceptorSubjectContext
+    .Create()
+    .WithFullPropertyTracking()
+    .WithRegistry();
+
+var car = new Car(context);
+
+// Generate a stable ID on first call, return the same ID on subsequent calls
+var id = car.GetOrAddSubjectId(); // e.g. "5Gk3mR7pLqWx9nYvBtHz01"
+
+// Or assign a known ID (e.g., from an incoming protocol message)
+car.SetSubjectId("my-car-001");
+```
+
+### Look up subjects by ID
+
+Use `ISubjectIdRegistry` to look up subjects by their assigned ID:
+
+```csharp
+var idRegistry = context.GetService<ISubjectIdRegistry>();
+if (idRegistry.TryGetSubjectById("my-car-001", out var subject))
+{
+    // subject is the Car instance
+}
+```
+
+### Lifecycle integration
+
+Subject IDs are automatically managed during the subject lifecycle:
+
+- **On attach**: If a subject already has an ID (e.g., set before attachment), it is auto-registered in the reverse index
+- **On detach**: The reverse index entry is automatically cleaned up
+- **Duplicate prevention**: Assigning an ID that is already in use by a different subject throws an `InvalidOperationException`
+
+### Without a registry
+
+Subject IDs also work without a registry configured — IDs are stored directly in the subject's `Data` dictionary. However, the reverse index lookup (`TryGetSubjectById`) requires a registry.
