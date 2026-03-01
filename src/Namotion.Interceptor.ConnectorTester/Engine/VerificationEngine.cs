@@ -239,29 +239,41 @@ public class VerificationEngine : BackgroundService
     {
         var update = SubjectUpdate.CreateCompleteUpdate(root, []);
 
-        // Strip timestamps from structural properties (Collection, Dictionary, Object).
-        // These are set during local graph creation and are inherently different per participant.
-        // Value property timestamps ARE compared and must converge via source timestamps.
+        // Build a normalized structure with sorted keys for deterministic comparison.
+        // Dictionary<string, ...> serializes in insertion order which varies per participant.
+        var sorted = new SortedDictionary<string, SortedDictionary<string, SubjectPropertyUpdate>>();
+
         if (update.Subjects != null)
         {
-            foreach (var subject in update.Subjects.Values)
+            foreach (var (subjectId, properties) in update.Subjects)
             {
-                if (subject == null)
-                {
+                if (properties == null)
                     continue;
-                }
 
-                foreach (var property in subject.Values)
+                var sortedProperties = new SortedDictionary<string, SubjectPropertyUpdate>(properties);
+
+                foreach (var property in sortedProperties.Values)
                 {
+                    // Strip timestamps from structural properties (Collection, Dictionary, Object).
+                    // These are set during local graph creation and are inherently different per participant.
+                    // Value property timestamps ARE compared and must converge via source timestamps.
                     if (property.Kind != SubjectPropertyUpdateKind.Value)
                     {
                         property.Timestamp = null;
                     }
+
+                    // Sort dictionary items by key for order-independent comparison.
+                    if (property.Kind == SubjectPropertyUpdateKind.Dictionary && property.Items != null)
+                    {
+                        property.Items.Sort(static (a, b) => string.Compare(a.Key, b.Key, StringComparison.Ordinal));
+                    }
                 }
+
+                sorted[subjectId] = sortedProperties;
             }
         }
 
-        return JsonSerializer.Serialize(update, SnapshotJsonOptions);
+        return JsonSerializer.Serialize(new { root = update.Root, subjects = sorted }, SnapshotJsonOptions);
     }
 
     private void WriteStatistics(TimeSpan cycleDuration, TimeSpan convergeDuration, string result)

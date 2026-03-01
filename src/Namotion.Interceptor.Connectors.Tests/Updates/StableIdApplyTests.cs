@@ -364,6 +364,132 @@ public class StableIdApplyTests
     }
 
     [Fact]
+    public void ApplyMultipleOperations_RemoveInsertMove_AppliedSequentially()
+    {
+        // Start: [A, B, C, D]
+        // Operations: Remove B, Insert New after A, Move D to head
+        // After Remove B: [A, C, D]
+        // After Insert New after A: [A, New, C, D]
+        // After Move D to head: [D, A, New, C]
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var childA = new CycleTestNode { Name = "A" };
+        var childB = new CycleTestNode { Name = "B" };
+        var childC = new CycleTestNode { Name = "C" };
+        var childD = new CycleTestNode { Name = "D" };
+        var node = new CycleTestNode(context) { Name = "Root", Items = [childA, childB, childC, childD] };
+
+        var childAId = childA.GetOrAddSubjectId();
+        var childBId = childB.GetOrAddSubjectId();
+        var childDId = childD.GetOrAddSubjectId();
+        var rootId = node.GetOrAddSubjectId();
+        var newChild = new CycleTestNode { Name = "New" };
+        var newChildId = newChild.GetOrAddSubjectId();
+
+        var update = new SubjectUpdate
+        {
+            Root = rootId,
+            Subjects = new()
+            {
+                [rootId] = new()
+                {
+                    ["Items"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Count = 4,
+                        Operations =
+                        [
+                            new SubjectCollectionOperation
+                            {
+                                Action = SubjectCollectionOperationType.Remove,
+                                Id = childBId
+                            },
+                            new SubjectCollectionOperation
+                            {
+                                Action = SubjectCollectionOperationType.Insert,
+                                Id = newChildId,
+                                AfterId = childAId
+                            },
+                            new SubjectCollectionOperation
+                            {
+                                Action = SubjectCollectionOperationType.Move,
+                                Id = childDId,
+                                AfterId = null // move to head
+                            }
+                        ]
+                    }
+                },
+                [newChildId] = new()
+                {
+                    ["Name"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "New"
+                    }
+                }
+            }
+        };
+
+        SubjectUpdateApplier.ApplyUpdate(
+            node, update, new DefaultSubjectFactory());
+
+        Assert.Equal(4, node.Items.Count);
+        Assert.Equal("D", node.Items[0].Name);
+        Assert.Equal("A", node.Items[1].Name);
+        Assert.Equal("New", node.Items[2].Name);
+        Assert.Equal("C", node.Items[3].Name);
+    }
+
+    [Fact]
+    public void ApplyCollectionInsert_IntoEmptyCollection_InsertsSuccessfully()
+    {
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var node = new CycleTestNode(context) { Name = "Root", Items = [] };
+
+        var rootId = node.GetOrAddSubjectId();
+        var newChild = new CycleTestNode { Name = "First" };
+        var newChildId = newChild.GetOrAddSubjectId();
+
+        var update = new SubjectUpdate
+        {
+            Root = rootId,
+            Subjects = new()
+            {
+                [rootId] = new()
+                {
+                    ["Items"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Count = 1,
+                        Operations =
+                        [
+                            new SubjectCollectionOperation
+                            {
+                                Action = SubjectCollectionOperationType.Insert,
+                                Id = newChildId,
+                                AfterId = null // insert at head (empty collection)
+                            }
+                        ]
+                    }
+                },
+                [newChildId] = new()
+                {
+                    ["Name"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "First"
+                    }
+                }
+            }
+        };
+
+        SubjectUpdateApplier.ApplyUpdate(
+            node, update, new DefaultSubjectFactory());
+
+        var singleItem = Assert.Single(node.Items);
+        Assert.Equal("First", singleItem.Name);
+    }
+
+    [Fact]
     public void ApplyInsert_WithMissingAfterId_AppendsToEnd()
     {
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();

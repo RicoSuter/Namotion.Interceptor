@@ -173,6 +173,10 @@ public class MutationEngine : BackgroundService
         var property = _random.Next(3);
         var counter = Interlocked.Increment(ref _globalCounter);
 
+        // Note: The node is selected under _nodeLock but mutated outside it.
+        // A concurrent structural mutation could remove this node from the graph.
+        // This is acceptable: the property assignment still succeeds on the CLR object,
+        // and the node will simply no longer be tracked after the next RebuildKnownNodes().
         using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
         {
             switch (property)

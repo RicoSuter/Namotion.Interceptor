@@ -175,11 +175,6 @@ internal static class SubjectItemsUpdateFactory
                 });
             }
         }
-
-        // Sort by key for deterministic serialization. Dictionary iteration order
-        // depends on insertion history which can differ across participants after
-        // reconnection (e.g., chaos recovery rebuilds the dictionary from Welcome state).
-        update.Items.Sort(static (a, b) => string.Compare(a.Key, b.Key, StringComparison.Ordinal));
     }
 
     /// <summary>
