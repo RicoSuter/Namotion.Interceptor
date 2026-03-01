@@ -149,7 +149,7 @@ internal static class SubjectUpdateApplier
         var isSameSubject = existingItem is not null &&
             existingItem.TryGetSubjectId() == propertyUpdate.Id;
 
-        if (existingItem is not null && isSameSubject)
+        if (isSameSubject)
         {
             // Same logical subject — keep the existing CLR object.
             targetItem = existingItem;

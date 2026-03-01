@@ -25,14 +25,7 @@ internal sealed class SubjectUpdateBuilder
     }
 
     public string GetOrCreateId(IInterceptorSubject subject)
-    {
-        if (!_subjectToId.TryGetValue(subject, out var id))
-        {
-            id = subject.GetOrAddSubjectId();
-            _subjectToId[subject] = id;
-        }
-        return id;
-    }
+        => GetOrCreateIdWithStatus(subject).Id;
 
     /// <summary>
     /// Gets an existing ID for a subject, or creates a new one.
@@ -41,9 +34,7 @@ internal sealed class SubjectUpdateBuilder
     public (string Id, bool IsNew) GetOrCreateIdWithStatus(IInterceptorSubject subject)
     {
         if (_subjectToId.TryGetValue(subject, out var id))
-        {
             return (id, false);
-        }
 
         id = subject.GetOrAddSubjectId();
         _subjectToId[subject] = id;

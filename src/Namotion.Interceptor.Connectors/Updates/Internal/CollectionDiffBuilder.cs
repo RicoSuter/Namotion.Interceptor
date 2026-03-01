@@ -81,7 +81,7 @@ internal sealed class CollectionDiffBuilder
                 _newCommonOrder.Add(newItems[i]);
         }
 
-        if (_oldCommonOrder.Count > 0 && !_oldCommonOrder.SequenceEqual(_newCommonOrder))
+        if (_oldCommonOrder.Count > 0 && !CommonOrdersAreEqual())
         {
             _oldCommonIndexMap.Clear();
             for (var i = 0; i < _oldCommonOrder.Count; i++)
@@ -108,17 +108,14 @@ internal sealed class CollectionDiffBuilder
     /// </summary>
     /// <param name="oldDictionary">The old dictionary.</param>
     /// <param name="newDictionary">The new dictionary.</param>
-    /// <param name="operations">Output: structural operations (Insert/Remove), or null if none.</param>
     /// <param name="newItemsToProcess">Output: items that are new and need full processing, or null if none.</param>
     /// <param name="removedKeys">Output: keys that were removed, or null if none.</param>
     public void GetDictionaryChanges(
         IDictionary? oldDictionary,
         IDictionary newDictionary,
-        out List<SubjectCollectionOperation>? operations,
         out List<(object key, IInterceptorSubject item)>? newItemsToProcess,
         out HashSet<object>? removedKeys)
     {
-        operations = null;
         newItemsToProcess = null;
         removedKeys = null;
 
@@ -187,5 +184,22 @@ internal sealed class CollectionDiffBuilder
         _oldCommonOrder.Clear();
         _newCommonOrder.Clear();
         _oldKeys.Clear();
+    }
+
+    /// <summary>
+    /// Compares old and new common orders without allocating enumerators.
+    /// </summary>
+    private bool CommonOrdersAreEqual()
+    {
+        if (_oldCommonOrder.Count != _newCommonOrder.Count)
+            return false;
+
+        for (var i = 0; i < _oldCommonOrder.Count; i++)
+        {
+            if (!ReferenceEquals(_oldCommonOrder[i], _newCommonOrder[i]))
+                return false;
+        }
+
+        return true;
     }
 }

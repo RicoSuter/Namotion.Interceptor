@@ -199,7 +199,6 @@ internal static class SubjectItemsUpdateFactory
         {
             changeBuilder.GetDictionaryChanges(
                 oldDict, newDict,
-                out _,
                 out var newItemsToProcess,
                 out var removedKeys);
 
