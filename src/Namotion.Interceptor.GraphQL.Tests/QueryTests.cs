@@ -1,7 +1,6 @@
 using System.Text.Json;
 using HotChocolate.Execution;
 using Microsoft.Extensions.DependencyInjection;
-using Namotion.Interceptor.GraphQL;
 using Namotion.Interceptor.GraphQL.Tests.Models;
 using Namotion.Interceptor.Tracking;
 using Xunit;

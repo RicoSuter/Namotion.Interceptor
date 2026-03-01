@@ -33,7 +33,7 @@ public static class GraphQLSelectionMatcher
             var segment = pathProvider.TryGetPropertySegment(current);
             if (segment is not null)
             {
-                pathParts.Insert(0, segment);
+                pathParts.Add(segment);
             }
 
             if (ReferenceEquals(current.Parent.Subject, rootSubject))
@@ -53,6 +53,8 @@ public static class GraphQLSelectionMatcher
             }
         }
 
+        pathParts.Reverse();
+
         if (pathParts.Count == 0)
         {
             return false;
@@ -70,27 +72,22 @@ public static class GraphQLSelectionMatcher
             }
 
             // Changed property is parent of selected (e.g., "location" changed, "location.building" selected)
-            if (selectedPath.StartsWith(changePath + ".", StringComparison.Ordinal))
+            if (selectedPath.Length > changePath.Length
+                && selectedPath[changePath.Length] == '.'
+                && selectedPath.AsSpan().StartsWith(changePath.AsSpan()))
             {
                 return true;
             }
 
             // Changed property is child of selected (e.g., "location.building" changed, "location" selected)
-            if (changePath.StartsWith(selectedPath + ".", StringComparison.Ordinal))
+            if (changePath.Length > selectedPath.Length
+                && changePath[selectedPath.Length] == '.'
+                && changePath.AsSpan().StartsWith(selectedPath.AsSpan()))
             {
                 return true;
             }
         }
 
         return false;
-    }
-
-    /// <summary>
-    /// Extracts field paths from a GraphQL selection set string (simplified parsing).
-    /// For now, accepts a list of field names.
-    /// </summary>
-    public static IReadOnlySet<string> ExtractSelectionPaths(IReadOnlyList<string> fieldNames)
-    {
-        return new HashSet<string>(fieldNames, StringComparer.Ordinal);
     }
 }

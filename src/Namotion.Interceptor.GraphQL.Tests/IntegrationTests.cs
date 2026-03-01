@@ -1,7 +1,6 @@
 using System.Text.Json;
 using HotChocolate.Execution;
 using Microsoft.Extensions.DependencyInjection;
-using Namotion.Interceptor.GraphQL;
 using Namotion.Interceptor.GraphQL.Tests.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
@@ -140,6 +139,41 @@ public class IntegrationTests
         var json = JsonSerializer.Serialize(operationResult.Data);
         Assert.Contains("42", json);
         Assert.Contains("Hot", json);
+    }
+
+    [Fact]
+    public async Task FullScenario_ConfigurationProviderUsingServiceProvider_WorksCorrectly()
+    {
+        // Arrange - config factory that depends on IServiceProvider
+        var services = new ServiceCollection();
+        services.AddSingleton(new GraphQLSubjectConfiguration
+        {
+            RootName = "fromDI",
+            BufferTime = TimeSpan.FromMilliseconds(200)
+        });
+
+        var executor = await services
+            .AddGraphQLServer()
+            .AddSubjectGraphQL(
+                _ =>
+                {
+                    var context = InterceptorSubjectContext.Create()
+                        .WithFullPropertyTracking()
+                        .WithRegistry();
+                    return new Sensor(context) { Temperature = 77.7m };
+                },
+                sp => sp.GetRequiredService<GraphQLSubjectConfiguration>()) // Uses IServiceProvider!
+            .AddInMemorySubscriptions()
+            .BuildRequestExecutorAsync();
+
+        // Act
+        var result = await executor.ExecuteAsync("{ fromDI { temperature } }");
+
+        // Assert
+        var operationResult = (IOperationResult)result;
+        Assert.Null(operationResult.Errors);
+        var json = JsonSerializer.Serialize(operationResult.Data);
+        Assert.Contains("77.7", json);
     }
 
 }
