@@ -181,6 +181,7 @@ public static class SubjectRegistryExtensions
     /// Gets or lazily generates a subject ID for the given subject.
     /// The ID is stored in the subject's Data dictionary and auto-registered
     /// in the reverse index if an <see cref="ISubjectIdRegistryWriter"/> is available.
+    /// Generated IDs are unique but not cryptographically secure.
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <returns>The subject ID.</returns>

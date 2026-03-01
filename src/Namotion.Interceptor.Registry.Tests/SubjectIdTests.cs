@@ -261,6 +261,7 @@ public class SubjectIdTests
         var subject = (IInterceptorSubject)person;
 
         // Act & Assert
+        Assert.Throws<ArgumentNullException>(() => subject.SetSubjectId(null!));
         Assert.Throws<ArgumentException>(() => subject.SetSubjectId(""));
         Assert.Throws<ArgumentException>(() => subject.SetSubjectId("   "));
     }
