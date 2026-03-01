@@ -407,7 +407,7 @@ public class SubjectUpdateCycleTests
         Assert.NotNull(json);
 
         // Verify "last wins" for root.Name
-        var rootId = ((IInterceptorSubject)root).GetOrAddSubjectId();
+        var rootId = root.GetOrAddSubjectId();
         var rootProperties = partialUpdate.Subjects[rootId];
         Assert.True(rootProperties.ContainsKey("name"));
         Assert.Equal("Root_Final", rootProperties["name"].Value);
@@ -455,7 +455,7 @@ public class SubjectUpdateCycleTests
         Assert.NotNull(json);
 
         // Verify we have Operations with Inserts
-        var rootId = ((IInterceptorSubject)root).GetOrAddSubjectId();
+        var rootId = root.GetOrAddSubjectId();
         var rootProperties = partialUpdate.Subjects[rootId];
         Assert.NotNull(rootProperties["items"].Operations);
         Assert.Equal(2, rootProperties["items"].Operations!.Count);
@@ -497,7 +497,7 @@ public class SubjectUpdateCycleTests
 
         // With flat structure, the insert operation has an Id that references
         // the subject in the Subjects dictionary
-        var rootId = ((IInterceptorSubject)root).GetOrAddSubjectId();
+        var rootId = root.GetOrAddSubjectId();
         var rootProperties = partialUpdate.Subjects[rootId];
         var operations = rootProperties["items"].Operations;
         Assert.NotNull(operations);

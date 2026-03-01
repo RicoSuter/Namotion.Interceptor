@@ -15,7 +15,7 @@ public class StableIdCollectionTests
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
         var node = new CycleTestNode(context) { Name = "Root" };
 
-        var update = SubjectUpdate.CreateCompleteUpdate((IInterceptorSubject)node, []);
+        var update = SubjectUpdate.CreateCompleteUpdate(node, []);
 
         Assert.NotNull(update.Root);
         Assert.Equal(22, update.Root.Length);
@@ -28,8 +28,8 @@ public class StableIdCollectionTests
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
         var node = new CycleTestNode(context) { Name = "Root" };
 
-        var update1 = SubjectUpdate.CreateCompleteUpdate((IInterceptorSubject)node, []);
-        var update2 = SubjectUpdate.CreateCompleteUpdate((IInterceptorSubject)node, []);
+        var update1 = SubjectUpdate.CreateCompleteUpdate(node, []);
+        var update2 = SubjectUpdate.CreateCompleteUpdate(node, []);
 
         Assert.Equal(update1.Root, update2.Root);
     }
@@ -48,10 +48,10 @@ public class StableIdCollectionTests
         node.Items = [child1, child2];
 
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(
-            (IInterceptorSubject)node, changes.ToArray(), []);
+            node, changes.ToArray(), []);
 
         // Find the Items property update on the root subject
-        var rootId = ((IInterceptorSubject)node).GetOrAddSubjectId();
+        var rootId = node.GetOrAddSubjectId();
         Assert.True(update.Subjects.ContainsKey(rootId));
         var itemsUpdate = update.Subjects[rootId]["Items"];
         Assert.NotNull(itemsUpdate.Operations);
@@ -59,7 +59,7 @@ public class StableIdCollectionTests
         var insertOp = itemsUpdate.Operations.First(o => o.Action == SubjectCollectionOperationType.Insert);
         Assert.Equal(22, insertOp.Id.Length);
         // afterId should be child1's stable ID (insert after child1)
-        Assert.Equal(((IInterceptorSubject)child1).GetOrAddSubjectId(), insertOp.AfterId);
+        Assert.Equal(child1.GetOrAddSubjectId(), insertOp.AfterId);
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public class StableIdCollectionTests
         var child2 = new CycleTestNode { Name = "Child2" };
         var node = new CycleTestNode(context) { Name = "Root", Items = [child1, child2] };
 
-        var child2Id = ((IInterceptorSubject)child2).GetOrAddSubjectId();
+        var child2Id = child2.GetOrAddSubjectId();
 
         var changes = new List<SubjectPropertyChange>();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
@@ -78,9 +78,9 @@ public class StableIdCollectionTests
         node.Items = [child1];
 
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(
-            (IInterceptorSubject)node, changes.ToArray(), []);
+            node, changes.ToArray(), []);
 
-        var rootId = ((IInterceptorSubject)node).GetOrAddSubjectId();
+        var rootId = node.GetOrAddSubjectId();
         var itemsUpdate = update.Subjects[rootId]["Items"];
         Assert.NotNull(itemsUpdate.Operations);
 
@@ -100,7 +100,7 @@ public class StableIdCollectionTests
         node.Name = "Updated";
 
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(
-            (IInterceptorSubject)node, changes.ToArray(), []);
+            node, changes.ToArray(), []);
 
         // Root is always set to the stable ID of the root subject
         Assert.NotNull(update.Root);
@@ -122,9 +122,9 @@ public class StableIdCollectionTests
         node.Items = [child1, child2];
 
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(
-            (IInterceptorSubject)node, changes.ToArray(), []);
+            node, changes.ToArray(), []);
 
-        var rootId = ((IInterceptorSubject)node).GetOrAddSubjectId();
+        var rootId = node.GetOrAddSubjectId();
         var itemsUpdate = update.Subjects[rootId]["Items"];
         var insertOp = itemsUpdate.Operations!.First(o => o.Action == SubjectCollectionOperationType.Insert);
 

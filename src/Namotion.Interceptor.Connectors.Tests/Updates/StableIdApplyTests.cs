@@ -17,9 +17,10 @@ public class StableIdApplyTests
         var child2 = new CycleTestNode { Name = "Child2" };
         var node = new CycleTestNode(context) { Name = "Root", Items = [child1, child2] };
 
-        var child1Id = ((IInterceptorSubject)child1).GetOrAddSubjectId();
-        var rootId = ((IInterceptorSubject)node).GetOrAddSubjectId();
-        var newChildId = SubjectRegistryExtensions.GenerateSubjectId();
+        var child1Id = child1.GetOrAddSubjectId();
+        var rootId = node.GetOrAddSubjectId();
+        var newChild = new CycleTestNode { Name = "NewChild" };
+        var newChildId = newChild.GetOrAddSubjectId();
 
         var update = new SubjectUpdate
         {
@@ -55,7 +56,7 @@ public class StableIdApplyTests
         };
 
         SubjectUpdateApplier.ApplyUpdate(
-            (IInterceptorSubject)node, update, new DefaultSubjectFactory());
+            node, update, new DefaultSubjectFactory());
 
         Assert.Equal(3, node.Items.Count);
         Assert.Equal("Child1", node.Items[0].Name);
@@ -72,8 +73,8 @@ public class StableIdApplyTests
         var child3 = new CycleTestNode { Name = "Child3" };
         var node = new CycleTestNode(context) { Name = "Root", Items = [child1, child2, child3] };
 
-        var child2Id = ((IInterceptorSubject)child2).GetOrAddSubjectId();
-        var rootId = ((IInterceptorSubject)node).GetOrAddSubjectId();
+        var child2Id = child2.GetOrAddSubjectId();
+        var rootId = node.GetOrAddSubjectId();
 
         var update = new SubjectUpdate
         {
@@ -100,7 +101,7 @@ public class StableIdApplyTests
         };
 
         SubjectUpdateApplier.ApplyUpdate(
-            (IInterceptorSubject)node, update, new DefaultSubjectFactory());
+            node, update, new DefaultSubjectFactory());
 
         Assert.Equal(2, node.Items.Count);
         Assert.Equal("Child1", node.Items[0].Name);
@@ -116,8 +117,8 @@ public class StableIdApplyTests
         var child3 = new CycleTestNode { Name = "C" };
         var node = new CycleTestNode(context) { Name = "Root", Items = [child1, child2, child3] };
 
-        var child3Id = ((IInterceptorSubject)child3).GetOrAddSubjectId();
-        var rootId = ((IInterceptorSubject)node).GetOrAddSubjectId();
+        var child3Id = child3.GetOrAddSubjectId();
+        var rootId = node.GetOrAddSubjectId();
 
         // Move C to head (before A)
         var update = new SubjectUpdate
@@ -146,7 +147,7 @@ public class StableIdApplyTests
         };
 
         SubjectUpdateApplier.ApplyUpdate(
-            (IInterceptorSubject)node, update, new DefaultSubjectFactory());
+            node, update, new DefaultSubjectFactory());
 
         Assert.Equal(3, node.Items.Count);
         Assert.Equal("C", node.Items[0].Name);
@@ -161,7 +162,7 @@ public class StableIdApplyTests
         var child = new CycleTestNode { Name = "OriginalName" };
         var node = new CycleTestNode(context) { Name = "Root", Items = [child] };
 
-        var childId = ((IInterceptorSubject)child).GetOrAddSubjectId();
+        var childId = child.GetOrAddSubjectId();
 
         var update = new SubjectUpdate
         {
@@ -180,7 +181,7 @@ public class StableIdApplyTests
         };
 
         SubjectUpdateApplier.ApplyUpdate(
-            (IInterceptorSubject)node, update, new DefaultSubjectFactory());
+            node, update, new DefaultSubjectFactory());
 
         Assert.Equal("UpdatedName", child.Name);
     }
@@ -192,8 +193,9 @@ public class StableIdApplyTests
         var child1 = new CycleTestNode { Name = "Child1" };
         var node = new CycleTestNode(context) { Name = "Root", Items = [child1] };
 
-        var rootId = ((IInterceptorSubject)node).GetOrAddSubjectId();
-        var newChildId = SubjectRegistryExtensions.GenerateSubjectId();
+        var rootId = node.GetOrAddSubjectId();
+        var newChild = new CycleTestNode { Name = "NewChild" };
+        var newChildId = newChild.GetOrAddSubjectId();
 
         var update = new SubjectUpdate
         {
@@ -229,7 +231,7 @@ public class StableIdApplyTests
         };
 
         SubjectUpdateApplier.ApplyUpdate(
-            (IInterceptorSubject)node, update, new DefaultSubjectFactory());
+            node, update, new DefaultSubjectFactory());
 
         // Should append to end when afterId not found
         Assert.Equal(2, node.Items.Count);
