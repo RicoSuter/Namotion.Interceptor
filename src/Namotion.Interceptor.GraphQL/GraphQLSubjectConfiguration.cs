@@ -9,6 +9,7 @@ public class GraphQLSubjectConfiguration
 {
     /// <summary>
     /// Gets or sets the root field name for queries and subscriptions. Default is "root".
+    /// Must not be null, empty, or whitespace.
     /// </summary>
     public string RootName { get; init; } = "root";
 
@@ -23,4 +24,16 @@ public class GraphQLSubjectConfiguration
     /// Higher values batch more changes together, lower values reduce latency.
     /// </summary>
     public TimeSpan BufferTime { get; init; } = TimeSpan.FromMilliseconds(50);
+
+    /// <summary>
+    /// Validates this configuration and throws if invalid.
+    /// </summary>
+    public void Validate()
+    {
+        if (string.IsNullOrWhiteSpace(RootName))
+        {
+            throw new ArgumentException(
+                "RootName must not be null, empty, or whitespace.", nameof(RootName));
+        }
+    }
 }
