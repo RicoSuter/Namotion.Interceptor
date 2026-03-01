@@ -11,7 +11,6 @@ namespace Namotion.Interceptor.GraphQL;
 public static class GraphQLSelectionMatcher
 {
     private const int MaxPathDepth = 16;
-    private const char PathSeparator = '.';
 
     /// <summary>
     /// Checks if a property change matches any of the selected paths.
@@ -34,7 +33,6 @@ public static class GraphQLSelectionMatcher
         try
         {
             var segmentCount = 0;
-            var totalLength = 0;
             var current = registeredProperty;
 
             while (current is not null)
@@ -49,7 +47,6 @@ public static class GraphQLSelectionMatcher
                     }
 
                     segments[segmentCount++] = segment;
-                    totalLength += segment.Length;
                 }
 
                 if (ReferenceEquals(current.Parent.Subject, rootSubject))
@@ -66,50 +63,12 @@ public static class GraphQLSelectionMatcher
                 return false;
             }
 
-            // Reverse to get root-to-leaf order.
-            Array.Reverse(segments, 0, segmentCount);
-
-            // Build the full path into a stackalloc buffer to avoid string allocation.
-            var pathLength = totalLength + (segmentCount - 1);
-            Span<char> changePath = stackalloc char[pathLength];
-            var position = 0;
-
-            for (var i = 0; i < segmentCount; i++)
-            {
-                if (i > 0)
-                {
-                    changePath[position++] = PathSeparator;
-                }
-
-                segments[i].AsSpan().CopyTo(changePath[position..]);
-                position += segments[i].Length;
-            }
-
-            // Check for exact match or prefix match.
+            // Segments are in leaf-to-root order.
+            // Match each selected path (root-to-leaf) by walking segments from end to start,
+            // avoiding both Array.Reverse and path string construction.
             foreach (var selectedPath in selectedPaths)
             {
-                var selected = selectedPath.AsSpan();
-
-                // Exact match
-                if (changePath.SequenceEqual(selected))
-                {
-                    return true;
-                }
-
-                // Changed property is parent of selected
-                // (e.g., "location" changed, "location.building" selected)
-                if (selected.Length > changePath.Length
-                    && selected[changePath.Length] == PathSeparator
-                    && selected.StartsWith(changePath))
-                {
-                    return true;
-                }
-
-                // Changed property is child of selected
-                // (e.g., "location.building" changed, "location" selected)
-                if (changePath.Length > selected.Length
-                    && changePath[selected.Length] == PathSeparator
-                    && changePath.StartsWith(selected))
+                if (PathMatchesSegments(selectedPath.AsSpan(), segments, segmentCount))
                 {
                     return true;
                 }
@@ -121,5 +80,40 @@ public static class GraphQLSelectionMatcher
         {
             ArrayPool<string>.Shared.Return(segments, clearArray: true);
         }
+    }
+
+    /// <summary>
+    /// Checks whether a dot-separated selected path matches the given segments (stored leaf-to-root).
+    /// Handles exact match, parent match (change is ancestor of selection),
+    /// and child match (change is descendant of selection).
+    /// </summary>
+    private static bool PathMatchesSegments(
+        ReadOnlySpan<char> selectedPath,
+        string[] segments,
+        int segmentCount)
+    {
+        var pathPosition = 0;
+        var segmentIndex = segmentCount - 1; // Start from root
+
+        while (segmentIndex >= 0 && pathPosition < selectedPath.Length)
+        {
+            var remaining = selectedPath[pathPosition..];
+            var dotIndex = remaining.IndexOf('.');
+            var pathPiece = dotIndex >= 0 ? remaining[..dotIndex] : remaining;
+
+            if (!pathPiece.SequenceEqual(segments[segmentIndex].AsSpan()))
+            {
+                return false;
+            }
+
+            pathPosition += pathPiece.Length + 1;
+            segmentIndex--;
+        }
+
+        // If we reach here, all compared segments matched.
+        // - Both exhausted: exact match
+        // - Segments exhausted, path has more: change is ancestor of selection
+        // - Path exhausted, more segments: change is descendant of selection
+        return true;
     }
 }
