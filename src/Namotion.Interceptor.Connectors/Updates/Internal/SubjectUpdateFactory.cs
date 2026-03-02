@@ -205,8 +205,11 @@ internal static class SubjectUpdateFactory
             }
             else
             {
-                SubjectItemsUpdateFactory.BuildDictionaryDiff(update, change.GetOldValue<IDictionary?>(),
-                    newValue, builder);
+                // Send complete dictionary structure with only new items processed fully.
+                // Avoids diff operations which can be incorrect when old values are stale
+                // (e.g., from the retry queue after reconnection or ChangeQueueProcessor dedup).
+                SubjectItemsUpdateFactory.BuildDictionaryUpdate(update,
+                    change.GetOldValue<IDictionary?>(), newValue, builder);
             }
         }
         else if (property.IsSubjectCollection)
@@ -219,7 +222,11 @@ internal static class SubjectUpdateFactory
             }
             else
             {
-                SubjectItemsUpdateFactory.BuildCollectionDiff(update,
+                // Send complete collection ordering with only new items processed fully.
+                // Avoids diff operations (Move/Insert/Remove) which can be incorrect when
+                // old values are stale (e.g., from the retry queue after reconnection
+                // or ChangeQueueProcessor dedup).
+                SubjectItemsUpdateFactory.BuildCollectionUpdate(update,
                     change.GetOldValue<IEnumerable<IInterceptorSubject>?>(),
                     newValue, builder);
             }

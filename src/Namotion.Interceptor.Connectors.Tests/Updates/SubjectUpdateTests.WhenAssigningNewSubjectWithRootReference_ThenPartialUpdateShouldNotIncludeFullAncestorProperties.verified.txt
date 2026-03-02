@@ -31,8 +31,7 @@
           Kind: Object
         },
         children: {
-          Kind: Collection,
-          Count: 0
+          Kind: Collection
         }
       }
     }

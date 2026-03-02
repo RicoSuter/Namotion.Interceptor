@@ -198,9 +198,10 @@ public class SubjectUpdateFlowTests
         var existingItem = new TestItem(serverContext) { Label = "Existing", Value = 1 };
         var serverRoot = new TestRoot(serverContext) { Name = "Root", Items = [existingItem] };
 
-        // Client with matching initial state
+        // Initialize client via complete update so stable IDs match
         var clientContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var clientRoot = new TestRoot(clientContext) { Name = "Root", Items = [new TestItem(clientContext) { Label = "Existing", Value = 1 }] };
+        var clientRoot = new TestRoot(clientContext);
+        clientRoot.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(serverRoot, []), DefaultSubjectFactory.Instance);
 
         // Make change - add item
         var changes = new List<SubjectPropertyChange>();

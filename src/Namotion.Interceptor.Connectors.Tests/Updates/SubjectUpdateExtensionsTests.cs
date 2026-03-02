@@ -586,51 +586,6 @@ public partial class SubjectUpdateExtensionsTests
         Assert.Equal("Original", target.FirstName);
     }
 
-    [Fact]
-    public void WhenApplyingCollectionUpdateWithUnknownId_ThenItIsIgnored()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var target = new Person(context)
-        {
-            FirstName = "Parent",
-            Children =
-            [
-                new Person(context) { FirstName = "Child1" }
-            ]
-        };
-
-        var update = new SubjectUpdate
-        {
-            Root = "1",
-            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
-            {
-                ["1"] = new()
-                {
-                    ["Children"] = new SubjectPropertyUpdate
-                    {
-                        Kind = SubjectPropertyUpdateKind.Collection,
-                        Operations =
-                        [
-                            new SubjectCollectionOperation
-                            {
-                                Action = SubjectCollectionOperationType.Remove,
-                                Id = "nonexistent_stable_id_12345" // Unknown stable ID
-                            }
-                        ],
-                        Count = 1
-                    }
-                }
-            }
-        };
-
-        // Act - should not throw
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
-
-        // Assert - collection unchanged
-        Assert.Single(target.Children);
-        Assert.Equal("Child1", target.Children[0].FirstName);
-    }
 
     [Fact]
     public void WhenApplyingUpdateWithMissingSubjectId_ThenItIsIgnored()
@@ -662,55 +617,6 @@ public partial class SubjectUpdateExtensionsTests
         Assert.Null(target.Father);
     }
 
-    [Fact]
-    public void WhenApplyingSparseUpdateWithUnknownItemId_ThenItemIsIgnored()
-    {
-        // Arrange - create source and target via complete update so IDs match
-        var sourceContext = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
-        var source = new Person(sourceContext)
-        {
-            FirstName = "Parent",
-            Children = [new Person(sourceContext) { FirstName = "Child1" }]
-        };
-
-        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
-        var target = new Person(targetContext);
-        target.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(source, []), DefaultSubjectFactory.Instance);
-
-        // Create a sparse update with an unknown item ID - should be ignored gracefully.
-        // Operations = [] signals this is a sparse update (not a complete collection).
-        var rootId = source.GetOrAddSubjectId();
-        var update = new SubjectUpdate
-        {
-            Root = rootId,
-            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
-            {
-                [rootId] = new()
-                {
-                    ["Children"] = new SubjectPropertyUpdate
-                    {
-                        Kind = SubjectPropertyUpdateKind.Collection,
-                        Operations = [],
-                        Items =
-                        [
-                            new SubjectPropertyItemUpdate
-                            {
-                                Id = "unknown_stable_id_12345"
-                            }
-                        ],
-                        Count = 1
-                    }
-                }
-            }
-        };
-
-        // Act - should not throw; unknown item IDs in sparse updates are ignored
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
-
-        // Assert - collection unchanged
-        Assert.Single(target.Children);
-        Assert.Equal("Child1", target.Children[0].FirstName);
-    }
 
     [Fact]
     public void WhenApplyingCompleteCollectionWithNewItem_ThenItemIsAppended()
@@ -740,8 +646,7 @@ public partial class SubjectUpdateExtensionsTests
                         [
                             new SubjectPropertyItemUpdate { Id = child1Id },
                             new SubjectPropertyItemUpdate { Id = child2Id }
-                        ],
-                        Count = 2
+                        ]
                     }
                 },
                 [child1Id] = new()
@@ -772,93 +677,10 @@ public partial class SubjectUpdateExtensionsTests
         Assert.Equal("NewChild", target.Children[1].FirstName);
     }
 
-    [Fact]
-    public void WhenApplyingMoveWithUnknownId_ThenItIsIgnored()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var child1 = new Person(context) { FirstName = "Child1" };
-        var child2 = new Person(context) { FirstName = "Child2" };
-        var target = new Person(context) { FirstName = "Parent", Children = [child1, child2] };
 
-        var update = new SubjectUpdate
-        {
-            Root = "1",
-            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
-            {
-                ["1"] = new()
-                {
-                    ["Children"] = new SubjectPropertyUpdate
-                    {
-                        Kind = SubjectPropertyUpdateKind.Collection,
-                        Operations =
-                        [
-                            new SubjectCollectionOperation
-                            {
-                                Action = SubjectCollectionOperationType.Move,
-                                Id = "unknown_stable_id_99999", // Unknown stable ID
-                                AfterId = null
-                            }
-                        ],
-                        Count = 2
-                    }
-                }
-            }
-        };
-
-        // Act - should not throw
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
-
-        // Assert - collection unchanged
-        Assert.Equal(2, target.Children.Count);
-        Assert.Equal("Child1", target.Children[0].FirstName);
-        Assert.Equal("Child2", target.Children[1].FirstName);
-    }
 
     [Fact]
-    public void WhenApplyingRemoveWithUnknownId_ThenItIsIgnored()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry();
-        var target = new Person(context)
-        {
-            FirstName = "Parent",
-            Children = [new Person(context) { FirstName = "Child1" }]
-        };
-
-        var update = new SubjectUpdate
-        {
-            Root = "1",
-            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
-            {
-                ["1"] = new()
-                {
-                    ["Children"] = new SubjectPropertyUpdate
-                    {
-                        Kind = SubjectPropertyUpdateKind.Collection,
-                        Operations =
-                        [
-                            new SubjectCollectionOperation
-                            {
-                                Action = SubjectCollectionOperationType.Remove,
-                                Id = "unknown_stable_id_99999" // Unknown stable ID
-                            }
-                        ],
-                        Count = 1
-                    }
-                }
-            }
-        };
-
-        // Act - should not throw
-        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
-
-        // Assert - collection unchanged
-        Assert.Single(target.Children);
-    }
-
-    [Fact]
-    public void WhenApplyingUpdateToEmptyCollection_ThenInsertOperationWorks()
+    public void WhenApplyingCompleteStateToEmptyCollection_ThenItemIsAdded()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
@@ -878,16 +700,10 @@ public partial class SubjectUpdateExtensionsTests
                     ["Children"] = new SubjectPropertyUpdate
                     {
                         Kind = SubjectPropertyUpdateKind.Collection,
-                        Operations =
+                        Items =
                         [
-                            new SubjectCollectionOperation
-                            {
-                                Action = SubjectCollectionOperationType.Insert,
-                                Id = "2",
-                                AfterId = null // Insert at head
-                            }
-                        ],
-                        Count = 1
+                            new SubjectPropertyItemUpdate { Id = "2" }
+                        ]
                     }
                 },
                 ["2"] = new()

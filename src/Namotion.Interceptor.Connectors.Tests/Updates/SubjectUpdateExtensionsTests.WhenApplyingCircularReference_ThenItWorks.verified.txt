@@ -25,12 +25,10 @@
         Id: SubjectId_2
       },
       Items: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       },
       Lookup: {
-        Kind: Dictionary,
-        Count: 0
+        Kind: Dictionary
       }
     },
     SubjectId_2: {
@@ -57,12 +55,10 @@
         Kind: Object
       },
       Items: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       },
       Lookup: {
-        Kind: Dictionary,
-        Count: 0
+        Kind: Dictionary
       }
     }
   }

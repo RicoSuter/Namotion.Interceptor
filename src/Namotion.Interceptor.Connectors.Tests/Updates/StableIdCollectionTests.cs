@@ -35,7 +35,7 @@ public class StableIdCollectionTests
     }
 
     [Fact]
-    public void CollectionInsert_UsesAfterIdOfPredecessor()
+    public void CollectionInsert_ProducesCompleteStateWithNewItemData()
     {
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
         var child1 = new CycleTestNode { Name = "Child1" };
@@ -54,23 +54,26 @@ public class StableIdCollectionTests
         var rootId = node.GetOrAddSubjectId();
         Assert.True(update.Subjects.ContainsKey(rootId));
         var itemsUpdate = update.Subjects[rootId]["Items"];
-        Assert.NotNull(itemsUpdate.Operations);
 
-        var insertOp = itemsUpdate.Operations.First(o => o.Action == SubjectCollectionOperationType.Insert);
-        Assert.Equal(22, insertOp.Id.Length);
-        // afterId should be child1's stable ID (insert after child1)
-        Assert.Equal(child1.GetOrAddSubjectId(), insertOp.AfterId);
+        // Complete state: full items list
+        Assert.NotNull(itemsUpdate.Items);
+        Assert.Equal(2, itemsUpdate.Items.Count);
+
+        // Both items referenced by stable IDs
+        Assert.Equal(child1.GetOrAddSubjectId(), itemsUpdate.Items[0].Id);
+        Assert.Equal(child2.GetOrAddSubjectId(), itemsUpdate.Items[1].Id);
+
+        // New item (child2) should have full subject data in the update
+        Assert.True(update.Subjects.ContainsKey(child2.GetOrAddSubjectId()));
     }
 
     [Fact]
-    public void CollectionRemove_UsesStableIdOfRemovedItem()
+    public void CollectionRemove_ProducesCompleteStateWithoutRemovedItem()
     {
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
         var child1 = new CycleTestNode { Name = "Child1" };
         var child2 = new CycleTestNode { Name = "Child2" };
         var node = new CycleTestNode(context) { Name = "Root", Items = [child1, child2] };
-
-        var child2Id = child2.GetOrAddSubjectId();
 
         var changes = new List<SubjectPropertyChange>();
         context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
@@ -82,10 +85,11 @@ public class StableIdCollectionTests
 
         var rootId = node.GetOrAddSubjectId();
         var itemsUpdate = update.Subjects[rootId]["Items"];
-        Assert.NotNull(itemsUpdate.Operations);
 
-        var removeOp = itemsUpdate.Operations.First(o => o.Action == SubjectCollectionOperationType.Remove);
-        Assert.Equal(child2Id, removeOp.Id);
+        // Complete state: items list with only remaining item
+        Assert.NotNull(itemsUpdate.Items);
+        Assert.Single(itemsUpdate.Items);
+        Assert.Equal(child1.GetOrAddSubjectId(), itemsUpdate.Items[0].Id);
     }
 
     [Fact]
@@ -109,7 +113,7 @@ public class StableIdCollectionTests
     }
 
     [Fact]
-    public void CollectionInsertAtHead_HasNullAfterId()
+    public void CollectionInsertAtHead_ProducesCompleteStateWithCorrectOrdering()
     {
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
         var child2 = new CycleTestNode { Name = "Child2" };
@@ -126,8 +130,11 @@ public class StableIdCollectionTests
 
         var rootId = node.GetOrAddSubjectId();
         var itemsUpdate = update.Subjects[rootId]["Items"];
-        var insertOp = itemsUpdate.Operations!.First(o => o.Action == SubjectCollectionOperationType.Insert);
 
-        Assert.Null(insertOp.AfterId); // inserted at head
+        // Complete state with correct ordering (child1 first)
+        Assert.NotNull(itemsUpdate.Items);
+        Assert.Equal(2, itemsUpdate.Items.Count);
+        Assert.Equal(child1.GetOrAddSubjectId(), itemsUpdate.Items[0].Id);
+        Assert.Equal(child2.GetOrAddSubjectId(), itemsUpdate.Items[1].Id);
     }
 }

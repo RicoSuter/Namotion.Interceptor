@@ -23,8 +23,7 @@
         Kind: Object
       },
       Items: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       },
       Lookup: {
         Kind: Value,

@@ -6,20 +6,14 @@
         children: {
           Kind: Collection,
           Timestamp: DateTimeOffset_1,
-          Operations: [
+          Items: [
             {
               Id: SubjectId_2
             }
-          ],
-          Items: [
-            {
-              Id: SubjectId_3
-            }
-          ],
-          Count: 1
+          ]
         }
       },
-      SubjectId_3: {
+      SubjectId_2: {
         firstName: {
           Kind: Value,
           Value: Child2.0,
@@ -36,7 +30,7 @@
   Update2: {
     Root: SubjectId_1,
     Subjects: {
-      SubjectId_3: {
+      SubjectId_2: {
         firstName: {
           Kind: Value,
           Value: Child2.1,

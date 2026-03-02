@@ -16,6 +16,7 @@ public class MutationEngine : BackgroundService
     private const int MinCollectionSize = 10;
     private const int MaxCollectionSize = 30;
     private const int MaxDepth = 3;
+    private const int MaxTotalNodes = 500;
 
     private static long _globalCounter;
 
@@ -24,11 +25,10 @@ public class MutationEngine : BackgroundService
     private readonly TestCycleCoordinator _coordinator;
     private readonly ILogger _logger;
     private readonly Random _random = new();
-    private readonly object _nodeLock = new();
+    private readonly Lock _nodeLock = new();
 
     private List<TestNode> _knownNodes = [];
     private List<TestNode> _structuralTargets = [];
-    private readonly Dictionary<TestNode, int> _nodeDepths = new();
 
     private long _valueMutationCount;
     private long _structuralMutationCount;
@@ -130,7 +130,6 @@ public class MutationEngine : BackgroundService
         {
             _knownNodes = [];
             _structuralTargets = [];
-            _nodeDepths.Clear();
 
             VisitNode(_root, 0);
         }
@@ -139,7 +138,6 @@ public class MutationEngine : BackgroundService
     private void VisitNode(TestNode node, int depth)
     {
         _knownNodes.Add(node);
-        _nodeDepths[node] = depth;
 
         if (depth < MaxDepth)
         {
@@ -233,16 +231,21 @@ public class MutationEngine : BackgroundService
     {
         var collection = target.Collection;
         var count = collection.Length;
+        var atNodeLimit = _knownNodes.Count >= MaxTotalNodes;
 
-        if (count >= MaxCollectionSize)
+        if (count >= MaxCollectionSize || (atNodeLimit && count > MinCollectionSize))
         {
-            // Must remove
+            // Must remove (also force remove when at global node limit)
             RemoveFromCollection(target, collection);
         }
-        else if (count <= MinCollectionSize)
+        else if (count <= MinCollectionSize && !atNodeLimit)
         {
-            // Must add
+            // Must add (but not when at global node limit)
             AddToCollection(target, collection);
+        }
+        else if (atNodeLimit)
+        {
+            RemoveFromCollection(target, collection);
         }
         else
         {
@@ -279,14 +282,19 @@ public class MutationEngine : BackgroundService
     {
         var items = target.Items;
         var count = items.Count;
+        var atNodeLimit = _knownNodes.Count >= MaxTotalNodes;
 
-        if (count >= MaxCollectionSize)
+        if (count >= MaxCollectionSize || (atNodeLimit && count > MinCollectionSize))
         {
             RemoveFromDictionary(target, items);
         }
-        else if (count <= MinCollectionSize)
+        else if (count <= MinCollectionSize && !atNodeLimit)
         {
             AddToDictionary(target);
+        }
+        else if (atNodeLimit)
+        {
+            RemoveFromDictionary(target, items);
         }
         else
         {
@@ -327,11 +335,13 @@ public class MutationEngine : BackgroundService
 
     private void MutateObjectRef(TestNode target)
     {
-        if (target.ObjectRef != null && _random.Next(2) == 0)
+        var atNodeLimit = _knownNodes.Count >= MaxTotalNodes;
+
+        if (target.ObjectRef != null && (_random.Next(2) == 0 || atNodeLimit))
         {
             target.ObjectRef = null;
         }
-        else
+        else if (!atNodeLimit)
         {
             target.ObjectRef = CreateNewNode();
         }

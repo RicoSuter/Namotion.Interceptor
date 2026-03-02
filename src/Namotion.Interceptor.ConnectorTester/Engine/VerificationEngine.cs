@@ -6,6 +6,7 @@ using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Logging;
 using Namotion.Interceptor.ConnectorTester.Model;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.ConnectorTester.Engine;
 
@@ -107,7 +108,7 @@ public class VerificationEngine : BackgroundService
         {
             foreach (var participant in profile.Participants)
             {
-                if (!_chaosEngines.Any(e => e.TargetName == participant))
+                if (_chaosEngines.All(e => e.TargetName != participant))
                 {
                     _logger.LogWarning(
                         "Chaos profile '{Profile}' references '{Participant}' which has no chaos engine (no Chaos config or not a known participant). It will be ignored.",
@@ -220,7 +221,7 @@ public class VerificationEngine : BackgroundService
                     var fileName = $"cycle{_cycleNumber:D3}-fail-{snapshot.Name}.json";
                     var filePath = Path.Combine(Path.GetDirectoryName(MemoryLogPath)!, fileName);
                     var formattedJson = FormatSnapshotJson(snapshot.Snapshot);
-                    File.WriteAllText(filePath, formattedJson);
+                    await File.WriteAllTextAsync(filePath, formattedJson, stoppingToken);
                     _logger.LogError("Snapshot [{Name}] written to {FilePath}", snapshot.Name, filePath);
                 }
 
@@ -327,6 +328,16 @@ public class VerificationEngine : BackgroundService
             CultureInfo.InvariantCulture,
             "{0:yyyy-MM-ddTHH:mm:ss.fffZ}, Cycle {1}, {2}, {3}, ProcessMB: {4:F1}, HeapMB: {5:F1}",
             DateTimeOffset.UtcNow, _cycleNumber, profile, result, workingSetMb, heapMb);
+
+        // Diagnostic: log registry vs reachable subject counts to distinguish leak from tree growth
+        var registryInfo = string.Join(", ", _participants.Select(p =>
+        {
+            var registry = ((IInterceptorSubject)p.Value).Context.TryGetService<ISubjectRegistry>();
+            var knownCount = registry?.KnownSubjects.Count ?? -1;
+            var reachable = SubjectUpdate.CreateCompleteUpdate(p.Value, []).Subjects.Count;
+            return $"{p.Key}={knownCount}/{reachable}";
+        }));
+        line += $", Subjects(registry/reachable): [{registryInfo}]";
 
         File.AppendAllText(MemoryLogPath, line + Environment.NewLine);
     }

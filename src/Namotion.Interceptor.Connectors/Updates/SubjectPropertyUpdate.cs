@@ -38,29 +38,12 @@ public class SubjectPropertyUpdate
     public string? Id { get; set; }
 
     /// <summary>
-    /// Structural operations (Remove, Insert, Move) for Collection/Dictionary kinds.
-    /// Applied in order BEFORE sparse property updates.
-    /// Note: Move is only valid for Collection kind.
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("operations")]
-    public List<SubjectCollectionOperation>? Operations { get; set; }
-
-    /// <summary>
     /// Item references by stable subject ID for Collection/Dictionary kinds.
-    /// In complete updates (no operations): defines the full ordered state.
-    /// In partial updates (with operations): sparse property updates for existing items.
+    /// Defines the complete ordered state of the collection or dictionary.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("items")]
     public List<SubjectPropertyItemUpdate>? Items { get; set; }
-
-    /// <summary>
-    /// Total count of collection/dictionary after all operations.
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("count")]
-    public int? Count { get; set; }
 
     /// <summary>
     /// Attribute updates for this property.

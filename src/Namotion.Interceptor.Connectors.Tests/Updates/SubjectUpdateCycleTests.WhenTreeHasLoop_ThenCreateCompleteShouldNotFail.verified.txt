@@ -35,8 +35,7 @@
         Kind: Object
       },
       children: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       }
     },
     SubjectId_2: {
@@ -72,8 +71,7 @@
         Kind: Object
       },
       children: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       }
     }
   }

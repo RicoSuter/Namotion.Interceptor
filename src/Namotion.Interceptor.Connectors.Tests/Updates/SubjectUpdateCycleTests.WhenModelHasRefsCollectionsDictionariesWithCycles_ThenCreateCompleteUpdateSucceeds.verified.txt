@@ -33,12 +33,10 @@
           {
             Id: SubjectId_3
           }
-        ],
-        Count: 1
+        ]
       },
       lookup: {
-        Kind: Dictionary,
-        Count: 0
+        Kind: Dictionary
       }
     },
     SubjectId_2: {
@@ -70,8 +68,7 @@
           {
             Id: SubjectId_4
           }
-        ],
-        Count: 1
+        ]
       },
       lookup: {
         Kind: Dictionary,
@@ -81,8 +78,7 @@
             Id: SubjectId_5,
             Key: key
           }
-        ],
-        Count: 1
+        ]
       }
     },
     SubjectId_4: {
@@ -108,12 +104,10 @@
         Kind: Object
       },
       items: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       },
       lookup: {
-        Kind: Dictionary,
-        Count: 0
+        Kind: Dictionary
       }
     },
     SubjectId_5: {
@@ -139,12 +133,10 @@
         Kind: Object
       },
       items: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       },
       lookup: {
-        Kind: Dictionary,
-        Count: 0
+        Kind: Dictionary
       }
     },
     SubjectId_3: {
@@ -170,12 +162,10 @@
         Kind: Object
       },
       items: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       },
       lookup: {
-        Kind: Dictionary,
-        Count: 0
+        Kind: Dictionary
       }
     }
   }

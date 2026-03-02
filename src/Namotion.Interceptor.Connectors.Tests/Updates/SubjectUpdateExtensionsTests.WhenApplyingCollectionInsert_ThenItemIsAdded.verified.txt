@@ -5,17 +5,17 @@
       Children: {
         Kind: Collection,
         Timestamp: DateTimeOffset_1,
-        Operations: [
+        Items: [
           {
-            Action: Insert,
-            Id: SubjectId_2,
-            AfterId: SubjectId_3
+            Id: SubjectId_2
+          },
+          {
+            Id: SubjectId_3
           }
-        ],
-        Count: 2
+        ]
       }
     },
-    SubjectId_2: {
+    SubjectId_3: {
       FirstName: {
         Kind: Value,
         Value: NewChild,
@@ -48,8 +48,7 @@
         Kind: Object
       },
       Children: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       }
     }
   }

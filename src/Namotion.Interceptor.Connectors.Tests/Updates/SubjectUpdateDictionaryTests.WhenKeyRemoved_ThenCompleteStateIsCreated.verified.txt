@@ -5,13 +5,12 @@
       Lookup: {
         Kind: Dictionary,
         Timestamp: DateTimeOffset_1,
-        Operations: [
+        Items: [
           {
             Id: SubjectId_2,
-            Key: key1
+            Key: key2
           }
-        ],
-        Count: 1
+        ]
       }
     }
   }

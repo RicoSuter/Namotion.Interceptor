@@ -5,12 +5,11 @@
       Items: {
         Kind: Collection,
         Timestamp: DateTimeOffset_1,
-        Operations: [
+        Items: [
           {
             Id: SubjectId_2
           }
-        ],
-        Count: 0
+        ]
       }
     }
   }

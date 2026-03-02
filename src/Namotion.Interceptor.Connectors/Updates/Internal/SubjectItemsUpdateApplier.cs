@@ -6,12 +6,11 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 
 /// <summary>
 /// Applies collection and dictionary updates from <see cref="SubjectUpdate"/> instances.
-/// Handles structural operations (Insert, Remove, Move) and sparse property updates.
 /// </summary>
 internal static class SubjectItemsUpdateApplier
 {
     /// <summary>
-    /// Applies a collection update to a property using subject ID-based operations.
+    /// Applies a collection update to a property using complete-state items.
     /// </summary>
     internal static void ApplyCollectionUpdate(
         IInterceptorSubject parent,
@@ -23,72 +22,8 @@ internal static class SubjectItemsUpdateApplier
         var structureChanged = false;
         var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
 
-        // Apply structural operations (ID-based)
-        if (propertyUpdate.Operations is { Count: > 0 })
-        {
-            var idIndex = BuildIdIndex(workingItems);
-            foreach (var operation in propertyUpdate.Operations)
-            {
-                if (string.IsNullOrEmpty(operation.Id))
-                    continue;
-
-                switch (operation.Action)
-                {
-                    case SubjectCollectionOperationType.Remove:
-                    {
-                        var index = FindItemIndexById(idIndex, operation.Id);
-                        if (index >= 0)
-                        {
-                            workingItems.RemoveAt(index);
-                            RemoveFromIdIndex(idIndex, operation.Id, index);
-                            structureChanged = true;
-                        }
-                        break;
-                    }
-
-                    case SubjectCollectionOperationType.Insert:
-                    {
-                        // Idempotent: skip if item already exists in collection (echo protection)
-                        if (FindItemIndexById(idIndex, operation.Id) >= 0)
-                            break;
-
-                        var newItem = ResolveOrCreateSubject(
-                            parent, property, 0, operation.Id, idRegistry, context);
-                        if (newItem is null)
-                            break;
-
-                        var insertIndex = FindInsertPosition(workingItems, idIndex, operation.AfterId);
-                        workingItems.Insert(insertIndex, newItem);
-                        InsertIntoIdIndex(idIndex, operation.Id, insertIndex);
-                        structureChanged = true;
-                        break;
-                    }
-
-                    case SubjectCollectionOperationType.Move:
-                    {
-                        // No-op when moving an item after itself
-                        if (operation.Id == operation.AfterId)
-                            break;
-
-                        var currentIndex = FindItemIndexById(idIndex, operation.Id);
-                        if (currentIndex >= 0)
-                        {
-                            var item = workingItems[currentIndex];
-                            workingItems.RemoveAt(currentIndex);
-                            RemoveFromIdIndex(idIndex, operation.Id, currentIndex);
-                            var insertIndex = FindInsertPosition(workingItems, idIndex, operation.AfterId);
-                            workingItems.Insert(insertIndex, item);
-                            InsertIntoIdIndex(idIndex, operation.Id, insertIndex);
-                            structureChanged = true;
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-
-        // Complete collection from items (when no operations = complete state)
-        if (propertyUpdate.Operations is null && propertyUpdate.Items is { Count: > 0 })
+        // Complete collection from items (defines the full ordered state)
+        if (propertyUpdate.Items is not null)
         {
             var newItems = new List<IInterceptorSubject>(propertyUpdate.Items.Count);
             foreach (var itemUpdate in propertyUpdate.Items)
@@ -105,33 +40,6 @@ internal static class SubjectItemsUpdateApplier
             structureChanged = true;
         }
 
-        // Sparse property updates (items with operations present -- update existing items by ID)
-        if (propertyUpdate.Operations is not null && propertyUpdate.Items is { Count: > 0 })
-        {
-            var sparseIdIndex = BuildIdIndex(workingItems);
-            foreach (var itemUpdate in propertyUpdate.Items)
-            {
-                if (context.Subjects.TryGetValue(itemUpdate.Id, out var itemProps))
-                {
-                    var index = FindItemIndexById(sparseIdIndex, itemUpdate.Id);
-                    if (index >= 0 && context.TryMarkAsProcessed(itemUpdate.Id))
-                    {
-                        SubjectUpdateApplier.ApplyPropertyUpdates(workingItems[index], itemProps, context);
-                    }
-                }
-            }
-        }
-
-        // Trim excess items when a complete update declares a smaller count.
-        // Only apply for complete updates (no operations) to avoid removing items
-        // added by other participants in a multi-source scenario.
-        if (propertyUpdate.Operations is null &&
-            propertyUpdate.Count.HasValue && workingItems.Count > propertyUpdate.Count.Value)
-        {
-            workingItems.RemoveRange(propertyUpdate.Count.Value, workingItems.Count - propertyUpdate.Count.Value);
-            structureChanged = true;
-        }
-
         if (structureChanged)
         {
             var collection = context.SubjectFactory.CreateSubjectCollection(property.Type, workingItems);
@@ -143,7 +51,7 @@ internal static class SubjectItemsUpdateApplier
     }
 
     /// <summary>
-    /// Applies a dictionary update to a property using subject ID-based operations.
+    /// Applies a dictionary update to a property using complete-state items.
     /// </summary>
     internal static void ApplyDictionaryUpdate(
         IInterceptorSubject parent,
@@ -166,48 +74,18 @@ internal static class SubjectItemsUpdateApplier
             }
         }
 
-        // Apply structural operations
-        if (propertyUpdate.Operations is { Count: > 0 })
+        // Apply item updates (complete state for dictionaries)
+        if (propertyUpdate.Items is not null)
         {
-            foreach (var operation in propertyUpdate.Operations)
-            {
-                if (string.IsNullOrEmpty(operation.Id))
-                    continue;
+            var updatedKeys = new HashSet<object>();
 
-                switch (operation.Action)
-                {
-                    case SubjectCollectionOperationType.Remove:
-                        if (operation.Key is not null)
-                        {
-                            var key = DictionaryKeyConverter.Convert(operation.Key, targetKeyType);
-                            if (workingDictionary.Remove(key))
-                                structureChanged = true;
-                        }
-                        break;
-
-                    case SubjectCollectionOperationType.Insert:
-                        if (operation.Key is not null && context.Subjects.TryGetValue(operation.Id, out var itemProps))
-                        {
-                            var key = DictionaryKeyConverter.Convert(operation.Key, targetKeyType);
-                            var newItem = ResolveExistingOrCreateSubject(
-                                parent, property, key, operation.Id, itemProps, idRegistry, context);
-                            workingDictionary[key] = newItem;
-                            structureChanged = true;
-                        }
-                        break;
-                }
-            }
-        }
-
-        // Apply sparse property updates
-        if (propertyUpdate.Items is { Count: > 0 })
-        {
             foreach (var collUpdate in propertyUpdate.Items)
             {
                 if (collUpdate.Key is null)
                     continue;
 
                 var key = DictionaryKeyConverter.Convert(collUpdate.Key, targetKeyType);
+                updatedKeys.Add(key);
 
                 if (context.Subjects.TryGetValue(collUpdate.Id, out var itemProps))
                 {
@@ -229,24 +107,8 @@ internal static class SubjectItemsUpdateApplier
                     }
                 }
             }
-        }
 
-        // Remove dictionary entries not mentioned in update when count doesn't match.
-        // Only apply for complete updates (no operations) to avoid removing entries
-        // added by other participants in a multi-source scenario.
-        if (propertyUpdate.Operations is null &&
-            propertyUpdate.Count.HasValue && workingDictionary.Count != propertyUpdate.Count.Value)
-        {
-            var updatedKeys = new HashSet<object>();
-            if (propertyUpdate.Items is { Count: > 0 })
-            {
-                foreach (var item in propertyUpdate.Items)
-                {
-                    if (item.Key is not null)
-                        updatedKeys.Add(DictionaryKeyConverter.Convert(item.Key, targetKeyType));
-                }
-            }
-
+            // Remove dictionary entries not mentioned in items
             List<object>? keysToRemove = null;
             foreach (var key in workingDictionary.Keys)
             {
@@ -273,64 +135,6 @@ internal static class SubjectItemsUpdateApplier
                 property.SetValue(dictionary);
             }
         }
-    }
-
-    /// <summary>
-    /// Builds a subject ID → index lookup dictionary for O(1) item lookups.
-    /// Must be rebuilt after any structural modification (Insert, Remove, Move).
-    /// </summary>
-    private static Dictionary<string, int> BuildIdIndex(List<IInterceptorSubject> items)
-    {
-        var index = new Dictionary<string, int>(items.Count);
-        for (var i = 0; i < items.Count; i++)
-        {
-            index[items[i].GetOrAddSubjectId()] = i;
-        }
-        return index;
-    }
-
-    private static int FindItemIndexById(Dictionary<string, int> idIndex, string stableId)
-    {
-        return idIndex.GetValueOrDefault(stableId, -1);
-    }
-
-    private static int FindInsertPosition(List<IInterceptorSubject> items, Dictionary<string, int> idIndex, string? afterId)
-    {
-        if (afterId is null)
-            return 0; // Insert at head
-
-        if (idIndex.TryGetValue(afterId, out var index))
-            return index + 1; // Insert after this item
-
-        return items.Count; // afterId not found, append to end
-    }
-
-    /// <summary>
-    /// Incrementally updates the ID index after removing an item at the given position.
-    /// Decrements indices of all items after the removed position.
-    /// </summary>
-    private static void RemoveFromIdIndex(Dictionary<string, int> idIndex, string removedId, int removedPosition)
-    {
-        idIndex.Remove(removedId);
-        foreach (var key in idIndex.Keys)
-        {
-            if (idIndex[key] > removedPosition)
-                idIndex[key]--;
-        }
-    }
-
-    /// <summary>
-    /// Incrementally updates the ID index after inserting an item at the given position.
-    /// Increments indices of all items at or after the inserted position, then adds the new entry.
-    /// </summary>
-    private static void InsertIntoIdIndex(Dictionary<string, int> idIndex, string insertedId, int insertedPosition)
-    {
-        foreach (var key in idIndex.Keys)
-        {
-            if (idIndex[key] >= insertedPosition)
-                idIndex[key]++;
-        }
-        idIndex[insertedId] = insertedPosition;
     }
 
     /// <summary>

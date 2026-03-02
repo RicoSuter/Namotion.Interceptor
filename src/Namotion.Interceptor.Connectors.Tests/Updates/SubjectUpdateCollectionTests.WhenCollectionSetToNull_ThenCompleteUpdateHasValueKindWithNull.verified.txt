@@ -27,8 +27,7 @@
         Timestamp: DateTimeOffset_2
       },
       Lookup: {
-        Kind: Dictionary,
-        Count: 0
+        Kind: Dictionary
       }
     }
   }

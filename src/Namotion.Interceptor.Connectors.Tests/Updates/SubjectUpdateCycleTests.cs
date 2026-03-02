@@ -454,11 +454,11 @@ public class SubjectUpdateCycleTests
         var json = JsonSerializer.Serialize(partialUpdate);
         Assert.NotNull(json);
 
-        // Verify we have Operations with Inserts
+        // Verify we have complete state with both items
         var rootId = root.GetOrAddSubjectId();
         var rootProperties = partialUpdate.Subjects[rootId];
-        Assert.NotNull(rootProperties["items"].Operations);
-        Assert.Equal(2, rootProperties["items"].Operations!.Count);
+        Assert.NotNull(rootProperties["items"].Items);
+        Assert.Equal(2, rootProperties["items"].Items!.Count);
     }
 
     [Fact]
@@ -495,22 +495,21 @@ public class SubjectUpdateCycleTests
         var json = JsonSerializer.Serialize(partialUpdate);
         Assert.NotNull(json);
 
-        // With flat structure, the insert operation has an Id that references
-        // the subject in the Subjects dictionary
+        // With complete state, the items list has the child's ID
         var rootId = root.GetOrAddSubjectId();
         var rootProperties = partialUpdate.Subjects[rootId];
-        var operations = rootProperties["items"].Operations;
-        Assert.NotNull(operations);
-        Assert.Single(operations);
+        var items = rootProperties["items"].Items;
+        Assert.NotNull(items);
+        Assert.Single(items);
 
-        var insertOp = operations[0];
-        Assert.NotNull(insertOp.Id);
+        var childItemId = items[0].Id;
+        Assert.NotNull(childItemId);
 
         // The child subject should exist in the dictionary
-        Assert.True(partialUpdate.Subjects.ContainsKey(insertOp.Id));
+        Assert.True(partialUpdate.Subjects.ContainsKey(childItemId));
 
         // The child's parent property should reference the root by Id
-        var childProperties = partialUpdate.Subjects[insertOp.Id];
+        var childProperties = partialUpdate.Subjects[childItemId];
         Assert.True(childProperties.ContainsKey("parent"));
         Assert.Equal(rootId, childProperties["parent"].Id);
     }

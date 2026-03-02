@@ -51,8 +51,7 @@
           {
             Id: SubjectId_6
           }
-        ],
-        Count: 3
+        ]
       }
     },
     SubjectId_2: {
@@ -87,8 +86,7 @@
         Kind: Object
       },
       children: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       }
     },
     SubjectId_3: {
@@ -122,8 +120,7 @@
         Kind: Object
       },
       children: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       }
     },
     SubjectId_4: {
@@ -158,8 +155,7 @@
         Kind: Object
       },
       children: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       }
     },
     SubjectId_5: {
@@ -193,8 +189,7 @@
         Kind: Object
       },
       children: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       }
     },
     SubjectId_6: {
@@ -229,8 +224,7 @@
         Kind: Object
       },
       children: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       }
     }
   }

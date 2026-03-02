@@ -5,20 +5,18 @@
       Lookup: {
         Kind: Dictionary,
         Timestamp: DateTimeOffset_1,
-        Operations: [
+        Items: [
           {
-            Action: Insert,
             Id: SubjectId_2,
-            Key: key2
+            Key: key1
           }
-        ],
-        Count: 2
+        ]
       }
     },
     SubjectId_2: {
       Name: {
         Kind: Value,
-        Value: Item2,
+        Value: ReplacementItem,
         Attributes: {
           Status: {
             Kind: Value,
@@ -36,12 +34,10 @@
         Kind: Object
       },
       Items: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       },
       Lookup: {
-        Kind: Dictionary,
-        Count: 0
+        Kind: Dictionary
       }
     }
   }

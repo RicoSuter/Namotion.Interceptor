@@ -22,14 +22,14 @@
       items: {
         Kind: Collection,
         Timestamp: {Scrubbed},
-        Operations: [
+        Items: [
           {
-            Action: Insert,
-            Id: SubjectId_3,
-            AfterId: SubjectId_4
+            Id: SubjectId_3
+          },
+          {
+            Id: SubjectId_4
           }
-        ],
-        Count: 2
+        ]
       }
     },
     SubjectId_2: {
@@ -54,15 +54,13 @@
         Kind: Object
       },
       items: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       },
       lookup: {
-        Kind: Dictionary,
-        Count: 0
+        Kind: Dictionary
       }
     },
-    SubjectId_3: {
+    SubjectId_4: {
       name: {
         Kind: Value,
         Value: NewItem,
@@ -84,12 +82,10 @@
         Kind: Object
       },
       items: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       },
       lookup: {
-        Kind: Dictionary,
-        Count: 0
+        Kind: Dictionary
       }
     }
   }

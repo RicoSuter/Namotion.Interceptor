@@ -14,7 +14,7 @@ namespace Namotion.Interceptor.Connectors.Tests.Updates;
 public class SubjectUpdateCollectionTests
 {
     [Fact]
-    public async Task WhenItemInsertedAtEnd_ThenInsertOperationIsCreated()
+    public async Task WhenItemInsertedAtEnd_ThenCompleteStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -35,7 +35,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenItemInsertedAtBeginning_ThenInsertOperationIsCreated()
+    public async Task WhenItemInsertedAtBeginning_ThenCompleteStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -56,7 +56,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenItemRemoved_ThenRemoveOperationIsCreated()
+    public async Task WhenItemRemoved_ThenCompleteStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -78,7 +78,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenItemMoved_ThenMoveOperationWithoutItemDataIsCreated()
+    public async Task WhenItemMoved_ThenCompleteStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -117,7 +117,7 @@ public class SubjectUpdateCollectionTests
 
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
 
-        // Assert - should have Collection update at index 1, not Operations
+        // Assert - should have Collection update at index 1
         await Verify(update);
     }
 
@@ -196,7 +196,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenRemoveAndInsertCombined_ThenBothOperationsAreCreated()
+    public async Task WhenRemoveAndInsertCombined_ThenCompleteStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -218,7 +218,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenMoveWithPropertyUpdate_ThenMoveOperationAndSparseUpdateAreCreated()
+    public async Task WhenMoveWithPropertyUpdate_ThenCompleteStateAndSparseUpdateAreCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -263,7 +263,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenCollectionBecomesEmpty_ThenRemoveOperationsAreCreated()
+    public async Task WhenCollectionBecomesEmpty_ThenEmptyStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -284,7 +284,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenCollectionPopulatedFromEmpty_ThenInsertOperationsAreCreated()
+    public async Task WhenCollectionPopulatedFromEmpty_ThenCompleteStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -321,7 +321,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenEmptyCollectionRemainsEmpty_ThenNoOperationsAreCreated()
+    public async Task WhenEmptyCollectionRemainsEmpty_ThenNoUpdateIsCreated()
     {
         // Arrange - both old and new collections are empty
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -360,7 +360,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenSingleItemRemoved_ThenRemoveOperationAtIndexZero()
+    public async Task WhenSingleItemRemoved_ThenCompleteStateAtIndexZero()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -401,7 +401,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenFirstItemRemoved_ThenRemoveAtIndexZero()
+    public async Task WhenFirstItemRemoved_ThenCompleteStateAtIndexZero()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -422,7 +422,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenInsertAtIndexZero_ThenInsertOperationAtZero()
+    public async Task WhenInsertAtIndexZero_ThenCompleteStateAtZero()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -443,7 +443,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public void WhenRemoveAndMoveCombined_ThenMoveIndicesAccountForRemovals()
+    public void WhenRemoveAndMoveCombined_ThenCompleteStateIsProduced()
     {
         // Arrange: [A, B, C] where we'll remove A and reorder B,C to C,B
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -460,26 +460,12 @@ public class SubjectUpdateCollectionTests
 
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
 
-        // Assert - operations should use intermediate indices
+        // Assert - complete state, items list contains final ordering
         Assert.NotNull(update.Subjects);
         Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
         Assert.True(rootProperties!.TryGetValue("Items", out var itemsUpdate));
-        Assert.NotNull(itemsUpdate!.Operations);
-
-        var removes = itemsUpdate.Operations.Where(op => op.Action == SubjectCollectionOperationType.Remove).ToList();
-        var moves = itemsUpdate.Operations.Where(op => op.Action == SubjectCollectionOperationType.Move).ToList();
-
-        Assert.Single(removes);
-        // Remove references childA by its stable ID
-        Assert.Equal(22, removes[0].Id.Length);
-        Assert.All(removes[0].Id.ToCharArray(), c => Assert.True(char.IsLetterOrDigit(c)));
-
-        // Move operations reference subjects by stable ID with AfterId for positioning
-        foreach (var move in moves)
-        {
-            Assert.Equal(22, move.Id.Length);
-            // AfterId can be null (move to head) or a valid stable ID
-        }
+        Assert.NotNull(itemsUpdate!.Items);
+        Assert.Equal(2, itemsUpdate.Items.Count);
     }
 
     [Fact]

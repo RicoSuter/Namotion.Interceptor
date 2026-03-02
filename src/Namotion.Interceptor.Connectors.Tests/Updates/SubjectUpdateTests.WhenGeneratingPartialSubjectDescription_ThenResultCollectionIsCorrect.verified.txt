@@ -10,25 +10,19 @@
       children: {
         Kind: Collection,
         Timestamp: {Scrubbed},
-        Operations: [
+        Items: [
           {
             Id: SubjectId_3
           },
           {
             Id: SubjectId_4
           }
-        ],
-        Items: [
-          {
-            Id: SubjectId_5
-          }
-        ],
-        Count: 2
+        ]
       },
       father: {
         Kind: Object,
         Timestamp: {Scrubbed},
-        Id: SubjectId_6
+        Id: SubjectId_5
       }
     },
     SubjectId_2: {
@@ -63,11 +57,10 @@
         Kind: Object
       },
       children: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       }
     },
-    SubjectId_5: {
+    SubjectId_4: {
       firstName: {
         Kind: Value,
         Value: John,
@@ -99,11 +92,10 @@
         Kind: Object
       },
       children: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       }
     },
-    SubjectId_6: {
+    SubjectId_5: {
       firstName: {
         Kind: Value,
         Value: MyFather,
@@ -134,8 +126,7 @@
         Kind: Object
       },
       children: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       }
     }
   }

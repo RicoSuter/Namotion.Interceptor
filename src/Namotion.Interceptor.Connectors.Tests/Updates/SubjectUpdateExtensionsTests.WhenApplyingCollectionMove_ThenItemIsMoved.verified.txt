@@ -5,23 +5,17 @@
       Children: {
         Kind: Collection,
         Timestamp: DateTimeOffset_1,
-        Operations: [
+        Items: [
           {
-            Action: Move,
             Id: SubjectId_2
           },
           {
-            Action: Move,
-            Id: SubjectId_3,
-            AfterId: SubjectId_2
+            Id: SubjectId_3
           },
           {
-            Action: Move,
-            Id: SubjectId_4,
-            AfterId: SubjectId_3
+            Id: SubjectId_4
           }
-        ],
-        Count: 3
+        ]
       }
     }
   }

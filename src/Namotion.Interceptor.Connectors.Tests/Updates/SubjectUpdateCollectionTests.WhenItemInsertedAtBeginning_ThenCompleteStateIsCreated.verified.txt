@@ -5,20 +5,20 @@
       Items: {
         Kind: Collection,
         Timestamp: DateTimeOffset_1,
-        Operations: [
+        Items: [
           {
-            Action: Insert,
-            Id: SubjectId_2,
-            AfterId: SubjectId_3
+            Id: SubjectId_2
+          },
+          {
+            Id: SubjectId_3
           }
-        ],
-        Count: 2
+        ]
       }
     },
     SubjectId_2: {
       Name: {
         Kind: Value,
-        Value: Child2,
+        Value: Child1,
         Attributes: {
           Status: {
             Kind: Value,
@@ -36,12 +36,10 @@
         Kind: Object
       },
       Items: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       },
       Lookup: {
-        Kind: Dictionary,
-        Count: 0
+        Kind: Dictionary
       }
     }
   }

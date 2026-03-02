@@ -8,14 +8,13 @@ using Namotion.Interceptor.Tracking.Change;
 namespace Namotion.Interceptor.Connectors.Tests.Updates;
 
 /// <summary>
-/// Tests for dictionary diff operations in SubjectUpdate.
-/// Tests Insert (add key), Remove (delete key) operations and sparse property updates.
-/// Note: Move is not applicable for dictionaries.
+/// Tests for dictionary updates in SubjectUpdate.
+/// Tests adding keys, removing keys, and property updates on dictionary items.
 /// </summary>
 public class SubjectUpdateDictionaryTests
 {
     [Fact]
-    public async Task WhenKeyAdded_ThenInsertOperationIsCreated()
+    public async Task WhenKeyAdded_ThenCompleteStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -40,7 +39,7 @@ public class SubjectUpdateDictionaryTests
     }
 
     [Fact]
-    public async Task WhenKeyRemoved_ThenRemoveOperationIsCreated()
+    public async Task WhenKeyRemoved_ThenCompleteStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -85,7 +84,7 @@ public class SubjectUpdateDictionaryTests
 
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
 
-        // Assert - should have Collection update at key1, not Operations
+        // Assert - should have Collection update at key1
         await Verify(update);
     }
 
@@ -122,7 +121,7 @@ public class SubjectUpdateDictionaryTests
     }
 
     [Fact]
-    public async Task WhenAddAndRemoveCombined_ThenBothOperationsAreCreated()
+    public async Task WhenAddAndRemoveCombined_ThenCompleteStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -174,7 +173,7 @@ public class SubjectUpdateDictionaryTests
     }
 
     [Fact]
-    public async Task WhenDictionaryBecomesEmpty_ThenRemoveOperationsAreCreated()
+    public async Task WhenDictionaryBecomesEmpty_ThenEmptyStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -199,7 +198,7 @@ public class SubjectUpdateDictionaryTests
     }
 
     [Fact]
-    public async Task WhenDictionaryPopulatedFromEmpty_ThenInsertOperationsAreCreated()
+    public async Task WhenDictionaryPopulatedFromEmpty_ThenCompleteStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -244,7 +243,7 @@ public class SubjectUpdateDictionaryTests
     }
 
     [Fact]
-    public async Task WhenValueReplacedAtSameKey_ThenInsertAndRemoveOperationsAreCreated()
+    public async Task WhenValueReplacedAtSameKey_ThenCompleteStateIsCreated()
     {
         // Arrange
         // This tests replacing the VALUE at an existing key with a DIFFERENT object.
