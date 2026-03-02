@@ -23,7 +23,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
     private Delegate? _methodInvocationFunction;
 
     private readonly HashSet<object> _services = []; // TODO(perf): Keep null initially?
-    private readonly HashSet<InterceptorSubjectContext> _usedByContexts = [];
+    private readonly ConcurrentDictionary<InterceptorSubjectContext, byte> _usedByContexts = new();
     private readonly HashSet<InterceptorSubjectContext> _fallbackContexts = [];
 
     private InterceptorSubjectContext? _noServicesSingleFallbackContext;
@@ -81,7 +81,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             if (_fallbackContexts.Add(contextImpl))
             {
-                contextImpl._usedByContexts.Add(this);
+                contextImpl._usedByContexts.TryAdd(this, 0);
 
                 // Fast path: first fallback on fresh context (no services, no caches)
                 // Skip full OnContextChanged - just set the optimization field
@@ -113,7 +113,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             if (_fallbackContexts.Remove(contextImpl))
             {
-                contextImpl._usedByContexts.Remove(this);
+                contextImpl._usedByContexts.TryRemove(this, out _);
                 OnContextChanged();
                 return true;
             }
@@ -351,14 +351,16 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
             _noServicesSingleFallbackContext = _services.Count == 0 && _fallbackContexts.Count == 1
                 ? _fallbackContexts.First() : null;
 
+            // _usedByContexts is a ConcurrentDictionary — safe to read without its own lock.
             // Avoid array allocation for common cases (0 or 1 parent)
-            if (_usedByContexts.Count == 1)
+            var usedByCount = _usedByContexts.Count;
+            if (usedByCount == 1)
             {
-                singleParent = _usedByContexts.First();
+                singleParent = _usedByContexts.Keys.First();
             }
-            else if (_usedByContexts.Count > 1)
+            else if (usedByCount > 1)
             {
-                parents = [.. _usedByContexts];
+                parents = [.. _usedByContexts.Keys];
             }
         }
 

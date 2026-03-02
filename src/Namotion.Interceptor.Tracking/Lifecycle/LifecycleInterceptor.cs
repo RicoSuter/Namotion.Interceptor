@@ -265,26 +265,16 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        var currentValue = context.CurrentValue;
-        next(ref context);
-        var newValue = context.GetFinalValue();
-
         if (typeof(TProperty).IsValueType || typeof(TProperty) == typeof(string))
         {
+            next(ref context);
             return;
         }
 
-        if (ReferenceEquals(currentValue, newValue))
-        {
-            return;
-        }
-
-        if (currentValue is not (IInterceptorSubject or ICollection or IDictionary) &&
-            newValue is not (IInterceptorSubject or ICollection or IDictionary))
-        {
-            return;
-        }
-
+        // For reference types that could contain subjects, serialize the property write
+        // together with lifecycle tracking under the same lock. This prevents concurrent
+        // writes to the same structural property from causing lifecycle state divergence
+        // (orphaned subjects in _attachedSubjects that no longer exist in any property).
         var oldCollectedSubjects = GetList();
         var newCollectedSubjects = GetList();
         var oldTouchedSubjects = GetSubjectHashSet();
@@ -294,6 +284,24 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             lock (_attachedSubjects)
             {
+                // Re-read the current value inside the lock. The value captured in
+                // context.CurrentValue may be stale if another thread wrote to this
+                // property between our capture and acquiring this lock.
+                var currentValue = context.Property.Metadata.GetValue?.Invoke(context.Property.Subject);
+                next(ref context);
+                var newValue = context.GetFinalValue();
+
+                if (ReferenceEquals(currentValue, newValue))
+                {
+                    return;
+                }
+
+                if (currentValue is not (IInterceptorSubject or ICollection or IDictionary) &&
+                    newValue is not (IInterceptorSubject or ICollection or IDictionary))
+                {
+                    return;
+                }
+
                 FindSubjectsInProperty(context.Property, currentValue, null, oldCollectedSubjects, oldTouchedSubjects);
                 FindSubjectsInProperty(context.Property, newValue, null, newCollectedSubjects, newTouchedSubjects);
 
