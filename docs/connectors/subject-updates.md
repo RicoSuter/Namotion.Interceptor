@@ -1,6 +1,6 @@
 # Subject Updates
 
-Subject updates enable efficient synchronization of object graphs between participants. Instead of sending full object state on every change, only the changed properties are transmitted. All subjects are identified by **stable subject IDs** (22-character base62-encoded GUIDs) that remain consistent across the lifetime of a subject, enabling correct convergence even under concurrent structural mutations.
+Subject updates enable efficient synchronization of object graphs between participants. The protocol is **server-authoritative** — the server holds the canonical state, and clients apply operations as received without conflict resolution or logical clocks. Instead of sending full object state on every change, only the changed properties are transmitted. All subjects are identified by **stable subject IDs** (22-character base62-encoded GUIDs) that remain consistent across the lifetime of a subject, enabling correct convergence even under concurrent structural mutations.
 
 ## Flat Structure
 
