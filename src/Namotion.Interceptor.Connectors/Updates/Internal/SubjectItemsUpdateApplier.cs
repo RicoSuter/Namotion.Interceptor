@@ -30,10 +30,7 @@ internal static class SubjectItemsUpdateApplier
             {
                 var item = ResolveOrCreateSubject(
                     parent, property, newItems.Count, itemUpdate.Id, idRegistry, context);
-                if (item is not null)
-                {
-                    newItems.Add(item);
-                }
+                newItems.Add(item);
             }
 
             workingItems = newItems;
@@ -138,11 +135,10 @@ internal static class SubjectItemsUpdateApplier
     }
 
     /// <summary>
-    /// Resolves an existing subject by ID, or creates a new one from the update context.
-    /// Returns null if the subject cannot be resolved or created.
-    /// Used by collection operations (Insert) and complete collection rebuilds.
+    /// Resolves an existing subject by ID, or creates a new one.
+    /// Used by collection operations and complete collection rebuilds.
     /// </summary>
-    private static IInterceptorSubject? ResolveOrCreateSubject(
+    private static IInterceptorSubject ResolveOrCreateSubject(
         IInterceptorSubject parent,
         RegisteredSubjectProperty property,
         object indexOrKey,
@@ -156,14 +152,9 @@ internal static class SubjectItemsUpdateApplier
             return existing;
         }
 
-        if (context.Subjects.ContainsKey(subjectId))
-        {
-            var newItem = CreateSubjectItem(parent, property, indexOrKey, subjectId, context);
-            ApplyPropertiesIfAvailable(newItem, subjectId, context);
-            return newItem;
-        }
-
-        return null;
+        var newItem = CreateSubjectItem(parent, property, indexOrKey, subjectId, context);
+        ApplyPropertiesIfAvailable(newItem, subjectId, context);
+        return newItem;
     }
 
     /// <summary>

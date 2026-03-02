@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Logging;
@@ -240,41 +241,76 @@ public class VerificationEngine : BackgroundService
     {
         var update = SubjectUpdate.CreateCompleteUpdate(root, []);
 
-        // Build a normalized structure with sorted keys for deterministic comparison.
-        // Dictionary<string, ...> serializes in insertion order which varies per participant.
-        var sorted = new SortedDictionary<string, SortedDictionary<string, SubjectPropertyUpdate>>();
+        // Serialize to JSON, then normalize the JSON tree for deterministic comparison.
+        // This avoids mutating the SubjectPropertyUpdate objects from the update.
+        var json = JsonSerializer.Serialize(update, SnapshotJsonOptions);
+        var node = JsonNode.Parse(json)!.AsObject();
 
-        if (update.Subjects != null)
+        var subjects = node["subjects"]?.AsObject();
+        if (subjects is not null)
         {
-            foreach (var (subjectId, properties) in update.Subjects)
+            foreach (var (_, subjectNode) in subjects)
             {
-                if (properties == null)
+                if (subjectNode is not JsonObject properties)
                     continue;
 
-                var sortedProperties = new SortedDictionary<string, SubjectPropertyUpdate>(properties);
-
-                foreach (var property in sortedProperties.Values)
+                foreach (var (_, propertyNode) in properties)
                 {
+                    if (propertyNode is not JsonObject property)
+                        continue;
+
+                    var kind = property["kind"]?.GetValue<string>();
+
                     // Strip timestamps from structural properties (Collection, Dictionary, Object).
                     // These are set during local graph creation and are inherently different per participant.
                     // Value property timestamps ARE compared and must converge via source timestamps.
-                    if (property.Kind != SubjectPropertyUpdateKind.Value)
+                    if (kind != "Value")
                     {
-                        property.Timestamp = null;
+                        property.Remove("timestamp");
                     }
 
                     // Sort dictionary items by key for order-independent comparison.
-                    if (property.Kind == SubjectPropertyUpdateKind.Dictionary && property.Items != null)
+                    if (kind == "Dictionary" && property["items"] is JsonArray items)
                     {
-                        property.Items.Sort(static (a, b) => string.Compare(a.Key, b.Key, StringComparison.Ordinal));
+                        var sorted = items
+                            .Select(item => item!.AsObject())
+                            .OrderBy(item => item["key"]?.GetValue<string>(), StringComparer.Ordinal)
+                            .Select(item => item.DeepClone())
+                            .ToArray();
+
+                        items.Clear();
+                        foreach (var item in sorted)
+                        {
+                            items.Add(item);
+                        }
                     }
                 }
-
-                sorted[subjectId] = sortedProperties;
             }
         }
 
-        return JsonSerializer.Serialize(new { root = update.Root, subjects = sorted }, SnapshotJsonOptions);
+        // Sort subjects by ID and properties by name for deterministic comparison.
+        var sortedSubjects = new JsonObject();
+        if (subjects is not null)
+        {
+            foreach (var subjectKey in subjects.Select(kvp => kvp.Key).Order(StringComparer.Ordinal))
+            {
+                var properties = subjects[subjectKey]!.AsObject();
+                var sortedProperties = new JsonObject();
+                foreach (var propertyKey in properties.Select(kvp => kvp.Key).Order(StringComparer.Ordinal))
+                {
+                    sortedProperties[propertyKey] = properties[propertyKey]!.DeepClone();
+                }
+                sortedSubjects[subjectKey] = sortedProperties;
+            }
+        }
+
+        var result = new JsonObject
+        {
+            ["root"] = node["root"]?.DeepClone(),
+            ["subjects"] = sortedSubjects
+        };
+
+        return result.ToJsonString(SnapshotJsonOptions);
     }
 
     private void WriteStatistics(TimeSpan cycleDuration, TimeSpan convergeDuration, string result)
