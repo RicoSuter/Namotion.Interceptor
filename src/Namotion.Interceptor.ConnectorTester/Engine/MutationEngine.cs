@@ -347,22 +347,8 @@ public class MutationEngine : BackgroundService
         }
     }
 
-    /// <summary>
-    /// Creates a new TestNode and re-sets its default value properties to ensure
-    /// write timestamps are recorded. Constructor property sets don't trigger
-    /// the tracking interceptor, so without this, default values have no timestamp.
-    /// </summary>
     private TestNode CreateNewNode()
     {
-        var context = ((IInterceptorSubject)_root).Context;
-        var node = new TestNode(context)
-        {
-            // Re-assign defaults to trigger write interceptor and record timestamps.
-            StringValue = string.Empty,
-            DecimalValue = 0,
-            IntValue = 0
-        };
-
-        return node;
+        return new TestNode();
     }
 }

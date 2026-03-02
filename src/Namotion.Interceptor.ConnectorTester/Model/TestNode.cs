@@ -54,11 +54,11 @@ public partial class TestNode
         var root = new TestNode(context)
         {
             Collection = Enumerable.Range(0, 20)
-                .Select(_ => new TestNode(context))
+                .Select(_ => new TestNode())
                 .ToArray(),
 
             Items = Enumerable.Range(0, 10)
-                .ToDictionary(i => $"item-{i}", i => new TestNode(context))
+                .ToDictionary(i => $"item-{i}", _ => new TestNode())
         };
 
         return root;
