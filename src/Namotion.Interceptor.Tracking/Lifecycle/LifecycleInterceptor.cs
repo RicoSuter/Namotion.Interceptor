@@ -280,6 +280,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Re-entrancy note: lifecycle handlers invoked during reconciliation may write to other
+    /// structural properties, re-entering this method. This is safe because the lock is re-entrant
+    /// and each property has its own <c>_lastProcessedValues</c> entry. However, handlers must NOT
+    /// write to the same property that is currently being reconciled by an outer call.
+    /// </remarks>
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         next(ref context);
@@ -292,8 +298,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         lock (_attachedSubjects)
         {
+            // Use NewValue (not GetFinalValue) because this property is never derived
+            // in this code path — the IsPrimitive/CanContainSubjects check above filters those out.
             var newValue = (object?)context.NewValue;
 
+            // Use the last reconciled value if available; fall back to CurrentValue for the
+            // first write. This ensures correct reconciliation when concurrent writers race:
+            // after next() completes outside the lock, another thread may have already
+            // reconciled a different value, making context.CurrentValue stale.
             if (!_lastProcessedValues.TryGetValue(context.Property, out var lastProcessed))
                 lastProcessed = context.CurrentValue;
 
@@ -336,15 +348,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     }
                 }
 
-                // Track the reconciled value for next time
-                if (newValue is IInterceptorSubject or ICollection or IDictionary)
-                {
-                    _lastProcessedValues[context.Property] = newValue;
-                }
-                else
-                {
-                    _lastProcessedValues.Remove(context.Property);
-                }
+                // Always track the reconciled value (including null) so the next concurrent
+                // writer sees what we last reconciled rather than falling back to the
+                // potentially stale context.CurrentValue.
+                _lastProcessedValues[context.Property] = newValue;
             }
             finally
             {
