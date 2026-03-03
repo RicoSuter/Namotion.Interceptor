@@ -9,12 +9,14 @@ namespace Namotion.Interceptor;
 
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
+    private static readonly object UsedByContextsLock = new();
+
     [ThreadStatic]
     private static HashSet<InterceptorSubjectContext>? _contextChangeVisited;
 
     [ThreadStatic]
     private static HashSet<InterceptorSubjectContext>? _serviceQueryVisited;
-
+    
     private readonly object _lock = new();
 
     private ConcurrentDictionary<Type, Delegate>? _readInterceptorFunction;
@@ -81,7 +83,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             if (_fallbackContexts.Add(contextImpl))
             {
-                lock (contextImpl._usedByContexts) { contextImpl._usedByContexts.Add(this); }
+                lock (UsedByContextsLock) { contextImpl._usedByContexts.Add(this); }
 
                 // Fast path: first fallback on fresh context (no services, no caches)
                 // Skip full OnContextChanged - just set the optimization field
@@ -113,7 +115,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             if (_fallbackContexts.Remove(contextImpl))
             {
-                lock (contextImpl._usedByContexts) { contextImpl._usedByContexts.Remove(this); }
+                lock (UsedByContextsLock) { contextImpl._usedByContexts.Remove(this); }
                 OnContextChanged();
                 return true;
             }
@@ -352,7 +354,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 ? _fallbackContexts.First() : null;
 
             // Avoid array allocation for common cases (0 or 1 parent)
-            lock (_usedByContexts)
+            lock (UsedByContextsLock)
             {
                 var usedByCount = _usedByContexts.Count;
                 if (usedByCount == 1)
