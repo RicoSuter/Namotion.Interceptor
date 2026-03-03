@@ -7,6 +7,7 @@ namespace Namotion.Interceptor.Tracking.Lifecycle;
 public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 {
     private readonly Dictionary<IInterceptorSubject, HashSet<PropertyReference>> _attachedSubjects = [];
+    private readonly Dictionary<PropertyReference, object?> _lastProcessedValues = new(PropertyReference.Comparer);
 
     [ThreadStatic]
     private static Stack<List<(IInterceptorSubject subject, PropertyReference property, object? index)>>? _listPool;
@@ -41,6 +42,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 {
                     AttachToProperty(child.subject, subject.Context, child.property, child.index);
                 }
+
+                // Seed _lastProcessedValues for structural properties so that
+                // WriteProperty reconciliation knows the baseline state.
+                SeedLastProcessedValues(subject);
 
                 if (!_attachedSubjects.ContainsKey(subject))
                 {
@@ -173,7 +178,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         
         foreach (var propertyName in subject.Properties.Keys)
         {
-            subject.DetachSubjectProperty(new PropertyReference(subject, propertyName));
+            var propertyRef = new PropertyReference(subject, propertyName);
+            _lastProcessedValues.Remove(propertyRef);
+            subject.DetachSubjectProperty(propertyRef);
         }
 
         var count = subject.GetReferenceCount();
@@ -214,7 +221,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             
             foreach (var propertyName in subject.Properties.Keys)
             {
-                subject.DetachSubjectProperty(new PropertyReference(subject, propertyName));
+                var propertyRef = new PropertyReference(subject, propertyName);
+                _lastProcessedValues.Remove(propertyRef);
+                subject.DetachSubjectProperty(propertyRef);
             }
         }
 
@@ -265,45 +274,38 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
+        next(ref context);
+
         if (typeof(TProperty).IsValueType || typeof(TProperty) == typeof(string))
         {
-            next(ref context);
             return;
         }
 
-        // For reference types that could contain subjects, serialize the property write
-        // together with lifecycle tracking under the same lock. This prevents concurrent
-        // writes to the same structural property from causing lifecycle state divergence
-        // (orphaned subjects in _attachedSubjects that no longer exist in any property).
-        var oldCollectedSubjects = GetList();
-        var newCollectedSubjects = GetList();
-        var oldTouchedSubjects = GetSubjectHashSet();
-        var newTouchedSubjects = GetSubjectHashSet();
-
-        try
+        lock (_attachedSubjects)
         {
-            lock (_attachedSubjects)
+            var actualCurrentValue = context.Property.Metadata.GetValue?.Invoke(context.Property.Subject);
+            _lastProcessedValues.TryGetValue(context.Property, out var lastProcessed);
+
+            if (ReferenceEquals(lastProcessed, actualCurrentValue))
             {
-                // Re-read the current value inside the lock. The value captured in
-                // context.CurrentValue may be stale if another thread wrote to this
-                // property between our capture and acquiring this lock.
-                var currentValue = context.Property.Metadata.GetValue?.Invoke(context.Property.Subject);
-                next(ref context);
-                var newValue = context.GetFinalValue();
+                return;
+            }
 
-                if (ReferenceEquals(currentValue, newValue))
-                {
-                    return;
-                }
+            if (lastProcessed is not (null or IInterceptorSubject or ICollection or IDictionary) &&
+                actualCurrentValue is not (null or IInterceptorSubject or ICollection or IDictionary))
+            {
+                return;
+            }
 
-                if (currentValue is not (IInterceptorSubject or ICollection or IDictionary) &&
-                    newValue is not (IInterceptorSubject or ICollection or IDictionary))
-                {
-                    return;
-                }
+            var oldCollectedSubjects = GetList();
+            var newCollectedSubjects = GetList();
+            var oldTouchedSubjects = GetSubjectHashSet();
+            var newTouchedSubjects = GetSubjectHashSet();
 
-                FindSubjectsInProperty(context.Property, currentValue, null, oldCollectedSubjects, oldTouchedSubjects);
-                FindSubjectsInProperty(context.Property, newValue, null, newCollectedSubjects, newTouchedSubjects);
+            try
+            {
+                FindSubjectsInProperty(context.Property, lastProcessed, null, oldCollectedSubjects, oldTouchedSubjects);
+                FindSubjectsInProperty(context.Property, actualCurrentValue, null, newCollectedSubjects, newTouchedSubjects);
 
                 for (var i = oldCollectedSubjects.Count - 1; i >= 0; i--)
                 {
@@ -322,14 +324,24 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                         AttachToProperty(d.subject, context.Property.Subject.Context, d.property, d.index);
                     }
                 }
+
+                // Track the reconciled value for next time
+                if (actualCurrentValue is IInterceptorSubject or ICollection or IDictionary)
+                {
+                    _lastProcessedValues[context.Property] = actualCurrentValue;
+                }
+                else
+                {
+                    _lastProcessedValues.Remove(context.Property);
+                }
             }
-        }
-        finally
-        {
-            ReturnList(oldCollectedSubjects);
-            ReturnList(newCollectedSubjects);
-            ReturnSubjectHashSet(oldTouchedSubjects);
-            ReturnSubjectHashSet(newTouchedSubjects);
+            finally
+            {
+                ReturnList(oldCollectedSubjects);
+                ReturnList(newCollectedSubjects);
+                ReturnSubjectHashSet(oldTouchedSubjects);
+                ReturnSubjectHashSet(newTouchedSubjects);
+            }
         }
     }
 
@@ -396,6 +408,27 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     i++;
                 }
                 break;
+        }
+    }
+
+    private void SeedLastProcessedValues(IInterceptorSubject subject)
+    {
+        foreach (var property in subject.Properties)
+        {
+            var metadata = property.Value;
+            if (metadata.IsDerived ||
+                !metadata.IsIntercepted ||
+                metadata.Type.IsValueType ||
+                metadata.Type == typeof(string))
+            {
+                continue;
+            }
+
+            var propertyValue = metadata.GetValue?.Invoke(subject);
+            if (propertyValue is IInterceptorSubject or ICollection or IDictionary)
+            {
+                _lastProcessedValues[new PropertyReference(subject, property.Key)] = propertyValue;
+            }
         }
     }
 
