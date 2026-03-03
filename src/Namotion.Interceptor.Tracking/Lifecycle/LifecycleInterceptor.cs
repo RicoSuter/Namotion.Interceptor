@@ -276,10 +276,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     {
         next(ref context);
 
-        if (typeof(TProperty).IsValueType ||
-            typeof(TProperty) == typeof(string) ||
-            context.Property.Metadata.IsDerived ||
-            !context.Property.Metadata.IsIntercepted)
+        if (typeof(TProperty).IsPrimitive || !typeof(TProperty).CanContainSubjects())
         {
             return;
         }
@@ -356,9 +353,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             var metadata = property.Value;
             if (metadata.IsDerived ||
-                metadata.IsIntercepted == false ||
-                metadata.Type.IsValueType ||
-                metadata.Type == typeof(string))
+                !metadata.IsIntercepted ||
+                !metadata.Type.CanContainSubjects())
             {
                 continue;
             }
@@ -421,8 +417,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             var metadata = property.Value;
             if (metadata.IsDerived ||
                 !metadata.IsIntercepted ||
-                metadata.Type.IsValueType ||
-                metadata.Type == typeof(string))
+                !metadata.Type.CanContainSubjects())
             {
                 continue;
             }
