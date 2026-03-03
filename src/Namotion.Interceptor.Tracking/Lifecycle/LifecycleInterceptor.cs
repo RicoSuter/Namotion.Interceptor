@@ -178,9 +178,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         
         foreach (var propertyName in subject.Properties.Keys)
         {
-            var propertyRef = new PropertyReference(subject, propertyName);
-            _lastProcessedValues.Remove(propertyRef);
-            subject.DetachSubjectProperty(propertyRef);
+            var property = new PropertyReference(subject, propertyName);
+            _lastProcessedValues.Remove(property);
+            subject.DetachSubjectProperty(property);
         }
 
         var count = subject.GetReferenceCount();
@@ -221,9 +221,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             
             foreach (var propertyName in subject.Properties.Keys)
             {
-                var propertyRef = new PropertyReference(subject, propertyName);
-                _lastProcessedValues.Remove(propertyRef);
-                subject.DetachSubjectProperty(propertyRef);
+                var subjectProperty = new PropertyReference(subject, propertyName);
+                _lastProcessedValues.Remove(subjectProperty);
+                subject.DetachSubjectProperty(subjectProperty);
             }
         }
 
@@ -276,7 +276,10 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     {
         next(ref context);
 
-        if (typeof(TProperty).IsValueType || typeof(TProperty) == typeof(string))
+        if (typeof(TProperty).IsValueType ||
+            typeof(TProperty) == typeof(string) ||
+            context.Property.Metadata.IsDerived ||
+            !context.Property.Metadata.IsIntercepted)
         {
             return;
         }
@@ -309,19 +312,19 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
                 for (var i = oldCollectedSubjects.Count - 1; i >= 0; i--)
                 {
-                    var d = oldCollectedSubjects[i];
-                    if (!newTouchedSubjects.Contains(d.subject))
+                    var (subject, property, index) = oldCollectedSubjects[i];
+                    if (!newTouchedSubjects.Contains(subject))
                     {
-                        DetachFromProperty(d.subject, context.Property.Subject.Context, d.property, d.index);
+                        DetachFromProperty(subject, context.Property.Subject.Context, property, index);
                     }
                 }
 
                 for (var i = 0; i < newCollectedSubjects.Count; i++)
                 {
-                    var d = newCollectedSubjects[i];
-                    if (!oldTouchedSubjects.Contains(d.subject))
+                    var (subject, property, index) = newCollectedSubjects[i];
+                    if (!oldTouchedSubjects.Contains(subject))
                     {
-                        AttachToProperty(d.subject, context.Property.Subject.Context, d.property, d.index);
+                        AttachToProperty(subject, context.Property.Subject.Context, property, index);
                     }
                 }
 
