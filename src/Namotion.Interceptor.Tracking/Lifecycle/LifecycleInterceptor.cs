@@ -43,10 +43,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     AttachToProperty(child.subject, subject.Context, child.property, child.index);
                 }
 
-                // Seed _lastProcessedValues for structural properties so that
-                // WriteProperty reconciliation knows the baseline state.
-                SeedLastProcessedValues(subject);
-
                 if (!_attachedSubjects.ContainsKey(subject))
                 {
                     AttachToContext(subject, subject.Context);
@@ -283,16 +279,18 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         lock (_attachedSubjects)
         {
-            var actualCurrentValue = context.Property.Metadata.GetValue?.Invoke(context.Property.Subject);
-            _lastProcessedValues.TryGetValue(context.Property, out var lastProcessed);
+            var newValue = (object?)context.NewValue;
 
-            if (ReferenceEquals(lastProcessed, actualCurrentValue))
+            if (!_lastProcessedValues.TryGetValue(context.Property, out var lastProcessed))
+                lastProcessed = (object?)context.CurrentValue;
+
+            if (ReferenceEquals(lastProcessed, newValue))
             {
                 return;
             }
 
             if (lastProcessed is not (null or IInterceptorSubject or ICollection or IDictionary) &&
-                actualCurrentValue is not (null or IInterceptorSubject or ICollection or IDictionary))
+                newValue is not (null or IInterceptorSubject or ICollection or IDictionary))
             {
                 return;
             }
@@ -305,7 +303,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             try
             {
                 FindSubjectsInProperty(context.Property, lastProcessed, null, oldCollectedSubjects, oldTouchedSubjects);
-                FindSubjectsInProperty(context.Property, actualCurrentValue, null, newCollectedSubjects, newTouchedSubjects);
+                FindSubjectsInProperty(context.Property, newValue, null, newCollectedSubjects, newTouchedSubjects);
 
                 for (var i = oldCollectedSubjects.Count - 1; i >= 0; i--)
                 {
@@ -326,9 +324,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 }
 
                 // Track the reconciled value for next time
-                if (actualCurrentValue is IInterceptorSubject or ICollection or IDictionary)
+                if (newValue is IInterceptorSubject or ICollection or IDictionary)
                 {
-                    _lastProcessedValues[context.Property] = actualCurrentValue;
+                    _lastProcessedValues[context.Property] = newValue;
                 }
                 else
                 {
@@ -407,26 +405,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     i++;
                 }
                 break;
-        }
-    }
-
-    private void SeedLastProcessedValues(IInterceptorSubject subject)
-    {
-        foreach (var property in subject.Properties)
-        {
-            var metadata = property.Value;
-            if (metadata.IsDerived ||
-                !metadata.IsIntercepted ||
-                !metadata.Type.CanContainSubjects())
-            {
-                continue;
-            }
-
-            var propertyValue = metadata.GetValue?.Invoke(subject);
-            if (propertyValue is IInterceptorSubject or ICollection or IDictionary)
-            {
-                _lastProcessedValues[new PropertyReference(subject, property.Key)] = propertyValue;
-            }
         }
     }
 
