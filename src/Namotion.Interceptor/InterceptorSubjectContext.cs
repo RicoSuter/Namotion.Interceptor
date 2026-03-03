@@ -9,6 +9,7 @@ namespace Namotion.Interceptor;
 
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
+    // Lock ordering: _lock → UsedByContextsLock (never reverse)
     private static readonly object UsedByContextsLock = new();
 
     [ThreadStatic]
