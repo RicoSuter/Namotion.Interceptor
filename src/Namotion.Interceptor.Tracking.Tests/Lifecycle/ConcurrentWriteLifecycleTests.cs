@@ -93,7 +93,11 @@ public class ConcurrentWriteLifecycleTests
             Assert.Equal(0, child.GetReferenceCount());
         }
 
-        // Verify the non-winning final set also has ref count 0
+        // Verify the non-winning final set also has ref count 0.
+        // Note: threadAFinalChildren/threadBFinalChildren always hold the last iteration's array
+        // for their respective thread. Since each iteration creates fresh Person objects, the
+        // "losing" thread's final array contains subjects that were never the actual winner,
+        // so checking ref count 0 on non-winning subjects is safe.
         var losingSet = ReferenceEquals(root.Children, threadAFinalChildren)
             ? threadBFinalChildren!
             : threadAFinalChildren!;
