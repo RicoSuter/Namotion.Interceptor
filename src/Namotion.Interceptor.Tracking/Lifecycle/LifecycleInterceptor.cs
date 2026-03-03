@@ -272,6 +272,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     {
         next(ref context);
 
+        // Fast path: IsPrimitive is a JIT constant, avoids the ConcurrentDictionary lookup
         if (typeof(TProperty).IsPrimitive || !typeof(TProperty).CanContainSubjects())
         {
             return;
