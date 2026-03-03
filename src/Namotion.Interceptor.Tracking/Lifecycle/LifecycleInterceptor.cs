@@ -172,10 +172,12 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             return;
         }
         
-        foreach (var propertyName in subject.Properties.Keys)
+        foreach (var entry in subject.Properties)
         {
-            var property = new PropertyReference(subject, propertyName);
-            _lastProcessedValues.Remove(property);
+            var property = new PropertyReference(subject, entry.Key);
+            if (entry.Value is { IsDerived: false, IsIntercepted: true } && entry.Value.Type.CanContainSubjects())
+                _lastProcessedValues.Remove(property);
+
             subject.DetachSubjectProperty(property);
         }
 
@@ -206,19 +208,29 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         var isLastDetach = set.Count == 0;
 
-        // Collect children before detaching (for cascade)
+        // Collect children and clean up in a single pass over properties
         List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
         if (isLastDetach)
         {
-            children = GetList();
-            FindSubjectsInProperties(subject, children, null);
-            
             _attachedSubjects.Remove(subject);
-            
-            foreach (var propertyName in subject.Properties.Keys)
+
+            foreach (var entry in subject.Properties)
             {
-                var subjectProperty = new PropertyReference(subject, propertyName);
-                _lastProcessedValues.Remove(subjectProperty);
+                var subjectProperty = new PropertyReference(subject, entry.Key);
+
+                var metadata = entry.Value;
+                if (metadata is { IsDerived: false, IsIntercepted: true } && metadata.Type.CanContainSubjects())
+                {
+                    var propertyValue = metadata.GetValue?.Invoke(subject);
+                    if (propertyValue is not null)
+                    {
+                        children ??= GetList();
+                        FindSubjectsInProperty(subjectProperty, propertyValue, null, children, null);
+                    }
+
+                    _lastProcessedValues.Remove(subjectProperty);
+                }
+
                 subject.DetachSubjectProperty(subjectProperty);
             }
         }
@@ -241,9 +253,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         InvokeRemovedLifecycleHandlers(subject, context, change);
 
-        if (isLastDetach)
+        if (children is not null)
         {
-            foreach (var child in children!)
+            foreach (var child in children)
             {
                 DetachFromProperty(child.subject, context, child.property, child.index);
             }
@@ -283,7 +295,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             var newValue = (object?)context.NewValue;
 
             if (!_lastProcessedValues.TryGetValue(context.Property, out var lastProcessed))
-                lastProcessed = (object?)context.CurrentValue;
+                lastProcessed = context.CurrentValue;
 
             if (ReferenceEquals(lastProcessed, newValue))
             {
