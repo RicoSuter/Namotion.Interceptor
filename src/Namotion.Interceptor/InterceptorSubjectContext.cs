@@ -9,7 +9,8 @@ namespace Namotion.Interceptor;
 
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
-    // Lock ordering: _lock → UsedByContextsLock (never reverse)
+    // Lock ordering: _lock → UsedByContextsLock (never reverse).
+    // TODO(perf): Static lock simplifies cross-instance ordering but may contend under many independent trees.
     private static readonly object UsedByContextsLock = new();
 
     [ThreadStatic]

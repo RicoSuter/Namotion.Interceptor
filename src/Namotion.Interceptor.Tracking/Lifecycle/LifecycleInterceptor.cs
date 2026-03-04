@@ -175,7 +175,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         foreach (var entry in subject.Properties)
         {
             var property = new PropertyReference(subject, entry.Key);
-            if (entry.Value is { IsDerived: false, IsIntercepted: true } && entry.Value.Type.CanContainSubjects())
+            if (entry.Value is { IsIntercepted: true } && entry.Value.Type.CanContainSubjects())
                 _lastProcessedValues.Remove(property);
 
             subject.DetachSubjectProperty(property);
@@ -219,7 +219,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 var subjectProperty = new PropertyReference(subject, entry.Key);
 
                 var metadata = entry.Value;
-                if (metadata is { IsDerived: false, IsIntercepted: true } && metadata.Type.CanContainSubjects())
+                if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
                 {
                     var propertyValue = metadata.GetValue?.Invoke(subject);
                     if (propertyValue is not null)
@@ -298,14 +298,11 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         lock (_attachedSubjects)
         {
-            // Use NewValue (not GetFinalValue) because this property is never derived
-            // in this code path — the IsPrimitive/CanContainSubjects check above filters those out.
+            // NewValue (not GetFinalValue) — re-reading the backing store could return another thread's value.
             var newValue = (object?)context.NewValue;
 
-            // Use the last reconciled value if available; fall back to CurrentValue for the
-            // first write. This ensures correct reconciliation when concurrent writers race:
-            // after next() completes outside the lock, another thread may have already
-            // reconciled a different value, making context.CurrentValue stale.
+            // Last reconciled value, or CurrentValue on first write. Avoids stale CurrentValue
+            // when a concurrent writer already reconciled a different value after next().
             if (!_lastProcessedValues.TryGetValue(context.Property, out var lastProcessed))
                 lastProcessed = context.CurrentValue;
 
@@ -370,8 +367,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         foreach (var property in subject.Properties)
         {
             var metadata = property.Value;
-            if (metadata.IsDerived ||
-                !metadata.IsIntercepted ||
+            if (!metadata.IsIntercepted ||
                 !metadata.Type.CanContainSubjects())
             {
                 continue;
