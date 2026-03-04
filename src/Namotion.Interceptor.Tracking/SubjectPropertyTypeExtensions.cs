@@ -115,12 +115,9 @@ public static class SubjectPropertyTypeExtensions
             if (genericEnumerables.Length > 0)
             {
                 return genericEnumerables.Any(static i =>
-                    i.GenericTypeArguments[0] is
-                    {
-                        Name: "KeyValuePair`2",
-                        Namespace: "System.Collections.Generic"
-                    } keyValueType &&
-                    keyValueType.GenericTypeArguments[1].IsSubjectReferenceType());
+                    i.GenericTypeArguments[0] is { IsGenericType: true } kvType &&
+                    kvType.GetGenericTypeDefinition() == typeof(KeyValuePair<,>) &&
+                    kvType.GenericTypeArguments[1].IsSubjectReferenceType());
             }
 
             // No generic type info (e.g. Hashtable) — fall back to non-generic check
