@@ -1,3 +1,5 @@
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -18,6 +20,7 @@ public class ConcurrentWriteLifecycleTests
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
+            .WithRegistry()
             .WithContextInheritance();
 
         var root = new Person(context) { FirstName = "Root" };
@@ -37,8 +40,8 @@ public class ConcurrentWriteLifecycleTests
         var barrier = new Barrier(2);
         const int iterations = 200;
 
-        Person[]? threadAFinalChildren = null;
-        Person[]? threadBFinalChildren = null;
+        var allCreatedByA = new List<Person>();
+        var allCreatedByB = new List<Person>();
 
         var threadA = new Thread(() =>
         {
@@ -51,9 +54,9 @@ public class ConcurrentWriteLifecycleTests
                     new Person { FirstName = $"A{i}_2" }
                 };
 
+                allCreatedByA.AddRange(children);
                 if (i == 0) barrier.SignalAndWait();
                 root.Children = children;
-                threadAFinalChildren = children;
             }
         });
 
@@ -67,9 +70,9 @@ public class ConcurrentWriteLifecycleTests
                     new Person { FirstName = $"B{i}_1" }
                 };
 
+                allCreatedByB.AddRange(children);
                 if (i == 0) barrier.SignalAndWait();
                 root.Children = children;
-                threadBFinalChildren = children;
             }
         });
 
@@ -78,39 +81,26 @@ public class ConcurrentWriteLifecycleTests
         threadA.Join();
         threadB.Join();
 
-        // Assert: The property has one of the final arrays.
-        // All subjects in the final array must have ref count = 1.
-        // All subjects NOT in the final array must have ref count = 0.
-        var finalChildren = root.Children;
-        foreach (var child in finalChildren)
+        // Assert: All subjects currently in Children must have ref count = 1.
+        var winningSet = new HashSet<Person>(root.Children);
+        foreach (var child in winningSet)
         {
             Assert.Equal(1, child.GetReferenceCount());
         }
 
-        // The initial children should all have ref count 0 (properly detached)
-        foreach (var child in initialChildren)
-        {
-            Assert.Equal(0, child.GetReferenceCount());
-        }
-
-        // Verify the non-winning final set also has ref count 0.
-        // Note: threadAFinalChildren/threadBFinalChildren always hold the last iteration's array
-        // for their respective thread. Since each iteration creates fresh Person objects, the
-        // "losing" thread's final array contains subjects that were never the actual winner,
-        // so checking ref count 0 on non-winning subjects is safe.
-        var losingSet = ReferenceEquals(root.Children, threadAFinalChildren)
-            ? threadBFinalChildren!
-            : threadAFinalChildren!;
-
-        // Only check subjects NOT in the winning set
-        var winningSet = new HashSet<Person>(root.Children);
-        foreach (var child in losingSet)
+        // Every subject NOT in the winning set (initial + all created by both threads)
+        // must have ref count 0 — no orphaned subjects.
+        foreach (var child in initialChildren.Concat(allCreatedByA).Concat(allCreatedByB))
         {
             if (!winningSet.Contains(child))
             {
                 Assert.Equal(0, child.GetReferenceCount());
             }
         }
+
+        // Verify registry only contains root + winning children (no orphaned subjects)
+        var registry = context.GetService<ISubjectRegistry>();
+        Assert.Equal(1 + winningSet.Count, registry.KnownSubjects.Count);
     }
 
     [Fact]
@@ -120,6 +110,7 @@ public class ConcurrentWriteLifecycleTests
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
+            .WithRegistry()
             .WithContextInheritance();
 
         var root = new Person(context) { FirstName = "Root" };
@@ -130,17 +121,18 @@ public class ConcurrentWriteLifecycleTests
         // Act: Two threads concurrently set Father to different subjects.
         var barrier = new Barrier(2);
         const int iterations = 200;
-        Person? threadAFinal = null;
-        Person? threadBFinal = null;
+
+        var allCreatedByA = new List<Person>();
+        var allCreatedByB = new List<Person>();
 
         var threadA = new Thread(() =>
         {
             for (var i = 0; i < iterations; i++)
             {
                 var father = new Person { FirstName = $"FatherA{i}" };
+                allCreatedByA.Add(father);
                 if (i == 0) barrier.SignalAndWait();
                 root.Father = father;
-                threadAFinal = father;
             }
         });
 
@@ -149,9 +141,9 @@ public class ConcurrentWriteLifecycleTests
             for (var i = 0; i < iterations; i++)
             {
                 var father = new Person { FirstName = $"FatherB{i}" };
+                allCreatedByB.Add(father);
                 if (i == 0) barrier.SignalAndWait();
                 root.Father = father;
-                threadBFinal = father;
             }
         });
 
@@ -160,18 +152,24 @@ public class ConcurrentWriteLifecycleTests
         threadA.Join();
         threadB.Join();
 
-        // Assert
+        // Assert: The final Father must have ref count = 1.
         var finalFather = root.Father;
         Assert.NotNull(finalFather);
         Assert.Equal(1, finalFather.GetReferenceCount());
-        Assert.Equal(0, initialFather.GetReferenceCount());
 
-        // The non-winning final subject should have ref count 0
-        var loser = ReferenceEquals(root.Father, threadAFinal) ? threadBFinal! : threadAFinal!;
-        if (!ReferenceEquals(loser, root.Father))
+        // Every subject NOT currently referenced (initial + all created by both threads)
+        // must have ref count 0 — no orphaned subjects.
+        foreach (var father in allCreatedByA.Concat(allCreatedByB).Append(initialFather))
         {
-            Assert.Equal(0, loser.GetReferenceCount());
+            if (!ReferenceEquals(father, finalFather))
+            {
+                Assert.Equal(0, father.GetReferenceCount());
+            }
         }
+
+        // Verify registry only contains root + final father (no orphaned subjects)
+        var registry = context.GetService<ISubjectRegistry>();
+        Assert.Equal(2, registry.KnownSubjects.Count);
     }
 
     [Fact]
@@ -181,6 +179,7 @@ public class ConcurrentWriteLifecycleTests
         var context = InterceptorSubjectContext
             .Create()
             .WithLifecycle()
+            .WithRegistry()
             .WithContextInheritance();
 
         var root = new Person(context) { FirstName = "Root" };
@@ -222,24 +221,24 @@ public class ConcurrentWriteLifecycleTests
 
         // Assert: Only subjects currently in Children should have ref count > 0.
         var currentChildren = new HashSet<Person>(root.Children);
-        var orphanCount = 0;
 
         foreach (var subjectList in allCreatedSubjects)
         {
             foreach (var subject in subjectList)
             {
-                var refCount = subject.GetReferenceCount();
                 if (currentChildren.Contains(subject))
                 {
-                    Assert.Equal(1, refCount);
+                    Assert.Equal(1, subject.GetReferenceCount());
                 }
-                else if (refCount > 0)
+                else
                 {
-                    orphanCount++;
+                    Assert.Equal(0, subject.GetReferenceCount());
                 }
             }
         }
 
-        Assert.Equal(0, orphanCount);
+        // Verify registry only contains root + current children (no orphaned subjects)
+        var registry = context.GetService<ISubjectRegistry>();
+        Assert.Equal(1 + currentChildren.Count, registry.KnownSubjects.Count);
     }
 }

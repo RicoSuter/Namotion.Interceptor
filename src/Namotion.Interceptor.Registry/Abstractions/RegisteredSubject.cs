@@ -197,9 +197,11 @@ public class RegisteredSubject
 
         var property = AddPropertyInternal(name, type, attributes);
 
-        // trigger change event
+        // Trigger initial change event with CurrentValue=null to indicate a new property.
+        // Using null (not readValue) ensures interceptors see a null→value transition,
+        // which is correct for lifecycle tracking of subjects in the initial value.
         property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject) ?? null,
-            o => getValue?.Invoke(o), delegate { });
+            null, delegate { });
 
         return property;
     }
