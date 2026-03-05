@@ -55,15 +55,14 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
 
         // Case 1: Derived property detached — remove from dependencies' UsedByProperties.
-        if (property.Metadata.IsDerived)
+        // RequiredProperties is only set for derived properties (during StoreRecordedTouchedProperties),
+        // so a non-null check replaces the more expensive property.Metadata.IsDerived lookup.
+        var requiredProperties = data.RequiredProperties;
+        if (requiredProperties is not null)
         {
-            var requiredProperties = data.RequiredProperties;
-            if (requiredProperties is not null)
+            foreach (ref readonly var dependency in requiredProperties.Items)
             {
-                foreach (ref readonly var dependency in requiredProperties.Items)
-                {
-                    dependency.TryGetDerivedPropertyData()?.UsedByProperties?.Remove(property);
-                }
+                dependency.TryGetDerivedPropertyData()?.UsedByProperties?.Remove(property);
             }
         }
 
