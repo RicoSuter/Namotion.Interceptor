@@ -11,6 +11,7 @@
     <File Path="../.gitignore" />
     <File Path="../features.png" />
     <File Path="../README.md" />
+    <File Path="../CLAUDE.md" />
     <File Path="Directory.Build.props" />
   </Folder>
   <Folder Name="/Connectors/">
