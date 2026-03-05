@@ -9,12 +9,16 @@ namespace Namotion.Interceptor;
 
 public class InterceptorSubjectContext : IInterceptorSubjectContext
 {
+    // Lock ordering: _lock → UsedByContextsLock (never reverse).
+    // TODO(perf): Static lock simplifies cross-instance ordering but may contend under many independent trees.
+    private static readonly object UsedByContextsLock = new();
+
     [ThreadStatic]
     private static HashSet<InterceptorSubjectContext>? _contextChangeVisited;
 
     [ThreadStatic]
     private static HashSet<InterceptorSubjectContext>? _serviceQueryVisited;
-
+    
     private readonly object _lock = new();
 
     private ConcurrentDictionary<Type, Delegate>? _readInterceptorFunction;
@@ -81,7 +85,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             if (_fallbackContexts.Add(contextImpl))
             {
-                contextImpl._usedByContexts.Add(this);
+                lock (UsedByContextsLock) { contextImpl._usedByContexts.Add(this); }
 
                 // Fast path: first fallback on fresh context (no services, no caches)
                 // Skip full OnContextChanged - just set the optimization field
@@ -113,7 +117,7 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             if (_fallbackContexts.Remove(contextImpl))
             {
-                contextImpl._usedByContexts.Remove(this);
+                lock (UsedByContextsLock) { contextImpl._usedByContexts.Remove(this); }
                 OnContextChanged();
                 return true;
             }
@@ -352,13 +356,17 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                 ? _fallbackContexts.First() : null;
 
             // Avoid array allocation for common cases (0 or 1 parent)
-            if (_usedByContexts.Count == 1)
+            lock (UsedByContextsLock)
             {
-                singleParent = _usedByContexts.First();
-            }
-            else if (_usedByContexts.Count > 1)
-            {
-                parents = [.. _usedByContexts];
+                var usedByCount = _usedByContexts.Count;
+                if (usedByCount == 1)
+                {
+                    singleParent = _usedByContexts.First();
+                }
+                else if (usedByCount > 1)
+                {
+                    parents = [.. _usedByContexts];
+                }
             }
         }
 

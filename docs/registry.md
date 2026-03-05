@@ -103,6 +103,14 @@ registered.AddDerivedProperty("Status", typeof(string),
 
 Derived properties automatically participate in change tracking and will update when their dependencies change.
 
+### Lifecycle tracking for dynamic properties
+
+Dynamic properties (including derived) fully participate in lifecycle tracking when `WithLifecycle()` or `WithFullPropertyTracking()` is enabled. If a dynamic property holds a reference to another subject, that subject is automatically attached to the lifecycle graph with proper reference counting. For example, a `AddDerivedProperty<Tire>("FirstTire", ...)` that returns the first tire from a collection would give that tire a reference count of 2 — one from the collection property and one from the derived property.
+
+When the underlying data changes, derived properties are re-evaluated and lifecycle tracking reconciles the old and new subjects automatically (attaching new subjects, detaching removed ones).
+
+When a dynamic property is added, its initial value triggers a change event with `OldValue = null`, representing a transition from "property did not exist" to its initial value. This ensures interceptors (lifecycle, change tracking, etc.) correctly process the initial state.
+
 ### Add attributes
 
 Use `AddAttribute` on any property to attach metadata dynamically:

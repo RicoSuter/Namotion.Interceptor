@@ -1,8 +1,7 @@
-﻿using System.Collections;
-using System.Collections.Concurrent;
-using System.Collections.Immutable;
+﻿using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
+using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
 
@@ -10,10 +9,6 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public class RegisteredSubjectProperty
 {
-    private static readonly ConcurrentDictionary<Type, bool> IsSubjectReferenceCache = new();
-    private static readonly ConcurrentDictionary<Type, bool> IsSubjectCollectionCache = new();
-    private static readonly ConcurrentDictionary<Type, bool> IsSubjectDictionaryCache = new();
-
     private readonly List<SubjectPropertyChild> _children = [];
     private ImmutableArray<SubjectPropertyChild> _childrenCache;
 
@@ -108,49 +103,37 @@ public class RegisteredSubjectProperty
     /// Checks whether this property has child subjects, which can be either
     /// a subject reference, a collection of subjects, or a dictionary of subjects.
     /// </summary>
-    public bool HasChildSubjects => IsSubjectReference || IsSubjectCollection || IsSubjectDictionary;
+    public bool HasChildSubjects
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => IsSubjectReference || IsSubjectCollection || IsSubjectDictionary;
+    }
 
     /// <summary>
     /// Gets a value indicating whether this property references another subject.
     /// </summary>
-    public bool IsSubjectReference => IsSubjectReferenceCache.GetOrAdd(Type, IsSubjectReferenceType);
-    
+    public bool IsSubjectReference
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Type.IsSubjectReferenceType();
+    }
+
     /// <summary>
     /// Gets a value indicating whether this property references multiple subject with a collection.
     /// </summary>
-    public bool IsSubjectCollection =>
-        IsSubjectCollectionCache.GetOrAdd(Type, t =>
-        {
-            return
-                t.IsAssignableTo(typeof(IEnumerable)) &&
-                t.GetInterfaces().Any(i =>
-                    i.IsAssignableTo(typeof(IEnumerable)) &&
-                    IsSubjectReferenceType(i.GenericTypeArguments.FirstOrDefault()));
-        });
+    public bool IsSubjectCollection
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Type.IsSubjectCollectionType();
+    }
 
     /// <summary>
     /// Gets a value indicating whether this property references multiple subject with a dictionary.
     /// </summary>
-    public bool IsSubjectDictionary =>
-        IsSubjectDictionaryCache.GetOrAdd(Type, t =>
-        {
-            return
-                t.IsAssignableTo(typeof(IEnumerable)) && 
-                t.GetInterfaces().Any(i => 
-                    i.IsAssignableTo(typeof(IEnumerable)) && 
-                    i.GenericTypeArguments.FirstOrDefault() is
-                    {
-                        Name: "KeyValuePair`2",
-                        Namespace: "System.Collections.Generic"
-                    } keyValueType && IsSubjectReferenceType(keyValueType.GenericTypeArguments[1]));
-        });
-
-    private static bool IsSubjectReferenceType(Type? type)
+    public bool IsSubjectDictionary
     {
-        if (type is null) return false;
-        return type.IsInterface || // any subject type might implement an any interface
-               type == typeof(object) ||
-               type.IsAssignableTo(typeof(IInterceptorSubject));
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Type.IsSubjectDictionaryType();
     }
 
     /// <summary>
