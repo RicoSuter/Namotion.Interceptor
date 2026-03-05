@@ -99,19 +99,25 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         next(ref context);
 
+        // Fast path: skip all post-write processing for properties without tracking data.
+        var data = context.Property.TryGetDerivedPropertyData();
+        if (data is null)
+        {
+            return;
+        }
+
         // If this property is itself a derived property with a setter, recalculate it.
         // The setter modifies internal state, but the actual value is computed by the getter.
         // We need to: 1) re-record dependencies, 2) fire change notification with correct value.
-        var metadata = context.Property.Metadata;
-        if (metadata is { IsDerived: true, SetValue: not null })
+        // RequiredProperties is only set for derived properties (during StoreRecordedTouchedProperties).
+        if (data.RequiredProperties is not null && context.Property.Metadata.SetValue is not null)
         {
             var currentTimestampUtcTicks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
             var property = context.Property;
             RecalculateDerivedProperty(ref property, currentTimestampUtcTicks);
         }
 
-        // Use TryGet to avoid allocating DerivedPropertyData for properties with no dependents.
-        var usedByProperties = context.Property.TryGetDerivedPropertyData()?.UsedByProperties;
+        var usedByProperties = data.UsedByProperties;
         if (usedByProperties is not null && usedByProperties.Count > 0)
         {
             // Skip dependent recalculation during transaction capture.
