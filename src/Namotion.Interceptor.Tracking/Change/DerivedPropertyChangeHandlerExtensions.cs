@@ -7,8 +7,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// </summary>
 public static class DerivedPropertyChangeHandlerExtensions
 {
-    // Short key to minimize hash computation cost (6 chars vs 41+ chars for individual keys).
-    // ConcurrentDictionary hash of (propertyName, key) processes every char of both strings.
+    // Short key to reduce dictionary hash cost on this hot path (verified).
     private const string DataKey = "ni.dpd";
 
     /// <summary>
