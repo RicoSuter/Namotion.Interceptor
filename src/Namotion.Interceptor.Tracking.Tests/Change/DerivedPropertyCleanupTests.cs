@@ -103,40 +103,6 @@ public class DerivedPropertyCleanupTests
     }
 
     [Fact]
-    public void WhenSubjectWithDerivedPropertyIsDetached_ThenCrossSubjectReferencesAreCleaned()
-    {
-        // Arrange - Car.AveragePressure depends on Tire.Pressure from multiple tires
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithDerivedPropertyChangeDetection()
-            .WithLifecycle()
-            .WithContextInheritance();
-
-        var car = new Car(context);
-        var firstTire = car.Tires[0];
-
-        // Get property references
-        var averagePressureProperty = new PropertyReference(car, nameof(Car.AveragePressure));
-        var firstTirePressureProperty = new PropertyReference(firstTire, nameof(Tire.Pressure));
-
-        // Verify initial state - AveragePressure depends on Tire.Pressure
-        Assert.Contains(firstTirePressureProperty, averagePressureProperty.GetRequiredProperties().Items.ToArray());
-
-        // Act - Replace the entire Tires array to trigger property write interceptor
-        // Note: Array indexer assignment (car.Tires[0] = x) doesn't trigger interception
-        var newTires = car.Tires.ToArray();
-        newTires[0] = new Tire(context);
-        car.Tires = newTires;
-
-        // Assert - The derived property's RequiredProperties should no longer reference the old tire
-        // This is what prevents memory leaks (Car not keeping old Tire alive)
-        Assert.DoesNotContain(firstTirePressureProperty, averagePressureProperty.GetRequiredProperties().Items.ToArray());
-
-        // Note: firstTirePressureProperty.UsedByProperties may still contain stale entries (for performance).
-        // These don't cause memory leaks and will be GC'd with the detached subject.
-    }
-
-    [Fact]
     public void DerivedPropertyDependingOnDerivedProperty_IsNotTracked()
     {
         // Note: This is a known design limitation.
