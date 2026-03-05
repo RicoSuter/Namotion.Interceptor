@@ -9,9 +9,14 @@ Namotion.Interceptor is a .NET library for creating trackable object models thro
 ## Development Commands
 
 ### Build and Test
-- `dotnet test src/Namotion.Interceptor.slnx` - Run all unit tests
 - `dotnet build src/Namotion.Interceptor.slnx` - Build entire solution
+- `dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"` - Run unit tests (default)
+- `dotnet test src/Namotion.Interceptor.slnx` - Run all tests including integration
 - `dotnet pack src/Namotion.Interceptor.slnx` - Create NuGet packages
+
+Only run integration tests when changing connector implementations (OPC UA, MQTT, WebSocket, etc.) or HomeBlaze UI — run those targeted per project, e.g.:
+- `dotnet test src/Namotion.Interceptor.OpcUa.Tests`
+- `dotnet test src/HomeBlaze/HomeBlaze.E2E.Tests`
 
 ### Running Samples
 - `dotnet run --project src/Namotion.Interceptor.SampleConsole` - Run console sample
@@ -42,6 +47,7 @@ src/
 ├── Extensions/                     # Integration packages (AspNetCore, Blazor, etc.)
 ├── Samples/                        # Example applications
 └── Tests/                          # Unit test projects
+docs/                               # Feature and connector documentation (docs/connectors/*)
 ```
 
 ## Language Requirements
