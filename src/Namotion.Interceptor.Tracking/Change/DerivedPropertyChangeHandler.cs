@@ -12,28 +12,19 @@ namespace Namotion.Interceptor.Tracking.Change;
 [RunsBefore(typeof(LifecycleInterceptor))]
 public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler
 {
-    // - Records property reads during derived property evaluation
-    // - Builds dependency graph: derived property → source properties
-    // - When source property changes, recalculates all dependent derived properties
-    // - Uses optimistic concurrency control to handle concurrent updates safely
-
-    // Thread Safety: Lock-free with allocation-free steady state. Handles concurrent writes via merge mode.
+    // Lock-free dependency tracking with an allocation-free steady state.
+    // Records property reads → builds dependency graph → recalculates dependents on write.
 
     [ThreadStatic]
     private static DerivedPropertyRecorder? _recorder;
 
-    // Thread-local storage for derived property recalculation to avoid closure allocations.
-    // These fields allow using static delegates instead of capturing closures.
+    // Thread-local old value + static delegates avoid closure allocations in recalculation.
     [ThreadStatic]
     private static object? _threadLocalOldValue;
 
-    // Deferred Case 2 removal buffer: During write-triggered detach, Case 2 removals
-    // (removing detached source from derived properties' RequiredProperties) are buffered
-    // here instead of executing immediately. After recalculation, the buffer is flushed.
-    // For targets that were recalculated, TryReplace already replaced RequiredProperties,
-    // so Remove() finds nothing (no allocation). For targets not recalculated, Remove()
-    // performs the normal CAS cleanup. This turns N costly CAS+allocation operations into
-    // N cheap "not found" lookups in the common case.
+    // Tracks WriteProperty nesting depth. During write-triggered detach, Case 2 removals
+    // are deferred to _pendingRemovals and flushed after recalculation (where TryReplace
+    // makes most Remove() calls no-ops).
     [ThreadStatic]
     private static int _writePropertyDepth;
 
@@ -67,15 +58,13 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         var property = change.Property;
 
-        // Single lookup for consolidated data (covers both Case 1 and Case 2)
         var data = property.TryGetDerivedPropertyData();
         if (data is null)
         {
             return;
         }
 
-        // Case 1: This is a derived property being detached.
-        // Remove it from all its dependencies' UsedByProperties to break backward refs.
+        // Case 1: Derived property detached — remove from dependencies' UsedByProperties.
         if (property.Metadata.IsDerived)
         {
             var requiredProperties = data.RequiredProperties;
@@ -83,14 +72,12 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             {
                 foreach (ref readonly var dependency in requiredProperties.Items)
                 {
-                    // Use TryGet to avoid allocating on dependencies that have no UsedByProperties
                     dependency.TryGetDerivedPropertyData()?.UsedByProperties?.Remove(property);
                 }
             }
         }
 
-        // Case 2: This property (source or derived) might be used by derived properties on OTHER subjects.
-        // Remove this property from those derived properties' RequiredProperties to prevent memory leaks.
+        // Case 2: Source property detached — remove from dependents' RequiredProperties.
         var usedByProperties = data.UsedByProperties;
         if (usedByProperties is null || usedByProperties.Count == 0)
         {
