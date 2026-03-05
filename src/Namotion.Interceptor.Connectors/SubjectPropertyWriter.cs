@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Connectors;
 /// Implements the buffer-load-replay pattern to ensure eventual consistency during source initialization.
 /// </summary>
 /// <remarks>
-/// During initialization, updates are buffered. Once <see cref="CompleteInitializationAsync"/> is called,
+/// During initialization, updates are buffered. Once <see cref="LoadInitialStateAndResumeAsync"/> is called,
 /// the initial state is loaded, buffered updates are replayed, and subsequent writes are applied immediately.
 /// This buffering behavior is transparent to sources - they simply call <see cref="Write{TState}"/>.
 /// </remarks>
@@ -36,7 +36,7 @@ public sealed class SubjectPropertyWriter
 
     /// <summary>
     /// Starts buffering updates instead of applying them directly.
-    /// Buffered updates will be replayed when <see cref="CompleteInitializationAsync"/> is called.
+    /// Buffered updates will be replayed when <see cref="LoadInitialStateAndResumeAsync"/> is called.
     /// This method should be called before the source starts listening for changes.
     /// </summary>
     public void StartBuffering()
@@ -59,7 +59,7 @@ public sealed class SubjectPropertyWriter
     /// </remarks>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The task.</returns>
-    public async Task CompleteInitializationAsync(CancellationToken cancellationToken)
+    public async Task LoadInitialStateAndResumeAsync(CancellationToken cancellationToken)
     {
         // Flush pending writes first (so server has latest before we load state)
         if (_flushRetryQueueAsync is not null)
@@ -78,7 +78,7 @@ public sealed class SubjectPropertyWriter
             {
                 // Already replayed by a concurrent/previous call (race between automatic and manual reconnection).
                 // This is safe - it means another reconnection cycle already loaded state and replayed updates.
-                _logger.LogDebug("CompleteInitializationAsync called but updates already replayed by concurrent reconnection.");
+                _logger.LogDebug("LoadInitialStateAndResumeAsync called but updates already replayed by concurrent reconnection.");
                 return;
             }
 
