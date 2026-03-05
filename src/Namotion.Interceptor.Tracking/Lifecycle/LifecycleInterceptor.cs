@@ -289,7 +289,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     {
         next(ref context);
 
-        if (typeof(TProperty).IsPrimitive || !typeof(TProperty).CanContainSubjects())
+        if (!SubjectPropertyTypeExtensions.CanContainSubjects<TProperty>())
         {
             return;
         }
