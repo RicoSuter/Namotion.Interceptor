@@ -281,16 +281,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
     /// <inheritdoc />
     /// <remarks>
-    /// Re-entrancy note: lifecycle handlers invoked during reconciliation may write to other
-    /// structural properties, re-entering this method. This is safe because the lock is re-entrant
-    /// and each property has its own <c>_lastProcessedValues</c> entry. However, handlers must NOT
-    /// write to the same property that is currently being reconciled by an outer call.
+    /// Re-entrant for different properties (lock is re-entrant, each property has its own
+    /// <c>_lastProcessedValues</c> entry). Handlers must NOT write to the same property
+    /// that is currently being reconciled — this would corrupt the reconciliation baseline.
     /// </remarks>
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
         next(ref context);
 
-        // Fast path: IsPrimitive is a JIT constant, avoids the ConcurrentDictionary lookup
         if (typeof(TProperty).IsPrimitive || !typeof(TProperty).CanContainSubjects())
         {
             return;
@@ -298,13 +296,16 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         lock (_attachedSubjects)
         {
-            // NewValue (not GetFinalValue) — re-reading the backing store could return another thread's value.
-            var newValue = (object?)context.NewValue;
-
-            // Last reconciled value, or CurrentValue on first write. Avoids stale CurrentValue
-            // when a concurrent writer already reconciled a different value after next().
             if (!_lastProcessedValues.TryGetValue(context.Property, out var lastProcessed))
                 lastProcessed = context.CurrentValue;
+
+            // Read the actual backing store value to handle concurrent writes correctly.
+            // context.NewValue may differ from the backing store if another thread
+            // overwrote the property between our next() call and lock acquisition.
+            var getValue = context.Property.Metadata.GetValue;
+            var newValue = getValue is not null
+                ? getValue(context.Property.Subject)
+                : context.NewValue;
 
             if (ReferenceEquals(lastProcessed, newValue))
             {
@@ -345,9 +346,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     }
                 }
 
-                // Always track the reconciled value (including null) so the next concurrent
-                // writer sees what we last reconciled rather than falling back to the
-                // potentially stale context.CurrentValue.
                 _lastProcessedValues[context.Property] = newValue;
             }
             finally
