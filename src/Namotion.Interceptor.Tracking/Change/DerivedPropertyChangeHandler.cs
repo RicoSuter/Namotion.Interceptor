@@ -40,7 +40,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         var metadata = change.Property.Metadata;
         if (metadata.IsDerived)
         {
-            // Get consolidated data once for LastKnownValue + StoreRecordedTouchedProperties
             var data = change.Property.GetDerivedPropertyData();
 
             StartRecordingTouchedProperties();
@@ -86,10 +85,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         if (_writePropertyDepth > 0)
         {
-            // Inside WriteProperty: defer removals. After recalculation, TryReplace will have
-            // already replaced RequiredProperties for recalculated targets, so the deferred
-            // Remove() calls will find nothing and return immediately (no CAS, no allocation).
-            // For non-recalculated targets, Remove() performs normal cleanup.
+            // Defer removals — flushed after recalculation (most become no-ops via TryReplace).
             _pendingRemovals ??= new(4);
             foreach (ref readonly var derivedProperty in usedByProperties.Items)
             {
@@ -103,7 +99,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
         else
         {
-            // Standalone detach (not inside WriteProperty): immediate cleanup.
+            // Standalone detach: immediate cleanup.
             foreach (ref readonly var derivedProperty in usedByProperties.Items)
             {
                 derivedProperty.TryGetDerivedPropertyData()?.RequiredProperties?.Remove(property);
@@ -152,7 +148,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             RecalculateDerivedProperty(ref property, currentTimestampUtcTicks);
         }
 
-        // Single lookup for consolidated data (short key "ni.dpd")
         // Use TryGet to avoid allocating DerivedPropertyData for properties with no dependents
         var usedByProperties = context.Property.TryGetDerivedPropertyData()?.UsedByProperties;
         if (usedByProperties is null || usedByProperties.Count == 0)
@@ -192,13 +187,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
     /// <summary>
     /// Recalculates a derived property when one of its dependencies changes.
-    /// Records new dependencies during evaluation and updates dependency graph.
     /// </summary>
     private static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long timestampUtcTicks)
     {
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
-
-        // Get consolidated data once: provides LastKnownValue + RequiredProperties
         var data = derivedProperty.GetDerivedPropertyData();
         var oldValue = data.LastKnownValue;
 
@@ -209,8 +201,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         data.LastKnownValue = newValue;
         derivedProperty.SetWriteTimestampUtcTicks(timestampUtcTicks);
 
-        // Fire change notification (null source indicates derived property change)
-        // Use thread-local storage + static delegates to avoid closure allocation
+        // Fire change notification via thread-local + static delegates (avoids closure allocation).
         _threadLocalOldValue = oldValue;
         using (SubjectChangeContext.WithSource(null))
         {
@@ -226,9 +217,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     }
 
     /// <summary>
-    /// Flushes deferred Case 2 removals. For targets where TryReplace already replaced
-    /// RequiredProperties (recalculated derived properties), Remove() returns false immediately
-    /// with no allocation. Only non-recalculated targets pay the CAS cost.
+    /// Flushes deferred Case 2 removals (most are no-ops after TryReplace).
     /// </summary>
     private static void FlushPendingRemovals()
     {
@@ -268,17 +257,16 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     private static void StoreRecordedTouchedProperties(PropertyReference derivedProperty, DerivedPropertyData data)
     {
         var recordedDependencies = _recorder!.FinishRecording();
-        var requiredProps = data.GetOrCreateRequiredProperties();
+        var requiredProperties = data.GetOrCreateRequiredProperties();
 
-        // Read version twice to detect concurrent modifications (allocation-free double-check)
-        var version1 = requiredProps.Version;
-        var previousItems = requiredProps.Items;
-        var version2 = requiredProps.Version;
+        // Double-read version to detect concurrent modifications.
+        var version1 = requiredProperties.Version;
+        var previousItems = requiredProperties.Items;
+        var version2 = requiredProperties.Version;
 
-        // Detect concurrent modification during read
         if (version1 != version2)
         {
-            MergeRecordedDependencies(requiredProps, recordedDependencies, derivedProperty);
+            MergeRecordedDependencies(requiredProperties, recordedDependencies, derivedProperty);
             _recorder.ClearLastRecording();
             return;
         }
@@ -289,10 +277,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return;
         }
 
-        if (!requiredProps.TryReplace(recordedDependencies, version1))
+        if (!requiredProperties.TryReplace(recordedDependencies, version1))
         {
-            // Version changed = concurrent write detected, use conservative merge
-            MergeRecordedDependencies(requiredProps, recordedDependencies, derivedProperty);
+            // Concurrent write detected, use conservative merge.
+            MergeRecordedDependencies(requiredProperties, recordedDependencies, derivedProperty);
             _recorder.ClearLastRecording();
             return;
         }
@@ -308,7 +296,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             }
         }
 
-        // Add this derived property to new dependencies
         foreach (ref readonly var newDependency in recordedDependencies)
         {
             if (!previousItems.Contains(newDependency))
@@ -321,19 +308,16 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     }
 
     /// <summary>
-    /// Merge mode for concurrent write conflicts - conservatively adds all recorded dependencies.
-    /// Never removes dependencies to avoid race conditions. Safe but may accumulate stale dependencies
-    /// until next exclusive-access recalculation.
+    /// Concurrent merge: adds all dependencies without removing (stale entries cleared on next exclusive recalc).
     /// </summary>
     private static void MergeRecordedDependencies(
-        DerivedPropertyDependencies requiredProps,
+        DerivedPropertyDependencies requiredProperties,
         ReadOnlySpan<PropertyReference> recordedDependencies,
         PropertyReference derivedProperty)
     {
-        // Add all recorded dependencies (CAS-based Add() is idempotent and thread-safe)
         foreach (ref readonly var dependency in recordedDependencies)
         {
-            requiredProps.Add(dependency);
+            requiredProperties.Add(dependency);
             dependency.GetUsedByProperties().Add(derivedProperty);
         }
     }
