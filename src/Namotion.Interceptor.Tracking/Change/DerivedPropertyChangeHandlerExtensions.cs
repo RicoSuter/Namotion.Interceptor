@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
@@ -14,6 +16,7 @@ public static class DerivedPropertyChangeHandlerExtensions
     /// Gets the consolidated tracking data for a property, creating it if needed.
     /// Single dictionary lookup provides access to UsedByProperties, RequiredProperties, and LastKnownValue.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static DerivedPropertyData GetDerivedPropertyData(this PropertyReference property) =>
         property.GetOrAddPropertyData(DataKey, static () => new DerivedPropertyData());
 
@@ -21,6 +24,7 @@ public static class DerivedPropertyChangeHandlerExtensions
     /// Tries to get the consolidated tracking data without allocating if not present.
     /// Returns null if no tracking data has been registered for this property.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static DerivedPropertyData? TryGetDerivedPropertyData(this PropertyReference property) =>
         property.TryGetPropertyData(DataKey, out var value) ? value as DerivedPropertyData : null;
 
@@ -35,6 +39,7 @@ public static class DerivedPropertyChangeHandlerExtensions
     /// Tries to get backward dependencies without allocating if not present.
     /// Returns null if no dependencies have been registered.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static DerivedPropertyDependencies? TryGetUsedByProperties(this PropertyReference property) =>
         property.TryGetDerivedPropertyData()?.UsedByProperties;
 
@@ -49,6 +54,7 @@ public static class DerivedPropertyChangeHandlerExtensions
     /// Tries to get forward dependencies without allocating if not present.
     /// Returns null if no dependencies have been registered.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static DerivedPropertyDependencies? TryGetRequiredProperties(this PropertyReference property) =>
         property.TryGetDerivedPropertyData()?.RequiredProperties;
 
