@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -135,11 +136,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
 
         // If this property is itself a derived property with a setter, recalculate it.
-        // This handles the case where SetValue is called directly on a derived property -
-        // the setter modifies internal state, but the actual value is computed by the getter.
+        // The setter modifies internal state, but the actual value is computed by the getter.
         // We need to: 1) re-record dependencies, 2) fire change notification with correct value.
-        // Performance: Two boolean checks for common case, extra getter call only for
-        // the rare case of derived properties with setters.
         var metadata = context.Property.Metadata;
         if (metadata is { IsDerived: true, SetValue: not null })
         {
@@ -148,38 +146,29 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             RecalculateDerivedProperty(ref property, currentTimestampUtcTicks);
         }
 
-        // Use TryGet to avoid allocating DerivedPropertyData for properties with no dependents
+        // Use TryGet to avoid allocating DerivedPropertyData for properties with no dependents.
         var usedByProperties = context.Property.TryGetDerivedPropertyData()?.UsedByProperties;
-        if (usedByProperties is null || usedByProperties.Count == 0)
+        if (usedByProperties is not null && usedByProperties.Count > 0)
         {
-            FlushPendingRemovals();
-            return;
-        }
-
-        var usedByPropertiesItems = usedByProperties.Items;
-
-        // Skip dependent recalculation during transaction capture.
-        // The [RunsBefore] ordering (Transaction before Derived) prevents non-derived writes
-        // from reaching here during capture. However, derived-with-setter properties bypass
-        // the transaction interceptor (IsDerived check), so this guard is still needed to
-        // suppress cascading recalculations until commit replay.
-        if (SubjectTransaction.HasActiveTransaction &&
-            SubjectTransaction.Current is { IsCommitting: false })
-        {
-            FlushPendingRemovals();
-            return;
-        }
-
-        var timestampUtcTicks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
-        for (var i = 0; i < usedByPropertiesItems.Length; i++)
-        {
-            var dependent = usedByPropertiesItems[i];
-            if (dependent == context.Property)
+            // Skip dependent recalculation during transaction capture.
+            // Derived-with-setter properties bypass the transaction interceptor (IsDerived check),
+            // so this guard suppresses cascading recalculations until commit replay.
+            if (!SubjectTransaction.HasActiveTransaction ||
+                SubjectTransaction.Current is not { IsCommitting: false })
             {
-                continue; // Skip self-references (rare edge case)
-            }
+                var usedByPropertiesItems = usedByProperties.Items;
+                var timestampUtcTicks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
+                for (var i = 0; i < usedByPropertiesItems.Length; i++)
+                {
+                    var dependent = usedByPropertiesItems[i];
+                    if (dependent == context.Property)
+                    {
+                        continue; // Skip self-references (rare edge case)
+                    }
 
-            RecalculateDerivedProperty(ref dependent, timestampUtcTicks);
+                    RecalculateDerivedProperty(ref dependent, timestampUtcTicks);
+                }
+            }
         }
 
         FlushPendingRemovals();
@@ -219,6 +208,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// <summary>
     /// Flushes deferred Case 2 removals (most are no-ops after TryReplace).
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void FlushPendingRemovals()
     {
         var pendingRemovals = _pendingRemovals;
