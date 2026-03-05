@@ -1,4 +1,3 @@
-using System.Reflection;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
 
@@ -6,12 +5,7 @@ namespace Namotion.Interceptor.Tracking.Tests.Change;
 
 public class DerivedPropertyRecorderTests
 {
-    // Access internal recorder via reflection for direct testing
-    private static DerivedPropertyRecorder CreateRecorder()
-    {
-        var type = typeof(DerivedPropertyRecorder);
-        return (DerivedPropertyRecorder)Activator.CreateInstance(type, nonPublic: true)!;
-    }
+    private static DerivedPropertyRecorder CreateRecorder() => new();
 
     [Fact]
     public void StartRecording_SetsIsRecordingTrue()
@@ -146,18 +140,22 @@ public class DerivedPropertyRecorderTests
         recorder.StartRecording();
 
         // Act - add more properties than initial buffer size (8)
-        var props = new List<PropertyReference>();
+        var properties = new List<PropertyReference>();
         for (var i = 0; i < 20; i++)
         {
-            var prop = new PropertyReference(person, $"Prop{i}");
-            props.Add(prop);
-            recorder.TouchProperty(ref prop);
+            var property = new PropertyReference(person, $"Prop{i}");
+            properties.Add(property);
+            recorder.TouchProperty(ref property);
         }
 
         var recorded = recorder.FinishRecording();
 
-        // Assert - all properties recorded
+        // Assert - all properties recorded and match
         Assert.Equal(20, recorded.Length);
+        for (var i = 0; i < properties.Count; i++)
+        {
+            Assert.Equal(properties[i], recorded[i]);
+        }
     }
 
     [Fact]

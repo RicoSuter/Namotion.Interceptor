@@ -12,19 +12,19 @@ internal sealed class DerivedPropertyData
     /// Backward dependencies: Which derived properties depend on this property.
     /// Initialized lazily via Interlocked.CompareExchange for thread safety.
     /// </summary>
-    public DerivedPropertyDependencies? UsedByProperties;
+    internal DerivedPropertyDependencies? UsedByProperties;
 
     /// <summary>
     /// Forward dependencies: Which properties this derived property depends on.
     /// Initialized lazily via Interlocked.CompareExchange for thread safety.
     /// </summary>
-    public DerivedPropertyDependencies? RequiredProperties;
+    internal DerivedPropertyDependencies? RequiredProperties;
 
     /// <summary>
     /// Cached last known value for change detection.
     /// Only used for derived properties.
     /// </summary>
-    public object? LastKnownValue;
+    internal object? LastKnownValue;
 
     /// <summary>
     /// Gets or creates the UsedByProperties collection (thread-safe).
