@@ -101,6 +101,11 @@ public class DerivedPropertyRecorderTests
     [Fact]
     public void NestedRecording_MaintainsSeparateFrames()
     {
+        // When a derived property's getter triggers recalculation of another derived property,
+        // StartRecording() nests. Each frame must record only its own dependencies so that
+        // StoreRecordedTouchedProperties builds the correct RequiredProperties per property.
+        // Without frame isolation, outer properties would incorrectly include inner dependencies.
+
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
