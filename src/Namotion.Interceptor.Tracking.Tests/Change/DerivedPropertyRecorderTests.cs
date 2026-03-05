@@ -41,17 +41,17 @@ public class DerivedPropertyRecorderTests
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
         var recorder = CreateRecorder();
-        var prop = new PropertyReference(person, nameof(Person.FirstName));
+        var property = new PropertyReference(person, nameof(Person.FirstName));
 
         recorder.StartRecording();
 
         // Act
-        recorder.TouchProperty(ref prop);
+        recorder.TouchProperty(ref property);
         var recorded = recorder.FinishRecording();
 
         // Assert
         Assert.Single(recorded.ToArray());
-        Assert.Equal(prop, recorded.ToArray()[0]);
+        Assert.Equal(property, recorded.ToArray()[0]);
     }
 
     [Fact]
@@ -61,14 +61,14 @@ public class DerivedPropertyRecorderTests
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
         var recorder = CreateRecorder();
-        var prop = new PropertyReference(person, nameof(Person.FirstName));
+        var property = new PropertyReference(person, nameof(Person.FirstName));
 
         recorder.StartRecording();
 
         // Act - touch same property multiple times
-        recorder.TouchProperty(ref prop);
-        recorder.TouchProperty(ref prop);
-        recorder.TouchProperty(ref prop);
+        recorder.TouchProperty(ref property);
+        recorder.TouchProperty(ref property);
+        recorder.TouchProperty(ref property);
         var recorded = recorder.FinishRecording();
 
         // Assert - should only appear once
@@ -82,20 +82,20 @@ public class DerivedPropertyRecorderTests
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
         var recorder = CreateRecorder();
-        var prop1 = new PropertyReference(person, nameof(Person.FirstName));
-        var prop2 = new PropertyReference(person, nameof(Person.LastName));
+        var firstNameProperty = new PropertyReference(person, nameof(Person.FirstName));
+        var lastNameProperty = new PropertyReference(person, nameof(Person.LastName));
 
         recorder.StartRecording();
 
         // Act
-        recorder.TouchProperty(ref prop1);
-        recorder.TouchProperty(ref prop2);
+        recorder.TouchProperty(ref firstNameProperty);
+        recorder.TouchProperty(ref lastNameProperty);
         var recorded = recorder.FinishRecording();
 
         // Assert
         Assert.Equal(2, recorded.Length);
-        Assert.Contains(prop1, recorded.ToArray());
-        Assert.Contains(prop2, recorded.ToArray());
+        Assert.Contains(firstNameProperty, recorded.ToArray());
+        Assert.Contains(lastNameProperty, recorded.ToArray());
     }
 
     [Fact]
@@ -105,28 +105,28 @@ public class DerivedPropertyRecorderTests
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
         var recorder = CreateRecorder();
-        var prop1 = new PropertyReference(person, nameof(Person.FirstName));
-        var prop2 = new PropertyReference(person, nameof(Person.LastName));
-        var prop3 = new PropertyReference(person, nameof(Person.Father));
+        var firstNameProperty = new PropertyReference(person, nameof(Person.FirstName));
+        var lastNameProperty = new PropertyReference(person, nameof(Person.LastName));
+        var fatherProperty = new PropertyReference(person, nameof(Person.Father));
 
         // Act - nested recording
         recorder.StartRecording();
-        recorder.TouchProperty(ref prop1);
+        recorder.TouchProperty(ref firstNameProperty);
 
         recorder.StartRecording(); // Nested
-        recorder.TouchProperty(ref prop2);
-        recorder.TouchProperty(ref prop3);
+        recorder.TouchProperty(ref lastNameProperty);
+        recorder.TouchProperty(ref fatherProperty);
         var innerRecorded = recorder.FinishRecording();
 
         var outerRecorded = recorder.FinishRecording();
 
         // Assert
         Assert.Equal(2, innerRecorded.Length);
-        Assert.Contains(prop2, innerRecorded.ToArray());
-        Assert.Contains(prop3, innerRecorded.ToArray());
+        Assert.Contains(lastNameProperty, innerRecorded.ToArray());
+        Assert.Contains(fatherProperty, innerRecorded.ToArray());
 
         Assert.Single(outerRecorded.ToArray());
-        Assert.Contains(prop1, outerRecorded.ToArray());
+        Assert.Contains(firstNameProperty, outerRecorded.ToArray());
     }
 
     [Fact]
@@ -172,8 +172,8 @@ public class DerivedPropertyRecorderTests
             recorder.StartRecording();
             for (var i = 0; i < 5; i++)
             {
-                var prop = new PropertyReference(person, $"Prop{i}");
-                recorder.TouchProperty(ref prop);
+                var property = new PropertyReference(person, $"Prop{i}");
+                recorder.TouchProperty(ref property);
             }
             var recorded = recorder.FinishRecording();
             Assert.Equal(5, recorded.Length);
@@ -190,10 +190,10 @@ public class DerivedPropertyRecorderTests
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
         var recorder = CreateRecorder();
-        var prop = new PropertyReference(person, nameof(Person.FirstName));
+        var property = new PropertyReference(person, nameof(Person.FirstName));
 
         recorder.StartRecording();
-        recorder.TouchProperty(ref prop);
+        recorder.TouchProperty(ref property);
         _ = recorder.FinishRecording();
 
         // Act

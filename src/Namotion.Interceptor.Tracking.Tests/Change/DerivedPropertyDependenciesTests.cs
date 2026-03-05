@@ -11,16 +11,16 @@ public class DerivedPropertyDependenciesTests
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
-        var deps = new DerivedPropertyDependencies();
-        var prop = new PropertyReference(person, nameof(Person.FirstName));
+        var dependencies = new DerivedPropertyDependencies();
+        var property = new PropertyReference(person, nameof(Person.FirstName));
 
         // Act
-        var result = deps.Add(prop);
+        var result = dependencies.Add(property);
 
         // Assert
         Assert.True(result);
-        Assert.Equal(1, deps.Count);
-        Assert.Contains(prop, deps.Items.ToArray());
+        Assert.Equal(1, dependencies.Count);
+        Assert.Contains(property, dependencies.Items.ToArray());
     }
 
     [Fact]
@@ -29,16 +29,16 @@ public class DerivedPropertyDependenciesTests
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
-        var deps = new DerivedPropertyDependencies();
-        var prop = new PropertyReference(person, nameof(Person.FirstName));
-        deps.Add(prop);
+        var dependencies = new DerivedPropertyDependencies();
+        var property = new PropertyReference(person, nameof(Person.FirstName));
+        dependencies.Add(property);
 
         // Act
-        var result = deps.Add(prop);
+        var result = dependencies.Add(property);
 
         // Assert
         Assert.False(result);
-        Assert.Equal(1, deps.Count);
+        Assert.Equal(1, dependencies.Count);
     }
 
     [Fact]
@@ -47,16 +47,16 @@ public class DerivedPropertyDependenciesTests
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
-        var deps = new DerivedPropertyDependencies();
-        var prop = new PropertyReference(person, nameof(Person.FirstName));
-        deps.Add(prop);
+        var dependencies = new DerivedPropertyDependencies();
+        var property = new PropertyReference(person, nameof(Person.FirstName));
+        dependencies.Add(property);
 
         // Act
-        var result = deps.Remove(prop);
+        var result = dependencies.Remove(property);
 
         // Assert
         Assert.True(result);
-        Assert.Equal(0, deps.Count);
+        Assert.Equal(0, dependencies.Count);
     }
 
     [Fact]
@@ -65,11 +65,11 @@ public class DerivedPropertyDependenciesTests
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
-        var deps = new DerivedPropertyDependencies();
-        var prop = new PropertyReference(person, nameof(Person.FirstName));
+        var dependencies = new DerivedPropertyDependencies();
+        var property = new PropertyReference(person, nameof(Person.FirstName));
 
         // Act
-        var result = deps.Remove(prop);
+        var result = dependencies.Remove(property);
 
         // Assert
         Assert.False(result);
@@ -81,16 +81,16 @@ public class DerivedPropertyDependenciesTests
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
-        var deps = new DerivedPropertyDependencies();
-        var prop = new PropertyReference(person, nameof(Person.FirstName));
-        deps.Add(prop);
+        var dependencies = new DerivedPropertyDependencies();
+        var property = new PropertyReference(person, nameof(Person.FirstName));
+        dependencies.Add(property);
 
         // Act
-        deps.Remove(prop);
+        dependencies.Remove(property);
 
         // Assert
-        Assert.Equal(0, deps.Count);
-        Assert.Empty(deps.Items.ToArray());
+        Assert.Equal(0, dependencies.Count);
+        Assert.Empty(dependencies.Items.ToArray());
     }
 
     [Fact]
@@ -99,23 +99,23 @@ public class DerivedPropertyDependenciesTests
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
-        var deps = new DerivedPropertyDependencies();
-        var prop1 = new PropertyReference(person, nameof(Person.FirstName));
-        var prop2 = new PropertyReference(person, nameof(Person.LastName));
-        var prop3 = new PropertyReference(person, nameof(Person.Father));
-        deps.Add(prop1);
-        deps.Add(prop2);
-        deps.Add(prop3);
+        var dependencies = new DerivedPropertyDependencies();
+        var firstNameProperty = new PropertyReference(person, nameof(Person.FirstName));
+        var lastNameProperty = new PropertyReference(person, nameof(Person.LastName));
+        var fatherProperty = new PropertyReference(person, nameof(Person.Father));
+        dependencies.Add(firstNameProperty);
+        dependencies.Add(lastNameProperty);
+        dependencies.Add(fatherProperty);
 
         // Act
-        deps.Remove(prop1);
+        dependencies.Remove(firstNameProperty);
 
         // Assert
-        Assert.Equal(2, deps.Count);
-        var items = deps.Items.ToArray();
-        Assert.DoesNotContain(prop1, items);
-        Assert.Contains(prop2, items);
-        Assert.Contains(prop3, items);
+        Assert.Equal(2, dependencies.Count);
+        var items = dependencies.Items.ToArray();
+        Assert.DoesNotContain(firstNameProperty, items);
+        Assert.Contains(lastNameProperty, items);
+        Assert.Contains(fatherProperty, items);
     }
 
     [Fact]
@@ -124,23 +124,23 @@ public class DerivedPropertyDependenciesTests
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
-        var deps = new DerivedPropertyDependencies();
-        var prop1 = new PropertyReference(person, nameof(Person.FirstName));
-        var prop2 = new PropertyReference(person, nameof(Person.LastName));
-        var prop3 = new PropertyReference(person, nameof(Person.Father));
-        deps.Add(prop1);
-        deps.Add(prop2);
-        deps.Add(prop3);
+        var dependencies = new DerivedPropertyDependencies();
+        var firstNameProperty = new PropertyReference(person, nameof(Person.FirstName));
+        var lastNameProperty = new PropertyReference(person, nameof(Person.LastName));
+        var fatherProperty = new PropertyReference(person, nameof(Person.Father));
+        dependencies.Add(firstNameProperty);
+        dependencies.Add(lastNameProperty);
+        dependencies.Add(fatherProperty);
 
         // Act
-        deps.Remove(prop3);
+        dependencies.Remove(fatherProperty);
 
         // Assert
-        Assert.Equal(2, deps.Count);
-        var items = deps.Items.ToArray();
-        Assert.Contains(prop1, items);
-        Assert.Contains(prop2, items);
-        Assert.DoesNotContain(prop3, items);
+        Assert.Equal(2, dependencies.Count);
+        var items = dependencies.Items.ToArray();
+        Assert.Contains(firstNameProperty, items);
+        Assert.Contains(lastNameProperty, items);
+        Assert.DoesNotContain(fatherProperty, items);
     }
 
     [Fact]
@@ -149,23 +149,23 @@ public class DerivedPropertyDependenciesTests
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
-        var deps = new DerivedPropertyDependencies();
-        var prop1 = new PropertyReference(person, nameof(Person.FirstName));
-        var prop2 = new PropertyReference(person, nameof(Person.LastName));
-        var prop3 = new PropertyReference(person, nameof(Person.Father));
-        deps.Add(prop1);
-        deps.Add(prop2);
-        deps.Add(prop3);
+        var dependencies = new DerivedPropertyDependencies();
+        var firstNameProperty = new PropertyReference(person, nameof(Person.FirstName));
+        var lastNameProperty = new PropertyReference(person, nameof(Person.LastName));
+        var fatherProperty = new PropertyReference(person, nameof(Person.Father));
+        dependencies.Add(firstNameProperty);
+        dependencies.Add(lastNameProperty);
+        dependencies.Add(fatherProperty);
 
         // Act
-        deps.Remove(prop2);
+        dependencies.Remove(lastNameProperty);
 
         // Assert
-        Assert.Equal(2, deps.Count);
-        var items = deps.Items.ToArray();
-        Assert.Contains(prop1, items);
-        Assert.DoesNotContain(prop2, items);
-        Assert.Contains(prop3, items);
+        Assert.Equal(2, dependencies.Count);
+        var items = dependencies.Items.ToArray();
+        Assert.Contains(firstNameProperty, items);
+        Assert.DoesNotContain(lastNameProperty, items);
+        Assert.Contains(fatherProperty, items);
     }
 
     [Fact]
@@ -174,23 +174,23 @@ public class DerivedPropertyDependenciesTests
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
-        var deps = new DerivedPropertyDependencies();
-        var prop1 = new PropertyReference(person, nameof(Person.FirstName));
-        deps.Add(prop1);
-        var version = deps.Version;
+        var dependencies = new DerivedPropertyDependencies();
+        var firstNameProperty = new PropertyReference(person, nameof(Person.FirstName));
+        dependencies.Add(firstNameProperty);
+        var version = dependencies.Version;
 
-        var prop2 = new PropertyReference(person, nameof(Person.LastName));
-        var newItems = new[] { prop2 };
+        var lastNameProperty = new PropertyReference(person, nameof(Person.LastName));
+        var newItems = new[] { lastNameProperty };
 
         // Act
-        var result = deps.TryReplace(newItems, version);
+        var result = dependencies.TryReplace(newItems, version);
 
         // Assert
         Assert.True(result);
-        Assert.Equal(1, deps.Count);
-        var items = deps.Items.ToArray();
-        Assert.DoesNotContain(prop1, items);
-        Assert.Contains(prop2, items);
+        Assert.Equal(1, dependencies.Count);
+        var items = dependencies.Items.ToArray();
+        Assert.DoesNotContain(firstNameProperty, items);
+        Assert.Contains(lastNameProperty, items);
     }
 
     [Fact]
@@ -199,28 +199,28 @@ public class DerivedPropertyDependenciesTests
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
-        var deps = new DerivedPropertyDependencies();
-        var prop1 = new PropertyReference(person, nameof(Person.FirstName));
-        deps.Add(prop1);
-        var oldVersion = deps.Version;
+        var dependencies = new DerivedPropertyDependencies();
+        var firstNameProperty = new PropertyReference(person, nameof(Person.FirstName));
+        dependencies.Add(firstNameProperty);
+        var oldVersion = dependencies.Version;
 
         // Simulate concurrent modification
-        var prop2 = new PropertyReference(person, nameof(Person.LastName));
-        deps.Add(prop2);
+        var lastNameProperty = new PropertyReference(person, nameof(Person.LastName));
+        dependencies.Add(lastNameProperty);
 
-        var prop3 = new PropertyReference(person, nameof(Person.Father));
-        var newItems = new[] { prop3 };
+        var fatherProperty = new PropertyReference(person, nameof(Person.Father));
+        var newItems = new[] { fatherProperty };
 
         // Act - try to replace with old version
-        var result = deps.TryReplace(newItems, oldVersion);
+        var result = dependencies.TryReplace(newItems, oldVersion);
 
         // Assert
         Assert.False(result);
-        Assert.Equal(2, deps.Count); // Original items preserved
-        var items = deps.Items.ToArray();
-        Assert.Contains(prop1, items);
-        Assert.Contains(prop2, items);
-        Assert.DoesNotContain(prop3, items);
+        Assert.Equal(2, dependencies.Count); // Original items preserved
+        var items = dependencies.Items.ToArray();
+        Assert.Contains(firstNameProperty, items);
+        Assert.Contains(lastNameProperty, items);
+        Assert.DoesNotContain(fatherProperty, items);
     }
 
     [Fact]
@@ -229,17 +229,17 @@ public class DerivedPropertyDependenciesTests
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
-        var deps = new DerivedPropertyDependencies();
-        var prop1 = new PropertyReference(person, nameof(Person.FirstName));
-        deps.Add(prop1);
-        var version = deps.Version;
+        var dependencies = new DerivedPropertyDependencies();
+        var firstNameProperty = new PropertyReference(person, nameof(Person.FirstName));
+        dependencies.Add(firstNameProperty);
+        var version = dependencies.Version;
 
         // Act
-        var result = deps.TryReplace(ReadOnlySpan<PropertyReference>.Empty, version);
+        var result = dependencies.TryReplace(ReadOnlySpan<PropertyReference>.Empty, version);
 
         // Assert
         Assert.True(result);
-        Assert.Equal(0, deps.Count);
+        Assert.Equal(0, dependencies.Count);
     }
 
     [Fact]
@@ -248,14 +248,14 @@ public class DerivedPropertyDependenciesTests
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
-        var deps = new DerivedPropertyDependencies();
-        var initialVersion = deps.Version;
+        var dependencies = new DerivedPropertyDependencies();
+        var initialVersion = dependencies.Version;
 
         // Act
-        deps.Add(new PropertyReference(person, nameof(Person.FirstName)));
+        dependencies.Add(new PropertyReference(person, nameof(Person.FirstName)));
 
         // Assert
-        Assert.Equal(initialVersion + 1, deps.Version);
+        Assert.Equal(initialVersion + 1, dependencies.Version);
     }
 
     [Fact]
@@ -264,16 +264,16 @@ public class DerivedPropertyDependenciesTests
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
-        var deps = new DerivedPropertyDependencies();
-        var prop = new PropertyReference(person, nameof(Person.FirstName));
-        deps.Add(prop);
-        var versionAfterAdd = deps.Version;
+        var dependencies = new DerivedPropertyDependencies();
+        var property = new PropertyReference(person, nameof(Person.FirstName));
+        dependencies.Add(property);
+        var versionAfterAdd = dependencies.Version;
 
         // Act
-        deps.Remove(prop);
+        dependencies.Remove(property);
 
         // Assert
-        Assert.Equal(versionAfterAdd + 1, deps.Version);
+        Assert.Equal(versionAfterAdd + 1, dependencies.Version);
     }
 
     [Fact]
@@ -282,15 +282,15 @@ public class DerivedPropertyDependenciesTests
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
-        var deps = new DerivedPropertyDependencies();
-        deps.Add(new PropertyReference(person, nameof(Person.FirstName)));
-        var version = deps.Version;
+        var dependencies = new DerivedPropertyDependencies();
+        dependencies.Add(new PropertyReference(person, nameof(Person.FirstName)));
+        var version = dependencies.Version;
 
         // Act
-        deps.TryReplace(new[] { new PropertyReference(person, nameof(Person.LastName)) }, version);
+        dependencies.TryReplace(new[] { new PropertyReference(person, nameof(Person.LastName)) }, version);
 
         // Assert
-        Assert.Equal(version + 1, deps.Version);
+        Assert.Equal(version + 1, dependencies.Version);
     }
 
     [Fact]
@@ -299,17 +299,17 @@ public class DerivedPropertyDependenciesTests
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
-        var deps = new DerivedPropertyDependencies();
-        var prop1 = new PropertyReference(person, nameof(Person.FirstName));
-        deps.Add(prop1);
+        var dependencies = new DerivedPropertyDependencies();
+        var firstNameProperty = new PropertyReference(person, nameof(Person.FirstName));
+        dependencies.Add(firstNameProperty);
 
         // Act - get snapshot then modify
-        var snapshot = deps.Items.ToArray();
-        deps.Add(new PropertyReference(person, nameof(Person.LastName)));
+        var snapshot = dependencies.Items.ToArray();
+        dependencies.Add(new PropertyReference(person, nameof(Person.LastName)));
 
         // Assert - snapshot unchanged
         Assert.Single(snapshot);
-        Assert.Equal(2, deps.Count); // But collection changed
+        Assert.Equal(2, dependencies.Count); // But collection changed
     }
 
     [Fact]
@@ -318,7 +318,7 @@ public class DerivedPropertyDependenciesTests
         // Arrange
         var context = InterceptorSubjectContext.Create();
         var person = new Person(context);
-        var deps = new DerivedPropertyDependencies();
+        var dependencies = new DerivedPropertyDependencies();
         var properties = new[]
         {
             new PropertyReference(person, nameof(Person.FirstName)),
@@ -334,17 +334,17 @@ public class DerivedPropertyDependenciesTests
             var index = i;
             tasks.Add(Task.Run(() =>
             {
-                var prop = properties[index % properties.Length];
+                var property = properties[index % properties.Length];
                 if (index % 2 == 0)
-                    deps.Add(prop);
+                    dependencies.Add(property);
                 else
-                    deps.Remove(prop);
+                    dependencies.Remove(property);
             }));
         }
 
         await Task.WhenAll(tasks);
 
         // Assert - should not throw, count should be valid
-        Assert.True(deps.Count >= 0 && deps.Count <= properties.Length);
+        Assert.True(dependencies.Count >= 0 && dependencies.Count <= properties.Length);
     }
 }
