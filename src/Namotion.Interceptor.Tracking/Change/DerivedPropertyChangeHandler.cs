@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -22,15 +21,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     // Thread-local old value + static delegates avoid closure allocations in recalculation.
     [ThreadStatic]
     private static object? _threadLocalOldValue;
-
-    // Tracks WriteProperty nesting depth. During write-triggered detach, Case 2 removals
-    // are deferred to _pendingRemovals and flushed after recalculation (where TryReplace
-    // makes most Remove() calls no-ops).
-    [ThreadStatic]
-    private static int _writePropertyDepth;
-
-    [ThreadStatic]
-    private static List<(DerivedPropertyDependencies target, PropertyReference source)>? _pendingRemovals;
 
     private static readonly Func<IInterceptorSubject, object?> GetOldValueDelegate = static _ => _threadLocalOldValue;
     private static readonly Action<IInterceptorSubject, object?> NoOpWriteDelegate = static (_, _) => { };
@@ -78,29 +68,12 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
 
         // Case 2: Source property detached — remove from dependents' RequiredProperties.
+        // During write-triggered detach, StoreRecordedTouchedProperties will TryReplace
+        // the RequiredProperties array anyway, making most of these Remove() calls redundant.
+        // Stale backlinks on detached subjects are harmless (subjects become unreachable → GC'd).
         var usedByProperties = data.UsedByProperties;
-        if (usedByProperties is null || usedByProperties.Count == 0)
+        if (usedByProperties is not null && usedByProperties.Count > 0)
         {
-            return;
-        }
-
-        if (_writePropertyDepth > 0)
-        {
-            // Defer removals — flushed after recalculation (most become no-ops via TryReplace).
-            _pendingRemovals ??= new(4);
-            foreach (ref readonly var derivedProperty in usedByProperties.Items)
-            {
-                var derivedData = derivedProperty.TryGetDerivedPropertyData();
-                var requiredProperties = derivedData?.RequiredProperties;
-                if (requiredProperties is not null)
-                {
-                    _pendingRemovals.Add((requiredProperties, property));
-                }
-            }
-        }
-        else
-        {
-            // Standalone detach: immediate cleanup.
             foreach (ref readonly var derivedProperty in usedByProperties.Items)
             {
                 derivedProperty.TryGetDerivedPropertyData()?.RequiredProperties?.Remove(property);
@@ -125,15 +98,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// <inheritdoc />
     public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
     {
-        _writePropertyDepth++;
-        try
-        {
-            next(ref context);
-        }
-        finally
-        {
-            _writePropertyDepth--;
-        }
+        next(ref context);
 
         // If this property is itself a derived property with a setter, recalculate it.
         // The setter modifies internal state, but the actual value is computed by the getter.
@@ -170,8 +135,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 }
             }
         }
-
-        FlushPendingRemovals();
     }
 
     /// <summary>
@@ -203,27 +166,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         {
             raiser.RaisePropertyChanged(derivedProperty.Metadata.Name);
         }
-    }
-
-    /// <summary>
-    /// Flushes deferred Case 2 removals (most are no-ops after TryReplace).
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void FlushPendingRemovals()
-    {
-        var pendingRemovals = _pendingRemovals;
-        if (pendingRemovals is null || pendingRemovals.Count == 0 || _writePropertyDepth > 0)
-        {
-            return;
-        }
-
-        for (var i = 0; i < pendingRemovals.Count; i++)
-        {
-            var (target, source) = pendingRemovals[i];
-            target.Remove(source);
-        }
-
-        pendingRemovals.Clear();
     }
 
     /// <summary>
