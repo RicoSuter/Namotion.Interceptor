@@ -50,6 +50,9 @@
       },
       Mother: {
         Kind: Object
+      },
+      Relationships: {
+        Kind: Value
       }
     }
   }

@@ -175,10 +175,12 @@ public static class PathExtensions
     {
         var pathParts = new List<(RegisteredSubjectProperty property, object? index)>();
         var current = property;
+        object? pendingIndex = null;
 
         while (current is not null)
         {
-            pathParts.Add((current, null));
+            pathParts.Add((current, pendingIndex));
+            pendingIndex = null;
 
             if (rootSubject is not null && current.Subject == rootSubject)
             {
@@ -193,11 +195,7 @@ public static class PathExtensions
             }
 
             var (parentProperty, index) = parentInfo.Value;
-            if (pathParts.Count > 0)
-            {
-                // Update the last item with the index from parent
-                pathParts[^1] = (pathParts[^1].property, index);
-            }
+            pendingIndex = index;
 
             current = parentProperty;
         }
