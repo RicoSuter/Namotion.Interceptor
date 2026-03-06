@@ -183,7 +183,7 @@ public class SubjectPathResolver : ILifecycleHandler
             var registered = registry.TryGetRegisteredSubject(current);
             var property = registered?.TryGetProperty(segment);
 
-            if (property is not { HasChildSubjects: true })
+            if (property is not { CanContainSubjects: true })
             {
                 // No direct property match - try [InlinePaths] fallback
                 var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(current.GetType());
