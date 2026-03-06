@@ -9,12 +9,14 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// </summary>
 internal sealed class SubjectUpdateBuilder
 {
+    private Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> _subjects = new();
+
     private readonly Dictionary<IInterceptorSubject, string> _subjectToId = new();
-    private readonly Dictionary<SubjectPropertyUpdate, (RegisteredSubjectProperty Property, IDictionary<string, SubjectPropertyUpdate> Parent)> _propertyUpdates = new();
+    private readonly Dictionary<
+        SubjectPropertyUpdate, (RegisteredSubjectProperty Property, 
+        IDictionary<string, SubjectPropertyUpdate> Parent)> _propertyUpdates = new();
 
     public ISubjectUpdateProcessor[] Processors { get; private set; } = [];
-    
-    public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = new();
 
     public HashSet<IInterceptorSubject> ProcessedSubjects { get; } = [];
 
@@ -43,21 +45,12 @@ internal sealed class SubjectUpdateBuilder
 
     public Dictionary<string, SubjectPropertyUpdate> GetOrCreateProperties(string subjectId)
     {
-        if (!Subjects.TryGetValue(subjectId, out var properties))
+        if (!_subjects.TryGetValue(subjectId, out var properties))
         {
             properties = new Dictionary<string, SubjectPropertyUpdate>();
-            Subjects[subjectId] = properties;
+            _subjects[subjectId] = properties;
         }
         return properties;
-    }
-
-    public bool SubjectHasUpdates(IInterceptorSubject subject)
-    {
-        if (_subjectToId.TryGetValue(subject, out var id))
-        {
-            return Subjects.TryGetValue(id, out var properties) && properties.Count > 0;
-        }
-        return false;
     }
 
     public void TrackPropertyUpdate(
@@ -82,11 +75,11 @@ internal sealed class SubjectUpdateBuilder
 
         // Build an ordered dictionary with root entry first for deterministic output.
         var orderedSubjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>();
-        if (Subjects.TryGetValue(rootId, out var rootProps))
+        if (_subjects.TryGetValue(rootId, out var rootProps))
         {
             orderedSubjects[rootId] = rootProps;
         }
-        foreach (var (key, value) in Subjects)
+        foreach (var (key, value) in _subjects)
         {
             if (key != rootId)
             {
@@ -115,10 +108,11 @@ internal sealed class SubjectUpdateBuilder
     /// </summary>
     public void Clear()
     {
+        _subjects = new(); // create a fresh dictionary, old one transferred to result
         _subjectToId.Clear();
         _propertyUpdates.Clear();
+
         ProcessedSubjects.Clear();
-        Subjects = new(); // create a fresh dictionary, old one transferred to result
         Processors = [];
     }
 
