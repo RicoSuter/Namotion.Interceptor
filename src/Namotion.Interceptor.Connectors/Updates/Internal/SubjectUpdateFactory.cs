@@ -146,24 +146,16 @@ internal static class SubjectUpdateFactory
 
         if (property.IsSubjectDictionary)
         {
-            if (value is null)
-            {
-                update.Kind = SubjectPropertyUpdateKind.Value;
-                update.Value = null;
-            }
-            else
+            update.Kind = SubjectPropertyUpdateKind.Dictionary;
+            if (value is not null)
             {
                 SubjectItemsUpdateFactory.BuildDictionaryComplete(update, value as IDictionary, builder);
             }
         }
         else if (property.IsSubjectCollection)
         {
-            if (value is null)
-            {
-                update.Kind = SubjectPropertyUpdateKind.Value;
-                update.Value = null;
-            }
-            else
+            update.Kind = SubjectPropertyUpdateKind.Collection;
+            if (value is not null)
             {
                 SubjectItemsUpdateFactory.BuildCollectionComplete(update, value as IEnumerable<IInterceptorSubject>, builder);
             }
@@ -197,35 +189,22 @@ internal static class SubjectUpdateFactory
 
         if (property.IsSubjectDictionary)
         {
+            update.Kind = SubjectPropertyUpdateKind.Dictionary;
+
             var newValue = change.GetNewValue<IDictionary?>();
-            if (newValue is null)
+            if (newValue is not null)
             {
-                update.Kind = SubjectPropertyUpdateKind.Value;
-                update.Value = null;
-            }
-            else
-            {
-                // Send complete dictionary structure with only new items processed fully.
-                // Avoids diff operations which can be incorrect when old values are stale
-                // (e.g., from the retry queue after reconnection or ChangeQueueProcessor dedup).
                 SubjectItemsUpdateFactory.BuildDictionaryUpdate(update,
                     change.GetOldValue<IDictionary?>(), newValue, builder);
             }
         }
         else if (property.IsSubjectCollection)
         {
+            update.Kind = SubjectPropertyUpdateKind.Collection;
+
             var newValue = change.GetNewValue<IEnumerable<IInterceptorSubject>?>();
-            if (newValue is null)
+            if (newValue is not null)
             {
-                update.Kind = SubjectPropertyUpdateKind.Value;
-                update.Value = null;
-            }
-            else
-            {
-                // Send complete collection ordering with only new items processed fully.
-                // Avoids diff operations (Move/Insert/Remove) which can be incorrect when
-                // old values are stale (e.g., from the retry queue after reconnection
-                // or ChangeQueueProcessor dedup).
                 SubjectItemsUpdateFactory.BuildCollectionUpdate(update,
                     change.GetOldValue<IEnumerable<IInterceptorSubject>?>(),
                     newValue, builder);
@@ -256,7 +235,7 @@ internal static class SubjectUpdateFactory
             update.Id = id;
 
             // Only process the complete subject if it's newly encountered.
-            // If the subject already had an ID, it's part of the existing tree
+            // If the subject already had an ID, it's part of the existing tree,
             // and we should only add a reference to it, not all its properties.
             // This prevents circular references from causing the entire tree
             // to be included in partial updates.
@@ -308,7 +287,7 @@ internal static class SubjectUpdateFactory
             subjectProperties[rootProperty.Name] = rootUpdate;
         }
 
-        // Navigate/create an attribute chain (excluding the last one which we'll create from change)
+        // Navigate/create an attribute chain (excluding the last one, which we'll create from change)
         var currentUpdate = rootUpdate;
         var attributeChain = new List<RegisteredSubjectProperty>();
         var currentProperty = attributeProperty;
@@ -319,7 +298,7 @@ internal static class SubjectUpdateFactory
         }
         attributeChain.Reverse();
 
-        // Navigate to parent of target attribute
+        // Navigate to the parent of the target attribute
         for (var i = 0; i < attributeChain.Count - 1; i++)
         {
             var chainedAttribute = attributeChain[i];

@@ -25,10 +25,12 @@ internal static class SubjectUpdateApplier
 
             if (update.Root is not null && update.Subjects.TryGetValue(update.Root, out var rootProperties))
             {
-                // Complete update or rooted partial update with root entry — apply from root.
-                // Set the root's subject ID to match the sender's ID so snapshots converge.
+                // Complete or rooted partial update — apply from root.
+                // Set the root's subject ID on first sync so IDs converge;
+                // later calls with the same ID are a no-op (reassignment throws).
                 subject.SetSubjectId(update.Root);
                 context.TryMarkAsProcessed(update.Root);
+
                 ApplyPropertyUpdates(subject, rootProperties, context);
             }
 
@@ -74,7 +76,8 @@ internal static class SubjectUpdateApplier
             {
                 foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)
                 {
-                    var registeredAttribute = subject.TryGetRegisteredSubject()?
+                    var registeredAttribute = subject
+                        .TryGetRegisteredSubject()?
                         .TryGetPropertyAttribute(propertyName, attributeName);
 
                     if (registeredAttribute is not null)

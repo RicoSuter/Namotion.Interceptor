@@ -18,32 +18,31 @@ internal static class SubjectItemsUpdateApplier
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        var workingItems = (property.GetValue() as IEnumerable<IInterceptorSubject>)?.ToList() ?? [];
-        var structureChanged = false;
-        var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
-
-        // Complete collection from items (defines the full ordered state)
-        if (propertyUpdate.Items is not null)
+        if (propertyUpdate.Items is null)
         {
-            var newItems = new List<IInterceptorSubject>(propertyUpdate.Items.Count);
-            foreach (var itemUpdate in propertyUpdate.Items)
-            {
-                var item = ResolveOrCreateSubject(
-                    parent, property, newItems.Count, itemUpdate.Id, idRegistry, context);
-                newItems.Add(item);
-            }
-
-            workingItems = newItems;
-            structureChanged = true;
-        }
-
-        if (structureChanged)
-        {
-            var collection = context.SubjectFactory.CreateSubjectCollection(property.Type, workingItems);
+            // Null items mean the collection itself is null
             using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
             {
-                property.SetValue(collection);
+                property.SetValue(null);
             }
+            return;
+        }
+
+        var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
+      
+        var newItems = new List<IInterceptorSubject>(propertyUpdate.Items.Count);
+        foreach (var itemUpdate in propertyUpdate.Items)
+        {
+            var item = ResolveOrCreateSubject(
+                parent, property, newItems.Count, itemUpdate.Id, idRegistry, context);
+
+            newItems.Add(item);
+        }
+
+        var collection = context.SubjectFactory.CreateSubjectCollection(property.Type, newItems);
+        using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
+        {
+            property.SetValue(collection);
         }
     }
 
@@ -56,12 +55,19 @@ internal static class SubjectItemsUpdateApplier
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        var existingDictionary = property.GetValue() as IDictionary;
-        var targetKeyType = property.Type.GenericTypeArguments[0];
-        var workingDictionary = new Dictionary<object, IInterceptorSubject>();
-        var structureChanged = false;
-        var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
+        if (propertyUpdate.Items is null)
+        {
+            // Null items mean the dictionary itself is null
+            using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
+            {
+                property.SetValue(null);
+            }
+            return;
+        }
 
+        var workingDictionary = new Dictionary<object, IInterceptorSubject>();
+
+        var existingDictionary = property.GetValue() as IDictionary;
         if (existingDictionary is not null)
         {
             foreach (DictionaryEntry entry in existingDictionary)
@@ -71,57 +77,72 @@ internal static class SubjectItemsUpdateApplier
             }
         }
 
-        // Apply item updates (complete state for dictionaries)
-        if (propertyUpdate.Items is not null)
+        var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
+
+        var targetKeyType = property.Type.GenericTypeArguments[0];
+        var structureChanged = false;
+        var updatedKeys = new HashSet<object>();
+
+        foreach (var collectionUpdate in propertyUpdate.Items)
         {
-            var updatedKeys = new HashSet<object>();
+            if (collectionUpdate.Key is null)
+                continue;
 
-            foreach (var collUpdate in propertyUpdate.Items)
+            var key = DictionaryKeyConverter.Convert(collectionUpdate.Key, targetKeyType);
+            updatedKeys.Add(key);
+
+            if (workingDictionary.TryGetValue(key, out var existing))
             {
-                if (collUpdate.Key is null)
-                    continue;
-
-                var key = DictionaryKeyConverter.Convert(collUpdate.Key, targetKeyType);
-                updatedKeys.Add(key);
-
-                if (context.Subjects.TryGetValue(collUpdate.Id, out var itemProps))
+                var existingId = existing.TryGetSubjectId();
+                if (existingId is not null && existingId != collectionUpdate.Id)
                 {
-                    if (workingDictionary.TryGetValue(key, out var existing))
-                    {
-                        // Set subject ID on pre-existing dictionary item to match the sender's ID.
-                        existing.SetSubjectId(collUpdate.Id);
-                        if (context.TryMarkAsProcessed(collUpdate.Id))
-                        {
-                            SubjectUpdateApplier.ApplyPropertyUpdates(existing, itemProps, context);
-                        }
-                    }
-                    else
-                    {
-                        var newItem = ResolveExistingOrCreateSubject(
-                            parent, property, key, collUpdate.Id, itemProps, idRegistry, context);
-                        workingDictionary[key] = newItem;
-                        structureChanged = true;
-                    }
+                    // Different logical subject at the same key — replace it.
+                    workingDictionary[key] = ResolveOrCreateSubject(
+                        parent, property, key, collectionUpdate.Id, idRegistry, context);
+ 
+                    structureChanged = true;
+                }
+                else
+                {
+                    // Same logical subject (or no ID yet) — converge ID and update in place.
+
+                    // TODO: This could throw on conflict (same key, different subject already added)
+                    existing.SetSubjectId(collectionUpdate.Id); 
+                    ApplyPropertiesIfAvailable(existing, collectionUpdate.Id, context);
                 }
             }
-
-            // Remove dictionary entries not mentioned in items
-            List<object>? keysToRemove = null;
-            foreach (var key in workingDictionary.Keys)
+            else
             {
-                if (!updatedKeys.Contains(key))
-                {
-                    keysToRemove ??= [];
-                    keysToRemove.Add(key);
-                }
-            }
+                workingDictionary[key] = ResolveOrCreateSubject(
+                    parent, property, key, collectionUpdate.Id, idRegistry, context);
 
-            if (keysToRemove is not null)
-            {
-                foreach (var key in keysToRemove)
-                    workingDictionary.Remove(key);
                 structureChanged = true;
             }
+        }
+
+        // Remove dictionary entries not mentioned in items
+        List<object>? keysToRemove = null;
+        foreach (var key in workingDictionary.Keys)
+        {
+            if (!updatedKeys.Contains(key))
+            {
+                keysToRemove ??= [];
+                keysToRemove.Add(key);
+            }
+        }
+
+        if (keysToRemove is not null)
+        {
+            foreach (var key in keysToRemove)
+                workingDictionary.Remove(key);
+            
+            structureChanged = true;
+        }
+
+        // Also rebuild when transitioning from null to a (possibly empty) dictionary
+        if (!structureChanged && existingDictionary is null)
+        {
+            structureChanged = true;
         }
 
         if (structureChanged)
@@ -158,38 +179,10 @@ internal static class SubjectItemsUpdateApplier
     }
 
     /// <summary>
-    /// Resolves an existing subject by ID, or creates a new one.
-    /// Always returns a non-null subject. Used by dictionary operations where the
-    /// subject properties are guaranteed to exist in the context.
-    /// </summary>
-    private static IInterceptorSubject ResolveExistingOrCreateSubject(
-        IInterceptorSubject parent,
-        RegisteredSubjectProperty property,
-        object indexOrKey,
-        string subjectId,
-        Dictionary<string, SubjectPropertyUpdate> subjectProperties,
-        ISubjectIdRegistry idRegistry,
-        SubjectUpdateApplyContext context)
-    {
-        var subject = idRegistry.TryGetSubjectById(subjectId, out var existing)
-            ? existing
-            : CreateSubjectItem(parent, property, indexOrKey, subjectId, context);
-
-        if (context.TryMarkAsProcessed(subjectId))
-        {
-            SubjectUpdateApplier.ApplyPropertyUpdates(subject, subjectProperties, context);
-        }
-
-        return subject;
-    }
-
-    /// <summary>
     /// Applies property updates to a subject if properties are available and not yet processed.
     /// </summary>
     private static void ApplyPropertiesIfAvailable(
-        IInterceptorSubject subject,
-        string subjectId,
-        SubjectUpdateApplyContext context)
+        IInterceptorSubject subject, string subjectId, SubjectUpdateApplyContext context)
     {
         if (context.Subjects.TryGetValue(subjectId, out var properties) &&
             context.TryMarkAsProcessed(subjectId))

@@ -52,7 +52,7 @@
         ]
       },
       relationships: {
-        Kind: Value
+        Kind: Dictionary
       }
     },
     SubjectId_2: {
@@ -89,7 +89,7 @@
         Kind: Collection
       },
       relationships: {
-        Kind: Value
+        Kind: Dictionary
       }
     },
     SubjectId_3: {
@@ -126,7 +126,7 @@
         Kind: Collection
       },
       relationships: {
-        Kind: Value
+        Kind: Dictionary
       }
     },
     SubjectId_4: {
@@ -163,7 +163,7 @@
         Kind: Collection
       },
       relationships: {
-        Kind: Value
+        Kind: Dictionary
       }
     },
     SubjectId_5: {
@@ -200,7 +200,7 @@
         Kind: Collection
       },
       relationships: {
-        Kind: Value
+        Kind: Dictionary
       }
     },
     SubjectId_6: {
@@ -237,7 +237,7 @@
         Kind: Collection
       },
       relationships: {
-        Kind: Value
+        Kind: Dictionary
       }
     }
   }

@@ -71,8 +71,8 @@ using (SubjectChangeContext.WithSource(source))
 
 The applier processes updates in two steps:
 
-1. If `root` is set and present in `subjects`, apply the root's properties and set the target's subject ID to `root`.
-2. Process remaining entries in `subjects` by looking up each subject ID in the local registry's reverse index.
+1. If `root` is set and present in `subjects`, apply the root's properties and set the target's subject ID to `root` (first sync only — subject IDs are immutable once assigned; setting the same ID again is a no-op).
+2. Process remaining entries in `subjects` by looking up each subject ID in the local registry's reverse index. Entries whose subject ID is not yet in the registry are skipped — they may be created later by a structural operation (e.g., collection insert) during this same apply pass.
 
 ## Property Update Kinds
 
@@ -82,6 +82,8 @@ The applier processes updates in two steps:
 | `Object` | Single nested subject (referenced by stable ID) |
 | `Collection` | Ordered list of subjects (array/list) |
 | `Dictionary` | Key-based dictionary of subjects |
+
+**Important**: The `kind` must always match the property's declared type, not its current value. A property typed as `IInterceptorSubject?` must always use `kind: "Object"` — even when the value is null (represented as `kind: "Object"` with `id` omitted). A null collection uses `kind: "Collection"` with `items` omitted, and a null dictionary uses `kind: "Dictionary"` with `items` omitted (see [Null Collections and Dictionaries](#null-collections-and-dictionaries)). Clients (e.g., TypeScript) rely on consistent `kind` values to create the correct data structures.
 
 ### Value Property
 
@@ -281,11 +283,17 @@ Circular references are handled naturally by the flat structure. Each subject ap
 
 ## Null Collections and Dictionaries
 
-When a collection or dictionary property is set to `null`, it is represented as a `Value` kind with no `value` field (the field is omitted when null):
+When a collection or dictionary property is set to `null`, it keeps its declared `kind` but omits the `items` field:
 
 ```json
 {
-  "kind": "Value"
+  "kind": "Collection"
+}
+```
+
+```json
+{
+  "kind": "Dictionary"
 }
 ```
 
@@ -318,11 +326,13 @@ The client must be able to look up local objects by subject ID and vice versa:
 
 Both must be updated whenever objects are created, replaced, or removed.
 
+**Important**: Subject IDs are immutable once assigned. A subject's ID must not change after the first assignment. Attempting to reassign a different ID is an error.
+
 ### When to Register Objects
 
 Register the subject ID ↔ object mapping in these cases:
 
-- **Root subject**: When applying a complete update, register the root object with `update.root`.
+- **Root subject**: When applying a complete update, register the root object with `update.root` (on first sync; subsequent applies with the same ID are a no-op).
 - **Object properties**: When applying a `kind: "Object"` property, register the created/reused object with the `id` from the property update.
 - **Collection/Dictionary items**: When creating a new item from the `items` array, register it with the item's `id`.
 
