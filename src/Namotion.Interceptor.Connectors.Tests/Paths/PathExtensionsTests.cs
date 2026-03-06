@@ -1,6 +1,4 @@
-﻿#pragma warning disable xUnit1026 // Theory methods do not use all parameters — name is used for test identification
-
-using System.Reactive.Concurrency;
+﻿using System.Reactive.Concurrency;
 using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
@@ -174,7 +172,7 @@ public class PathExtensionsTests
 
     [Theory]
     [MemberData(nameof(GetProviders))]
-    public void WhenTryGetPath_SimpleProperty_ReturnsPropertyName(string name, PathProviderBase pathProvider)
+    public void WhenTryGetPath_SimpleProperty_ReturnsPropertyName(string _, PathProviderBase pathProvider)
     {
         // Arrange
         var person = CreateTestGraph();
@@ -190,7 +188,7 @@ public class PathExtensionsTests
 
     [Theory]
     [MemberData(nameof(GetProviders))]
-    public void WhenTryGetPath_DirectChildProperty_ReturnsNestedPath(string name, PathProviderBase pathProvider)
+    public void WhenTryGetPath_DirectChildProperty_ReturnsNestedPath(string _, PathProviderBase pathProvider)
     {
         // Arrange
         var person = CreateTestGraph();
@@ -206,7 +204,7 @@ public class PathExtensionsTests
 
     [Theory]
     [MemberData(nameof(GetProviders))]
-    public void WhenTryGetPath_ListIndexedChild_ReturnsIndexedPath(string name, PathProviderBase pathProvider)
+    public void WhenTryGetPath_ListIndexedChild_ReturnsIndexedPath(string _, PathProviderBase pathProvider)
     {
         // Arrange
         var person = CreateTestGraph();
@@ -222,7 +220,7 @@ public class PathExtensionsTests
 
     [Theory]
     [MemberData(nameof(GetProviders))]
-    public void WhenTryGetPath_DictionaryKeyedChild_ReturnsDictionaryPath(string name, PathProviderBase pathProvider)
+    public void WhenTryGetPath_DictionaryKeyedChild_ReturnsDictionaryPath(string _, PathProviderBase pathProvider)
     {
         // Arrange
         var person = CreateTestGraph();
@@ -238,7 +236,7 @@ public class PathExtensionsTests
 
     [Theory]
     [MemberData(nameof(GetProviders))]
-    public void WhenTryGetPath_DeeplyNested_ReturnsFullPath(string name, PathProviderBase pathProvider)
+    public void WhenTryGetPath_DeeplyNested_ReturnsFullPath(string _, PathProviderBase pathProvider)
     {
         // Arrange
         var person = CreateTestGraph();
@@ -254,7 +252,7 @@ public class PathExtensionsTests
 
     [Theory]
     [MemberData(nameof(GetProviders))]
-    public void WhenTryGetPath_WithRootSubject_ReturnsRelativePath(string name, PathProviderBase pathProvider)
+    public void WhenTryGetPath_WithRootSubject_ReturnsRelativePath(string _, PathProviderBase pathProvider)
     {
         // Arrange
         var person = CreateTestGraph();
@@ -270,7 +268,7 @@ public class PathExtensionsTests
 
     [Theory]
     [MemberData(nameof(GetProviders))]
-    public void WhenTryGetPath_StandaloneSubject_ReturnsPropertyName(string name, PathProviderBase pathProvider)
+    public void WhenTryGetPath_StandaloneSubject_ReturnsPropertyName(string _, PathProviderBase pathProvider)
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -290,7 +288,7 @@ public class PathExtensionsTests
 
     [Theory]
     [MemberData(nameof(GetProviders))]
-    public void WhenRoundTrip_SimpleProperty_ResolvesBackToSameProperty(string name, PathProviderBase pathProvider)
+    public void WhenRoundTrip_SimpleProperty_ResolvesBackToSameProperty(string _, PathProviderBase pathProvider)
     {
         // Arrange
         var person = CreateTestGraph();
@@ -383,7 +381,7 @@ public class PathExtensionsTests
 
     [Theory]
     [MemberData(nameof(GetProviders))]
-    public void WhenRegistryTryGetPath_ListIndexedChild_ReturnsIndexedPath(string name, PathProviderBase pathProvider)
+    public void WhenRegistryTryGetPath_ListIndexedChild_ReturnsIndexedPath(string _, PathProviderBase pathProvider)
     {
         // Arrange
         var person = CreateTestGraph();
@@ -398,7 +396,7 @@ public class PathExtensionsTests
 
     [Theory]
     [MemberData(nameof(GetProviders))]
-    public void WhenRegistryTryGetPath_DictionaryKeyedChild_ReturnsDictionaryPath(string name, PathProviderBase pathProvider)
+    public void WhenRegistryTryGetPath_DictionaryKeyedChild_ReturnsDictionaryPath(string _, PathProviderBase pathProvider)
     {
         // Arrange
         var person = CreateTestGraph();
@@ -413,7 +411,7 @@ public class PathExtensionsTests
 
     [Theory]
     [MemberData(nameof(GetProviders))]
-    public void WhenRegistryTryGetPath_DeeplyNested_ReturnsFullPath(string name, PathProviderBase pathProvider)
+    public void WhenRegistryTryGetPath_DeeplyNested_ReturnsFullPath(string _, PathProviderBase pathProvider)
     {
         // Arrange
         var person = CreateTestGraph();
@@ -448,7 +446,7 @@ public class PathExtensionsTests
 
     [Theory]
     [MemberData(nameof(GetProviders))]
-    public void WhenGetPaths_FromChanges_ReturnsPathsForChangedProperties(string name, PathProviderBase pathProvider)
+    public void WhenGetPaths_FromChanges_ReturnsPathsForChangedProperties(string _, PathProviderBase pathProvider)
     {
         // Arrange
         var context = InterceptorSubjectContext
