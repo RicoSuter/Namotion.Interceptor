@@ -77,7 +77,7 @@ internal static class SubjectUpdateFactory
         if (registeredSubject is null)
         {
             // Subject is detached (concurrent mutation removed it from the graph).
-            // Still create an empty properties entry so the client can instantiate the
+            // Still, create an empty properties entry so the client can instantiate the
             // subject from its type metadata. Future updates will populate properties.
             builder.GetOrCreateProperties(subjectId);
             return;
