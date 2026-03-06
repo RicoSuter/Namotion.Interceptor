@@ -82,7 +82,6 @@ public sealed class SubjectPropertyWriter
                 return;
             }
 
-            _updates = null;
             foreach (var action in updates)
             {
                 try
@@ -94,6 +93,9 @@ public sealed class SubjectPropertyWriter
                     _logger.LogError(e, "Failed to apply subject update.");
                 }
             }
+
+            // Must be after replay: Write() reads _updates without lock on the fast path.
+            _updates = null;
         }
     }
 
