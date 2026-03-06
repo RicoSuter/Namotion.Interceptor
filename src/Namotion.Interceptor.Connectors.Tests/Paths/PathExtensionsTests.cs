@@ -141,6 +141,9 @@ public class PathExtensionsTests
     [InlineData("Children", "Children")]
     [InlineData("Children[0].FirstName", "FirstName")]
     [InlineData("Children[2].FirstName", "FirstName")]
+    [InlineData("Father.FirstName", "FirstName")]
+    [InlineData("Father.Mother.FirstName", "FirstName")]
+    [InlineData("Relationships[boss].FirstName", "FirstName")]
     public void WhenTryGetPropertyFromPath_ReturnsResolvedProperty(string fullPath, string propertyName)
     {
         // Arrange
@@ -148,18 +151,21 @@ public class PathExtensionsTests
             .Create()
             .WithRegistry();
 
-        var father = new Person { FirstName = "Father" };
+        var grandmother = new Person { FirstName = "Grandmother" };
+        var father = new Person { FirstName = "Father", Mother = grandmother };
         var mother = new Person { FirstName = "Mother" };
         var child1 = new Person { FirstName = "Child1" };
         var child2 = new Person { FirstName = "Child2" };
         var child3 = new Person { FirstName = "Child3" };
+        var boss = new Person { FirstName = "Boss" };
 
         var person = new Person(context)
         {
             FirstName = "Child",
             Mother = mother,
             Father = father,
-            Children = [child1, child2, child3]
+            Children = [child1, child2, child3],
+            Relationships = new Dictionary<string, Person> { ["boss"] = boss }
         };
 
         // Act
