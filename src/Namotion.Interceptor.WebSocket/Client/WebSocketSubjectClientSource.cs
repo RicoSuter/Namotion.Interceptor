@@ -269,7 +269,7 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         // Get all leaf properties, filtered by PathProvider if configured
         var properties = registeredSubject
             .GetAllProperties()
-            .Where(p => !p.HasChildSubjects && (pathProvider is null || pathProvider.IsPropertyIncluded(p)))
+            .Where(p => !p.CanContainSubjects && (pathProvider is null || pathProvider.IsPropertyIncluded(p)))
             .ToList();
 
         var claimedCount = 0;

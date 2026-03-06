@@ -12,6 +12,7 @@ using MQTTnet.Packets;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Performance;
 using Namotion.Interceptor.Tracking.Change;
@@ -170,7 +171,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
                 {
                     var change = changesSpan[i];
                     var property = change.Property.TryGetRegisteredProperty();
-                    if (property is null || property.HasChildSubjects)
+                    if (property is null || property.CanContainSubjects)
                     {
                         continue;
                     }
@@ -299,7 +300,7 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
 
         var properties = registeredSubject
             .GetAllProperties()
-            .Where(p => !p.HasChildSubjects && _configuration.PathProvider.IsPropertyIncluded(p))
+            .Where(p => !p.CanContainSubjects && _configuration.PathProvider.IsPropertyIncluded(p))
             .ToList();
 
         if (properties.Count == 0)
