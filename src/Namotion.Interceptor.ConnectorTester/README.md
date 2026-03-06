@@ -141,7 +141,7 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
     "MutatePhaseDuration": "00:01:00",
     "ConvergenceTimeout": "00:05:00",
     "Server": {
-      "MutationRate": 1000,
+      "ValueMutationRate": 1000,
       "Chaos": {
         "IntervalMin": "00:00:10",
         "IntervalMax": "00:00:20",
@@ -153,7 +153,7 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
     "Clients": [
       {
         "Name": "client-a",
-        "MutationRate": 100,
+        "ValueMutationRate": 100,
         "Chaos": {
           "IntervalMin": "00:00:10",
           "IntervalMax": "00:00:20",
@@ -164,7 +164,7 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
       },
       {
         "Name": "client-b",
-        "MutationRate": 100,
+        "ValueMutationRate": 100,
         "Chaos": {
           "IntervalMin": "00:00:08",
           "IntervalMax": "00:00:15",
@@ -310,10 +310,10 @@ For multi-day runs, consider using longer cycle durations and lower mutation rat
   "ConnectorTester": {
     "MutatePhaseDuration": "00:02:00",
     "ConvergenceTimeout": "00:02:00",
-    "Server": { "MutationRate": 500 },
+    "Server": { "ValueMutationRate": 500 },
     "Clients": [
-      { "Name": "client-a", "MutationRate": 25 },
-      { "Name": "client-b", "MutationRate": 25 }
+      { "Name": "client-a", "ValueMutationRate": 25 },
+      { "Name": "client-b", "ValueMutationRate": 25 }
     ],
     "ChaosProfiles": []
   }

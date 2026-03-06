@@ -24,7 +24,8 @@ public class MutationEngine : BackgroundService
     private readonly ParticipantConfiguration _configuration;
     private readonly TestCycleCoordinator _coordinator;
     private readonly ILogger _logger;
-    private readonly Random _random = new();
+    private readonly Random _valueMutationRandom = new();
+    private readonly Random _structuralMutationRandom = new();
     private readonly Lock _nodeLock = new();
 
     private List<TestNode> _knownNodes = [];
@@ -135,8 +136,14 @@ public class MutationEngine : BackgroundService
         }
     }
 
-    private void VisitNode(TestNode node, int depth)
+    private void VisitNode(TestNode node, int depth, HashSet<TestNode>? visited = null)
     {
+        visited ??= [];
+        if (!visited.Add(node))
+        {
+            return;
+        }
+
         _knownNodes.Add(node);
 
         if (depth < MaxDepth)
@@ -146,17 +153,17 @@ public class MutationEngine : BackgroundService
 
         foreach (var child in node.Collection)
         {
-            VisitNode(child, depth + 1);
+            VisitNode(child, depth + 1, visited);
         }
 
         foreach (var child in node.Items.Values)
         {
-            VisitNode(child, depth + 1);
+            VisitNode(child, depth + 1, visited);
         }
 
         if (node.ObjectRef != null)
         {
-            VisitNode(node.ObjectRef, depth + 1);
+            VisitNode(node.ObjectRef, depth + 1, visited);
         }
     }
 
@@ -165,10 +172,10 @@ public class MutationEngine : BackgroundService
         TestNode node;
         lock (_nodeLock)
         {
-            node = _knownNodes[_random.Next(_knownNodes.Count)];
+            node = _knownNodes[_valueMutationRandom.Next(_knownNodes.Count)];
         }
 
-        var property = _random.Next(3);
+        var property = _valueMutationRandom.Next(3);
         var counter = Interlocked.Increment(ref _globalCounter);
 
         // Note: The node is selected under _nodeLock but mutated outside it.
@@ -195,6 +202,7 @@ public class MutationEngine : BackgroundService
     private void PerformStructuralMutation()
     {
         TestNode target;
+        int totalNodeCount;
         lock (_nodeLock)
         {
             if (_structuralTargets.Count == 0)
@@ -202,24 +210,25 @@ public class MutationEngine : BackgroundService
                 return;
             }
 
-            target = _structuralTargets[_random.Next(_structuralTargets.Count)];
+            target = _structuralTargets[_structuralMutationRandom.Next(_structuralTargets.Count)];
+            totalNodeCount = _knownNodes.Count;
         }
 
         // Pick random operation category: 0=Collection, 1=Dictionary, 2=ObjectRef
-        var category = _random.Next(3);
+        var category = _structuralMutationRandom.Next(3);
 
         using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
         {
             switch (category)
             {
                 case 0:
-                    MutateCollection(target);
+                    MutateCollection(target, totalNodeCount);
                     break;
                 case 1:
-                    MutateDictionary(target);
+                    MutateDictionary(target, totalNodeCount);
                     break;
                 case 2:
-                    MutateObjectRef(target);
+                    MutateObjectRef(target, totalNodeCount);
                     break;
             }
         }
@@ -227,20 +236,18 @@ public class MutationEngine : BackgroundService
         RebuildKnownNodes();
     }
 
-    private void MutateCollection(TestNode target)
+    private void MutateCollection(TestNode target, int totalNodeCount)
     {
         var collection = target.Collection;
         var count = collection.Length;
-        var atNodeLimit = _knownNodes.Count >= MaxTotalNodes;
+        var atNodeLimit = totalNodeCount >= MaxTotalNodes;
 
         if (count >= MaxCollectionSize || (atNodeLimit && count > MinCollectionSize))
         {
-            // Must remove (also force remove when at global node limit)
             RemoveFromCollection(target, collection);
         }
         else if (count <= MinCollectionSize && !atNodeLimit)
         {
-            // Must add (but not when at global node limit)
             AddToCollection(target, collection);
         }
         else if (atNodeLimit)
@@ -249,8 +256,7 @@ public class MutationEngine : BackgroundService
         }
         else
         {
-            // Randomly add or remove
-            if (_random.Next(2) == 0)
+            if (_structuralMutationRandom.Next(2) == 0)
             {
                 AddToCollection(target, collection);
             }
@@ -274,15 +280,15 @@ public class MutationEngine : BackgroundService
             return;
         }
 
-        var index = _random.Next(collection.Length);
+        var index = _structuralMutationRandom.Next(collection.Length);
         target.Collection = [.. collection[..index], .. collection[(index + 1)..]];
     }
 
-    private void MutateDictionary(TestNode target)
+    private void MutateDictionary(TestNode target, int totalNodeCount)
     {
         var items = target.Items;
         var count = items.Count;
-        var atNodeLimit = _knownNodes.Count >= MaxTotalNodes;
+        var atNodeLimit = totalNodeCount >= MaxTotalNodes;
 
         if (count >= MaxCollectionSize || (atNodeLimit && count > MinCollectionSize))
         {
@@ -298,7 +304,7 @@ public class MutationEngine : BackgroundService
         }
         else
         {
-            if (_random.Next(2) == 0)
+            if (_structuralMutationRandom.Next(2) == 0)
             {
                 AddToDictionary(target);
             }
@@ -327,17 +333,17 @@ public class MutationEngine : BackgroundService
         }
 
         var keys = items.Keys.ToList();
-        var key = keys[_random.Next(keys.Count)];
+        var key = keys[_structuralMutationRandom.Next(keys.Count)];
         var newItems = new Dictionary<string, TestNode>(items);
         newItems.Remove(key);
         target.Items = newItems;
     }
 
-    private void MutateObjectRef(TestNode target)
+    private void MutateObjectRef(TestNode target, int totalNodeCount)
     {
-        var atNodeLimit = _knownNodes.Count >= MaxTotalNodes;
+        var atNodeLimit = totalNodeCount >= MaxTotalNodes;
 
-        if (target.ObjectRef != null && (_random.Next(2) == 0 || atNodeLimit))
+        if (target.ObjectRef != null && (_structuralMutationRandom.Next(2) == 0 || atNodeLimit))
         {
             target.ObjectRef = null;
         }
