@@ -190,7 +190,7 @@ public class SubjectUpdateCollectionTests
         Assert.Equal(100, ids.Count);
         Assert.All(ids, id =>
         {
-            Assert.Equal(22, id!.Length);
+            Assert.Equal(22, id.Length);
             Assert.All(id.ToCharArray(), c => Assert.True(char.IsLetterOrDigit(c)));
         });
     }
@@ -463,8 +463,8 @@ public class SubjectUpdateCollectionTests
         // Assert - complete state, items list contains final ordering
         Assert.NotNull(update.Subjects);
         Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
-        Assert.True(rootProperties!.TryGetValue("Items", out var itemsUpdate));
-        Assert.NotNull(itemsUpdate!.Items);
+        Assert.True(rootProperties.TryGetValue("Items", out var itemsUpdate));
+        Assert.NotNull(itemsUpdate.Items);
         Assert.Equal(2, itemsUpdate.Items.Count);
     }
 
@@ -535,7 +535,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenCollectionSetToNull_ThenCompleteUpdateHasValueKindWithNull()
+    public async Task WhenCollectionSetToNull_ThenCompleteUpdateHasCollectionKindWithNullItems()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
@@ -544,18 +544,18 @@ public class SubjectUpdateCollectionTests
         // Act
         var update = SubjectUpdate.CreateCompleteUpdate(node, []);
 
-        // Assert - Items should be Value kind with null, not Collection kind
+        // Assert - Items should be Collection kind with null items
         Assert.NotNull(update.Subjects);
         Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
-        Assert.True(rootProperties!.TryGetValue("Items", out var itemsUpdate));
-        Assert.Equal(SubjectPropertyUpdateKind.Value, itemsUpdate!.Kind);
-        Assert.Null(itemsUpdate.Value);
+        Assert.True(rootProperties.TryGetValue("Items", out var itemsUpdate));
+        Assert.Equal(SubjectPropertyUpdateKind.Collection, itemsUpdate.Kind);
+        Assert.Null(itemsUpdate.Items);
 
         await Verify(update);
     }
 
     [Fact]
-    public void WhenCollectionSetToNull_ThenPartialUpdateHasValueKindWithNull()
+    public void WhenCollectionSetToNull_ThenPartialUpdateHasCollectionKindWithNullItems()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -570,12 +570,12 @@ public class SubjectUpdateCollectionTests
 
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
 
-        // Assert - Items should be Value kind with null
+        // Assert - Items should be Collection kind with null items
         Assert.NotNull(update.Subjects);
         Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
-        Assert.True(rootProperties!.TryGetValue("Items", out var itemsUpdate));
-        Assert.Equal(SubjectPropertyUpdateKind.Value, itemsUpdate!.Kind);
-        Assert.Null(itemsUpdate.Value);
+        Assert.True(rootProperties.TryGetValue("Items", out var itemsUpdate));
+        Assert.Equal(SubjectPropertyUpdateKind.Collection, itemsUpdate.Kind);
+        Assert.Null(itemsUpdate.Items);
     }
 
     [Fact]

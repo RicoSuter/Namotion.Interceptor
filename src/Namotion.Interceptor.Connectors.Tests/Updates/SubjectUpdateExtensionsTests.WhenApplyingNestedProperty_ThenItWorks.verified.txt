@@ -38,7 +38,7 @@
         Kind: Collection
       },
       Relationships: {
-        Kind: Value
+        Kind: Dictionary
       }
     },
     SubjectId_2: {
@@ -76,7 +76,7 @@
         Kind: Collection
       },
       Relationships: {
-        Kind: Value
+        Kind: Dictionary
       }
     }
   }

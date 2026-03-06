@@ -271,7 +271,7 @@ public class SubjectUpdateDictionaryTests
     }
 
     [Fact]
-    public async Task WhenDictionarySetToNull_ThenCompleteUpdateHasValueKindWithNull()
+    public async Task WhenDictionarySetToNull_ThenCompleteUpdateHasDictionaryKindWithNullItems()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
@@ -280,18 +280,18 @@ public class SubjectUpdateDictionaryTests
         // Act
         var update = SubjectUpdate.CreateCompleteUpdate(node, []);
 
-        // Assert - Lookup should be Value kind with null, not Dictionary kind
+        // Assert - Lookup should be Dictionary kind with null items
         Assert.NotNull(update.Subjects);
         Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
-        Assert.True(rootProperties!.TryGetValue("Lookup", out var lookupUpdate));
-        Assert.Equal(SubjectPropertyUpdateKind.Value, lookupUpdate!.Kind);
-        Assert.Null(lookupUpdate.Value);
+        Assert.True(rootProperties.TryGetValue("Lookup", out var lookupUpdate));
+        Assert.Equal(SubjectPropertyUpdateKind.Dictionary, lookupUpdate!.Kind);
+        Assert.Null(lookupUpdate.Items);
 
         await Verify(update);
     }
 
     [Fact]
-    public void WhenDictionarySetToNull_ThenPartialUpdateHasValueKindWithNull()
+    public void WhenDictionarySetToNull_ThenPartialUpdateHasDictionaryKindWithNullItems()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -310,12 +310,12 @@ public class SubjectUpdateDictionaryTests
 
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
 
-        // Assert - Lookup should be Value kind with null
+        // Assert - Lookup should be Dictionary kind with null items
         Assert.NotNull(update.Subjects);
         Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
-        Assert.True(rootProperties!.TryGetValue("Lookup", out var lookupUpdate));
-        Assert.Equal(SubjectPropertyUpdateKind.Value, lookupUpdate!.Kind);
-        Assert.Null(lookupUpdate.Value);
+        Assert.True(rootProperties.TryGetValue("Lookup", out var lookupUpdate));
+        Assert.Equal(SubjectPropertyUpdateKind.Dictionary, lookupUpdate!.Kind);
+        Assert.Null(lookupUpdate.Items);
     }
 
     [Fact]

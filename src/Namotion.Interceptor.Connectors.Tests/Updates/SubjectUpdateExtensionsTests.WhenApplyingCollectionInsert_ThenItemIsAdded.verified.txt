@@ -51,7 +51,7 @@
         Kind: Collection
       },
       Relationships: {
-        Kind: Value
+        Kind: Dictionary
       }
     }
   }

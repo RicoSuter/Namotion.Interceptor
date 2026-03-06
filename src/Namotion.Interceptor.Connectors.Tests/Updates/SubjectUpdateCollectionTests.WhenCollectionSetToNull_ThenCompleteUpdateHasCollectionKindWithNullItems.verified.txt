@@ -23,11 +23,11 @@
         Kind: Object
       },
       Items: {
-        Kind: Collection
+        Kind: Collection,
+        Timestamp: DateTimeOffset_2
       },
       Lookup: {
-        Kind: Value,
-        Timestamp: DateTimeOffset_2
+        Kind: Dictionary
       }
     }
   }

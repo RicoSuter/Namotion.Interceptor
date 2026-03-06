@@ -782,7 +782,7 @@ public partial class SubjectUpdateExtensionsTests
     }
 
     [Fact]
-    public void WhenCreatingCompleteUpdateWithNullCollection_ThenUpdateHasKindValueAndValueNull()
+    public void WhenCreatingCompleteUpdateWithNullCollection_ThenUpdateHasCollectionKindWithNullItems()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
@@ -795,8 +795,8 @@ public partial class SubjectUpdateExtensionsTests
         Assert.NotNull(update.Root);
         var rootProps = update.Subjects[update.Root!];
         Assert.True(rootProps.ContainsKey("Children"));
-        Assert.Equal(SubjectPropertyUpdateKind.Value, rootProps["Children"].Kind);
-        Assert.Null(rootProps["Children"].Value);
+        Assert.Equal(SubjectPropertyUpdateKind.Collection, rootProps["Children"].Kind);
+        Assert.Null(rootProps["Children"].Items);
     }
 
     [InterceptorSubject]
