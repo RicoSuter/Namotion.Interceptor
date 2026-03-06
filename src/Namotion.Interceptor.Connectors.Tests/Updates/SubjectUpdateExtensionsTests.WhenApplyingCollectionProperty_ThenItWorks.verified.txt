@@ -43,6 +43,9 @@
             Id: SubjectId_3
           }
         ]
+      },
+      Relationships: {
+        Kind: Value
       }
     },
     SubjectId_2: {
@@ -78,6 +81,9 @@
       },
       Children: {
         Kind: Collection
+      },
+      Relationships: {
+        Kind: Value
       }
     },
     SubjectId_3: {
@@ -113,6 +119,9 @@
       },
       Children: {
         Kind: Collection
+      },
+      Relationships: {
+        Kind: Value
       }
     }
   }

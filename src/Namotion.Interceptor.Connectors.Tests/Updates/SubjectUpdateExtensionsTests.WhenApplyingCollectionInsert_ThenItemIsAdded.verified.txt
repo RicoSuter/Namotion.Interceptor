@@ -49,6 +49,9 @@
       },
       Children: {
         Kind: Collection
+      },
+      Relationships: {
+        Kind: Value
       }
     }
   }

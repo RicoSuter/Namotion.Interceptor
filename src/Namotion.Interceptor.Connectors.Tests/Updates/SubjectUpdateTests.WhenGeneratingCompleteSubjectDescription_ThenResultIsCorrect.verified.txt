@@ -50,6 +50,9 @@
             Id: SubjectId_6
           }
         ]
+      },
+      relationships: {
+        Kind: Value
       }
     },
     SubjectId_2: {
@@ -84,6 +87,9 @@
       },
       children: {
         Kind: Collection
+      },
+      relationships: {
+        Kind: Value
       }
     },
     SubjectId_3: {
@@ -118,6 +124,9 @@
       },
       children: {
         Kind: Collection
+      },
+      relationships: {
+        Kind: Value
       }
     },
     SubjectId_4: {
@@ -152,6 +161,9 @@
       },
       children: {
         Kind: Collection
+      },
+      relationships: {
+        Kind: Value
       }
     },
     SubjectId_5: {
@@ -186,6 +198,9 @@
       },
       children: {
         Kind: Collection
+      },
+      relationships: {
+        Kind: Value
       }
     },
     SubjectId_6: {
@@ -220,6 +235,9 @@
       },
       children: {
         Kind: Collection
+      },
+      relationships: {
+        Kind: Value
       }
     }
   }

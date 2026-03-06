@@ -35,7 +35,7 @@ public class NavigationItemResolver
 
         foreach (var prop in registered.Properties)
         {
-            if (!prop.HasChildSubjects)
+            if (!prop.CanContainSubjects)
                 continue;
 
             foreach (var childInfo in prop.Children)
@@ -85,7 +85,7 @@ public class NavigationItemResolver
 
         foreach (var prop in registered.Properties)
         {
-            if (!prop.HasChildSubjects)
+            if (!prop.CanContainSubjects)
                 continue;
 
             foreach (var childInfo in prop.Children)

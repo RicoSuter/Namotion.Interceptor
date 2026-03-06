@@ -36,6 +36,9 @@
       },
       children: {
         Kind: Collection
+      },
+      relationships: {
+        Kind: Value
       }
     },
     SubjectId_2: {
@@ -72,6 +75,9 @@
       },
       children: {
         Kind: Collection
+      },
+      relationships: {
+        Kind: Value
       }
     }
   }
