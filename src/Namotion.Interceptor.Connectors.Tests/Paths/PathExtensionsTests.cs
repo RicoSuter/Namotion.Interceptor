@@ -1,10 +1,13 @@
 ﻿#pragma warning disable xUnit1026 // Theory methods do not use all parameters — name is used for test identification
 
+using System.Reactive.Concurrency;
 using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
+using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Tests.Paths;
 
@@ -47,7 +50,7 @@ public class PathExtensionsTests
             .ToArray() ?? [];
 
         // Assert
-        await Verify(allPaths?.Select(p => p.path))
+        await Verify(allPaths.Select(p => p.path))
             .UseMethodName($"{nameof(WhenRetrievingPropertyPath_ThenItIsCorrect)}_{name}")
             .DisableDateCounting();
     }
@@ -387,7 +390,7 @@ public class PathExtensionsTests
         var registeredProperty = person.TryGetRegisteredProperty(p => p.Children[2].FirstName)!;
 
         // Act — call registry-level TryGetPath directly
-        var path = pathProvider.TryGetPath(registeredProperty, null);
+        var path = registeredProperty.TryGetPath(pathProvider, null);
 
         // Assert
         Assert.Equal("Children[2].FirstName", path);
@@ -402,7 +405,7 @@ public class PathExtensionsTests
         var registeredProperty = person.TryGetRegisteredProperty(p => p.Relationships!["boss"].FirstName)!;
 
         // Act — call registry-level TryGetPath directly
-        var path = pathProvider.TryGetPath(registeredProperty, null);
+        var path = registeredProperty.TryGetPath(pathProvider, null);
 
         // Assert
         Assert.Equal("Relationships[boss].FirstName", path);
@@ -417,7 +420,7 @@ public class PathExtensionsTests
         var registeredProperty = person.TryGetRegisteredProperty(p => p.Father!.Mother!.FirstName)!;
 
         // Act — call registry-level TryGetPath directly
-        var path = pathProvider.TryGetPath(registeredProperty, null);
+        var path = registeredProperty.TryGetPath(pathProvider, null);
 
         // Assert
         Assert.Equal("Father.Mother.FirstName", path);
@@ -441,6 +444,44 @@ public class PathExtensionsTests
         Assert.Equal("FirstName", results[1].Name);
         Assert.Equal(person, results[0].Subject);
         Assert.Equal(person.Father, results[1].Subject);
+    }
+
+    [Theory]
+    [MemberData(nameof(GetProviders))]
+    public void WhenGetPaths_FromChanges_ReturnsPathsForChangedProperties(string name, PathProviderBase pathProvider)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithPropertyChangeObservable();
+
+        var person = new Person(context)
+        {
+            FirstName = "Root",
+            Father = new Person { FirstName = "Father" },
+            Children = [new Person { FirstName = "Child1" }, new Person { FirstName = "Child2" }]
+        };
+
+        var changes = new List<SubjectPropertyChange>();
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c));
+
+        // Act — trigger changes
+        person.FirstName = "NewRoot";
+        person.Father!.FirstName = "NewFather";
+        person.Children[1].FirstName = "NewChild2";
+
+        var paths = changes
+            .GetPaths(pathProvider, person)
+            .ToArray();
+
+        // Assert
+        Assert.Equal(3, paths.Length);
+        Assert.Equal("FirstName", paths[0].path);
+        Assert.Equal("Father.FirstName", paths[1].path);
+        Assert.Equal("Children[1].FirstName", paths[2].path);
     }
 
     private static Person CreateTestGraph()

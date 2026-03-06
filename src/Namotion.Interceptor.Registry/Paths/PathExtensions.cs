@@ -1,6 +1,8 @@
+using System.Buffers;
 using System.Collections;
 using System.Text;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Registry.Paths;
 
@@ -9,34 +11,6 @@ namespace Namotion.Interceptor.Registry.Paths;
 /// </summary>
 public static class PathExtensions
 {
-    /// <summary>
-    /// Gets a full path string for a sequence of properties with their indices.
-    /// </summary>
-    public static string GetPath(
-        this PathProviderBase pathProvider,
-        IEnumerable<(RegisteredSubjectProperty property, object? index)> properties)
-    {
-        StringBuilder? sb = null;
-        foreach (var (property, index) in properties)
-        {
-            // Use explicit segment or fall back to BrowseName for path building
-            var segment = pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
-
-            sb ??= new StringBuilder();
-            if (sb.Length > 0)
-            {
-                sb.Append(pathProvider.PathSeparator);
-            }
-
-            sb.Append(segment);
-            if (index is not null)
-            {
-                sb.Append(pathProvider.IndexOpen).Append(index).Append(pathProvider.IndexClose);
-            }
-        }
-        return sb?.ToString() ?? string.Empty;
-    }
-
     /// <summary>
     /// Parses a path string into segments with their indices.
     /// </summary>
@@ -161,49 +135,6 @@ public static class PathExtensions
         }
     }
 
-    /// <summary>
-    /// Tries to build a path from the root to the given property.
-    /// </summary>
-    /// <param name="pathProvider">The path provider to use.</param>
-    /// <param name="property">The property to build a path to.</param>
-    /// <param name="rootSubject">The root subject (optional, defaults to traversing to root).</param>
-    /// <returns>The path string, or null if unable to build path.</returns>
-    public static string? TryGetPath(
-        this PathProviderBase pathProvider,
-        RegisteredSubjectProperty property,
-        IInterceptorSubject? rootSubject = null)
-    {
-        var pathParts = new List<(RegisteredSubjectProperty property, object? index)>();
-        var current = property;
-        object? pendingIndex = null;
-
-        while (current is not null)
-        {
-            pathParts.Add((current, pendingIndex));
-            pendingIndex = null;
-
-            if (rootSubject is not null && current.Subject == rootSubject)
-            {
-                break;
-            }
-
-            // Find parent property that references this subject
-            var parentInfo = FindParentProperty(current.Parent);
-            if (parentInfo is null)
-            {
-                break;
-            }
-
-            var (parentProperty, index) = parentInfo.Value;
-            pendingIndex = index;
-
-            current = parentProperty;
-        }
-
-        pathParts.Reverse();
-        return pathProvider.GetPath(pathParts);
-    }
-
     private static IInterceptorSubject? GetChildSubject(RegisteredSubjectProperty property, object? index)
     {
         var value = property.GetValue();
@@ -230,15 +161,112 @@ public static class PathExtensions
         return null;
     }
 
-    private static (RegisteredSubjectProperty property, object? index)? FindParentProperty(
-        RegisteredSubject subject)
+    /// <summary>
+    /// Gets the complete path of the given property.
+    /// </summary>
+    /// <param name="property">The property.</param>
+    /// <param name="pathProvider">The path provider.</param>
+    /// <param name="rootSubject">The root subject or null.</param>
+    /// <returns>The path.</returns>
+    public static string? TryGetPath(this RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject? rootSubject)
     {
-        if (subject.Parents.Length > 0)
+        if (!pathProvider.IsPropertyIncluded(property))
         {
-            var parent = subject.Parents[0];
-            return (parent.Property, parent.Index);
+            return null;
         }
 
-        return null;
+        var buffer = ArrayPool<(RegisteredSubjectProperty Property, object? Index)>.Shared.Rent(16);
+        try
+        {
+            var count = 0;
+            var current = property;
+            object? pendingIndex = null;
+
+            while (current is not null)
+            {
+                if (count == buffer.Length)
+                {
+                    var newBuffer = ArrayPool<(RegisteredSubjectProperty, object?)>.Shared.Rent(buffer.Length * 2);
+                    buffer.AsSpan(0, count).CopyTo(newBuffer);
+                    ArrayPool<(RegisteredSubjectProperty, object?)>.Shared.Return(buffer);
+                    buffer = newBuffer;
+                }
+
+                buffer[count++] = (current, pendingIndex);
+
+                if (rootSubject is not null && current.Subject == rootSubject)
+                {
+                    break;
+                }
+
+                if (current.Parent.Parents.Length == 0)
+                {
+                    break;
+                }
+
+                var parent = current.Parent.Parents[0];
+                pendingIndex = parent.Index;
+                current = parent.Property;
+            }
+
+            var sb = new StringBuilder();
+            for (var i = count - 1; i >= 0; i--)
+            {
+                var (prop, index) = buffer[i];
+                var segment = pathProvider.TryGetPropertySegment(prop) ?? prop.BrowseName;
+                if (sb.Length > 0)
+                {
+                    sb.Append(pathProvider.PathSeparator);
+                }
+
+                sb.Append(segment);
+                if (index is not null)
+                {
+                    sb.Append(pathProvider.IndexOpen).Append(index).Append(pathProvider.IndexClose);
+                }
+            }
+
+            return sb.Length > 0 ? sb.ToString() : null;
+        }
+        finally
+        {
+            ArrayPool<(RegisteredSubjectProperty, object?)>.Shared.Return(buffer);
+        }
+    }
+
+    /// <summary>
+    /// Gets all complete paths of the given properties.
+    /// </summary>
+    public static IEnumerable<(string path, RegisteredSubjectProperty property)> GetPaths(
+        this IEnumerable<RegisteredSubjectProperty> properties, PathProviderBase pathProvider, IInterceptorSubject? rootSubject)
+    {
+        foreach (var property in properties)
+        {
+            var path = property.TryGetPath(pathProvider, rootSubject);
+            if (path is not null)
+            {
+                yield return (path, property);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets all complete paths of the given property changes.
+    /// </summary>
+    public static IEnumerable<(string path, SubjectPropertyChange change)> GetPaths(
+        this IEnumerable<SubjectPropertyChange> changes, PathProviderBase pathProvider, IInterceptorSubject? rootSubject)
+    {
+        foreach (var change in changes)
+        {
+            var registeredProperty = change.Property.TryGetRegisteredProperty();
+            if (registeredProperty is not null)
+            {
+                var path = registeredProperty.TryGetPath(pathProvider, rootSubject);
+                if (path is not null)
+                {
+                    yield return (path, change);
+                }
+            }
+        }
     }
 }
