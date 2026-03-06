@@ -1,4 +1,6 @@
-﻿using Namotion.Interceptor.Connectors.Paths;
+﻿#pragma warning disable xUnit1026 // Theory methods do not use all parameters — name is used for test identification
+
+using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
@@ -165,5 +167,310 @@ public class PathExtensionsTests
 
         // Assert
         Assert.Equal(propertyName, property!.Name);
+    }
+
+    [Theory]
+    [MemberData(nameof(GetProviders))]
+    public void WhenTryGetPath_SimpleProperty_ReturnsPropertyName(string name, PathProviderBase pathProvider)
+    {
+        // Arrange
+        var person = CreateTestGraph();
+
+        // Act
+        var path = person
+            .TryGetRegisteredProperty(p => p.FirstName)?
+            .TryGetPath(pathProvider, null);
+
+        // Assert
+        Assert.Equal("FirstName", path);
+    }
+
+    [Theory]
+    [MemberData(nameof(GetProviders))]
+    public void WhenTryGetPath_DirectChildProperty_ReturnsNestedPath(string name, PathProviderBase pathProvider)
+    {
+        // Arrange
+        var person = CreateTestGraph();
+
+        // Act
+        var path = person
+            .TryGetRegisteredProperty(p => p.Father!.FirstName)?
+            .TryGetPath(pathProvider, null);
+
+        // Assert
+        Assert.Equal("Father.FirstName", path);
+    }
+
+    [Theory]
+    [MemberData(nameof(GetProviders))]
+    public void WhenTryGetPath_ListIndexedChild_ReturnsIndexedPath(string name, PathProviderBase pathProvider)
+    {
+        // Arrange
+        var person = CreateTestGraph();
+
+        // Act
+        var path = person
+            .TryGetRegisteredProperty(p => p.Children[2].FirstName)?
+            .TryGetPath(pathProvider, null);
+
+        // Assert
+        Assert.Equal("Children[2].FirstName", path);
+    }
+
+    [Theory]
+    [MemberData(nameof(GetProviders))]
+    public void WhenTryGetPath_DictionaryKeyedChild_ReturnsDictionaryPath(string name, PathProviderBase pathProvider)
+    {
+        // Arrange
+        var person = CreateTestGraph();
+
+        // Act
+        var path = person
+            .TryGetRegisteredProperty(p => p.Relationships!["boss"].FirstName)?
+            .TryGetPath(pathProvider, null);
+
+        // Assert
+        Assert.Equal("Relationships[boss].FirstName", path);
+    }
+
+    [Theory]
+    [MemberData(nameof(GetProviders))]
+    public void WhenTryGetPath_DeeplyNested_ReturnsFullPath(string name, PathProviderBase pathProvider)
+    {
+        // Arrange
+        var person = CreateTestGraph();
+
+        // Act
+        var path = person
+            .TryGetRegisteredProperty(p => p.Father!.Mother!.FirstName)?
+            .TryGetPath(pathProvider, null);
+
+        // Assert
+        Assert.Equal("Father.Mother.FirstName", path);
+    }
+
+    [Theory]
+    [MemberData(nameof(GetProviders))]
+    public void WhenTryGetPath_WithRootSubject_ReturnsRelativePath(string name, PathProviderBase pathProvider)
+    {
+        // Arrange
+        var person = CreateTestGraph();
+
+        // Act
+        var path = person
+            .TryGetRegisteredProperty(p => p.Father!.FirstName)?
+            .TryGetPath(pathProvider, person.Father);
+
+        // Assert
+        Assert.Equal("FirstName", path);
+    }
+
+    [Theory]
+    [MemberData(nameof(GetProviders))]
+    public void WhenTryGetPath_StandaloneSubject_ReturnsPropertyName(string name, PathProviderBase pathProvider)
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var standalone = new Person(context) { FirstName = "Standalone" };
+
+        // Act
+        var path = standalone
+            .TryGetRegisteredProperty(p => p.FirstName)?
+            .TryGetPath(pathProvider, null);
+
+        // Assert
+        Assert.Equal("FirstName", path);
+    }
+
+    [Theory]
+    [MemberData(nameof(GetProviders))]
+    public void WhenRoundTrip_SimpleProperty_ResolvesBackToSameProperty(string name, PathProviderBase pathProvider)
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        var originalProperty = person.TryGetRegisteredProperty(p => p.FirstName)!;
+        var path = originalProperty.TryGetPath(pathProvider, null)!;
+
+        // Act
+        var (resolvedProperty, _) = person.TryGetPropertyFromPath(path, pathProvider);
+
+        // Assert
+        Assert.NotNull(resolvedProperty);
+        Assert.Equal(originalProperty.Name, resolvedProperty.Name);
+        Assert.Equal(originalProperty.Parent.Subject, resolvedProperty.Parent.Subject);
+    }
+
+    // Multi-segment round-trip tests use DefaultPathProvider only because
+    // AttributeBasedPathProvider can't resolve intermediate segments without [Path] attributes.
+
+    [Fact]
+    public void WhenRoundTrip_DirectChild_ResolvesBackToSameProperty()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        var pathProvider = DefaultPathProvider.Instance;
+        var originalProperty = person.TryGetRegisteredProperty(p => p.Father!.FirstName)!;
+        var path = originalProperty.TryGetPath(pathProvider, null)!;
+
+        // Act
+        var (resolvedProperty, _) = person.TryGetPropertyFromPath(path, pathProvider);
+
+        // Assert
+        Assert.NotNull(resolvedProperty);
+        Assert.Equal(originalProperty.Name, resolvedProperty.Name);
+        Assert.Equal(originalProperty.Parent.Subject, resolvedProperty.Parent.Subject);
+    }
+
+    [Fact]
+    public void WhenRoundTrip_ListIndexed_ResolvesBackToSameProperty()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        var pathProvider = DefaultPathProvider.Instance;
+        var originalProperty = person.TryGetRegisteredProperty(p => p.Children[1].FirstName)!;
+        var path = originalProperty.TryGetPath(pathProvider, null)!;
+
+        // Act
+        var (resolvedProperty, _) = person.TryGetPropertyFromPath(path, pathProvider);
+
+        // Assert
+        Assert.NotNull(resolvedProperty);
+        Assert.Equal(originalProperty.Name, resolvedProperty.Name);
+        Assert.Equal(originalProperty.Parent.Subject, resolvedProperty.Parent.Subject);
+    }
+
+    [Fact]
+    public void WhenRoundTrip_DictionaryKeyed_ResolvesBackToSameProperty()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        var pathProvider = DefaultPathProvider.Instance;
+        var originalProperty = person.TryGetRegisteredProperty(p => p.Relationships!["boss"].FirstName)!;
+        var path = originalProperty.TryGetPath(pathProvider, null)!;
+
+        // Act
+        var (resolvedProperty, _) = person.TryGetPropertyFromPath(path, pathProvider);
+
+        // Assert
+        Assert.NotNull(resolvedProperty);
+        Assert.Equal(originalProperty.Name, resolvedProperty.Name);
+        Assert.Equal(originalProperty.Parent.Subject, resolvedProperty.Parent.Subject);
+    }
+
+    [Fact]
+    public void WhenRoundTrip_DeeplyNested_ResolvesBackToSameProperty()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        var pathProvider = DefaultPathProvider.Instance;
+        var originalProperty = person.TryGetRegisteredProperty(p => p.Father!.Mother!.FirstName)!;
+        var path = originalProperty.TryGetPath(pathProvider, null)!;
+
+        // Act
+        var (resolvedProperty, _) = person.TryGetPropertyFromPath(path, pathProvider);
+
+        // Assert
+        Assert.NotNull(resolvedProperty);
+        Assert.Equal(originalProperty.Name, resolvedProperty.Name);
+        Assert.Equal(originalProperty.Parent.Subject, resolvedProperty.Parent.Subject);
+    }
+
+    [Theory]
+    [MemberData(nameof(GetProviders))]
+    public void WhenRegistryTryGetPath_ListIndexedChild_ReturnsIndexedPath(string name, PathProviderBase pathProvider)
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        var registeredProperty = person.TryGetRegisteredProperty(p => p.Children[2].FirstName)!;
+
+        // Act — call registry-level TryGetPath directly
+        var path = pathProvider.TryGetPath(registeredProperty, null);
+
+        // Assert
+        Assert.Equal("Children[2].FirstName", path);
+    }
+
+    [Theory]
+    [MemberData(nameof(GetProviders))]
+    public void WhenRegistryTryGetPath_DictionaryKeyedChild_ReturnsDictionaryPath(string name, PathProviderBase pathProvider)
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        var registeredProperty = person.TryGetRegisteredProperty(p => p.Relationships!["boss"].FirstName)!;
+
+        // Act — call registry-level TryGetPath directly
+        var path = pathProvider.TryGetPath(registeredProperty, null);
+
+        // Assert
+        Assert.Equal("Relationships[boss].FirstName", path);
+    }
+
+    [Theory]
+    [MemberData(nameof(GetProviders))]
+    public void WhenRegistryTryGetPath_DeeplyNested_ReturnsFullPath(string name, PathProviderBase pathProvider)
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        var registeredProperty = person.TryGetRegisteredProperty(p => p.Father!.Mother!.FirstName)!;
+
+        // Act — call registry-level TryGetPath directly
+        var path = pathProvider.TryGetPath(registeredProperty, null);
+
+        // Assert
+        Assert.Equal("Father.Mother.FirstName", path);
+    }
+
+    [Fact]
+    public void WhenGetPropertiesFromPaths_ReturnsMatchingPropertiesAndSkipsInvalid()
+    {
+        // Arrange
+        var person = CreateTestGraph();
+        var pathProvider = DefaultPathProvider.Instance;
+        var registeredSubject = person.TryGetRegisteredSubject()!;
+        var paths = new[] { "FirstName", "NonExistent", "Father.FirstName" };
+
+        // Act
+        var results = pathProvider.GetPropertiesFromPaths(registeredSubject, paths).ToList();
+
+        // Assert
+        Assert.Equal(2, results.Count);
+        Assert.Equal("FirstName", results[0].Name);
+        Assert.Equal("FirstName", results[1].Name);
+        Assert.Equal(person, results[0].Subject);
+        Assert.Equal(person.Father, results[1].Subject);
+    }
+
+    private static Person CreateTestGraph()
+    {
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var grandmother = new Person { FirstName = "Grandmother" };
+        var father = new Person { FirstName = "Father", Mother = grandmother };
+        var mother = new Person { FirstName = "Mother" };
+        var child1 = new Person { FirstName = "Child1" };
+        var child2 = new Person { FirstName = "Child2" };
+        var child3 = new Person { FirstName = "Child3" };
+        var boss = new Person { FirstName = "Boss" };
+        var mentor = new Person { FirstName = "Mentor" };
+
+        var person = new Person(context)
+        {
+            FirstName = "Root",
+            Father = father,
+            Mother = mother,
+            Children = [child1, child2, child3],
+            Relationships = new Dictionary<string, Person>
+            {
+                ["boss"] = boss,
+                ["mentor"] = mentor
+            }
+        };
+
+        return person;
     }
 }
