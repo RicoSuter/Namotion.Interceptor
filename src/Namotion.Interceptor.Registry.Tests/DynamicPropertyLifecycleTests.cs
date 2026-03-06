@@ -1,6 +1,8 @@
+using System.Reactive.Linq;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Tests.Models;
 using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry.Tests;
@@ -11,6 +13,76 @@ namespace Namotion.Interceptor.Registry.Tests;
 /// </summary>
 public class DynamicPropertyLifecycleTests
 {
+    [Fact]
+    public void WhenWritingToDynamicDerivedPropertyWithSetter_ThenPropertyIsRecalculated()
+    {
+        // Arrange: Dynamic derived property with a setter.
+        // The getter computes "FirstName (override)" or "FirstName" based on internal state.
+        // The setter modifies internal state, then the handler should recalculate via the getter.
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var root = new Person(context) { FirstName = "John" };
+        var registeredRoot = root.TryGetRegisteredSubject()!;
+
+        string? overrideValue = null;
+
+        var property = registeredRoot.AddDerivedProperty<string>(
+            "DisplayName",
+            getValue: _ => overrideValue ?? root.FirstName ?? "NA",
+            setValue: (_, value) => overrideValue = value);
+
+        // Verify initial value
+        var propertyReference = property.Reference;
+        var initialValue = propertyReference.Metadata.GetValue?.Invoke(root);
+        Assert.Equal("John", initialValue);
+
+        // Act - Write to the derived-with-setter property via the interceptor
+        propertyReference.Metadata.SetValue?.Invoke(root, "Custom");
+
+        // Assert - The override was applied
+        Assert.Equal("Custom", overrideValue);
+
+        // The getter should now return the override value
+        var newValue = propertyReference.Metadata.GetValue?.Invoke(root);
+        Assert.Equal("Custom", newValue);
+    }
+
+    [Fact]
+    public void WhenSourceChanges_ThenDynamicDerivedPropertyIsRecalculated()
+    {
+        // Arrange: Dynamic derived property depending on FirstName.
+        // When FirstName changes, the derived property should recalculate.
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var root = new Person(context) { FirstName = "John" };
+        var registeredRoot = root.TryGetRegisteredSubject()!;
+
+        registeredRoot.AddDerivedProperty<string>(
+            "Greeting",
+            getValue: _ => $"Hello, {root.FirstName}!",
+            setValue: (_, _) => { });
+
+        context
+            .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Where(c => c.Property.Name == "Greeting")
+            .Subscribe(changes.Add);
+
+        // Act - Change the source property
+        root.FirstName = "Jane";
+
+        // Assert - Greeting should have been recalculated
+        Assert.NotEmpty(changes);
+        Assert.Contains(changes, c =>
+            c.GetNewValue<string?>() == "Hello, Jane!");
+    }
+
     [Fact]
     public void WhenDynamicDerivedPropertyReturnsSubject_ThenSubjectIsTrackedInRegistry()
     {
