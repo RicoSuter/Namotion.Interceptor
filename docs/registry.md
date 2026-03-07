@@ -170,7 +170,7 @@ The registry provides a subject ID system that assigns stable string identifiers
 
 ### Assign and retrieve IDs
 
-Use `GetOrAddSubjectId` to lazily generate a stable 22-character base62-encoded ID, or `SetSubjectId` to assign a known ID:
+Use `GetOrAddSubjectId` to lazily generate a stable 22-character base62-encoded ID, or `SetSubjectId` to assign a known ID **before** the subject has one:
 
 ```csharp
 var context = InterceptorSubjectContext
@@ -180,11 +180,13 @@ var context = InterceptorSubjectContext
 
 var car = new Car(context);
 
-// Generate a stable ID on first call, return the same ID on subsequent calls
+// Option A: Generate a stable ID on first call, return the same ID on subsequent calls
 var id = car.GetOrAddSubjectId(); // e.g. "5Gk3mR7pLqWx9nYvBtHz01"
 
-// Or assign a known ID (e.g., from an incoming protocol message)
-car.SetSubjectId("my-car-001");
+// Option B: Assign a known ID (e.g., from an incoming protocol message)
+// Must be called before the subject has an ID; reassignment throws.
+var car2 = new Car(context);
+car2.SetSubjectId("my-car-001");
 ```
 
 ### Look up subjects by ID
@@ -203,9 +205,10 @@ if (idRegistry.TryGetSubjectById("my-car-001", out var subject))
 
 Subject IDs are automatically managed during the subject lifecycle:
 
-- **On attach**: If a subject already has an ID (e.g., set before attachment), it is auto-registered in the reverse index. If the ID conflicts with an existing subject, registration is silently skipped to avoid aborting the lifecycle — the caller can resolve the conflict later via `SetSubjectId`
-- **On detach**: The reverse index entry is automatically cleaned up
-- **Duplicate prevention**: Calling `SetSubjectId` with an ID that is already in use by a different subject throws an `InvalidOperationException`
+- **On attach**: If a subject already has an ID (e.g., set before attachment), it is auto-registered in the reverse index. If the ID conflicts with an existing subject, registration is silently skipped to avoid aborting the lifecycle.
+- **On detach**: The reverse index entry is automatically cleaned up.
+- **Immutability**: Once a subject has an ID, calling `SetSubjectId` with a **different** ID throws an `InvalidOperationException`. Calling with the **same** ID is a no-op. This prevents accidental identity changes that could corrupt the object graph.
+- **Duplicate prevention**: Calling `SetSubjectId` with an ID that is already in use by a different subject throws an `InvalidOperationException`.
 
 ### Without a registry
 

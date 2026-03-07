@@ -1,9 +1,9 @@
 ﻿{
+  Root: SubjectId_1,
   Subjects: {
     SubjectId_1: {
-      Name: {
-        Kind: Value,
-        Value: UpdatedChild,
+      Items: {
+        Kind: Collection,
         Timestamp: DateTimeOffset_1
       }
     }

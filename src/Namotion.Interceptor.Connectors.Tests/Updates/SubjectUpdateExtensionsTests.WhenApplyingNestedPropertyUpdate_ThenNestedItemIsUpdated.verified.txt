@@ -1,22 +1,6 @@
 ﻿{
-  Root: 1,
   Subjects: {
-    1: {
-      Children: {
-        Kind: Collection,
-        Items: [
-          {
-            Index: 0,
-            Id: 2
-          },
-          {
-            Index: 0,
-            Id: 2
-          }
-        ]
-      }
-    },
-    2: {
+    SubjectId_1: {
       FirstName: {
         Kind: Value,
         Value: UpdatedChild,

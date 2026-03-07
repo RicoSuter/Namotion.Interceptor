@@ -1,6 +1,5 @@
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Connectors.Updates.Internal;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Updates;
@@ -15,8 +14,9 @@ public class SubjectUpdate
     /// <summary>
     /// The ID of the root subject in the <see cref="Subjects"/> dictionary.
     /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("root")]
-    public string Root { get; init; } = string.Empty;
+    public string? Root { get; init; }
 
     /// <summary>
     /// Dictionary of all subjects keyed by their string ID.

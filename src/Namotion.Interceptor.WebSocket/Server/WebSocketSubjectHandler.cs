@@ -228,7 +228,8 @@ public sealed class WebSocketSubjectHandler
         var batchSize = _configuration.WriteBatchSize;
         if (batchSize <= 0 || changes.Length <= batchSize)
         {
-            // Single batch
+            // Single batch — use complete structural state because multiple concurrent writers
+            // (server mutations + client updates) can cause dedup-based diffs to be incorrect.
             var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, changes.Span, _processors);
             await BroadcastUpdateAsync(update, cancellationToken).ConfigureAwait(false);
         }

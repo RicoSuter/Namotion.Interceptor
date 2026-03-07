@@ -2,10 +2,12 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Logging;
 using Namotion.Interceptor.ConnectorTester.Model;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.ConnectorTester.Engine;
 
@@ -21,6 +23,11 @@ public class VerificationEngine : BackgroundService
     private static readonly JsonSerializerOptions SnapshotJsonOptions = new()
     {
         WriteIndented = false
+    };
+
+    private static readonly JsonSerializerOptions IndentedJsonOptions = new()
+    {
+        WriteIndented = true
     };
 
     private readonly ConnectorTesterConfiguration _configuration;
@@ -86,7 +93,8 @@ public class VerificationEngine : BackgroundService
             string.Join(", ", _participants.Select(p => p.Key)));
         foreach (var engine in _mutationEngines)
         {
-            _logger.LogInformation("  {Name}: {Rate} mutations/sec", engine.Name, engine.MutationRate);
+            _logger.LogInformation("  {Name}: {Rate} value mutations/sec, {StructuralRate} structural mutations/sec",
+                engine.Name, engine.ValueMutationRate, engine.StructuralMutationRate);
         }
 
         if (_configuration.ChaosProfiles.Count > 0)
@@ -101,7 +109,7 @@ public class VerificationEngine : BackgroundService
         {
             foreach (var participant in profile.Participants)
             {
-                if (!_chaosEngines.Any(e => e.TargetName == participant))
+                if (_chaosEngines.All(e => e.TargetName != participant))
                 {
                     _logger.LogWarning(
                         "Chaos profile '{Profile}' references '{Participant}' which has no chaos engine (no Chaos config or not a known participant). It will be ignored.",
@@ -197,7 +205,7 @@ public class VerificationEngine : BackgroundService
                 _logger.LogError("=== Cycle {Cycle}: FAIL (did not converge within {Timeout}) ===",
                     _cycleNumber, _configuration.ConvergenceTimeout);
 
-                // Log snapshot diffs
+                // Log snapshot diffs and write per-participant JSON files
                 var referenceSnapshot = snapshots[0];
                 foreach (var snapshot in snapshots.Skip(1))
                 {
@@ -208,10 +216,14 @@ public class VerificationEngine : BackgroundService
                     }
                 }
 
-                // Log full snapshots
+                // Write formatted JSON snapshots for easy diffing
                 foreach (var snapshot in snapshots)
                 {
-                    _logger.LogError("Snapshot [{Name}]: {Snapshot}", snapshot.Name, snapshot.Snapshot);
+                    var fileName = $"cycle{_cycleNumber:D3}-fail-{snapshot.Name}.json";
+                    var filePath = Path.Combine(Path.GetDirectoryName(MemoryLogPath)!, fileName);
+                    var formattedJson = FormatSnapshotJson(snapshot.Snapshot);
+                    await File.WriteAllTextAsync(filePath, formattedJson, stoppingToken);
+                    _logger.LogError("Snapshot [{Name}] written to {FilePath}", snapshot.Name, filePath);
                 }
 
                 WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, "FAIL");
@@ -229,50 +241,98 @@ public class VerificationEngine : BackgroundService
     {
         var update = SubjectUpdate.CreateCompleteUpdate(root, []);
 
-        // Strip timestamps from structural properties (Collection, Dictionary, Object).
-        // These are set during local graph creation and are inherently different per participant.
-        // Value property timestamps ARE compared and must converge via source timestamps.
-        if (update.Subjects != null)
-        {
-            foreach (var subject in update.Subjects.Values)
-            {
-                if (subject == null)
-                {
-                    continue;
-                }
+        // Serialize to JSON, then normalize the JSON tree for deterministic comparison.
+        // This avoids mutating the SubjectPropertyUpdate objects from the update.
+        var json = JsonSerializer.Serialize(update, SnapshotJsonOptions);
+        var node = JsonNode.Parse(json)!.AsObject();
 
-                foreach (var property in subject.Values)
+        var subjects = node["subjects"]?.AsObject();
+        if (subjects is not null)
+        {
+            foreach (var (_, subjectNode) in subjects)
+            {
+                if (subjectNode is not JsonObject properties)
+                    continue;
+
+                foreach (var (_, propertyNode) in properties)
                 {
-                    if (property.Kind != SubjectPropertyUpdateKind.Value)
+                    if (propertyNode is not JsonObject property)
+                        continue;
+
+                    var kind = property["kind"]?.GetValue<string>();
+
+                    // Strip timestamps from structural properties (Collection, Dictionary, Object).
+                    // These are set during local graph creation and are inherently different per participant.
+                    // Value property timestamps ARE compared and must converge via source timestamps.
+                    if (kind != "Value")
                     {
-                        property.Timestamp = null;
+                        property.Remove("timestamp");
+                    }
+
+                    // Sort dictionary items by key for order-independent comparison.
+                    if (kind == "Dictionary" && property["items"] is JsonArray items)
+                    {
+                        var sorted = items
+                            .Select(item => item!.AsObject())
+                            .OrderBy(item => item["key"]?.GetValue<string>(), StringComparer.Ordinal)
+                            .Select(item => item.DeepClone())
+                            .ToArray();
+
+                        items.Clear();
+                        foreach (var item in sorted)
+                        {
+                            items.Add(item);
+                        }
                     }
                 }
             }
         }
 
-        return JsonSerializer.Serialize(update, SnapshotJsonOptions);
+        // Sort subjects by ID and properties by name for deterministic comparison.
+        var sortedSubjects = new JsonObject();
+        if (subjects is not null)
+        {
+            foreach (var subjectKey in subjects.Select(kvp => kvp.Key).Order(StringComparer.Ordinal))
+            {
+                var properties = subjects[subjectKey]!.AsObject();
+                var sortedProperties = new JsonObject();
+                foreach (var propertyKey in properties.Select(kvp => kvp.Key).Order(StringComparer.Ordinal))
+                {
+                    sortedProperties[propertyKey] = properties[propertyKey]!.DeepClone();
+                }
+                sortedSubjects[subjectKey] = sortedProperties;
+            }
+        }
+
+        var result = new JsonObject
+        {
+            ["root"] = node["root"]?.DeepClone(),
+            ["subjects"] = sortedSubjects
+        };
+
+        return result.ToJsonString(SnapshotJsonOptions);
     }
 
     private void WriteStatistics(TimeSpan cycleDuration, TimeSpan convergeDuration, string result)
     {
-        var totalMutations = _mutationEngines.Sum(engine => engine.ValueMutationCount);
+        var totalValueMutations = _mutationEngines.Sum(engine => engine.ValueMutationCount);
+        var totalStructuralMutations = _mutationEngines.Sum(engine => engine.StructuralMutationCount);
         var totalChaos = _chaosEngines.Sum(engine => engine.ChaosEventCount);
 
         _logger.LogInformation("""
             --- Cycle {Cycle} Statistics ---
             Duration: {CycleDuration:F0}s (converged in {ConvergeDuration:F1}s)
-            Total mutations: {TotalMutations:N0} | Total chaos events: {TotalChaos}
+            Total mutations: {TotalValueMutations:N0} value + {TotalStructuralMutations:N0} structural | Total chaos events: {TotalChaos}
             Result: {Result}
             """,
             _cycleNumber, cycleDuration.TotalSeconds, convergeDuration.TotalSeconds,
-            totalMutations, totalChaos, result);
+            totalValueMutations, totalStructuralMutations, totalChaos, result);
 
         // Per-participant breakdown
         foreach (var engine in _mutationEngines)
         {
-            _logger.LogInformation("  {Name}: {Values:N0} value mutations",
-                engine.Name, engine.ValueMutationCount);
+            _logger.LogInformation("  {Name}: {Values:N0} value + {Structural:N0} structural mutations",
+                engine.Name, engine.ValueMutationCount, engine.StructuralMutationCount);
         }
 
         // Chaos event timeline
@@ -305,7 +365,23 @@ public class VerificationEngine : BackgroundService
             "{0:yyyy-MM-ddTHH:mm:ss.fffZ}, Cycle {1}, {2}, {3}, ProcessMB: {4:F1}, HeapMB: {5:F1}",
             DateTimeOffset.UtcNow, _cycleNumber, profile, result, workingSetMb, heapMb);
 
+        // Diagnostic: log registry vs reachable subject counts to distinguish leak from tree growth
+        var registryInfo = string.Join(", ", _participants.Select(p =>
+        {
+            var registry = ((IInterceptorSubject)p.Value).Context.TryGetService<ISubjectRegistry>();
+            var knownCount = registry?.KnownSubjects.Count ?? -1;
+            var reachable = SubjectUpdate.CreateCompleteUpdate(p.Value, []).Subjects.Count;
+            return $"{p.Key}={knownCount}/{reachable}";
+        }));
+        line += $", Subjects(registry/reachable): [{registryInfo}]";
+
         File.AppendAllText(MemoryLogPath, line + Environment.NewLine);
+    }
+
+    private static string FormatSnapshotJson(string compactJson)
+    {
+        using var document = JsonDocument.Parse(compactJson);
+        return JsonSerializer.Serialize(document, IndentedJsonOptions);
     }
 
     private string? ApplyChaosProfile()
