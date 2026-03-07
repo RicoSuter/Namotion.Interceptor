@@ -30,6 +30,9 @@ namespace YourDefaultNamespace
 
         void IRaisePropertyChanged.RaisePropertyChanged(string propertyName) => RaisePropertyChanged(propertyName);
 
+        private static readonly global::System.Collections.Generic.IReadOnlyDictionary<string, global::Namotion.Interceptor.SubjectPropertyMetadata> __defaultProperties =
+            global::Namotion.Interceptor.SubjectPropertyMetadataCache.Get<WeatherStation>();
+
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
@@ -40,60 +43,30 @@ namespace YourDefaultNamespace
         ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
 
         [JsonIgnore]
-        IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
+        global::System.Collections.Generic.IReadOnlyDictionary<string, global::Namotion.Interceptor.SubjectPropertyMetadata> global::Namotion.Interceptor.IInterceptorSubject.Properties =>
+            _properties ?? __defaultProperties;
 
         [JsonIgnore]
         object IInterceptorSubject.SyncRoot { get; } = new object();
 
-        void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+        void global::Namotion.Interceptor.IInterceptorSubject.AddProperties(params global::System.Collections.Generic.IEnumerable<global::Namotion.Interceptor.SubjectPropertyMetadata> properties)
         {
-            _properties = (_properties ?? DefaultProperties)
-                .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+            _properties = (_properties ?? __defaultProperties)
+                .Concat(properties.Select(p => new global::System.Collections.Generic.KeyValuePair<string, global::Namotion.Interceptor.SubjectPropertyMetadata>(p.Name, p)))
                 .ToFrozenDictionary();
         }
 
-        public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
-            new Dictionary<string, SubjectPropertyMetadata>
-            {
-                {
-                    "Temperature",
-                    new SubjectPropertyMetadata(
-                        typeof(WeatherStation).GetProperty(nameof(Temperature), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((WeatherStation)o).Temperature,
-                        (o, v) => ((WeatherStation)o).Temperature = (double)v,
-                        isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "Humidity",
-                    new SubjectPropertyMetadata(
-                        typeof(WeatherStation).GetProperty(nameof(Humidity), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((WeatherStation)o).Humidity,
-                        (o, v) => ((WeatherStation)o).Humidity = (double)v,
-                        isIntercepted: true,
-                        isDynamic: false)
-                },
-                {
-                    "IsHot",
-                    new SubjectPropertyMetadata(
-                        typeof(global::IHasTemperature).GetProperty(nameof(global::IHasTemperature.IsHot), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((global::IHasTemperature)o).IsHot,
-                        null,
-                        isIntercepted: false,
-                        isDynamic: false)
-                },
-                {
-                    "IsHumid",
-                    new SubjectPropertyMetadata(
-                        typeof(global::IHasHumidity).GetProperty(nameof(global::IHasHumidity.IsHumid), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((global::IHasHumidity)o).IsHumid,
-                        null,
-                        isIntercepted: false,
-                        isDynamic: false)
-                },
-            }
-            .ToFrozenDictionary();
 
+        [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]
+        internal static (global::System.Func<global::Namotion.Interceptor.IInterceptorSubject, object?>?, global::System.Action<global::Namotion.Interceptor.IInterceptorSubject, object?>?)
+            __GetPropertyAccessors(string name) => name switch
+        {
+            "Temperature" => (static o => ((WeatherStation)o).Temperature, static (o, v) => ((WeatherStation)o).Temperature = (double)v!),
+            "Humidity" => (static o => ((WeatherStation)o).Humidity, static (o, v) => ((WeatherStation)o).Humidity = (double)v!),
+            "IsHot" => (static o => ((global::IHasTemperature)o).IsHot, null),
+            "IsHumid" => (static o => ((global::IHasHumidity)o).IsHumid, null),
+            _ => (null, null)
+        };
         public WeatherStation()
         {
         }
@@ -105,6 +78,7 @@ namespace YourDefaultNamespace
 
         private double _Temperature;
 
+        [global::Namotion.Interceptor.Attributes.Intercepted]
         public partial double Temperature
         {
             get
@@ -130,6 +104,7 @@ namespace YourDefaultNamespace
 
         private double _Humidity;
 
+        [global::Namotion.Interceptor.Attributes.Intercepted]
         public partial double Humidity
         {
             get
