@@ -223,9 +223,11 @@ public static class SubjectRegistryExtensions
     /// Assigns a known subject ID (e.g., from an incoming update).
     /// When a registry is configured, both the subject's Data store and the
     /// reverse index are updated atomically under the registry's lock.
+    /// Setting the same ID again is a no-op.
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <param name="id">The subject ID to assign.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the subject already has a different ID assigned.</exception>
     public static void SetSubjectId(this IInterceptorSubject subject, string id)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);

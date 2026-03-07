@@ -25,10 +25,10 @@ internal static class SubjectUpdateApplier
 
             if (update.Root is not null && update.Subjects.TryGetValue(update.Root, out var rootProperties))
             {
-                // Complete or rooted partial update — apply from root.
-                // Set the root's subject ID on first sync so IDs converge;
-                // later calls with the same ID are a no-op (reassignment throws).
-                subject.SetSubjectId(update.Root);
+                // The Root field identifies which subject ID in the update
+                // corresponds to the local root subject. The root's ID may
+                // differ between sender and receiver — Root is a mapping hint,
+                // not an identity assignment.
                 context.TryMarkAsProcessed(update.Root);
 
                 ApplyPropertyUpdates(subject, rootProperties, context);

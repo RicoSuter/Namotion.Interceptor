@@ -3,16 +3,15 @@
     Person.Father
   ],
   Update: {
-    Root: SubjectId_1,
     Subjects: {
-      SubjectId_2: {
+      SubjectId_1: {
         father: {
           Kind: Object,
           Timestamp: {Scrubbed},
-          Id: SubjectId_3
+          Id: SubjectId_2
         }
       },
-      SubjectId_3: {
+      SubjectId_2: {
         firstName: {
           Kind: Value,
           Value: NewFather,

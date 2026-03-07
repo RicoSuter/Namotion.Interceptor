@@ -1,7 +1,6 @@
 ﻿{
-  Root: SubjectId_1,
   Subjects: {
-    SubjectId_2: {
+    SubjectId_1: {
       FirstName: {
         Kind: Value,
         Value: UpdatedChild,

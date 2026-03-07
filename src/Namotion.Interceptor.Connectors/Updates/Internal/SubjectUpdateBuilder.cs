@@ -87,11 +87,10 @@ internal sealed class SubjectUpdateBuilder
             }
         }
 
-        // Always include the root subject's stable ID so the applier can map
-        // the root entry to the target subject, even for partial updates.
+        // Only include root when the root subject has properties in this update.
         var update = new SubjectUpdate
         {
-            Root = rootId,
+            Root = _subjects.ContainsKey(rootId) ? rootId : null,
             Subjects = orderedSubjects
         };
 
