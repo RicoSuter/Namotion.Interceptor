@@ -1,6 +1,6 @@
 # Subject Updates
 
-Subject updates enable efficient synchronization of object graphs between participants. The protocol is **server-authoritative** — the server holds the canonical state, and clients apply updates as received without conflict resolution or logical clocks. Instead of sending full object state on every change, only the changed properties are transmitted. All subjects are identified by **stable subject IDs** (22-character base62-encoded GUIDs) that remain consistent across the lifetime of a subject, enabling correct convergence even under concurrent structural mutations.
+Subject updates enable efficient synchronization of object graphs between participants. The protocol is **server-authoritative**: the server holds the canonical state, and clients apply updates as received without conflict resolution or logical clocks. Instead of sending full object state on every change, only the changed properties are transmitted. All subjects are identified by **stable subject IDs** (22-character base62-encoded GUIDs) that remain consistent across the lifetime of a subject, enabling correct convergence even under concurrent structural mutations.
 
 ## Sync Flow
 
@@ -8,7 +8,7 @@ Subject updates enable efficient synchronization of object graphs between partic
 2. **Server sends a complete update** containing the full state of the object graph.
 3. Both sides send **partial updates** as properties change, containing only the changed properties.
 
-The protocol is bidirectional — both sides can send updates. However, the server is authoritative: if there is a conflict, the server's state wins. See the [WebSocket connector](websocket.md) for transport-specific details.
+The protocol is bidirectional: both sides can send updates. However, the server is authoritative: if there is a conflict, the server's state wins. See the [WebSocket connector](websocket.md) for transport-specific details.
 
 ## JSON Schema
 
@@ -16,14 +16,14 @@ Subject updates use a **flat dictionary structure** where all subjects are store
 
 ```
 SubjectUpdate {
-  root: string?                                  // sender's root subject ID (mapping hint)
+  root: string?                  // sender's root subject ID (mapping hint)
   subjects: Map<string, Map<string, PropertyUpdate>>  // subjectId → propertyName → update
 }
 
 PropertyUpdate {
   kind: "Value" | "Object" | "Collection" | "Dictionary"
   value: any?                    // Value only
-  id: string?                   // Object only
+  id: string?                    // Object only
   items: ItemRef[]?              // Collection/Dictionary only
   timestamp: string?             // ISO 8601, optional, all kinds
   attributes: Map<string, PropertyUpdate>?  // optional, all kinds
@@ -37,8 +37,8 @@ ItemRef {
 
 ### Fields
 
-- `root` — The sender's subject ID for the root subject. This is a **mapping hint**: it tells the receiver which entry in `subjects` corresponds to the local root subject. The root's ID may differ between sender and receiver — each side generates its own IDs independently. Null when the root subject is not part of this update.
-- `subjects` — All subjects in the update, keyed by the sender's subject IDs. Each subject contains property name to property update mappings.
+- `root`: The sender's subject ID for the root subject. This is a **mapping hint** that tells the receiver which entry in `subjects` corresponds to the local root subject. The root's ID may differ between sender and receiver because each side generates its own IDs independently. Null when the root subject is not part of this update.
+- `subjects`: All subjects in the update, keyed by the sender's subject IDs. Each subject contains property name to property update mappings.
 
 ### Subject IDs
 
@@ -48,16 +48,16 @@ Subject IDs are **immutable** once assigned. A subject's ID must not change afte
 
 ### Property Names
 
-Property names default to **UpperCamelCase** (PascalCase), matching the C# property names. Specific server-to-client implementations may apply transformations (e.g., to camelCase) — this is up to the transport or connector configuration.
+Property names default to **UpperCamelCase** (PascalCase), matching the C# property names. Specific server-to-client implementations may apply transformations (e.g., to camelCase). This is up to the transport or connector configuration.
 
 ## Complete vs Partial Updates
 
-Both complete and partial updates use the same JSON format and the same complete-state semantics for collections and dictionaries — the `items` array always defines the full ordered state.
+Both complete and partial updates use the same JSON format and the same complete-state semantics for collections and dictionaries. The `items` array always defines the full ordered state.
 
 The difference is in **scope**:
 
-- **Complete update** — Contains all properties of all reachable subjects. Used for initial sync. Every subject in the graph appears in `subjects` with all its properties. `root` is always set.
-- **Partial update** — Contains only changed properties. Unchanged subjects and properties are omitted entirely. `root` is set when the root subject has changes in this update, null otherwise. For structural changes (insert, remove, reorder), the `items` array lists the full new ordering but only new items have their properties included in `subjects`. Existing items whose properties haven't changed are referenced by ID only.
+- **Complete update**: Contains all properties of all reachable subjects. Used for initial sync. Every subject in the graph appears in `subjects` with all its properties. `root` is always set.
+- **Partial update**: Contains only changed properties. Unchanged subjects and properties are omitted entirely. `root` is set when the root subject has changes in this update, null otherwise. For structural changes (insert, remove, reorder), the `items` array lists the full new ordering but only new items have their properties included in `subjects`. Existing items whose properties haven't changed are referenced by ID only.
 
 ### Creating Updates
 
@@ -76,11 +76,11 @@ Each property update has a `kind` that determines how it is serialized and appli
 | `Collection` | Ordered list of subjects (array/list) |
 | `Dictionary` | Key-based dictionary of subjects |
 
-**Important**: The `kind` must always match the **property's declared type**, not its current value. A property typed as `IInterceptorSubject?` must always use `kind: "Object"` — even when the value is null. Clients rely on consistent `kind` values to create the correct data structures.
+**Important**: The `kind` must always match the **property's declared type**, not its current value. A property typed as `IInterceptorSubject?` must always use `kind: "Object"`, even when the value is null. Clients rely on consistent `kind` values to create the correct data structures.
 
 ### Value
 
-Scalar replacement. The `value` field carries the JSON-serialized property value — this can be any JSON-compatible type (string, number, boolean, null, arrays, objects). Non-primitive types (e.g., enums, DateTimes, custom value objects) are serialized as their JSON representation. The `timestamp` field is optional and records when the value was last changed.
+Scalar replacement. The `value` field carries the JSON-serialized property value. This can be any JSON-compatible type (string, number, boolean, null, arrays, objects). Non-primitive types (e.g., enums, DateTimes, custom value objects) are serialized as their JSON representation. The `timestamp` field is optional and records when the value was last changed.
 
 ```json
 {
@@ -109,7 +109,7 @@ References another subject by stable ID. A null reference omits the `id` field.
 
 ### Collection
 
-Ordered list of subjects. The `items` array defines the **complete ordered state** — array position determines ordering.
+Ordered list of subjects. The `items` array defines the **complete ordered state** where array position determines ordering.
 
 ```json
 {
@@ -171,15 +171,13 @@ This section describes the algorithm for applying a received `SubjectUpdate` to 
 
 ### Step 1: Root Mapping
 
-If `root` is set and present in `subjects`, apply those properties to the local root subject. The `root` field is a mapping hint — it identifies which entry in `subjects` corresponds to the applier's root, without assigning or changing the root's local subject ID.
+If `root` is set and present in `subjects`, apply those properties to the local root subject. The `root` field is a mapping hint that identifies which entry in `subjects` corresponds to the applier's root, without assigning or changing the root's local subject ID.
 
-If `root` is null, skip this step — the root subject has no changes in this update.
+If `root` is null, skip this step because the root subject has no changes in this update.
 
 ### Step 2: Remaining Subjects
 
-Process remaining entries in `subjects` (those not already processed as root) by looking up each subject ID in the local ID-to-object map. If a subject ID is found, apply its properties to the local object. If not found, skip it — the subject may not exist yet because it is a newly introduced subject whose structural parent hasn't been processed yet.
-
-For example, when a collection insert adds a new item, the new item's subject ID appears in `subjects` with its properties, but the item object doesn't exist locally until the collection property is applied (which creates it). The collection apply step itself looks up the new item's properties from `subjects` and applies them immediately after creation — so skipping an unknown subject ID in step 2 is safe, as it will be handled during the structural apply of its parent.
+Process remaining entries in `subjects` (those not already processed as root) by looking up each subject ID in the local ID-to-object map. If a subject ID is found, apply its properties to the local object. If not found, skip it. The subject is likely a newly introduced item (e.g., inserted into a collection) whose local object doesn't exist yet because its parent's structural property hasn't been applied yet. Skipping is safe because the parent's collection/dictionary/object apply step will create the item, register it by ID, and immediately look up its properties from `subjects` at that point.
 
 ### Applying Value Properties
 
@@ -196,7 +194,7 @@ Set the local property to the `value` from the update.
 
 ### Applying Collection Properties
 
-1. If `items` is null/omitted, the collection is null — set the local property to null.
+1. If `items` is null/omitted, the collection is null. Set the local property to null.
 2. If `items` is present, it defines the **full ordered state**:
    - For each item, look up `item.id` in the ID-to-object map. If found, reuse it. If not, create a new object and register it with `item.id`.
    - Apply the item's properties from `subjects[item.id]` if present.
@@ -205,7 +203,7 @@ Set the local property to the `value` from the update.
 
 ### Applying Dictionary Properties
 
-1. If `items` is null/omitted, the dictionary is null — set the local property to null.
+1. If `items` is null/omitted, the dictionary is null. Set the local property to null.
 2. If `items` is present, it defines the **full state**:
    - For each item, look up `item.id` in the ID-to-object map. If found, reuse it. If not, create a new object and register it with `item.id`.
    - Apply the item's properties from `subjects[item.id]` if present.
@@ -221,7 +219,7 @@ Each participant is expected to know the type of each subject statically based o
 
 ### Root ID Independence
 
-The sender and receiver each generate their own subject IDs for the root. The sender includes its root ID in the `root` field so the receiver knows which `subjects` entry to apply to its local root. Non-root subjects (children, collection items, etc.) share IDs across sender/receiver because they are assigned during apply. Only the root is special — its identity is established by the `root` mapping hint, not by ID matching.
+The sender and receiver each generate their own subject IDs for the root. The sender includes its root ID in the `root` field so the receiver knows which `subjects` entry to apply to its local root. Non-root subjects (children, collection items, etc.) share IDs across sender/receiver because they are assigned during apply. Only the root is special: its identity is established by the `root` mapping hint, not by ID matching.
 
 This works **symmetrically**: when the server sends an update, `root` contains the server's root ID, and the client maps it to its local root. When the client sends an update back, `root` contains the client's root ID, and the server maps it to its local root. Neither side needs to know or store the other's root ID beyond the current update.
 
@@ -266,9 +264,24 @@ Both must be updated whenever objects are created, replaced, or removed.
 
 ### When to Register Objects
 
-- **Root subject**: The root is identified by `update.root`, which is a mapping hint — not an ID to assign. The receiver should map its local root object to the sender's root ID (from `update.root`) so that subsequent references to that ID resolve correctly. The root's local ID may differ from the sender's ID.
+- **Root subject**: The root is identified by `update.root`, which is a mapping hint, not an ID to assign. The receiver should map its local root object to the sender's root ID (from `update.root`) so that subsequent references to that ID resolve correctly. The root's local ID may differ from the sender's ID.
 - **Object properties**: When applying a `kind: "Object"` property, register the created/reused object with the `id` from the property update.
 - **Collection/Dictionary items**: When creating a new item from the `items` array, register it with the item's `id`.
+
+### Subject Lifecycle and Cleanup
+
+The client's ID-to-object map grows as new subjects arrive but never shrinks unless the client actively cleans up. Since the protocol uses complete-state semantics for collections and dictionaries, a subject that disappears from all `items` arrays is no longer reachable and should be removed from the map.
+
+**Complete updates** rebuild the map from scratch. Discard the entire ID-to-object map and populate it from the update. This implicitly drops all orphaned entries.
+
+**Partial updates** require **reference counting** to detect when subjects become unreachable:
+
+1. For each subject ID in the map, track how many structural properties (Object, Collection, Dictionary) currently reference it.
+2. When applying a collection/dictionary update, decrement counts for IDs that were removed and increment counts for IDs that were added.
+3. When applying an object property update, decrement the old ID (if any) and increment the new ID.
+4. When a subject's reference count reaches zero, remove it from the ID-to-object map (and recursively decrement counts for any IDs that subject itself referenced).
+
+**Without cleanup**, the map accumulates every subject ever seen, which is a memory leak proportional to churn (e.g., items repeatedly added and removed from collections).
 
 ### Echo Prevention
 
@@ -277,7 +290,7 @@ When applying received updates, mark changes with a source identifier so your ow
 ### Reconnection and Server Restart
 
 - **Reconnection**: Request a fresh complete update to resynchronize. Non-root subject IDs are stable within a server's lifetime, so existing local objects can be matched by ID after reconnection.
-- **Server restart**: After a server restart, the server generates new subject IDs (including for the root). The client does not need special handling — the `root` mapping hint in the complete update identifies the new root entry, and all child subjects are re-created with their new IDs during apply. The client should clear its old ID-to-object maps when applying a complete update after reconnection.
+- **Server restart**: After a server restart, the server generates new subject IDs (including for the root). The client does not need special handling because the `root` mapping hint in the complete update identifies the new root entry, and all child subjects are re-created with their new IDs during apply. The client should clear its old ID-to-object maps when applying a complete update after reconnection.
 
 ### Conflict Resolution
 
