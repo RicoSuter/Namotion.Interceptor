@@ -19,6 +19,7 @@ public class DynamicPropertyLifecycleTests
         // Arrange: Dynamic derived property with a setter.
         // The getter computes "FirstName (override)" or "FirstName" based on internal state.
         // The setter modifies internal state, then the handler should recalculate via the getter.
+        var changes = new List<SubjectPropertyChange>();
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
@@ -34,6 +35,11 @@ public class DynamicPropertyLifecycleTests
             getValue: _ => overrideValue ?? root.FirstName ?? "NA",
             setValue: (_, value) => overrideValue = value);
 
+        context
+            .GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Where(c => c.Property.Name == "DisplayName")
+            .Subscribe(changes.Add);
+
         // Verify initial value
         var propertyReference = property.Reference;
         var initialValue = propertyReference.Metadata.GetValue?.Invoke(root);
@@ -48,6 +54,11 @@ public class DynamicPropertyLifecycleTests
         // The getter should now return the override value
         var newValue = propertyReference.Metadata.GetValue?.Invoke(root);
         Assert.Equal("Custom", newValue);
+
+        // The observable should have fired with the recalculated value
+        Assert.NotEmpty(changes);
+        Assert.Contains(changes, c =>
+            c.GetNewValue<string?>() == "Custom");
     }
 
     [Fact]
