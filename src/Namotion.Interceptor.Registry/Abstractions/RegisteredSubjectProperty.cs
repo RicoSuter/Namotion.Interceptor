@@ -103,10 +103,10 @@ public class RegisteredSubjectProperty
     /// Checks whether this property has child subjects, which can be either
     /// a subject reference, a collection of subjects, or a dictionary of subjects.
     /// </summary>
-    public bool HasChildSubjects
+    public bool CanContainSubjects
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => IsSubjectReference || IsSubjectCollection || IsSubjectDictionary;
+        get => Type.CanContainSubjects();
     }
 
     /// <summary>
