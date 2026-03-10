@@ -128,6 +128,7 @@ internal sealed class WriteRetryQueue : IDisposable
             }
 
             // Process in batches up to MaxBatchSize, looping until queue is empty
+            var totalFlushed = 0;
             while (true)
             {
                 // Dequeue up to buffer size
@@ -169,12 +170,13 @@ internal sealed class WriteRetryQueue : IDisposable
                     return false;
                 }
 
+                totalFlushed += count;
                 Array.Clear(_scratchBuffer, 0, count);
             }
 
             if (_hasFlushWarnings)
             {
-                _logger.LogInformation("Successfully flushed queued writes after retry.");
+                _logger.LogInformation("Successfully flushed {Count} queued writes after retry.", totalFlushed);
                 _hasFlushWarnings = false;
                 _lastFlushWarningTimestamp = 0;
             }
