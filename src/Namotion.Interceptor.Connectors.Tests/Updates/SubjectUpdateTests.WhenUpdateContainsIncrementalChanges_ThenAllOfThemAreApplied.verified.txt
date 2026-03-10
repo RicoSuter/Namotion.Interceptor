@@ -42,11 +42,7 @@
           Kind: Collection,
           Items: [
             {
-              Index: 1,
-              Id: 2
-            },
-            {
-              Index: 1,
+              Index: 0,
               Id: 2
             }
           ]
