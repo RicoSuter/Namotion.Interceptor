@@ -23,6 +23,10 @@ internal sealed class WriteRetryQueue : IDisposable
     private readonly int _maxQueueSize;
     private int _count;
 
+    // Throttle flush-failure warnings to avoid log spam during extended disconnections
+    private long _lastFlushWarningTimestamp;
+    private bool _hasFlushWarnings;
+
     /// <summary>
     /// Gets a value indicating whether the write queue is empty.
     /// </summary>
@@ -148,13 +152,30 @@ internal sealed class WriteRetryQueue : IDisposable
                 var result = await source.WriteChangesInBatchesAsync(memory, cancellationToken).ConfigureAwait(false);
                 if (result.Error is not null)
                 {
-                    _logger.LogWarning(result.Error, "Failed to flush {Count} queued writes to source, re-queuing failed items.", count);
+                    var now = Environment.TickCount64;
+                    if (now - _lastFlushWarningTimestamp >= 5000)
+                    {
+                        var queueSize = count + PendingWriteCount;
+                        _lastFlushWarningTimestamp = now;
+                        _logger.LogWarning(result.Error,
+                            "Failed to flush queued writes to source, re-queuing failed items ({QueueSize} writes queued).",
+                            queueSize);
+                    }
+
+                    _hasFlushWarnings = true;
+
                     RequeueChanges(result.FailedChanges);
                     Array.Clear(_scratchBuffer, 0, count);
                     return false;
                 }
 
                 Array.Clear(_scratchBuffer, 0, count);
+            }
+
+            if (_hasFlushWarnings)
+            {
+                _logger.LogInformation("Successfully flushed queued writes after retry.");
+                _hasFlushWarnings = false;
             }
 
             return true;
