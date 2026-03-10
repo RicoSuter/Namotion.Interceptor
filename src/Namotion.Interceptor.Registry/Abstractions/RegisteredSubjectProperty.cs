@@ -1,4 +1,5 @@
-﻿using System.Collections.Immutable;
+﻿using System.Collections;
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking;
@@ -9,6 +10,9 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public class RegisteredSubjectProperty
 {
+    [ThreadStatic]
+    private static Dictionary<IInterceptorSubject, int>? _reusableLiveIndices;
+
     private readonly List<SubjectPropertyChild> _children = [];
     private ImmutableArray<SubjectPropertyChild> _childrenCache;
 
@@ -327,28 +331,93 @@ public class RegisteredSubjectProperty
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void RemoveChild(SubjectPropertyChild child)
     {
         lock (_children)
         {
-            var index = _children.IndexOf(child);
+            var index = -1;
+            if (IsSubjectCollection)
+            {
+                // For collections, match by Subject only. The Index field represents
+                // the collection position which shifts as items are removed, so it
+                // cannot be used for reliable matching.
+                var subject = child.Subject;
+                for (var i = 0; i < _children.Count; i++)
+                {
+                    if (_children[i].Subject == subject)
+                    {
+                        index = i;
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                index = _children.IndexOf(child);
+            }
+
             if (index == -1)
                 return;
 
             _children.RemoveAt(index);
+            _childrenCache = default;
+        }
+    }
 
-            // Handle collection index reordering after removal
-            // For subject collections, update all further indices
-            if (IsSubjectCollection && index < _children.Count)
+    /// <summary>
+    /// Refreshes all children's Index values and ordering from the live collection,
+    /// and updates each child's Parent entry to match.
+    /// Called after a collection property write has been fully reconciled.
+    /// </summary>
+    internal void RefreshCollectionIndices()
+    {
+        if (!IsSubjectCollection)
+            return;
+
+        var value = GetValue();
+        if (value is not ICollection collection)
+            return;
+
+        lock (_children)
+        {
+            // Build subject → live index map from the current collection
+            // Reuse a ThreadStatic dictionary to avoid allocations
+            var liveIndices = _reusableLiveIndices;
+            liveIndices?.Clear();
+
+            var liveIndex = 0;
+            foreach (var item in collection)
             {
-                for (int i = index; i < _children.Count; i++)
+                if (item is IInterceptorSubject subject)
                 {
-                    _children[i] = _children[i] with { Index = i };
+                    liveIndices ??= _reusableLiveIndices = new Dictionary<IInterceptorSubject, int>(_children.Count);
+                    liveIndices[subject] = liveIndex;
+                }
+
+                liveIndex++;
+            }
+
+            if (liveIndices is null)
+                return;
+
+            // Update all children's indices and their Parent entries
+            for (var i = 0; i < _children.Count; i++)
+            {
+                var child = _children[i];
+                if (liveIndices.TryGetValue(child.Subject, out var newIndex))
+                {
+                    var boxedNewIndex = (object)newIndex;
+                    if (!Equals(child.Index, boxedNewIndex))
+                    {
+                        _children[i] = child with { Index = boxedNewIndex };
+                        child.Subject.TryGetRegisteredSubject()?.UpdateParentIndex(this, child.Index, boxedNewIndex);
+                    }
                 }
             }
 
-            _childrenCache = default; // invalidate cache
+            // Sort children to match live collection order
+            _children.Sort(static (a, b) => ((int)a.Index!).CompareTo((int)b.Index!));
+            _childrenCache = default;
         }
     }
 }

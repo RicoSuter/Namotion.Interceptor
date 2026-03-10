@@ -198,6 +198,18 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     void IPropertyLifecycleHandler.DetachProperty(SubjectPropertyLifecycleChange change)
     {
     }
+
+    void IPropertyLifecycleHandler.HandleCollectionPropertyChanged(PropertyReference property)
+    {
+        lock (_knownSubjects)
+        {
+            var registeredProperty = _knownSubjects
+                .GetValueOrDefault(property.Subject)?
+                .TryGetProperty(property.Name);
+
+            registeredProperty?.RefreshCollectionIndices();
+        }
+    }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private RegisteredSubjectProperty? TryGetRegisteredProperty(PropertyReference property)

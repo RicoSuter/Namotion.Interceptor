@@ -17,10 +17,6 @@
           {
             Index: 1,
             Id: 3
-          },
-          {
-            Index: 3,
-            Id: 3
           }
         ],
         Count: 2

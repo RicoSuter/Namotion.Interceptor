@@ -113,6 +113,19 @@ public class RegisteredSubject
         }
     }
 
+    internal void UpdateParentIndex(RegisteredSubjectProperty property, object? oldIndex, object? newIndex)
+    {
+        lock (_parentsLock)
+        {
+            var oldParent = new SubjectPropertyParent { Property = property, Index = oldIndex };
+            var idx = _parents.IndexOf(oldParent);
+            if (idx >= 0)
+            {
+                _parents = _parents.SetItem(idx, new SubjectPropertyParent { Property = property, Index = newIndex });
+            }
+        }
+    }
+
     /// <summary>
     /// Adds a dynamic derived property to the subject with tracking of dependencies.
     /// </summary>
