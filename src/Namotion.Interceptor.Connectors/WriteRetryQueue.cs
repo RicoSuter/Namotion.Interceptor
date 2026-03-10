@@ -176,6 +176,7 @@ internal sealed class WriteRetryQueue : IDisposable
             {
                 _logger.LogInformation("Successfully flushed queued writes after retry.");
                 _hasFlushWarnings = false;
+                _lastFlushWarningTimestamp = 0;
             }
 
             return true;
