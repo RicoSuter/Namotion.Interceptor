@@ -288,25 +288,31 @@ public class VerificationEngine : BackgroundService
             }
         }
 
+        // Normalize root subject ID: each participant generates its own root ID independently,
+        // so replace it with a constant placeholder for comparison purposes.
+        // See docs/connectors/subject-updates.md "Root ID Independence".
+        var rootId = node["root"]?.GetValue<string>();
+
         // Sort subjects by ID and properties by name for deterministic comparison.
         var sortedSubjects = new JsonObject();
         if (subjects is not null)
         {
             foreach (var subjectKey in subjects.Select(kvp => kvp.Key).Order(StringComparer.Ordinal))
             {
+                var normalizedKey = subjectKey == rootId ? "ROOT" : subjectKey;
                 var properties = subjects[subjectKey]!.AsObject();
                 var sortedProperties = new JsonObject();
                 foreach (var propertyKey in properties.Select(kvp => kvp.Key).Order(StringComparer.Ordinal))
                 {
                     sortedProperties[propertyKey] = properties[propertyKey]!.DeepClone();
                 }
-                sortedSubjects[subjectKey] = sortedProperties;
+                sortedSubjects[normalizedKey] = sortedProperties;
             }
         }
 
         var result = new JsonObject
         {
-            ["root"] = node["root"]?.DeepClone(),
+            ["root"] = rootId != null ? "ROOT" : null,
             ["subjects"] = sortedSubjects
         };
 
