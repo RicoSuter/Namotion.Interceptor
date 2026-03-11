@@ -21,7 +21,7 @@ public interface IPropertyLifecycleHandler
     public void DetachProperty(SubjectPropertyLifecycleChange change);
 
     /// <summary>
-    /// Called after a collection property write has been fully reconciled
+    /// Called after a collection property writing has been fully reconciled
     /// (all detach/attach events processed). Allows handlers to refresh
     /// child index metadata from the live collection value.
     /// </summary>
