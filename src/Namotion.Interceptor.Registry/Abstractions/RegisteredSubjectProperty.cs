@@ -380,7 +380,7 @@ public class RegisteredSubjectProperty
 
         lock (_children)
         {
-            // Build subject → live index map from the current collection
+            // Build a subject → live index map from the current collection
             // Reuse a ThreadStatic dictionary to avoid allocations
             var liveIndices = _reusableLiveIndices;
             liveIndices?.Clear();
