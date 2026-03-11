@@ -93,10 +93,23 @@ internal static class SubjectUpdateFactory
             if (!IsPropertyIncluded(property, builder.Processors))
                 continue;
 
-            var propertyUpdate = CreatePropertyUpdate(property, builder);
-            properties[property.Name] = propertyUpdate;
+            if (properties.TryGetValue(property.Name, out var existingUpdate))
+            {
+                // Property was already set by a value change earlier in this batch.
+                // Preserve the change-based value but ensure attributes are populated,
+                // since value changes don't include attributes.
+                if (existingUpdate.Attributes is null)
+                {
+                    existingUpdate.Attributes = CreateAttributeUpdates(property, builder);
+                }
+            }
+            else
+            {
+                var propertyUpdate = CreatePropertyUpdate(property, builder);
+                properties[property.Name] = propertyUpdate;
 
-            builder.TrackPropertyUpdate(propertyUpdate, property, properties);
+                builder.TrackPropertyUpdate(propertyUpdate, property, properties);
+            }
         }
     }
 
@@ -113,7 +126,16 @@ internal static class SubjectUpdateFactory
         if (!IsPropertyIncluded(registeredProperty, builder.Processors))
             return;
 
-        var subjectId = builder.GetOrCreateId(changedSubject);
+        var (subjectId, isNewToBuilder) = builder.GetOrCreateIdWithStatus(changedSubject);
+        if (isNewToBuilder)
+        {
+            // Track that this subject was first encountered via a value change, not via
+            // a structural reference. If a structural change (ObjectRef/Collection/Dictionary)
+            // later references this subject in the same batch, ProcessSubjectComplete must
+            // still be called to populate the remaining properties.
+            builder.SubjectsWithPartialChanges.Add(changedSubject);
+        }
+
         var properties = builder.GetOrCreateProperties(subjectId);
 
         if (registeredProperty.IsAttribute)
@@ -234,12 +256,11 @@ internal static class SubjectUpdateFactory
             var (id, isNew) = builder.GetOrCreateIdWithStatus(item);
             update.Id = id;
 
-            // Only process the complete subject if it's newly encountered.
-            // If the subject already had an ID, it's part of the existing tree,
-            // and we should only add a reference to it, not all its properties.
-            // This prevents circular references from causing the entire tree
-            // to be included in partial updates.
-            if (isNew)
+            // Process the complete subject if it's newly encountered OR if a value change
+            // earlier in the same batch created its ID without populating complete properties.
+            // ProcessSubjectComplete uses ProcessedSubjects.Add to prevent circular references
+            // and ContainsKey to preserve explicitly changed properties.
+            if (isNew || builder.SubjectsWithPartialChanges.Remove(item))
             {
                 ProcessSubjectComplete(item, builder);
             }

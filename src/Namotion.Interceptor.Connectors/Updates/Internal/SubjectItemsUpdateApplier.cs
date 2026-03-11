@@ -28,8 +28,8 @@ internal static class SubjectItemsUpdateApplier
             return;
         }
 
-        var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
-      
+        var idRegistry = context.SubjectIdRegistry;
+
         var newItems = new List<IInterceptorSubject>(propertyUpdate.Items.Count);
         foreach (var itemUpdate in propertyUpdate.Items)
         {
@@ -77,7 +77,7 @@ internal static class SubjectItemsUpdateApplier
             }
         }
 
-        var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
+        var idRegistry = context.SubjectIdRegistry;
 
         var targetKeyType = property.Type.GenericTypeArguments[0];
         var structureChanged = false;

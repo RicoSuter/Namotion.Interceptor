@@ -21,7 +21,7 @@ internal static class SubjectUpdateApplier
         var context = ContextPool.Rent();
         try
         {
-            context.Initialize(update.Subjects, subjectFactory, transformValueBeforeApply);
+            context.Initialize(subject.Context, update.Subjects, subjectFactory, transformValueBeforeApply);
 
             if (update.Root is not null && update.Subjects.TryGetValue(update.Root, out var rootProperties))
             {
@@ -40,19 +40,17 @@ internal static class SubjectUpdateApplier
             // to subjects NOT reachable from the root's changed properties (e.g., a deeply
             // nested ObjectRef change in the same batch as a root scalar change).
             // TryMarkAsProcessed ensures no subject is processed twice.
-            var idRegistry = subject.Context.GetService<ISubjectIdRegistry>();
+            var idRegistry = context.SubjectIdRegistry;
             foreach (var (subjectId, properties) in update.Subjects)
             {
-                if (idRegistry.TryGetSubjectById(subjectId, out var targetSubject))
+                // Subjects not found in the ID registry are expected: they are new subjects
+                // whose structural parent (collection/dictionary/object ref) will create them
+                // and apply their properties via ApplyPropertiesIfAvailable during this same update.
+                if (idRegistry.TryGetSubjectById(subjectId, out var targetSubject) &&
+                    context.TryMarkAsProcessed(subjectId))
                 {
-                    if (context.TryMarkAsProcessed(subjectId))
-                    {
-                        ApplyPropertyUpdates(targetSubject, properties, context);
-                    }
+                    ApplyPropertyUpdates(targetSubject, properties, context);
                 }
-                // If subject not found, do NOT mark as processed.
-                // The subject may be created later by a structural operation
-                // (e.g., Collection Insert) which will apply its properties.
             }
         }
         finally
@@ -67,7 +65,7 @@ internal static class SubjectUpdateApplier
         Dictionary<string, SubjectPropertyUpdate> properties,
         SubjectUpdateApplyContext context)
     {
-        var registry = subject.Context.GetService<ISubjectRegistry>();
+        var registry = context.SubjectRegistry;
 
         foreach (var (propertyName, propertyUpdate) in properties)
         {
@@ -162,8 +160,7 @@ internal static class SubjectUpdateApplier
             // Either no existing item, or existing item is a DIFFERENT subject (replacement).
             // Try to reuse an existing subject by subject ID (may exist elsewhere in the graph).
             targetItem = null;
-            var idRegistry = parent.Context.GetService<ISubjectIdRegistry>();
-            if (idRegistry.TryGetSubjectById(propertyUpdate.Id, out var existing))
+            if (context.SubjectIdRegistry.TryGetSubjectById(propertyUpdate.Id, out var existing))
             {
                 targetItem = existing;
             }

@@ -20,6 +20,14 @@ internal sealed class SubjectUpdateBuilder
 
     public HashSet<IInterceptorSubject> ProcessedSubjects { get; } = [];
 
+    /// <summary>
+    /// Tracks subjects whose IDs were first created by a value change (ProcessPropertyChange),
+    /// not by a structural reference (BuildObjectReference/ProcessSubjectComplete).
+    /// When a structural reference later encounters such a subject, ProcessSubjectComplete
+    /// must still be called to populate the remaining properties that weren't in the change.
+    /// </summary>
+    public HashSet<IInterceptorSubject> SubjectsWithPartialChanges { get; } = [];
+
     public void Initialize(IInterceptorSubject rootSubject, ISubjectUpdateProcessor[] processors)
     {
         Processors = processors;
@@ -112,6 +120,7 @@ internal sealed class SubjectUpdateBuilder
         _propertyUpdates.Clear();
 
         ProcessedSubjects.Clear();
+        SubjectsWithPartialChanges.Clear();
         Processors = [];
     }
 

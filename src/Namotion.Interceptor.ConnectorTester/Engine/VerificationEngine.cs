@@ -246,6 +246,11 @@ public class VerificationEngine : BackgroundService
         var json = JsonSerializer.Serialize(update, SnapshotJsonOptions);
         var node = JsonNode.Parse(json)!.AsObject();
 
+        // Normalize root subject ID: each participant generates its own root ID independently,
+        // so replace it with a constant placeholder for comparison purposes.
+        // See docs/connectors/subject-updates.md "Root ID Independence".
+        var rootId = node["root"]?.GetValue<string>();
+
         var subjects = node["subjects"]?.AsObject();
         if (subjects is not null)
         {
@@ -269,6 +274,25 @@ public class VerificationEngine : BackgroundService
                         property.Remove("timestamp");
                     }
 
+                    // Normalize references to the root subject ID. Each participant
+                    // generates its own root ID independently (see "Root ID Independence"
+                    // in subject-updates.md), so replace with a constant placeholder.
+                    if (kind == "Object" && property["id"]?.GetValue<string>() == rootId)
+                    {
+                        property["id"] = "ROOT";
+                    }
+
+                    if ((kind == "Collection" || kind == "Dictionary") && property["items"] is JsonArray itemsToNormalize)
+                    {
+                        foreach (var itemNode in itemsToNormalize)
+                        {
+                            if (itemNode is JsonObject itemObj && itemObj["id"]?.GetValue<string>() == rootId)
+                            {
+                                itemObj["id"] = "ROOT";
+                            }
+                        }
+                    }
+
                     // Sort dictionary items by key for order-independent comparison.
                     if (kind == "Dictionary" && property["items"] is JsonArray items)
                     {
@@ -288,26 +312,28 @@ public class VerificationEngine : BackgroundService
             }
         }
 
-        // Normalize root subject ID: each participant generates its own root ID independently,
-        // so replace it with a constant placeholder for comparison purposes.
-        // See docs/connectors/subject-updates.md "Root ID Independence".
-        var rootId = node["root"]?.GetValue<string>();
-
-        // Sort subjects by ID and properties by name for deterministic comparison.
-        var sortedSubjects = new JsonObject();
+        // Normalize keys first, then sort by normalized key for deterministic comparison.
+        // Each participant generates its own root ID, so sorting must happen after normalization.
+        var normalizedEntries = new List<(string Key, JsonObject Properties)>();
         if (subjects is not null)
         {
-            foreach (var subjectKey in subjects.Select(kvp => kvp.Key).Order(StringComparer.Ordinal))
+            foreach (var (subjectKey, subjectNode) in subjects)
             {
                 var normalizedKey = subjectKey == rootId ? "ROOT" : subjectKey;
-                var properties = subjects[subjectKey]!.AsObject();
+                var properties = subjectNode!.AsObject();
                 var sortedProperties = new JsonObject();
                 foreach (var propertyKey in properties.Select(kvp => kvp.Key).Order(StringComparer.Ordinal))
                 {
                     sortedProperties[propertyKey] = properties[propertyKey]!.DeepClone();
                 }
-                sortedSubjects[normalizedKey] = sortedProperties;
+                normalizedEntries.Add((normalizedKey, sortedProperties));
             }
+        }
+
+        var sortedSubjects = new JsonObject();
+        foreach (var (key, props) in normalizedEntries.OrderBy(e => e.Key, StringComparer.Ordinal))
+        {
+            sortedSubjects[key] = props;
         }
 
         var result = new JsonObject
