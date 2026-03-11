@@ -406,18 +406,22 @@ public class RegisteredSubjectProperty
                 var child = _children[i];
                 if (liveIndices.TryGetValue(child.Subject, out var newIndex))
                 {
+                    // Compare unboxed to avoid allocating a boxed int when index hasn't changed
+                    if (child.Index is int oldIndex && oldIndex == newIndex)
+                        continue;
+
                     var boxedNewIndex = (object)newIndex;
-                    if (!Equals(child.Index, boxedNewIndex))
-                    {
-                        _children[i] = child with { Index = boxedNewIndex };
-                        child.Subject.TryGetRegisteredSubject()?.UpdateParentIndex(this, child.Index, boxedNewIndex);
-                    }
+                    _children[i] = child with { Index = boxedNewIndex };
+                    child.Subject.TryGetRegisteredSubject()?.UpdateParentIndex(this, child.Index, boxedNewIndex);
                 }
             }
 
             // Sort children to match live collection order
             _children.Sort(static (a, b) => ((int)a.Index!).CompareTo((int)b.Index!));
             _childrenCache = default;
+
+            // Release references to subjects so they can be GC'd on idle threads
+            liveIndices.Clear();
         }
     }
 }

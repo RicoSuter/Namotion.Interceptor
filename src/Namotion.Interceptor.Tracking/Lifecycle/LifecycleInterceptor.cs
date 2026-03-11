@@ -348,9 +348,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
                 _lastProcessedValues[context.Property] = newValue;
 
-                // Notify property lifecycle handlers that a collection property
-                // has been fully reconciled so they can refresh child index metadata.
-                if (newValue is ICollection)
+                // Refresh child index metadata for retained subjects whose
+                // positions may have shifted in the new collection.
+                if (newValue is ICollection && oldTouchedSubjects.Overlaps(newTouchedSubjects))
                 {
                     var handlers = context.Property.Subject.Context.GetServices<IPropertyLifecycleHandler>();
                     for (var i = 0; i < handlers.Length; i++)
