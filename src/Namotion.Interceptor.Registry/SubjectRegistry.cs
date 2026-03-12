@@ -199,16 +199,19 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     {
     }
 
-    void IPropertyLifecycleHandler.HandleCollectionPropertyChanged(PropertyReference property)
+    void IPropertyLifecycleHandler.RefreshCollectionProperty(PropertyReference property)
     {
+        RegisteredSubjectProperty? registeredProperty;
         lock (_knownSubjects)
         {
-            var registeredProperty = _knownSubjects
+            registeredProperty = _knownSubjects
                 .GetValueOrDefault(property.Subject)?
                 .TryGetProperty(property.Name);
-
-            registeredProperty?.RefreshCollectionIndices();
         }
+
+        // Call outside lock — RefreshCollectionIndices enumerates the live collection
+        // and updates parent entries; holding _knownSubjects would risk deadlock.
+        registeredProperty?.RefreshCollectionIndices();
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

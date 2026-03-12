@@ -375,26 +375,44 @@ public class RegisteredSubjectProperty
             return;
 
         var value = GetValue();
-        if (value is not ICollection collection)
-            return;
 
         lock (_children)
         {
-            // Build a subject → live index map from the current collection
-            // Reuse a ThreadStatic dictionary to avoid allocations
+            // Build a subject → live index map from the current collection.
+            // Reuse a ThreadStatic dictionary to avoid allocations.
             var liveIndices = _reusableLiveIndices;
             liveIndices?.Clear();
 
-            var liveIndex = 0;
-            foreach (var item in collection)
+            // Use IList indexed access when available to avoid boxing the struct
+            // enumerator that ICollection.GetEnumerator() would allocate for List<T>/arrays.
+            // Fall back to ICollection foreach for non-indexed collections (Queue<T>, etc.).
+            if (value is IList list)
             {
-                if (item is IInterceptorSubject subject)
+                for (var liveIndex = 0; liveIndex < list.Count; liveIndex++)
                 {
-                    liveIndices ??= _reusableLiveIndices = new Dictionary<IInterceptorSubject, int>(_children.Count);
-                    liveIndices[subject] = liveIndex;
+                    if (list[liveIndex] is IInterceptorSubject subject)
+                    {
+                        liveIndices ??= _reusableLiveIndices = new Dictionary<IInterceptorSubject, int>(_children.Count);
+                        liveIndices[subject] = liveIndex;
+                    }
                 }
-
-                liveIndex++;
+            }
+            else if (value is ICollection collection)
+            {
+                var liveIndex = 0;
+                foreach (var item in collection)
+                {
+                    if (item is IInterceptorSubject subject)
+                    {
+                        liveIndices ??= _reusableLiveIndices = new Dictionary<IInterceptorSubject, int>(_children.Count);
+                        liveIndices[subject] = liveIndex;
+                    }
+                    liveIndex++;
+                }
+            }
+            else
+            {
+                return;
             }
 
             if (liveIndices is null)
@@ -412,6 +430,9 @@ public class RegisteredSubjectProperty
 
                     var boxedNewIndex = (object)newIndex;
                     _children[i] = child with { Index = boxedNewIndex };
+
+                    // child is a snapshot from before the update above,
+                    // so child.Index is still the old value — correct for oldIndex parameter.
                     child.Subject.TryGetRegisteredSubject()?.UpdateParentIndex(this, child.Index, boxedNewIndex);
                 }
             }
