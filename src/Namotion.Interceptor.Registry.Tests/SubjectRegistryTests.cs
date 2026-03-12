@@ -268,7 +268,9 @@ public class SubjectRegistryTests
         Assert.NotNull(registeredChildren);
         Assert.Equal(2, registeredChildren.Value.Length);
         Assert.Equal("Child8", ((Person)registeredChildren.Value[0].Subject).FirstName);
+        Assert.Equal(0, registeredChildren.Value[0].Index);
         Assert.Equal("Child9", ((Person)registeredChildren.Value[1].Subject).FirstName);
+        Assert.Equal(1, registeredChildren.Value[1].Index);
     }
 
     [Fact]
@@ -298,8 +300,14 @@ public class SubjectRegistryTests
         var childrenProp = person.TryGetRegisteredSubject()!
             .TryGetProperty(nameof(Person.Children))!;
 
+        Assert.Same(child1, childrenProp.Children[0].Subject);
         Assert.Equal(0, childrenProp.Children[0].Index);
+        Assert.Same(child3, childrenProp.Children[1].Subject);
         Assert.Equal(1, childrenProp.Children[1].Index);
+
+        var child1Parents = child1.TryGetRegisteredSubject()!.Parents;
+        Assert.Single(child1Parents);
+        Assert.Equal(0, child1Parents[0].Index); // position 0 in [A, C]
 
         var child3Parents = child3.TryGetRegisteredSubject()!.Parents;
         Assert.Single(child3Parents);
@@ -339,6 +347,7 @@ public class SubjectRegistryTests
 
         // Parents should also match
         Assert.Equal(2, child1.TryGetRegisteredSubject()!.Parents[0].Index);
+        Assert.Equal(1, child2.TryGetRegisteredSubject()!.Parents[0].Index);
         Assert.Equal(0, child3.TryGetRegisteredSubject()!.Parents[0].Index);
     }
 
@@ -373,7 +382,9 @@ public class SubjectRegistryTests
         Assert.Equal(1, childBySubject["B"]);
         Assert.Equal(2, childBySubject["C"]);
 
-        // C's parent index should be updated from 1 to 2
-        Assert.Equal(2, child3.TryGetRegisteredSubject()!.Parents[0].Index);
+        // All parent indices should match live positions
+        Assert.Equal(0, child1.TryGetRegisteredSubject()!.Parents[0].Index);
+        Assert.Equal(1, child2.TryGetRegisteredSubject()!.Parents[0].Index);
+        Assert.Equal(2, child3.TryGetRegisteredSubject()!.Parents[0].Index); // updated from 1 to 2
     }
 }
