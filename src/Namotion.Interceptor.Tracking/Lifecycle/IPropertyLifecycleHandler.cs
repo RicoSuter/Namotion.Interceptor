@@ -25,5 +25,7 @@ public interface IPropertyLifecycleHandler
     /// (all detach/attach events processed). Allows handlers to refresh
     /// child index metadata from the live collection value.
     /// </summary>
-    void RefreshCollectionProperty(PropertyReference property) { }
+    /// <param name="property">The collection property reference.</param>
+    /// <param name="value">The current collection value.</param>
+    void RefreshCollectionProperty(PropertyReference property, object? value) { }
 }
