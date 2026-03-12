@@ -355,7 +355,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     var handlers = context.Property.Subject.Context.GetServices<IPropertyLifecycleHandler>();
                     for (var i = 0; i < handlers.Length; i++)
                     {
-                        handlers[i].HandleCollectionPropertyChanged(context.Property);
+                        handlers[i].RefreshCollectionProperty(context.Property);
                     }
                 }
             }
