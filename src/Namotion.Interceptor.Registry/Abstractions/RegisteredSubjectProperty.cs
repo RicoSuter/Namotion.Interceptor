@@ -367,16 +367,15 @@ public class RegisteredSubjectProperty
     /// <summary>
     /// Syncs children's indices and parent entries with the live collection.
     /// </summary>
-    internal void RefreshCollectionIndices()
+    /// <param name="collectionValue">The current collection value (passed from caller to avoid re-reading through interceptors).</param>
+    internal void RefreshCollectionIndices(object? collectionValue)
     {
         if (!IsSubjectCollection)
             return;
 
-        var value = GetValue();
-
         lock (_children)
         {
-            var collectionPositions = BuildCollectionPositions(value, _children.Count);
+            var collectionPositions = BuildCollectionPositions(collectionValue, _children.Count);
             if (collectionPositions is null)
                 return;
 
