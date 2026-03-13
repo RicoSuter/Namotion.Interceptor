@@ -12,6 +12,12 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// </summary>
 public sealed class DerivedPropertyDependencies
 {
+    /// <summary>
+    /// Shared empty instance for read-only queries when no data exists.
+    /// Avoids allocating data objects just to check dependencies.
+    /// </summary>
+    internal static readonly DerivedPropertyDependencies Empty = new();
+
     private PropertyReference[] _items = [];
     private long _version; // Increments on every mutation (Add/Remove/TryReplace)
 
@@ -108,27 +114,17 @@ public sealed class DerivedPropertyDependencies
     }
 
     /// <summary>
-    /// Attempts to atomically replace all dependencies if version matches (optimistic concurrency).
-    /// Check version matches expectedVersion (no concurrent modifications)
-    /// - If match: Replace array and increment version
-    /// - If mismatch: Return false (caller should use merge mode)
-    /// The version check prevents ABA problem where value changes and changes back.
+    /// Atomically replaces all dependencies if version matches.
+    /// Returns false on version mismatch or concurrent modification (caller should use merge mode).
     /// </summary>
-    /// <returns>True if replaced successfully; false if version changed (concurrent modification detected).</returns>
     internal bool TryReplace(ReadOnlySpan<PropertyReference> newItems, long expectedVersion)
     {
-        // Fast path: Fail if version already changed (avoids array allocation)
         if (Volatile.Read(ref _version) != expectedVersion)
             return false;
 
-        // Capture current array for CAS comparison
         var snapshot = Volatile.Read(ref _items);
-
-        // Allocate new array
         var newArr = newItems.Length == 0 ? [] : newItems.ToArray();
 
-        // CAS ensures no concurrent modification between our reads and write
-        // This closes the race window that existed with plain Volatile.Write
         if (!ReferenceEquals(Interlocked.CompareExchange(ref _items, newArr, snapshot), snapshot))
             return false;
 

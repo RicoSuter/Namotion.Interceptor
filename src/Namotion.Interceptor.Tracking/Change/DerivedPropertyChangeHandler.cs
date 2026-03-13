@@ -32,14 +32,16 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         if (metadata.IsDerived)
         {
             var data = change.Property.GetDerivedPropertyData();
+            lock (data)
+            {
+                StartRecordingTouchedProperties();
 
-            StartRecordingTouchedProperties();
+                var result = metadata.GetValue?.Invoke(change.Subject);
+                data.LastKnownValue = result;
+                change.Property.SetWriteTimestampUtcTicks(SubjectChangeContext.Current.ChangedTimestampUtcTicks);
 
-            var result = metadata.GetValue?.Invoke(change.Subject);
-            data.LastKnownValue = result;
-            change.Property.SetWriteTimestampUtcTicks(SubjectChangeContext.Current.ChangedTimestampUtcTicks);
-
-            StoreRecordedTouchedProperties(change.Property, data);
+                StoreRecordedTouchedProperties(change.Property, data);
+            }
         }
     }
 
@@ -144,32 +146,55 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
     /// <summary>
     /// Recalculates a derived property when one of its dependencies changes.
+    /// Locks on the per-property DerivedPropertyData to serialize concurrent recalculations
+    /// of the same derived property, ensuring dependencies and value stay consistent.
     /// </summary>
     private static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long timestampUtcTicks)
     {
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
         var data = derivedProperty.GetDerivedPropertyData();
-        var oldValue = data.LastKnownValue;
-
-        StartRecordingTouchedProperties();
-        var newValue = derivedProperty.Metadata.GetValue?.Invoke(derivedProperty.Subject);
-        StoreRecordedTouchedProperties(derivedProperty, data);
-
-        data.LastKnownValue = newValue;
-        derivedProperty.SetWriteTimestampUtcTicks(timestampUtcTicks);
-
-        // Fire change notification via thread-local + static delegates (avoids closure allocation).
-        _threadLocalOldValue = oldValue;
-        using (SubjectChangeContext.WithSource(null))
+        lock (data)
         {
-            derivedProperty.SetPropertyValueWithInterception(newValue, GetOldValueDelegate, NoOpWriteDelegate);
-        }
+            // Re-entrancy guard: when a derived-with-setter property is recalculated,
+            // SetPropertyValueWithInterception re-enters WriteProperty which would call
+            // RecalculateDerivedProperty again for the same property. The lock is re-entrant
+            // (same thread), so without this guard the recursion is infinite.
+            // Cross-thread callers block on the lock and see IsRecalculating=false after release.
+            if (data.IsRecalculating)
+            {
+                return;
+            }
 
-        _threadLocalOldValue = null; // Release reference to prevent stale subject retention
+            data.IsRecalculating = true;
+            try
+            {
+                var oldValue = data.LastKnownValue;
 
-        if (derivedProperty.Subject is IRaisePropertyChanged raiser)
-        {
-            raiser.RaisePropertyChanged(derivedProperty.Metadata.Name);
+                StartRecordingTouchedProperties();
+                var newValue = derivedProperty.Metadata.GetValue?.Invoke(derivedProperty.Subject);
+                StoreRecordedTouchedProperties(derivedProperty, data);
+
+                data.LastKnownValue = newValue;
+                derivedProperty.SetWriteTimestampUtcTicks(timestampUtcTicks);
+
+                // Fire change notification via thread-local + static delegates (avoids closure allocation).
+                _threadLocalOldValue = oldValue;
+                using (SubjectChangeContext.WithSource(null))
+                {
+                    derivedProperty.SetPropertyValueWithInterception(newValue, GetOldValueDelegate, NoOpWriteDelegate);
+                }
+
+                _threadLocalOldValue = null; // Release reference to prevent stale subject retention
+
+                if (derivedProperty.Subject is IRaisePropertyChanged raiser)
+                {
+                    raiser.RaisePropertyChanged(derivedProperty.Metadata.Name);
+                }
+            }
+            finally
+            {
+                data.IsRecalculating = false;
+            }
         }
     }
 
@@ -229,7 +254,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         {
             if (!recordedDependencies.Contains(oldDependency))
             {
-                oldDependency.GetUsedByProperties().Remove(derivedProperty);
+                oldDependency.GetDerivedPropertyData().GetOrCreateUsedByProperties().Remove(derivedProperty);
             }
         }
 
@@ -237,7 +262,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         {
             if (!previousItems.Contains(newDependency))
             {
-                newDependency.GetUsedByProperties().Add(derivedProperty);
+                newDependency.GetDerivedPropertyData().GetOrCreateUsedByProperties().Add(derivedProperty);
             }
         }
 
@@ -255,7 +280,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         foreach (ref readonly var dependency in recordedDependencies)
         {
             requiredProperties.Add(dependency);
-            dependency.GetUsedByProperties().Add(derivedProperty);
+            dependency.GetDerivedPropertyData().GetOrCreateUsedByProperties().Add(derivedProperty);
         }
     }
 }
