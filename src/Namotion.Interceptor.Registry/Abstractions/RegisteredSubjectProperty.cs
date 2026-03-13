@@ -17,6 +17,7 @@ public class RegisteredSubjectProperty
     private ImmutableArray<SubjectPropertyChild> _childrenCache;
 
     private readonly PropertyAttributeAttribute? _attributeMetadata;
+
     internal RegisteredSubjectProperty[]? AttributesCache = null; // TODO: Dangerous cache, needs review
 
     public RegisteredSubjectProperty(RegisteredSubject parent, string name,
@@ -338,11 +339,12 @@ public class RegisteredSubjectProperty
             var index = -1;
             if (IsSubjectCollection)
             {
-                // For collections, match by Subject only. The Index field represents
-                // the collection position which shifts as items are removed, so it
-                // cannot be used for reliable matching.
+                // For collections, match by Subject only — the Index field represents
+                // the collection position which shifts as items are removed.
+                // Search backwards because LifecycleInterceptor detaches in reverse
+                // collection order, making each lookup O(1) instead of O(n).
                 var subject = child.Subject;
-                for (var i = 0; i < _children.Count; i++)
+                for (var i = _children.Count - 1; i >= 0; i--)
                 {
                     if (_children[i].Subject == subject)
                     {
@@ -368,7 +370,8 @@ public class RegisteredSubjectProperty
     /// Syncs children's indices and parent entries with the live collection.
     /// </summary>
     /// <param name="collectionValue">The current collection value (passed from caller to avoid re-reading through interceptors).</param>
-    internal void RefreshCollectionIndices(object? collectionValue)
+    /// <param name="registry">The subject registry (passed from caller to avoid repeated service resolution per child).</param>
+    internal void RefreshCollectionIndices(object? collectionValue, ISubjectRegistry registry)
     {
         if (!IsSubjectCollection)
             return;
@@ -394,7 +397,7 @@ public class RegisteredSubjectProperty
 
                 // child is a readonly record struct snapshot from before the update above,
                 // so child.Index still holds the old value — correct for the oldIndex parameter.
-                child.Subject.TryGetRegisteredSubject()?.UpdateParentIndex(this, child.Index, boxedNewIndex);
+                registry.TryGetRegisteredSubject(child.Subject)?.UpdateParentIndex(this, child.Index, boxedNewIndex);
             }
 
             // Sort children to match live collection order
