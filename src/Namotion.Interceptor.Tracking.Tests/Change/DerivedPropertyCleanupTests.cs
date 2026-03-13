@@ -129,6 +129,48 @@ public class DerivedPropertyCleanupTests
     }
 
     [Fact]
+    public async Task WhenMultiplePropertiesDetachedConcurrently_ThenCleanupRemainsConsistent()
+    {
+        // Exercises the CAS retry paths in DetachProperty when multiple threads
+        // detach different properties of the same subject simultaneously.
+
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithDerivedPropertyChangeDetection()
+            .WithLifecycle()
+            .WithContextInheritance();
+
+        var cars = Enumerable.Range(0, 10).Select(_ => new Car(context)).ToArray();
+
+        // Verify initial state: all AveragePressure properties track tire dependencies
+        foreach (var car in cars)
+        {
+            var averagePressureProperty = new PropertyReference(car, nameof(Car.AveragePressure));
+            Assert.True(averagePressureProperty.GetRequiredProperties().Count > 0);
+        }
+
+        // Act - Detach AveragePressure from all cars concurrently
+        var tasks = cars.Select(car => Task.Run(() =>
+        {
+            var averagePressureProperty = new PropertyReference(car, nameof(Car.AveragePressure));
+            car.DetachSubjectProperty(averagePressureProperty);
+        }));
+
+        await Task.WhenAll(tasks);
+
+        // Assert - All tire pressures should have empty UsedByProperties (no dangling refs)
+        foreach (var car in cars)
+        {
+            foreach (var tire in car.Tires)
+            {
+                var tirePressureProperty = new PropertyReference(tire, nameof(Tire.Pressure));
+                Assert.Equal(0, tirePressureProperty.GetUsedByProperties().Count);
+            }
+        }
+    }
+
+    [Fact]
     public void WhenDerivedPropertyIsDetached_ThenItRemovesItselfFromDependenciesUsedByProperties()
     {
         // This is Case 1: When a derived property is detached, it removes itself from

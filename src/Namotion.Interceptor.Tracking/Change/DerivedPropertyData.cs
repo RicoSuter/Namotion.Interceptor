@@ -27,6 +27,14 @@ internal sealed class DerivedPropertyData
     internal object? LastKnownValue;
 
     /// <summary>
+    /// Re-entrancy guard for RecalculateDerivedProperty.
+    /// Prevents infinite recursion when a derived-with-setter property's
+    /// SetPropertyValueWithInterception re-enters WriteProperty.
+    /// Only read/written inside lock(this), so no volatile needed.
+    /// </summary>
+    internal bool IsRecalculating;
+
+    /// <summary>
     /// Gets or creates the UsedByProperties collection (thread-safe).
     /// </summary>
     public DerivedPropertyDependencies GetOrCreateUsedByProperties()

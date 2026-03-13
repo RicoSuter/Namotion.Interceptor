@@ -13,8 +13,24 @@ public static class DerivedPropertyChangeHandlerExtensions
     private const string DataKey = "ni.dpd";
 
     /// <summary>
+    /// Gets backward dependencies: Which derived properties depend on this property.
+    /// Example: If FullName depends on FirstName, then FirstName.GetUsedByProperties() includes FullName.
+    /// Returns a shared empty instance if no tracking data exists (allocation-free).
+    /// </summary>
+    public static DerivedPropertyDependencies GetUsedByProperties(this PropertyReference property) =>
+        property.TryGetDerivedPropertyData()?.UsedByProperties ?? DerivedPropertyDependencies.Empty;
+
+    /// <summary>
+    /// Gets forward dependencies: Which properties this derived property depends on.
+    /// Example: FullName.GetRequiredProperties() includes FirstName and LastName.
+    /// Returns a shared empty instance if no tracking data exists (allocation-free).
+    /// </summary>
+    public static DerivedPropertyDependencies GetRequiredProperties(this PropertyReference property) =>
+        property.TryGetDerivedPropertyData()?.RequiredProperties ?? DerivedPropertyDependencies.Empty;
+
+    /// <summary>
     /// Gets the consolidated tracking data for a property, creating it if needed.
-    /// Single dictionary lookup provides access to UsedByProperties, RequiredProperties, and LastKnownValue.
+    /// A single dictionary lookup provides access to UsedByProperties, RequiredProperties, and LastKnownValue.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static DerivedPropertyData GetDerivedPropertyData(this PropertyReference property) =>
@@ -28,46 +44,4 @@ public static class DerivedPropertyChangeHandlerExtensions
     internal static DerivedPropertyData? TryGetDerivedPropertyData(this PropertyReference property) =>
         property.TryGetPropertyData(DataKey, out var value) ? value as DerivedPropertyData : null;
 
-    /// <summary>
-    /// Gets backward dependencies: Which derived properties depend on this property.
-    /// Example: If FullName depends on FirstName, then FirstName.GetUsedByProperties() includes FullName.
-    /// </summary>
-    public static DerivedPropertyDependencies GetUsedByProperties(this PropertyReference property) =>
-        property.GetDerivedPropertyData().GetOrCreateUsedByProperties();
-
-    /// <summary>
-    /// Tries to get backward dependencies without allocating if not present.
-    /// Returns null if no dependencies have been registered.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static DerivedPropertyDependencies? TryGetUsedByProperties(this PropertyReference property) =>
-        property.TryGetDerivedPropertyData()?.UsedByProperties;
-
-    /// <summary>
-    /// Gets forward dependencies: Which properties this derived property depends on.
-    /// Example: FullName.GetRequiredProperties() includes FirstName and LastName.
-    /// </summary>
-    public static DerivedPropertyDependencies GetRequiredProperties(this PropertyReference property) =>
-        property.GetDerivedPropertyData().GetOrCreateRequiredProperties();
-
-    /// <summary>
-    /// Tries to get forward dependencies without allocating if not present.
-    /// Returns null if no dependencies have been registered.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static DerivedPropertyDependencies? TryGetRequiredProperties(this PropertyReference property) =>
-        property.TryGetDerivedPropertyData()?.RequiredProperties;
-
-    /// <summary>
-    /// Gets the cached last known value of a derived property.
-    /// Used for change detection (compare old vs new value).
-    /// </summary>
-    internal static object? GetLastKnownValue(this PropertyReference property) =>
-        property.TryGetDerivedPropertyData()?.LastKnownValue;
-
-    /// <summary>
-    /// Sets the cached last known value of a derived property.
-    /// </summary>
-    internal static void SetLastKnownValue(this PropertyReference property, object? value) =>
-        property.GetDerivedPropertyData().LastKnownValue = value;
 }
