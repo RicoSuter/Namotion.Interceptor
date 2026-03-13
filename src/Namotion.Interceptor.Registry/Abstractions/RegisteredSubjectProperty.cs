@@ -368,6 +368,10 @@ public class RegisteredSubjectProperty
 
     /// <summary>
     /// Syncs children's indices and parent entries with the live collection.
+    /// Must be called while LifecycleInterceptor's _attachedSubjects lock is held,
+    /// because this method acquires _children then _knownSubjects — the inverse of
+    /// HandleLifecycleChange's lock order. The outer _attachedSubjects lock serializes
+    /// both paths and prevents deadlock.
     /// </summary>
     /// <param name="collectionValue">The current collection value (passed from caller to avoid re-reading through interceptors).</param>
     /// <param name="registry">The subject registry (passed from caller to avoid repeated service resolution per child).</param>
