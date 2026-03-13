@@ -103,12 +103,14 @@ public class DerivedPropertyCleanupTests
     }
 
     [Fact]
-    public void DerivedPropertyDependingOnDerivedProperty_IsNotTracked()
+    public void DerivedPropertyDependingOnDerivedProperty_HasFlattenedDependencies()
     {
-        // Note: This is a known design limitation.
-        // Derived properties that depend on OTHER derived properties don't go through
-        // the interceptor chain (the getter is a direct C# property access).
-        // Only partial (intercepted) properties are tracked as dependencies.
+        // Derived-to-derived dependencies are flattened: FullNameWithPrefix calls FullName's
+        // getter, which reads FirstName and LastName through the interceptor chain. The recorder
+        // captures FirstName and LastName as direct dependencies of FullNameWithPrefix.
+        // FullName itself does not appear as a dependency (it's not an intercepted property).
+        // Recalculation still works correctly because both FullName and FullNameWithPrefix
+        // are in FirstName.UsedByProperties / LastName.UsedByProperties.
 
         // Arrange - FullNameWithPrefix depends on FullName (another derived property)
         var context = InterceptorSubjectContext
@@ -124,7 +126,8 @@ public class DerivedPropertyCleanupTests
 
         var fullNameProperty = new PropertyReference(person, nameof(Person.FullName));
 
-        // Assert - FullName.UsedByProperties is empty because derived-to-derived deps aren't tracked
+        // Assert - FullName.UsedByProperties is empty because the dependency is flattened
+        // (FullNameWithPrefix depends on FirstName/LastName directly, not on FullName)
         Assert.Empty(fullNameProperty.GetUsedByProperties().Items.ToArray());
     }
 
@@ -199,6 +202,79 @@ public class DerivedPropertyCleanupTests
         car.DetachSubjectProperty(averagePressureProperty);
 
         // Assert - AveragePressure should be removed from tire's UsedByProperties (Case 1)
+        Assert.DoesNotContain(averagePressureProperty, firstTirePressureProperty.GetUsedByProperties().Items.ToArray());
+    }
+
+    [Fact]
+    public async Task WhenDerivedPropertyDetachedDuringConcurrentWrites_ThenNoZombieBacklinks()
+    {
+        // Exercises Finding 3: concurrent detach + write should not resurrect backlinks.
+
+        const int iterations = 100;
+
+        for (var i = 0; i < iterations; i++)
+        {
+            var context = InterceptorSubjectContext
+                .Create()
+                .WithFullPropertyTracking()
+                .WithContextInheritance();
+
+            var car = new Car(context);
+            var firstTire = car.Tires[0];
+
+            var averagePressureProperty = new PropertyReference(car, nameof(Car.AveragePressure));
+            var firstTirePressureProperty = new PropertyReference(firstTire, nameof(Tire.Pressure));
+
+            // Verify initial backlink exists
+            Assert.Contains(averagePressureProperty, firstTirePressureProperty.GetUsedByProperties().Items.ToArray());
+
+            var barrier = new Barrier(2);
+
+            var detachTask = Task.Run(() =>
+            {
+                barrier.SignalAndWait();
+                car.DetachSubjectProperty(averagePressureProperty);
+            });
+
+            var writeTask = Task.Run(() =>
+            {
+                barrier.SignalAndWait();
+                firstTire.Pressure = i + 1;
+            });
+
+            await Task.WhenAll(detachTask, writeTask);
+
+            // After detach completes, AveragePressure must NOT be in any tire's UsedByProperties
+            Assert.DoesNotContain(averagePressureProperty, firstTirePressureProperty.GetUsedByProperties().Items.ToArray());
+        }
+    }
+
+    [Fact]
+    public void WhenDerivedPropertyDetached_ThenSubsequentSourceWriteDoesNotResurrectBacklinks()
+    {
+        // Deterministic version: detach first, then write.
+        // Without IsDetached check, the write would trigger recalculation
+        // of the detached property (if snapshot was taken before detach).
+
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithDerivedPropertyChangeDetection()
+            .WithLifecycle()
+            .WithContextInheritance();
+
+        var car = new Car(context);
+        var firstTire = car.Tires[0];
+
+        var averagePressureProperty = new PropertyReference(car, nameof(Car.AveragePressure));
+        var firstTirePressureProperty = new PropertyReference(firstTire, nameof(Tire.Pressure));
+
+        // Detach the derived property
+        car.DetachSubjectProperty(averagePressureProperty);
+
+        // Write to a former dependency
+        firstTire.Pressure = 42;
+
+        // Verify no zombie backlinks were created
         Assert.DoesNotContain(averagePressureProperty, firstTirePressureProperty.GetUsedByProperties().Items.ToArray());
     }
 }

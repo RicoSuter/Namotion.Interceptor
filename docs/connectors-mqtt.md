@@ -240,7 +240,7 @@ The library ensures thread-safe operations across all MQTT interactions:
 
 ## Lifecycle Management
 
-The MQTT integration hooks into the interceptor lifecycle system (see [Subject Lifecycle Tracking](../tracking.md#subject-lifecycle-tracking)) to clean up resources when subjects are detached.
+The MQTT integration hooks into the interceptor lifecycle system (see [Subject Lifecycle Tracking](tracking.md#subject-lifecycle-tracking)) to clean up resources when subjects are detached.
 
 ### Automatic Cleanup on Subject Detach
 

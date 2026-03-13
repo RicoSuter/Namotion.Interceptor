@@ -29,13 +29,21 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             var data = change.Property.GetDerivedPropertyData();
             lock (data)
             {
-                StartRecordingTouchedProperties();
+                data.IsDetached = false;
 
-                var result = metadata.GetValue?.Invoke(change.Subject);
+                // Loop until dependency set stabilizes (same pattern as RecalculateDerivedProperty).
+                object? result;
+                bool dependenciesChanged;
+                do
+                {
+                    StartRecordingTouchedProperties();
+                    result = metadata.GetValue?.Invoke(change.Subject);
+                    dependenciesChanged = StoreRecordedTouchedProperties(change.Property, data);
+                }
+                while (dependenciesChanged);
+
                 data.LastKnownValue = result;
                 change.Property.SetWriteTimestampUtcTicks(SubjectChangeContext.Current.ChangedTimestampUtcTicks);
-
-                StoreRecordedTouchedProperties(change.Property, data);
             }
         }
     }
@@ -52,14 +60,18 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
 
         // Case 1: Derived property detached — remove from dependencies' UsedByProperties.
-        // RequiredProperties is only set for derived properties (during StoreRecordedTouchedProperties),
-        // so a non-null check replaces the more expensive property.Metadata.IsDerived lookup.
+        // Lock serializes with RecalculateDerivedProperty to prevent zombie backlink resurrection.
         var requiredProperties = data.RequiredProperties;
         if (requiredProperties is not null)
         {
-            foreach (var dependency in requiredProperties.AsSpan())
+            lock (data)
             {
-                dependency.TryGetDerivedPropertyData()?.UsedByProperties?.Remove(property);
+                data.IsDetached = true;
+
+                foreach (var dependency in requiredProperties.AsSpan())
+                {
+                    dependency.TryGetDerivedPropertyData()?.UsedByProperties?.Remove(property);
+                }
             }
         }
 
@@ -183,14 +195,28 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 return;
             }
 
+            if (data.IsDetached)
+            {
+                return;
+            }
+
             data.IsRecalculating = true;
             try
             {
                 var oldValue = data.LastKnownValue;
 
-                StartRecordingTouchedProperties();
-                var newValue = derivedProperty.Metadata.GetValue?.Invoke(derivedProperty.Subject);
-                StoreRecordedTouchedProperties(derivedProperty, data);
+                // Loop until dependency set stabilizes.
+                // Re-evaluation catches concurrent writes to newly-added dependencies
+                // that happened before backlinks were registered.
+                object? newValue;
+                bool dependenciesChanged;
+                do
+                {
+                    StartRecordingTouchedProperties();
+                    newValue = derivedProperty.Metadata.GetValue?.Invoke(derivedProperty.Subject);
+                    dependenciesChanged = StoreRecordedTouchedProperties(derivedProperty, data);
+                }
+                while (dependenciesChanged);
 
                 data.LastKnownValue = newValue;
                 derivedProperty.SetWriteTimestampUtcTicks(timestampUtcTicks);
@@ -227,7 +253,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// Called under lock(data), so RequiredProperties access is serialized.
     /// Only UsedByProperties updates use CAS (modified by multiple derived properties concurrently).
     /// </summary>
-    private static void StoreRecordedTouchedProperties(PropertyReference derivedProperty, DerivedPropertyData data)
+    /// <returns>True if the dependency set changed (caller should re-evaluate); false if unchanged.</returns>
+    private static bool StoreRecordedTouchedProperties(PropertyReference derivedProperty, DerivedPropertyData data)
     {
         var recordedDependencies = _recorder!.FinishRecording();
         var previousItems = data.RequiredProperties.AsSpan();
@@ -236,7 +263,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         if (previousItems.SequenceEqual(recordedDependencies))
         {
             _recorder.ClearLastRecording();
-            return;
+            return false;
         }
 
         // Replace forward dependencies (simple assignment under lock).
@@ -263,6 +290,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
 
         _recorder.ClearLastRecording();
+        return true;
     }
 
     private static PropertyReference[] RemoveFromArray(PropertyReference[] source, int index)
