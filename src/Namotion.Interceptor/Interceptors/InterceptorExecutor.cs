@@ -19,13 +19,11 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty>? readValue, Action<IInterceptorSubject, TProperty> writeValue)
+    public bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue)
     {
-        // TODO(perf): Reading current value (invoke getter) here might be a performance problem.
-
         var context = new PropertyWriteContext<TProperty>(
             new PropertyReference(_subject, propertyName),
-            readValue is not null ? readValue(_subject) : default!,
+            currentValue,
             newValue);
 
         ExecuteInterceptedWrite(ref context, writeValue);

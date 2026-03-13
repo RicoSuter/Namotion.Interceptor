@@ -23,10 +23,13 @@ public static class DerivedPropertyChangeHandlerExtensions
     /// <summary>
     /// Gets forward dependencies: Which properties this derived property depends on.
     /// Example: FullName.GetRequiredProperties() includes FirstName and LastName.
-    /// Returns a shared empty instance if no tracking data exists (allocation-free).
+    /// Returns empty span if no tracking data exists (allocation-free).
     /// </summary>
-    public static DerivedPropertyDependencies GetRequiredProperties(this PropertyReference property) =>
-        property.TryGetDerivedPropertyData()?.RequiredProperties ?? DerivedPropertyDependencies.Empty;
+    public static ReadOnlySpan<PropertyReference> GetRequiredProperties(this PropertyReference property)
+    {
+        var items = property.TryGetDerivedPropertyData()?.RequiredProperties;
+        return items is not null ? items.AsSpan() : ReadOnlySpan<PropertyReference>.Empty;
+    }
 
     /// <summary>
     /// Gets the consolidated tracking data for a property, creating it if needed.

@@ -116,7 +116,7 @@ namespace YourDefaultNamespace
                 var newValue = value;
                 var cancel = false;
                 OnTemperatureChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Temperature), newValue, static (o) => ((WeatherStation)o)._Temperature, static (o, v) => ((WeatherStation)o)._Temperature = v))
+                if (!cancel && SetPropertyValue(nameof(Temperature), newValue, _Temperature, static (o, v) => ((WeatherStation)o)._Temperature = v))
                 {
                     OnTemperatureChanged(_Temperature);
                     RaisePropertyChanged(nameof(Temperature));
@@ -141,7 +141,7 @@ namespace YourDefaultNamespace
                 var newValue = value;
                 var cancel = false;
                 OnHumidityChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Humidity), newValue, static (o) => ((WeatherStation)o)._Humidity, static (o, v) => ((WeatherStation)o)._Humidity = v))
+                if (!cancel && SetPropertyValue(nameof(Humidity), newValue, _Humidity, static (o, v) => ((WeatherStation)o)._Humidity = v))
                 {
                     OnHumidityChanged(_Humidity);
                     RaisePropertyChanged(nameof(Humidity));
@@ -160,7 +160,7 @@ namespace YourDefaultNamespace
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
+        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
         {
             if (_context is null)
             {
@@ -169,7 +169,7 @@ namespace YourDefaultNamespace
             }
             else
             {
-                return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
+                return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
             }
         }
 

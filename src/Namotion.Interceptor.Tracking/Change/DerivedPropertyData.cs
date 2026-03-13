@@ -16,9 +16,10 @@ internal sealed class DerivedPropertyData
 
     /// <summary>
     /// Forward dependencies: Which properties this derived property depends on.
-    /// Initialized lazily via Interlocked.CompareExchange for thread safety.
+    /// Always read/written under lock(this) — no volatile or CAS needed.
+    /// Null until first recalculation; replaced atomically on each recalculation.
     /// </summary>
-    internal DerivedPropertyDependencies? RequiredProperties;
+    internal PropertyReference[]? RequiredProperties;
 
     /// <summary>
     /// Cached last known value for change detection.
@@ -47,20 +48,5 @@ internal sealed class DerivedPropertyData
 
         var created = new DerivedPropertyDependencies();
         return Interlocked.CompareExchange(ref UsedByProperties, created, null) ?? created;
-    }
-
-    /// <summary>
-    /// Gets or creates the RequiredProperties collection (thread-safe).
-    /// </summary>
-    public DerivedPropertyDependencies GetOrCreateRequiredProperties()
-    {
-        var required = Volatile.Read(ref RequiredProperties);
-        if (required is not null)
-        {
-            return required;
-        }
-
-        var created = new DerivedPropertyDependencies();
-        return Interlocked.CompareExchange(ref RequiredProperties, created, null) ?? created;
     }
 }
