@@ -316,6 +316,15 @@ internal static class SubjectUpdateFactory
         if (parentProperties.TryGetValue(propertyName, out var existingUpdate))
         {
             existingUpdate.Items ??= [];
+
+            // Skip if this subject is already referenced in Items (multiple property
+            // changes on the same child each trigger BuildPathToRoot)
+            for (var i = 0; i < existingUpdate.Items.Count; i++)
+            {
+                if (existingUpdate.Items[i].Id == childId)
+                    return;
+            }
+
             existingUpdate.Items.Add(new SubjectPropertyItemUpdate
             {
                 Index = index,
