@@ -253,7 +253,7 @@ public class DerivedPropertyCleanupTests
     public void WhenDerivedPropertyDetached_ThenSubsequentSourceWriteDoesNotResurrectBacklinks()
     {
         // Deterministic version: detach first, then write.
-        // Without IsDetached check, the write would trigger recalculation
+        // Without IsAttached check, the write would trigger recalculation
         // of the detached property (if snapshot was taken before detach).
 
         var context = InterceptorSubjectContext

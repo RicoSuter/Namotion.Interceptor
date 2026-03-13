@@ -88,7 +88,7 @@ public sealed class DerivedPropertyDependencies
     }
 
     // Helper: Creates new array with item at index removed
-    private static PropertyReference[] RemoveAt(PropertyReference[] source, int index)
+    internal static PropertyReference[] RemoveAt(PropertyReference[] source, int index)
     {
         var result = new PropertyReference[source.Length - 1];
         if (index > 0)

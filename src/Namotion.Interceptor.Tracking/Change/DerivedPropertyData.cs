@@ -36,11 +36,12 @@ internal sealed class DerivedPropertyData
     internal bool IsRecalculating;
 
     /// <summary>
-    /// Lifecycle flag set during DetachProperty under lock(this).
+    /// Lifecycle flag cleared during DetachProperty under lock(this).
     /// Checked by RecalculateDerivedProperty to prevent zombie backlink resurrection.
-    /// Cleared by AttachProperty to support re-attachment.
+    /// Set by AttachProperty to support re-attachment.
+    /// Defaults to true because properties are assumed live until explicitly detached.
     /// </summary>
-    internal bool IsDetached;
+    internal bool IsAttached = true;
 
     /// <summary>
     /// Gets or creates the UsedByProperties collection (thread-safe).

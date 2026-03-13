@@ -29,9 +29,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             var data = change.Property.GetDerivedPropertyData();
             lock (data)
             {
-                data.IsDetached = false;
+                data.IsAttached = true;
 
                 // Loop until dependency set stabilizes (same pattern as RecalculateDerivedProperty).
+                // Terminates because the set of possible dependencies is finite and each
+                // iteration only re-evaluates when the recorded set actually changed.
                 object? result;
                 bool dependenciesChanged;
                 do
@@ -66,7 +68,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         {
             lock (data)
             {
-                data.IsDetached = true;
+                data.IsAttached = false;
 
                 foreach (var dependency in requiredProperties.AsSpan())
                 {
@@ -106,7 +108,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
                     derivedData.RequiredProperties = required.Length == 1
                         ? null
-                        : RemoveFromArray(required, index);
+                        : DerivedPropertyDependencies.RemoveAt(required, index);
                 }
             }
         }
@@ -197,7 +199,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 return;
             }
 
-            if (data.IsDetached)
+            if (!data.IsAttached)
             {
                 return;
             }
@@ -210,6 +212,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 // Loop until dependency set stabilizes.
                 // Re-evaluation catches concurrent writes to newly-added dependencies
                 // that happened before backlinks were registered.
+                // Terminates because the set of possible dependencies is finite and each
+                // iteration only re-evaluates when the recorded set actually changed.
                 object? newValue;
                 bool dependenciesChanged;
                 do
@@ -295,13 +299,4 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         return true;
     }
 
-    private static PropertyReference[] RemoveFromArray(PropertyReference[] source, int index)
-    {
-        var result = new PropertyReference[source.Length - 1];
-        if (index > 0)
-            Array.Copy(source, 0, result, 0, index);
-        if (index < source.Length - 1)
-            Array.Copy(source, index + 1, result, index, source.Length - index - 1);
-        return result;
-    }
 }
