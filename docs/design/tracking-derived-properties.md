@@ -75,7 +75,7 @@ When a subject is created with a context, `LifecycleInterceptor` fires `AttachPr
 ```
 AttachProperty(FullName)
   lock(data)
-    data.IsDetached = false
+    data.IsAttached = true
     do:
       StartRecordingTouchedProperties()         // push recording frame
       result = getter.Invoke(subject)            // evaluates "FirstName + LastName"
@@ -130,7 +130,7 @@ WriteProperty(FirstName = "Jane")
 RecalculateDerivedProperty(FullName, timestamp)
   lock(data)
     if data.IsRecalculating → return             // re-entrancy guard
-    if data.IsDetached → return                  // zombie prevention
+    if !data.IsAttached → return                  // zombie prevention
     data.IsRecalculating = true
     try:
       oldValue = data.LastKnownValue
@@ -162,7 +162,7 @@ When a subject is removed from the object graph, `DetachProperty` cleans up both
 ```
 DetachProperty(FullName)
   lock(data)
-    data.IsDetached = true
+    data.IsAttached = false
     for each dependency in data.RequiredProperties:
       dependency.UsedByProperties.Remove(FullName)   // CAS
 ```
@@ -263,10 +263,10 @@ After the first iteration registers backlinks, any concurrent write to a depende
 
 When `WriteProperty` takes a snapshot of `UsedByProperties` and then iterates it, a concurrent `DetachProperty` may remove a derived property's backlinks between the snapshot and the recalculation call. Without protection, `RecalculateDerivedProperty` would re-add the backlinks via `StoreRecordedTouchedProperties`, creating zombie dependencies.
 
-`DetachProperty` Case 1 and `RecalculateDerivedProperty` both acquire `lock(data)` on the same derived property's data, serializing them. `DetachProperty` sets `data.IsDetached = true` inside the lock. `RecalculateDerivedProperty` checks `IsDetached` inside the lock and bails out if true. `AttachProperty` clears `IsDetached = false` to support re-attachment.
+`DetachProperty` Case 1 and `RecalculateDerivedProperty` both acquire `lock(data)` on the same derived property's data, serializing them. `DetachProperty` sets `data.IsAttached = false` inside the lock. `RecalculateDerivedProperty` checks `IsAttached` inside the lock and bails out if false. `AttachProperty` sets `IsAttached = true` to support re-attachment.
 
 Both orderings produce a correct final state:
-- **Detach wins lock**: sets `IsDetached`, removes backlinks. Recalculation then sees `IsDetached` and skips.
+- **Detach wins lock**: clears `IsAttached`, removes backlinks. Recalculation then sees `!IsAttached` and skips.
 - **Recalculation wins lock**: evaluates and re-adds backlinks. Detach then removes them. Final state is clean.
 
 ## Correctness Guarantees
@@ -280,7 +280,7 @@ Every piece of shared mutable state is protected by exactly one synchronization 
 | `data.RequiredProperties` | `lock(data)` | `StoreRecordedTouchedProperties`, `DetachProperty` Case 2 |
 | `data.LastKnownValue` | `lock(data)` | `RecalculateDerivedProperty`, `AttachProperty` |
 | `data.IsRecalculating` | `lock(data)` | `RecalculateDerivedProperty` |
-| `data.IsDetached` | `lock(data)` | `DetachProperty` Case 1, `RecalculateDerivedProperty`, `AttachProperty` |
+| `data.IsAttached` | `lock(data)` | `DetachProperty` Case 1, `RecalculateDerivedProperty`, `AttachProperty` |
 | `data.UsedByProperties` (collection contents) | CAS (copy-on-write) | `StoreRecordedTouchedProperties`, `DetachProperty` Case 1 |
 | `data.UsedByProperties` (field itself) | `Interlocked.CompareExchange` | `GetOrCreateUsedByProperties` |
 | `_recorder` | `[ThreadStatic]` (no sharing) | `ReadProperty`, `StartRecording`, `StoreRecordedTouchedProperties` |
@@ -306,7 +306,7 @@ When a derived property is detached, no stale references remain in the dependenc
 
 - **Forward links cleaned**: `DetachProperty` Case 1 iterates `data.RequiredProperties` and removes the derived property from each dependency's `UsedByProperties` via CAS `Remove`.
 - **Backward links cleaned**: `DetachProperty` Case 2 iterates `data.UsedByProperties` and removes the source property from each dependent's `RequiredProperties` under `lock(derivedData)`.
-- **No resurrection**: `DetachProperty` Case 1 acquires `lock(data)` and sets `IsDetached = true`. Any concurrent `RecalculateDerivedProperty` that acquired the lock before detach will complete and re-add backlinks — but detach then removes them. Any recalculation that acquires the lock after detach sees `IsDetached = true` and skips, so no backlinks are re-added.
+- **No resurrection**: `DetachProperty` Case 1 acquires `lock(data)` and sets `IsAttached = false`. Any concurrent `RecalculateDerivedProperty` that acquired the lock before detach will complete and re-add backlinks — but detach then removes them. Any recalculation that acquires the lock after detach sees `!IsAttached` and skips, so no backlinks are re-added.
 
 ### No memory leaks from cross-subject dependencies
 
