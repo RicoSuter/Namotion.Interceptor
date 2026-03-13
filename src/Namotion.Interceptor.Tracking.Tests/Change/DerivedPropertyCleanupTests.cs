@@ -59,13 +59,13 @@ public class DerivedPropertyCleanupTests
         var firstNameProperty = new PropertyReference(person, nameof(Person.FirstName));
 
         // FullName depends on FirstName
-        Assert.Contains(firstNameProperty, fullNameProperty.GetRequiredProperties().Items.ToArray());
+        Assert.Contains(firstNameProperty, fullNameProperty.GetRequiredProperties().ToArray());
 
         // Act - Standalone detach (not inside a WriteProperty call)
         person.DetachSubjectProperty(firstNameProperty);
 
         // Assert - FirstName should be immediately removed from FullName's RequiredProperties
-        Assert.DoesNotContain(firstNameProperty, fullNameProperty.GetRequiredProperties().Items.ToArray());
+        Assert.DoesNotContain(firstNameProperty, fullNameProperty.GetRequiredProperties().ToArray());
     }
 
     [Fact]
@@ -88,18 +88,18 @@ public class DerivedPropertyCleanupTests
         var oldTirePressureProperty = new PropertyReference(oldTire, nameof(Tire.Pressure));
 
         // AveragePressure depends on old tire's Pressure
-        Assert.Contains(oldTirePressureProperty, averagePressureProperty.GetRequiredProperties().Items.ToArray());
+        Assert.Contains(oldTirePressureProperty, averagePressureProperty.GetRequiredProperties().ToArray());
 
         // Act - Replace tires: deferred Case 2 + recalculation + flush
         var newTires = new[] { new Tire(context), car.Tires[1], car.Tires[2], car.Tires[3] };
         car.Tires = newTires;
 
         // Assert - Old tire's Pressure is no longer in RequiredProperties
-        Assert.DoesNotContain(oldTirePressureProperty, averagePressureProperty.GetRequiredProperties().Items.ToArray());
+        Assert.DoesNotContain(oldTirePressureProperty, averagePressureProperty.GetRequiredProperties().ToArray());
 
         // New tire's Pressure should now be tracked
         var newTirePressureProperty = new PropertyReference(newTires[0], nameof(Tire.Pressure));
-        Assert.Contains(newTirePressureProperty, averagePressureProperty.GetRequiredProperties().Items.ToArray());
+        Assert.Contains(newTirePressureProperty, averagePressureProperty.GetRequiredProperties().ToArray());
     }
 
     [Fact]
@@ -147,7 +147,7 @@ public class DerivedPropertyCleanupTests
         foreach (var car in cars)
         {
             var averagePressureProperty = new PropertyReference(car, nameof(Car.AveragePressure));
-            Assert.True(averagePressureProperty.GetRequiredProperties().Count > 0);
+            Assert.True(averagePressureProperty.GetRequiredProperties().Length > 0);
         }
 
         // Act - Detach AveragePressure from all cars concurrently
@@ -193,7 +193,7 @@ public class DerivedPropertyCleanupTests
         Assert.Contains(averagePressureProperty, firstTirePressureProperty.GetUsedByProperties().Items.ToArray());
 
         // Also verify RequiredProperties
-        Assert.Contains(firstTirePressureProperty, averagePressureProperty.GetRequiredProperties().Items.ToArray());
+        Assert.Contains(firstTirePressureProperty, averagePressureProperty.GetRequiredProperties().ToArray());
 
         // Act - Detach just the AveragePressure property (simulates derived property detachment)
         car.DetachSubjectProperty(averagePressureProperty);

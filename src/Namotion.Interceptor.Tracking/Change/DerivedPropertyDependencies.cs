@@ -1,14 +1,12 @@
 namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
-/// Lock-free, copy-on-write collection for property dependencies.
+/// Lock-free, copy-on-write collection for backward property dependencies (UsedByProperties).
 /// Concurrency Model:
 /// - Reads: Allocation-free via <see cref="Items"/>. Always returns stable snapshot.
 /// - Writes: Lock-free CAS (Compare-And-Swap) with automatic retry on contention.
-/// - Version: Monotonically increasing counter for optimistic concurrency control.
-/// Design: Copy-on-write ensures readers never see partial updates. Version counter detects ABA problems.
-/// Memory: Allocates on mutation (inherent to copy-on-write). Steady-state is allocation-free
-/// when dependencies don't change (SequenceEqual early-exit in StoreRecordedTouchedProperties).
+/// Design: Copy-on-write ensures readers never see partial updates.
+/// Memory: Allocates on mutation (inherent to copy-on-write). Steady-state is allocation-free.
 /// </summary>
 public sealed class DerivedPropertyDependencies
 {
@@ -19,18 +17,11 @@ public sealed class DerivedPropertyDependencies
     internal static readonly DerivedPropertyDependencies Empty = new();
 
     private PropertyReference[] _items = [];
-    private long _version; // Increments on every mutation (Add/Remove/TryReplace)
 
     /// <summary>
     /// Gets the count of dependencies (thread-safe, allocation-free).
     /// </summary>
     public int Count => Volatile.Read(ref _items).Length;
-
-    /// <summary>
-    /// Gets the current version for optimistic concurrency control.
-    /// Version increments on every mutation. Wraps around after 2^64 operations (584 years @ 1B ops/sec).
-    /// </summary>
-    internal long Version => Volatile.Read(ref _version);
 
     /// <summary>
     /// Gets a stable snapshot for iteration (thread-safe, allocation-free).
@@ -61,10 +52,7 @@ public sealed class DerivedPropertyDependencies
 
             // Atomic swap: Succeeds if no other thread modified _items
             if (ReferenceEquals(Interlocked.CompareExchange(ref _items, newArr, snapshot), snapshot))
-            {
-                Interlocked.Increment(ref _version);
                 return true;
-            }
 
             // Another thread won the race - retry with new snapshot
         }
@@ -93,10 +81,7 @@ public sealed class DerivedPropertyDependencies
 
             // Atomic swap: Succeeds if no other thread modified _items
             if (ReferenceEquals(Interlocked.CompareExchange(ref _items, newArr, snapshot), snapshot))
-            {
-                Interlocked.Increment(ref _version);
                 return true;
-            }
 
             // Another thread won the race - retry with new snapshot
         }
@@ -111,24 +96,5 @@ public sealed class DerivedPropertyDependencies
         if (index < source.Length - 1)
             Array.Copy(source, index + 1, result, index, source.Length - index - 1);
         return result;
-    }
-
-    /// <summary>
-    /// Atomically replaces all dependencies if version matches.
-    /// Returns false on version mismatch or concurrent modification (caller should use merge mode).
-    /// </summary>
-    internal bool TryReplace(ReadOnlySpan<PropertyReference> newItems, long expectedVersion)
-    {
-        if (Volatile.Read(ref _version) != expectedVersion)
-            return false;
-
-        var snapshot = Volatile.Read(ref _items);
-        var newArr = newItems.Length == 0 ? [] : newItems.ToArray();
-
-        if (!ReferenceEquals(Interlocked.CompareExchange(ref _items, newArr, snapshot), snapshot))
-            return false;
-
-        Interlocked.Increment(ref _version);
-        return true;
     }
 }
