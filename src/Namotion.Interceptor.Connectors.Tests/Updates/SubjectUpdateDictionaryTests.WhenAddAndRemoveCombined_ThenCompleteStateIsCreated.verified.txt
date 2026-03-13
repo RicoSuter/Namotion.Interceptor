@@ -1,35 +1,23 @@
 ﻿{
-  Root: 1,
+  Root: SubjectId_1,
   Subjects: {
-    1: {
+    SubjectId_1: {
       Lookup: {
         Kind: Dictionary,
         Timestamp: DateTimeOffset_1,
-        Operations: [
+        Items: [
           {
-            Action: Insert,
-            Index: key3,
-            Id: 2
+            Id: SubjectId_2,
+            Key: key2
           },
           {
-            Index: key1
+            Id: SubjectId_3,
+            Key: key3
           }
-        ],
-        Count: 2
+        ]
       }
     },
-    2: {
-      Child: {
-        Kind: Object
-      },
-      Items: {
-        Kind: Collection,
-        Count: 0
-      },
-      Lookup: {
-        Kind: Dictionary,
-        Count: 0
-      },
+    SubjectId_3: {
       Name: {
         Kind: Value,
         Value: Item3,
@@ -40,11 +28,20 @@
           }
         }
       },
+      Self: {
+        Kind: Object
+      },
       Parent: {
         Kind: Object
       },
-      Self: {
+      Child: {
         Kind: Object
+      },
+      Items: {
+        Kind: Collection
+      },
+      Lookup: {
+        Kind: Dictionary
       }
     }
   }

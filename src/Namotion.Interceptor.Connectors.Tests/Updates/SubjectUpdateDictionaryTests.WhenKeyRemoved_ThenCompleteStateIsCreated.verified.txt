@@ -1,16 +1,16 @@
 ﻿{
-  Root: 1,
+  Root: SubjectId_1,
   Subjects: {
-    1: {
+    SubjectId_1: {
       Lookup: {
         Kind: Dictionary,
         Timestamp: DateTimeOffset_1,
-        Operations: [
+        Items: [
           {
-            Index: key1
+            Id: SubjectId_2,
+            Key: key2
           }
-        ],
-        Count: 1
+        ]
       }
     }
   }

@@ -18,18 +18,40 @@ internal static class SubjectUpdateApplier
         ISubjectFactory subjectFactory,
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
     {
-        if (string.IsNullOrEmpty(update.Root))
-            return;
-
-        if (!update.Subjects.TryGetValue(update.Root, out var rootProperties))
-            return;
-
         var context = ContextPool.Rent();
         try
         {
-            context.Initialize(update.Subjects, subjectFactory, transformValueBeforeApply);
-            context.TryMarkAsProcessed(update.Root);
-            ApplyPropertyUpdates(subject, rootProperties, context);
+            context.Initialize(subject.Context, update.Subjects, subjectFactory, transformValueBeforeApply);
+
+            if (update.Root is not null && update.Subjects.TryGetValue(update.Root, out var rootProperties))
+            {
+                // The Root field identifies which subject ID in the update
+                // corresponds to the local root subject. The root's ID may
+                // differ between sender and receiver — Root is a mapping hint,
+                // not an identity assignment.
+                context.TryMarkAsProcessed(update.Root);
+
+                ApplyPropertyUpdates(subject, rootProperties, context);
+            }
+
+            // Always process remaining subjects by subject ID lookup.
+            // When the root path ran above, it recursively processed subjects reachable
+            // from the root's structural properties. But partial updates can contain changes
+            // to subjects NOT reachable from the root's changed properties (e.g., a deeply
+            // nested ObjectRef change in the same batch as a root scalar change).
+            // TryMarkAsProcessed ensures no subject is processed twice.
+            var idRegistry = context.SubjectIdRegistry;
+            foreach (var (subjectId, properties) in update.Subjects)
+            {
+                // Subjects not found in the ID registry are expected: they are new subjects
+                // whose structural parent (collection/dictionary/object ref) will create them
+                // and apply their properties via ApplyPropertiesIfAvailable during this same update.
+                if (idRegistry.TryGetSubjectById(subjectId, out var targetSubject) &&
+                    context.TryMarkAsProcessed(subjectId))
+                {
+                    ApplyPropertyUpdates(targetSubject, properties, context);
+                }
+            }
         }
         finally
         {
@@ -43,7 +65,7 @@ internal static class SubjectUpdateApplier
         Dictionary<string, SubjectPropertyUpdate> properties,
         SubjectUpdateApplyContext context)
     {
-        var registry = subject.Context.GetService<ISubjectRegistry>();
+        var registry = context.SubjectRegistry;
 
         foreach (var (propertyName, propertyUpdate) in properties)
         {
@@ -52,7 +74,8 @@ internal static class SubjectUpdateApplier
             {
                 foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)
                 {
-                    var registeredAttribute = subject.TryGetRegisteredSubject()?
+                    var registeredAttribute = subject
+                        .TryGetRegisteredSubject()?
                         .TryGetPropertyAttribute(propertyName, attributeName);
 
                     if (registeredAttribute is not null)
@@ -108,37 +131,61 @@ internal static class SubjectUpdateApplier
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        if (propertyUpdate.Id is not null &&
-            context.Subjects.TryGetValue(propertyUpdate.Id, out var itemProperties))
-        {
-            if (property.GetValue() is IInterceptorSubject existingItem)
-            {
-                if (context.TryMarkAsProcessed(propertyUpdate.Id))
-                {
-                    ApplyPropertyUpdates(existingItem, itemProperties, context);
-                }
-            }
-            else
-            {
-                var newItem = context.SubjectFactory.CreateSubject(property);
-                newItem.Context.AddFallbackContext(parent.Context);
-
-                if (context.TryMarkAsProcessed(propertyUpdate.Id))
-                {
-                    ApplyPropertyUpdates(newItem, itemProperties, context);
-                }
-
-                using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
-                {
-                    property.SetValue(newItem);
-                }
-            }
-        }
-        else
+        if (propertyUpdate.Id is null)
         {
             using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
             {
                 property.SetValue(null);
+            }
+            return;
+        }
+
+        context.Subjects.TryGetValue(propertyUpdate.Id, out var itemProperties);
+
+        var existingItem = property.GetValue() as IInterceptorSubject;
+        IInterceptorSubject? targetItem;
+
+        // Check if the existing item is the SAME logical subject (matching subject ID)
+        // or a DIFFERENT subject that needs to be replaced.
+        var isSameSubject = existingItem is not null &&
+            existingItem.TryGetSubjectId() == propertyUpdate.Id;
+
+        if (isSameSubject)
+        {
+            // Same logical subject — keep the existing CLR object.
+            targetItem = existingItem;
+        }
+        else
+        {
+            // Either no existing item, or existing item is a DIFFERENT subject (replacement).
+            // Try to reuse an existing subject by subject ID (may exist elsewhere in the graph).
+            targetItem = null;
+            if (context.SubjectIdRegistry.TryGetSubjectById(propertyUpdate.Id, out var existing))
+            {
+                targetItem = existing;
+            }
+
+            if (targetItem is null && itemProperties is not null)
+            {
+                targetItem = context.SubjectFactory.CreateSubject(property);
+                targetItem.Context.AddFallbackContext(parent.Context);
+                targetItem.SetSubjectId(propertyUpdate.Id);
+            }
+        }
+
+        if (targetItem is not null)
+        {
+            if (itemProperties is not null && context.TryMarkAsProcessed(propertyUpdate.Id))
+            {
+                ApplyPropertyUpdates(targetItem, itemProperties, context);
+            }
+
+            if (existingItem != targetItem)
+            {
+                using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
+                {
+                    property.SetValue(targetItem);
+                }
             }
         }
     }

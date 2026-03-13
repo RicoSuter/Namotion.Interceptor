@@ -1,26 +1,19 @@
 ﻿{
   Update1: {
-    Root: 1,
+    Root: SubjectId_1,
     Subjects: {
-      1: {
+      SubjectId_1: {
         children: {
           Kind: Collection,
           Timestamp: DateTimeOffset_1,
-          Operations: [
-            {
-              Index: 0
-            }
-          ],
           Items: [
             {
-              Index: 0,
-              Id: 2
+              Id: SubjectId_2
             }
-          ],
-          Count: 1
+          ]
         }
       },
-      2: {
+      SubjectId_2: {
         firstName: {
           Kind: Value,
           Value: Child2.0,
@@ -35,24 +28,8 @@
     }
   },
   Update2: {
-    Root: 1,
     Subjects: {
-      1: {
-        children: {
-          Kind: Collection,
-          Items: [
-            {
-              Index: 1,
-              Id: 2
-            },
-            {
-              Index: 1,
-              Id: 2
-            }
-          ]
-        }
-      },
-      2: {
+      SubjectId_2: {
         firstName: {
           Kind: Value,
           Value: Child2.1,
@@ -67,9 +44,9 @@
     }
   },
   Update3: {
-    Root: 1,
+    Root: SubjectId_1,
     Subjects: {
-      1: {
+      SubjectId_1: {
         firstName: {
           Kind: Value,
           Value: ParentNext,

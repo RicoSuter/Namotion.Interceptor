@@ -1,23 +1,14 @@
 ﻿{
-  Root: 1,
+  Root: SubjectId_1,
   Subjects: {
-    1: {
+    SubjectId_1: {
       father: {
         Kind: Object,
         Timestamp: {Scrubbed},
-        Id: 2
+        Id: SubjectId_2
       }
     },
-    2: {
-      children: {
-        Kind: Collection,
-        Count: 0
-      },
-      father: {
-        Kind: Object,
-        Timestamp: {Scrubbed},
-        Id: 1
-      },
+    SubjectId_2: {
       firstName: {
         Kind: Value,
         Value: Father,
@@ -34,18 +25,26 @@
           }
         }
       },
+      lastName: {
+        Kind: Value
+      },
       fullName: {
         Kind: Value,
         Value: Father 
       },
-      lastName: {
-        Kind: Value
+      father: {
+        Kind: Object,
+        Timestamp: {Scrubbed},
+        Id: SubjectId_1
       },
       mother: {
         Kind: Object
       },
+      children: {
+        Kind: Collection
+      },
       relationships: {
-        Kind: Value
+        Kind: Dictionary
       }
     }
   }
