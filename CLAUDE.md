@@ -47,7 +47,8 @@ src/
 ├── Extensions/                     # Integration packages (AspNetCore, Blazor, etc.)
 ├── Samples/                        # Example applications
 └── Tests/                          # Unit test projects
-docs/                               # Feature and connector documentation (docs/connectors/*)
+docs/                               # Feature and connector documentation
+├── design/                         # Internal design documents
 ```
 
 ## Language Requirements

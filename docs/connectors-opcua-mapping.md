@@ -125,7 +125,7 @@ public class OpcUaNodeAttribute : Attribute
 }
 ```
 
-> For details on sampling vs exception-based monitoring, see [Monitoring & Subscriptions](opcua.md#monitoring--subscriptions).
+> For details on sampling vs exception-based monitoring, see [Monitoring & Subscriptions](connectors-opcua.md#monitoring--subscriptions).
 
 **Resolution order:**
 1. Class-level `[OpcUaNode]` - defaults for the type
@@ -338,7 +338,7 @@ TemperatureSensor (ObjectNode)
 
 Note: The C# property names (e.g., `Value_EURange`) are just convention - the OPC UA browse names come from the `[Path]` or `[OpcUaNode]` attributes. Attributes can be nested (attributes on attributes) for complex metadata hierarchies.
 
-`[PropertyAttribute]` is one way to define property attributes. Attributes can also be added dynamically at runtime via `AddAttribute()`. The OPC UA mapping handles all registry attributes the same way. For more on the property attributes concept, see [Registry](../registry.md#define-attributes-using-properties).
+`[PropertyAttribute]` is one way to define property attributes. Attributes can also be added dynamically at runtime via `AddAttribute()`. The OPC UA mapping handles all registry attributes the same way. For more on the property attributes concept, see [Registry](registry.md#define-attributes-using-properties).
 
 ### Same Instance, Multiple References
 
@@ -530,7 +530,7 @@ Result: { BrowseName: "Speed", SamplingInterval: 50 }
 
 **Note on ReferenceType defaults:** `PathProviderOpcUaNodeMapper` returns `null` for `ReferenceType` on non-attribute properties, allowing later mappers to specify it. `AttributeOpcUaNodeMapper` uses `"HasProperty"` as the default when `[OpcUaReference]` is not specified. This design allows the composite chain to resolve defaults correctly.
 
-> For custom value converters and type resolvers, see [Extensibility](opcua.md#extensibility).
+> For custom value converters and type resolvers, see [Extensibility](connectors-opcua.md#extensibility).
 
 ## Standard Reference Types
 
