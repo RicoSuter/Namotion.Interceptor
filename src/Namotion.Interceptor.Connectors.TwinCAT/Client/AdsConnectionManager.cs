@@ -1,0 +1,304 @@
+using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors.Resilience;
+using TwinCAT;
+using TwinCAT.Ads;
+using TwinCAT.Ads.TypeSystem;
+using TwinCAT.TypeSystem;
+
+namespace Namotion.Interceptor.Connectors.TwinCAT.Client;
+
+/// <summary>
+/// Manages the ADS connection lifecycle including client creation, circuit breaker,
+/// event subscriptions, reconnection tracking, and ADS state monitoring.
+/// </summary>
+internal sealed class AdsConnectionManager : IAsyncDisposable
+{
+    private readonly AdsClientConfiguration _configuration;
+    private readonly ILogger _logger;
+    private readonly CircuitBreaker _circuitBreaker;
+
+    // ADS connection objects — uses AdsClient directly (not AdsSession) for reliable dispose in 7.0.x
+    private AdsClient? _client;
+    private volatile ISymbolLoader? _symbolLoader;
+
+    // First-occurrence logging state (Warning first, then Debug until cleared)
+    private readonly ConcurrentDictionary<string, bool> _loggedErrors = new();
+
+    // Reconnection tracking
+    private long _totalReconnectionAttempts;
+    private long _successfulReconnections;
+    private long _failedReconnections;
+    private long _lastConnectedAtTicks;
+
+    // ADS state tracking (-1 = not set, otherwise cast to AdsState)
+    private int _currentAdsState = -1;
+
+    private int _disposed; // 0 = false, 1 = true
+
+    /// <summary>
+    /// Fired when a previously-lost connection is restored.
+    /// </summary>
+    internal event Action? ConnectionRestored;
+
+    /// <summary>
+    /// Fired when the connection is lost.
+    /// </summary>
+    internal event Action? ConnectionLost;
+
+    /// <summary>
+    /// Fired when the PLC enters the Run state.
+    /// </summary>
+    internal event Action? AdsStateEnteredRun;
+
+    /// <summary>
+    /// Fired when the PLC symbol version changes.
+    /// </summary>
+    internal event Action? SymbolVersionChanged;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="AdsConnectionManager"/> class.
+    /// </summary>
+    public AdsConnectionManager(AdsClientConfiguration configuration, ILogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        _configuration = configuration;
+        _logger = logger;
+
+        _circuitBreaker = new CircuitBreaker(
+            configuration.CircuitBreakerFailureThreshold,
+            configuration.CircuitBreakerCooldown);
+    }
+
+    /// <summary>
+    /// Gets the current ADS connection, or null if not connected.
+    /// </summary>
+    internal IAdsConnection? Connection => Volatile.Read(ref _client);
+
+    /// <summary>
+    /// Gets the current symbol loader, or null if not loaded.
+    /// </summary>
+    internal ISymbolLoader? SymbolLoader => _symbolLoader;
+
+    /// <summary>
+    /// Sets the symbol loader directly (e.g. for injecting a mock in tests).
+    /// </summary>
+    internal void SetSymbolLoader(ISymbolLoader symbolLoader)
+    {
+        _symbolLoader = symbolLoader;
+    }
+
+    /// <summary>
+    /// Gets the current PLC ADS state, or null if not yet known.
+    /// </summary>
+    internal AdsState? CurrentAdsState
+    {
+        get
+        {
+            var value = Volatile.Read(ref _currentAdsState);
+            return value == -1 ? null : (AdsState)value;
+        }
+    }
+
+    /// <summary>
+    /// Gets whether the ADS client is currently connected.
+    /// </summary>
+    internal bool IsConnected =>
+        Volatile.Read(ref _client) is IConnection { IsConnected: true };
+
+    internal long TotalReconnectionAttempts =>
+        Interlocked.Read(ref _totalReconnectionAttempts);
+
+    internal long SuccessfulReconnections =>
+        Interlocked.Read(ref _successfulReconnections);
+
+    internal long FailedReconnections =>
+        Interlocked.Read(ref _failedReconnections);
+
+    internal DateTimeOffset? LastConnectedAt
+    {
+        get
+        {
+            var ticks = Interlocked.Read(ref _lastConnectedAtTicks);
+            return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
+        }
+    }
+
+    internal bool IsCircuitBreakerOpen => _circuitBreaker.IsOpen;
+
+    internal long CircuitBreakerTripCount => _circuitBreaker.TripCount;
+
+    /// <summary>
+    /// Connects to the PLC with retry and circuit breaker logic.
+    /// If already connected, returns immediately. If a previous client exists
+    /// but is disconnected, it is disposed before creating a new one.
+    /// </summary>
+    internal async Task ConnectWithRetryAsync(CancellationToken cancellationToken)
+    {
+        // If already connected, reuse the existing connection
+        if (IsConnected)
+        {
+            return;
+        }
+
+        // Dispose stale client before creating a new one
+        DisconnectAndDisposeClient();
+
+        var amsNetId = AmsNetId.Parse(_configuration.AmsNetId);
+
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                if (_circuitBreaker.ShouldAttempt())
+                {
+                    Interlocked.Increment(ref _totalReconnectionAttempts);
+
+                    var client = _configuration.RouterConfiguration is not null
+                        ? new AdsClient(_configuration.RouterConfiguration, null)
+                        : new AdsClient();
+
+                    try
+                    {
+                        await client.ConnectAsync(amsNetId, _configuration.AmsPort, cancellationToken);
+                    }
+                    catch
+                    {
+                        client.Dispose();
+                        throw;
+                    }
+
+                    client.Timeout = (int)_configuration.Timeout.TotalMilliseconds;
+
+                    // Wire events before publishing _client so that no caller can read
+                    // Connection and find a client whose events are not yet subscribed.
+                    client.ConnectionStateChanged += OnConnectionStateChanged;
+                    client.AdsStateChanged += OnAdsStateChanged;
+                    client.AdsSymbolVersionChanged += OnSymbolVersionChanged;
+
+                    Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
+                    Volatile.Write(ref _client, client);
+                    _circuitBreaker.RecordSuccess();
+                    _logger.LogInformation(
+                        "Connected to TwinCAT PLC at {AmsNetId}:{Port}.",
+                        _configuration.AmsNetId, _configuration.AmsPort);
+                    return;
+                }
+
+                _logger.LogDebug(
+                    "Circuit breaker open, skipping connection attempt. Cooldown remaining: {Remaining}",
+                    _circuitBreaker.GetCooldownRemaining());
+            }
+            catch (Exception exception)
+            {
+                Interlocked.Increment(ref _failedReconnections);
+                LogFirstOccurrence("Connection", exception,
+                    "Failed to connect to TwinCAT PLC. Retrying...");
+                _circuitBreaker.RecordFailure();
+            }
+
+            await Task.Delay(_configuration.HealthCheckInterval, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Creates a new symbol loader from the current connection.
+    /// </summary>
+    internal void RecreateSymbolLoader()
+    {
+        var client = Volatile.Read(ref _client);
+        if (client is not null)
+        {
+            _symbolLoader = SymbolLoaderFactory.Create(
+                client,
+                new SymbolLoaderSettings(SymbolsLoadMode.DynamicTree));
+        }
+    }
+
+    internal void LogFirstOccurrence(string category, Exception? exception, string message, params object[] arguments)
+    {
+        var level = _loggedErrors.TryAdd(category, true) ? LogLevel.Warning : LogLevel.Debug;
+        _logger.Log(level, exception, message, arguments);
+    }
+
+    internal void ClearFirstOccurrenceLog(string category)
+    {
+        _loggedErrors.TryRemove(category, out _);
+    }
+
+    internal void OnConnectionStateChanged(object? sender, ConnectionStateChangedEventArgs eventArgs)
+    {
+        if (eventArgs.NewState == ConnectionState.Connected &&
+            eventArgs.OldState != ConnectionState.Connected)
+        {
+            Interlocked.Increment(ref _successfulReconnections);
+            ConnectionRestored?.Invoke();
+        }
+        else if (eventArgs.NewState != ConnectionState.Connected)
+        {
+            ClearFirstOccurrenceLog("Connection");
+            ConnectionLost?.Invoke();
+        }
+    }
+
+    internal void OnAdsStateChanged(object? sender, AdsStateChangedEventArgs eventArgs)
+    {
+        var newState = eventArgs.State.AdsState;
+        var previousState = (AdsState)Interlocked.Exchange(ref _currentAdsState, (int)newState);
+
+        if (newState == AdsState.Run && previousState != AdsState.Run)
+        {
+            AdsStateEnteredRun?.Invoke();
+        }
+        else if (newState != AdsState.Run)
+        {
+            LogFirstOccurrence("PlcState", null,
+                "PLC left Run state: {State}. Writes paused.", newState);
+        }
+    }
+
+    internal void OnSymbolVersionChanged(object? sender, AdsSymbolVersionChangedEventArgs eventArgs)
+    {
+        SymbolVersionChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// Unsubscribes event handlers, disconnects, and disposes the current ADS client.
+    /// Safe to call when no client exists (no-op).
+    /// </summary>
+    private void DisconnectAndDisposeClient()
+    {
+        var client = Interlocked.Exchange(ref _client, null);
+        if (client is not null)
+        {
+            client.ConnectionStateChanged -= OnConnectionStateChanged;
+            client.AdsStateChanged -= OnAdsStateChanged;
+            client.AdsSymbolVersionChanged -= OnSymbolVersionChanged;
+
+            try
+            {
+                client.Disconnect();
+                client.Dispose();
+            }
+            catch (Exception exception)
+            {
+                _logger.LogDebug(exception, "Error disposing ADS client.");
+            }
+        }
+
+        _symbolLoader = null;
+    }
+
+    /// <inheritdoc />
+    public ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            DisconnectAndDisposeClient();
+        }
+
+        return ValueTask.CompletedTask;
+    }
+}
