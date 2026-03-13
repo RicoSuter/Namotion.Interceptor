@@ -155,21 +155,23 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             // Skip dependent recalculation during transaction capture.
             // Derived-with-setter properties bypass the transaction interceptor (IsDerived check),
             // so this guard suppresses cascading recalculations until commit replay.
-            if (!SubjectTransaction.HasActiveTransaction ||
-                SubjectTransaction.Current is not { IsCommitting: false })
+            if (SubjectTransaction.HasActiveTransaction &&
+                SubjectTransaction.Current is { IsCommitting: false })
             {
-                var usedByPropertiesItems = usedByProperties.Items;
-                var timestampUtcTicks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
-                for (var i = 0; i < usedByPropertiesItems.Length; i++)
-                {
-                    var dependent = usedByPropertiesItems[i];
-                    if (dependent == context.Property)
-                    {
-                        continue; // Skip self-references (rare edge case)
-                    }
+                return;
+            }
 
-                    RecalculateDerivedProperty(ref dependent, timestampUtcTicks);
+            var usedByPropertiesItems = usedByProperties.Items;
+            var timestampUtcTicks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
+            for (var i = 0; i < usedByPropertiesItems.Length; i++)
+            {
+                var dependent = usedByPropertiesItems[i];
+                if (dependent == context.Property)
+                {
+                    continue; // Skip self-references (rare edge case)
                 }
+
+                RecalculateDerivedProperty(ref dependent, timestampUtcTicks);
             }
         }
     }
