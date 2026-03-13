@@ -18,8 +18,8 @@ internal static class SubjectCodeGenerator
         EmitContainingTypeOpening(builder, metadata.ContainingTypes);
         EmitClassDeclaration(builder, metadata);
         EmitNotifyPropertyChangedImplementation(builder, metadata.BaseClassHasInpc);
-        EmitInterceptorSubjectImplementation(builder);
-        EmitDefaultProperties(builder, metadata);
+        EmitInterceptorSubjectImplementation(builder, metadata);
+        EmitPropertyAccessors(builder, metadata);
         EmitConstructors(builder, metadata);
         EmitProperties(builder, metadata);
         EmitMethods(builder, metadata);
@@ -132,9 +132,12 @@ internal static class SubjectCodeGenerator
             """);
     }
 
-    private static void EmitInterceptorSubjectImplementation(StringBuilder builder)
+    private static void EmitInterceptorSubjectImplementation(StringBuilder builder, SubjectMetadata metadata)
     {
-        builder.Append("""
+        builder.Append($$"""
+                    private static readonly global::System.Collections.Generic.IReadOnlyDictionary<string, global::Namotion.Interceptor.SubjectPropertyMetadata> __defaultProperties =
+                        global::Namotion.Interceptor.SubjectPropertyMetadataCache.Get<{{metadata.ClassName}}>();
+
                     private IInterceptorExecutor? _context;
                     private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
@@ -145,15 +148,16 @@ internal static class SubjectCodeGenerator
                     ConcurrentDictionary<(string? property, string key), object?> IInterceptorSubject.Data { get; } = new();
 
                     [JsonIgnore]
-                    IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
+                    global::System.Collections.Generic.IReadOnlyDictionary<string, global::Namotion.Interceptor.SubjectPropertyMetadata> global::Namotion.Interceptor.IInterceptorSubject.Properties =>
+                        _properties ?? __defaultProperties;
 
                     [JsonIgnore]
                     object IInterceptorSubject.SyncRoot { get; } = new object();
 
-                    void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+                    void global::Namotion.Interceptor.IInterceptorSubject.AddProperties(params global::System.Collections.Generic.IEnumerable<global::Namotion.Interceptor.SubjectPropertyMetadata> properties)
                     {
-                        _properties = (_properties ?? DefaultProperties)
-                            .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+                        _properties = (_properties ?? __defaultProperties)
+                            .Concat(properties.Select(p => new global::System.Collections.Generic.KeyValuePair<string, global::Namotion.Interceptor.SubjectPropertyMetadata>(p.Name, p)))
                             .ToFrozenDictionary();
                     }
 
@@ -161,67 +165,37 @@ internal static class SubjectCodeGenerator
             """);
     }
 
-    private static void EmitDefaultProperties(StringBuilder builder, SubjectMetadata metadata)
+    private static void EmitPropertyAccessors(StringBuilder builder, SubjectMetadata metadata)
     {
-        var newModifier = metadata.BaseClassTypeName is not null ? "new " : "";
+        // Use 'new' modifier if base class also has [InterceptorSubject] to hide inherited method
+        var newModifier = metadata.BaseClassHasInterceptorSubject ? "new " : "";
 
-        builder.AppendLine($"        public {newModifier}static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties {{ get; }} =");
-        builder.AppendLine("            new Dictionary<string, SubjectPropertyMetadata>");
-        builder.AppendLine("            {");
+        builder.AppendLine();
+        builder.AppendLine("        [global::System.ComponentModel.EditorBrowsable(global::System.ComponentModel.EditorBrowsableState.Never)]");
+        builder.AppendLine($"        internal static {newModifier}(global::System.Func<global::Namotion.Interceptor.IInterceptorSubject, object?>?, global::System.Action<global::Namotion.Interceptor.IInterceptorSubject, object?>?)");
+        builder.AppendLine("            __GetPropertyAccessors(string name) => name switch");
+        builder.AppendLine("        {");
 
         foreach (var property in metadata.Properties)
         {
-            if (property.IsFromInterface)
-            {
-                // Interface default properties: cast to interface to invoke default implementation
-                var getterLambda = property.HasGetter
-                    ? $"(o) => (({property.InterfaceTypeName})o).{property.Name}"
-                    : "null";
-                var setterLambda = property.HasSetter
-                    ? $"(o, v) => (({property.InterfaceTypeName})o).{property.Name} = ({property.FullTypeName})v"
-                    : "null";
+            // InterfaceTypeName already contains "global::" prefix from FullyQualifiedFormat
+            var typeCast = property.IsFromInterface && property.InterfaceTypeName != null
+                ? property.InterfaceTypeName
+                : metadata.ClassName;
 
-                builder.AppendLine("                {");
-                builder.AppendLine($"                    \"{property.Name}\",");
-                builder.AppendLine("                    new SubjectPropertyMetadata(");
-                builder.AppendLine($"                        typeof({property.InterfaceTypeName}).GetProperty(nameof({property.InterfaceTypeName}.{property.Name}), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,");
-                builder.AppendLine($"                        {getterLambda},");
-                builder.AppendLine($"                        {setterLambda},");
-                builder.AppendLine("                        isIntercepted: false,");
-                builder.AppendLine("                        isDynamic: false)");
-                builder.AppendLine("                },");
-            }
-            else
-            {
-                var getterLambda = property.HasGetter
-                    ? $"(o) => (({metadata.ClassName})o).{property.Name}"
-                    : "null";
-                // Note: init-only properties cannot have a setter lambda because they can only be set during construction
-                var setterLambda = property.HasSetter
-                    ? $"(o, v) => (({metadata.ClassName})o).{property.Name} = ({property.FullTypeName})v"
-                    : "null";
+            var getter = property.HasGetter
+                ? $"static o => (({typeCast})o).{property.Name}"
+                : "null";
 
-                builder.AppendLine("                {");
-                builder.AppendLine($"                    \"{property.Name}\",");
-                builder.AppendLine("                    new SubjectPropertyMetadata(");
-                builder.AppendLine($"                        typeof({metadata.ClassName}).GetProperty(nameof({property.Name}), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,");
-                builder.AppendLine($"                        {getterLambda},");
-                builder.AppendLine($"                        {setterLambda},");
-                builder.AppendLine($"                        isIntercepted: {(property.IsPartial ? "true" : "false")},");
-                builder.AppendLine("                        isDynamic: false)");
-                builder.AppendLine("                },");
-            }
+            var setter = property.HasSetter && !property.IsFromInterface
+                ? $"static (o, v) => (({metadata.ClassName})o).{property.Name} = ({property.FullTypeName})v!"
+                : "null";
+
+            builder.AppendLine($"            \"{property.Name}\" => ({getter}, {setter}),");
         }
 
-        builder.AppendLine("            }");
-
-        if (metadata.BaseClassTypeName is not null)
-        {
-            builder.AppendLine($"            .Concat({metadata.BaseClassTypeName}.DefaultProperties)");
-        }
-
-        builder.AppendLine("            .ToFrozenDictionary();");
-        builder.AppendLine();
+        builder.AppendLine("            _ => (null, null)");
+        builder.AppendLine("        };");
     }
 
     private static void EmitConstructors(StringBuilder builder, SubjectMetadata metadata)
@@ -273,6 +247,7 @@ internal static class SubjectCodeGenerator
 
         var requiredModifier = property.IsRequired ? "required " : "";
 
+        builder.AppendLine("        [global::Namotion.Interceptor.Attributes.Intercepted]");
         builder.AppendLine($"        {property.AccessModifier} {requiredModifier}{additionalModifiers}partial {property.FullTypeName} {property.Name}");
         builder.AppendLine("        {");
 
