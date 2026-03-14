@@ -30,6 +30,12 @@ public sealed class DerivedPropertyDependencies
     public ReadOnlySpan<PropertyReference> Items => Volatile.Read(ref _items);
 
     /// <summary>
+    /// Gets the underlying snapshot array (thread-safe). Use when a span cannot be stored
+    /// (e.g., across lock boundaries where ref structs are not allowed).
+    /// </summary>
+    internal PropertyReference[] ItemsArray => Volatile.Read(ref _items);
+
+    /// <summary>
     /// Adds a dependency using lock-free CAS (compare-and-swap).
     /// Thread-safe: Multiple threads can call concurrently. CAS loop retries on contention.
     /// Idempotent: Adding same item multiple times is safe (no duplicates).

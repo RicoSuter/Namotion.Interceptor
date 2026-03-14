@@ -13,13 +13,18 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// <remarks>
 /// Lock ordering / deadlock safety:
 /// Locks are always acquired on per-property <see cref="DerivedPropertyData"/> objects.
-/// Nested lock acquisition follows the property dependency graph direction
-/// (parent derived → child derived via cascade in <see cref="RecalculateDerivedProperty"/>).
-/// A deadlock would require a cycle in the lock acquisition order, which would imply a circular
-/// dependency in the property graph — but circular getter dependencies cause infinite recursion
-/// before any lock is reached, so the graph is always a DAG and deadlock is impossible.
-/// <see cref="DetachProperty"/> acquires at most one lock at a time (Case 1 and Case 2 are
-/// sequential, not nested), so it cannot participate in a lock cycle either.
+/// <para>
+/// <see cref="RecalculateDerivedProperty"/> and <see cref="StoreRecordedTouchedProperties"/>
+/// nest locks in derived → dependency direction: lock(D_data) → lock(X_data).
+/// A deadlock would require a cycle, which would imply a circular dependency in the property
+/// graph — but circular getter dependencies cause infinite recursion before any lock is reached,
+/// so the graph is always a DAG and deadlock is impossible.
+/// </para>
+/// <para>
+/// <see cref="DetachProperty"/> acquires locks sequentially (never nested):
+/// lock(data) for IsAttached + snapshot, release, then lock(derivedData) for RequiredProperties cleanup.
+/// Because DetachProperty never holds two locks simultaneously, it cannot participate in a lock cycle.
+/// </para>
 /// </remarks>
 [RunsBefore(typeof(LifecycleInterceptor))]
 public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler
@@ -36,15 +41,27 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     public void AttachProperty(SubjectPropertyLifecycleChange change)
     {
         var metadata = change.Property.Metadata;
-        if (metadata.IsDerived)
-        {
-            var data = change.Property.GetDerivedPropertyData();
-            lock (data)
-            {
-                // Explicit set handles re-attachment after a prior DetachProperty cleared this flag.
-                // On first attach the field default (true) is redundant but harmless.
-                data.IsAttached = true;
 
+        // For derived properties, GetDerivedPropertyData creates data if needed (first attach).
+        // For source properties, TryGet returns null on first attach (data created later by
+        // StoreRecordedTouchedProperties when a derived property first depends on it).
+        var data = metadata.IsDerived
+            ? change.Property.GetDerivedPropertyData()
+            : change.Property.TryGetDerivedPropertyData();
+
+        if (data is null)
+        {
+            return;
+        }
+
+        lock (data)
+        {
+            // Reset IsAttached for re-attachment after DetachProperty cleared it.
+            // On first attach the field default (true) is redundant but harmless.
+            data.IsAttached = true;
+
+            if (metadata.IsDerived)
+            {
                 // Loop until dependency set stabilizes (same pattern as RecalculateDerivedProperty).
                 // Terminates because the set of possible dependencies is finite and each
                 // iteration only re-evaluates when the recorded set actually changed.
@@ -84,10 +101,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         // Case 1: Derived property detached — remove from dependencies' UsedByProperties.
         // Lock serializes with RecalculateDerivedProperty to prevent zombie backlink resurrection.
-        // Gate on IsDerived (immutable) rather than RequiredProperties (mutable): a concurrent
-        // RecalculateDerivedProperty or Case 2 could change RequiredProperties between an
-        // outside-lock null check and lock acquisition, causing leaked backlinks or missed
-        // IsAttached clearing.
         if (property.Metadata.IsDerived)
         {
             lock (data)
@@ -101,43 +114,56 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                     {
                         dependency.TryGetDerivedPropertyData()?.UsedByProperties?.Remove(property);
                     }
+
+                    data.RequiredProperties = null;
                 }
+
+                data.LastKnownValue = null;
             }
         }
 
         // Case 2: Source property detached — remove from dependents' RequiredProperties.
-        // Lock the dependent's data and replace the array with the element removed.
-        // This serializes with StoreRecordedTouchedProperties (same lock) and allows
-        // the detached source subject to be GC'd immediately.
-        var usedByProperties = data.UsedByProperties;
-        if (usedByProperties is not null && usedByProperties.Count > 0)
+        // Take the UsedByProperties snapshot under lock(data) to serialize with
+        // StoreRecordedTouchedProperties' backlink Add (which also locks depData).
+        // This ensures: either the backlink was added before our snapshot (we see it and clean up),
+        // or StoreRecordedTouchedProperties acquires the lock after us and sees IsAttached=false (skips Add).
+        // Release lock before processing to avoid nesting with lock(derivedData) → no deadlock.
+        // ItemsArray returns a stable copy-on-write array snapshot, safe to use after releasing the lock.
+        // Clear UsedByProperties inside the lock so concurrent StoreRecordedTouchedProperties
+        // that acquires the lock after us sees both IsAttached=false and null UsedByProperties.
+        PropertyReference[] usedBySnapshot;
+        lock (data)
         {
-            foreach (ref readonly var derivedProperty in usedByProperties.Items)
+            data.IsAttached = false; // Redundant for derived (Case 1 above), needed for source-only properties.
+            usedBySnapshot = data.UsedByProperties?.ItemsArray ?? [];
+            data.UsedByProperties = null;
+        }
+
+        foreach (ref readonly var derivedProperty in usedBySnapshot.AsSpan())
+        {
+            var derivedData = derivedProperty.TryGetDerivedPropertyData();
+            if (derivedData is null)
             {
-                var derivedData = derivedProperty.TryGetDerivedPropertyData();
-                if (derivedData is null)
+                continue;
+            }
+
+            lock (derivedData)
+            {
+                var required = derivedData.RequiredProperties;
+                if (required is null)
                 {
                     continue;
                 }
 
-                lock (derivedData)
+                var index = Array.IndexOf(required, property);
+                if (index < 0)
                 {
-                    var required = derivedData.RequiredProperties;
-                    if (required is null)
-                    {
-                        continue;
-                    }
-
-                    var index = Array.IndexOf(required, property);
-                    if (index < 0)
-                    {
-                        continue;
-                    }
-
-                    derivedData.RequiredProperties = required.Length == 1
-                        ? null
-                        : DerivedPropertyDependencies.RemoveAt(required, index);
+                    continue;
                 }
+
+                derivedData.RequiredProperties = required.Length == 1
+                    ? null
+                    : DerivedPropertyDependencies.RemoveAt(required, index);
             }
         }
     }
@@ -302,8 +328,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
     /// <summary>
     /// Updates forward (required) and backward (usedBy) dependencies.
-    /// Called under lock(data), so RequiredProperties access is serialized.
-    /// Only UsedByProperties updates use CAS (modified by multiple derived properties concurrently).
+    /// Called under lock(data) for the derived property, so RequiredProperties access is serialized.
+    /// Backward link additions lock the dependency's data to serialize with DetachProperty.
     /// </summary>
     /// <returns>True if the dependency set changed (caller should re-evaluate); false if unchanged.</returns>
     private static bool StoreRecordedTouchedProperties(PropertyReference derivedProperty, DerivedPropertyData data)
@@ -339,11 +365,60 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
 
         // Add this derived property to new dependencies not previously tracked.
+        // Lock depData to serialize the IsAttached check + Add with DetachProperty's
+        // IsAttached=false + snapshot (both under the same lock). This guarantees:
+        // - If DetachProperty wins the lock: sets IsAttached=false, takes snapshot. We see false → skip.
+        // - If we win the lock: IsAttached=true, Add succeeds. DetachProperty's snapshot includes us → cleans up.
+        var hasSkippedDependencies = false;
         foreach (ref readonly var newDependency in newDeps)
         {
             if (!previousItems.Contains(newDependency))
             {
-                newDependency.GetDerivedPropertyData().GetOrCreateUsedByProperties().Add(derivedProperty);
+                var depData = newDependency.GetDerivedPropertyData();
+                lock (depData)
+                {
+                    if (depData.IsAttached)
+                    {
+                        depData.GetOrCreateUsedByProperties().Add(derivedProperty);
+                    }
+                    else
+                    {
+                        hasSkippedDependencies = true;
+                    }
+                }
+            }
+        }
+
+        // When a backlink Add was skipped (dependency detaching), remove that dependency
+        // from RequiredProperties to prevent forward reference leaks (memory) and stale deps.
+        // Only runs in the rare concurrent detach race — zero overhead on the normal path.
+        if (hasSkippedDependencies)
+        {
+            var liveCount = 0;
+            for (var i = 0; i < newItems.Length; i++)
+            {
+                var depData = newItems[i].TryGetDerivedPropertyData();
+                if (depData is null || depData.IsAttached)
+                {
+                    newItems[liveCount++] = newItems[i];
+                }
+                else
+                {
+                    // Also clean backward link if it exists from a previous registration.
+                    depData.UsedByProperties?.Remove(derivedProperty);
+                }
+            }
+
+            data.RequiredProperties = liveCount == 0
+                ? null
+                : newItems.AsSpan(0, liveCount).ToArray();
+
+            // If filtered result matches previous deps, nothing effectively changed —
+            // return false to prevent the stabilization loop from re-evaluating infinitely
+            // (getter keeps reading the detached dep, we keep filtering it out).
+            if (data.RequiredProperties.AsSpan().SequenceEqual(previousItems))
+            {
+                return false;
             }
         }
 
