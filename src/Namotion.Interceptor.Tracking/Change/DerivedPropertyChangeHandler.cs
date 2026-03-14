@@ -350,11 +350,20 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void DiscardActiveRecording()
     {
-        if (_recorder is { IsRecording: true })
+        if (_recorder is null)
+        {
+            return;
+        }
+
+        if (_recorder.IsRecording)
         {
             _recorder.FinishRecording();
-            _recorder.ClearLastRecording();
         }
+
+        // Always clear, even if recording was already finished by StoreRecordedTouchedProperties.
+        // Handles the case where FinishRecording succeeded but ClearLastRecording didn't run
+        // (exception between them). No-op if already cleared (Count == 0).
+        _recorder.ClearLastRecording();
     }
 
     /// <summary>
