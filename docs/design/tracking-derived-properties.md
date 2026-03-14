@@ -169,19 +169,30 @@ DetachProperty(FullName)
     data.IsAttached = false
     for each dependency in data.RequiredProperties:   // read under lock
       dependency.UsedByProperties.Remove(FullName)    // CAS
+    data.RequiredProperties = null                    // release forward references
+    data.LastKnownValue = null                        // release cached value
 ```
 
 **Case 2 — Source property detached** (e.g., FirstName is detached):
 ```
 DetachProperty(FirstName)
-  for each derived in FirstName.UsedByProperties:
+  lock(data)                                          // serialize with StoreRecordedTouchedProperties
+    data.IsAttached = false
+    usedBySnapshot = data.UsedByProperties.ItemsArray // stable copy-on-write snapshot
+    data.UsedByProperties = null                      // clear immediately
+  // release lock before processing to avoid nesting with lock(derivedData)
+  for each derived in usedBySnapshot:
     lock(derivedData)
       remove FirstName from derivedData.RequiredProperties
 ```
 
+The lock in Case 2 serializes with `StoreRecordedTouchedProperties`' backlink Add (which also acquires `lock(depData)` on the same object). This ensures either:
+- The backlink was added before the snapshot → we see it and clean up the forward reference.
+- `StoreRecordedTouchedProperties` acquires the lock after us → sees `IsAttached = false` → skips the Add.
+
 ## Dependency Updates (`StoreRecordedTouchedProperties`)
 
-This method is called under `lock(data)` and maintains both forward and backward links:
+This method is called under `lock(data)` (the derived property's data) and maintains both forward and backward links:
 
 1. **Fast path**: If `previousDeps.SequenceEqual(recordedDeps)` → clear recorder, return `false` (no allocation).
 2. **Slow path**:
@@ -189,8 +200,9 @@ This method is called under `lock(data)` and maintains both forward and backward
    - Clear the recorder immediately (`ClearLastRecording()`). After this point the `recordedDeps` span is invalidated; all subsequent code uses `newItems`.
    - Replace `data.RequiredProperties` with the new array.
    - For each old dependency no longer used: `Remove(derivedProperty)` from its `UsedByProperties` (CAS).
-   - For each new dependency not previously tracked: `Add(derivedProperty)` to its `UsedByProperties` (CAS).
-   - Return `true` (caller should re-evaluate).
+   - For each new dependency not previously tracked: `lock(depData)` → check `depData.IsAttached` → if attached, `Add(derivedProperty)` to its `UsedByProperties`. The lock serializes with `DetachProperty` Case 2 on the same dependency data.
+   - If any backlink Add was skipped (dependency detaching), filter the detached dependencies from `RequiredProperties` and clean their backward links. This prevents forward reference leaks when no future recalculation would clean them up.
+   - Return `true` if dependencies changed (caller should re-evaluate), `false` if the filtered result matches the previous set (prevents infinite stabilization loops when a getter keeps reading a detaching dependency).
 
 The `bool` return drives the stabilization loop in `RecalculateDerivedProperty` and `AttachProperty`.
 
@@ -238,9 +250,9 @@ This is necessary because multiple derived properties on different threads may c
 
 ### Lock ordering follows the dependency DAG
 
-During cascading recalculation, nested locks can occur: `RecalculateDerivedProperty(B)` holds `lock(dataB)` and may trigger `RecalculateDerivedProperty(C)` via `SetPropertyValueWithInterception` → `WriteProperty`, acquiring `lock(dataC)`. A deadlock would require a cycle in the lock acquisition order, which would imply a circular dependency in the property graph — but circular getter dependencies cause infinite recursion before any lock is reached, so the graph is always a DAG and deadlock is impossible.
+`RecalculateDerivedProperty` and `StoreRecordedTouchedProperties` nest locks in the derived → dependency direction: `lock(D_data)` (outer, from `RecalculateDerivedProperty`) → `lock(X_data)` (inner, from the backlink Add loop in `StoreRecordedTouchedProperties`). A deadlock would require a cycle in the lock acquisition order, which would imply a circular dependency in the property graph — but circular getter dependencies cause infinite recursion before any lock is reached, so the graph is always a DAG and deadlock is impossible.
 
-`DetachProperty` acquires at most one lock at a time (Case 1 and Case 2 are sequential, not nested), so it cannot participate in a lock cycle either. Backward link updates use lock-free CAS, so they never block.
+`DetachProperty` acquires locks sequentially (never nested): `lock(data)` for `IsAttached` + snapshot (then release), followed by `lock(derivedData)` for `RequiredProperties` cleanup. Because it never holds two locks simultaneously, it cannot participate in a lock cycle.
 
 ## Concurrency Scenarios
 
@@ -270,13 +282,27 @@ After the first iteration registers backlinks, any concurrent write to a depende
 
 ### Concurrent detach and recalculation
 
-When `WriteProperty` takes a snapshot of `UsedByProperties` and then iterates it, a concurrent `DetachProperty` may remove a derived property's backlinks between the snapshot and the recalculation call. Without protection, `RecalculateDerivedProperty` would re-add the backlinks via `StoreRecordedTouchedProperties`, creating zombie dependencies.
+Two race conditions must be handled when `DetachProperty` runs concurrently with `RecalculateDerivedProperty` / `StoreRecordedTouchedProperties`:
 
-`DetachProperty` Case 1 and `RecalculateDerivedProperty` both acquire `lock(data)` on the same derived property's data, serializing them. `DetachProperty` sets `data.IsAttached = false` inside the lock. `RecalculateDerivedProperty` checks `IsAttached` inside the lock and bails out if false. `AttachProperty` sets `IsAttached = true` to support re-attachment.
+**Race 1 — Zombie backlink resurrection (Case 1):** `WriteProperty` takes a snapshot of `UsedByProperties` and iterates it. A concurrent `DetachProperty` may remove a derived property's backlinks between the snapshot and the recalculation call. Without protection, `RecalculateDerivedProperty` would re-add the backlinks, creating zombie dependencies.
+
+`DetachProperty` Case 1 and `RecalculateDerivedProperty` both acquire `lock(data)` on the same derived property's data, serializing them. `DetachProperty` sets `data.IsAttached = false` inside the lock. `RecalculateDerivedProperty` checks `IsAttached` inside the lock and bails out if false. `AttachProperty` sets `IsAttached = true` under lock to support re-attachment.
 
 Both orderings produce a correct final state:
 - **Detach wins lock**: clears `IsAttached`, removes backlinks. Recalculation then sees `!IsAttached` and skips.
 - **Recalculation wins lock**: evaluates and re-adds backlinks. Detach then removes them. Final state is clean.
+
+**Race 2 — Missed backlink in Case 2 snapshot:** When a source property X is being detached, `DetachProperty` Case 2 takes a snapshot of `X.UsedByProperties` to find dependent derived properties. Concurrently, `StoreRecordedTouchedProperties` may be adding a new backlink (D → X) to `X.UsedByProperties`. If the Add completes after the snapshot, `DetachProperty` misses D, leaving a stale forward reference (`D.RequiredProperties` contains X) and a stale backward reference (D in `X.UsedByProperties`).
+
+This is solved by locking `X.DerivedPropertyData` in both places:
+- `DetachProperty` Case 2: `lock(data)` → set `IsAttached = false` + take snapshot + clear `UsedByProperties` → release lock.
+- `StoreRecordedTouchedProperties` backlink loop: `lock(depData)` → check `IsAttached` → if true, Add → release lock.
+
+Since both operations lock the same object (`X.DerivedPropertyData`), they are fully serialized:
+- **DetachProperty wins lock**: sets `IsAttached = false`, takes snapshot (D not present), clears `UsedByProperties`. `StoreRecordedTouchedProperties` then acquires the lock, sees `IsAttached = false`, skips the Add. The skipped dependency is also filtered from `RequiredProperties` by the post-loop cleanup.
+- **StoreRecordedTouchedProperties wins lock**: sees `IsAttached = true`, adds D to `UsedByProperties`. `DetachProperty` then acquires the lock, takes snapshot (D is present), cleans up D's `RequiredProperties`.
+
+No window exists where a backlink is added but not visible to `DetachProperty`.
 
 ## Correctness Guarantees
 
@@ -287,14 +313,14 @@ Every piece of shared mutable state is protected by exactly one synchronization 
 | State | Protection | Accessed by |
 |-------|-----------|-------------|
 | `data.RequiredProperties` | `lock(data)` | `StoreRecordedTouchedProperties`, `DetachProperty` Case 2 |
-| `data.LastKnownValue` | `lock(data)` | `RecalculateDerivedProperty`, `AttachProperty` |
+| `data.LastKnownValue` | `lock(data)` | `RecalculateDerivedProperty`, `AttachProperty`, `DetachProperty` Case 1 |
 | `data.IsRecalculating` | `lock(data)` | `RecalculateDerivedProperty` |
-| `data.IsAttached` | `lock(data)` | `DetachProperty` Case 1, `RecalculateDerivedProperty`, `AttachProperty` |
+| `data.IsAttached` | `lock(data)` | `DetachProperty` Case 1 + Case 2, `RecalculateDerivedProperty`, `AttachProperty`, `StoreRecordedTouchedProperties` (backlink loop) |
 | `data.UsedByProperties` (collection contents) | CAS (copy-on-write) | `StoreRecordedTouchedProperties`, `DetachProperty` Case 1 |
-| `data.UsedByProperties` (field itself) | `Interlocked.CompareExchange` | `GetOrCreateUsedByProperties` |
+| `data.UsedByProperties` (field itself) | `lock(data)` + `Interlocked.CompareExchange` | `DetachProperty` Case 2 (nulls under lock), `GetOrCreateUsedByProperties` (CAS create) |
 | `_recorder` | `[ThreadStatic]` (no sharing) | `ReadProperty`, `StartRecording`, `StoreRecordedTouchedProperties` |
 
-Cascading recalculation can create nested locks across properties, but the acquisition order follows the dependency DAG. Circular dependencies would cause infinite recursion in getters before any lock is reached, so deadlock is impossible. Backward link updates to other properties' `UsedByProperties` use CAS, not locks.
+Nested locks occur in `StoreRecordedTouchedProperties`: `lock(D_data)` (outer, from `RecalculateDerivedProperty`) → `lock(X_data)` (inner, backlink Add). The acquisition order follows the dependency DAG (derived → source). Circular dependencies would cause infinite recursion in getters before any lock is reached, so deadlock is impossible. `DetachProperty` acquires locks sequentially (never nested), so it cannot participate in a lock cycle.
 
 ### Value correctness: derived value always reflects current state
 
@@ -311,28 +337,30 @@ After all concurrent writes complete and recalculations settle, every derived pr
 
 ### No zombie dependencies after detach
 
-When a derived property is detached, no stale references remain in the dependency graph:
+When a property is detached, no stale references remain in the dependency graph:
 
-- **Forward links cleaned**: `DetachProperty` Case 1 iterates `data.RequiredProperties` and removes the derived property from each dependency's `UsedByProperties` via CAS `Remove`.
-- **Backward links cleaned**: `DetachProperty` Case 2 iterates `data.UsedByProperties` and removes the source property from each dependent's `RequiredProperties` under `lock(derivedData)`.
-- **No resurrection**: `DetachProperty` Case 1 acquires `lock(data)` and sets `IsAttached = false`. Any concurrent `RecalculateDerivedProperty` that acquired the lock before detach will complete and re-add backlinks — but detach then removes them. Any recalculation that acquires the lock after detach sees `!IsAttached` and skips, so no backlinks are re-added.
+- **Forward links cleaned (Case 1)**: `DetachProperty` iterates `data.RequiredProperties` under lock and removes the derived property from each dependency's `UsedByProperties` via CAS `Remove`. Then sets `RequiredProperties = null` and `LastKnownValue = null`.
+- **Backward links cleaned (Case 2)**: `DetachProperty` takes a `UsedByProperties` snapshot under `lock(data)`, clears `UsedByProperties = null`, then iterates the snapshot and removes the source property from each dependent's `RequiredProperties` under `lock(derivedData)`.
+- **No resurrection (Case 1)**: `DetachProperty` acquires `lock(data)` and sets `IsAttached = false`. Any concurrent `RecalculateDerivedProperty` that acquired the lock before detach will complete and re-add backlinks — but detach then removes them. Any recalculation that acquires the lock after detach sees `!IsAttached` and skips, so no backlinks are re-added.
+- **No missed backlinks (Case 2)**: The `lock(data)` in Case 2 serializes with `StoreRecordedTouchedProperties`' backlink Add (which also locks `depData`). Any backlink added before the lock is in the snapshot; any Add attempt after the lock sees `IsAttached = false` and skips. Skipped backlinks also trigger a filter that removes the detached dependency from `RequiredProperties`, preventing forward reference leaks even when no future recalculation would clean them up.
 
 ### No memory leaks from cross-subject dependencies
 
-Cross-subject dependencies (e.g., `Car.AveragePressure` → `Tire.Pressure`) create references between subjects via the dependency graph. These are cleaned up in two scenarios:
+Cross-subject dependencies (e.g., `Car.AveragePressure` → `Tire.Pressure`) create references between subjects via the dependency graph. These are cleaned up in three scenarios:
 
 - **Source replacement** (e.g., replacing a tire): The write to the structural property triggers recalculation of `AveragePressure`. The getter now reads the new tire's `Pressure`, so `StoreRecordedTouchedProperties` removes the old tire from `RequiredProperties` and removes `AveragePressure` from the old tire's `UsedByProperties`. The old tire has no remaining backlinks and can be GC'd.
-- **Derived property detach** (e.g., car removed from graph): `DetachProperty` Case 1 removes `AveragePressure` from all tires' `UsedByProperties`. The tires have no remaining references to the car's properties and the car can be GC'd.
-- **Source property detach** (e.g., tire removed from graph): `DetachProperty` Case 2 removes the tire's `Pressure` from `AveragePressure.RequiredProperties` under lock. No dangling forward references remain.
+- **Derived property detach** (e.g., car removed from graph): `DetachProperty` Case 1 removes `AveragePressure` from all tires' `UsedByProperties`, and sets `RequiredProperties = null` and `LastKnownValue = null`. The tires have no remaining references to the car's properties and the car can be GC'd.
+- **Source property detach** (e.g., tire removed from graph): `DetachProperty` Case 2 takes a snapshot of `UsedByProperties` under lock and clears it, then removes the tire's `Pressure` from `AveragePressure.RequiredProperties` under `lock(derivedData)`. If a concurrent `StoreRecordedTouchedProperties` was adding a backlink, the lock serialization ensures it is either in the snapshot (cleaned up) or skipped (filtered from `RequiredProperties`). No dangling forward or backward references remain.
 
-In all cases, both forward and backward links are cleaned up, so no cross-subject references prevent garbage collection.
+In all cases, both forward and backward links are cleaned up immediately, so no cross-subject references prevent garbage collection.
 
 ## Performance Characteristics
 
 | Scenario | Allocations | Cost |
 |----------|-------------|------|
 | Steady-state write (deps unchanged) | Zero | `SequenceEqual` on `RequiredProperties` span |
-| Dependency set changes | One `PropertyReference[]` | Differential backward link updates (CAS) |
+| Dependency set changes | One `PropertyReference[]` | Differential backward link updates with `lock(depData)` per new dep |
+| Dependency set changes + concurrent detach | Two `PropertyReference[]` | Above + filter allocation for detached deps (rare) |
 | Recording | Zero (pooled buffers) | Stack push/pop per frame |
 | Recalculation | Zero (beyond getter) | One `lock(data)` + getter invocation |
 | Backward link read (`UsedByProperties.Items`) | Zero | Returns stable `ReadOnlySpan` snapshot |
