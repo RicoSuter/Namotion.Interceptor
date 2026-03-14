@@ -37,6 +37,15 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
     private static readonly Action<IInterceptorSubject, object?> NoOpWriteDelegate = static (_, _) => { };
 
+    // Lightweight write-detection counter for AttachProperty's concurrent-write check.
+    // Incremented (non-atomically via Volatile.Write) on every property write.
+    // AttachProperty reads before/after evaluation: if changed, falls back to stabilization loop.
+    // Non-atomic increment is intentional: lost increments from concurrent writers are harmless
+    // (the counter still differs from AttachProperty's "before" snapshot).
+    // Volatile.Write provides release semantics, pairing with Volatile.Read's acquire semantics
+    // to guarantee that committed property values are visible when the counter change is observed.
+    private int _writeGeneration;
+
     /// <inheritdoc />
     public void AttachProperty(SubjectPropertyLifecycleChange change)
     {
@@ -62,20 +71,31 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
             if (metadata.IsDerived)
             {
-                // Loop until dependency set stabilizes (same pattern as RecalculateDerivedProperty).
-                // Terminates because the set of possible dependencies is finite and each
-                // iteration only re-evaluates when the recorded set actually changed.
+                // Single evaluation, with generation-based concurrent-write detection.
+                // On the common path (single-threaded construction), _writeGeneration is
+                // unchanged → zero extra getter evaluations (vs. the old unconditional loop).
+                // If a concurrent write IS detected (rare), fall back to the stabilization
+                // loop for full correctness (same as RecalculateDerivedProperty).
                 object? result;
                 try
                 {
-                    bool dependenciesChanged;
-                    do
+                    var generationBefore = Volatile.Read(ref _writeGeneration);
+
+                    StartRecordingTouchedProperties();
+                    result = metadata.GetValue?.Invoke(change.Subject);
+                    StoreRecordedTouchedProperties(change.Property, data);
+
+                    if (Volatile.Read(ref _writeGeneration) != generationBefore)
                     {
-                        StartRecordingTouchedProperties();
-                        result = metadata.GetValue?.Invoke(change.Subject);
-                        dependenciesChanged = StoreRecordedTouchedProperties(change.Property, data);
+                        bool dependenciesChanged;
+                        do
+                        {
+                            StartRecordingTouchedProperties();
+                            result = metadata.GetValue?.Invoke(change.Subject);
+                            dependenciesChanged = StoreRecordedTouchedProperties(change.Property, data);
+                        }
+                        while (dependenciesChanged);
                     }
-                    while (dependenciesChanged);
                 }
                 finally
                 {
@@ -189,6 +209,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         next(ref context);
 
+        // Signal write for AttachProperty's concurrent-write detection.
+        // Placed before TryGetDerivedPropertyData so writes to not-yet-tracked properties
+        // (which may become dependencies during a concurrent AttachProperty) are also detected.
+        Volatile.Write(ref _writeGeneration, _writeGeneration + 1);
+
         // Fast path: skip all post-write processing for properties without tracking data.
         var data = context.Property.TryGetDerivedPropertyData();
         if (data is null)
@@ -239,7 +264,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// Locks on the per-property DerivedPropertyData to serialize concurrent recalculations
     /// of the same derived property, ensuring dependencies and value stay consistent.
     /// </summary>
-    private static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long timestampUtcTicks)
+    private void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long timestampUtcTicks)
     {
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
         var data = derivedProperty.GetDerivedPropertyData();
@@ -264,21 +289,27 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             try
             {
                 var oldValue = data.LastKnownValue;
+                var generationBefore = Volatile.Read(ref _writeGeneration);
 
-                // Loop until dependency set stabilizes.
-                // Re-evaluation catches concurrent writes to newly-added dependencies
-                // that happened before backlinks were registered.
-                // Terminates because the set of possible dependencies is finite and each
-                // iteration only re-evaluates when the recorded set actually changed.
-                object? newValue;
-                bool dependenciesChanged;
-                do
+                // Single evaluation, with generation-based concurrent-write detection.
+                // If deps changed (conditional branch or cross-subject swap) but no
+                // concurrent write occurred, the recorded deps and value are already
+                // correct — skip re-evaluation. If a concurrent write IS detected,
+                // fall back to the stabilization loop for full correctness.
+                StartRecordingTouchedProperties();
+                var newValue = derivedProperty.Metadata.GetValue?.Invoke(derivedProperty.Subject);
+                var dependenciesChanged = StoreRecordedTouchedProperties(derivedProperty, data);
+
+                if (dependenciesChanged && Volatile.Read(ref _writeGeneration) != generationBefore)
                 {
-                    StartRecordingTouchedProperties();
-                    newValue = derivedProperty.Metadata.GetValue?.Invoke(derivedProperty.Subject);
-                    dependenciesChanged = StoreRecordedTouchedProperties(derivedProperty, data);
+                    do
+                    {
+                        StartRecordingTouchedProperties();
+                        newValue = derivedProperty.Metadata.GetValue?.Invoke(derivedProperty.Subject);
+                        dependenciesChanged = StoreRecordedTouchedProperties(derivedProperty, data);
+                    }
+                    while (dependenciesChanged);
                 }
-                while (dependenciesChanged);
 
                 data.LastKnownValue = newValue;
                 derivedProperty.SetWriteTimestampUtcTicks(timestampUtcTicks);
