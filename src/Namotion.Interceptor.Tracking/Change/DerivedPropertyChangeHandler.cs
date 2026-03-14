@@ -37,14 +37,17 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
     private static readonly Action<IInterceptorSubject, object?> NoOpWriteDelegate = static (_, _) => { };
 
-    // Lightweight write-detection counter for AttachProperty's concurrent-write check.
+    // Global write-detection counter for concurrent-write checks in AttachProperty and
+    // RecalculateDerivedProperty. Static so writes from any context are detected, even when
+    // dependencies span contexts (e.g., via context inheritance).
     // Incremented (non-atomically via Volatile.Write) on every property write.
-    // AttachProperty reads before/after evaluation: if changed, falls back to stabilization loop.
     // Non-atomic increment is intentional: lost increments from concurrent writers are harmless
-    // (the counter still differs from AttachProperty's "before" snapshot).
+    // (the counter still differs from the "before" snapshot).
     // Volatile.Write provides release semantics, pairing with Volatile.Read's acquire semantics
     // to guarantee that committed property values are visible when the counter change is observed.
-    private int _writeGeneration;
+    // False positives (unrelated writes) only affect AttachProperty and RecalculateDerivedProperty
+    // when deps change — the steady-state write path never checks the generation.
+    private static int _writeGeneration;
 
     /// <inheritdoc />
     public void AttachProperty(SubjectPropertyLifecycleChange change)
@@ -260,7 +263,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// Locks on the per-property DerivedPropertyData to serialize concurrent recalculations
     /// of the same derived property, ensuring dependencies and value stay consistent.
     /// </summary>
-    private void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long timestampUtcTicks)
+    private static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long timestampUtcTicks)
     {
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
 

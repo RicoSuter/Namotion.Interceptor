@@ -296,15 +296,9 @@ The `Volatile.Write`/`Volatile.Read` pair forms a release-acquire synchronizatio
 
 The non-atomic increment (`_writeGeneration + 1`) is intentional. Two concurrent writers may both read the same value and write the same incremented value ("lost increment"). This is harmless — the counter still differs from the "before" snapshot, so the concurrent write is detected.
 
+`_writeGeneration` is a static field, shared across all handler instances. This ensures writes from any context are detected, even when dependencies span contexts (e.g., via context inheritance). The tradeoff is that unrelated writes (from other contexts) may cause false positives — triggering the stabilization loop when no relevant concurrent write occurred. False positives only affect `AttachProperty` and `RecalculateDerivedProperty` when dependencies change; the steady-state write path (`dependenciesChanged = false`) never checks the generation, so there is zero overhead from false positives in the common case. A false positive costs one extra getter evaluation that exits immediately (deps unchanged).
+
 In the common case (stable dependencies or single-threaded construction), the generation is unchanged and the loop is skipped — zero extra getter evaluations. The stabilization loop only runs when a concurrent write is actually detected.
-
-#### Cross-context limitation
-
-`_writeGeneration` is an instance field on `DerivedPropertyChangeHandler`, which is per-context. When dependencies span contexts (e.g., via context inheritance), writes through a different context's handler increment a different counter. This means a concurrent write from another context may not be detected by the generation check.
-
-This is acceptable because the concurrent write still triggers `RecalculateDerivedProperty` via the normal backlink path (`UsedByProperties`), which blocks on `lock(data)` and corrects the value after the current evaluation completes. The result is a brief stale window (between the first evaluation completing and the blocked recalculation running) rather than a permanent inconsistency.
-
-For single-context usage (the common case), all writes go through the same handler and the generation check is fully accurate — no stale window.
 
 ### Concurrent detach and recalculation
 
@@ -345,7 +339,7 @@ Every piece of shared mutable state is protected by exactly one synchronization 
 | `data.UsedByProperties` (collection contents) | CAS (copy-on-write) | `StoreRecordedTouchedProperties`, `DetachProperty` Case 1 |
 | `data.UsedByProperties` (field itself) | `lock(data)` + `Interlocked.CompareExchange` | `DetachProperty` Case 2 (nulls under lock), `GetOrCreateUsedByProperties` (CAS create) |
 | `_recorder` | `[ThreadStatic]` (no sharing) | `ReadProperty`, `StartRecording`, `StoreRecordedTouchedProperties` |
-| `_writeGeneration` | `Volatile.Write` (release) / `Volatile.Read` (acquire) | `WriteProperty` (increment), `AttachProperty` + `RecalculateDerivedProperty` (check) |
+| `_writeGeneration` (static) | `Volatile.Write` (release) / `Volatile.Read` (acquire) | `WriteProperty` (increment), `AttachProperty` + `RecalculateDerivedProperty` (check) |
 
 Nested locks occur in `StoreRecordedTouchedProperties`: `lock(D_data)` (outer, from `RecalculateDerivedProperty`) → `lock(X_data)` (inner, backlink Add). The acquisition order follows the dependency DAG (derived → source). Circular dependencies would cause infinite recursion in getters before any lock is reached, so deadlock is impossible. `DetachProperty` uses a single `lock(data)` for all local cleanup, then acquires `lock(derivedData)` sequentially (never nested), so it cannot participate in a lock cycle.
 
@@ -364,7 +358,7 @@ After all concurrent writes complete and recalculations settle, every derived pr
 
    In the common case (no concurrent writes, or stable dependencies), the generation check avoids the loop entirely — zero extra getter evaluations.
 
-**Cross-context note**: `_writeGeneration` is per-handler (per-context). Concurrent writes from a different context may not be detected by the generation check. These writes are still handled correctly via backlink-driven recalculation (mechanism 1), which blocks on `lock(data)` and corrects the value. The result is a brief stale window rather than a permanent inconsistency. See "Cross-context limitation" above for details.
+Because `_writeGeneration` is static (global), writes from any context are detected — no cross-context blind spots. False positives from unrelated contexts only trigger re-evaluation when deps actually changed, and the re-evaluation exits immediately when deps are stable.
 
 ### No zombie dependencies after detach
 
