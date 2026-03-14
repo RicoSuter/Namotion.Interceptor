@@ -207,7 +207,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             RecalculateDerivedProperty(ref property, currentTimestampUtcTicks);
         }
 
-        var usedByProperties = data.UsedByProperties;
+        var usedByProperties = Volatile.Read(ref data.UsedByProperties);
         if (usedByProperties is not null && usedByProperties.Count > 0)
         {
             // Skip dependent recalculation during transaction capture.
