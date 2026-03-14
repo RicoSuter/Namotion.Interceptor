@@ -51,6 +51,8 @@ Forward (RequiredProperties):        Backward (UsedByProperties):
 - **Forward links** (`data.RequiredProperties`): Which properties a derived property reads. Stored as `PropertyReference[]`, replaced atomically under `lock(data)`.
 - **Backward links** (`data.UsedByProperties`): Which derived properties depend on this property. Stored as `DerivedPropertyDependencies`, updated via lock-free CAS.
 
+The two use different data structures because of their access patterns. Forward links are always read and written under `lock(data)` (the derived property's own data), so a plain array with whole-array swap is sufficient. Backward links are read without any lock (`WriteProperty` iterates dependents via `Volatile.Read`) and mutated from multiple lock scopes (`Remove` is called under the *derived* property's lock, not the *source* property's lock — so two derived properties detaching concurrently can call `Remove` on the same source's `UsedByProperties`). This requires the lock-free CAS copy-on-write wrapper.
+
 Both directions are needed:
 - Forward links enable cleanup when a derived property is detached (remove itself from all dependencies' backward links).
 - Backward links enable recalculation when a source property is written (find all affected derived properties).
