@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -9,6 +10,17 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// Handles derived property tracking and automatic recalculation using dependency recording.
 /// Requires LifecycleInterceptor to be added after this interceptor.
 /// </summary>
+/// <remarks>
+/// Lock ordering / deadlock safety:
+/// Locks are always acquired on per-property <see cref="DerivedPropertyData"/> objects.
+/// Nested lock acquisition follows the property dependency graph direction
+/// (parent derived → child derived via cascade in <see cref="RecalculateDerivedProperty"/>).
+/// A deadlock would require a cycle in the lock acquisition order, which would imply a circular
+/// dependency in the property graph — but circular getter dependencies cause infinite recursion
+/// before any lock is reached, so the graph is always a DAG and deadlock is impossible.
+/// <see cref="DetachProperty"/> acquires at most one lock at a time (Case 1 and Case 2 are
+/// sequential, not nested), so it cannot participate in a lock cycle either.
+/// </remarks>
 [RunsBefore(typeof(LifecycleInterceptor))]
 public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler
 {
@@ -29,20 +41,29 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             var data = change.Property.GetDerivedPropertyData();
             lock (data)
             {
+                // Explicit set handles re-attachment after a prior DetachProperty cleared this flag.
+                // On first attach the field default (true) is redundant but harmless.
                 data.IsAttached = true;
 
                 // Loop until dependency set stabilizes (same pattern as RecalculateDerivedProperty).
                 // Terminates because the set of possible dependencies is finite and each
                 // iteration only re-evaluates when the recorded set actually changed.
                 object? result;
-                bool dependenciesChanged;
-                do
+                try
                 {
-                    StartRecordingTouchedProperties();
-                    result = metadata.GetValue?.Invoke(change.Subject);
-                    dependenciesChanged = StoreRecordedTouchedProperties(change.Property, data);
+                    bool dependenciesChanged;
+                    do
+                    {
+                        StartRecordingTouchedProperties();
+                        result = metadata.GetValue?.Invoke(change.Subject);
+                        dependenciesChanged = StoreRecordedTouchedProperties(change.Property, data);
+                    }
+                    while (dependenciesChanged);
                 }
-                while (dependenciesChanged);
+                finally
+                {
+                    DiscardActiveRecording();
+                }
 
                 data.LastKnownValue = result;
                 change.Property.SetWriteTimestampUtcTicks(SubjectChangeContext.Current.ChangedTimestampUtcTicks);
@@ -63,16 +84,23 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         // Case 1: Derived property detached — remove from dependencies' UsedByProperties.
         // Lock serializes with RecalculateDerivedProperty to prevent zombie backlink resurrection.
-        var requiredProperties = data.RequiredProperties;
-        if (requiredProperties is not null)
+        // Gate on IsDerived (immutable) rather than RequiredProperties (mutable): a concurrent
+        // RecalculateDerivedProperty or Case 2 could change RequiredProperties between an
+        // outside-lock null check and lock acquisition, causing leaked backlinks or missed
+        // IsAttached clearing.
+        if (property.Metadata.IsDerived)
         {
             lock (data)
             {
                 data.IsAttached = false;
 
-                foreach (var dependency in requiredProperties.AsSpan())
+                var requiredProperties = data.RequiredProperties;
+                if (requiredProperties is not null)
                 {
-                    dependency.TryGetDerivedPropertyData()?.UsedByProperties?.Remove(property);
+                    foreach (var dependency in requiredProperties.AsSpan())
+                    {
+                        dependency.TryGetDerivedPropertyData()?.UsedByProperties?.Remove(property);
+                    }
                 }
             }
         }
@@ -118,12 +146,14 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
     {
         var result = next(ref context);
-
+        
+        // ReSharper disable InconsistentlySynchronizedField (thread static)
         if (_recorder?.IsRecording == true)
         {
             var property = context.Property;
             _recorder.TouchProperty(ref property);
         }
+        // ReSharper restore InconsistentlySynchronizedField
 
         return result;
     }
@@ -240,6 +270,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             }
             finally
             {
+                DiscardActiveRecording();
                 data.IsRecalculating = false;
             }
         }
@@ -252,6 +283,21 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         _recorder ??= new DerivedPropertyRecorder();
         _recorder.StartRecording();
+    }
+
+    /// <summary>
+    /// Discards an active recording if the getter threw before StoreRecordedTouchedProperties could run.
+    /// Called in finally blocks to prevent recorder depth corruption.
+    /// Zero overhead on the happy path (recording is already finished).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void DiscardActiveRecording()
+    {
+        if (_recorder is { IsRecording: true })
+        {
+            _recorder.FinishRecording();
+            _recorder.ClearLastRecording();
+        }
     }
 
     /// <summary>
@@ -272,22 +318,28 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return false;
         }
 
-        // Replace forward dependencies (simple assignment under lock).
+        // Copy to array and release recorder buffer immediately.
+        // After ClearLastRecording(), the recordedDependencies span is invalidated;
+        // all subsequent code uses newItems instead.
         var newItems = recordedDependencies.ToArray();
+        _recorder.ClearLastRecording();
+
+        // Replace forward dependencies (simple assignment under lock).
         data.RequiredProperties = newItems;
 
         // Update backward links differentially.
         // Remove this derived property from old dependencies no longer used.
+        ReadOnlySpan<PropertyReference> newDeps = newItems;
         foreach (ref readonly var oldDependency in previousItems)
         {
-            if (!recordedDependencies.Contains(oldDependency))
+            if (!newDeps.Contains(oldDependency))
             {
                 oldDependency.TryGetDerivedPropertyData()?.UsedByProperties?.Remove(derivedProperty);
             }
         }
 
         // Add this derived property to new dependencies not previously tracked.
-        foreach (ref readonly var newDependency in recordedDependencies)
+        foreach (ref readonly var newDependency in newDeps)
         {
             if (!previousItems.Contains(newDependency))
             {
@@ -295,8 +347,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             }
         }
 
-        _recorder.ClearLastRecording();
         return true;
     }
-
 }

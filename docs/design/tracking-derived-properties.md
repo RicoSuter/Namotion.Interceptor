@@ -76,17 +76,20 @@ When a subject is created with a context, `LifecycleInterceptor` fires `AttachPr
 AttachProperty(FullName)
   lock(data)
     data.IsAttached = true
-    do:
-      StartRecordingTouchedProperties()         // push recording frame
-      result = getter.Invoke(subject)            // evaluates "FirstName + LastName"
-        → ReadProperty(FirstName)               // recorder captures FirstName
-        → ReadProperty(LastName)                // recorder captures LastName
-      dependenciesChanged = StoreRecordedTouchedProperties(FullName, data)
-        // sets data.RequiredProperties = [FirstName, LastName]
-        // adds FullName to FirstName.UsedByProperties
-        // adds FullName to LastName.UsedByProperties
-        // returns true (deps changed from null to [FirstName, LastName])
-    while (dependenciesChanged)                  // second iteration: deps unchanged, returns false
+    try:
+      do:
+        StartRecordingTouchedProperties()         // push recording frame
+        result = getter.Invoke(subject)            // evaluates "FirstName + LastName"
+          → ReadProperty(FirstName)               // recorder captures FirstName
+          → ReadProperty(LastName)                // recorder captures LastName
+        dependenciesChanged = StoreRecordedTouchedProperties(FullName, data)
+          // sets data.RequiredProperties = [FirstName, LastName]
+          // adds FullName to FirstName.UsedByProperties
+          // adds FullName to LastName.UsedByProperties
+          // returns true (deps changed from null to [FirstName, LastName])
+      while (dependenciesChanged)                  // second iteration: deps unchanged, returns false
+    finally:
+      DiscardActiveRecording()                     // clean up if getter threw
     data.LastKnownValue = result
     SetWriteTimestampUtcTicks(...)
 ```
@@ -145,6 +148,7 @@ RecalculateDerivedProperty(FullName, timestamp)
         SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate)
       RaisePropertyChanged("FullName")           // INotifyPropertyChanged integration
     finally:
+      DiscardActiveRecording()                 // clean up if getter threw
       data.IsRecalculating = false
 ```
 
@@ -163,8 +167,8 @@ When a subject is removed from the object graph, `DetachProperty` cleans up both
 DetachProperty(FullName)
   lock(data)
     data.IsAttached = false
-    for each dependency in data.RequiredProperties:
-      dependency.UsedByProperties.Remove(FullName)   // CAS
+    for each dependency in data.RequiredProperties:   // read under lock
+      dependency.UsedByProperties.Remove(FullName)    // CAS
 ```
 
 **Case 2 — Source property detached** (e.g., FirstName is detached):
@@ -179,10 +183,13 @@ DetachProperty(FirstName)
 
 This method is called under `lock(data)` and maintains both forward and backward links:
 
-1. **Fast path**: If `previousDeps.SequenceEqual(recordedDeps)` → return `false` (no allocation).
-2. **Slow path**: Replace `data.RequiredProperties` with new array.
-   - For each old dependency no longer used: `Remove(derivedProperty)` from its `UsedByProperties`.
-   - For each new dependency not previously tracked: `Add(derivedProperty)` to its `UsedByProperties`.
+1. **Fast path**: If `previousDeps.SequenceEqual(recordedDeps)` → clear recorder, return `false` (no allocation).
+2. **Slow path**:
+   - Copy recorded dependencies to an owned array (`newItems = recordedDeps.ToArray()`).
+   - Clear the recorder immediately (`ClearLastRecording()`). After this point the `recordedDeps` span is invalidated; all subsequent code uses `newItems`.
+   - Replace `data.RequiredProperties` with the new array.
+   - For each old dependency no longer used: `Remove(derivedProperty)` from its `UsedByProperties` (CAS).
+   - For each new dependency not previously tracked: `Add(derivedProperty)` to its `UsedByProperties` (CAS).
    - Return `true` (caller should re-evaluate).
 
 The `bool` return drives the stabilization loop in `RecalculateDerivedProperty` and `AttachProperty`.
@@ -229,9 +236,11 @@ This is necessary because multiple derived properties on different threads may c
 
 `DerivedPropertyRecorder` is `[ThreadStatic]`, so each thread has its own instance. This avoids synchronization during recording. The recorder supports nesting (stack-based frames) for derived properties that read other derived properties.
 
-### No cross-property nested locking
+### Lock ordering follows the dependency DAG
 
-`lock(data)` is only acquired on the derived property's own data. Backward link updates use CAS, not locks. This eliminates deadlock risk from lock ordering.
+During cascading recalculation, nested locks can occur: `RecalculateDerivedProperty(B)` holds `lock(dataB)` and may trigger `RecalculateDerivedProperty(C)` via `SetPropertyValueWithInterception` → `WriteProperty`, acquiring `lock(dataC)`. A deadlock would require a cycle in the lock acquisition order, which would imply a circular dependency in the property graph — but circular getter dependencies cause infinite recursion before any lock is reached, so the graph is always a DAG and deadlock is impossible.
+
+`DetachProperty` acquires at most one lock at a time (Case 1 and Case 2 are sequential, not nested), so it cannot participate in a lock cycle either. Backward link updates use lock-free CAS, so they never block.
 
 ## Concurrency Scenarios
 
@@ -285,7 +294,7 @@ Every piece of shared mutable state is protected by exactly one synchronization 
 | `data.UsedByProperties` (field itself) | `Interlocked.CompareExchange` | `GetOrCreateUsedByProperties` |
 | `_recorder` | `[ThreadStatic]` (no sharing) | `ReadProperty`, `StartRecording`, `StoreRecordedTouchedProperties` |
 
-No cross-property nested locking occurs. `lock(data)` is only acquired on the derived property's own data. Backward link updates to other properties' `UsedByProperties` use CAS, not locks. This eliminates deadlock risk.
+Cascading recalculation can create nested locks across properties, but the acquisition order follows the dependency DAG. Circular dependencies would cause infinite recursion in getters before any lock is reached, so deadlock is impossible. Backward link updates to other properties' `UsedByProperties` use CAS, not locks.
 
 ### Value correctness: derived value always reflects current state
 
