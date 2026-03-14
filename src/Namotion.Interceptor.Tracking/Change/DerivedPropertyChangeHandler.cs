@@ -40,10 +40,9 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     // Global write-detection counter for concurrent-write checks in AttachProperty and
     // RecalculateDerivedProperty. Static so writes from any context are detected, even when
     // dependencies span contexts (e.g., via context inheritance).
-    // Incremented (non-atomically via Volatile.Write) on every property write.
-    // Non-atomic increment is intentional: lost increments from concurrent writers are harmless
-    // (the counter still differs from the "before" snapshot).
-    // Volatile.Write provides release semantics, pairing with Volatile.Read's acquire semantics
+    // Incremented atomically via Interlocked.Increment on every property write, ensuring each
+    // write produces a unique counter value (no lost increments from concurrent writers).
+    // Interlocked.Increment provides a full fence, pairing with Volatile.Read's acquire semantics
     // to guarantee that committed property values are visible when the counter change is observed.
     // False positives (unrelated writes) only affect AttachProperty and RecalculateDerivedProperty
     // when deps change — the steady-state write path never checks the generation.
@@ -116,11 +115,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         var property = change.Property;
 
-        var data = property.TryGetDerivedPropertyData();
-        if (data is null)
-        {
-            return;
-        }
+        var data = property.GetDerivedPropertyData();
 
         // Single lock handles both forward (Case 1) and backward (Case 2) cleanup.
         // Case 1 (derived only): Remove this property from its dependencies' UsedByProperties.
@@ -211,7 +206,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // Signal write for AttachProperty's concurrent-write detection.
         // Placed before TryGetDerivedPropertyData so writes to not-yet-tracked properties
         // (which may become dependencies during a concurrent AttachProperty) are also detected.
-        Volatile.Write(ref _writeGeneration, _writeGeneration + 1);
+        Interlocked.Increment(ref _writeGeneration);
 
         // Fast path: skip all post-write processing for properties without tracking data.
         var data = context.Property.TryGetDerivedPropertyData();
@@ -431,6 +426,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         // When a backlink Add was skipped (dependency detaching), remove that dependency
         // from RequiredProperties to prevent forward reference leaks (memory) and stale deps.
+        // Re-check IsAttached under lock to handle concurrent re-attachment: if a dependency
+        // was detached during the backlink loop but re-attached before we get here, the locked
+        // check sees IsAttached=true and adds the backward link (idempotent Add), ensuring
+        // forward and backward links stay consistent.
         // Only runs in the rare concurrent detach race — zero overhead on the normal path.
         if (hasSkippedDependencies)
         {
@@ -438,14 +437,26 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             for (var i = 0; i < newItems.Length; i++)
             {
                 var depData = newItems[i].TryGetDerivedPropertyData();
-                if (depData is null || depData.IsAttached)
+                if (depData is null)
                 {
                     newItems[liveCount++] = newItems[i];
+                    continue;
                 }
-                else
+
+                lock (depData)
                 {
-                    // Also clean backward link if it exists from a previous registration.
-                    depData.UsedByProperties?.Remove(derivedProperty);
+                    if (depData.IsAttached)
+                    {
+                        // Dependency is (still or again) attached. Ensure backward link exists.
+                        // Idempotent for deps that were successfully added in the backlink loop.
+                        depData.GetOrCreateUsedByProperties().Add(derivedProperty);
+                        newItems[liveCount++] = newItems[i];
+                    }
+                    else
+                    {
+                        // Still detached — remove from RequiredProperties and clean backward link.
+                        depData.UsedByProperties?.Remove(derivedProperty);
+                    }
                 }
             }
 
