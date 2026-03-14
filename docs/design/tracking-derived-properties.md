@@ -184,13 +184,14 @@ Key details of the change notification:
 
 When a subject is removed from the object graph, `DetachProperty` cleans up both directions.
 
-`DetachProperty` always creates `DerivedPropertyData` via `GetDerivedPropertyData()` (which uses `ConcurrentDictionary.GetOrAdd`). This ensures that even for source properties that were never dependencies, `IsAttached = false` is set under lock — preventing a race where a concurrent `StoreRecordedTouchedProperties` creates data with `IsAttached = true` (default) after `DetachProperty` exits, leaving a stale backlink. Since both paths share the same `DerivedPropertyData` object via `GetOrAdd`, the existing lock serialization handles all orderings correctly. The extra allocation for never-tracked properties is negligible because it only occurs during detach (the subject is being torn down).
+`DetachProperty` uses `TryGetDerivedPropertyData()` and returns early if no tracking data exists. This avoids `ConcurrentDictionary.GetOrAdd` allocations for source properties that were never dependencies — a significant performance optimization when detaching subjects with many non-dependency properties (e.g., detaching 1000 cars where only 1 of 18 properties per car participates in derived property tracking).
 
-Both cases are handled in a single `lock(data)` block, followed by Case 2 cleanup outside the lock:
+For properties with tracking data, both cases are handled in a single `lock(data)` block, followed by Case 2 cleanup outside the lock:
 
 ```
 DetachProperty(property)
-  data = property.GetDerivedPropertyData()       // always create (no early exit)
+  data = property.TryGetDerivedPropertyData()
+  if data is null → return                       // skip untracked properties
   lock(data)
     data.IsAttached = false
     // Case 1 (derived only): Remove forward dependencies
@@ -371,7 +372,8 @@ When a property is detached, no stale references remain in the dependency graph:
 - **Backward links cleaned (Case 2)**: Inside the same `lock(data)`, `DetachProperty` takes a `UsedByProperties` snapshot and clears `UsedByProperties = null`. After releasing the lock, it iterates the snapshot and removes the source property from each dependent's `RequiredProperties` under `lock(derivedData)`.
 - **Atomic state transition**: The single lock ensures `IsAttached = false`, forward cleanup (Case 1), and backward snapshot (Case 2) happen atomically. No concurrent thread can observe `IsAttached = false` while `UsedByProperties` is still populated.
 - **No resurrection (Case 1)**: `DetachProperty` sets `IsAttached = false` inside the lock. Any concurrent `RecalculateDerivedProperty` that acquired the lock before detach will complete and re-add backlinks — but detach then removes them. Any recalculation that acquires the lock after detach sees `!IsAttached` and skips, so no backlinks are re-added.
-- **No missed backlinks (Case 2)**: `DetachProperty` always creates `DerivedPropertyData` (via `GetDerivedPropertyData`), so `IsAttached = false` is set even for source properties that were never dependencies. This prevents the race where a concurrent `StoreRecordedTouchedProperties` creates data with `IsAttached = true` (default) after `DetachProperty` exits. The `lock(data)` serializes with `StoreRecordedTouchedProperties`' backlink Add (which also locks `depData`). Any backlink added before the lock is in the snapshot; any Add attempt after the lock sees `IsAttached = false` and skips. Skipped backlinks trigger a locked filter that re-checks `IsAttached` under `lock(depData)`: if the dependency was re-attached concurrently, the filter calls idempotent `Add(derivedProperty)` to repair the missing backward link; if still detached, it removes the dependency from `RequiredProperties` and cleans the backward link.
+- **No missed backlinks (Case 2)**: For properties **with** tracking data, `DetachProperty` sets `IsAttached = false` under `lock(data)`. The lock serializes with `StoreRecordedTouchedProperties`' backlink Add (which also locks `depData`). Any backlink added before the lock is in the snapshot; any Add attempt after the lock sees `IsAttached = false` and skips. Skipped backlinks trigger a locked filter that re-checks `IsAttached` under `lock(depData)`: if the dependency was re-attached concurrently, the filter calls idempotent `Add(derivedProperty)` to repair the missing backward link; if still detached, it removes the dependency from `RequiredProperties` and cleans the backward link.
+- **Untracked source properties**: For source properties that were **never** dependencies (no `DerivedPropertyData` exists), `DetachProperty` skips them entirely via `TryGetDerivedPropertyData() → null → return`. A theoretical race exists where a concurrent `StoreRecordedTouchedProperties` creates data with `IsAttached = true` after `DetachProperty` exits, leaving a stale forward reference in the derived property's `RequiredProperties`. However, this is safe in practice: for a derived property D to read source property X on subject S, the getter must reach S through the object graph — meaning S is already kept alive by a structural reference from the getter's reachable path (a tracked property, closure capture, etc.), not solely by `RequiredProperties`. The stale forward reference is redundant with the existing structural reference and is cleaned up on the next recalculation of D (when the structural reference changes, D re-records its dependencies and drops X). This tradeoff avoids `ConcurrentDictionary.GetOrAdd` for every untracked property during detach, which profiling showed to be the dominant cost in bulk detach scenarios.
 
 ### No memory leaks from cross-subject dependencies
 
@@ -379,9 +381,9 @@ Cross-subject dependencies (e.g., `Car.AveragePressure` → `Tire.Pressure`) cre
 
 - **Source replacement** (e.g., replacing a tire): The write to the structural property triggers recalculation of `AveragePressure`. The getter now reads the new tire's `Pressure`, so `StoreRecordedTouchedProperties` removes the old tire from `RequiredProperties` and removes `AveragePressure` from the old tire's `UsedByProperties`. The old tire has no remaining backlinks and can be GC'd.
 - **Derived property detach** (e.g., car removed from graph): `DetachProperty` Case 1 removes `AveragePressure` from all tires' `UsedByProperties`, and sets `RequiredProperties = null` and `LastKnownValue = null`. The tires have no remaining references to the car's properties and the car can be GC'd.
-- **Source property detach** (e.g., tire removed from graph): `DetachProperty` Case 2 takes a snapshot of `UsedByProperties` under lock and clears it, then removes the tire's `Pressure` from `AveragePressure.RequiredProperties` under `lock(derivedData)`. If a concurrent `StoreRecordedTouchedProperties` was adding a backlink, the lock serialization ensures it is either in the snapshot (cleaned up) or skipped (filtered from `RequiredProperties`). No dangling forward or backward references remain.
+- **Source property detach** (e.g., tire removed from graph): For tracked source properties, `DetachProperty` Case 2 takes a snapshot of `UsedByProperties` under lock and clears it, then removes the tire's `Pressure` from `AveragePressure.RequiredProperties` under `lock(derivedData)`. If a concurrent `StoreRecordedTouchedProperties` was adding a backlink, the lock serialization ensures it is either in the snapshot (cleaned up) or skipped (filtered from `RequiredProperties`). For untracked source properties, `DetachProperty` skips them (no data to clean). See "Untracked source properties" above for the theoretical race and why it is safe.
 
-In all cases, both forward and backward links are cleaned up immediately, so no cross-subject references prevent garbage collection.
+In all cases for tracked properties, both forward and backward links are cleaned up immediately, so no cross-subject references prevent garbage collection.
 
 ## Performance Characteristics
 

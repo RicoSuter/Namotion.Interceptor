@@ -115,7 +115,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         var property = change.Property;
 
-        var data = property.GetDerivedPropertyData();
+        var data = property.TryGetDerivedPropertyData();
+        if (data is null)
+        {
+            return;
+        }
 
         // Single lock handles both forward (Case 1) and backward (Case 2) cleanup.
         // Case 1 (derived only): Remove this property from its dependencies' UsedByProperties.
