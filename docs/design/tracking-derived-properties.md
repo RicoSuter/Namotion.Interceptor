@@ -77,22 +77,29 @@ AttachProperty(FullName)
   lock(data)
     data.IsAttached = true
     try:
-      do:
-        StartRecordingTouchedProperties()         // push recording frame
-        result = getter.Invoke(subject)            // evaluates "FirstName + LastName"
-          → ReadProperty(FirstName)               // recorder captures FirstName
-          → ReadProperty(LastName)                // recorder captures LastName
-        dependenciesChanged = StoreRecordedTouchedProperties(FullName, data)
-          // sets data.RequiredProperties = [FirstName, LastName]
-          // adds FullName to FirstName.UsedByProperties
-          // adds FullName to LastName.UsedByProperties
-          // returns true (deps changed from null to [FirstName, LastName])
-      while (dependenciesChanged)                  // second iteration: deps unchanged, returns false
+      generationBefore = Volatile.Read(_writeGeneration)
+      StartRecordingTouchedProperties()
+      result = getter.Invoke(subject)              // evaluates "FirstName + LastName"
+        → ReadProperty(FirstName)                 // recorder captures FirstName
+        → ReadProperty(LastName)                  // recorder captures LastName
+      StoreRecordedTouchedProperties(FullName, data)
+        // sets data.RequiredProperties = [FirstName, LastName]
+        // adds FullName to FirstName.UsedByProperties
+        // adds FullName to LastName.UsedByProperties
+      if Volatile.Read(_writeGeneration) != generationBefore:
+        // Concurrent write detected — fall back to stabilization loop
+        do:
+          StartRecordingTouchedProperties()
+          result = getter.Invoke(subject)
+          dependenciesChanged = StoreRecordedTouchedProperties(FullName, data)
+        while (dependenciesChanged)
     finally:
-      DiscardActiveRecording()                     // clean up if getter threw
+      DiscardActiveRecording()                     // always clears recorder buffer
     data.LastKnownValue = result
     SetWriteTimestampUtcTicks(...)
 ```
+
+On the common path (single-threaded construction), `_writeGeneration` is unchanged and the loop is skipped entirely — zero extra getter evaluations. If a concurrent write is detected, the full stabilization loop runs for correctness.
 
 ### 2. Read (recording)
 
@@ -115,15 +122,20 @@ When a source property is written, `WriteProperty` triggers recalculation of all
 ```
 WriteProperty(FirstName = "Jane")
   next(ref context)                              // write the value
+  Volatile.Write(_writeGeneration, _writeGeneration + 1)  // signal for AttachProperty/RecalculateDerivedProperty
   data = FirstName.TryGetDerivedPropertyData()
+  if data is null → return                       // fast path: no tracking data
   // Self-recalculation: if this is a derived-with-setter property, recalculate it
   if data.RequiredProperties != null && Metadata.SetValue != null:
     RecalculateDerivedProperty(FirstName, timestamp)
   // Cascade: recalculate all dependent derived properties
-  if data.UsedByProperties has entries:
+  usedByProperties = Volatile.Read(data.UsedByProperties)  // acquire fence for ARM64 visibility
+  if usedByProperties has entries:
     for each dependent (e.g., FullName):
       RecalculateDerivedProperty(FullName, timestamp)
 ```
+
+The `_writeGeneration` increment uses `Volatile.Write` (release semantics) so that `AttachProperty`/`RecalculateDerivedProperty` can detect concurrent writes via `Volatile.Read` (acquire semantics). The non-atomic increment (`_writeGeneration + 1`) is intentional — lost increments from concurrent writers are harmless because the counter still differs from the "before" snapshot.
 
 **Derived properties with setters** (created via `AddDerivedProperty<T>(name, getValue, setValue)`) have both a getter and a setter. The setter modifies internal state as a side effect, but the actual property value is always determined by the getter. When the setter is called, `WriteProperty` detects `RequiredProperties != null && SetValue != null` and triggers recalculation to re-evaluate the getter and fire a change notification with the correct computed value.
 
@@ -137,20 +149,28 @@ RecalculateDerivedProperty(FullName, timestamp)
     data.IsRecalculating = true
     try:
       oldValue = data.LastKnownValue
-      do:
-        StartRecordingTouchedProperties()
-        newValue = getter.Invoke(subject)
-        dependenciesChanged = StoreRecordedTouchedProperties(FullName, data)
-      while (dependenciesChanged)                // re-evaluate if deps changed
+      generationBefore = Volatile.Read(_writeGeneration)
+      StartRecordingTouchedProperties()
+      newValue = getter.Invoke(subject)
+      dependenciesChanged = StoreRecordedTouchedProperties(FullName, data)
+      if dependenciesChanged && Volatile.Read(_writeGeneration) != generationBefore:
+        // Concurrent write during evaluation — stabilization loop
+        do:
+          StartRecordingTouchedProperties()
+          newValue = getter.Invoke(subject)
+          dependenciesChanged = StoreRecordedTouchedProperties(FullName, data)
+        while (dependenciesChanged)
       data.LastKnownValue = newValue
       SetWriteTimestampUtcTicks(timestamp)       // inherits trigger's timestamp
       WithSource(null):                          // marks as internal recalculation
         SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate)
       RaisePropertyChanged("FullName")           // INotifyPropertyChanged integration
     finally:
-      DiscardActiveRecording()                 // clean up if getter threw
+      DiscardActiveRecording()                   // always clears recorder buffer
       data.IsRecalculating = false
 ```
+
+The generation check avoids re-evaluation when dependencies change but no concurrent write occurred (e.g., `ChangeAllTires` swaps tire references, changing deps from old tires to new tires). The stabilization loop only runs when a concurrent write is actually detected.
 
 Key details of the change notification:
 - **Timestamp inheritance**: The derived property receives the same timestamp as the write that triggered the recalculation, ensuring consistent timestamps within a mutation context.
@@ -162,31 +182,30 @@ Key details of the change notification:
 
 When a subject is removed from the object graph, `DetachProperty` cleans up both directions:
 
-**Case 1 — Derived property detached** (e.g., FullName is detached):
+Both cases are handled in a single `lock(data)` block, followed by Case 2 cleanup outside the lock:
+
 ```
-DetachProperty(FullName)
+DetachProperty(property)
   lock(data)
     data.IsAttached = false
-    for each dependency in data.RequiredProperties:   // read under lock
-      dependency.UsedByProperties.Remove(FullName)    // CAS
-    data.RequiredProperties = null                    // release forward references
-    data.LastKnownValue = null                        // release cached value
-```
-
-**Case 2 — Source property detached** (e.g., FirstName is detached):
-```
-DetachProperty(FirstName)
-  lock(data)                                          // serialize with StoreRecordedTouchedProperties
-    data.IsAttached = false
-    usedBySnapshot = data.UsedByProperties.ItemsArray // stable copy-on-write snapshot
-    data.UsedByProperties = null                      // clear immediately
-  // release lock before processing to avoid nesting with lock(derivedData)
+    // Case 1 (derived only): Remove forward dependencies
+    if property.IsDerived:
+      for each dependency in data.RequiredProperties:   // read under lock
+        dependency.UsedByProperties.Remove(property)    // CAS, no nested lock
+      data.RequiredProperties = null                    // release forward references
+      data.LastKnownValue = null                        // release cached value
+    // Case 2 (all properties): Snapshot and clear backward dependencies
+    usedBySnapshot = data.UsedByProperties.ItemsArray   // stable copy-on-write snapshot
+    data.UsedByProperties = null                        // clear immediately
+  // release lock before Case 2 processing to avoid nesting with lock(derivedData)
   for each derived in usedBySnapshot:
     lock(derivedData)
-      remove FirstName from derivedData.RequiredProperties
+      remove property from derivedData.RequiredProperties
 ```
 
-The lock in Case 2 serializes with `StoreRecordedTouchedProperties`' backlink Add (which also acquires `lock(depData)` on the same object). This ensures either:
+The single lock ensures `IsAttached`, forward cleanup (Case 1), and backward snapshot (Case 2) are atomic — no window where a concurrent thread could see `IsAttached=false` but `UsedByProperties` still populated.
+
+The lock serializes with `StoreRecordedTouchedProperties`' backlink Add (which also acquires `lock(depData)` on the same object). This ensures either:
 - The backlink was added before the snapshot → we see it and clean up the forward reference.
 - `StoreRecordedTouchedProperties` acquires the lock after us → sees `IsAttached = false` → skips the Add.
 
@@ -252,7 +271,7 @@ This is necessary because multiple derived properties on different threads may c
 
 `RecalculateDerivedProperty` and `StoreRecordedTouchedProperties` nest locks in the derived → dependency direction: `lock(D_data)` (outer, from `RecalculateDerivedProperty`) → `lock(X_data)` (inner, from the backlink Add loop in `StoreRecordedTouchedProperties`). A deadlock would require a cycle in the lock acquisition order, which would imply a circular dependency in the property graph — but circular getter dependencies cause infinite recursion before any lock is reached, so the graph is always a DAG and deadlock is impossible.
 
-`DetachProperty` acquires locks sequentially (never nested): `lock(data)` for `IsAttached` + snapshot (then release), followed by `lock(derivedData)` for `RequiredProperties` cleanup. Because it never holds two locks simultaneously, it cannot participate in a lock cycle.
+`DetachProperty` uses a single `lock(data)` for all local cleanup (`IsAttached`, forward deps, backward snapshot), then acquires `lock(derivedData)` sequentially for `RequiredProperties` cleanup. Because it never holds two locks simultaneously, it cannot participate in a lock cycle. Case 1's forward cleanup (removing from dependencies' `UsedByProperties`) uses CAS inside the lock — no nested lock acquisition.
 
 ## Concurrency Scenarios
 
@@ -262,23 +281,30 @@ Derived properties with setters (added via `AddDerivedProperty<T>(name, getValue
 
 The `data.IsRecalculating` flag guards against this. The re-entrant call sees `IsRecalculating = true` inside the lock and returns immediately. Cross-thread callers block on the lock and see `false` after the first thread releases — so they proceed normally.
 
-### Conditional dependencies and concurrent writes
+### Concurrent write detection via `_writeGeneration`
 
 When a derived property has conditional dependencies (e.g., `Display => UseFirstName ? FirstName : LastName`), the dependency set changes based on runtime state. A concurrent write to a newly-added dependency could land between getter evaluation and backlink registration — the write would not trigger recalculation because the backlink isn't registered yet.
 
-The stabilization loop handles this. `StoreRecordedTouchedProperties` returns `true` when the dependency set changed, causing the `do/while` loop to re-evaluate the getter:
+Both `AttachProperty` and `RecalculateDerivedProperty` use a generation-based detection scheme instead of unconditionally re-evaluating:
 
-```csharp
-do
-{
-    StartRecordingTouchedProperties();
-    newValue = getter.Invoke(subject);
-    dependenciesChanged = StoreRecordedTouchedProperties(derivedProperty, data);
-}
-while (dependenciesChanged);
-```
+1. `WriteProperty` increments `_writeGeneration` via `Volatile.Write` (release fence) on every write.
+2. `AttachProperty`/`RecalculateDerivedProperty` read `_writeGeneration` via `Volatile.Read` (acquire fence) before and after evaluation.
+3. If unchanged → no concurrent write occurred → skip the stabilization loop.
+4. If changed → a concurrent write happened → fall back to the full stabilization loop.
 
-After the first iteration registers backlinks, any concurrent write to a dependency triggers recalculation via the normal `UsedByProperties` path and blocks on `lock(data)`. The second iteration catches writes that happened before backlinks were in place. In the common case (stable dependencies), `SequenceEqual` returns `true` on the first iteration and the loop runs exactly once with zero overhead.
+The `Volatile.Write`/`Volatile.Read` pair forms a release-acquire synchronization: if the counter change is observed, all prior writes (including the committed property value) are guaranteed visible to the reading thread.
+
+The non-atomic increment (`_writeGeneration + 1`) is intentional. Two concurrent writers may both read the same value and write the same incremented value ("lost increment"). This is harmless — the counter still differs from the "before" snapshot, so the concurrent write is detected.
+
+In the common case (stable dependencies or single-threaded construction), the generation is unchanged and the loop is skipped — zero extra getter evaluations. The stabilization loop only runs when a concurrent write is actually detected.
+
+#### Cross-context limitation
+
+`_writeGeneration` is an instance field on `DerivedPropertyChangeHandler`, which is per-context. When dependencies span contexts (e.g., via context inheritance), writes through a different context's handler increment a different counter. This means a concurrent write from another context may not be detected by the generation check.
+
+This is acceptable because the concurrent write still triggers `RecalculateDerivedProperty` via the normal backlink path (`UsedByProperties`), which blocks on `lock(data)` and corrects the value after the current evaluation completes. The result is a brief stale window (between the first evaluation completing and the blocked recalculation running) rather than a permanent inconsistency.
+
+For single-context usage (the common case), all writes go through the same handler and the generation check is fully accurate — no stale window.
 
 ### Concurrent detach and recalculation
 
@@ -319,30 +345,36 @@ Every piece of shared mutable state is protected by exactly one synchronization 
 | `data.UsedByProperties` (collection contents) | CAS (copy-on-write) | `StoreRecordedTouchedProperties`, `DetachProperty` Case 1 |
 | `data.UsedByProperties` (field itself) | `lock(data)` + `Interlocked.CompareExchange` | `DetachProperty` Case 2 (nulls under lock), `GetOrCreateUsedByProperties` (CAS create) |
 | `_recorder` | `[ThreadStatic]` (no sharing) | `ReadProperty`, `StartRecording`, `StoreRecordedTouchedProperties` |
+| `_writeGeneration` | `Volatile.Write` (release) / `Volatile.Read` (acquire) | `WriteProperty` (increment), `AttachProperty` + `RecalculateDerivedProperty` (check) |
 
-Nested locks occur in `StoreRecordedTouchedProperties`: `lock(D_data)` (outer, from `RecalculateDerivedProperty`) → `lock(X_data)` (inner, backlink Add). The acquisition order follows the dependency DAG (derived → source). Circular dependencies would cause infinite recursion in getters before any lock is reached, so deadlock is impossible. `DetachProperty` acquires locks sequentially (never nested), so it cannot participate in a lock cycle.
+Nested locks occur in `StoreRecordedTouchedProperties`: `lock(D_data)` (outer, from `RecalculateDerivedProperty`) → `lock(X_data)` (inner, backlink Add). The acquisition order follows the dependency DAG (derived → source). Circular dependencies would cause infinite recursion in getters before any lock is reached, so deadlock is impossible. `DetachProperty` uses a single `lock(data)` for all local cleanup, then acquires `lock(derivedData)` sequentially (never nested), so it cannot participate in a lock cycle.
 
 ### Value correctness: derived value always reflects current state
 
-After all concurrent writes complete and recalculations settle, every derived property's value matches what its getter would return if called with the current source values. This is guaranteed by two mechanisms working together:
+After all concurrent writes complete and recalculations settle, every derived property's value matches what its getter would return if called with the current source values. This is guaranteed by three mechanisms working together:
 
 1. **Backlink-driven recalculation**: Once a dependency's backward link includes a derived property, any write to that dependency triggers `RecalculateDerivedProperty` via `WriteProperty`. The recalculation acquires `lock(data)`, so concurrent recalculations of the same derived property are serialized — each one sees the most recent source values.
 
-2. **Stabilization loop for dependency changes**: When the dependency set changes (conditional dependencies), there is a window between getter evaluation and backlink registration where a concurrent write to a newly-added dependency would not trigger recalculation. The `do/while` loop closes this window:
-   - **First iteration**: evaluates getter, registers backlinks. Any concurrent write that happened *before* backlink registration is not yet visible.
-   - **Second iteration**: re-evaluates getter with backlinks now in place. Picks up any writes that landed during the first iteration. If deps are stable, `SequenceEqual` returns true and the loop exits.
-   - **After the loop**: backlinks are registered. Any *subsequent* write triggers recalculation via the normal path and blocks on `lock(data)`.
+2. **Generation-based concurrent write detection**: `WriteProperty` increments `_writeGeneration` on every write (`Volatile.Write`, release fence). `AttachProperty` and `RecalculateDerivedProperty` read the counter before and after evaluation (`Volatile.Read`, acquire fence). If unchanged, no concurrent write occurred and re-evaluation is skipped. If changed, the stabilization loop runs to catch writes that landed between getter evaluation and backlink registration.
 
-   Together, the loop catches writes from *before* backlink registration, and the lock ensures writes *after* registration are handled. No writes are missed.
+3. **Stabilization loop (on concurrent write detection)**: When the generation check detects a concurrent write AND the dependency set changed, the `do/while` loop re-evaluates until dependencies stabilize:
+   - **First iteration**: evaluates getter, registers backlinks.
+   - **Subsequent iterations**: re-evaluate with backlinks in place, catching writes that happened before backlinks were registered. Each iteration that acquires backlinks ensures any *further* concurrent write to those dependencies triggers recalculation via the normal path and blocks on `lock(data)`.
+   - The loop exits when `StoreRecordedTouchedProperties` returns `false` (deps unchanged).
+
+   In the common case (no concurrent writes, or stable dependencies), the generation check avoids the loop entirely — zero extra getter evaluations.
+
+**Cross-context note**: `_writeGeneration` is per-handler (per-context). Concurrent writes from a different context may not be detected by the generation check. These writes are still handled correctly via backlink-driven recalculation (mechanism 1), which blocks on `lock(data)` and corrects the value. The result is a brief stale window rather than a permanent inconsistency. See "Cross-context limitation" above for details.
 
 ### No zombie dependencies after detach
 
 When a property is detached, no stale references remain in the dependency graph:
 
-- **Forward links cleaned (Case 1)**: `DetachProperty` iterates `data.RequiredProperties` under lock and removes the derived property from each dependency's `UsedByProperties` via CAS `Remove`. Then sets `RequiredProperties = null` and `LastKnownValue = null`.
-- **Backward links cleaned (Case 2)**: `DetachProperty` takes a `UsedByProperties` snapshot under `lock(data)`, clears `UsedByProperties = null`, then iterates the snapshot and removes the source property from each dependent's `RequiredProperties` under `lock(derivedData)`.
-- **No resurrection (Case 1)**: `DetachProperty` acquires `lock(data)` and sets `IsAttached = false`. Any concurrent `RecalculateDerivedProperty` that acquired the lock before detach will complete and re-add backlinks — but detach then removes them. Any recalculation that acquires the lock after detach sees `!IsAttached` and skips, so no backlinks are re-added.
-- **No missed backlinks (Case 2)**: The `lock(data)` in Case 2 serializes with `StoreRecordedTouchedProperties`' backlink Add (which also locks `depData`). Any backlink added before the lock is in the snapshot; any Add attempt after the lock sees `IsAttached = false` and skips. Skipped backlinks also trigger a filter that removes the detached dependency from `RequiredProperties`, preventing forward reference leaks even when no future recalculation would clean them up.
+- **Forward links cleaned (Case 1)**: Inside the single `lock(data)`, `DetachProperty` iterates `data.RequiredProperties` and removes the derived property from each dependency's `UsedByProperties` via CAS `Remove` (no nested lock). Then sets `RequiredProperties = null` and `LastKnownValue = null`.
+- **Backward links cleaned (Case 2)**: Inside the same `lock(data)`, `DetachProperty` takes a `UsedByProperties` snapshot and clears `UsedByProperties = null`. After releasing the lock, it iterates the snapshot and removes the source property from each dependent's `RequiredProperties` under `lock(derivedData)`.
+- **Atomic state transition**: The single lock ensures `IsAttached = false`, forward cleanup (Case 1), and backward snapshot (Case 2) happen atomically. No concurrent thread can observe `IsAttached = false` while `UsedByProperties` is still populated.
+- **No resurrection (Case 1)**: `DetachProperty` sets `IsAttached = false` inside the lock. Any concurrent `RecalculateDerivedProperty` that acquired the lock before detach will complete and re-add backlinks — but detach then removes them. Any recalculation that acquires the lock after detach sees `!IsAttached` and skips, so no backlinks are re-added.
+- **No missed backlinks (Case 2)**: The `lock(data)` serializes with `StoreRecordedTouchedProperties`' backlink Add (which also locks `depData`). Any backlink added before the lock is in the snapshot; any Add attempt after the lock sees `IsAttached = false` and skips. Skipped backlinks also trigger a filter that removes the detached dependency from `RequiredProperties`, preventing forward reference leaks even when no future recalculation would clean them up.
 
 ### No memory leaks from cross-subject dependencies
 
@@ -358,11 +390,13 @@ In all cases, both forward and backward links are cleaned up immediately, so no 
 
 | Scenario | Allocations | Cost |
 |----------|-------------|------|
-| Steady-state write (deps unchanged) | Zero | `SequenceEqual` on `RequiredProperties` span |
-| Dependency set changes | One `PropertyReference[]` | Differential backward link updates with `lock(depData)` per new dep |
+| Steady-state write (deps unchanged) | Zero | `SequenceEqual` on `RequiredProperties` span + one `Volatile.Write` (~1ns) |
+| Dependency set changes, no concurrent write | One `PropertyReference[]` | Differential backward link updates, generation check skips re-evaluation |
+| Dependency set changes + concurrent write | One `PropertyReference[]` | Above + stabilization loop (re-evaluation until deps stabilize) |
 | Dependency set changes + concurrent detach | Two `PropertyReference[]` | Above + filter allocation for detached deps (rare) |
 | Recording | Zero (pooled buffers) | Stack push/pop per frame |
-| Recalculation | Zero (beyond getter) | One `lock(data)` + getter invocation |
+| Recalculation | Zero (beyond getter) | One `lock(data)` + getter invocation + two `Volatile.Read` (~2ns) |
+| Attach (common path) | Zero (beyond initial) | One getter invocation + two `Volatile.Read` (~2ns) |
 | Backward link read (`UsedByProperties.Items`) | Zero | Returns stable `ReadOnlySpan` snapshot |
 
 ## Interaction with Other Interceptors
