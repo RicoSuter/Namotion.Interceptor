@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -9,47 +10,150 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// Handles derived property tracking and automatic recalculation using dependency recording.
 /// Requires LifecycleInterceptor to be added after this interceptor.
 /// </summary>
+/// <remarks>
+/// Deadlock safety: locks are acquired on per-property <see cref="DerivedPropertyData"/> objects.
+/// Nesting follows derived → dependency direction (DAG), so cycles are impossible.
+/// <see cref="DetachProperty"/> never holds two locks simultaneously.
+/// See docs/design/tracking-derived-properties.md for full concurrency analysis.
+/// </remarks>
 [RunsBefore(typeof(LifecycleInterceptor))]
 public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler
 {
-    // - Records property reads during derived property evaluation
-    // - Builds dependency graph: derived property → source properties
-    // - When source property changes, recalculates all dependent derived properties
-    // - Uses optimistic concurrency control to handle concurrent updates safely
-
-    // Thread Safety: Lock-free with allocation-free steady state. Handles concurrent writes via merge mode.
-
     [ThreadStatic]
     private static DerivedPropertyRecorder? _recorder;
 
-    // Thread-local storage for derived property recalculation to avoid closure allocations.
-    // These fields allow using static delegates instead of capturing closures.
-    [ThreadStatic]
-    private static object? _threadLocalOldValue;
-
-    private static readonly Func<IInterceptorSubject, object?> GetOldValueDelegate = static _ => _threadLocalOldValue;
     private static readonly Action<IInterceptorSubject, object?> NoOpWriteDelegate = static (_, _) => { };
+
+    // Global counter incremented on every write (Interlocked.Increment, full fence).
+    // Paired with Volatile.Read in AttachProperty/RecalculateDerivedProperty to detect
+    // concurrent writes during getter evaluation. Static so cross-context writes are visible.
+    // False positives only trigger re-evaluation when deps actually changed.
+    private static int _writeGeneration;
 
     /// <inheritdoc />
     public void AttachProperty(SubjectPropertyLifecycleChange change)
     {
         var metadata = change.Property.Metadata;
-        if (metadata.IsDerived)
-        {
-            StartRecordingTouchedProperties();
 
-            var result = metadata.GetValue?.Invoke(change.Subject);
-            change.Property.SetLastKnownValue(result);
-            change.Property.SetWriteTimestampUtcTicks(SubjectChangeContext.Current.ChangedTimestampUtcTicks);
-            
-            StoreRecordedTouchedProperties(change.Property);
+        // Derived: create data if needed. Source: only get existing (created by Store when first depended on).
+        var data = metadata.IsDerived
+            ? change.Property.GetDerivedPropertyData()
+            : change.Property.TryGetDerivedPropertyData();
+
+        if (data is null)
+        {
+            return;
+        }
+
+        lock (data)
+        {
+            data.IsAttached = true;
+
+            if (metadata.IsDerived)
+            {
+                // Evaluate getter once, re-evaluate only if a concurrent write is detected.
+                object? result;
+                try
+                {
+                    var generationBefore = Volatile.Read(ref _writeGeneration);
+
+                    StartRecordingTouchedProperties();
+                    result = metadata.GetValue?.Invoke(change.Subject);
+                    StoreRecordedTouchedProperties(change.Property, data);
+
+                    if (Volatile.Read(ref _writeGeneration) != generationBefore)
+                    {
+                        // Concurrent write detected — stabilization loop.
+                        bool dependenciesChanged;
+                        do
+                        {
+                            StartRecordingTouchedProperties();
+                            result = metadata.GetValue?.Invoke(change.Subject);
+                            dependenciesChanged = StoreRecordedTouchedProperties(change.Property, data);
+                        }
+                        while (dependenciesChanged);
+                    }
+                }
+                finally
+                {
+                    DiscardActiveRecording();
+                }
+
+                data.LastKnownValue = result;
+                change.Property.SetWriteTimestampUtcTicks(SubjectChangeContext.Current.ChangedTimestampUtcTicks);
+            }
         }
     }
 
     /// <inheritdoc />
     public void DetachProperty(SubjectPropertyLifecycleChange change)
     {
-        // No cleanup needed - dependencies are managed per-property
+        var property = change.Property;
+
+        // Skip properties without tracking data (never participated in dependency graph).
+        var data = property.TryGetDerivedPropertyData();
+        if (data is null)
+        {
+            return;
+        }
+
+        // Single lock: set IsAttached=false, clean forward links (Case 1), snapshot backward links (Case 2).
+        // Lock serializes with StoreRecordedTouchedProperties' backlink Add on the same depData.
+        PropertyReference[] usedBySnapshot;
+        lock (data)
+        {
+            data.IsAttached = false;
+
+            // Case 1 (derived only): remove this property from each dependency's UsedByProperties.
+            if (property.Metadata.IsDerived)
+            {
+                var requiredProperties = data.RequiredProperties;
+                if (requiredProperties is not null)
+                {
+                    foreach (var dependency in requiredProperties.AsSpan())
+                    {
+                        dependency.TryGetDerivedPropertyData()?.UsedByProperties?.Remove(property);
+                    }
+
+                    data.RequiredProperties = null;
+                }
+
+                data.LastKnownValue = null;
+            }
+
+            // Case 2: snapshot backward deps, then clear. Snapshot is stable (copy-on-write).
+            usedBySnapshot = data.UsedByProperties?.ItemsArray ?? [];
+            data.UsedByProperties = null;
+        }
+
+        // Case 2: remove this property from each dependent's RequiredProperties (outside lock).
+        foreach (ref readonly var derivedProperty in usedBySnapshot.AsSpan())
+        {
+            var derivedData = derivedProperty.TryGetDerivedPropertyData();
+            if (derivedData is null)
+            {
+                continue;
+            }
+
+            lock (derivedData)
+            {
+                var required = derivedData.RequiredProperties;
+                if (required is null)
+                {
+                    continue;
+                }
+
+                var index = Array.IndexOf(required, property);
+                if (index < 0)
+                {
+                    continue;
+                }
+
+                derivedData.RequiredProperties = required.Length == 1
+                    ? null
+                    : DerivedPropertyDependencies.RemoveAt(required, index);
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -57,11 +161,13 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         var result = next(ref context);
 
+        // ReSharper disable InconsistentlySynchronizedField (thread static)
         if (_recorder?.IsRecording == true)
         {
             var property = context.Property;
             _recorder.TouchProperty(ref property);
         }
+        // ReSharper restore InconsistentlySynchronizedField
 
         return result;
     }
@@ -71,84 +177,115 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         next(ref context);
 
-        // If this property is itself a derived property with a setter, recalculate it.
-        // This handles the case where SetValue is called directly on a derived property -
-        // the setter modifies internal state, but the actual value is computed by the getter.
-        // We need to: 1) re-record dependencies, 2) fire change notification with correct value.
-        // Performance: Two boolean checks for common case, extra getter call only for
-        // the rare case of derived properties with setters.
-        var metadata = context.Property.Metadata;
-        if (metadata is { IsDerived: true, SetValue: not null })
+        // Signal write before TryGet so writes to not-yet-tracked properties are also detected.
+        Interlocked.Increment(ref _writeGeneration);
+
+        var data = context.Property.TryGetDerivedPropertyData();
+        if (data is null)
+        {
+            return;
+        }
+
+        // Derived-with-setter: setter modifies state, but value comes from the getter → recalculate.
+        if (data.RequiredProperties is not null && context.Property.Metadata.SetValue is not null)
         {
             var currentTimestampUtcTicks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
             var property = context.Property;
             RecalculateDerivedProperty(ref property, currentTimestampUtcTicks);
         }
 
-        // Check this first as it's more likely to early-exit than transaction check
-        var usedByProperties = context.Property.GetUsedByProperties().Items;
-        if (usedByProperties.Length == 0)
+        var usedByProperties = Volatile.Read(ref data.UsedByProperties);
+        if (usedByProperties is not null && usedByProperties.Count > 0)
         {
-            return;
-        }
-
-        // Skip dependent recalculation during transaction capture.
-        // The [RunsBefore] ordering (Transaction before Derived) prevents non-derived writes
-        // from reaching here during capture. However, derived-with-setter properties bypass
-        // the transaction interceptor (IsDerived check), so this guard is still needed to
-        // suppress cascading recalculations until commit replay.
-        if (SubjectTransaction.HasActiveTransaction &&
-            SubjectTransaction.Current is { IsCommitting: false })
-        {
-            return;
-        }
-
-        var timestampUtcTicks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
-        for (var i = 0; i < usedByProperties.Length; i++)
-        {
-            var dependent = usedByProperties[i];
-            if (dependent == context.Property)
+            // Suppress cascading recalculations during transaction capture (replayed on commit).
+            if (SubjectTransaction.HasActiveTransaction &&
+                SubjectTransaction.Current is { IsCommitting: false })
             {
-                continue; // Skip self-references (rare edge case)
+                return;
             }
 
-            RecalculateDerivedProperty(ref dependent, timestampUtcTicks);
+            var usedByPropertiesItems = usedByProperties.Items;
+            var timestampUtcTicks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
+            for (var i = 0; i < usedByPropertiesItems.Length; i++)
+            {
+                var dependent = usedByPropertiesItems[i];
+                if (dependent == context.Property)
+                {
+                    continue; // Skip self-references (rare edge case)
+                }
+
+                RecalculateDerivedProperty(ref dependent, timestampUtcTicks);
+            }
         }
     }
 
     /// <summary>
-    /// Recalculates a derived property when one of its dependencies changes.
-    /// Records new dependencies during evaluation and updates dependency graph.
+    /// Recalculates a derived property: re-evaluates getter, updates deps, fires change notification.
+    /// Locks per-property data to serialize concurrent recalculations.
     /// </summary>
     private static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long timestampUtcTicks)
     {
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
 
-        var oldValue = derivedProperty.GetLastKnownValue();
-        StartRecordingTouchedProperties();
-        var newValue = derivedProperty.Metadata.GetValue?.Invoke(derivedProperty.Subject);
-        StoreRecordedTouchedProperties(derivedProperty);
-
-        derivedProperty.SetLastKnownValue(newValue);
-        derivedProperty.SetWriteTimestampUtcTicks(timestampUtcTicks);
-
-        // Fire change notification (null source indicates derived property change)
-        // Use thread-local storage + static delegates to avoid closure allocation
-        _threadLocalOldValue = oldValue;
-        using (SubjectChangeContext.WithSource(null))
+        var data = derivedProperty.GetDerivedPropertyData();
+        lock (data)
         {
-            derivedProperty.SetPropertyValueWithInterception(newValue, GetOldValueDelegate, NoOpWriteDelegate);
-        }
+            // Re-entrancy guard: derived-with-setter → SetPropertyValueWithInterception → WriteProperty
+            // → RecalculateDerivedProperty. Lock is re-entrant (same thread), so this flag is needed.
+            if (data.IsRecalculating)
+            {
+                return;
+            }
 
-        if (derivedProperty.Subject is IRaisePropertyChanged raiser)
-        {
-            raiser.RaisePropertyChanged(derivedProperty.Metadata.Name);
+            if (!data.IsAttached)
+            {
+                return;
+            }
+
+            data.IsRecalculating = true;
+            try
+            {
+                var oldValue = data.LastKnownValue;
+                var generationBefore = Volatile.Read(ref _writeGeneration);
+
+                StartRecordingTouchedProperties();
+                var newValue = derivedProperty.Metadata.GetValue?.Invoke(derivedProperty.Subject);
+                var dependenciesChanged = StoreRecordedTouchedProperties(derivedProperty, data);
+
+                // Stabilization loop: only when deps changed AND a concurrent write was detected.
+                if (dependenciesChanged && Volatile.Read(ref _writeGeneration) != generationBefore)
+                {
+                    do
+                    {
+                        StartRecordingTouchedProperties();
+                        newValue = derivedProperty.Metadata.GetValue?.Invoke(derivedProperty.Subject);
+                        dependenciesChanged = StoreRecordedTouchedProperties(derivedProperty, data);
+                    }
+                    while (dependenciesChanged);
+                }
+
+                data.LastKnownValue = newValue;
+                derivedProperty.SetWriteTimestampUtcTicks(timestampUtcTicks);
+
+                // Fire change notification (null source = internal recalculation, not external).
+                using (SubjectChangeContext.WithSource(null))
+                {
+                    derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate);
+                }
+
+                if (derivedProperty.Subject is IRaisePropertyChanged raiser)
+                {
+                    raiser.RaisePropertyChanged(derivedProperty.Metadata.Name);
+                }
+            }
+            finally
+            {
+                DiscardActiveRecording();
+                data.IsRecalculating = false;
+            }
         }
     }
 
-    /// <summary>
-    /// Starts recording property accesses for dependency tracking.
-    /// </summary>
     private static void StartRecordingTouchedProperties()
     {
         _recorder ??= new DerivedPropertyRecorder();
@@ -156,78 +293,119 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     }
 
     /// <summary>
-    /// Updates forward (required) and backward (usedBy) dependencies using optimistic concurrency control.
-    /// Strategy:
-    /// - Sequential writes: Replace dependencies (exact tracking, removes stale)
-    /// - Concurrent writes: Merge dependencies (conservative, keeps all discovered)
-    /// - No change: Early exit (allocation-free)
-    /// Use version to prevent ABA problem where two threads think they have exclusive access.
+    /// Cleans up recorder state if getter threw before StoreRecordedTouchedProperties ran.
+    /// No-op on the happy path (recording already finished and cleared).
     /// </summary>
-    private static void StoreRecordedTouchedProperties(PropertyReference derivedProperty)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void DiscardActiveRecording()
     {
-        var recordedDependencies = _recorder!.FinishRecording();
-        var requiredProps = derivedProperty.GetRequiredProperties();
-
-        // Read version twice to detect concurrent modifications (allocation-free double-check)
-        var version1 = requiredProps.Version;
-        var previousItems = requiredProps.Items;
-        var version2 = requiredProps.Version;
-
-        // Detect concurrent modification during read
-        if (version1 != version2)
-        {
-            MergeRecordedDependencies(requiredProps, recordedDependencies, derivedProperty);
-            return;
-        }
-
-        if (previousItems.SequenceEqual(recordedDependencies))
+        if (_recorder is null)
         {
             return;
         }
 
-        if (!requiredProps.TryReplace(recordedDependencies, version1))
+        if (_recorder.IsRecording)
         {
-            // Version changed = concurrent write detected, use conservative merge
-            MergeRecordedDependencies(requiredProps, recordedDependencies, derivedProperty);
-            return;
+            _recorder.FinishRecording();
         }
 
-        // Success: Exclusive access confirmed, safe to update backlinks
-        // Note: previousItems span still valid (points to old array kept alive by GC)
-        // Remove this derived property from old dependencies no longer used
-        foreach (ref readonly var oldDependency in previousItems)
-        {
-            if (!recordedDependencies.Contains(oldDependency))
-            {
-                oldDependency.GetUsedByProperties().Remove(derivedProperty);
-            }
-        }
-
-        // Add this derived property to new dependencies
-        foreach (ref readonly var newDependency in recordedDependencies)
-        {
-            if (!previousItems.Contains(newDependency))
-            {
-                newDependency.GetUsedByProperties().Add(derivedProperty);
-            }
-        }
+        // Always clear to prevent thread-static from holding refs to detached subjects.
+        _recorder.ClearLastRecording();
     }
 
     /// <summary>
-    /// Merge mode for concurrent write conflicts - conservatively adds all recorded dependencies.
-    /// Never removes dependencies to avoid race conditions. Safe but may accumulate stale dependencies
-    /// until next exclusive-access recalculation.
+    /// Updates forward (RequiredProperties) and backward (UsedByProperties) dependency links.
+    /// Called under lock(data). Returns true if dependency set changed (caller should re-evaluate).
     /// </summary>
-    private static void MergeRecordedDependencies(
-        DerivedPropertyDependencies requiredProps,
-        ReadOnlySpan<PropertyReference> recordedDependencies,
-        PropertyReference derivedProperty)
+    private static bool StoreRecordedTouchedProperties(PropertyReference derivedProperty, DerivedPropertyData data)
     {
-        // Add all recorded dependencies (CAS-based Add() is idempotent and thread-safe)
-        foreach (ref readonly var dependency in recordedDependencies)
+        var recordedDependencies = _recorder!.FinishRecording();
+        var previousItems = data.RequiredProperties.AsSpan();
+
+        // Fast path: deps unchanged → no allocation.
+        if (previousItems.SequenceEqual(recordedDependencies))
         {
-            requiredProps.Add(dependency);
-            dependency.GetUsedByProperties().Add(derivedProperty);
+            _recorder.ClearLastRecording();
+            return false;
         }
+
+        // Copy recorded deps to owned array, then release recorder buffer.
+        var newItems = recordedDependencies.ToArray();
+        _recorder.ClearLastRecording();
+
+        data.RequiredProperties = newItems;
+
+        // Differential backward link update.
+        ReadOnlySpan<PropertyReference> newDeps = newItems;
+        foreach (ref readonly var oldDependency in previousItems)
+        {
+            if (!newDeps.Contains(oldDependency))
+            {
+                oldDependency.TryGetDerivedPropertyData()?.UsedByProperties?.Remove(derivedProperty);
+            }
+        }
+
+        // Add backlinks for new deps. Lock depData to serialize with DetachProperty's IsAttached check.
+        var hasSkippedDependencies = false;
+        foreach (ref readonly var newDependency in newDeps)
+        {
+            if (!previousItems.Contains(newDependency))
+            {
+                var depData = newDependency.GetDerivedPropertyData();
+                lock (depData)
+                {
+                    if (depData.IsAttached)
+                    {
+                        depData.GetOrCreateUsedByProperties().Add(derivedProperty);
+                    }
+                    else
+                    {
+                        hasSkippedDependencies = true;
+                    }
+                }
+            }
+        }
+
+        // Rare path: a dependency was detaching concurrently. Re-check under lock to handle
+        // re-attachment, then filter out still-detached deps from RequiredProperties.
+        if (hasSkippedDependencies)
+        {
+            var liveCount = 0;
+            for (var i = 0; i < newItems.Length; i++)
+            {
+                var depData = newItems[i].TryGetDerivedPropertyData();
+                if (depData is null)
+                {
+                    newItems[liveCount++] = newItems[i];
+                    continue;
+                }
+
+                lock (depData)
+                {
+                    if (depData.IsAttached)
+                    {
+                        depData.GetOrCreateUsedByProperties().Add(derivedProperty);
+                        newItems[liveCount++] = newItems[i];
+                    }
+                    else
+                    {
+                        depData.UsedByProperties?.Remove(derivedProperty);
+                    }
+                }
+            }
+
+            data.RequiredProperties = liveCount == 0
+                ? null
+                : newItems.AsSpan(0, liveCount).ToArray();
+
+            // If filtered result matches previous deps, nothing effectively changed.
+            // Return false to prevent infinite stabilization loop.
+            if (data.RequiredProperties.AsSpan().SequenceEqual(previousItems))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

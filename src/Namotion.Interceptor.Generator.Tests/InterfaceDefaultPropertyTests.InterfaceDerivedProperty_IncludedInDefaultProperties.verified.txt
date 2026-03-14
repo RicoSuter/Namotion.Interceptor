@@ -98,7 +98,7 @@ namespace YourDefaultNamespace
                 var newValue = value;
                 var cancel = false;
                 OnCelsiusChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Celsius), newValue, static (o) => ((TemperatureSensor)o)._Celsius, static (o, v) => ((TemperatureSensor)o)._Celsius = v))
+                if (!cancel && SetPropertyValue(nameof(Celsius), newValue, _Celsius, static (o, v) => ((TemperatureSensor)o)._Celsius = v))
                 {
                     OnCelsiusChanged(_Celsius);
                     RaisePropertyChanged(nameof(Celsius));
@@ -117,7 +117,7 @@ namespace YourDefaultNamespace
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
+        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
         {
             if (_context is null)
             {
@@ -126,7 +126,7 @@ namespace YourDefaultNamespace
             }
             else
             {
-                return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
+                return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
             }
         }
 

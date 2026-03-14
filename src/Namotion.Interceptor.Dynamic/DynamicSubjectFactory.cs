@@ -81,8 +81,8 @@ public class DynamicSubjectFactory
                 var propertyName = invocation.Method.Name[4..];
                 var newValue = invocation.Arguments[0];
                 var propertyType = invocation.Method.GetParameters().Single().ParameterType;
-                context.SetPropertyValue(propertyName, newValue,
-                    _ => ReadProperty(propertyName, propertyType),
+                var currentValue = ReadProperty(propertyName, propertyType);
+                context.SetPropertyValue(propertyName, newValue, currentValue,
                     (_, value) => WriteProperty(propertyName, value));
 
                 invocation.ReturnValue = null;

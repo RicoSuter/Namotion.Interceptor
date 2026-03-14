@@ -1,17 +1,22 @@
 namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
-/// Lock-free, copy-on-write collection for property dependencies.
+/// Lock-free, copy-on-write collection for backward property dependencies (UsedByProperties).
 /// Concurrency Model:
 /// - Reads: Allocation-free via <see cref="Items"/>. Always returns stable snapshot.
 /// - Writes: Lock-free CAS (Compare-And-Swap) with automatic retry on contention.
-/// - Version: Monotonically increasing counter for optimistic concurrency control.
-/// Design: Copy-on-write ensures readers never see partial updates. Version counter detects ABA problems.
+/// Design: Copy-on-write ensures readers never see partial updates.
+/// Memory: Allocates on mutation (inherent to copy-on-write). Steady-state is allocation-free.
 /// </summary>
 public sealed class DerivedPropertyDependencies
 {
+    /// <summary>
+    /// Shared empty instance for read-only queries when no data exists.
+    /// Avoids allocating data objects just to check dependencies.
+    /// </summary>
+    internal static readonly DerivedPropertyDependencies Empty = new();
+
     private PropertyReference[] _items = [];
-    private long _version; // Increments on every mutation (Add/Remove/TryReplace)
 
     /// <summary>
     /// Gets the count of dependencies (thread-safe, allocation-free).
@@ -19,16 +24,16 @@ public sealed class DerivedPropertyDependencies
     public int Count => Volatile.Read(ref _items).Length;
 
     /// <summary>
-    /// Gets the current version for optimistic concurrency control.
-    /// Version increments on every mutation. Wraps around after 2^64 operations (584 years @ 1B ops/sec).
-    /// </summary>
-    internal long Version => Volatile.Read(ref _version);
-
-    /// <summary>
     /// Gets a stable snapshot for iteration (thread-safe, allocation-free).
     /// <para>Snapshot won't change even if collection is modified concurrently - copy-on-write semantics.</para>
     /// </summary>
     public ReadOnlySpan<PropertyReference> Items => Volatile.Read(ref _items);
+
+    /// <summary>
+    /// Gets the underlying snapshot array (thread-safe). Use when a span cannot be stored
+    /// (e.g., across lock boundaries where ref structs are not allowed).
+    /// </summary>
+    internal PropertyReference[] ItemsArray => Volatile.Read(ref _items);
 
     /// <summary>
     /// Adds a dependency using lock-free CAS (compare-and-swap).
@@ -53,10 +58,7 @@ public sealed class DerivedPropertyDependencies
 
             // Atomic swap: Succeeds if no other thread modified _items
             if (ReferenceEquals(Interlocked.CompareExchange(ref _items, newArr, snapshot), snapshot))
-            {
-                Interlocked.Increment(ref _version);
                 return true;
-            }
 
             // Another thread won the race - retry with new snapshot
         }
@@ -85,17 +87,14 @@ public sealed class DerivedPropertyDependencies
 
             // Atomic swap: Succeeds if no other thread modified _items
             if (ReferenceEquals(Interlocked.CompareExchange(ref _items, newArr, snapshot), snapshot))
-            {
-                Interlocked.Increment(ref _version);
                 return true;
-            }
 
             // Another thread won the race - retry with new snapshot
         }
     }
 
     // Helper: Creates new array with item at index removed
-    private static PropertyReference[] RemoveAt(PropertyReference[] source, int index)
+    internal static PropertyReference[] RemoveAt(PropertyReference[] source, int index)
     {
         var result = new PropertyReference[source.Length - 1];
         if (index > 0)
@@ -103,27 +102,5 @@ public sealed class DerivedPropertyDependencies
         if (index < source.Length - 1)
             Array.Copy(source, index + 1, result, index, source.Length - index - 1);
         return result;
-    }
-
-    /// <summary>
-    /// Attempts to atomically replace all dependencies if version matches (optimistic concurrency).
-    /// Check version matches expectedVersion (no concurrent modifications)
-    /// - If match: Replace array and increment version
-    /// - If mismatch: Return false (caller should use merge mode)
-    /// The version check prevents ABA problem where value changes and changes back.
-    /// </summary>
-    /// <returns>True if replaced successfully; false if version changed (concurrent modification detected).</returns>
-    internal bool TryReplace(ReadOnlySpan<PropertyReference> newItems, long expectedVersion)
-    {
-        // Optimistic concurrency: Fail if another thread modified since we read
-        if (Volatile.Read(ref _version) != expectedVersion)
-            return false;
-
-        // Replace array atomically (volatile write ensures visibility)
-        var newArr = newItems.Length == 0 ? [] : newItems.ToArray();
-        Volatile.Write(ref _items, newArr);
-        Interlocked.Increment(ref _version);
-
-        return true;
     }
 }

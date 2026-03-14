@@ -146,7 +146,7 @@ The server automatically configures security policies, authentication, operation
 
 ### Node Mapper
 
-Both client and server configurations include a `NodeMapper` property (`IOpcUaNodeMapper`) that controls how C# properties map to OPC UA nodes. The default is a `CompositeNodeMapper` combining `PathProviderOpcUaNodeMapper` (maps `[Path]` attributes) and `AttributeOpcUaNodeMapper` (maps `[OpcUaNode]` attributes). For custom mapping strategies including fluent configuration and composite mappers, see [OPC UA Mapping Guide](opcua-mapping.md).
+Both client and server configurations include a `NodeMapper` property (`IOpcUaNodeMapper`) that controls how C# properties map to OPC UA nodes. The default is a `CompositeNodeMapper` combining `PathProviderOpcUaNodeMapper` (maps `[Path]` attributes) and `AttributeOpcUaNodeMapper` (maps `[OpcUaNode]` attributes). For custom mapping strategies including fluent configuration and composite mappers, see [OPC UA Mapping Guide](connectors-opcua-mapping.md).
 
 ## Property Mapping
 
@@ -172,7 +172,7 @@ public partial class Machine
 }
 ```
 
-For comprehensive mapping documentation including companion spec support, VariableTypes, and fluent configuration, see [OPC UA Mapping Guide](opcua-mapping.md).
+For comprehensive mapping documentation including companion spec support, VariableTypes, and fluent configuration, see [OPC UA Mapping Guide](connectors-opcua-mapping.md).
 
 ## Monitoring & Subscriptions
 
@@ -423,7 +423,7 @@ The server automatically loads embedded NodeSets:
 
 Reference these types with `[OpcUaNode(TypeDefinition = "...", TypeDefinitionNamespace = "...")]`.
 
-For mapping patterns with companion specs, see [OPC UA Mapping Guide — Companion Spec Support](opcua-mapping.md#opc-ua-companion-spec-support).
+For mapping patterns with companion specs, see [OPC UA Mapping Guide — Companion Spec Support](connectors-opcua-mapping.md#opc-ua-companion-spec-support).
 
 ## Resilience
 
@@ -621,7 +621,7 @@ using (SubjectChangeContext.WithSource(opcUaSource))
 
 ## Lifecycle Management
 
-The OPC UA integration hooks into the interceptor lifecycle system (see [Subject Lifecycle Tracking](../tracking.md#subject-lifecycle-tracking)) to clean up resources when subjects are detached.
+The OPC UA integration hooks into the interceptor lifecycle system (see [Subject Lifecycle Tracking](tracking.md#subject-lifecycle-tracking)) to clean up resources when subjects are detached.
 
 ### Automatic Cleanup on Subject Detach
 

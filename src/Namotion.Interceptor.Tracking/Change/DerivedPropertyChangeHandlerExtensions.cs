@@ -1,49 +1,50 @@
+using System.Runtime.CompilerServices;
+
 namespace Namotion.Interceptor.Tracking.Change;
 
 /// <summary>
 /// Extension methods for derived property dependency tracking.
-/// Stores dependency graph and cached values in PropertyReference metadata dictionary.
+/// All data is consolidated into a single <see cref="DerivedPropertyData"/> object per property
+/// stored with a short key to minimize dictionary lookup overhead.
 /// </summary>
 public static class DerivedPropertyChangeHandlerExtensions
 {
-    private const string UsedByPropertiesKey = "Namotion.Interceptor.UsedByProperties";
-    private const string RequiredPropertiesKey = "Namotion.Interceptor.RequiredProperties";
-    private const string LastKnownValueKey = "Namotion.Interceptor.LastKnownValue";
+    // Short key to reduce dictionary hash cost on this hot path (verified).
+    private const string DataKey = "ni.dpd";
 
     /// <summary>
     /// Gets backward dependencies: Which derived properties depend on this property.
     /// Example: If FullName depends on FirstName, then FirstName.GetUsedByProperties() includes FullName.
+    /// Returns a shared empty instance if no tracking data exists (allocation-free).
     /// </summary>
     public static DerivedPropertyDependencies GetUsedByProperties(this PropertyReference property) =>
-        property.GetOrAddPropertyData(UsedByPropertiesKey, static () => new DerivedPropertyDependencies());
+        property.TryGetDerivedPropertyData()?.UsedByProperties ?? DerivedPropertyDependencies.Empty;
 
     /// <summary>
     /// Gets forward dependencies: Which properties this derived property depends on.
     /// Example: FullName.GetRequiredProperties() includes FirstName and LastName.
+    /// Returns empty span if no tracking data exists (allocation-free).
     /// </summary>
-    public static DerivedPropertyDependencies GetRequiredProperties(this PropertyReference property) =>
-        property.GetOrAddPropertyData(RequiredPropertiesKey, static () => new DerivedPropertyDependencies());
-
-    /// <summary>
-    /// Gets the cached last known value of a derived property.
-    /// Used for change detection (compare old vs new value).
-    /// </summary>
-    internal static object? GetLastKnownValue(this PropertyReference property) =>
-        property.GetOrAddPropertyData(LastKnownValueKey, static () => new LastKnownValueWrapper()).Value;
-
-    /// <summary>
-    /// Sets the cached last known value of a derived property.
-    /// </summary>
-    internal static void SetLastKnownValue(this PropertyReference property, object? value) =>
-        property.AddOrUpdatePropertyData<LastKnownValueWrapper, object?>(
-            LastKnownValueKey, static (wrapper, val) => wrapper.Value = val, value);
-
-    /// <summary>
-    /// Wrapper to avoid repeated boxing of value types.
-    /// Allocated once per property (stored in metadata dict), then reused for all updates.
-    /// </summary>
-    private sealed class LastKnownValueWrapper
+    public static ReadOnlySpan<PropertyReference> GetRequiredProperties(this PropertyReference property)
     {
-        public object? Value { get; set; }
+        var items = property.TryGetDerivedPropertyData()?.RequiredProperties;
+        return items is not null ? items.AsSpan() : ReadOnlySpan<PropertyReference>.Empty;
     }
+
+    /// <summary>
+    /// Gets the consolidated tracking data for a property, creating it if needed.
+    /// A single dictionary lookup provides access to UsedByProperties, RequiredProperties, and LastKnownValue.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static DerivedPropertyData GetDerivedPropertyData(this PropertyReference property) =>
+        property.GetOrAddPropertyData(DataKey, static () => new DerivedPropertyData());
+
+    /// <summary>
+    /// Tries to get the consolidated tracking data without allocating if not present.
+    /// Returns null if no tracking data has been registered for this property.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static DerivedPropertyData? TryGetDerivedPropertyData(this PropertyReference property) =>
+        property.TryGetPropertyData(DataKey, out var value) ? value as DerivedPropertyData : null;
+
 }
