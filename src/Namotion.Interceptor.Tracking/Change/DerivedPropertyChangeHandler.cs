@@ -11,41 +11,23 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// Requires LifecycleInterceptor to be added after this interceptor.
 /// </summary>
 /// <remarks>
-/// Lock ordering / deadlock safety:
-/// Locks are always acquired on per-property <see cref="DerivedPropertyData"/> objects.
-/// <para>
-/// <see cref="RecalculateDerivedProperty"/> and <see cref="StoreRecordedTouchedProperties"/>
-/// nest locks in derived → dependency direction: lock(D_data) → lock(X_data).
-/// A deadlock would require a cycle, which would imply a circular dependency in the property
-/// graph — but circular getter dependencies cause infinite recursion before any lock is reached,
-/// so the graph is always a DAG and deadlock is impossible.
-/// </para>
-/// <para>
-/// <see cref="DetachProperty"/> uses a single lock(data) for all local cleanup (IsAttached, forward deps,
-/// backward snapshot), then acquires lock(derivedData) sequentially for RequiredProperties cleanup.
-/// Because DetachProperty never holds two locks simultaneously, it cannot participate in a lock cycle.
-/// </para>
+/// Deadlock safety: locks are acquired on per-property <see cref="DerivedPropertyData"/> objects.
+/// Nesting follows derived → dependency direction (DAG), so cycles are impossible.
+/// <see cref="DetachProperty"/> never holds two locks simultaneously.
+/// See docs/design/tracking-derived-properties.md for full concurrency analysis.
 /// </remarks>
 [RunsBefore(typeof(LifecycleInterceptor))]
 public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler
 {
-    // Lock-free dependency tracking with an allocation-free steady state.
-    // Records property reads → builds dependency graph → recalculates dependents on write.
-
     [ThreadStatic]
     private static DerivedPropertyRecorder? _recorder;
 
     private static readonly Action<IInterceptorSubject, object?> NoOpWriteDelegate = static (_, _) => { };
 
-    // Global write-detection counter for concurrent-write checks in AttachProperty and
-    // RecalculateDerivedProperty. Static so writes from any context are detected, even when
-    // dependencies span contexts (e.g., via context inheritance).
-    // Incremented atomically via Interlocked.Increment on every property write, ensuring each
-    // write produces a unique counter value (no lost increments from concurrent writers).
-    // Interlocked.Increment provides a full fence, pairing with Volatile.Read's acquire semantics
-    // to guarantee that committed property values are visible when the counter change is observed.
-    // False positives (unrelated writes) only affect AttachProperty and RecalculateDerivedProperty
-    // when deps change — the steady-state write path never checks the generation.
+    // Global counter incremented on every write (Interlocked.Increment, full fence).
+    // Paired with Volatile.Read in AttachProperty/RecalculateDerivedProperty to detect
+    // concurrent writes during getter evaluation. Static so cross-context writes are visible.
+    // False positives only trigger re-evaluation when deps actually changed.
     private static int _writeGeneration;
 
     /// <inheritdoc />
@@ -53,9 +35,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         var metadata = change.Property.Metadata;
 
-        // For derived properties, GetDerivedPropertyData creates data if needed (first attach).
-        // For source properties, TryGet returns null on first attach (data created later by
-        // StoreRecordedTouchedProperties when a derived property first depends on it).
+        // Derived: create data if needed. Source: only get existing (created by Store when first depended on).
         var data = metadata.IsDerived
             ? change.Property.GetDerivedPropertyData()
             : change.Property.TryGetDerivedPropertyData();
@@ -67,17 +47,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         lock (data)
         {
-            // Reset IsAttached for re-attachment after DetachProperty cleared it.
-            // On first attach the field default (true) is redundant but harmless.
             data.IsAttached = true;
 
             if (metadata.IsDerived)
             {
-                // Single evaluation, with generation-based concurrent-write detection.
-                // On the common path (single-threaded construction), _writeGeneration is
-                // unchanged → zero extra getter evaluations (vs. the old unconditional loop).
-                // If a concurrent write IS detected (rare), fall back to the stabilization
-                // loop for full correctness (same as RecalculateDerivedProperty).
+                // Evaluate getter once, re-evaluate only if a concurrent write is detected.
                 object? result;
                 try
                 {
@@ -89,6 +63,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
                     if (Volatile.Read(ref _writeGeneration) != generationBefore)
                     {
+                        // Concurrent write detected — stabilization loop.
                         bool dependenciesChanged;
                         do
                         {
@@ -115,25 +90,21 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         var property = change.Property;
 
+        // Skip properties without tracking data (never participated in dependency graph).
         var data = property.TryGetDerivedPropertyData();
         if (data is null)
         {
             return;
         }
 
-        // Single lock handles both forward (Case 1) and backward (Case 2) cleanup.
-        // Case 1 (derived only): Remove this property from its dependencies' UsedByProperties.
-        // Case 2 (all properties): Snapshot and clear UsedByProperties, then clean dependents' RequiredProperties.
-        // Snapshot under lock serializes with StoreRecordedTouchedProperties' backlink Add (which also locks depData).
-        // This ensures: either the backlink was added before our snapshot (we see it and clean up),
-        // or StoreRecordedTouchedProperties acquires the lock after us and sees IsAttached=false (skips Add).
-        // Release lock before processing Case 2 snapshot to avoid nesting with lock(derivedData) → no deadlock.
+        // Single lock: set IsAttached=false, clean forward links (Case 1), snapshot backward links (Case 2).
+        // Lock serializes with StoreRecordedTouchedProperties' backlink Add on the same depData.
         PropertyReference[] usedBySnapshot;
         lock (data)
         {
             data.IsAttached = false;
 
-            // Case 1: Derived property — remove forward dependencies.
+            // Case 1 (derived only): remove this property from each dependency's UsedByProperties.
             if (property.Metadata.IsDerived)
             {
                 var requiredProperties = data.RequiredProperties;
@@ -150,13 +121,12 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 data.LastKnownValue = null;
             }
 
-            // Case 2: Snapshot backward dependencies for cleanup outside lock.
-            // ItemsArray returns a stable copy-on-write snapshot, safe to use after releasing the lock.
+            // Case 2: snapshot backward deps, then clear. Snapshot is stable (copy-on-write).
             usedBySnapshot = data.UsedByProperties?.ItemsArray ?? [];
             data.UsedByProperties = null;
         }
 
-        // Case 2: Remove this property from each dependent's RequiredProperties.
+        // Case 2: remove this property from each dependent's RequiredProperties (outside lock).
         foreach (ref readonly var derivedProperty in usedBySnapshot.AsSpan())
         {
             var derivedData = derivedProperty.TryGetDerivedPropertyData();
@@ -190,7 +160,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
     {
         var result = next(ref context);
-        
+
         // ReSharper disable InconsistentlySynchronizedField (thread static)
         if (_recorder?.IsRecording == true)
         {
@@ -207,22 +177,16 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         next(ref context);
 
-        // Signal write for AttachProperty's concurrent-write detection.
-        // Placed before TryGetDerivedPropertyData so writes to not-yet-tracked properties
-        // (which may become dependencies during a concurrent AttachProperty) are also detected.
+        // Signal write before TryGet so writes to not-yet-tracked properties are also detected.
         Interlocked.Increment(ref _writeGeneration);
 
-        // Fast path: skip all post-write processing for properties without tracking data.
         var data = context.Property.TryGetDerivedPropertyData();
         if (data is null)
         {
             return;
         }
 
-        // If this property is itself a derived property with a setter, recalculate it.
-        // The setter modifies internal state, but the actual value is computed by the getter.
-        // We need to: 1) re-record dependencies, 2) fire change notification with correct value.
-        // RequiredProperties is only set for derived properties (during StoreRecordedTouchedProperties).
+        // Derived-with-setter: setter modifies state, but value comes from the getter → recalculate.
         if (data.RequiredProperties is not null && context.Property.Metadata.SetValue is not null)
         {
             var currentTimestampUtcTicks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
@@ -233,9 +197,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         var usedByProperties = Volatile.Read(ref data.UsedByProperties);
         if (usedByProperties is not null && usedByProperties.Count > 0)
         {
-            // Skip dependent recalculation during transaction capture.
-            // Derived-with-setter properties bypass the transaction interceptor (IsDerived check),
-            // so this guard suppresses cascading recalculations until commit replay.
+            // Suppress cascading recalculations during transaction capture (replayed on commit).
             if (SubjectTransaction.HasActiveTransaction &&
                 SubjectTransaction.Current is { IsCommitting: false })
             {
@@ -258,9 +220,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     }
 
     /// <summary>
-    /// Recalculates a derived property when one of its dependencies changes.
-    /// Locks on the per-property DerivedPropertyData to serialize concurrent recalculations
-    /// of the same derived property, ensuring dependencies and value stay consistent.
+    /// Recalculates a derived property: re-evaluates getter, updates deps, fires change notification.
+    /// Locks per-property data to serialize concurrent recalculations.
     /// </summary>
     private static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long timestampUtcTicks)
     {
@@ -269,11 +230,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         var data = derivedProperty.GetDerivedPropertyData();
         lock (data)
         {
-            // Re-entrancy guard: when a derived-with-setter property is recalculated,
-            // SetPropertyValueWithInterception re-enters WriteProperty which would call
-            // RecalculateDerivedProperty again for the same property. The lock is re-entrant
-            // (same thread), so without this guard the recursion is infinite.
-            // Cross-thread callers block on the lock and see IsRecalculating=false after release.
+            // Re-entrancy guard: derived-with-setter → SetPropertyValueWithInterception → WriteProperty
+            // → RecalculateDerivedProperty. Lock is re-entrant (same thread), so this flag is needed.
             if (data.IsRecalculating)
             {
                 return;
@@ -290,15 +248,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 var oldValue = data.LastKnownValue;
                 var generationBefore = Volatile.Read(ref _writeGeneration);
 
-                // Single evaluation, with generation-based concurrent-write detection.
-                // If deps changed (conditional branch or cross-subject swap) but no
-                // concurrent write occurred, the recorded deps and value are already
-                // correct — skip re-evaluation. If a concurrent write IS detected,
-                // fall back to the stabilization loop for full correctness.
                 StartRecordingTouchedProperties();
                 var newValue = derivedProperty.Metadata.GetValue?.Invoke(derivedProperty.Subject);
                 var dependenciesChanged = StoreRecordedTouchedProperties(derivedProperty, data);
 
+                // Stabilization loop: only when deps changed AND a concurrent write was detected.
                 if (dependenciesChanged && Volatile.Read(ref _writeGeneration) != generationBefore)
                 {
                     do
@@ -313,7 +267,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 data.LastKnownValue = newValue;
                 derivedProperty.SetWriteTimestampUtcTicks(timestampUtcTicks);
 
-                // Fire change notification with known old value (zero-alloc, no ThreadStatic).
+                // Fire change notification (null source = internal recalculation, not external).
                 using (SubjectChangeContext.WithSource(null))
                 {
                     derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate);
@@ -332,9 +286,6 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
     }
 
-    /// <summary>
-    /// Starts recording property accesses for dependency tracking.
-    /// </summary>
     private static void StartRecordingTouchedProperties()
     {
         _recorder ??= new DerivedPropertyRecorder();
@@ -342,9 +293,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     }
 
     /// <summary>
-    /// Discards an active recording if the getter threw before StoreRecordedTouchedProperties could run.
-    /// Called in finally blocks to prevent recorder depth corruption.
-    /// Zero overhead on the happy path (recording is already finished).
+    /// Cleans up recorder state if getter threw before StoreRecordedTouchedProperties ran.
+    /// No-op on the happy path (recording already finished and cleared).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static void DiscardActiveRecording()
@@ -359,41 +309,33 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             _recorder.FinishRecording();
         }
 
-        // Always clear, even if recording was already finished by StoreRecordedTouchedProperties.
-        // Handles the case where FinishRecording succeeded but ClearLastRecording didn't run
-        // (exception between them). No-op if already cleared (Count == 0).
+        // Always clear to prevent thread-static from holding refs to detached subjects.
         _recorder.ClearLastRecording();
     }
 
     /// <summary>
-    /// Updates forward (required) and backward (usedBy) dependencies.
-    /// Called under lock(data) for the derived property, so RequiredProperties access is serialized.
-    /// Backward link additions lock the dependency's data to serialize with DetachProperty.
+    /// Updates forward (RequiredProperties) and backward (UsedByProperties) dependency links.
+    /// Called under lock(data). Returns true if dependency set changed (caller should re-evaluate).
     /// </summary>
-    /// <returns>True if the dependency set changed (caller should re-evaluate); false if unchanged.</returns>
     private static bool StoreRecordedTouchedProperties(PropertyReference derivedProperty, DerivedPropertyData data)
     {
         var recordedDependencies = _recorder!.FinishRecording();
         var previousItems = data.RequiredProperties.AsSpan();
 
-        // Steady-state fast path: no allocation if dependencies unchanged.
+        // Fast path: deps unchanged → no allocation.
         if (previousItems.SequenceEqual(recordedDependencies))
         {
             _recorder.ClearLastRecording();
             return false;
         }
 
-        // Copy to array and release recorder buffer immediately.
-        // After ClearLastRecording(), the recordedDependencies span is invalidated;
-        // all subsequent code uses newItems instead.
+        // Copy recorded deps to owned array, then release recorder buffer.
         var newItems = recordedDependencies.ToArray();
         _recorder.ClearLastRecording();
 
-        // Replace forward dependencies (simple assignment under lock).
         data.RequiredProperties = newItems;
 
-        // Update backward links differentially.
-        // Remove this derived property from old dependencies no longer used.
+        // Differential backward link update.
         ReadOnlySpan<PropertyReference> newDeps = newItems;
         foreach (ref readonly var oldDependency in previousItems)
         {
@@ -403,11 +345,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             }
         }
 
-        // Add this derived property to new dependencies not previously tracked.
-        // Lock depData to serialize the IsAttached check + Add with DetachProperty's
-        // IsAttached=false + snapshot (both under the same lock). This guarantees:
-        // - If DetachProperty wins the lock: sets IsAttached=false, takes snapshot. We see false → skip.
-        // - If we win the lock: IsAttached=true, Add succeeds. DetachProperty's snapshot includes us → cleans up.
+        // Add backlinks for new deps. Lock depData to serialize with DetachProperty's IsAttached check.
         var hasSkippedDependencies = false;
         foreach (ref readonly var newDependency in newDeps)
         {
@@ -428,13 +366,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             }
         }
 
-        // When a backlink Add was skipped (dependency detaching), remove that dependency
-        // from RequiredProperties to prevent forward reference leaks (memory) and stale deps.
-        // Re-check IsAttached under lock to handle concurrent re-attachment: if a dependency
-        // was detached during the backlink loop but re-attached before we get here, the locked
-        // check sees IsAttached=true and adds the backward link (idempotent Add), ensuring
-        // forward and backward links stay consistent.
-        // Only runs in the rare concurrent detach race — zero overhead on the normal path.
+        // Rare path: a dependency was detaching concurrently. Re-check under lock to handle
+        // re-attachment, then filter out still-detached deps from RequiredProperties.
         if (hasSkippedDependencies)
         {
             var liveCount = 0;
@@ -451,14 +384,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 {
                     if (depData.IsAttached)
                     {
-                        // Dependency is (still or again) attached. Ensure backward link exists.
-                        // Idempotent for deps that were successfully added in the backlink loop.
                         depData.GetOrCreateUsedByProperties().Add(derivedProperty);
                         newItems[liveCount++] = newItems[i];
                     }
                     else
                     {
-                        // Still detached — remove from RequiredProperties and clean backward link.
                         depData.UsedByProperties?.Remove(derivedProperty);
                     }
                 }
@@ -468,9 +398,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 ? null
                 : newItems.AsSpan(0, liveCount).ToArray();
 
-            // If filtered result matches previous deps, nothing effectively changed —
-            // return false to prevent the stabilization loop from re-evaluating infinitely
-            // (getter keeps reading the detached dep, we keep filtering it out).
+            // If filtered result matches previous deps, nothing effectively changed.
+            // Return false to prevent infinite stabilization loop.
             if (data.RequiredProperties.AsSpan().SequenceEqual(previousItems))
             {
                 return false;
