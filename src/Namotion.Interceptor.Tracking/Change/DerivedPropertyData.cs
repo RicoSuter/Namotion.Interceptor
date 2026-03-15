@@ -72,11 +72,21 @@ internal sealed class DerivedPropertyData
     /// <summary>
     /// Returns the current forward dependencies as a read-only span.
     /// Returns empty span if no dependencies exist (allocation-free).
+    /// Safe for lock-free reads (clamps count to array length to handle torn reads).
     /// </summary>
     internal ReadOnlySpan<PropertyReference> RequiredPropertiesSpan
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => _requiredProperties.AsSpan(0, _requiredPropertyCount);
+        get
+        {
+            var array = _requiredProperties;
+            if (array is null)
+            {
+                return ReadOnlySpan<PropertyReference>.Empty;
+            }
+
+            return array.AsSpan(0, Math.Min(_requiredPropertyCount, array.Length));
+        }
     }
 
     /// <summary>
