@@ -17,8 +17,8 @@ public static class DerivedPropertyChangeHandlerExtensions
     /// Example: If FullName depends on FirstName, then FirstName.GetUsedByProperties() includes FullName.
     /// Returns a shared empty instance if no tracking data exists (allocation-free).
     /// </summary>
-    public static DerivedPropertyDependencies GetUsedByProperties(this PropertyReference property) =>
-        property.TryGetDerivedPropertyData()?.UsedByProperties ?? DerivedPropertyDependencies.Empty;
+    public static PropertyReferenceCollection GetUsedByProperties(this PropertyReference property) =>
+        property.TryGetDerivedPropertyData()?.UsedByDependencies ?? PropertyReferenceCollection.Empty;
 
     /// <summary>
     /// Gets forward dependencies: Which properties this derived property depends on.
@@ -27,8 +27,8 @@ public static class DerivedPropertyChangeHandlerExtensions
     /// </summary>
     public static ReadOnlySpan<PropertyReference> GetRequiredProperties(this PropertyReference property)
     {
-        var items = property.TryGetDerivedPropertyData()?.RequiredProperties;
-        return items is not null ? items.AsSpan() : ReadOnlySpan<PropertyReference>.Empty;
+        var data = property.TryGetDerivedPropertyData();
+        return data is not null ? data.RequiredPropertiesSpan : ReadOnlySpan<PropertyReference>.Empty;
     }
 
     /// <summary>

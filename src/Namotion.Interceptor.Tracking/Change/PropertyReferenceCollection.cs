@@ -8,15 +8,29 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// Design: Copy-on-write ensures readers never see partial updates.
 /// Memory: Allocates on mutation (inherent to copy-on-write). Steady-state is allocation-free.
 /// </summary>
-public sealed class DerivedPropertyDependencies
+public sealed class PropertyReferenceCollection
 {
+    private PropertyReference[] _items;
+
     /// <summary>
     /// Shared empty instance for read-only queries when no data exists.
     /// Avoids allocating data objects just to check dependencies.
     /// </summary>
-    internal static readonly DerivedPropertyDependencies Empty = new();
+    internal static readonly PropertyReferenceCollection Empty = new();
 
-    private PropertyReference[] _items = [];
+    internal PropertyReferenceCollection()
+    {
+        _items = [];
+    }
+
+    /// <summary>
+    /// Creates a collection pre-populated with a single item.
+    /// Avoids a separate Add call (and its CAS array allocation) for the common 0→1 transition.
+    /// </summary>
+    internal PropertyReferenceCollection(in PropertyReference initialItem)
+    {
+        _items = [initialItem];
+    }
 
     /// <summary>
     /// Gets the count of dependencies (thread-safe, allocation-free).
@@ -38,27 +52,31 @@ public sealed class DerivedPropertyDependencies
     /// <summary>
     /// Adds a dependency using lock-free CAS (compare-and-swap).
     /// Thread-safe: Multiple threads can call concurrently. CAS loop retries on contention.
-    /// Idempotent: Adding same item multiple times is safe (no duplicates).
+    /// Idempotent: Adding same property multiple times is safe (no duplicates).
     /// </summary>
-    /// <returns>True if item was added; false if already exists.</returns>
-    internal bool Add(in PropertyReference item)
+    /// <returns>True if property was added; false if already exists.</returns>
+    internal bool Add(in PropertyReference property)
     {
         while (true)
         {
             var snapshot = Volatile.Read(ref _items);
 
             // Idempotency check: Skip if already present
-            if (Array.IndexOf(snapshot, item) >= 0)
+            if (Array.IndexOf(snapshot, property) >= 0)
+            {
                 return false;
+            }
 
-            // Create new array with item appended
-            var newArr = new PropertyReference[snapshot.Length + 1];
-            Array.Copy(snapshot, newArr, snapshot.Length);
-            newArr[^1] = item;
+            // Create new array with property appended
+            var newArray = new PropertyReference[snapshot.Length + 1];
+            Array.Copy(snapshot, newArray, snapshot.Length);
+            newArray[^1] = property;
 
             // Atomic swap: Succeeds if no other thread modified _items
-            if (ReferenceEquals(Interlocked.CompareExchange(ref _items, newArr, snapshot), snapshot))
+            if (ReferenceEquals(Interlocked.CompareExchange(ref _items, newArray, snapshot), snapshot))
+            {
                 return true;
+            }
 
             // Another thread won the race - retry with new snapshot
         }
@@ -68,39 +86,48 @@ public sealed class DerivedPropertyDependencies
     /// Removes a dependency using lock-free CAS (compare-and-swap).
     /// Thread-safe: Multiple threads can call concurrently. CAS loop retries on contention.
     /// </summary>
-    /// <returns>True if item was removed; false if not found.</returns>
-    internal bool Remove(in PropertyReference item)
+    /// <returns>True if property was removed; false if not found.</returns>
+    internal bool Remove(in PropertyReference property)
     {
         while (true)
         {
             var snapshot = Volatile.Read(ref _items);
 
-            // Find item to remove
-            var idx = Array.IndexOf(snapshot, item);
+            // Find property to remove
+            var idx = Array.IndexOf(snapshot, property);
             if (idx < 0)
             {
                 return false; // Not found
             }
 
-            // Create new array without the item
-            var newArr = snapshot.Length == 1 ? [] : RemoveAt(snapshot, idx);
+            // Create new array without the property
+            var newArray = snapshot.Length == 1 ? [] : RemoveAt(snapshot, idx);
 
             // Atomic swap: Succeeds if no other thread modified _items
-            if (ReferenceEquals(Interlocked.CompareExchange(ref _items, newArr, snapshot), snapshot))
+            if (ReferenceEquals(Interlocked.CompareExchange(ref _items, newArray, snapshot), snapshot))
+            {
                 return true;
+            }
 
             // Another thread won the race - retry with new snapshot
         }
     }
 
     // Helper: Creates new array with item at index removed
-    internal static PropertyReference[] RemoveAt(PropertyReference[] source, int index)
+    private static PropertyReference[] RemoveAt(PropertyReference[] source, int index)
     {
         var result = new PropertyReference[source.Length - 1];
+       
         if (index > 0)
+        {
             Array.Copy(source, 0, result, 0, index);
+        }
+
         if (index < source.Length - 1)
+        {
             Array.Copy(source, index + 1, result, index, source.Length - index - 1);
+        }
+
         return result;
     }
 }
