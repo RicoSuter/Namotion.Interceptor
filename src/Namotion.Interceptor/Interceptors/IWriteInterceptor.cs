@@ -8,7 +8,9 @@ public interface IWriteInterceptor
     /// <summary>
     /// Intercepts a property write operation.
     /// </summary>
-    /// <typeparam name="TProperty">The type of the property.</typeparam>
+    /// <typeparam name="TProperty">A hint for the property type. May be <c>object</c> when
+    /// values are boxed through non-generic paths (e.g., <c>SetPropertyValueWithInterception</c>).
+    /// Use <c>context.Property.Metadata.Type</c> for the actual declared property type.</typeparam>
     /// <param name="context">The write context containing the property reference and values.</param>
     /// <param name="next">The next interceptor in the chain to call.</param>
     void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next);
@@ -16,6 +18,12 @@ public interface IWriteInterceptor
 
 public delegate void WriteInterceptionDelegate<TProperty>(ref PropertyWriteContext<TProperty> context);
 
+/// <summary>
+/// Context for a property write operation.
+/// <typeparamref name="TProperty"/> is a hint — it may be <c>object</c> when values are
+/// boxed through non-generic paths. Use <c>Property.Metadata.Type</c> for the actual
+/// declared property type.
+/// </summary>
 public struct PropertyWriteContext<TProperty>
 {
     /// <summary>

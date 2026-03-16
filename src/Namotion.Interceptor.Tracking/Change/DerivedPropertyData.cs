@@ -44,6 +44,14 @@ internal sealed class DerivedPropertyData
     internal bool IsRecalculating;
 
     /// <summary>
+    /// Sequence counter incremented under lock(this) each time RecalculateDerivedProperty
+    /// computes a new value. Read via Volatile.Read outside the lock to detect stale
+    /// notifications — if the sequence has advanced, a newer recalculation already completed
+    /// and the current notification should be skipped.
+    /// </summary>
+    internal long RecalculationSequence;
+
+    /// <summary>
     /// Lifecycle flag cleared during DetachProperty under lock(this).
     /// Checked by RecalculateDerivedProperty to prevent zombie backlink resurrection.
     /// Set by AttachProperty to support re-attachment.
