@@ -291,6 +291,7 @@ internal static class SubjectUpdateFactory
                 var kind = parentProperty.IsSubjectDictionary
                     ? SubjectPropertyUpdateKind.Dictionary
                     : SubjectPropertyUpdateKind.Collection;
+            
                 AddCollectionOrDictionaryItemToParent(parentProperties, parentProperty.Name, parentInfo.Index, childId, kind);
             }
             else
