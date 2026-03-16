@@ -98,7 +98,7 @@ namespace YourDefaultNamespace
                 var newValue = value;
                 var cancel = false;
                 OnNameChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Name), newValue, static (o) => ((Light)o)._Name, static (o, v) => ((Light)o)._Name = v))
+                if (!cancel && SetPropertyValue(nameof(Name), newValue, _Name, static (o, v) => ((Light)o)._Name = v))
                 {
                     OnNameChanged(_Name);
                     RaisePropertyChanged(nameof(Name));
@@ -123,7 +123,7 @@ namespace YourDefaultNamespace
                 var newValue = value;
                 var cancel = false;
                 OnOnChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(On), newValue, static (o) => ((Light)o)._On, static (o, v) => ((Light)o)._On = v))
+                if (!cancel && SetPropertyValue(nameof(On), newValue, _On, static (o, v) => ((Light)o)._On = v))
                 {
                     OnOnChanged(_On);
                     RaisePropertyChanged(nameof(On));
@@ -142,7 +142,7 @@ namespace YourDefaultNamespace
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
+        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
         {
             if (_context is null)
             {
@@ -151,7 +151,7 @@ namespace YourDefaultNamespace
             }
             else
             {
-                return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
+                return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
             }
         }
 
@@ -249,7 +249,7 @@ namespace YourDefaultNamespace
                 var newValue = value;
                 var cancel = false;
                 OnBrightnessChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Brightness), newValue, static (o) => ((DimmableLight)o)._Brightness, static (o, v) => ((DimmableLight)o)._Brightness = v))
+                if (!cancel && SetPropertyValue(nameof(Brightness), newValue, _Brightness, static (o, v) => ((DimmableLight)o)._Brightness = v))
                 {
                     OnBrightnessChanged(_Brightness);
                     RaisePropertyChanged(nameof(Brightness));
@@ -268,7 +268,7 @@ namespace YourDefaultNamespace
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
+        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
         {
             if (_context is null)
             {
@@ -277,7 +277,7 @@ namespace YourDefaultNamespace
             }
             else
             {
-                return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
+                return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
             }
         }
 
