@@ -140,6 +140,43 @@ public class InheritancePathTests
     }
 
     [Fact]
+    public void WhenUsingDerivedAttribute_ThenPropertiesIncludeBaseAndOwnProperties()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var light = new DimmableLight(context) { Name = "Desk Lamp", On = true, Brightness = 0.8 };
+
+        // Act
+        var registeredSubject = light.TryGetRegisteredSubject();
+        var propertyNames = registeredSubject?.Properties
+            .Select(p => p.Name)
+            .Order()
+            .ToArray() ?? [];
+
+        // Assert — must include both base (Name, On) and own (Brightness) properties
+        Assert.Equal(["Brightness", "Name", "On"], propertyNames);
+    }
+
+    [Fact]
+    public void WhenUsingDerivedAttribute_ThenInheritedPropertiesAreAccessible()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var light = new DimmableLight(context) { Name = "Desk Lamp", On = true, Brightness = 0.8 };
+
+        // Act & Assert — base class properties should be resolvable
+        Assert.Equal("Desk Lamp", light.TryGetRegisteredProperty("Name")?.GetValue());
+        Assert.Equal(true, light.TryGetRegisteredProperty("On")?.GetValue());
+        Assert.Equal(0.8, light.TryGetRegisteredProperty("Brightness")?.GetValue());
+    }
+
+    [Fact]
     public void WhenTeacherInCollection_ThenPathIncludesIndex()
     {
         // Arrange
