@@ -79,28 +79,37 @@ AttachProperty(FullName)
   lock(data)
     data.IsAttached = true
     try:
-      generationBefore = Volatile.Read(_writeGeneration)
-      StartRecordingTouchedProperties()
-      result = getter.Invoke(subject)              // evaluates "FirstName + LastName"
-        → ReadProperty(FirstName)                 // recorder captures FirstName
-        → ReadProperty(LastName)                  // recorder captures LastName
-      recordedDeps = recorder.FinishRecording()
-      data.UpdateDependencies(FullName, recordedDeps, recorder)
-        // sets data.RequiredProperties = [FirstName, LastName]
-        // adds FullName to FirstName.UsedByProperties
-        // adds FullName to LastName.UsedByProperties
-      if Volatile.Read(_writeGeneration) != generationBefore:
-        // Concurrent write detected — fall back to stabilization loop
-        do:
-          StartRecordingTouchedProperties()
-          result = getter.Invoke(subject)
-          recordedDeps = recorder.FinishRecording()
-          dependenciesChanged = data.UpdateDependencies(FullName, recordedDeps, recorder)
-        while (dependenciesChanged)
-    finally:
-      DiscardActiveRecording()                     // always clears recorder buffer
-    data.LastKnownValue = result
-    SetWriteTimestampUtcTicks(...)
+      data.LastKnownValue = EvaluateAndStabilize(data, FullName)
+      SetWriteTimestampUtcTicks(...)
+    catch:
+      // Getter threw — value will be computed on the next dependency write.
+```
+
+`EvaluateAndStabilize` handles the dependency recording, generation check, and stabilization loop internally (see Section 4 for details). If the getter throws during initial evaluation (typically during concurrent state transitions), the exception is caught and `LastKnownValue` remains null. The next dependency write triggers recalculation which retries with consistent state.
+
+The generation-based stabilization inside `EvaluateAndStabilize` works as follows:
+
+```
+EvaluateAndStabilize(data, FullName)
+  try:
+    generationBefore = Volatile.Read(_writeGeneration)
+    StartRecordingTouchedProperties()
+    result = getter.Invoke(subject)              // evaluates "FirstName + LastName"
+      → ReadProperty(FirstName)                 // recorder captures FirstName
+      → ReadProperty(LastName)                  // recorder captures LastName
+    recordedDeps = recorder.FinishRecording()
+    dependenciesChanged = data.UpdateDependencies(FullName, recordedDeps, recorder)
+    if dependenciesChanged && Volatile.Read(_writeGeneration) != generationBefore:
+      // Concurrent write detected — fall back to stabilization loop
+      do:
+        StartRecordingTouchedProperties()
+        result = getter.Invoke(subject)
+        recordedDeps = recorder.FinishRecording()
+        dependenciesChanged = data.UpdateDependencies(FullName, recordedDeps, recorder)
+      while (dependenciesChanged)
+    return result
+  finally:
+    DiscardActiveRecording()                     // always clears recorder buffer
 ```
 
 On the common path (single-threaded construction), `_writeGeneration` is unchanged and the loop is skipped entirely — zero extra getter evaluations. If a concurrent write is detected, the full stabilization loop runs for correctness.
@@ -158,11 +167,15 @@ RecalculateDerivedProperty(FullName, timestamp)
       catch:
         return                                   // keep LastKnownValue, skip notification
       data.LastKnownValue = newValue
+      sequence = ++data.RecalculationSequence    // monotonic counter for stale detection
       SetWriteTimestampUtcTicks(timestamp)       // inherits trigger's timestamp
     finally:
       data.IsRecalculating = false
   // Notifications fired OUTSIDE lock(data) to avoid deadlock with
   // LifecycleInterceptor's lock(_attachedSubjects).
+  // Two guards prevent stale notifications:
+  if sequence != Volatile.Read(data.RecalculationSequence) → return  // superseded
+  if !ReferenceEquals(newValue, Volatile.Read(data.LastKnownValue)) → return  // overwritten
   WithSource(null):                              // marks as internal recalculation
     SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate)
   RaisePropertyChanged("FullName")               // INotifyPropertyChanged integration
@@ -285,7 +298,13 @@ Derived properties with setters (added via `AddDerivedProperty<T>(name, getValue
 - **Without this**: Thread A holds `lock(_attachedSubjects)` → `DetachProperty` → wants `lock(data)`. Thread B holds `lock(data)` → `SetPropertyValueWithInterception` → `LifecycleInterceptor.WriteProperty` → wants `lock(_attachedSubjects)`. Deadlock.
 - **With this**: `lock(data)` is released before `SetPropertyValueWithInterception`, so Thread B never holds `lock(data)` when acquiring `lock(_attachedSubjects)`.
 
-The tradeoff: concurrent recalculations may produce out-of-order or duplicate notifications. Thread A computes (old=X, new=Y) and Thread B computes (old=Y, new=Z), but Thread B's notification may fire before Thread A's. The final `LastKnownValue` is always correct.
+The tradeoff: concurrent recalculations could produce out-of-order or stale notifications if unmitigated. Two guards prevent this:
+
+1. **`RecalculationSequence` check**: A monotonic counter incremented under `lock(data)` on each recalculation. After releasing the lock, `Volatile.Read` compares the thread's captured sequence against the current value. If a newer recalculation completed in between, the notification is skipped.
+
+2. **`ReferenceEquals` check on `LastKnownValue`**: Even if the sequence check passes (the thread checked before the next recalculation entered the lock), a second guard compares the thread's computed `newValue` reference against `data.LastKnownValue` via `Volatile.Read`. Since `data.LastKnownValue = newValue` stores the same reference inside the lock, a mismatch means another thread overwrote it — the notification is skipped. This works for boxed value types because each getter evaluation produces a distinct boxed reference.
+
+Together, these guards ensure the last notification always reflects the final computed value. In the rare case where both threads pass both checks (their computed values happen to be reference-equal, e.g., both null), the duplicate notification carries the correct value and is harmless.
 
 Additionally, `LifecycleInterceptor.WriteProperty` uses `context.Property.Metadata.Type.CanContainSubjects<TProperty>()` (the declared metadata type) rather than just `CanContainSubjects<TProperty>()` (the generic parameter). `TProperty` is a hint that may be widened to `object` through non-generic paths like `SetPropertyValueWithInterception`, which would cause `CanContainSubjects<object>()` to return `true` for value-type properties (e.g., `decimal`). The metadata type check ensures value-type properties never enter the lifecycle lock.
 
@@ -345,6 +364,7 @@ Every piece of shared mutable state is protected by exactly one synchronization 
 | `data.UsedByProperties` (collection contents) | CAS (copy-on-write) | `UpdateDependencies`, `DetachAndSnapshotUsedBy` |
 | `data.UsedByProperties` (field itself) | `lock(data)` + `Interlocked.CompareExchange` | `DetachAndSnapshotUsedBy` (nulls under lock), `AddUsedByProperty` (CAS create) |
 | `_recorder` | `[ThreadStatic]` (no sharing) | `ReadProperty`, `StartRecording`, `UpdateDependencies` (via parameter) |
+| `data.RecalculationSequence` | `lock(data)` (write) / `Volatile.Read` (read) | `RecalculateDerivedProperty` (increment under lock, read outside lock for stale notification check) |
 | `_writeGeneration` (static) | `Interlocked.Increment` (full fence) / `Volatile.Read` (acquire) | `WriteProperty` (increment), `AttachProperty` + `RecalculateDerivedProperty` (check) |
 
 Nested locks occur in `UpdateDependencies`: `lock(D_data)` (outer, from `RecalculateDerivedProperty`) → `lock(X_data)` (inner, backlink Add). The acquisition order follows the dependency DAG (derived → source). Circular dependencies would cause infinite recursion in getters before any lock is reached, so deadlock is impossible. `DetachProperty` uses a single `lock(data)` for all local cleanup (via `DetachAndSnapshotUsedBy`), then acquires `lock(derivedData)` sequentially (never nested), so it cannot participate in a lock cycle. `RecalculateDerivedProperty` releases `lock(data)` before firing notifications via `SetPropertyValueWithInterception`, which may acquire `lock(_attachedSubjects)` in `LifecycleInterceptor` — since `lock(data)` is not held, no cycle is possible.
