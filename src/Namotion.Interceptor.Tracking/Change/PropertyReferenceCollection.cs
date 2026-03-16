@@ -3,7 +3,7 @@ namespace Namotion.Interceptor.Tracking.Change;
 /// <summary>
 /// Lock-free, copy-on-write collection for backward property dependencies (UsedByProperties).
 /// Concurrency Model:
-/// - Reads: Allocation-free via <see cref="Items"/>. Always returns stable snapshot.
+/// - Reads: Allocation-free via <see cref="Items"/>. Always returns a stable snapshot.
 /// - Writes: Lock-free CAS (Compare-And-Swap) with automatic retry on contention.
 /// Design: Copy-on-write ensures readers never see partial updates.
 /// Memory: Allocates on mutation (inherent to copy-on-write). Steady-state is allocation-free.
@@ -39,7 +39,7 @@ public sealed class PropertyReferenceCollection
 
     /// <summary>
     /// Gets a stable snapshot for iteration (thread-safe, allocation-free).
-    /// <para>Snapshot won't change even if collection is modified concurrently - copy-on-write semantics.</para>
+    /// <para>Snapshot won't change even if a collection is modified concurrently - copy-on-write semantics.</para>
     /// </summary>
     public ReadOnlySpan<PropertyReference> Items => Volatile.Read(ref _items);
 
@@ -52,7 +52,7 @@ public sealed class PropertyReferenceCollection
     /// <summary>
     /// Adds a dependency using lock-free CAS (compare-and-swap).
     /// Thread-safe: Multiple threads can call concurrently. CAS loop retries on contention.
-    /// Idempotent: Adding same property multiple times is safe (no duplicates).
+    /// Idempotent: Adding the same property multiple times is safe (no duplicates).
     /// </summary>
     /// <returns>True if property was added; false if already exists.</returns>
     internal bool Add(in PropertyReference property)
@@ -67,7 +67,7 @@ public sealed class PropertyReferenceCollection
                 return false;
             }
 
-            // Create new array with property appended
+            // Create a new array with property appended
             var newArray = new PropertyReference[snapshot.Length + 1];
             Array.Copy(snapshot, newArray, snapshot.Length);
             newArray[^1] = property;
@@ -78,7 +78,7 @@ public sealed class PropertyReferenceCollection
                 return true;
             }
 
-            // Another thread won the race - retry with new snapshot
+            // Another thread won the race - retry with a new snapshot
         }
     }
 
@@ -100,7 +100,7 @@ public sealed class PropertyReferenceCollection
                 return false; // Not found
             }
 
-            // Create new array without the property
+            // Create a new array without the property
             var newArray = snapshot.Length == 1 ? [] : RemoveAt(snapshot, idx);
 
             // Atomic swap: Succeeds if no other thread modified _items
@@ -109,11 +109,11 @@ public sealed class PropertyReferenceCollection
                 return true;
             }
 
-            // Another thread won the race - retry with new snapshot
+            // Another thread won the race - retry with a new snapshot
         }
     }
 
-    // Helper: Creates new array with item at index removed
+    // Helper: Creates a new array with item at index removed
     private static PropertyReference[] RemoveAt(PropertyReference[] source, int index)
     {
         var result = new PropertyReference[source.Length - 1];

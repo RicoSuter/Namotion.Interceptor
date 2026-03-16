@@ -47,7 +47,7 @@ internal sealed class DerivedPropertyData
     /// Lifecycle flag cleared during DetachProperty under lock(this).
     /// Checked by RecalculateDerivedProperty to prevent zombie backlink resurrection.
     /// Set by AttachProperty to support re-attachment.
-    /// Defaults to true because properties are assumed live until explicitly detached.
+    /// Defaults to true because properties are assumed to be attached until explicitly detached.
     /// </summary>
     internal bool IsAttached = true;
 
@@ -107,7 +107,7 @@ internal sealed class DerivedPropertyData
 
     /// <summary>
     /// Detaches this property: sets IsAttached=false, cleans forward links (if derived),
-    /// snapshots and clears backward links. Called under lock(this).
+    /// snapshots, and clears backward links. Called under lock(this).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal PropertyReference[] DetachAndSnapshotUsedBy(in PropertyReference property)
@@ -120,7 +120,9 @@ internal sealed class DerivedPropertyData
             var requiredProperties = RequiredPropertiesSpan;
             for (var i = 0; i < requiredProperties.Length; i++)
             {
-                requiredProperties[i].TryGetDerivedPropertyData()?.RemoveUsedByProperty(property);
+                requiredProperties[i]
+                    .TryGetDerivedPropertyData()?
+                    .RemoveUsedByProperty(property);
             }
 
             ClearRequiredProperties();
@@ -173,7 +175,7 @@ internal sealed class DerivedPropertyData
             }
         }
 
-        // Add backlinks for new deps. Lock depData to serialize with DetachProperty's IsAttached check.
+        // Add backlinks for new dependencies. Lock dependencyData to serialize with DetachProperty's IsAttached check.
         var hasSkippedDependencies = false;
         foreach (ref readonly var newDependency in recordedDependencies)
         {
@@ -322,7 +324,7 @@ internal sealed class DerivedPropertyData
             return false;
         }
 
-        // Swap-remove: move last item into removed slot, decrement count.
+        // Swap-remove: move the last item into the removed slot, decrement count.
         // No array allocation. Safe under lock.
         var lastIndex = requiredCount - 1;
         if (index < lastIndex)
