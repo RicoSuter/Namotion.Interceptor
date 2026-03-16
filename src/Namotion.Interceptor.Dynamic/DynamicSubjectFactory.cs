@@ -72,16 +72,17 @@ public class DynamicSubjectFactory
                 var propertyType = invocation.Method.ReturnType;
 
                 var value = context.GetPropertyValue(propertyName, _ => ReadProperty(propertyName, propertyType));
-
                 invocation.ReturnValue = value;
             }
             else if (invocation.Method.IsSpecialName &&
                      invocation.Method.Name.StartsWith("set_"))
             {
                 var propertyName = invocation.Method.Name[4..];
-                var newValue = invocation.Arguments[0];
                 var propertyType = invocation.Method.GetParameters().Single().ParameterType;
+
+                var newValue = invocation.Arguments[0];
                 var currentValue = ReadProperty(propertyName, propertyType);
+              
                 context.SetPropertyValue(propertyName, newValue, currentValue,
                     (_, value) => WriteProperty(propertyName, value));
 
