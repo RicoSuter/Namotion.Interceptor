@@ -19,10 +19,15 @@ namespace Namotion.Interceptor.Tracking.Change;
 [RunsBefore(typeof(LifecycleInterceptor))]
 public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor, IPropertyLifecycleHandler
 {
+    private static readonly Action<IInterceptorSubject, object?> NoOpWriteDelegate = static (_, _) => { };
+
+    // Safety limit for stabilization loops. Prevents infinite loops from getters
+    // with side effects that mutate tracked state (a user error, but shouldn't hang).
+    // In correct code, the loop runs 1-2 iterations max.
+    private const int MaxStabilizationIterations = 100;
+
     [ThreadStatic]
     private static DerivedPropertyRecorder? _recorder;
-
-    private static readonly Action<IInterceptorSubject, object?> NoOpWriteDelegate = static (_, _) => { };
 
     // Global counter incremented on every write (Interlocked.Increment, full fence).
     // Paired with Volatile.Read in AttachProperty/RecalculateDerivedProperty to detect
@@ -48,40 +53,9 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         lock (data)
         {
             data.IsAttached = true;
-
             if (metadata.IsDerived)
             {
-                // Evaluate getter once, re-evaluate only if a concurrent write is detected.
-                object? result;
-                try
-                {
-                    var generationBefore = Volatile.Read(ref _writeGeneration);
-
-                    StartRecordingTouchedProperties();
-                    result = metadata.GetValue?.Invoke(change.Subject);
-                    var recordedDeps = _recorder!.FinishRecording();
-                    data.UpdateDependencies(change.Property, recordedDeps, _recorder);
-
-                    if (Volatile.Read(ref _writeGeneration) != generationBefore)
-                    {
-                        // Concurrent write detected, run stabilization loop.
-                        bool dependenciesChanged;
-                        do
-                        {
-                            StartRecordingTouchedProperties();
-                            result = metadata.GetValue?.Invoke(change.Subject);
-                            recordedDeps = _recorder.FinishRecording();
-                            dependenciesChanged = data.UpdateDependencies(change.Property, recordedDeps, _recorder);
-                        }
-                        while (dependenciesChanged);
-                    }
-                }
-                finally
-                {
-                    DiscardActiveRecording();
-                }
-
-                data.LastKnownValue = result;
+                data.LastKnownValue = EvaluateAndStabilize(data, change.Property);
                 change.Property.SetWriteTimestampUtcTicks(SubjectChangeContext.Current.ChangedTimestampUtcTicks);
             }
         }
@@ -92,7 +66,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         var property = change.Property;
 
-        // Skip properties without tracking data (never participated in dependency graph).
+        // Skip properties without tracking data (never participated in the dependency graph).
         var data = property.TryGetDerivedPropertyData();
         if (data is null)
         {
@@ -107,7 +81,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             usedBySnapshot = data.DetachAndSnapshotUsedBy(property);
         }
 
-        // Case 2: remove this property from each dependent's RequiredProperties (outside lock).
+        // Case 2: Remove this property from each dependent's RequiredProperties (outside lock).
         foreach (ref readonly var derivedProperty in usedBySnapshot.AsSpan())
         {
             var derivedData = derivedProperty.TryGetDerivedPropertyData();
@@ -127,7 +101,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     public TProperty ReadProperty<TProperty>(ref PropertyReadContext context, ReadInterceptionDelegate<TProperty> next)
     {
         var result = next(ref context);
-       
+
         if (_recorder?.IsRecording == true)
         {
             var property = context.Property;
@@ -210,27 +184,9 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             try
             {
                 var oldValue = data.LastKnownValue;
-                var generationBefore = Volatile.Read(ref _writeGeneration);
-
-                StartRecordingTouchedProperties();
-                var newValue = derivedProperty.Metadata.GetValue?.Invoke(derivedProperty.Subject);
-                var recordedDeps = _recorder!.FinishRecording();
-                var dependenciesChanged = data.UpdateDependencies(derivedProperty, recordedDeps, _recorder);
-
-                // Stabilization loop: Only when dependencies changed AND a concurrent write was detected.
-                if (dependenciesChanged && Volatile.Read(ref _writeGeneration) != generationBefore)
-                {
-                    do
-                    {
-                        StartRecordingTouchedProperties();
-                        newValue = derivedProperty.Metadata.GetValue?.Invoke(derivedProperty.Subject);
-                        recordedDeps = _recorder.FinishRecording();
-                        dependenciesChanged = data.UpdateDependencies(derivedProperty, recordedDeps, _recorder);
-                    }
-                    while (dependenciesChanged);
-                }
-
+                var newValue = EvaluateAndStabilize(data, derivedProperty);
                 data.LastKnownValue = newValue;
+
                 derivedProperty.SetWriteTimestampUtcTicks(timestampUtcTicks);
 
                 // Fire change notification (null source = internal recalculation, not external).
@@ -246,9 +202,49 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             }
             finally
             {
-                DiscardActiveRecording();
                 data.IsRecalculating = false;
             }
+        }
+    }
+
+    /// <summary>
+    /// Evaluates a derived property getter, records dependencies, and runs the stabilization
+    /// loop if concurrent writes changed the dependency set. Called under lock(data).
+    /// </summary>
+    private static object? EvaluateAndStabilize(DerivedPropertyData data, in PropertyReference property)
+    {
+        try
+        {
+            var generationBefore = Volatile.Read(ref _writeGeneration);
+
+            StartRecordingTouchedProperties();
+            var result = property.Metadata.GetValue?.Invoke(property.Subject);
+            var recordedDeps = _recorder!.FinishRecording();
+            var dependenciesChanged = data.UpdateDependencies(property, recordedDeps, _recorder);
+
+            if (dependenciesChanged && Volatile.Read(ref _writeGeneration) != generationBefore)
+            {
+                var iterations = 0;
+                do
+                {
+                    if (++iterations > MaxStabilizationIterations)
+                    {
+                        break;
+                    }
+
+                    StartRecordingTouchedProperties();
+                    result = property.Metadata.GetValue?.Invoke(property.Subject);
+                    recordedDeps = _recorder.FinishRecording();
+                    dependenciesChanged = data.UpdateDependencies(property, recordedDeps, _recorder);
+                }
+                while (dependenciesChanged);
+            }
+
+            return result;
+        }
+        finally
+        {
+            DiscardActiveRecording();
         }
     }
 
@@ -259,7 +255,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     }
 
     /// <summary>
-    /// Cleans up recorder state if getter threw before UpdateDependencies ran.
+    /// Cleans up the recorder state if the getter threw before UpdateDependencies ran.
     /// No-op on the happy path (recording already finished and cleared).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
