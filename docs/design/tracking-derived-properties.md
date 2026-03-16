@@ -186,7 +186,7 @@ The getter is evaluated inside `EvaluateAndStabilize`, which handles dependency 
 The generation check avoids re-evaluation when dependencies change but no concurrent write occurred (e.g., `ChangeAllTires` swaps tire references, changing deps from old tires to new tires). The stabilization loop only runs when a concurrent write is actually detected.
 
 Key details of the change notification:
-- **Notifications outside lock**: `SetPropertyValueWithInterception` and `RaisePropertyChanged` are fired after releasing `lock(data)`. This prevents a deadlock between `lock(data)` (held during recalculation) and `lock(_attachedSubjects)` (acquired by `LifecycleInterceptor.WriteProperty` when `TProperty` is `object`). The tradeoff is that concurrent recalculations may produce out-of-order or duplicate notifications. The final value is always correct.
+- **Notifications outside lock**: `SetPropertyValueWithInterception` and `RaisePropertyChanged` are fired after releasing `lock(data)`. This prevents a deadlock between `lock(data)` (held during recalculation) and `lock(_attachedSubjects)` (acquired by `LifecycleInterceptor.WriteProperty` when `TProperty` is `object`). Two guards prevent stale notifications: a `RecalculationSequence` check (skips if a newer recalculation completed) and a `ReferenceEquals` check on `LastKnownValue` (skips if another thread overwrote the value). See the "Deadlock prevention" section for details.
 - **Timestamp inheritance**: The derived property receives the same timestamp as the write that triggered the recalculation, ensuring consistent timestamps within a mutation context.
 - **`WithSource(null)`**: Wraps the notification in a scope that clears any external source context. This marks the change as an internal recalculation, preventing source transaction handlers from writing it back to an external source.
 - **`NoOpWriteDelegate`**: Since derived properties have no backing field, the write delegate is a no-op (`static (_, _) => { }`). The call to `SetPropertyValueWithInterception` exists solely to fire the change notification through the interceptor chain (observable, queue, etc.) with the correct old and new values.
@@ -358,7 +358,7 @@ Every piece of shared mutable state is protected by exactly one synchronization 
 | State | Protection | Accessed by |
 |-------|-----------|-------------|
 | `data.RequiredProperties` | `lock(data)` | `UpdateDependencies`, `DetachAndSnapshotUsedBy`, `DetachProperty` Case 2 |
-| `data.LastKnownValue` | `lock(data)` | `RecalculateDerivedProperty`, `AttachProperty`, `DetachAndSnapshotUsedBy` |
+| `data.LastKnownValue` | `lock(data)` (write) / `Volatile.Read` (read) | `RecalculateDerivedProperty` (write under lock, read outside lock for stale notification check), `AttachProperty`, `DetachAndSnapshotUsedBy` |
 | `data.IsRecalculating` | `lock(data)` | `RecalculateDerivedProperty` |
 | `data.IsAttached` | `lock(data)` | `DetachAndSnapshotUsedBy`, `RecalculateDerivedProperty`, `AttachProperty`, `UpdateDependencies` (backlink loop) |
 | `data.UsedByProperties` (collection contents) | CAS (copy-on-write) | `UpdateDependencies`, `DetachAndSnapshotUsedBy` |
