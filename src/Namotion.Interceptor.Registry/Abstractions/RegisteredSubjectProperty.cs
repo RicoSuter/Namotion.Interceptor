@@ -1,4 +1,5 @@
-﻿using System.Collections.Immutable;
+﻿using System.Collections;
+using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking;
@@ -9,10 +10,14 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public class RegisteredSubjectProperty
 {
+    [ThreadStatic]
+    private static Dictionary<IInterceptorSubject, int>? _reusableCollectionPositions;
+
     private readonly List<SubjectPropertyChild> _children = [];
     private ImmutableArray<SubjectPropertyChild> _childrenCache;
 
     private readonly PropertyAttributeAttribute? _attributeMetadata;
+
     internal RegisteredSubjectProperty[]? AttributesCache = null; // TODO: Dangerous cache, needs review
 
     public RegisteredSubjectProperty(RegisteredSubject parent, string name,
@@ -327,28 +332,123 @@ public class RegisteredSubjectProperty
         }
     }
 
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void RemoveChild(SubjectPropertyChild child)
     {
         lock (_children)
         {
-            var index = _children.IndexOf(child);
+            var index = -1;
+            if (IsSubjectCollection)
+            {
+                // For collections, match by Subject only — the Index field represents
+                // the collection position which shifts as items are removed.
+                // Search backwards because LifecycleInterceptor detaches in reverse
+                // collection order, making each lookup O(1) instead of O(n).
+                var subject = child.Subject;
+                for (var i = _children.Count - 1; i >= 0; i--)
+                {
+                    if (_children[i].Subject == subject)
+                    {
+                        index = i;
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                index = _children.IndexOf(child);
+            }
+
             if (index == -1)
                 return;
 
             _children.RemoveAt(index);
+            _childrenCache = default;
+        }
+    }
 
-            // Handle collection index reordering after removal
-            // For subject collections, update all further indices
-            if (IsSubjectCollection && index < _children.Count)
+    /// <summary>
+    /// Syncs children's indices and parent entries with the live collection.
+    /// Must be called while LifecycleInterceptor's _attachedSubjects lock is held,
+    /// because this method acquires _children then _knownSubjects — the inverse of
+    /// HandleLifecycleChange's lock order. The outer _attachedSubjects lock serializes
+    /// both paths and prevents deadlock.
+    /// </summary>
+    /// <param name="collectionValue">The current collection value (passed from caller to avoid re-reading through interceptors).</param>
+    /// <param name="registry">The subject registry (passed from caller to avoid repeated service resolution per child).</param>
+    internal void RefreshCollectionIndices(object? collectionValue, ISubjectRegistry registry)
+    {
+        if (!IsSubjectCollection)
+            return;
+
+        lock (_children)
+        {
+            var collectionPositions = BuildCollectionPositions(collectionValue, _children.Count);
+            if (collectionPositions is null)
+                return;
+
+            for (var i = 0; i < _children.Count; i++)
             {
-                for (int i = index; i < _children.Count; i++)
-                {
-                    _children[i] = _children[i] with { Index = i };
-                }
+                var child = _children[i];
+                if (!collectionPositions.TryGetValue(child.Subject, out var newIndex))
+                    continue;
+
+                // Compare unboxed to avoid allocating a boxed int when index hasn't changed
+                if (child.Index is int oldIndex && oldIndex == newIndex)
+                    continue;
+
+                var boxedNewIndex = (object)newIndex;
+                _children[i] = child with { Index = boxedNewIndex };
+
+                // child is a readonly record struct snapshot from before the update above,
+                // so child.Index still holds the old value — correct for the oldIndex parameter.
+                registry.TryGetRegisteredSubject(child.Subject)?.UpdateParentIndex(this, child.Index, boxedNewIndex);
             }
 
-            _childrenCache = default; // invalidate cache
+            // Sort children to match live collection order
+            _children.Sort(static (a, b) => ((int)a.Index!).CompareTo((int)b.Index!));
+            _childrenCache = default;
+
+            // Release references so subjects can be GC'd on idle threads
+            collectionPositions.Clear();
         }
+    }
+
+    /// <summary>
+    /// Maps each subject in the collection to its current position.
+    /// Uses IList indexed access when available; falls back to ICollection foreach.
+    /// Reuses a ThreadStatic dictionary to avoid allocations.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static Dictionary<IInterceptorSubject, int>? BuildCollectionPositions(object? value, int capacityHint)
+    {
+        var collectionPositions = _reusableCollectionPositions;
+        collectionPositions?.Clear();
+
+        if (value is IList list)
+        {
+            for (var index = 0; index < list.Count; index++)
+            {
+                if (list[index] is IInterceptorSubject subject)
+                {
+                    collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint);
+                    collectionPositions[subject] = index;
+                }
+            }
+        }
+        else if (value is ICollection collection)
+        {
+            var index = 0;
+            foreach (var item in collection)
+            {
+                if (item is IInterceptorSubject subject)
+                {
+                    collectionPositions ??= _reusableCollectionPositions = new Dictionary<IInterceptorSubject, int>(capacityHint);
+                    collectionPositions[subject] = index;
+                }
+                index++;
+            }
+        }
+
+        return collectionPositions;
     }
 }

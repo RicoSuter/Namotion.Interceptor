@@ -21,7 +21,7 @@ using System.Text.Json.Serialization;
 
 namespace YourDefaultNamespace
 {
-    public partial class Person : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
+    public partial class Light : IInterceptorSubject, INotifyPropertyChanged, IRaisePropertyChanged
     {
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -56,84 +56,84 @@ namespace YourDefaultNamespace
             new Dictionary<string, SubjectPropertyMetadata>
             {
                 {
-                    "FirstName",
+                    "Name",
                     new SubjectPropertyMetadata(
-                        typeof(Person).GetProperty(nameof(FirstName), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((Person)o).FirstName,
-                        (o, v) => ((Person)o).FirstName = (string)v,
+                        typeof(Light).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((Light)o).Name,
+                        (o, v) => ((Light)o).Name = (string)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
                 {
-                    "LastName",
+                    "On",
                     new SubjectPropertyMetadata(
-                        typeof(Person).GetProperty(nameof(LastName), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((Person)o).LastName,
-                        (o, v) => ((Person)o).LastName = (string)v,
+                        typeof(Light).GetProperty(nameof(On), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((Light)o).On,
+                        (o, v) => ((Light)o).On = (bool)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
             }
             .ToFrozenDictionary();
 
-        public Person()
+        public Light()
         {
         }
 
-        public Person(IInterceptorSubjectContext context) : this()
+        public Light(IInterceptorSubjectContext context) : this()
         {
             ((IInterceptorSubject)this).Context.AddFallbackContext(context);
         }
 
-        private string _FirstName;
+        private string _Name;
 
-        public partial string FirstName
+        public partial string Name
         {
             get
             {
-                return GetPropertyValue<string>(nameof(FirstName), static (o) => ((Person)o)._FirstName);
+                return GetPropertyValue<string>(nameof(Name), static (o) => ((Light)o)._Name);
             }
             set
             {
                 var newValue = value;
                 var cancel = false;
-                OnFirstNameChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(FirstName), newValue, _FirstName, static (o, v) => ((Person)o)._FirstName = v))
+                OnNameChanging(ref newValue, ref cancel);
+                if (!cancel && SetPropertyValue(nameof(Name), newValue, _Name, static (o, v) => ((Light)o)._Name = v))
                 {
-                    OnFirstNameChanged(_FirstName);
-                    RaisePropertyChanged(nameof(FirstName));
+                    OnNameChanged(_Name);
+                    RaisePropertyChanged(nameof(Name));
                 }
             }
         }
 
-        partial void OnFirstNameChanging(ref string newValue, ref bool cancel);
+        partial void OnNameChanging(ref string newValue, ref bool cancel);
 
-        partial void OnFirstNameChanged(string newValue);
+        partial void OnNameChanged(string newValue);
 
-        private string _LastName;
+        private bool _On;
 
-        public partial string LastName
+        public partial bool On
         {
             get
             {
-                return GetPropertyValue<string>(nameof(LastName), static (o) => ((Person)o)._LastName);
+                return GetPropertyValue<bool>(nameof(On), static (o) => ((Light)o)._On);
             }
             set
             {
                 var newValue = value;
                 var cancel = false;
-                OnLastNameChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(LastName), newValue, _LastName, static (o, v) => ((Person)o)._LastName = v))
+                OnOnChanging(ref newValue, ref cancel);
+                if (!cancel && SetPropertyValue(nameof(On), newValue, _On, static (o, v) => ((Light)o)._On = v))
                 {
-                    OnLastNameChanged(_LastName);
-                    RaisePropertyChanged(nameof(LastName));
+                    OnOnChanged(_On);
+                    RaisePropertyChanged(nameof(On));
                 }
             }
         }
 
-        partial void OnLastNameChanging(ref string newValue, ref bool cancel);
+        partial void OnOnChanging(ref bool newValue, ref bool cancel);
 
-        partial void OnLastNameChanged(string newValue);
+        partial void OnOnChanged(bool newValue);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)
@@ -187,7 +187,7 @@ using System.Text.Json.Serialization;
 
 namespace YourDefaultNamespace
 {
-    public partial class Teacher : IInterceptorSubject
+    public partial class DimmableLight : IInterceptorSubject
     {
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
@@ -215,51 +215,51 @@ namespace YourDefaultNamespace
             new Dictionary<string, SubjectPropertyMetadata>
             {
                 {
-                    "MainCourse",
+                    "Brightness",
                     new SubjectPropertyMetadata(
-                        typeof(Teacher).GetProperty(nameof(MainCourse), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
-                        (o) => ((Teacher)o).MainCourse,
-                        (o, v) => ((Teacher)o).MainCourse = (string)v,
+                        typeof(DimmableLight).GetProperty(nameof(Brightness), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((DimmableLight)o).Brightness,
+                        (o, v) => ((DimmableLight)o).Brightness = (double)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
             }
-            .Concat(global::Person.DefaultProperties)
+            .Concat(global::Light.DefaultProperties)
             .ToFrozenDictionary();
 
-        public Teacher()
+        public DimmableLight()
         {
         }
 
-        public Teacher(IInterceptorSubjectContext context) : this()
+        public DimmableLight(IInterceptorSubjectContext context) : this()
         {
             ((IInterceptorSubject)this).Context.AddFallbackContext(context);
         }
 
-        private string _MainCourse;
+        private double _Brightness;
 
-        public partial string MainCourse
+        public partial double Brightness
         {
             get
             {
-                return GetPropertyValue<string>(nameof(MainCourse), static (o) => ((Teacher)o)._MainCourse);
+                return GetPropertyValue<double>(nameof(Brightness), static (o) => ((DimmableLight)o)._Brightness);
             }
             set
             {
                 var newValue = value;
                 var cancel = false;
-                OnMainCourseChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(MainCourse), newValue, _MainCourse, static (o, v) => ((Teacher)o)._MainCourse = v))
+                OnBrightnessChanging(ref newValue, ref cancel);
+                if (!cancel && SetPropertyValue(nameof(Brightness), newValue, _Brightness, static (o, v) => ((DimmableLight)o)._Brightness = v))
                 {
-                    OnMainCourseChanged(_MainCourse);
-                    RaisePropertyChanged(nameof(MainCourse));
+                    OnBrightnessChanged(_Brightness);
+                    RaisePropertyChanged(nameof(Brightness));
                 }
             }
         }
 
-        partial void OnMainCourseChanging(ref string newValue, ref bool cancel);
+        partial void OnBrightnessChanging(ref double newValue, ref bool cancel);
 
-        partial void OnMainCourseChanged(string newValue);
+        partial void OnBrightnessChanged(double newValue);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private TProperty GetPropertyValue<TProperty>(string propertyName, Func<IInterceptorSubject, TProperty> readValue)

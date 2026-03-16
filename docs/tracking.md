@@ -187,6 +187,8 @@ person.LastName = "Doe";
 - When a dependency changes, the derived property is recalculated
 - If the derived value changes, a change event is triggered with `Source = null` (indicating local calculation)
 
+> **Internal design:** For details on the dependency graph, concurrency model, and correctness guarantees, see [Derived Property Design](design/tracking-derived-properties.md).
+
 ## Context Inheritance
 
 Automatically assigns the parent context to child subjects, ensuring they participate in the same tracking and interception pipeline:

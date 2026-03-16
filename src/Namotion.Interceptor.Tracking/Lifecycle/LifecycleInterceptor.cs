@@ -328,6 +328,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 FindSubjectsInProperty(context.Property, lastProcessed, null, oldCollectedSubjects, oldTouchedSubjects);
                 FindSubjectsInProperty(context.Property, newValue, null, newCollectedSubjects, newTouchedSubjects);
 
+                // Detach in reverse order so that collection children are removed from the end first.
+                // RemoveChild searches backwards to match this order for O(1) per removal.
                 for (var i = oldCollectedSubjects.Count - 1; i >= 0; i--)
                 {
                     var (subject, property, index) = oldCollectedSubjects[i];
@@ -347,6 +349,17 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 }
 
                 _lastProcessedValues[context.Property] = newValue;
+
+                // Refresh child index metadata for retained subjects whose
+                // positions may have shifted in the new collection.
+                if (newValue is ICollection && oldTouchedSubjects.Overlaps(newTouchedSubjects))
+                {
+                    var handlers = context.Property.Subject.Context.GetServices<IPropertyLifecycleHandler>();
+                    for (var i = 0; i < handlers.Length; i++)
+                    {
+                        handlers[i].RefreshCollectionProperty(context.Property, newValue);
+                    }
+                }
             }
             finally
             {
