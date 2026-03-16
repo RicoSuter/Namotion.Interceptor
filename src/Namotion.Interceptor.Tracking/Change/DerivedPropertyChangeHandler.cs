@@ -223,6 +223,13 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return;
         }
 
+        // Skip if a newer recalculation overwrote LastKnownValue after we released the lock.
+        // Safe for boxed value types: each computation produces a distinct reference.
+        if (!ReferenceEquals(newValue, Volatile.Read(ref data.LastKnownValue)))
+        {
+            return;
+        }
+
         using (SubjectChangeContext.WithSource(null))
         {
             derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate);

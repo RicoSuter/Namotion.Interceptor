@@ -1,4 +1,7 @@
+using System.Collections.Concurrent;
 using System.ComponentModel;
+using System.Reactive.Concurrency;
+using System.Reactive.Linq;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -351,7 +354,7 @@ public class DerivedPropertyConcurrencyTests
                 LastName = "B"
             };
 
-            var notifiedPropertyNames = new System.Collections.Concurrent.ConcurrentBag<string>();
+            var notifiedPropertyNames = new ConcurrentBag<string>();
             ((INotifyPropertyChanged)person).PropertyChanged += (_, args) =>
             {
                 if (args.PropertyName is not null)
@@ -673,6 +676,81 @@ public class DerivedPropertyConcurrencyTests
         var weakTire = new WeakReference(car.Tires[0]);
         car.Tires = [new Tire(context), car.Tires[1], car.Tires[2], car.Tires[3]];
         return weakTire;
+    }
+
+    [Fact]
+    public async Task WhenConcurrentWritesToSharedDependency_ThenObservableNotificationsAlwaysCarryFinalValue()
+    {
+        const int threadCount = 8;
+        const int writesPerThread = 50;
+
+        for (var iteration = 0; iteration < DefaultIterations; iteration++)
+        {
+            // Arrange
+            var context = InterceptorSubjectContext
+                .Create()
+                .WithFullPropertyTracking();
+
+            var person = new Person(context)
+            {
+                FirstName = "A",
+                LastName = "B"
+            };
+
+            // ConcurrentQueue preserves insertion order so we can check the last-delivered notification.
+            var observedChanges = new ConcurrentQueue<SubjectPropertyChange>();
+            using var subscription = context
+                .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+                .Where(change => change.Property.Name == nameof(Person.FullName))
+                .Subscribe(observedChanges.Enqueue);
+
+            // Drain initial setup notifications.
+            while (observedChanges.TryDequeue(out _)) { }
+
+            var barrier = new Barrier(threadCount);
+            var counter = 0;
+
+            // Act — many threads writing to dependencies of the same derived property.
+            // High concurrency increases the chance of a thread being preempted between
+            // the stale-notification check and the actual notification delivery.
+            var tasks = new Task[threadCount];
+            for (var t = 0; t < threadCount; t++)
+            {
+                var isFirstName = t % 2 == 0;
+                tasks[t] = Task.Run(() =>
+                {
+                    barrier.SignalAndWait();
+                    for (var j = 0; j < writesPerThread; j++)
+                    {
+                        var value = Interlocked.Increment(ref counter).ToString();
+                        if (isFirstName)
+                            person.FirstName = value;
+                        else
+                            person.LastName = value;
+                    }
+                });
+            }
+
+            await Task.WhenAll(tasks);
+
+            // Assert — the last-delivered notification must carry the correct final value.
+            // Without the ReferenceEquals guard, a stale notification can fire AFTER
+            // the correct one (out-of-order delivery), making the last-delivered value wrong.
+            var finalFullName = $"{person.FirstName} {person.LastName}".Trim();
+            var allChanges = observedChanges.ToArray();
+            Assert.True(allChanges.Length > 0, "Expected at least one FullName change notification");
+
+            var lastDeliveredValue = allChanges[^1].GetNewValue<string?>();
+            Assert.Equal(finalFullName, lastDeliveredValue);
+
+            // Every notified newValue must be a valid computed state (format: "X Y").
+            foreach (var change in allChanges)
+            {
+                var newValue = change.GetNewValue<string?>();
+                Assert.NotNull(newValue);
+                Assert.Contains(" ", newValue);
+            }
+        }
     }
 
     private static int TireIndex(int threadIndex) => (threadIndex % 3) + 1;
