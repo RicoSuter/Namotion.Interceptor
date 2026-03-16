@@ -98,7 +98,7 @@ namespace YourDefaultNamespace
                 var newValue = value;
                 var cancel = false;
                 OnFirstNameChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(FirstName), newValue, static (o) => ((Person)o)._FirstName, static (o, v) => ((Person)o)._FirstName = v))
+                if (!cancel && SetPropertyValue(nameof(FirstName), newValue, _FirstName, static (o, v) => ((Person)o)._FirstName = v))
                 {
                     OnFirstNameChanged(_FirstName);
                     RaisePropertyChanged(nameof(FirstName));
@@ -123,7 +123,7 @@ namespace YourDefaultNamespace
                 var newValue = value;
                 var cancel = false;
                 OnLastNameChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(LastName), newValue, static (o) => ((Person)o)._LastName, static (o, v) => ((Person)o)._LastName = v))
+                if (!cancel && SetPropertyValue(nameof(LastName), newValue, _LastName, static (o, v) => ((Person)o)._LastName = v))
                 {
                     OnLastNameChanged(_LastName);
                     RaisePropertyChanged(nameof(LastName));
@@ -142,7 +142,7 @@ namespace YourDefaultNamespace
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
+        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
         {
             if (_context is null)
             {
@@ -151,7 +151,7 @@ namespace YourDefaultNamespace
             }
             else
             {
-                return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
+                return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
             }
         }
 
@@ -249,7 +249,7 @@ namespace YourDefaultNamespace
                 var newValue = value;
                 var cancel = false;
                 OnMainCourseChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(MainCourse), newValue, static (o) => ((Teacher)o)._MainCourse, static (o, v) => ((Teacher)o)._MainCourse = v))
+                if (!cancel && SetPropertyValue(nameof(MainCourse), newValue, _MainCourse, static (o, v) => ((Teacher)o)._MainCourse = v))
                 {
                     OnMainCourseChanged(_MainCourse);
                     RaisePropertyChanged(nameof(MainCourse));
@@ -268,7 +268,7 @@ namespace YourDefaultNamespace
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
+        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
         {
             if (_context is null)
             {
@@ -277,7 +277,7 @@ namespace YourDefaultNamespace
             }
             else
             {
-                return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
+                return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
             }
         }
 

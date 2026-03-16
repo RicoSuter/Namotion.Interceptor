@@ -89,7 +89,7 @@ namespace YourDefaultNamespace
                 var newValue = value;
                 var cancel = false;
                 OnVirtualPropChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(VirtualProp), newValue, static (o) => ((BaseClass)o)._VirtualProp, static (o, v) => ((BaseClass)o)._VirtualProp = v))
+                if (!cancel && SetPropertyValue(nameof(VirtualProp), newValue, _VirtualProp, static (o, v) => ((BaseClass)o)._VirtualProp = v))
                 {
                     OnVirtualPropChanged(_VirtualProp);
                     RaisePropertyChanged(nameof(VirtualProp));
@@ -108,7 +108,7 @@ namespace YourDefaultNamespace
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
+        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
         {
             if (_context is null)
             {
@@ -117,7 +117,7 @@ namespace YourDefaultNamespace
             }
             else
             {
-                return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
+                return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
             }
         }
 
