@@ -211,7 +211,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
 
         // Call outside lock — RefreshCollectionIndices updates parent entries;
         // holding _knownSubjects would risk deadlock.
-        registeredProperty?.RefreshCollectionIndices(value, this);
+        registeredProperty?.RefreshCollectionIndices(value, registry: this);
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
