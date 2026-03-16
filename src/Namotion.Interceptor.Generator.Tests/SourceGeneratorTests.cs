@@ -190,7 +190,7 @@ public partial class SampleSubject
     }
 
     [Fact]
-    public Task WhenGeneratingClassWithInheritanceAndDerivedAttribute_ThenBasePropertiesAreIncluded()
+    public Task WhenGeneratingClassWithInheritanceAndCustomAttribute_ThenBasePropertiesAreIncluded()
     {
         // Arrange
         const string source = @"
