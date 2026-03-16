@@ -55,8 +55,15 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             data.IsAttached = true;
             if (metadata.IsDerived)
             {
-                data.LastKnownValue = EvaluateAndStabilize(data, change.Property);
-                change.Property.SetWriteTimestampUtcTicks(SubjectChangeContext.Current.ChangedTimestampUtcTicks);
+                try
+                {
+                    data.LastKnownValue = EvaluateAndStabilize(data, change.Property);
+                    change.Property.SetWriteTimestampUtcTicks(SubjectChangeContext.Current.ChangedTimestampUtcTicks);
+                }
+                catch (Exception)
+                {
+                    // Getter threw — value will be computed on the next dependency write.
+                }
             }
         }
     }
@@ -166,6 +173,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
 
         var data = derivedProperty.GetDerivedPropertyData();
+        object? oldValue;
+        object? newValue;
+        long sequence;
+
         lock (data)
         {
             // Reentrancy guard: derived-with-setter → SetPropertyValueWithInterception → WriteProperty
@@ -183,27 +194,43 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             data.IsRecalculating = true;
             try
             {
-                var oldValue = data.LastKnownValue;
-                var newValue = EvaluateAndStabilize(data, derivedProperty);
+                oldValue = data.LastKnownValue;
+
+                try
+                {
+                    newValue = EvaluateAndStabilize(data, derivedProperty);
+                }
+                catch (Exception)
+                {
+                    // Getter threw — keep LastKnownValue, concurrent writer's cascade will retry.
+                    return;
+                }
+
                 data.LastKnownValue = newValue;
-
+                sequence = ++data.RecalculationSequence;
                 derivedProperty.SetWriteTimestampUtcTicks(timestampUtcTicks);
-
-                // Fire change notification (null source = internal recalculation, not external).
-                using (SubjectChangeContext.WithSource(null))
-                {
-                    derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate);
-                }
-
-                if (derivedProperty.Subject is IRaisePropertyChanged raiser)
-                {
-                    raiser.RaisePropertyChanged(derivedProperty.Metadata.Name);
-                }
             }
             finally
             {
                 data.IsRecalculating = false;
             }
+        }
+
+        // Notifications outside lock(data) to avoid deadlock with lock(_attachedSubjects).
+        // Skip stale notifications so the last one always reflects the final state.
+        if (sequence != Volatile.Read(ref data.RecalculationSequence))
+        {
+            return;
+        }
+
+        using (SubjectChangeContext.WithSource(null))
+        {
+            derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate);
+        }
+
+        if (derivedProperty.Subject is IRaisePropertyChanged raiser)
+        {
+            raiser.RaisePropertyChanged(derivedProperty.Metadata.Name);
         }
     }
 
