@@ -45,6 +45,7 @@ public struct PropertyReference : IEquatable<PropertyReference>
         Subject.Data.TryRemove((Name, key), out _);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGetPropertyData(string key, out object? value)
     {
         return Subject.Data.TryGetValue((Name, key), out value);

@@ -224,7 +224,7 @@ sensor.Temperature = 25.5m;
 // (and trigger change notifications)
 ```
 
-Similar patterns work with OPC UA, databases, and other external systems. See the [MQTT](docs/connectors/mqtt.md), [OPC UA](docs/connectors/opcua.md), and [Connectors](docs/connectors.md) documentation for details.
+Similar patterns work with OPC UA, databases, and other external systems. See the [MQTT](docs/connectors-mqtt.md), [OPC UA](docs/connectors-opcua.md), and [Connectors](docs/connectors.md) documentation for details.
 
 ## Extensibility
 
@@ -261,9 +261,9 @@ Namotion.Interceptor is designed to be extended:
 | Package | Description | Documentation |
 |---------|-------------|---------------|
 | **Namotion.Interceptor.Connectors** | Base infrastructure for external system integration | [Connectors](docs/connectors.md) |
-| **Namotion.Interceptor.Mqtt** | Bidirectional MQTT synchronization | [MQTT](docs/connectors/mqtt.md) |
-| **Namotion.Interceptor.OpcUa** | OPC UA client and server integration | [OPC UA](docs/connectors/opcua.md) |
-| **Namotion.Interceptor.WebSocket** | Real-time WebSocket synchronization | [WebSocket](docs/connectors/websocket.md) |
+| **Namotion.Interceptor.Mqtt** | Bidirectional MQTT synchronization | [MQTT](docs/connectors-mqtt.md) |
+| **Namotion.Interceptor.OpcUa** | OPC UA client and server integration | [OPC UA](docs/connectors-opcua.md) |
+| **Namotion.Interceptor.WebSocket** | Real-time WebSocket synchronization | [WebSocket](docs/connectors-websocket.md) |
 
 ### Integrations
 

@@ -59,7 +59,7 @@ host.Run();
 // Server listens on ws://localhost:8080/ws
 ```
 
-> See [Hosting](../hosting.md) for details on `WithHostedServices()`.
+> See [Hosting](hosting.md) for details on `WithHostedServices()`.
 
 ## Server Setup (Embedded)
 
@@ -261,7 +261,7 @@ Client                                 Server
 
 #### Register-Before-Welcome Design
 
-The server registers the connection for broadcasts **before** building and sending the Welcome snapshot. This follows the buffer-flush-load-replay pattern (see [Connectors](../connectors.md)) and ensures eventual consistency:
+The server registers the connection for broadcasts **before** building and sending the Welcome snapshot. This follows the buffer-flush-load-replay pattern (see [Connectors](connectors.md)) and ensures eventual consistency:
 
 1. **Register**: Connection is added to the broadcast list. Any concurrent property changes are **queued per-connection** along with their sequence numbers (not sent yet). The client does not receive any messages until the Welcome is sent.
 2. **Snapshot**: The server builds the complete state snapshot under `_applyUpdateLock`, the same lock used when applying client updates. This ensures the snapshot is a consistent cut: every update applied before the lock is included, every update applied after will be sent as a separate Update message.
@@ -327,7 +327,7 @@ Example wire format: `[4, {"sequence": 42}]`
 
 ### SubjectUpdate Wire Format
 
-See [Subject Updates](subject-updates.md) for details on the update format.
+See [Subject Updates](connectors-subject-updates.md) for details on the update format.
 
 ## Resilience
 
@@ -440,7 +440,7 @@ Tiered error handling preserves connections when possible:
 
 ## Lifecycle Management
 
-Unlike MQTT and OPC UA connectors which maintain per-property topic/node caches that require cleanup on subject detach (see [Subject Lifecycle Tracking](../tracking.md#subject-lifecycle-tracking)), the WebSocket connector synchronizes the entire subject graph as a unit. There are no per-property caches to clean up — the server builds a fresh snapshot for each new client connection, and broadcast updates are derived from the change tracking layer. Connection-level resources (WebSocket, send lock, cancellation tokens) are cleaned up when a client disconnects or the server stops.
+Unlike MQTT and OPC UA connectors which maintain per-property topic/node caches that require cleanup on subject detach (see [Subject Lifecycle Tracking](tracking.md#subject-lifecycle-tracking)), the WebSocket connector synchronizes the entire subject graph as a unit. There are no per-property caches to clean up — the server builds a fresh snapshot for each new client connection, and broadcast updates are derived from the change tracking layer. Connection-level resources (WebSocket, send lock, cancellation tokens) are cleaned up when a client disconnects or the server stops.
 
 ## Known Limitations
 

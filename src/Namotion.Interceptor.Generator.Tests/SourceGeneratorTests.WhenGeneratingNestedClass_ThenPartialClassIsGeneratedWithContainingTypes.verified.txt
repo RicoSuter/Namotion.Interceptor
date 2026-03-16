@@ -91,7 +91,7 @@ namespace TestNamespace
                 var newValue = value;
                 var cancel = false;
                 OnNameChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Name), newValue, static (o) => ((NestedSubject)o)._Name, static (o, v) => ((NestedSubject)o)._Name = v))
+                if (!cancel && SetPropertyValue(nameof(Name), newValue, _Name, static (o, v) => ((NestedSubject)o)._Name = v))
                 {
                     OnNameChanged(_Name);
                     RaisePropertyChanged(nameof(Name));
@@ -110,7 +110,7 @@ namespace TestNamespace
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
+        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
         {
             if (_context is null)
             {
@@ -119,7 +119,7 @@ namespace TestNamespace
             }
             else
             {
-                return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
+                return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
             }
         }
 
