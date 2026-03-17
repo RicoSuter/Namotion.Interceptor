@@ -1,3 +1,4 @@
+@using System.Runtime.CompilerServices
 @using HomeBlaze.Components.Dialogs
 
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(CanvasLayout))]
@@ -116,7 +117,7 @@
 
     private CanvasLayout? Canvas => Subject as CanvasLayout;
 
-    private string GetNodeId(CanvasNode node) => node.GetHashCode().ToString();
+    private string GetNodeId(CanvasNode node) => RuntimeHelpers.GetHashCode(node).ToString();
 
     private int SnapToGrid(double value)
     {
@@ -148,7 +149,7 @@
         {
             try
             {
-                var configurationWriter = Canvas.TryGetFirstParent<IConfigurationWriter>() ?? RootManager;
+                var configurationWriter = RootManager.GetConfigurationWriter(Canvas);
                 await configurationWriter.WriteConfigurationAsync(Canvas, CancellationToken.None);
             }
             catch (Exception exception)
@@ -218,7 +219,7 @@
             Canvas.Nodes = Canvas.Nodes.Where(n => n != node).ToList();
 
             // Persist the change
-            var configurationWriter = Canvas.TryGetFirstParent<IConfigurationWriter>() ?? RootManager;
+            var configurationWriter = RootManager.GetConfigurationWriter(Canvas);
             await configurationWriter.WriteConfigurationAsync(Canvas, CancellationToken.None);
         }
     }
