@@ -36,7 +36,7 @@ internal sealed class DerivedPropertyData
     internal object? LastKnownValue;
 
     /// <summary>
-    /// Re-entrancy guard for RecalculateDerivedProperty.
+    /// Reentrancy guard for RecalculateDerivedProperty.
     /// Prevents infinite recursion when a derived-with-setter property's
     /// SetPropertyValueWithInterception re-enters WriteProperty.
     /// Only read/written inside lock(this), so no volatile needed.
@@ -46,7 +46,7 @@ internal sealed class DerivedPropertyData
     /// <summary>
     /// Sequence counter incremented under lock(this) each time RecalculateDerivedProperty
     /// computes a new value. Read via Volatile.Read outside the lock to detect stale
-    /// notifications — if the sequence has advanced, a newer recalculation already completed
+    /// notifications — if the sequence has advanced, a newer recalculation is already completed
     /// and the current notification should be skipped.
     /// </summary>
     internal long RecalculationSequence;
@@ -55,7 +55,7 @@ internal sealed class DerivedPropertyData
     /// Set under lock(this) when a state change occurs while IsRecalculating is true:
     /// concurrent RecalculateDerivedProperty (bails), DetachProperty, or AttachProperty.
     /// Checked by RecalculateDerivedProperty before committing — if set, the evaluation
-    /// result is discarded and the getter is re-evaluated with fresh state.
+    /// result is discarded and the getter is re-evaluated with a fresh state.
     /// </summary>
     internal bool RecalculationNeeded;
 
@@ -87,7 +87,7 @@ internal sealed class DerivedPropertyData
 
     /// <summary>
     /// Returns the current dependencies as a read-only span.
-    /// Returns empty span if no dependencies exist (allocation-free).
+    /// Returns an empty span if no dependencies exist (allocation-free).
     /// Safe for lock-free reads (clamps count to array length to handle torn reads).
     /// </summary>
     internal ReadOnlySpan<PropertyReference> RequiredPropertiesSpan
@@ -275,9 +275,9 @@ internal sealed class DerivedPropertyData
 
         SetRequiredProperties(newItems.AsSpan(0, liveCount));
 
-        // If filtered result matches previous deps, nothing effectively changed.
+        // If a filtered result matches previous deps, nothing effectively changed.
         // Return false to prevent infinite stabilization loop.
-        // previousRequiredProperties span is still valid (points to old array, replaced above).
+        // the previousRequiredProperties span is still valid (points to old array, replaced above).
         return !RequiredPropertiesSpan.SequenceEqual(previousRequiredProperties);
     }
 
@@ -320,7 +320,7 @@ internal sealed class DerivedPropertyData
 
     /// <summary>
     /// Removes a dependency using swap-remove (no array allocation).
-    /// Nulls out array when last item is removed.
+    /// Nulls out array when the last item is removed.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal bool RemoveRequiredProperty(in PropertyReference property)
