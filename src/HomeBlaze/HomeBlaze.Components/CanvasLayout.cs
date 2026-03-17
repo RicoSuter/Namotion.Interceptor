@@ -34,7 +34,7 @@ public partial class CanvasLayout : IConfigurableSubject, ITitleProvider
     /// <summary>
     /// Collection of nodes positioned on the canvas.
     /// </summary>
-    [Configuration]
+    [Configuration, State]
     public partial List<CanvasNode> Nodes { get; set; }
 
     public string? Title => "Canvas";

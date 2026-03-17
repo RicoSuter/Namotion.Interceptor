@@ -65,6 +65,9 @@
 
 @code {
     private DynamicComponent? _dynamicComponent;
+    private Dictionary<string, object?>? _cachedParameters;
+    private IInterceptorSubject? _previousSubject;
+    private Dictionary<string, object?>? _previousAdditionalParameters;
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
@@ -102,7 +105,20 @@
         Subject != null &&
         ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit);
 
+    protected override void OnParametersSet()
+    {
+        if (Subject != _previousSubject || AdditionalParameters != _previousAdditionalParameters)
+        {
+            _previousSubject = Subject;
+            _previousAdditionalParameters = AdditionalParameters;
+            _cachedParameters = BuildComponentParameters();
+        }
+    }
+
     private Dictionary<string, object?> GetComponentParameters()
+        => _cachedParameters ??= BuildComponentParameters();
+
+    private Dictionary<string, object?> BuildComponentParameters()
     {
         var parameters = new Dictionary<string, object?> { ["Subject"] = Subject };
 
