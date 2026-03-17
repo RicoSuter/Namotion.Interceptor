@@ -80,8 +80,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return;
         }
 
-        // Single lock: set IsAttached=false, clean forward links (Case 1), snapshot backward links (Case 2).
-        // Lock serializes with UpdateDependencies' backlink Add on the same depData.
+        // Single lock: set IsAttached=false, clean dependencies (Case 1), snapshot used-by properties (Case 2).
+        // Lock serializes with UpdateDependencies' used-by Add on the same depData.
         PropertyReference[] usedBySnapshot;
         lock (data)
         {
@@ -179,14 +179,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         lock (data)
         {
-            // Reentrancy guard: derived-with-setter → SetPropertyValueWithInterception → WriteProperty
-            // → RecalculateDerivedProperty. Lock is re-entrant (same thread), so this flag is needed.
-            if (data.IsRecalculating)
-            {
-                return;
-            }
-
-            if (!data.IsAttached)
+            if (data.IsRecalculating || !data.IsAttached)
             {
                 return;
             }
@@ -216,14 +209,27 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             }
         }
 
-        // Notifications outside lock(data) to avoid deadlock with lock(_attachedSubjects).
-        // Skip stale notifications so the last one always reflects the final state.
+        NotifyDerivedPropertyChanged(ref derivedProperty, data, sequence, newValue, oldValue);
+    }
+
+    /// <summary>
+    /// Fires change notification for a recalculated derived property.
+    /// Called outside lock(data) to avoid deadlock with lock(_attachedSubjects) in LifecycleInterceptor.
+    /// Skips if a newer recalculation already completed (stale sequence or overwritten value).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void NotifyDerivedPropertyChanged(
+        ref PropertyReference derivedProperty,
+        DerivedPropertyData data,
+        long sequence,
+        object? newValue,
+        object? oldValue)
+    {
         if (sequence != Volatile.Read(ref data.RecalculationSequence))
         {
             return;
         }
 
-        // Skip if a newer recalculation overwrote LastKnownValue after we released the lock.
         // Safe for boxed value types: each computation produces a distinct reference.
         if (!ReferenceEquals(newValue, Volatile.Read(ref data.LastKnownValue)))
         {
@@ -247,31 +253,31 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// </summary>
     private static object? EvaluateAndStabilize(DerivedPropertyData data, in PropertyReference property)
     {
+        var generationBefore = Volatile.Read(ref _writeGeneration);
+
         try
         {
-            var generationBefore = Volatile.Read(ref _writeGeneration);
-
             StartRecordingTouchedProperties();
             var result = property.Metadata.GetValue?.Invoke(property.Subject);
             var recordedDeps = _recorder!.FinishRecording();
+
             var dependenciesChanged = data.UpdateDependencies(property, recordedDeps, _recorder);
-
-            if (dependenciesChanged && Volatile.Read(ref _writeGeneration) != generationBefore)
+            if (!dependenciesChanged || Volatile.Read(ref _writeGeneration) == generationBefore)
             {
-                var iterations = 0;
-                do
-                {
-                    if (++iterations > MaxStabilizationIterations)
-                    {
-                        break;
-                    }
+                return result;
+            }
 
-                    StartRecordingTouchedProperties();
-                    result = property.Metadata.GetValue?.Invoke(property.Subject);
-                    recordedDeps = _recorder.FinishRecording();
-                    dependenciesChanged = data.UpdateDependencies(property, recordedDeps, _recorder);
+            // Concurrent write detected while dependencies changed — stabilize.
+            for (var iteration = 0; iteration < MaxStabilizationIterations; iteration++)
+            {
+                StartRecordingTouchedProperties();
+                result = property.Metadata.GetValue?.Invoke(property.Subject);
+                recordedDeps = _recorder.FinishRecording();
+
+                if (!data.UpdateDependencies(property, recordedDeps, _recorder))
+                {
+                    break;
                 }
-                while (dependenciesChanged);
             }
 
             return result;
