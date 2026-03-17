@@ -1,6 +1,4 @@
-@using Excubo.Blazor.Diagrams
 @using HomeBlaze.Components.Dialogs
-@using Namotion.Interceptor.Tracking.Parent
 
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(CanvasLayout))]
 @implements ISubjectComponent
@@ -27,6 +25,7 @@
     }
 
     <Diagram @ref="_diagram">
+        <Links />
         <Nodes>
             @if (Canvas?.Nodes != null)
             {
@@ -34,13 +33,13 @@
                 {
                     <Node @key="node"
                           Id="@GetNodeId(node)"
-                          X="@node.X"
-                          Y="@node.Y"
-                          Draggable="@IsEditing"
-                          XChanged="@(x => OnNodePositionChanged(node, (int)x, node.Y))"
-                          YChanged="@(y => OnNodePositionChanged(node, node.X, (int)y))">
-                        <div class="canvas-node @(IsEditing ? "editing" : "")"
-                             style="width: @(node.Width)px; height: @(node.Height)px;">
+                          X="@((double)node.X)"
+                          Y="@((double)node.Y)"
+                          Movable="@IsEditing"
+                          XChanged="@(x => OnNodePositionChanged(node, x, node.Y))"
+                          YChanged="@(y => OnNodePositionChanged(node, node.X, y))"
+                          ContentStyle="@($"width: {node.Width}px; height: {node.Height}px;")">
+                        <div class="canvas-node @(IsEditing ? "editing" : "")">
                             <div class="canvas-node-content">
                                 <SubjectComponent Subject="@node.Child"
                                                   Type="SubjectComponentType.Widget">
@@ -85,6 +84,8 @@
         border: 1px solid rgba(128,128,128,0.2);
         border-radius: 4px;
         overflow: hidden;
+        width: 100%;
+        height: 100%;
     }
 
     /* In edit mode: disable widget interaction, show drag cursor */
@@ -116,17 +117,20 @@
 
     private string GetNodeId(CanvasNode node) => node.GetHashCode().ToString();
 
-    private void OnNodePositionChanged(CanvasNode node, int x, int y)
+    private void OnNodePositionChanged(CanvasNode node, double x, double y)
     {
+        var intX = (int)Math.Round(x);
+        var intY = (int)Math.Round(y);
+
         if (Canvas?.IsSnapToGridEnabled == true)
         {
             var snapSize = Canvas.GridSize > 0 ? Canvas.GridSize : 100;
-            x = (int)Math.Round((double)x / snapSize) * snapSize;
-            y = (int)Math.Round((double)y / snapSize) * snapSize;
+            intX = (int)Math.Round(x / snapSize) * snapSize;
+            intY = (int)Math.Round(y / snapSize) * snapSize;
         }
 
-        node.X = x;
-        node.Y = y;
+        node.X = intX;
+        node.Y = intY;
     }
 
     private async Task OnCanvasClick(MouseEventArgs e)
