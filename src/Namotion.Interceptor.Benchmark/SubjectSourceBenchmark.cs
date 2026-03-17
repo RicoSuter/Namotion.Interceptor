@@ -62,7 +62,7 @@ public class SubjectSourceBenchmark
         await _service.StartAsync(_cts.Token);
 
         _propertyWriter = _source.PropertyWriter;
-        await _propertyWriter.CompleteInitializationAsync(_cts.Token);
+        await _propertyWriter.LoadInitialStateAndResumeAsync(_cts.Token);
 
         _updates = Enumerable
             .Range(1, 1000000)

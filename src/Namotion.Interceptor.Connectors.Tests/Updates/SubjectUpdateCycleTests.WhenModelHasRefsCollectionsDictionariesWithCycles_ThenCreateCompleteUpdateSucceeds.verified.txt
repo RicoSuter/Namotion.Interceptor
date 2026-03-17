@@ -3,14 +3,14 @@
   Subjects: {
     1: {
       child: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: {Scrubbed},
         Id: 2
       },
       items: {
         Kind: Collection,
         Timestamp: {Scrubbed},
-        Collection: [
+        Items: [
           {
             Index: 0,
             Id: 5
@@ -19,7 +19,7 @@
         Count: 1
       },
       lookup: {
-        Kind: Collection,
+        Kind: Dictionary,
         Count: 0
       },
       name: {
@@ -34,22 +34,22 @@
         }
       },
       parent: {
-        Kind: Item
+        Kind: Object
       },
       self: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: {Scrubbed},
         Id: 1
       }
     },
     2: {
       child: {
-        Kind: Item
+        Kind: Object
       },
       items: {
         Kind: Collection,
         Timestamp: {Scrubbed},
-        Collection: [
+        Items: [
           {
             Index: 0,
             Id: 3
@@ -58,9 +58,9 @@
         Count: 1
       },
       lookup: {
-        Kind: Collection,
+        Kind: Dictionary,
         Timestamp: {Scrubbed},
-        Collection: [
+        Items: [
           {
             Index: key,
             Id: 4
@@ -79,24 +79,24 @@
         }
       },
       parent: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: {Scrubbed},
         Id: 1
       },
       self: {
-        Kind: Item
+        Kind: Object
       }
     },
     3: {
       child: {
-        Kind: Item
+        Kind: Object
       },
       items: {
         Kind: Collection,
         Count: 0
       },
       lookup: {
-        Kind: Collection,
+        Kind: Dictionary,
         Count: 0
       },
       name: {
@@ -110,24 +110,24 @@
         }
       },
       parent: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: {Scrubbed},
         Id: 1
       },
       self: {
-        Kind: Item
+        Kind: Object
       }
     },
     4: {
       child: {
-        Kind: Item
+        Kind: Object
       },
       items: {
         Kind: Collection,
         Count: 0
       },
       lookup: {
-        Kind: Collection,
+        Kind: Dictionary,
         Count: 0
       },
       name: {
@@ -141,24 +141,24 @@
         }
       },
       parent: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: {Scrubbed},
         Id: 1
       },
       self: {
-        Kind: Item
+        Kind: Object
       }
     },
     5: {
       child: {
-        Kind: Item
+        Kind: Object
       },
       items: {
         Kind: Collection,
         Count: 0
       },
       lookup: {
-        Kind: Collection,
+        Kind: Dictionary,
         Count: 0
       },
       name: {
@@ -172,12 +172,12 @@
         }
       },
       parent: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: {Scrubbed},
         Id: 1
       },
       self: {
-        Kind: Item
+        Kind: Object
       }
     }
   }

@@ -42,12 +42,20 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
     /// Should only be called from a single consumer thread per subscription (not thread-safe for concurrent TryDequeue calls).
     /// </summary>
     /// <param name="item">The dequeued property change if available.</param>
-    /// <param name="ct">Cancellation token to abort the wait.</param>
+    /// <param name="cancellationToken">Cancellation token to abort the wait.</param>
     /// <returns>True if an item was dequeued; false if the subscription is completed or cancelled.</returns>
-    public bool TryDequeue(out SubjectPropertyChange item, CancellationToken ct = default)
+    public bool TryDequeue(out SubjectPropertyChange item, CancellationToken cancellationToken)
     {
         while (true)
         {
+            // Check cancellation before dequeuing so that kill/shutdown signals
+            // are observed even when the queue is continuously fed by producers.
+            if (cancellationToken.IsCancellationRequested)
+            {
+                item = default!;
+                return false;
+            }
+
             // Fast path: dequeue if available
             if (_queue.TryDequeue(out item))
             {
@@ -70,7 +78,7 @@ public sealed class PropertyChangeQueueSubscription : IDisposable
             // Still empty after reset: wait for a producer to Set()
             try
             {
-                _signal.Wait(ct);
+                _signal.Wait(cancellationToken);
             }
             catch (OperationCanceledException)
             {

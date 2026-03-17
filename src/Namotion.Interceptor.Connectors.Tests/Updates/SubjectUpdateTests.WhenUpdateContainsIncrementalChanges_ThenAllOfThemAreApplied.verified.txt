@@ -11,7 +11,7 @@
               Index: 0
             }
           ],
-          Collection: [
+          Items: [
             {
               Index: 0,
               Id: 2
@@ -40,13 +40,9 @@
       1: {
         children: {
           Kind: Collection,
-          Collection: [
+          Items: [
             {
-              Index: 1,
-              Id: 2
-            },
-            {
-              Index: 1,
+              Index: 0,
               Id: 2
             }
           ]

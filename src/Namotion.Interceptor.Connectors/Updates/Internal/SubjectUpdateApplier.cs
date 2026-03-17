@@ -2,7 +2,6 @@ using System.Text.Json;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Performance;
-using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
 
@@ -89,20 +88,21 @@ internal static class SubjectUpdateApplier
                 }
                 break;
 
-            case SubjectPropertyUpdateKind.Item:
-                ApplyItemUpdate(subject, registeredProperty, propertyUpdate, context);
+            case SubjectPropertyUpdateKind.Object:
+                ApplyObjectUpdate(subject, registeredProperty, propertyUpdate, context);
                 break;
 
             case SubjectPropertyUpdateKind.Collection:
-                if (registeredProperty.IsSubjectDictionary)
-                    SubjectCollectionUpdateApplier.ApplyDictionaryUpdate(subject, registeredProperty, propertyUpdate, context);
-                else
-                    SubjectCollectionUpdateApplier.ApplyCollectionUpdate(subject, registeredProperty, propertyUpdate, context);
+                SubjectItemsUpdateApplier.ApplyCollectionUpdate(subject, registeredProperty, propertyUpdate, context);
+                break;
+
+            case SubjectPropertyUpdateKind.Dictionary:
+                SubjectItemsUpdateApplier.ApplyDictionaryUpdate(subject, registeredProperty, propertyUpdate, context);
                 break;
         }
     }
 
-    private static void ApplyItemUpdate(
+    private static void ApplyObjectUpdate(
         IInterceptorSubject parent,
         RegisteredSubjectProperty property,
         SubjectPropertyUpdate propertyUpdate,

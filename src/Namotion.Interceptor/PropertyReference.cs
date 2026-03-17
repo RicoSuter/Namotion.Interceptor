@@ -45,6 +45,7 @@ public struct PropertyReference : IEquatable<PropertyReference>
         Subject.Data.TryRemove((Name, key), out _);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGetPropertyData(string key, out object? value)
     {
         return Subject.Data.TryGetValue((Name, key), out value);
@@ -73,6 +74,32 @@ public struct PropertyReference : IEquatable<PropertyReference>
     {
         return ((ICollection<KeyValuePair<(string?, string), object?>>)Subject.Data)
             .Remove(new KeyValuePair<(string?, string), object?>((Name, key), expectedValue));
+    }
+
+    private const string WriteTimestampKey = "Namotion.Interceptor.WriteTimestamp";
+
+    /// <summary>
+    /// Gets the write timestamp, or null if no timestamp has been set.
+    /// </summary>
+    public DateTimeOffset? TryGetWriteTimestamp()
+    {
+        if (Subject.Data.TryGetValue((Name, WriteTimestampKey), out var value) && value is long[] holder)
+        {
+            var ticks = Interlocked.Read(ref holder[0]);
+            return ticks == 0 ? null : new DateTimeOffset(ticks, TimeSpan.Zero);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Sets the write timestamp from raw UTC ticks, avoiding DateTimeOffset conversion on the hot path.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal void SetWriteTimestampUtcTicks(long utcTicks)
+    {
+        var holder = (long[])Subject.Data.GetOrAdd((Name, WriteTimestampKey), static _ => new long[1])!;
+        Interlocked.Exchange(ref holder[0], utcTicks);
     }
 
     #region Equality

@@ -113,6 +113,19 @@ public class RegisteredSubject
         }
     }
 
+    internal void UpdateParentIndex(RegisteredSubjectProperty property, object? oldIndex, object? newIndex)
+    {
+        lock (_parentsLock)
+        {
+            var oldParent = new SubjectPropertyParent { Property = property, Index = oldIndex };
+            var idx = _parents.IndexOf(oldParent);
+            if (idx >= 0)
+            {
+                _parents = _parents.SetItem(idx, new SubjectPropertyParent { Property = property, Index = newIndex });
+            }
+        }
+    }
+
     /// <summary>
     /// Adds a dynamic derived property to the subject with tracking of dependencies.
     /// </summary>
@@ -191,15 +204,17 @@ public class RegisteredSubject
             type,
             attributes,
             getValue is not null ? s => ((IInterceptorExecutor)s.Context).GetPropertyValue(name, getValue) : null,
-            setValue is not null ? (s, v) => ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, getValue, setValue) : null,
+            setValue is not null ? (s, v) => ((IInterceptorExecutor)s.Context).SetPropertyValue(name, v, getValue?.Invoke(s), setValue) : null,
             isIntercepted: true,
             isDynamic: true));
 
         var property = AddPropertyInternal(name, type, attributes);
 
-        // trigger change event
+        // Trigger initial change event with CurrentValue=null to indicate a new property.
+        // Using null (not readValue) ensures interceptors see a null→value transition,
+        // which is correct for lifecycle tracking of subjects in the initial value.
         property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject) ?? null,
-            o => getValue?.Invoke(o), delegate { });
+            null, delegate { });
 
         return property;
     }

@@ -187,6 +187,8 @@ person.LastName = "Doe";
 - When a dependency changes, the derived property is recalculated
 - If the derived value changes, a change event is triggered with `Source = null` (indicating local calculation)
 
+> **Internal design:** For details on the dependency graph, concurrency model, and correctness guarantees, see [Derived Property Design](design/tracking-derived-properties.md).
+
 ## Context Inheritance
 
 Automatically assigns the parent context to child subjects, ensuring they participate in the same tracking and interception pipeline:
@@ -303,6 +305,10 @@ Events are useful for:
 - Cache invalidation when subjects are removed from the object graph
 - Dynamic subscribers that register/unregister at runtime (unlike `ILifecycleHandler` which is registered at startup)
 - Integration packages (MQTT, OPC UA) that need to clean up internal state
+
+### Thread Safety
+
+The lifecycle interceptor is fully thread-safe. Multiple threads can concurrently write to the same structural property — reference counts remain consistent, no subjects are orphaned, and all attach/detach callbacks fire exactly once per transition.
 
 ### Handler Requirements
 

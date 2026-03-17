@@ -153,14 +153,14 @@
             var registered = currentSubject.TryGetRegisteredSubject();
             var property = registered?.TryGetProperty(propertyName);
 
-            if (property is not { HasChildSubjects: true })
+            if (property is not { CanContainSubjects: true })
             {
                 // Try [InlinePaths] fallback
                 var inlinePathsPropertyName = InlinePathsAttribute.GetInlinePathsPropertyName(currentSubject.GetType());
                 if (inlinePathsPropertyName != null)
                 {
                     property = registered?.TryGetProperty(inlinePathsPropertyName);
-                    if (property is { HasChildSubjects: true })
+                    if (property is { CanContainSubjects: true })
                     {
                         // This segment is actually a child key, not a property name
                         var childKey = propertyName;

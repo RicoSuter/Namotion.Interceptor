@@ -1,5 +1,4 @@
 using System.Buffers;
-using System.Collections.Concurrent;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Tracking.Transactions;
@@ -27,8 +26,17 @@ public sealed class SubjectTransaction : IDisposable
     private readonly TimeSpan _commitTimeout;
     private readonly IDisposable? _lockReleaser; // null for Optimistic until commit
 
+    /// <summary>
+    /// Last write wins if the same property is written multiple times.
+    /// Preserves insertion order so that commit replays changes in the order they were written.
+    /// Access must be synchronized via <see cref="_pendingChangesLock"/>.
+    /// </summary>
+    private readonly OrderedDictionary<PropertyReference, SubjectPropertyChange> _pendingChanges = new(PropertyReference.Comparer);
+    private readonly Lock _pendingChangesLock = new();
+
     private volatile bool _isCommitting;
     private volatile bool _isCommitted;
+    private int _commitStarted;
     private int _isDisposed;
 
     /// <summary>
@@ -56,15 +64,75 @@ public sealed class SubjectTransaction : IDisposable
     internal SubjectTransactionInterceptor Interceptor { get; }
 
     /// <summary>
-    /// Last write wins if the same property is written multiple times.
-    /// Thread-safe for concurrent property writes within the same transaction.
+    /// Gets a snapshot of the pending changes as a read-only list, in insertion order.
     /// </summary>
-    internal ConcurrentDictionary<PropertyReference, SubjectPropertyChange> PendingChanges { get; } = new(PropertyReference.Comparer);
+    public IReadOnlyList<SubjectPropertyChange> GetPendingChanges()
+    {
+        lock (_pendingChangesLock)
+        {
+            return _pendingChanges.Values.ToList();
+        }
+    }
 
     /// <summary>
-    /// Gets the pending changes as a read-only list.
+    /// Tries to read a pending value for the given property.
+    /// Returns false if the transaction is committing or no pending value exists.
     /// </summary>
-    public IReadOnlyList<SubjectPropertyChange> GetPendingChanges() => PendingChanges.Values.ToList();
+    internal bool TryGetPendingValue<TProperty>(PropertyReference property, out TProperty value)
+    {
+        lock (_pendingChangesLock)
+        {
+            ThrowIfCommittingConcurrently();
+
+            if (_pendingChanges.TryGetValue(property, out var change))
+            {
+                value = change.GetNewValue<TProperty>();
+                return true;
+            }
+
+            value = default!;
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Atomically captures a property change into the pending dictionary.
+    /// First write preserves <paramref name="currentValue"/> as old value for conflict detection;
+    /// subsequent writes preserve the original old value (last write wins).
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown if a concurrent commit is in progress (TOCTOU race).</exception>
+    internal void CaptureChange<TProperty>(
+        PropertyReference property,
+        object? source,
+        DateTimeOffset changedTimestamp,
+        DateTimeOffset? receivedTimestamp,
+        TProperty currentValue,
+        TProperty newValue)
+    {
+        lock (_pendingChangesLock)
+        {
+            ThrowIfCommittingConcurrently();
+
+            var isFirstWrite = !_pendingChanges.TryGetValue(property, out var existingChange);
+            _pendingChanges[property] = SubjectPropertyChange.Create(
+                property,
+                source: source,
+                changedTimestamp: changedTimestamp,
+                receivedTimestamp: receivedTimestamp,
+                isFirstWrite ? currentValue : existingChange.GetOldValue<TProperty>(),
+                newValue);
+        }
+    }
+
+    private void ThrowIfCommittingConcurrently()
+    {
+        if (_isCommitting)
+        {
+            throw new InvalidOperationException(
+                "Cannot access transactional property while commit is in progress. " +
+                "This typically indicates the transaction is being used from multiple threads.");
+        }
+    }
 
     /// <summary>
     /// Gets the context this transaction is bound to.
@@ -178,19 +246,20 @@ public sealed class SubjectTransaction : IDisposable
     {
         ValidateCanCommit();
 
-        if (PendingChanges.Count == 0)
+        lock (_pendingChangesLock)
         {
-            _isCommitted = true;
-            return;
+            if (_pendingChanges.Count == 0)
+            {
+                _isCommitted = true;
+                return;
+            }
         }
 
         var commitLock = await AcquireOptimisticLockIfNeededAsync(cancellationToken);
-        var (rentedArray, changes) = RentAndCopyChanges();
+        var (rentedArray, changes) = StartCommitAndSnapshotChanges();
 
         try
         {
-            _isCommitting = true;
-
             ThrowIfConflictsDetected(changes.Span);
 
             using var timeoutCts = CreateCommitTimeoutCts();
@@ -198,7 +267,11 @@ public sealed class SubjectTransaction : IDisposable
 
             var (successful, failed, errors) = await ExecuteWritesAsync(changes, commitToken);
 
-            PendingChanges.Clear();
+            lock (_pendingChangesLock)
+            {
+                _pendingChanges.Clear();
+            }
+
             _isCommitted = true;
 
             ThrowIfFailed(successful, failed, errors);
@@ -206,6 +279,14 @@ public sealed class SubjectTransaction : IDisposable
         finally
         {
             _isCommitting = false;
+
+            if (!_isCommitted)
+            {
+                // Allow retry: reset so CommitAsync can be called again after a failure
+                // (e.g., conflict detected, timeout, validation during replay).
+                Volatile.Write(ref _commitStarted, 0);
+            }
+
             ArrayPool<SubjectPropertyChange>.Shared.Return(rentedArray);
             commitLock?.Dispose();
         }
@@ -218,6 +299,9 @@ public sealed class SubjectTransaction : IDisposable
 
         if (_isCommitted)
             throw new InvalidOperationException("Transaction has already been committed.");
+
+        if (Interlocked.CompareExchange(ref _commitStarted, 1, 0) != 0)
+            throw new InvalidOperationException("CommitAsync is already in progress.");
     }
 
     private async ValueTask<IDisposable?> AcquireOptimisticLockIfNeededAsync(CancellationToken cancellationToken)
@@ -229,18 +313,25 @@ public sealed class SubjectTransaction : IDisposable
         return null;
     }
 
-    private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes) RentAndCopyChanges()
+    private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes) StartCommitAndSnapshotChanges()
     {
-        var changeCount = PendingChanges.Count;
-        var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount);
-
-        var index = 0;
-        foreach (var change in PendingChanges.Values)
+        lock (_pendingChangesLock)
         {
-            rentedArray[index++] = change;
-        }
+            // Set _isCommitting inside the lock to prevent concurrent writes from being
+            // captured into _pendingChanges between the copy and the flag update (TOCTOU).
+            _isCommitting = true;
 
-        return (rentedArray, rentedArray.AsMemory(0, changeCount));
+            var changeCount = _pendingChanges.Count;
+            var rentedArray = ArrayPool<SubjectPropertyChange>.Shared.Rent(changeCount);
+
+            var index = 0;
+            foreach (var change in _pendingChanges.Values)
+            {
+                rentedArray[index++] = change;
+            }
+
+            return (rentedArray, rentedArray.AsMemory(0, changeCount));
+        }
     }
 
     private void ThrowIfConflictsDetected(ReadOnlySpan<SubjectPropertyChange> changes)
@@ -414,7 +505,12 @@ public sealed class SubjectTransaction : IDisposable
         if (Interlocked.CompareExchange(ref _isDisposed, 1, 0) == 0)
         {
             Interlocked.Decrement(ref _activeTransactionCount);
-            PendingChanges.Clear();
+
+            lock (_pendingChangesLock)
+            {
+                _pendingChanges.Clear();
+            }
+
             CurrentTransaction.Value = null;
             _lockReleaser?.Dispose(); // May be null for Optimistic transactions
         }

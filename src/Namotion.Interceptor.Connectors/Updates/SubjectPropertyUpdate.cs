@@ -29,8 +29,8 @@ public class SubjectPropertyUpdate
     public DateTimeOffset? Timestamp { get; set; }
 
     /// <summary>
-    /// The subject ID for Item kind properties.
-    /// Null means the item reference is null.
+    /// The subject ID for Object kind properties.
+    /// Null means the object reference is null.
     /// Omitted entirely when null (no "id": null in JSON).
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -38,23 +38,24 @@ public class SubjectPropertyUpdate
     public string? Id { get; set; }
 
     /// <summary>
-    /// Structural operations (Remove, Insert, Move) for Collection kind.
+    /// Structural operations (Remove, Insert, Move) for Collection/Dictionary kinds.
     /// Applied in order BEFORE sparse property updates.
+    /// Note: Move is only valid for Collection kind.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("operations")]
     public List<SubjectCollectionOperation>? Operations { get; set; }
 
     /// <summary>
-    /// Sparse property updates by final index/key for Collection kind.
+    /// Sparse property updates by final index/key for Collection/Dictionary kinds.
     /// Applied AFTER structural operations.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    [JsonPropertyName("collection")]
-    public List<SubjectPropertyCollectionUpdate>? Collection { get; set; }
+    [JsonPropertyName("items")]
+    public List<SubjectPropertyItemUpdate>? Items { get; set; }
 
     /// <summary>
-    /// Total count of collection after all operations.
+    /// Total count of collection/dictionary after all operations.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("count")]

@@ -18,7 +18,6 @@ public class ChangeQueueProcessor : IDisposable
     private const int FlushDedupedBufferMinSize = 256;
     private const int FlushDedupedBufferMaxSize = 1024;
 
-    private readonly IInterceptorSubjectContext _context;
     private readonly Func<RegisteredSubjectProperty, bool> _propertyFilter;
     private readonly Func<ReadOnlyMemory<SubjectPropertyChange>, CancellationToken, ValueTask> _writeHandler;
     private readonly object? _source;
@@ -28,11 +27,11 @@ public class ChangeQueueProcessor : IDisposable
     // Use a concurrent, lock-free queue for collecting changes from the subscription thread.
     private readonly ConcurrentQueue<SubjectPropertyChange> _changes = new();
     private int _flushGate; // 0 = free, 1 = flushing
-    private bool _disposed;
+    private int _disposed; // 0 = not disposed, 1 = disposed (use Interlocked for thread-safe check)
 
     // Scratch buffers used only while holding the flush gate (single-threaded access)
     private readonly List<SubjectPropertyChange> _flushChanges = [];
-    private readonly HashSet<PropertyReference> _flushTouchedChanges = new(PropertyReference.Comparer);
+    private readonly Dictionary<PropertyReference, int> _flushPropertyIndices = new(PropertyReference.Comparer);
 
     // Reusable buffer for deduped changes (rented from ArrayPool to avoid allocations on resize)
     private SubjectPropertyChange[] _flushDedupedBuffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(FlushDedupedBufferMinSize);
@@ -41,8 +40,13 @@ public class ChangeQueueProcessor : IDisposable
     // Reusable single-item buffer for the no-buffer (immediate) path
     private readonly SubjectPropertyChange[] _immediateBuffer = new SubjectPropertyChange[1];
 
+    private readonly PropertyChangeQueueSubscription _subscription;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="ChangeQueueProcessor"/> class.
+    /// The subscription is created immediately so that changes are captured from this point,
+    /// even before <see cref="ProcessAsync"/> is called. This prevents change loss during
+    /// initialization gaps (e.g., between OPC UA node creation and processing start).
     /// </summary>
     /// <param name="source">Source to ignore (to prevent update loops).</param>
     /// <param name="context">The interceptor subject context.</param>
@@ -59,11 +63,21 @@ public class ChangeQueueProcessor : IDisposable
         ILogger logger)
     {
         _source = source;
-        _context = context;
         _propertyFilter = propertyFilter;
         _writeHandler = writeHandler;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
+
+        try
+        {
+            _subscription = context.CreatePropertyChangeQueueSubscription();
+        }
+        catch
+        {
+            ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
+            _flushDedupedBuffer = null!;
+            throw;
+        }
     }
 
     /// <summary>
@@ -73,8 +87,6 @@ public class ChangeQueueProcessor : IDisposable
     /// <returns>The task.</returns>
     public async Task ProcessAsync(CancellationToken cancellationToken)
     {
-        using var subscription = _context.CreatePropertyChangeQueueSubscription();
-
         using var periodicTimer = _bufferTime > TimeSpan.Zero ? new PeriodicTimer(_bufferTime) : null;
         using var linkedTokenSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
@@ -83,23 +95,37 @@ public class ChangeQueueProcessor : IDisposable
             {
                 try
                 {
+                    // ReSharper disable AccessToDisposedClosure
                     while (await periodicTimer.WaitForNextTickAsync(linkedTokenSource.Token).ConfigureAwait(false))
                     {
                         await TryFlushAsync(linkedTokenSource.Token).ConfigureAwait(false);
                     }
+                    // ReSharper restore AccessToDisposedClosure
                 }
-                catch (OperationCanceledException)
+                catch (Exception ex)
                 {
-                    // Expected when stopping
+                    if (ex is not OperationCanceledException)
+                    {
+                        _logger.LogError(ex, "Failed to flush changes.");
+                    }
                 }
             }, linkedTokenSource.Token)
             : Task.CompletedTask;
+
+        if (periodicTimer is null)
+        {
+            _logger.LogWarning(
+                "Change queue processor is running without buffering (bufferTime <= 0). " +
+                "Each property change will be processed individually without deduplication, " +
+                "which can cause high CPU usage under load. " +
+                "Consider setting a bufferTime (e.g., 8-50ms) to enable batching and deduplication.");
+        }
 
         try
         {
             await Task.Yield();
 
-            while (subscription.TryDequeue(out var change, linkedTokenSource.Token))
+            while (_subscription.TryDequeue(out var change, linkedTokenSource.Token))
             {
                 if (change.Source == _source)
                 {
@@ -114,7 +140,7 @@ public class ChangeQueueProcessor : IDisposable
 
                 if (periodicTimer is null)
                 {
-                    // Immediate path: send single change without buffering (zero allocation)
+                    // Immediate path: send a single change without buffering (zero allocation)
                     _immediateBuffer[0] = change;
                     try
                     {
@@ -166,11 +192,11 @@ public class ChangeQueueProcessor : IDisposable
                 return;
             }
 
-            _flushTouchedChanges.Clear();
+            _flushPropertyIndices.Clear();
             _flushDedupedCount = 0;
 
             // Pre-size to avoid resizes under bursts
-            _flushTouchedChanges.EnsureCapacity(_flushChanges.Count);
+            _flushPropertyIndices.EnsureCapacity(_flushChanges.Count);
 
             // Ensure the buffer is large enough (rent from pool to avoid allocations)
             if (_flushDedupedBuffer.Length < _flushChanges.Count)
@@ -179,17 +205,24 @@ public class ChangeQueueProcessor : IDisposable
                 _flushDedupedBuffer = ArrayPool<SubjectPropertyChange>.Shared.Rent(_flushChanges.Count);
             }
 
-            // Deduplicate by Property, keeping the last write, and preserve order of last occurrences
+            // Deduplicate by Property: keep oldest old value, use newest new value.
+            // Backward iteration finds last occurrences first, preserving last-occurrence order.
             for (var i = _flushChanges.Count - 1; i >= 0; i--)
             {
                 var change = _flushChanges[i];
-                if (_flushTouchedChanges.Add(change.Property))
+                if (!_flushPropertyIndices.TryGetValue(change.Property, out var existingIndex))
                 {
+                    _flushPropertyIndices[change.Property] = _flushDedupedCount;
                     _flushDedupedBuffer[_flushDedupedCount++] = change;
+                }
+                else
+                {
+                    // Earlier occurrence: merge its old value into the kept (later) change
+                    _flushDedupedBuffer[existingIndex] = change.MergeWithNewer(_flushDedupedBuffer[existingIndex]);
                 }
             }
 
-            // Reverse in place to keep the ascending order of last occurrences without allocations
+            // Reverse to restore chronological order of last occurrences
             if (_flushDedupedCount > 1)
             {
                 Array.Reverse(_flushDedupedBuffer, 0, _flushDedupedCount);
@@ -215,13 +248,13 @@ public class ChangeQueueProcessor : IDisposable
         {
             // Clear buffers to allow GC of SubjectPropertyChange objects
             _flushChanges.Clear();
-            _flushTouchedChanges.Clear();
+            _flushPropertyIndices.Clear();
 
             // Clear entire rented array before potential return to pool.
             // SubjectPropertyChange contains object references (Source, boxed values) that must be released.
             Array.Clear(_flushDedupedBuffer, 0, _flushDedupedBuffer.Length);
 
-            if (_disposed)
+            if (Volatile.Read(ref _disposed) == 1)
             {
                 // Disposed while flushing - return buffer to pool now
                 ArrayPool<SubjectPropertyChange>.Shared.Return(_flushDedupedBuffer);
@@ -244,12 +277,13 @@ public class ChangeQueueProcessor : IDisposable
     /// </summary>
     public void Dispose()
     {
-        if (_disposed)
+        // Atomic check-and-set to prevent double-dispose race condition
+        if (Interlocked.Exchange(ref _disposed, 1) == 1)
         {
             return;
         }
 
-        _disposed = true;
+        _subscription.Dispose();
 
         // Try to acquire gate once - if flush is in progress, it will handle cleanup when it sees _disposed
         if (Interlocked.CompareExchange(ref _flushGate, 1, 0) == 0)

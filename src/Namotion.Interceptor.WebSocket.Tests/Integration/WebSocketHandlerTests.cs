@@ -1,0 +1,216 @@
+using System;
+using System.Threading.Tasks;
+using Namotion.Interceptor.Testing;
+using Xunit;
+using Xunit.Abstractions;
+
+namespace Namotion.Interceptor.WebSocket.Tests.Integration;
+
+/// <summary>
+/// Integration tests for AddWebSocketSubjectHandler and MapWebSocketSubjectHandler
+/// which embed WebSocket handling in an existing ASP.NET Core application.
+/// </summary>
+[Trait("Category", "Integration")]
+public class WebSocketHandlerTests
+{
+    private readonly ITestOutputHelper _output;
+
+    public WebSocketHandlerTests(ITestOutputHelper output)
+    {
+        _output = output;
+    }
+
+    [Fact]
+    public async Task EmbeddedServer_ServerWriteProperty_ShouldUpdateClient()
+    {
+        // Arrange
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = new WebSocketEmbeddedTestServer<TestRoot>(_output);
+        await using var client = new WebSocketTestClient<TestRoot>(_output);
+
+        await server.StartAsync(
+            context => new TestRoot(context),
+            (_, root) => root.Name = "Initial",
+            port: portLease.Port);
+
+        await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Root!.Name == "Initial",
+            message: "Client should receive initial state");
+
+        // Act
+        server.Root!.Name = "Updated from Server";
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Root!.Name == "Updated from Server",
+            message: "Client should receive server update");
+    }
+
+    [Fact]
+    public async Task EmbeddedServer_ClientWriteProperty_ShouldUpdateServer()
+    {
+        // Arrange
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = new WebSocketEmbeddedTestServer<TestRoot>(_output);
+        await using var client = new WebSocketTestClient<TestRoot>(_output);
+
+        await server.StartAsync(
+            context => new TestRoot(context),
+            (_, root) => root.Name = "Initial",
+            port: portLease.Port);
+
+        await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Root!.Name == "Initial",
+            message: "Client should receive initial state");
+
+        // Act
+        client.Root!.Name = "Updated from Client";
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => server.Root!.Name == "Updated from Client",
+            message: "Server should receive client update");
+    }
+
+    [Fact]
+    public async Task EmbeddedServer_NumericProperty_ShouldSyncBidirectionally()
+    {
+        // Arrange
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = new WebSocketEmbeddedTestServer<TestRoot>(_output);
+        await using var client = new WebSocketTestClient<TestRoot>(_output);
+
+        await server.StartAsync(context => new TestRoot(context), port: portLease.Port);
+        await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
+
+        // Act - Server updates
+        server.Root!.Number = 123.45m;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Root!.Number == 123.45m,
+            message: "Client should receive server's number update");
+
+        // Act - Client updates
+        client.Root!.Number = 678.90m;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => server.Root.Number == 678.90m,
+            message: "Server should receive client's number update");
+    }
+
+    [Fact]
+    public async Task EmbeddedServer_MultipleClients_ShouldAllReceiveUpdates()
+    {
+        // Arrange
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = new WebSocketEmbeddedTestServer<TestRoot>(_output);
+        await using var client1 = new WebSocketTestClient<TestRoot>(_output);
+        await using var client2 = new WebSocketTestClient<TestRoot>(_output);
+
+        await server.StartAsync(context => new TestRoot(context), port: portLease.Port);
+        await client1.StartAsync(context => new TestRoot(context), port: portLease.Port);
+        await client2.StartAsync(context => new TestRoot(context), port: portLease.Port);
+
+        // Act
+        server.Root!.Name = "Broadcast Test";
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client1.Root!.Name == "Broadcast Test" &&
+                  client2.Root!.Name == "Broadcast Test",
+            message: "Both clients should receive broadcast");
+    }
+
+    [Fact]
+    public async Task EmbeddedServer_WithCollectionItems_ShouldSyncCollection()
+    {
+        // Arrange
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = new WebSocketEmbeddedTestServer<TestRoot>(_output);
+        await using var client = new WebSocketTestClient<TestRoot>(_output);
+
+        await server.StartAsync(
+            context => new TestRoot(context),
+            (context, root) =>
+            {
+                root.Name = "WithItems";
+                root.Number = 100m;
+                root.Items =
+                [
+                    new TestItem(context) { Label = "Item1", Value = 10 },
+                    new TestItem(context) { Label = "Item2", Value = 20 }
+                ];
+            },
+            port: portLease.Port);
+
+        await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
+
+        // Act & Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Root!.Items.Length == 2,
+            timeout: TimeSpan.FromSeconds(10),
+            message: "Collection should sync");
+
+        Assert.Equal("WithItems", client.Root!.Name);
+        Assert.Equal(2, client.Root.Items.Length);
+        Assert.Equal("Item1", client.Root.Items[0].Label);
+        Assert.Equal(20, client.Root.Items[1].Value);
+    }
+
+    [Fact]
+    public async Task EmbeddedServer_Restart_ClientRecovers()
+    {
+        // Arrange
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = new WebSocketEmbeddedTestServer<TestRoot>(_output);
+        await using var client = new WebSocketTestClient<TestRoot>(_output);
+
+        await server.StartAsync(
+            context => new TestRoot(context),
+            (_, root) => root.Name = "Initial",
+            port: portLease.Port);
+
+        await client.StartAsync(context => new TestRoot(context), port: portLease.Port);
+
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Root!.Name == "Initial",
+            message: "Initial sync should complete");
+
+        _output.WriteLine("Initial sync verified");
+
+        // Act - Restart server
+        _output.WriteLine("Restarting embedded server...");
+        await server.StopAsync();
+        await server.RestartAsync();
+
+        server.Root!.Name = "AfterRestart";
+
+        // Assert - Wait for client to reconnect and sync
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => client.Root!.Name == "AfterRestart",
+            timeout: TimeSpan.FromSeconds(30),
+            message: "Client should receive update after embedded server restart");
+
+        _output.WriteLine($"Client received: {client.Root!.Name}");
+    }
+
+    [Fact]
+    public async Task EmbeddedServer_Handler_IsAccessible()
+    {
+        // Arrange
+        using var portLease = await WebSocketTestPortPool.AcquireAsync();
+        await using var server = new WebSocketEmbeddedTestServer<TestRoot>(_output);
+
+        // Act
+        await server.StartAsync(context => new TestRoot(context), port: portLease.Port);
+
+        // Assert
+        Assert.NotNull(server.Handler);
+    }
+}

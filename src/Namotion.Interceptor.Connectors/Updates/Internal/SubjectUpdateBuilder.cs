@@ -18,9 +18,11 @@ internal sealed class SubjectUpdateBuilder
 
     public HashSet<IInterceptorSubject> ProcessedSubjects { get; } = [];
 
-    public void Initialize(IInterceptorSubject rootSubject, ReadOnlySpan<ISubjectUpdateProcessor> processors)
+    public HashSet<IInterceptorSubject> PathVisited { get; } = [];
+
+    public void Initialize(IInterceptorSubject rootSubject, ISubjectUpdateProcessor[] processors)
     {
-        Processors = processors.ToArray();
+        Processors = processors;
         GetOrCreateId(rootSubject); // Ensure root subject gets ID "1"
     }
 
@@ -32,6 +34,22 @@ internal sealed class SubjectUpdateBuilder
             _subjectToId[subject] = id;
         }
         return id;
+    }
+
+    /// <summary>
+    /// Gets an existing ID for a subject, or creates a new one.
+    /// Returns true if a new ID was created, false if the subject already had an ID.
+    /// </summary>
+    public (string Id, bool IsNew) GetOrCreateIdWithStatus(IInterceptorSubject subject)
+    {
+        if (_subjectToId.TryGetValue(subject, out var id))
+        {
+            return (id, false);
+        }
+
+        id = (++_nextId).ToString();
+        _subjectToId[subject] = id;
+        return (id, true);
     }
 
     public Dictionary<string, SubjectPropertyUpdate> GetOrCreateProperties(string subjectId)
@@ -95,6 +113,7 @@ internal sealed class SubjectUpdateBuilder
         _subjectToId.Clear();
         _propertyUpdates.Clear();
         ProcessedSubjects.Clear();
+        PathVisited.Clear();
         Subjects = new(); // create a fresh dictionary, old one transferred to result
         Processors = [];
     }
