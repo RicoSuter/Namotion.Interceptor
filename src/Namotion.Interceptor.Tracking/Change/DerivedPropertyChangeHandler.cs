@@ -23,7 +23,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     private static readonly Action<IInterceptorSubject, object?> NoOpWriteDelegate = static (_, _) => { };
 
     // Safety limit for stabilization loops. Prevents infinite loops from getters
-    // with side effects that mutate tracked state (a user error, but shouldn't hang).
+    // with side effects that mutate the tracked state (a user error but shouldn't hang).
     // In correct code, the loop runs 1-2 iterations max.
     private const int MaxStabilizationIterations = 100;
 
@@ -217,7 +217,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             long sequence;
             try
             {
-                // Inner loop: re-evaluates when state changes during evaluation.
+                // Inner loop: re-evaluates when the state changes during evaluation.
                 while (true)
                 {
                     // Phase 2: Evaluate getter OUTSIDE lock(data).
@@ -242,7 +242,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                         }
 
                         // State changed during evaluation (write, attach, or detach set this flag).
-                        // Discard the stale result and re-evaluate with fresh state.
+                        // Discard the stale result and re-evaluate with a fresh state.
                         if (data.RecalculationNeeded)
                         {
                             data.RecalculationNeeded = false;
