@@ -26,7 +26,7 @@ internal sealed class DerivedPropertyRecorder
     }
 
     /// <summary>
-    /// Gets whether recording is currently active (depth > 0).
+    /// Gets whether the recording is currently active (depth > 0).
     /// </summary>
     public bool IsRecording => _depth > 0;
 
@@ -58,7 +58,9 @@ internal sealed class DerivedPropertyRecorder
 
         // Deduplicate: Skip if already recorded in this session
         if (Array.IndexOf(buffer, property, 0, frame.Count) >= 0)
+        {
             return;
+        }
 
         // Grow buffer if full (rare - only if property has > 8, 16, 32... dependencies)
         if (frame.Count == buffer.Length)

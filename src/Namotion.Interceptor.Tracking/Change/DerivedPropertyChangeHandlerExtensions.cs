@@ -46,5 +46,4 @@ public static class DerivedPropertyChangeHandlerExtensions
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal static DerivedPropertyData? TryGetDerivedPropertyData(this PropertyReference property) =>
         property.TryGetPropertyData(DataKey, out var value) ? value as DerivedPropertyData : null;
-
 }
