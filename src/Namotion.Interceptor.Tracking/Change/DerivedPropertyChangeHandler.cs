@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
@@ -187,12 +188,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     {
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
 
-        var data = derivedProperty.GetDerivedPropertyData();
         object? oldValue;
-        object? newValue;
-        long sequence;
 
         // Phase 1: Acquire recalculation ownership (brief lock).
+        var data = derivedProperty.GetDerivedPropertyData();
         lock (data)
         {
             if (data.IsRecalculating)
@@ -214,6 +213,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // preventing stack overflow under sustained concurrent writes.
         for (var outerIteration = 0; outerIteration < MaxStabilizationIterations; outerIteration++)
         {
+            object? newValue;
+            long sequence;
             try
             {
                 // Inner loop: re-evaluates when state changes during evaluation.
@@ -269,7 +270,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             // Uses a loop (not recursion) to prevent stack overflow under sustained concurrent writes.
             lock (data)
             {
-                if (!data.RecalculationNeeded)
+                if (!data.RecalculationNeeded || !data.IsAttached)
                 {
                     return;
                 }
@@ -283,6 +284,11 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // Safety: if the outer loop exhausted MaxStabilizationIterations, the post-notification
         // check may have set IsRecalculating=true for the next iteration that never ran.
         // Clear it to prevent permanently blocking future recalculations.
+        Trace.TraceWarning(
+            $"DerivedPropertyChangeHandler: MaxStabilizationIterations ({MaxStabilizationIterations}) exhausted for " +
+            $"'{derivedProperty.Metadata.Name}' on {derivedProperty.Subject.GetType().Name}. " +
+            "This indicates a derived getter with circular side effects.");
+       
         lock (data)
         {
             data.IsRecalculating = false;
@@ -399,6 +405,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                     }
                 }
             }
+
+            Trace.TraceWarning(
+                $"DerivedPropertyChangeHandler: MaxStabilizationIterations ({MaxStabilizationIterations}) exhausted " +
+                $"during dependency stabilization for '{property.Metadata.Name}' on {property.Subject.GetType().Name}.");
 
             return result;
         }
