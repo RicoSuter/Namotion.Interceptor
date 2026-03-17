@@ -229,7 +229,15 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                     }
                     catch (Exception)
                     {
-                        // Getter threw — keep LastKnownValue, concurrent writer's cascade will retry.
+                        // Getter threw — keep LastKnownValue, next dependency write will retry.
+                        // Clear RecalculationNeeded to prevent a wasted re-evaluation: the flag
+                        // may have been set by a concurrent write during this failed evaluation,
+                        // but the next write triggers a fresh recalculation that reads current state.
+                        lock (data)
+                        {
+                            data.RecalculationNeeded = false;
+                        }
+
                         return;
                     }
 
