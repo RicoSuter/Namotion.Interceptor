@@ -1,5 +1,4 @@
 @using HomeBlaze.Components.Dialogs
-@using Namotion.Interceptor.Tracking.Parent
 
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(GridLayout))]
 @implements ISubjectComponent
@@ -223,7 +222,7 @@
             Grid.Cells = Grid.Cells.Where(c => c != cell).ToList();
 
             // Persist the change
-            var configurationWriter = Grid.TryGetFirstParent<IConfigurationWriter>() ?? RootManager;
+            var configurationWriter = RootManager.GetConfigurationWriter(Grid);
             await configurationWriter.WriteConfigurationAsync(Grid, CancellationToken.None);
         }
     }
