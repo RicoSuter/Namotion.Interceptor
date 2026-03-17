@@ -17,13 +17,14 @@ public static class SubjectPropertyTypeExtensions
     private static readonly ConcurrentDictionary<Type, bool> IsSubjectDictionaryTypeCache = new();
 
     /// <summary>
-    /// JIT-constant fast path for generic call sites (e.g. <c>WriteProperty&lt;TProperty&gt;</c>).
-    /// Each <c>typeof(TProperty) == typeof(X)</c> check is eliminated at JIT time when TProperty
-    /// does not match, so this compiles to a single <c>return false</c> for common leaf types.
-    /// Falls through to the cached <see cref="CanContainSubjects"/> for all other types.
+    /// Checks whether a property can contain subjects, using both a JIT-constant fast path
+    /// via <typeparamref name="TProperty"/> and a runtime fallback via the declared
+    /// <paramref name="type"/>. <typeparamref name="TProperty"/> is a hint — it may be
+    /// <c>object</c> when values are boxed through non-generic paths (this applies to
+    /// <c>TProperty</c> throughout the interceptor interfaces, not just here).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static bool CanContainSubjects<TProperty>()
+    public static bool CanContainSubjects<TProperty>(this Type type)
     {
         if (typeof(TProperty).IsPrimitive ||
             typeof(TProperty) == typeof(decimal) ||
@@ -36,7 +37,7 @@ public static class SubjectPropertyTypeExtensions
             return false;
         }
 
-        return typeof(TProperty).CanContainSubjects();
+        return type.CanContainSubjects();
     }
 
     /// <summary>
