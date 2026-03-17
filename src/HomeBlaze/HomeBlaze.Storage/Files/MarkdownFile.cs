@@ -117,26 +117,13 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         IInterceptorSubject subject,
         CancellationToken cancellationToken)
     {
-        Console.WriteLine($"[MarkdownFile.WriteConfigurationAsync] Called for subject: {subject.GetType().Name}");
-        Console.WriteLine($"[MarkdownFile.WriteConfigurationAsync] Children count: {Children.Count}");
-        foreach (var kvp in Children)
-        {
-            Console.WriteLine($"[MarkdownFile.WriteConfigurationAsync] Child: {kvp.Key} -> {kvp.Value.GetType().Name}");
-        }
-
         // Rebuild markdown with all embedded subjects serialized
-        var newContent = RebuildMarkdownContent();
-        Console.WriteLine($"[MarkdownFile.WriteConfigurationAsync] Content length before: {Content?.Length}, after: {newContent.Length}");
-        Content = newContent;
+        Content = RebuildMarkdownContent();
 
         // Write to storage
         var bytes = Encoding.UTF8.GetBytes(Content);
         using var stream = new MemoryStream(bytes);
         await WriteAsync(stream, cancellationToken);
-        Console.WriteLine($"[MarkdownFile.WriteConfigurationAsync] Written to storage");
-
-        // Note: MarkdownFile writes directly to storage, no need to continue chain
-        // (parent storage container doesn't need to serialize MarkdownFile itself)
 
         return true;
     }
