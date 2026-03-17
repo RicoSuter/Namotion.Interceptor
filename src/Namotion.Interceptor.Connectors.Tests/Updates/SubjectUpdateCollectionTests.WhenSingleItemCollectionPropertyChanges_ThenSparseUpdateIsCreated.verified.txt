@@ -4,7 +4,7 @@
     1: {
       Items: {
         Kind: Collection,
-        Collection: [
+        Items: [
           {
             Index: 0,
             Id: 2

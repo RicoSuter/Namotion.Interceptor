@@ -5,7 +5,7 @@
       children: {
         Kind: Collection,
         Timestamp: {Scrubbed},
-        Collection: [
+        Items: [
           {
             Index: 0,
             Id: 4
@@ -22,7 +22,7 @@
         Count: 3
       },
       father: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: {Scrubbed},
         Id: 2
       },
@@ -51,9 +51,12 @@
         Kind: Value
       },
       mother: {
-        Kind: Item,
+        Kind: Object,
         Timestamp: {Scrubbed},
         Id: 3
+      },
+      relationships: {
+        Kind: Value
       }
     },
     2: {
@@ -62,7 +65,7 @@
         Count: 0
       },
       father: {
-        Kind: Item
+        Kind: Object
       },
       firstName: {
         Kind: Value,
@@ -88,7 +91,10 @@
         Kind: Value
       },
       mother: {
-        Kind: Item
+        Kind: Object
+      },
+      relationships: {
+        Kind: Value
       }
     },
     3: {
@@ -97,7 +103,7 @@
         Count: 0
       },
       father: {
-        Kind: Item
+        Kind: Object
       },
       firstName: {
         Kind: Value,
@@ -123,7 +129,10 @@
         Kind: Value
       },
       mother: {
-        Kind: Item
+        Kind: Object
+      },
+      relationships: {
+        Kind: Value
       }
     },
     4: {
@@ -132,7 +141,7 @@
         Count: 0
       },
       father: {
-        Kind: Item
+        Kind: Object
       },
       firstName: {
         Kind: Value,
@@ -158,7 +167,10 @@
         Kind: Value
       },
       mother: {
-        Kind: Item
+        Kind: Object
+      },
+      relationships: {
+        Kind: Value
       }
     },
     5: {
@@ -167,7 +179,7 @@
         Count: 0
       },
       father: {
-        Kind: Item
+        Kind: Object
       },
       firstName: {
         Kind: Value,
@@ -193,7 +205,10 @@
         Kind: Value
       },
       mother: {
-        Kind: Item
+        Kind: Object
+      },
+      relationships: {
+        Kind: Value
       }
     },
     6: {
@@ -202,7 +217,7 @@
         Count: 0
       },
       father: {
-        Kind: Item
+        Kind: Object
       },
       firstName: {
         Kind: Value,
@@ -228,7 +243,10 @@
         Kind: Value
       },
       mother: {
-        Kind: Item
+        Kind: Object
+      },
+      relationships: {
+        Kind: Value
       }
     }
   }

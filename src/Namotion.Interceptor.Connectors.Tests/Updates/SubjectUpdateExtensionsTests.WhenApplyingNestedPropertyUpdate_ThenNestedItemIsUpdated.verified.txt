@@ -4,11 +4,7 @@
     1: {
       Children: {
         Kind: Collection,
-        Collection: [
-          {
-            Index: 0,
-            Id: 2
-          },
+        Items: [
           {
             Index: 0,
             Id: 2

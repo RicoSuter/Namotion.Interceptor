@@ -78,12 +78,6 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
     public partial int? BufferTimeMs { get; set; }
 
     /// <summary>
-    /// Retry delay time in seconds. Uses default if not specified.
-    /// </summary>
-    [Configuration]
-    public partial int? RetryTimeSeconds { get; set; }
-
-    /// <summary>
     /// Whether the server is enabled and should auto-start on application startup.
     /// When stopped manually, this is set to false to prevent auto-restart.
     /// </summary>
@@ -229,16 +223,13 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
             }
 
             // Build configuration with defaults
-            var pathProvider = DefaultPathProvider.Instance;
             var defaults = new OpcUaServerConfiguration
             {
-                PathProvider = pathProvider,
                 ValueConverter = new OpcUaValueConverter()
             };
 
             var configuration = new OpcUaServerConfiguration
             {
-                PathProvider = pathProvider,
                 ValueConverter = new OpcUaValueConverter(),
                 ApplicationName = ApplicationName ?? defaults.ApplicationName,
                 NamespaceUri = NamespaceUri ?? defaults.NamespaceUri,
@@ -246,7 +237,6 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
                 BaseAddress = BaseAddress ?? defaults.BaseAddress,
                 CleanCertificateStore = CleanCertificateStore ?? defaults.CleanCertificateStore,
                 BufferTime = BufferTimeMs.HasValue ? TimeSpan.FromMilliseconds(BufferTimeMs.Value) : defaults.BufferTime,
-                RetryTime = RetryTimeSeconds.HasValue ? TimeSpan.FromSeconds(RetryTimeSeconds.Value) : defaults.RetryTime
             };
 
             _serverService = targetSubject.CreateOpcUaServer(configuration, _logger);
