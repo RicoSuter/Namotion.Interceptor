@@ -155,24 +155,56 @@ The `_writeGeneration` increment uses `Interlocked.Increment` (full fence) so th
 
 ### 4. Recalculation
 
+`RecalculateDerivedProperty` evaluates the getter **outside** `lock(data)` to prevent deadlock with `lock(_attachedSubjects)` in `LifecycleInterceptor` when getters have side effects (e.g., writing to subject-typed properties). `IsRecalculating` serializes concurrent recalculations; `RecalculationNeeded` catches state changes that occur during the unlocked evaluation window.
+
 ```
 RecalculateDerivedProperty(FullName, timestamp)
+  // Phase 1: Acquire recalculation ownership (brief lock).
   lock(data)
-    if data.IsRecalculating || !data.IsAttached → return
+    if data.IsRecalculating:
+      data.RecalculationNeeded = true            // signal the in-progress recalculation
+      return
+    if !data.IsAttached → return
     data.IsRecalculating = true
+    oldValue = data.LastKnownValue
+
+  // Outer loop: handles post-notification RecalculationNeeded without recursion.
+  for outerIteration in 0..<MaxStabilizationIterations:
     try:
-      oldValue = data.LastKnownValue
-      try:
-        newValue = EvaluateAndStabilize(data, FullName)
-      catch:
-        return                                   // keep LastKnownValue, skip notification
-      data.LastKnownValue = newValue
-      sequence = ++data.RecalculationSequence    // monotonic counter for stale detection
-      SetWriteTimestampUtcTicks(timestamp)       // inherits trigger's timestamp
+      // Inner loop: re-evaluates when state changes during evaluation.
+      while true:
+        // Phase 2: Evaluate getter OUTSIDE lock(data).
+        try:
+          newValue = EvaluateAndStabilize(data, FullName, callerHoldsLock: false)
+        catch:
+          return                                 // keep LastKnownValue, skip notification
+
+        // Phase 3: Commit result under lock.
+        lock(data)
+          if !data.IsAttached → return
+          if data.RecalculationNeeded:           // state changed during evaluation
+            data.RecalculationNeeded = false
+            continue                             // discard stale result, re-evaluate
+          data.LastKnownValue = newValue
+          sequence = ++data.RecalculationSequence
+          SetWriteTimestampUtcTicks(timestamp)
+          break
     finally:
-      data.IsRecalculating = false
-  // Notification fired OUTSIDE lock(data) via NotifyDerivedPropertyChanged
-  NotifyDerivedPropertyChanged(FullName, data, sequence, newValue, oldValue)
+      lock(data)
+        data.IsRecalculating = false
+
+    NotifyDerivedPropertyChanged(FullName, data, sequence, newValue, oldValue)
+
+    // Handle recalculations that arrived after commit but before IsRecalculating was cleared.
+    lock(data)
+      if !data.RecalculationNeeded → return      // done
+      data.RecalculationNeeded = false
+      data.IsRecalculating = true                // re-acquire ownership
+      oldValue = data.LastKnownValue
+
+  // Safety: clear IsRecalculating if outer loop exhausted.
+  lock(data)
+    data.IsRecalculating = false
 ```
 
 ```
@@ -185,12 +217,19 @@ NotifyDerivedPropertyChanged(derivedProperty, data, sequence, newValue, oldValue
   RaisePropertyChanged("FullName")               // INotifyPropertyChanged integration
 ```
 
-The getter is evaluated inside `EvaluateAndStabilize`, which handles dependency recording, the generation check, and the stabilization loop. If the getter throws (typically during concurrent state transitions), the exception is caught and `LastKnownValue` remains unchanged. The concurrent writer's `WriteProperty` cascade will re-trigger recalculation with consistent state after the lock is released.
+The getter is evaluated inside `EvaluateAndStabilize` **without holding `lock(data)`** (when `callerHoldsLock` is false). The lock is acquired only briefly for `UpdateDependencies`. If the getter throws (typically during concurrent state transitions), the exception is caught and `LastKnownValue` remains unchanged. The concurrent writer's `WriteProperty` cascade will re-trigger recalculation with consistent state.
 
-The generation check avoids re-evaluation when dependencies change but no concurrent write occurred (e.g., `ChangeAllTires` swaps tire references, changing deps from old tires to new tires). The stabilization loop only runs when a concurrent write is actually detected.
+The `RecalculationNeeded` flag is set under `lock(data)` by three sources when `IsRecalculating` is true:
+- **Concurrent `RecalculateDerivedProperty`**: Another write triggered recalculation but the current one is in progress — the concurrent call bails and signals the flag.
+- **`AttachProperty`**: The property is being reattached while recalculation is in progress — the evaluation result may be stale.
+- **`DetachProperty`**: The property is being detached while recalculation is in progress — the evaluation result is invalid.
+
+Phase 3 checks the flag before committing. If set, the stale result is discarded and the inner loop re-evaluates with fresh state. The outer loop handles the narrow window between commit (Phase 3 lock release) and `IsRecalculating` cleanup (finally block) — if a write arrives in this window, the notification fires and the outer loop re-enters to process the missed recalculation without recursion.
+
+The generation check inside `EvaluateAndStabilize` avoids re-evaluation when dependencies change but no concurrent write occurred. The stabilization loop only runs when a concurrent write is actually detected.
 
 Key details of the change notification:
-- **Notifications outside lock**: `NotifyDerivedPropertyChanged` fires `SetPropertyValueWithInterception` and `RaisePropertyChanged` after releasing `lock(data)`. This prevents a deadlock between `lock(data)` (held during recalculation) and `lock(_attachedSubjects)` (acquired by `LifecycleInterceptor.WriteProperty` when `TProperty` is `object`). Two guards prevent stale notifications: a `RecalculationSequence` check (skips if a newer recalculation completed) and a `ReferenceEquals` check on `LastKnownValue` (skips if another thread overwrote the value). See the "Deadlock prevention" section for details.
+- **Notifications outside lock**: `NotifyDerivedPropertyChanged` fires `SetPropertyValueWithInterception` and `RaisePropertyChanged` after releasing `lock(data)`. This prevents a deadlock between `lock(data)` and `lock(_attachedSubjects)` (acquired by `LifecycleInterceptor.WriteProperty`). Two guards prevent stale notifications: a `RecalculationSequence` check (skips if a newer recalculation completed) and a `ReferenceEquals` check on `LastKnownValue` (skips if another thread overwrote the value). See the "Deadlock prevention" section for details.
 - **Timestamp inheritance**: The derived property receives the same timestamp as the write that triggered the recalculation, ensuring consistent timestamps within a mutation context.
 - **`WithSource(null)`**: Wraps the notification in a scope that clears any external source context. This marks the change as an internal recalculation, preventing source transaction handlers from writing it back to an external source.
 - **`NoOpWriteDelegate`**: Since derived properties have no backing field, the write delegate is a no-op (`static (_, _) => { }`). The call to `SetPropertyValueWithInterception` exists solely to fire the change notification through the interceptor chain (observable, queue, etc.) with the correct old and new values.
@@ -209,6 +248,8 @@ DetachProperty(property)
   data = property.TryGetDerivedPropertyData()
   if data is null → return                       // skip untracked properties
   lock(data)
+    if data.IsRecalculating:
+      data.RecalculationNeeded = true            // signal in-progress recalculation
     usedBySnapshot = data.DetachAndSnapshotUsedBy(property)
       // sets IsAttached = false
       // Case 1 (derived only): removes from each dependency's UsedByProperties (CAS)
@@ -245,9 +286,12 @@ The `bool` return drives the stabilization loop in `RecalculateDerivedProperty` 
 ### Per-property lock
 
 `lock(data)` on `DerivedPropertyData` serializes:
-- Concurrent recalculations of the same derived property
-- Recalculation vs. detach (prevents zombie resurrection)
-- `RequiredProperties` reads and writes
+- Concurrent recalculations of the same derived property (via `IsRecalculating` flag)
+- Recalculation vs. detach (prevents zombie resurrection via `IsAttached` check)
+- `RequiredProperties` reads and writes (via `UpdateDependencies`)
+- `RecalculationNeeded` signaling (set by concurrent operations, consumed by recalculation)
+
+In `RecalculateDerivedProperty`, the lock is acquired briefly for state transitions (Phase 1, Phase 3, finally, post-notification) but **not held during getter evaluation**. This prevents deadlock with `lock(_attachedSubjects)` in `LifecycleInterceptor` when getters have side effects. In `AttachProperty`, the lock is held throughout evaluation because the caller already holds `lock(_attachedSubjects)` (correct lock ordering).
 
 This is a fine-grained lock (per derived property), so different derived properties can recalculate concurrently.
 
@@ -284,9 +328,11 @@ This is necessary because multiple derived properties on different threads may c
 
 ### Lock ordering follows the dependency DAG
 
-`RecalculateDerivedProperty` and `UpdateDependencies` nest locks in the derived → dependency direction: `lock(D_data)` (outer, from `RecalculateDerivedProperty`) → `lock(X_data)` (inner, from the used-by Add loop in `UpdateDependencies`). A deadlock would require a cycle in the lock acquisition order, which would imply a circular dependency in the property graph — but circular getter dependencies cause infinite recursion before any lock is reached, so the graph is always a DAG and deadlock is impossible.
+`EvaluateAndStabilize` (when `callerHoldsLock` is false) and `UpdateDependencies` nest locks in the derived → dependency direction: `lock(D_data)` (from `EvaluateAndStabilize`'s brief lock for `UpdateDependencies`) → `lock(X_data)` (inner, from the used-by Add loop in `UpdateDependencies`). A deadlock would require a cycle in the lock acquisition order, which would imply a circular dependency in the property graph — but circular getter dependencies cause infinite recursion before any lock is reached, so the graph is always a DAG and deadlock is impossible.
 
-`DetachProperty` uses a single `lock(data)` for all local cleanup (`IsAttached`, dependencies, used-by snapshot), then acquires `lock(derivedData)` sequentially for `RequiredProperties` cleanup. Because it never holds two locks simultaneously, it cannot participate in a lock cycle. Case 1's dependency cleanup (removing from dependencies' `UsedByProperties`) uses CAS inside the lock — no nested lock acquisition.
+`RecalculateDerivedProperty` does **not** hold `lock(data)` during getter evaluation. The getter runs unlocked, so getter side effects (e.g., writing to subject-typed properties) can safely acquire `lock(_attachedSubjects)` in `LifecycleInterceptor` without lock ordering inversion. `AttachProperty` holds both `lock(_attachedSubjects)` (from LifecycleInterceptor, outer) and `lock(data)` (inner) during evaluation — correct ordering, and reentrant for getter side effects on the same thread.
+
+`DetachProperty` uses a single `lock(data)` for all local cleanup (`IsAttached`, `RecalculationNeeded` signaling, dependencies, used-by snapshot), then acquires `lock(derivedData)` sequentially for `RequiredProperties` cleanup. Because it never holds two locks simultaneously, it cannot participate in a lock cycle. Case 1's dependency cleanup (removing from dependencies' `UsedByProperties`) uses CAS inside the lock — no nested lock acquisition.
 
 ## Concurrency Scenarios
 
@@ -294,18 +340,25 @@ This is necessary because multiple derived properties on different threads may c
 
 Derived properties with setters (added via `AddDerivedProperty<T>(name, getValue, setValue)`) create a re-entrancy path: `RecalculateDerivedProperty` calls `SetPropertyValueWithInterception` (outside the lock), which re-enters `WriteProperty`, which would call `RecalculateDerivedProperty` again. The re-entrant call acquires `lock(data)`, sees `IsRecalculating = false` (already cleared), and proceeds. The equality check interceptor bounds this: the getter returns the same value (nothing changed), so the notification is suppressed.
 
-### Deadlock prevention: notifications outside lock
+### Deadlock prevention: unlocked getter evaluation
 
-`RecalculateDerivedProperty` fires notifications via `NotifyDerivedPropertyChanged` after releasing `lock(data)`. This prevents a lock ordering inversion between `lock(data)` and `lock(_attachedSubjects)` in `LifecycleInterceptor`:
+`RecalculateDerivedProperty` evaluates the getter **outside** `lock(data)` and fires notifications after releasing `lock(data)`. This prevents two lock ordering inversions between `lock(data)` and `lock(_attachedSubjects)` in `LifecycleInterceptor`:
 
-- **Without this**: Thread A holds `lock(_attachedSubjects)` → `DetachProperty` → wants `lock(data)`. Thread B holds `lock(data)` → `SetPropertyValueWithInterception` → `LifecycleInterceptor.WriteProperty` → wants `lock(_attachedSubjects)`. Deadlock.
-- **With this**: `lock(data)` is released before `SetPropertyValueWithInterception`, so Thread B never holds `lock(data)` when acquiring `lock(_attachedSubjects)`.
+**Inversion 1 — Getter side effects**: A derived property getter may write to a subject-typed property as a side effect (e.g., lazy initialization, derived-with-setter patterns). This triggers `LifecycleInterceptor.WriteProperty` → `lock(_attachedSubjects)`. If the getter ran inside `lock(data)`, the ordering would be `lock(data)` → `lock(_attachedSubjects)`. Meanwhile, a concurrent `LifecycleInterceptor` operation holds `lock(_attachedSubjects)` → `AttachProperty`/`DetachProperty` → `lock(data)`. Deadlock.
 
-The tradeoff: concurrent recalculations could produce out-of-order or stale notifications if unmitigated. Two guards prevent this:
+**Inversion 2 — Notifications**: `NotifyDerivedPropertyChanged` fires `SetPropertyValueWithInterception` which enters the interceptor chain, potentially acquiring `lock(_attachedSubjects)` via `LifecycleInterceptor.WriteProperty`. Same ordering inversion as above.
 
-1. **`RecalculationSequence` check**: A monotonic counter incremented under `lock(data)` on each recalculation. After releasing the lock, `Volatile.Read` compares the thread's captured sequence against the current value. If a newer recalculation completed in between, the notification is skipped.
+Both are prevented because `lock(data)` is never held during getter evaluation or notification in `RecalculateDerivedProperty`. The `IsRecalculating` flag (set/cleared under brief `lock(data)` acquisitions) serializes concurrent recalculations without holding the lock for the entire evaluation. The `RecalculationNeeded` flag catches state changes (writes, attach, detach) that arrive during the unlocked window.
 
-2. **`ReferenceEquals` check on `LastKnownValue`**: Even if the sequence check passes (the thread checked before the next recalculation entered the lock), a second guard compares the thread's computed `newValue` reference against `data.LastKnownValue` via `Volatile.Read`. Since `data.LastKnownValue = newValue` stores the same reference inside the lock, a mismatch means another thread overwrote it — the notification is skipped. This works for boxed value types because each getter evaluation produces a distinct boxed reference.
+In `AttachProperty`, the getter runs inside `lock(data)` — this is safe because the caller (`LifecycleInterceptor`) already holds `lock(_attachedSubjects)`, so the ordering is `lock(_attachedSubjects)` → `lock(data)` (correct, and reentrant for getter side effects on the same thread).
+
+The tradeoff: concurrent recalculations could produce out-of-order or stale notifications if unmitigated. Three guards prevent this:
+
+1. **`RecalculationNeeded` check**: Set under `lock(data)` by concurrent operations (writes, attach, detach) when `IsRecalculating` is true. Checked before committing in Phase 3 — if set, the evaluation result is discarded and the getter is re-evaluated. This ensures the committed value reflects the latest state.
+
+2. **`RecalculationSequence` check**: A monotonic counter incremented under `lock(data)` on each recalculation. After releasing the lock, `Volatile.Read` compares the thread's captured sequence against the current value. If a newer recalculation completed in between, the notification is skipped.
+
+3. **`ReferenceEquals` check on `LastKnownValue`**: Even if the sequence check passes (the thread checked before the next recalculation entered the lock), a second guard compares the thread's computed `newValue` reference against `data.LastKnownValue` via `Volatile.Read`. Since `data.LastKnownValue = newValue` stores the same reference inside the lock, a mismatch means another thread overwrote it — the notification is skipped. This works for boxed value types because each getter evaluation produces a distinct boxed reference.
 
 Together, these guards ensure the last notification always reflects the final computed value. In the rare case where both threads pass both checks (their computed values happen to be reference-equal, e.g., both null), the duplicate notification carries the correct value and is harmless.
 
@@ -334,11 +387,12 @@ Two race conditions must be handled when `DetachProperty` runs concurrently with
 
 **Race 1 — Zombie used-by resurrection (Case 1):** `WriteProperty` takes a snapshot of `UsedByProperties` and iterates it. A concurrent `DetachProperty` may remove a derived property's used-by entries between the snapshot and the recalculation call. Without protection, `RecalculateDerivedProperty` would re-add the used-by entries, creating zombie dependencies.
 
-`DetachProperty` Case 1 and `RecalculateDerivedProperty` both acquire `lock(data)` on the same derived property's data, serializing them. `DetachProperty` sets `data.IsAttached = false` inside the lock. `RecalculateDerivedProperty` checks `IsAttached` inside the lock and bails out if false. `AttachProperty` sets `IsAttached = true` under lock to support re-attachment.
+`DetachProperty` and `RecalculateDerivedProperty` both acquire `lock(data)` on the same derived property's data. `DetachProperty` sets `data.IsAttached = false` and `data.RecalculationNeeded = true` (if `IsRecalculating`) inside the lock. `RecalculateDerivedProperty` checks `IsAttached` at Phase 3 (commit) and `RecalculationNeeded` inside `EvaluateAndStabilize`'s brief lock for `UpdateDependencies`. `AttachProperty` sets `IsAttached = true` and `RecalculationNeeded = true` (if `IsRecalculating`) under lock to support re-attachment.
 
 Both orderings produce a correct final state:
-- **Detach wins lock**: clears `IsAttached`, removes used-by entries. Recalculation then sees `!IsAttached` and skips.
-- **Recalculation wins lock**: evaluates and re-adds used-by entries. Detach then removes them. Final state is clean.
+- **Detach wins lock during evaluation**: sets `IsAttached = false` and `RecalculationNeeded = true`. `EvaluateAndStabilize` bails on the next `UpdateDependencies` lock acquisition (sees `!IsAttached`). Phase 3 sees `!IsAttached` and returns. No stale deps.
+- **Evaluation's UpdateDependencies wins lock**: registers used-by entries. Detach then runs, clears them. Final state is clean.
+- **Detach + reattach during evaluation**: `RecalculationNeeded` is set by both operations. Phase 3 sees the flag, discards the stale result, and re-evaluates with the post-reattach state.
 
 **Race 2 — Missed used-by property in Case 2 snapshot:** When a source property X is being detached, `DetachProperty` Case 2 takes a snapshot of `X.UsedByProperties` to find dependent derived properties. Concurrently, `UpdateDependencies` may be adding a new used-by entry (D → X) to `X.UsedByProperties`. If the Add completes after the snapshot, `DetachProperty` misses D, leaving a stale dependency (`D.RequiredProperties` contains X) and a stale used-by entry (D in `X.UsedByProperties`).
 
@@ -362,27 +416,30 @@ Every piece of shared mutable state is protected by exactly one synchronization 
 |-------|-----------|-------------|
 | `data.RequiredProperties` | `lock(data)` | `UpdateDependencies`, `DetachAndSnapshotUsedBy`, `DetachProperty` Case 2 |
 | `data.LastKnownValue` | `lock(data)` (write) / `Volatile.Read` (read) | `RecalculateDerivedProperty` (write under lock, read outside lock for stale notification check), `AttachProperty`, `DetachAndSnapshotUsedBy` |
-| `data.IsRecalculating` | `lock(data)` | `RecalculateDerivedProperty` |
-| `data.IsAttached` | `lock(data)` | `DetachAndSnapshotUsedBy`, `RecalculateDerivedProperty`, `AttachProperty`, `UpdateDependencies` (used-by loop) |
+| `data.IsRecalculating` | `lock(data)` | `RecalculateDerivedProperty` (Phase 1, finally, post-notification, safety cleanup) |
+| `data.RecalculationNeeded` | `lock(data)` | `RecalculateDerivedProperty` (Phase 1 bail, Phase 3, post-notification), `AttachProperty`, `DetachProperty`, `EvaluateAndStabilize` (bail check) |
+| `data.IsAttached` | `lock(data)` | `DetachAndSnapshotUsedBy`, `RecalculateDerivedProperty` (Phase 3), `AttachProperty`, `UpdateDependencies` (used-by loop), `EvaluateAndStabilize` (bail check) |
 | `data.UsedByProperties` (collection contents) | CAS (copy-on-write) | `UpdateDependencies`, `DetachAndSnapshotUsedBy` |
 | `data.UsedByProperties` (field itself) | `lock(data)` + `Interlocked.CompareExchange` | `DetachAndSnapshotUsedBy` (nulls under lock), `AddUsedByProperty` (CAS create) |
 | `_recorder` | `[ThreadStatic]` (no sharing) | `ReadProperty`, `StartRecording`, `UpdateDependencies` (via parameter) |
 | `data.RecalculationSequence` | `lock(data)` (write) / `Volatile.Read` (read) | `RecalculateDerivedProperty` (increment under lock, read outside lock for stale notification check) |
 | `_writeGeneration` (static) | `Interlocked.Increment` (full fence) / `Volatile.Read` (acquire) | `WriteProperty` (increment), `AttachProperty` + `RecalculateDerivedProperty` (check) |
 
-Nested locks occur in `UpdateDependencies`: `lock(D_data)` (outer, from `RecalculateDerivedProperty`) → `lock(X_data)` (inner, used-by Add). The acquisition order follows the dependency DAG (derived → source). Circular dependencies would cause infinite recursion in getters before any lock is reached, so deadlock is impossible. `DetachProperty` uses a single `lock(data)` for all local cleanup (via `DetachAndSnapshotUsedBy`), then acquires `lock(derivedData)` sequentially (never nested), so it cannot participate in a lock cycle. `RecalculateDerivedProperty` releases `lock(data)` before firing notifications via `NotifyDerivedPropertyChanged`, which may acquire `lock(_attachedSubjects)` in `LifecycleInterceptor` — since `lock(data)` is not held, no cycle is possible.
+Nested locks occur in `UpdateDependencies`: `lock(D_data)` (outer, from `EvaluateAndStabilize`'s brief lock) → `lock(X_data)` (inner, used-by Add). The acquisition order follows the dependency DAG (derived → source). Circular dependencies would cause infinite recursion in getters before any lock is reached, so deadlock is impossible. `DetachProperty` uses a single `lock(data)` for all local cleanup (via `DetachAndSnapshotUsedBy`), then acquires `lock(derivedData)` sequentially (never nested), so it cannot participate in a lock cycle. `RecalculateDerivedProperty` never holds `lock(data)` during getter evaluation or notification — both may acquire `lock(_attachedSubjects)` in `LifecycleInterceptor`, and since `lock(data)` is not held, no cycle is possible.
 
 ### Value correctness: derived value always reflects current state
 
-After all concurrent writes complete and recalculations settle, every derived property's value matches what its getter would return if called with the current source values. This is guaranteed by three mechanisms working together:
+After all concurrent writes complete and recalculations settle, every derived property's value matches what its getter would return if called with the current source values. This is guaranteed by four mechanisms working together:
 
-1. **Used-by-driven recalculation**: Once a dependency's used-by properties include a derived property, any write to that dependency triggers `RecalculateDerivedProperty` via `WriteProperty`. The recalculation acquires `lock(data)`, so concurrent recalculations of the same derived property are serialized — each one sees the most recent source values.
+1. **Used-by-driven recalculation**: Once a dependency's used-by properties include a derived property, any write to that dependency triggers `RecalculateDerivedProperty` via `WriteProperty`. The `IsRecalculating` flag serializes concurrent recalculations of the same derived property — each successful evaluation sees the most recent source values.
 
-2. **Generation-based concurrent write detection**: `WriteProperty` increments `_writeGeneration` on every write (`Interlocked.Increment`, full fence). `AttachProperty` and `RecalculateDerivedProperty` read the counter before and after evaluation (`Volatile.Read`, acquire fence). If unchanged, no concurrent write occurred and re-evaluation is skipped. If changed, the stabilization loop runs to catch writes that landed between getter evaluation and used-by registration.
+2. **`RecalculationNeeded` flag**: When a concurrent write, attach, or detach occurs while `IsRecalculating` is true, the `RecalculationNeeded` flag is set under `lock(data)`. The in-progress recalculation checks this flag before committing (Phase 3) and inside `EvaluateAndStabilize`'s brief lock for `UpdateDependencies`. If set, the stale evaluation result is discarded and the getter is re-evaluated. The outer loop also checks after notification to catch writes in the narrow window between commit and `IsRecalculating` cleanup.
 
-3. **Stabilization loop (on concurrent write detection)**: When the generation check detects a concurrent write AND the dependency set changed, the `for` loop re-evaluates until dependencies stabilize (up to `MaxStabilizationIterations`):
+3. **Generation-based concurrent write detection**: `WriteProperty` increments `_writeGeneration` on every write (`Interlocked.Increment`, full fence). `AttachProperty` and `EvaluateAndStabilize` read the counter before and after evaluation (`Volatile.Read`, acquire fence). If unchanged, no concurrent write occurred and re-evaluation is skipped. If changed, the stabilization loop runs to catch writes that landed between getter evaluation and used-by registration.
+
+4. **Stabilization loop (on concurrent write detection)**: When the generation check detects a concurrent write AND the dependency set changed, the `for` loop re-evaluates until dependencies stabilize (up to `MaxStabilizationIterations`):
    - **First iteration**: evaluates getter, registers used-by properties.
-   - **Subsequent iterations**: re-evaluate with used-by properties in place, catching writes that happened before registration. Each iteration that acquires used-by properties ensures any *further* concurrent write to those dependencies triggers recalculation via the normal path and blocks on `lock(data)`.
+   - **Subsequent iterations**: re-evaluate with used-by properties in place, catching writes that happened before registration. Each iteration that acquires used-by properties ensures any *further* concurrent write to those dependencies triggers recalculation via the normal path.
    - The loop exits when `UpdateDependencies` returns `false` (deps unchanged).
 
    In the common case (no concurrent writes, or stable dependencies), the generation check avoids the loop entirely — zero extra getter evaluations.
@@ -396,7 +453,7 @@ When a property is detached, no stale references remain in the dependency graph:
 - **Dependencies cleaned (Case 1)**: Inside the single `lock(data)`, `DetachAndSnapshotUsedBy` iterates `RequiredProperties` and removes the derived property from each dependency's `UsedByProperties` via CAS `Remove` (no nested lock). Then clears `RequiredProperties` and `LastKnownValue`.
 - **Used-by properties cleaned (Case 2)**: Inside the same `lock(data)`, `DetachAndSnapshotUsedBy` takes a `UsedByProperties` snapshot and clears it. After releasing the lock, `DetachProperty` iterates the snapshot and removes the source property from each dependent's `RequiredProperties` under `lock(derivedData)`.
 - **Atomic state transition**: The single lock ensures `IsAttached = false`, dependency cleanup (Case 1), and used-by snapshot (Case 2) happen atomically. No concurrent thread can observe `IsAttached = false` while `UsedByProperties` is still populated.
-- **No resurrection (Case 1)**: `DetachProperty` sets `IsAttached = false` inside the lock. Any concurrent `RecalculateDerivedProperty` that acquired the lock before detach will complete and re-add used-by entries — but detach then removes them. Any recalculation that acquires the lock after detach sees `!IsAttached` and skips, so no used-by entries are re-added.
+- **No resurrection (Case 1)**: `DetachProperty` sets `IsAttached = false` and `RecalculationNeeded = true` (if `IsRecalculating`) inside the lock. Any concurrent `RecalculateDerivedProperty` with an in-flight evaluation sees `!IsAttached` or `RecalculationNeeded` at the next lock acquisition (`EvaluateAndStabilize` bail check or Phase 3) and either bails or re-evaluates. No stale used-by entries are committed.
 - **No missed used-by properties (Case 2)**: For properties **with** tracking data, `DetachAndSnapshotUsedBy` sets `IsAttached = false` under `lock(data)`. The lock serializes with `UpdateDependencies`' used-by Add (which also locks `depData`). Any used-by property added before the lock is in the snapshot; any Add attempt after the lock sees `IsAttached = false` and skips. Skipped entries trigger `ReconcileSkippedDependencies` which re-checks `IsAttached` under `lock(depData)`: if the dependency was re-attached concurrently, the filter calls idempotent `Add(derivedProperty)` to repair the missing used-by property; if still detached, it removes the dependency from `RequiredProperties` and cleans the used-by entry.
 - **Untracked source properties**: For source properties that were **never** dependencies (no `DerivedPropertyData` exists), `DetachProperty` skips them entirely via `TryGetDerivedPropertyData() → null → return`. A theoretical race exists where a concurrent `UpdateDependencies` creates data with `IsAttached = true` after `DetachProperty` exits, leaving a stale dependency in the derived property's `RequiredProperties`. However, this is safe in practice: for a derived property D to read source property X on subject S, the getter must reach S through the object graph — meaning S is already kept alive by a structural reference from the getter's reachable path (a tracked property, closure capture, etc.), not solely by `RequiredProperties`. The stale dependency is redundant with the existing structural reference and is cleaned up on the next recalculation of D (when the structural reference changes, D re-records its dependencies and drops X). This tradeoff avoids `ConcurrentDictionary.GetOrAdd` for every untracked property during detach, which profiling showed to be the dominant cost in bulk detach scenarios.
 
@@ -419,8 +476,8 @@ In all cases for tracked properties, both dependencies and used-by properties ar
 | Dependency set changes + concurrent write | One `PropertyReference[]` | Above + stabilization loop (re-evaluation until deps stabilize) |
 | Dependency set changes + concurrent detach | Two `PropertyReference[]` | Above + filter allocation for detached deps (rare) |
 | Recording | Zero (pooled buffers) | Stack push/pop per frame |
-| Recalculation | Zero (beyond getter) | One `lock(data)` + getter invocation + two `Volatile.Read` (~2ns) |
-| Attach (common path) | Zero (beyond initial) | One getter invocation + two `Volatile.Read` (~2ns) |
+| Recalculation | Zero (beyond getter) | Brief `lock(data)` acquisitions (Phase 1, UpdateDependencies, Phase 3, finally) + getter invocation + two `Volatile.Read` (~2ns). Lock not held during getter evaluation. |
+| Attach (common path) | Zero (beyond initial) | One `lock(data)` + getter invocation + two `Volatile.Read` (~2ns) |
 | Used-by read (`UsedByProperties.Items`) | Zero | Returns stable `ReadOnlySpan` snapshot |
 
 ## Interaction with Other Interceptors

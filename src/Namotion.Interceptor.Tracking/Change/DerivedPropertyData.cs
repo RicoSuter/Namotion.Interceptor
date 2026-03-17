@@ -52,6 +52,14 @@ internal sealed class DerivedPropertyData
     internal long RecalculationSequence;
 
     /// <summary>
+    /// Set under lock(this) when a state change occurs while IsRecalculating is true:
+    /// concurrent RecalculateDerivedProperty (bails), DetachProperty, or AttachProperty.
+    /// Checked by RecalculateDerivedProperty before committing — if set, the evaluation
+    /// result is discarded and the getter is re-evaluated with fresh state.
+    /// </summary>
+    internal bool RecalculationNeeded;
+
+    /// <summary>
     /// Lifecycle flag cleared during DetachProperty under lock(this).
     /// Checked by RecalculateDerivedProperty to prevent zombie used-by property resurrection.
     /// Set by AttachProperty to support re-attachment.

@@ -753,5 +753,95 @@ public class DerivedPropertyConcurrencyTests
         }
     }
 
+    [Fact]
+    public async Task WhenDerivedGetterWritesToSubjectTypedProperty_ThenNoDeadlockAndCorrectValue()
+    {
+        // Regression test: reproduces deadlock between lock(data) and lock(_attachedSubjects).
+        //
+        // SideEffectPerson.Greeting getter writes to Companion (subject-typed property),
+        // which triggers LifecycleInterceptor.WriteProperty → lock(_attachedSubjects).
+        //
+        // The deadlock (fixed by evaluating getter outside lock(data)):
+        //   Thread A: RecalculateDerivedProperty(Greeting) → lock(data_Greeting) → getter
+        //             → Companion=null → LifecycleInterceptor → lock(_attachedSubjects) → WAITS
+        //   Thread B: holder.Person=null → LifecycleInterceptor → lock(_attachedSubjects)
+        //             → detach SideEffectPerson → DetachSubjectProperty(Greeting)
+        //             → DerivedPropertyChangeHandler.DetachProperty → lock(data_Greeting) → WAITS
+        //
+        // Both threads contend on the SAME data_Greeting lock, creating an ABBA deadlock.
+        // SideEffectHolder is the parent that makes SideEffectPerson a lifecycle-managed child,
+        // so setting holder.Person = null triggers detach of all SideEffectPerson properties
+        // (including Greeting) under lock(_attachedSubjects).
+
+        for (var i = 0; i < DefaultIterations; i++)
+        {
+            // Arrange
+            var context = InterceptorSubjectContext
+                .Create()
+                .WithFullPropertyTracking()
+                .WithContextInheritance();
+
+            var holder = new SideEffectHolder(context);
+            var person = new SideEffectPerson(context)
+            {
+                Name = "Initial",
+                Companion = new Person(context) { FirstName = "Friend" }
+            };
+            holder.Person = person;
+
+            var barrier = new Barrier(2);
+
+            // Act — Thread 1 writes Name → RecalculateDerivedProperty(Greeting)
+            //          → getter writes Companion (subject-typed) → lock(_attachedSubjects)
+            //        Thread 2 sets holder.Person = null → lock(_attachedSubjects)
+            //          → detach SideEffectPerson → DetachSubjectProperty(Greeting) → lock(data_Greeting)
+            var writeNameTask = Task.Run(() =>
+            {
+                barrier.SignalAndWait();
+                for (var j = 0; j < 20; j++)
+                {
+                    try
+                    {
+                        person.Name = $"Name{j}";
+                    }
+                    catch (NullReferenceException)
+                    {
+                        // Expected: person may be temporarily detached (context nulled)
+                        // by the concurrent holder.Person = null on the other thread.
+                    }
+                }
+            });
+
+            var detachTask = Task.Run(() =>
+            {
+                barrier.SignalAndWait();
+                for (var j = 0; j < 20; j++)
+                {
+                    try
+                    {
+                        // Detach: lifecycle removes SideEffectPerson → DetachProperty(Greeting) → lock(data_Greeting)
+                        holder.Person = null;
+                        // Reattach: lifecycle adds SideEffectPerson → AttachProperty(Greeting) → lock(data_Greeting)
+                        holder.Person = person;
+                    }
+                    catch (NullReferenceException)
+                    {
+                        // Expected: concurrent detach may null the context while
+                        // LifecycleInterceptor reads properties during attach/detach.
+                    }
+                }
+            });
+
+            var work = Task.WhenAll(writeNameTask, detachTask);
+            var completed = await Task.WhenAny(work, Task.Delay(TimeSpan.FromSeconds(10)));
+
+            // Assert — test must complete (no deadlock) and final value must be correct.
+            Assert.True(completed == work, "Test timed out — possible deadlock");
+            await work;
+
+            Assert.Equal($"Hello, {person.Name}", person.Greeting);
+        }
+    }
+
     private static int TireIndex(int threadIndex) => (threadIndex % 3) + 1;
 }
