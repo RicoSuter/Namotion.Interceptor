@@ -109,7 +109,7 @@
 
             if (subject is IConfigurableSubject)
             {
-                var configurationWriter = subject.TryGetFirstParent<IConfigurationWriter>() ?? RootManager;
+                var configurationWriter = RootManager.GetConfigurationWriter(subject);
                 await configurationWriter.WriteConfigurationAsync(subject, CancellationToken.None);
             }
 
@@ -141,4 +141,5 @@
 
         return ValueTask.CompletedTask;
     }
+
 }

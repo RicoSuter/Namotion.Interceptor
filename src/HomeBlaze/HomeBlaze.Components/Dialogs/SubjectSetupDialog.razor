@@ -107,6 +107,12 @@
     private SubjectEditPanel? _editPanel;
     private string _subjectName = "";
 
+    /// <summary>
+    /// Optional callback invoked before saving, to establish parent chain.
+    /// </summary>
+    [Parameter]
+    public Action<IInterceptorSubject>? BeforeSave { get; set; }
+
     // TODO: Invalidate cache when types can be dynamically loaded
     private Dictionary<string, List<Type>>? _groupedTypes;
 
@@ -186,7 +192,10 @@
         {
             try
             {
-                // Save the edit component changes before creating
+                // Establish parent chain before saving (if callback provided)
+                BeforeSave?.Invoke(_createdSubject);
+
+                // Save the edit component changes
                 if (_editPanel != null)
                 {
                     await _editPanel.SaveAsync(CancellationToken.None);
@@ -204,7 +213,11 @@
     /// <summary>
     /// Shows the create subject wizard and returns the result.
     /// </summary>
-    public static async Task<CreateSubjectResult?> ShowAsync(IDialogService dialogService)
+    /// <param name="dialogService">The dialog service.</param>
+    /// <param name="beforeSave">Optional callback invoked before saving, to establish parent chain.</param>
+    public static async Task<CreateSubjectResult?> ShowAsync(
+        IDialogService dialogService,
+        Action<IInterceptorSubject>? beforeSave = null)
     {
         var options = new DialogOptions
         {
@@ -213,7 +226,12 @@
             CloseOnEscapeKey = true
         };
 
-        var dialog = await dialogService.ShowAsync<SubjectSetupDialog>("Create Subject", options);
+        var parameters = new DialogParameters<SubjectSetupDialog>
+        {
+            { x => x.BeforeSave, beforeSave }
+        };
+
+        var dialog = await dialogService.ShowAsync<SubjectSetupDialog>("Create Subject", parameters, options);
         var result = await dialog.Result;
 
         if (result?.Canceled != false)

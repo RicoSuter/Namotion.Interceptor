@@ -1,11 +1,15 @@
+using System.Text;
+using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Components.Abstractions.Pages;
+using HomeBlaze.Services;
 using HomeBlaze.Storage.Abstractions;
 using HomeBlaze.Storage.Abstractions.Attributes;
 using HomeBlaze.Storage.Internal;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Tracking.Parent;
 using MarkdownContentParser = HomeBlaze.Storage.Internal.MarkdownContentParser;
 
 namespace HomeBlaze.Storage.Files;
@@ -16,9 +20,13 @@ namespace HomeBlaze.Storage.Files;
 [InterceptorSubject]
 [FileExtension(".md")]
 [FileExtension(".markdown")]
-public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider, IPage
+public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider, IPage, IConfigurationWriter
 {
+    [GeneratedRegex(@"```subject\(([^)]+)\)\s*\n[\s\S]*?```")]
+    private static partial Regex SubjectBlockRegex();
+
     private readonly MarkdownContentParser _parser;
+    private readonly ConfigurableSubjectSerializer _serializer;
 
     public IStorageContainer Storage { get; }
     public string FullPath { get; }
@@ -67,13 +75,18 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     [State("Modified", Position = 2)]
     public partial DateTime LastModified { get; set; }
 
-    public MarkdownFile(IStorageContainer storage, string fullPath, MarkdownContentParser parser)
+    public MarkdownFile(
+        IStorageContainer storage,
+        string fullPath,
+        MarkdownContentParser parser,
+        ConfigurableSubjectSerializer serializer)
     {
         Storage = storage;
         FullPath = fullPath;
         Name = Path.GetFileName(fullPath);
         Children = new Dictionary<string, IInterceptorSubject>();
         _parser = parser;
+        _serializer = serializer;
     }
 
     private async Task LoadFileAsync(CancellationToken cancellationToken)
@@ -102,6 +115,47 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
 
     public Task WriteAsync(Stream content, CancellationToken cancellationToken)
         => Storage.WriteBlobAsync(FullPath, content, cancellationToken);
+
+    public async Task<bool> WriteConfigurationAsync(
+        IInterceptorSubject subject,
+        CancellationToken cancellationToken)
+    {
+        // Rebuild markdown with all embedded subjects serialized
+        Content = RebuildMarkdownContent();
+
+        // Write to storage
+        var bytes = Encoding.UTF8.GetBytes(Content);
+        using var stream = new MemoryStream(bytes);
+        await WriteAsync(stream, cancellationToken);
+
+        return true;
+    }
+
+    private string RebuildMarkdownContent()
+    {
+        if (string.IsNullOrEmpty(Content))
+        {
+            return string.Empty;
+        }
+
+        // Regex matches: ```subject(name)\n{json}```
+        return SubjectBlockRegex().Replace(
+            Content,
+            match =>
+            {
+                var name = match.Groups[1].Value;
+
+                // Find the child subject by name and serialize it
+                if (Children.TryGetValue(name, out var child))
+                {
+                    var json = _serializer.Serialize(child);
+                    return $"```subject({name})\n{json}\n```";
+                }
+
+                // Subject not found - keep original block unchanged
+                return match.Value;
+            });
+    }
 
     private static string FormatFilename(string name)
     {
