@@ -1,4 +1,3 @@
-@using System.Runtime.CompilerServices
 @using HomeBlaze.Components.Dialogs
 
 @attribute [SubjectComponent(SubjectComponentType.Widget, typeof(CanvasLayout))]
@@ -117,7 +116,7 @@
 
     private CanvasLayout? Canvas => Subject as CanvasLayout;
 
-    private string GetNodeId(CanvasNode node) => RuntimeHelpers.GetHashCode(node).ToString();
+    private string GetNodeId(CanvasNode node) => node.GetOrAddSubjectId();
 
     private int SnapToGrid(double value)
     {
