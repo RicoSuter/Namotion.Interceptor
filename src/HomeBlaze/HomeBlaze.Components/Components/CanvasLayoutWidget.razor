@@ -24,9 +24,9 @@
                        OnClick="EditLayout" />
     }
 
-    <Diagram @ref="_diagram">
+    <Diagram @ref="_diagram" style="@($"width: 100%; height: {Canvas?.MinHeight ?? 400}px;")">
         <Links />
-        <Nodes>
+        <Nodes OnModified="OnNodeModified">
             @if (Canvas?.Nodes != null)
             {
                 @foreach (var node in Canvas.Nodes)
@@ -106,6 +106,7 @@
 
 @code {
     private Diagram? _diagram;
+    private bool _suppressNextClick;
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
@@ -133,8 +134,27 @@
         node.Y = intY;
     }
 
+    private void OnNodeModified(NodeBase modifiedNode)
+    {
+        if (Canvas == null) return;
+
+        _suppressNextClick = true;
+
+        InvokeAsync(async () =>
+        {
+            var configurationWriter = Canvas.TryFindFirstParent<IConfigurationWriter>() ?? RootManager;
+            await configurationWriter.WriteConfigurationAsync(Canvas, CancellationToken.None);
+        });
+    }
+
     private async Task OnCanvasClick(MouseEventArgs e)
     {
+        if (_suppressNextClick)
+        {
+            _suppressNextClick = false;
+            return;
+        }
+
         if (!IsEditing) return;
 
         // Add node at click position
