@@ -22,6 +22,9 @@ namespace HomeBlaze.Storage.Files;
 [FileExtension(".markdown")]
 public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider, IPage, IConfigurationWriter
 {
+    [GeneratedRegex(@"```subject\(([^)]+)\)\s*\n[\s\S]*?```")]
+    private static partial Regex SubjectBlockRegex();
+
     private readonly MarkdownContentParser _parser;
     private readonly ConfigurableSubjectSerializer _serializer;
 
@@ -136,9 +139,8 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         }
 
         // Regex matches: ```subject(name)\n{json}```
-        return Regex.Replace(
+        return SubjectBlockRegex().Replace(
             Content,
-            @"```subject\(([^)]+)\)\s*\n[\s\S]*?```",
             match =>
             {
                 var name = match.Groups[1].Value;

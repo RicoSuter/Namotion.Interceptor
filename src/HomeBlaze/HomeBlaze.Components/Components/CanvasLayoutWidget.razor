@@ -118,20 +118,24 @@
 
     private string GetNodeId(CanvasNode node) => node.GetHashCode().ToString();
 
-    private void OnNodePositionChanged(CanvasNode node, double x, double y)
+    private int SnapToGrid(double value)
     {
-        var intX = (int)Math.Round(x);
-        var intY = (int)Math.Round(y);
-
         if (Canvas?.IsSnapToGridEnabled == true)
         {
             var snapSize = Canvas.GridSize > 0 ? Canvas.GridSize : 100;
-            intX = (int)Math.Round(x / snapSize) * snapSize;
-            intY = (int)Math.Round(y / snapSize) * snapSize;
+            return (int)Math.Round(value / snapSize) * snapSize;
         }
 
-        node.X = intX;
-        node.Y = intY;
+        return (int)Math.Round(value);
+    }
+
+    private void OnNodePositionChanged(CanvasNode node, double x, double y)
+    {
+        var intX = SnapToGrid(x);
+        var intY = SnapToGrid(y);
+
+        if (node.X != intX) node.X = intX;
+        if (node.Y != intY) node.Y = intY;
     }
 
     private void OnNodeModified(NodeBase modifiedNode)
@@ -140,10 +144,17 @@
 
         _suppressNextClick = true;
 
-        InvokeAsync(async () =>
+        _ = InvokeAsync(async () =>
         {
-            var configurationWriter = Canvas.TryGetFirstParent<IConfigurationWriter>() ?? RootManager;
-            await configurationWriter.WriteConfigurationAsync(Canvas, CancellationToken.None);
+            try
+            {
+                var configurationWriter = Canvas.TryGetFirstParent<IConfigurationWriter>() ?? RootManager;
+                await configurationWriter.WriteConfigurationAsync(Canvas, CancellationToken.None);
+            }
+            catch (Exception exception)
+            {
+                Console.Error.WriteLine($"Failed to persist canvas layout: {exception.Message}");
+            }
         });
     }
 
@@ -163,12 +174,8 @@
 
     private async Task AddNodeAtPosition(int x, int y)
     {
-        if (Canvas?.IsSnapToGridEnabled == true)
-        {
-            var snapSize = Canvas.GridSize > 0 ? Canvas.GridSize : 100;
-            x = (int)Math.Round((double)x / snapSize) * snapSize;
-            y = (int)Math.Round((double)y / snapSize) * snapSize;
-        }
+        x = SnapToGrid(x);
+        y = SnapToGrid(y);
 
         await SubjectSetupDialog.ShowAsync(DialogService, subject =>
         {

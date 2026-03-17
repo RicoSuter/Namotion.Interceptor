@@ -137,15 +137,16 @@
 
     private string GetCellStyle(GridCell cell)
     {
-        var styles = new List<string>();
+        var row = cell.Row.HasValue ? $"grid-row: {cell.Row.Value + 1} / span {cell.RowSpan}" : null;
+        var col = cell.Column.HasValue ? $"grid-column: {cell.Column.Value + 1} / span {cell.ColumnSpan}" : null;
 
-        if (cell.Row.HasValue)
-            styles.Add($"grid-row: {cell.Row.Value + 1} / span {cell.RowSpan}");
-
-        if (cell.Column.HasValue)
-            styles.Add($"grid-column: {cell.Column.Value + 1} / span {cell.ColumnSpan}");
-
-        return string.Join("; ", styles);
+        return (row, col) switch
+        {
+            (not null, not null) => $"{row}; {col}",
+            (not null, null) => row,
+            (null, not null) => col,
+            _ => ""
+        };
     }
 
     private IEnumerable<(int row, int col)> GetEmptyCellPositions()
