@@ -142,7 +142,7 @@
 
         InvokeAsync(async () =>
         {
-            var configurationWriter = Canvas.TryFindFirstParent<IConfigurationWriter>() ?? RootManager;
+            var configurationWriter = Canvas.TryGetFirstParent<IConfigurationWriter>() ?? RootManager;
             await configurationWriter.WriteConfigurationAsync(Canvas, CancellationToken.None);
         });
     }
@@ -211,7 +211,7 @@
             Canvas.Nodes = Canvas.Nodes.Where(n => n != node).ToList();
 
             // Persist the change
-            var configurationWriter = Canvas.TryFindFirstParent<IConfigurationWriter>() ?? RootManager;
+            var configurationWriter = Canvas.TryGetFirstParent<IConfigurationWriter>() ?? RootManager;
             await configurationWriter.WriteConfigurationAsync(Canvas, CancellationToken.None);
         }
     }

@@ -222,7 +222,7 @@
             Grid.Cells = Grid.Cells.Where(c => c != cell).ToList();
 
             // Persist the change
-            var configurationWriter = Grid.TryFindFirstParent<IConfigurationWriter>() ?? RootManager;
+            var configurationWriter = Grid.TryGetFirstParent<IConfigurationWriter>() ?? RootManager;
             await configurationWriter.WriteConfigurationAsync(Grid, CancellationToken.None);
         }
     }
