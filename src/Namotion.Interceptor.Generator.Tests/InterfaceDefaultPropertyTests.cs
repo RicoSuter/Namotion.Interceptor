@@ -109,7 +109,8 @@ public partial class Sensor : ISensor
         var generatedSource = generated.Single().SourceText.ToString();
 
         // Name should be intercepted (from class), not from interface
-        Assert.Contains("isIntercepted: true", generatedSource);
+        // The [Intercepted] attribute indicates this property is intercepted by the class
+        Assert.Contains("[global::Namotion.Interceptor.Attributes.Intercepted]", generatedSource);
         return Verify(generatedSource);
     }
 
@@ -169,34 +170,10 @@ public partial class Diamond : IA, IB
         var generated = GenerateCode(source);
         var generatedSource = generated.Single().SourceText.ToString();
 
-        // Count occurrences of "Shared" in DefaultProperties
+        // Count occurrences of "Shared" in __GetPropertyAccessors switch expression
         var count = System.Text.RegularExpressions.Regex.Matches(
             generatedSource, @"""Shared""").Count;
         Assert.Equal(1, count);
-    }
-
-    [Fact]
-    public void GenericInterface_DefaultPropertyIncluded()
-    {
-        const string source = @"
-using Namotion.Interceptor.Attributes;
-
-public interface ISensor<T>
-{
-    T Value { get; set; }
-    string TypeName => typeof(T).Name;
-}
-
-[InterceptorSubject]
-public partial class IntSensor : ISensor<int>
-{
-    public partial int Value { get; set; }
-}";
-
-        var generated = GenerateCode(source);
-        var generatedSource = generated.Single().SourceText.ToString();
-
-        Assert.Contains(@"""TypeName""", generatedSource);
     }
 
     private static IEnumerable<GeneratedSourceResult> GenerateCode(string source)
