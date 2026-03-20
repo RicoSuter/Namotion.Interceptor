@@ -1,18 +1,6 @@
 ﻿{
-  Root: 1,
   Subjects: {
-    1: {
-      Lookup: {
-        Kind: Dictionary,
-        Items: [
-          {
-            Index: key1,
-            Id: 2
-          }
-        ]
-      }
-    },
-    2: {
+    SubjectId_1: {
       Name: {
         Kind: Value,
         Value: Item1Updated,

@@ -221,11 +221,15 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 var metadata = entry.Value;
                 if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
                 {
-                    var propertyValue = metadata.GetValue?.Invoke(subject);
-                    if (propertyValue is not null)
+                    // Read _lastProcessedValues (what the lifecycle has actually attached)
+                    // instead of the backing store. A concurrent next() may have written a
+                    // new (unattached) child to the backing store; the parentStillAttached
+                    // guard in WriteProperty prevents attaching children to dead parents,
+                    // so only _lastProcessedValues contains actually-attached children.
+                    if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
                     {
                         children ??= GetList();
-                        FindSubjectsInProperty(subjectProperty, propertyValue, null, children, null);
+                        FindSubjectsInProperty(subjectProperty, lastProcessed, null, children, null);
                     }
 
                     _lastProcessedValues.Remove(subjectProperty);
@@ -261,6 +265,36 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             }
 
             ReturnList(children);
+        }
+
+        // Scan for subjects that a concurrent WriteProperty attached to the just-detached
+        // subject's properties before this detach acquired the lock. These are children
+        // whose PropertyReference.Subject points to the now-dead subject.
+        // Collect first to avoid modifying _attachedSubjects during iteration.
+        if (isLastDetach)
+        {
+            (IInterceptorSubject subject, PropertyReference property)[]? lateAttachments = null;
+            var lateCount = 0;
+
+            foreach (var (attachedSubject, propertyRefs) in _attachedSubjects)
+            {
+                foreach (var propertyReference in propertyRefs)
+                {
+                    if (ReferenceEquals(propertyReference.Subject, subject))
+                    {
+                        lateAttachments ??= new (IInterceptorSubject, PropertyReference)[4];
+                        if (lateCount == lateAttachments.Length)
+                            Array.Resize(ref lateAttachments, lateCount * 2);
+                        lateAttachments[lateCount++] = (attachedSubject, propertyReference);
+                        break;
+                    }
+                }
+            }
+
+            for (var i = 0; i < lateCount; i++)
+            {
+                DetachFromProperty(lateAttachments![i].subject, context, lateAttachments[i].property, null);
+            }
         }
     }
 
@@ -339,16 +373,30 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     }
                 }
 
+                // Only attach new children if the parent subject is still in the graph.
+                // A concurrent DetachFromProperty on the parent may have removed it from
+                // _attachedSubjects; attaching children to a dead parent would leak them.
+                // Detaches always run regardless — previously-attached children must be cleaned up.
+                var parentStillAttached = _attachedSubjects.ContainsKey(context.Property.Subject);
+
                 for (var i = 0; i < newCollectedSubjects.Count; i++)
                 {
                     var (subject, property, index) = newCollectedSubjects[i];
-                    if (!oldTouchedSubjects.Contains(subject))
+                    if (!oldTouchedSubjects.Contains(subject) && parentStillAttached)
                     {
                         AttachToProperty(subject, context.Property.Subject.Context, property, index);
                     }
                 }
 
-                _lastProcessedValues[context.Property] = newValue;
+                // Only update _lastProcessedValues if the parent is still in the graph.
+                // When parentStillAttached is false, the parent was concurrently detached
+                // and its _lastProcessedValues entries were already cleaned up. Writing here
+                // would create a dangling entry that holds a reference to the new collection/
+                // dictionary (and its children) forever, since no future detach will clean it up.
+                if (parentStillAttached)
+                {
+                    _lastProcessedValues[context.Property] = newValue;
+                }
 
                 // Refresh child index metadata for retained subjects whose
                 // positions may have shifted in the new collection.

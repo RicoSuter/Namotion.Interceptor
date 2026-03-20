@@ -138,11 +138,10 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
 {
   "ConnectorTester": {
     "Connector": "opcua",
-    "EnableStructuralMutations": false,
     "MutatePhaseDuration": "00:01:00",
     "ConvergenceTimeout": "00:05:00",
     "Server": {
-      "MutationRate": 1000,
+      "ValueMutationRate": 1000,
       "Chaos": {
         "IntervalMin": "00:00:10",
         "IntervalMax": "00:00:20",
@@ -154,7 +153,7 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
     "Clients": [
       {
         "Name": "client-a",
-        "MutationRate": 100,
+        "ValueMutationRate": 100,
         "Chaos": {
           "IntervalMin": "00:00:10",
           "IntervalMax": "00:00:20",
@@ -165,7 +164,7 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
       },
       {
         "Name": "client-b",
-        "MutationRate": 100,
+        "ValueMutationRate": 100,
         "Chaos": {
           "IntervalMin": "00:00:08",
           "IntervalMax": "00:00:15",
@@ -191,7 +190,6 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `Connector` | string | `"opcua"` | Protocol to test: `"opcua"`, `"mqtt"`, or `"websocket"` |
-| `EnableStructuralMutations` | bool | `false` | Reserved for future collection/dictionary mutations |
 | `MutatePhaseDuration` | TimeSpan | `00:01:00` | How long mutations run before convergence check |
 | `ConvergenceTimeout` | TimeSpan | `00:01:00` | Max time to wait for all snapshots to match |
 | `Server` | object | - | Server participant configuration |
@@ -203,7 +201,8 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `Name` | string | `""` | Participant identifier (appears in logs) |
-| `MutationRate` | int | `50` | Target mutations per second |
+| `ValueMutationRate` | int | `50` | Target value mutations per second |
+| `StructuralMutationRate` | int | `0` | Structural mutations per second (collection/dictionary/object ref changes). `0` = disabled |
 | `Chaos` | object? | `null` | Chaos configuration (`null` = no chaos) |
 
 ### Chaos Configuration
@@ -311,10 +310,10 @@ For multi-day runs, consider using longer cycle durations and lower mutation rat
   "ConnectorTester": {
     "MutatePhaseDuration": "00:02:00",
     "ConvergenceTimeout": "00:02:00",
-    "Server": { "MutationRate": 500 },
+    "Server": { "ValueMutationRate": 500 },
     "Clients": [
-      { "Name": "client-a", "MutationRate": 25 },
-      { "Name": "client-b", "MutationRate": 25 }
+      { "Name": "client-a", "ValueMutationRate": 25 },
+      { "Name": "client-b", "ValueMutationRate": 25 }
     ],
     "ChaosProfiles": []
   }

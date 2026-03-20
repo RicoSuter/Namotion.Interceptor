@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
@@ -14,7 +15,21 @@ internal sealed class SubjectUpdateApplyContext
     public ISubjectFactory SubjectFactory { get; private set; } = null!;
     public Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? TransformValueBeforeApply { get; private set; }
 
+    /// <summary>
+    /// The subject registry from the root subject's context.
+    /// Stored here so that newly created subjects (whose contexts may not yet have services
+    /// resolved via fallback) don't need to look up the registry themselves.
+    /// </summary>
+    public ISubjectRegistry SubjectRegistry { get; private set; } = null!;
+
+    /// <summary>
+    /// The subject ID registry from the root subject's context.
+    /// Stored here for the same reason as <see cref="SubjectRegistry"/>.
+    /// </summary>
+    public ISubjectIdRegistry SubjectIdRegistry { get; private set; } = null!;
+
     public void Initialize(
+        IInterceptorSubjectContext rootContext,
         Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> subjects,
         ISubjectFactory subjectFactory,
         Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply)
@@ -22,6 +37,8 @@ internal sealed class SubjectUpdateApplyContext
         Subjects = subjects;
         SubjectFactory = subjectFactory;
         TransformValueBeforeApply = transformValueBeforeApply;
+        SubjectRegistry = rootContext.GetService<ISubjectRegistry>();
+        SubjectIdRegistry = rootContext.GetService<ISubjectIdRegistry>();
     }
 
     public bool TryMarkAsProcessed(string subjectId)
@@ -36,5 +53,7 @@ internal sealed class SubjectUpdateApplyContext
         Subjects = null!;
         SubjectFactory = null!;
         TransformValueBeforeApply = null;
+        SubjectRegistry = null!;
+        SubjectIdRegistry = null!;
     }
 }

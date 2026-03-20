@@ -1,17 +1,16 @@
 using System.Collections;
-using System.Text.Json;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
 
 /// <summary>
 /// Applies collection and dictionary updates from <see cref="SubjectUpdate"/> instances.
-/// Handles structural operations (Insert, Remove, Move) and sparse property updates.
 /// </summary>
 internal static class SubjectItemsUpdateApplier
 {
     /// <summary>
-    /// Applies a collection (array/list) update to a property.
+    /// Applies a collection update to a property using complete-state items.
     /// </summary>
     internal static void ApplyCollectionUpdate(
         IInterceptorSubject parent,
@@ -19,117 +18,56 @@ internal static class SubjectItemsUpdateApplier
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        var workingItems = (property.GetValue() as IEnumerable<IInterceptorSubject>)?.ToList() ?? [];
-        var structureChanged = false;
-
-        // Apply structural operations in two phases:
-        // Phase 1: Remove and Insert operations (applied sequentially)
-        // Phase 2: Move operations (applied atomically using snapshot)
-        if (propertyUpdate.Operations is { Count: > 0 })
+        if (propertyUpdate.Items is null)
         {
-            // Phase 1: Apply Remove and Insert operations sequentially
-            // Removes should be in descending order so they don't affect each other's indices
-            foreach (var operation in propertyUpdate.Operations)
-            {
-                var index = ConvertIndexToInt(operation.Index);
-                switch (operation.Action)
-                {
-                    case SubjectCollectionOperationType.Remove:
-                        if (index >= 0 && index < workingItems.Count)
-                        {
-                            workingItems.RemoveAt(index);
-                            structureChanged = true;
-                        }
-                        break;
-
-                    case SubjectCollectionOperationType.Insert:
-                        if (operation.Id is not null && context.Subjects.TryGetValue(operation.Id, out var itemProps))
-                        {
-                            var newItem = CreateAndApplyItem(parent, property, index, operation.Id, itemProps, context);
-                            if (index >= workingItems.Count)
-                                workingItems.Add(newItem);
-                            else
-                                workingItems.Insert(index, newItem);
-                            structureChanged = true;
-                        }
-                        break;
-                }
-            }
-
-            // Phase 2: Apply Move operations atomically using snapshot
-            // Move indices reference the state after removes/inserts, and moves are applied simultaneously
-            var hasMoves = propertyUpdate.Operations.Any(op => op.Action == SubjectCollectionOperationType.Move);
-            if (hasMoves)
-            {
-                var snapshot = workingItems.ToArray();
-                foreach (var operation in propertyUpdate.Operations)
-                {
-                    if (operation is { Action: SubjectCollectionOperationType.Move, FromIndex: not null })
-                    {
-                        var toIndex = ConvertIndexToInt(operation.Index);
-                        var fromIndex = operation.FromIndex.Value;
-                        if (fromIndex >= 0 && fromIndex < snapshot.Length && toIndex >= 0 && toIndex < workingItems.Count)
-                        {
-                            workingItems[toIndex] = snapshot[fromIndex];
-                            structureChanged = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Apply sparse property updates
-        if (propertyUpdate.Items is { Count: > 0 })
-        {
-            foreach (var collectionUpdate in propertyUpdate.Items)
-            {
-                var index = ConvertIndexToInt(collectionUpdate.Index);
-
-                // Validate index against declared count - if count is specified, index must be < count
-                if (propertyUpdate.Count.HasValue && index >= propertyUpdate.Count.Value)
-                {
-                    throw new InvalidOperationException(
-                        $"Invalid collection update: index {index} is out of bounds for declared count {propertyUpdate.Count.Value}. " +
-                        "The index in a sparse update must be less than the declared count.");
-                }
-
-                if (collectionUpdate.Id is not null &&
-                    context.Subjects.TryGetValue(collectionUpdate.Id, out var itemProps))
-                {
-                    if (index >= 0 && index < workingItems.Count)
-                    {
-                        // Update existing item
-                        if (context.TryMarkAsProcessed(collectionUpdate.Id))
-                        {
-                            SubjectUpdateApplier.ApplyPropertyUpdates(workingItems[index], itemProps, context);
-                        }
-                    }
-                    else if (index >= 0 && index <= workingItems.Count)
-                    {
-                        // Create new item at append position (for complete updates rebuilding the collection)
-                        var newItem = CreateAndApplyItem(parent, property, index, collectionUpdate.Id, itemProps, context);
-                        if (index >= workingItems.Count)
-                            workingItems.Add(newItem);
-                        else
-                            workingItems[index] = newItem;
-                        structureChanged = true;
-                    }
-                }
-            }
-        }
-
-        if (structureChanged)
-        {
-            var collection = context.SubjectFactory.CreateSubjectCollection(property.Type, workingItems);
+            // Null items mean the collection itself is null
             using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
             {
-                property.SetValue(collection);
+                property.SetValue(null);
             }
+            return;
+        }
+
+        var idRegistry = context.SubjectIdRegistry;
+
+        // Phase 1: Resolve or create subjects, set IDs on new subjects immediately
+        // so that GetOrAddSubjectId (called by ChangeQueueProcessor flush) finds the
+        // pre-assigned ID instead of generating a conflicting one.
+        var newItems = new List<(IInterceptorSubject Subject, string Id)>(propertyUpdate.Items.Count);
+        foreach (var itemUpdate in propertyUpdate.Items)
+        {
+            var (item, isNew) = ResolveOrCreateSubject(
+                parent, property, newItems.Count, itemUpdate.Id, idRegistry, context);
+
+            if (isNew)
+            {
+                item.SetSubjectId(itemUpdate.Id);
+            }
+
+            newItems.Add((item, itemUpdate.Id));
+        }
+
+        // Phase 2: Assign collection to graph (roots all items via lifecycle attach,
+        // which populates the reverse ID index from the pre-assigned IDs in Data)
+        var subjects = new IInterceptorSubject[newItems.Count];
+        for (var i = 0; i < newItems.Count; i++)
+            subjects[i] = newItems[i].Subject;
+
+        var collection = context.SubjectFactory.CreateSubjectCollection(property.Type, subjects);
+        using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
+        {
+            property.SetValue(collection);
+        }
+
+        // Phase 3: Apply properties (subjects are now rooted with IDs set)
+        foreach (var (item, id) in newItems)
+        {
+            ApplyPropertiesIfAvailable(item, id, context);
         }
     }
 
     /// <summary>
-    /// Applies a dictionary update to a property.
+    /// Applies a dictionary update to a property using complete-state items.
     /// </summary>
     internal static void ApplyDictionaryUpdate(
         IInterceptorSubject parent,
@@ -137,11 +75,19 @@ internal static class SubjectItemsUpdateApplier
         SubjectPropertyUpdate propertyUpdate,
         SubjectUpdateApplyContext context)
     {
-        var existingDictionary = property.GetValue() as IDictionary;
-        var targetKeyType = property.Type.GenericTypeArguments[0];
-        var workingDictionary = new Dictionary<object, IInterceptorSubject>();
-        var structureChanged = false;
+        if (propertyUpdate.Items is null)
+        {
+            // Null items mean the dictionary itself is null
+            using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
+            {
+                property.SetValue(null);
+            }
+            return;
+        }
 
+        var workingDictionary = new Dictionary<object, IInterceptorSubject>();
+
+        var existingDictionary = property.GetValue() as IDictionary;
         if (existingDictionary is not null)
         {
             foreach (DictionaryEntry entry in existingDictionary)
@@ -151,58 +97,93 @@ internal static class SubjectItemsUpdateApplier
             }
         }
 
-        // Apply structural operations
-        if (propertyUpdate.Operations is { Count: > 0 })
-        {
-            foreach (var operation in propertyUpdate.Operations)
-            {
-                var key = ConvertDictionaryKey(operation.Index, targetKeyType);
-                switch (operation.Action)
-                {
-                    case SubjectCollectionOperationType.Remove:
-                        if (workingDictionary.Remove(key))
-                            structureChanged = true;
-                        break;
+        var idRegistry = context.SubjectIdRegistry;
 
-                    case SubjectCollectionOperationType.Insert:
-                        if (operation.Id is not null && context.Subjects.TryGetValue(operation.Id, out var itemProps))
-                        {
-                            var newItem = CreateAndApplyItem(parent, property, key, operation.Id, itemProps, context);
-                            workingDictionary[key] = newItem;
-                            structureChanged = true;
-                        }
-                        break;
+        var targetKeyType = property.Type.GenericTypeArguments[0];
+        var structureChanged = false;
+        var updatedKeys = new HashSet<object>();
+
+        // Track subjects that need properties applied after graph assignment.
+        List<(IInterceptorSubject Subject, string Id)>? pendingPropertyApply = null;
+
+        foreach (var collectionUpdate in propertyUpdate.Items)
+        {
+            if (collectionUpdate.Key is null)
+                continue;
+
+            var key = DictionaryKeyConverter.Convert(collectionUpdate.Key, targetKeyType);
+            updatedKeys.Add(key);
+
+            if (workingDictionary.TryGetValue(key, out var existing))
+            {
+                var existingId = existing.TryGetSubjectId();
+                if (existingId is not null && existingId != collectionUpdate.Id)
+                {
+                    // Different logical subject at the same key — replace it.
+                    var (item, isNew) = ResolveOrCreateSubject(
+                        parent, property, key, collectionUpdate.Id, idRegistry, context);
+                    workingDictionary[key] = item;
+
+                    // Set ID immediately so ChangeQueueProcessor flush finds it
+                    if (isNew) item.SetSubjectId(collectionUpdate.Id);
+
+                    pendingPropertyApply ??= [];
+                    pendingPropertyApply.Add((item, collectionUpdate.Id));
+                    structureChanged = true;
                 }
+                else
+                {
+                    // Same logical subject (or no ID yet) — converge ID.
+                    if (existing.TryGetSubjectId() != collectionUpdate.Id)
+                    {
+                        existing.SetSubjectId(collectionUpdate.Id);
+                    }
+
+                    pendingPropertyApply ??= [];
+                    pendingPropertyApply.Add((existing, collectionUpdate.Id));
+                }
+            }
+            else
+            {
+                var (item, isNew) = ResolveOrCreateSubject(
+                    parent, property, key, collectionUpdate.Id, idRegistry, context);
+                workingDictionary[key] = item;
+
+                // Set ID immediately so ChangeQueueProcessor flush finds it
+                if (isNew) item.SetSubjectId(collectionUpdate.Id);
+
+                pendingPropertyApply ??= [];
+                pendingPropertyApply.Add((item, collectionUpdate.Id));
+                structureChanged = true;
             }
         }
 
-        // Apply sparse property updates
-        if (propertyUpdate.Items is { Count: > 0 })
+        // Remove dictionary entries not mentioned in items
+        List<object>? keysToRemove = null;
+        foreach (var key in workingDictionary.Keys)
         {
-            foreach (var collUpdate in propertyUpdate.Items)
+            if (!updatedKeys.Contains(key))
             {
-                var key = ConvertDictionaryKey(collUpdate.Index, targetKeyType);
-
-                if (collUpdate.Id is not null &&
-                    context.Subjects.TryGetValue(collUpdate.Id, out var itemProps))
-                {
-                    if (workingDictionary.TryGetValue(key, out var existing))
-                    {
-                        if (context.TryMarkAsProcessed(collUpdate.Id))
-                        {
-                            SubjectUpdateApplier.ApplyPropertyUpdates(existing, itemProps, context);
-                        }
-                    }
-                    else
-                    {
-                        var newItem = CreateAndApplyItem(parent, property, key, collUpdate.Id, itemProps, context);
-                        workingDictionary[key] = newItem;
-                        structureChanged = true;
-                    }
-                }
+                keysToRemove ??= [];
+                keysToRemove.Add(key);
             }
         }
 
+        if (keysToRemove is not null)
+        {
+            foreach (var key in keysToRemove)
+                workingDictionary.Remove(key);
+
+            structureChanged = true;
+        }
+
+        // Also rebuild when transitioning from null to a (possibly empty) dictionary
+        if (!structureChanged && existingDictionary is null)
+        {
+            structureChanged = true;
+        }
+
+        // Assign to graph first so subjects are rooted
         if (structureChanged)
         {
             var dictionary = context.SubjectFactory.CreateSubjectDictionary(property.Type, workingDictionary);
@@ -211,32 +192,64 @@ internal static class SubjectItemsUpdateApplier
                 property.SetValue(dictionary);
             }
         }
+
+        // Apply properties (IDs already set before graph assignment)
+        if (pendingPropertyApply is not null)
+        {
+            foreach (var (subject, id) in pendingPropertyApply)
+            {
+                ApplyPropertiesIfAvailable(subject, id, context);
+            }
+        }
     }
 
-    private static int ConvertIndexToInt(object index) => index switch
-    {
-        int i => i,
-        JsonElement json => json.GetInt32(),
-        _ => Convert.ToInt32(index)
-    };
-
-    private static object ConvertDictionaryKey(object key, Type targetKeyType)
-        => DictionaryKeyConverter.Convert(key, targetKeyType);
-
-    private static IInterceptorSubject CreateAndApplyItem(
+    /// <summary>
+    /// Resolves an existing subject by ID, or creates a new one.
+    /// For newly created subjects, the ID is NOT set here — the caller must
+    /// first assign the item to the graph (via SetValue on the collection/dictionary),
+    /// then set IDs and apply properties.
+    /// </summary>
+    private static (IInterceptorSubject Subject, bool IsNew) ResolveOrCreateSubject(
         IInterceptorSubject parent,
         RegisteredSubjectProperty property,
         object indexOrKey,
         string subjectId,
-        Dictionary<string, SubjectPropertyUpdate> properties,
+        ISubjectIdRegistry idRegistry,
         SubjectUpdateApplyContext context)
     {
-        var newItem = context.SubjectFactory.CreateCollectionSubject(property, indexOrKey);
-        newItem.Context.AddFallbackContext(parent.Context);
-        if (context.TryMarkAsProcessed(subjectId))
+        if (idRegistry.TryGetSubjectById(subjectId, out var existing))
         {
-            SubjectUpdateApplier.ApplyPropertyUpdates(newItem, properties, context);
+            return (existing, false);
         }
-        return newItem;
+
+        var newItem = CreateSubjectItem(parent, property, indexOrKey, context);
+        return (newItem, true);
+    }
+
+    /// <summary>
+    /// Applies property updates to a subject if properties are available and not yet processed.
+    /// </summary>
+    private static void ApplyPropertiesIfAvailable(
+        IInterceptorSubject subject, string subjectId, SubjectUpdateApplyContext context)
+    {
+        if (context.Subjects.TryGetValue(subjectId, out var properties) &&
+            context.TryMarkAsProcessed(subjectId))
+        {
+            SubjectUpdateApplier.ApplyPropertyUpdates(subject, properties, context);
+        }
+    }
+
+    /// <summary>
+    /// Creates a new subject item. Does not assign ID, fallback context, or apply properties.
+    /// Fallback context is added automatically by ContextInheritanceHandler when the subject
+    /// enters the graph via SetValue. The caller must assign the item to the graph first.
+    /// </summary>
+    private static IInterceptorSubject CreateSubjectItem(
+        IInterceptorSubject parent,
+        RegisteredSubjectProperty property,
+        object indexOrKey,
+        SubjectUpdateApplyContext context)
+    {
+        return context.SubjectFactory.CreateCollectionSubject(property, indexOrKey);
     }
 }

@@ -1,40 +1,24 @@
 ﻿{
-  Root: 1,
+  Root: SubjectId_1,
   Subjects: {
-    1: {
-      Lookup: {
-        Kind: Dictionary,
+    SubjectId_1: {
+      Items: {
+        Kind: Collection,
         Timestamp: DateTimeOffset_1,
-        Operations: [
+        Items: [
           {
-            Action: Insert,
-            Index: key1,
-            Id: 2
+            Id: SubjectId_2
           },
           {
-            Action: Insert,
-            Index: key2,
-            Id: 3
+            Id: SubjectId_3
           }
-        ],
-        Count: 2
+        ]
       }
     },
-    2: {
-      Child: {
-        Kind: Object
-      },
-      Items: {
-        Kind: Collection,
-        Count: 0
-      },
-      Lookup: {
-        Kind: Dictionary,
-        Count: 0
-      },
+    SubjectId_2: {
       Name: {
         Kind: Value,
-        Value: Item1,
+        Value: Child1,
         Attributes: {
           Status: {
             Kind: Value,
@@ -42,28 +26,26 @@
           }
         }
       },
+      Self: {
+        Kind: Object
+      },
       Parent: {
         Kind: Object
       },
-      Self: {
-        Kind: Object
-      }
-    },
-    3: {
       Child: {
         Kind: Object
       },
       Items: {
-        Kind: Collection,
-        Count: 0
+        Kind: Collection
       },
       Lookup: {
-        Kind: Dictionary,
-        Count: 0
-      },
+        Kind: Dictionary
+      }
+    },
+    SubjectId_3: {
       Name: {
         Kind: Value,
-        Value: Item2,
+        Value: Child2,
         Attributes: {
           Status: {
             Kind: Value,
@@ -71,11 +53,20 @@
           }
         }
       },
+      Self: {
+        Kind: Object
+      },
       Parent: {
         Kind: Object
       },
-      Self: {
+      Child: {
         Kind: Object
+      },
+      Items: {
+        Kind: Collection
+      },
+      Lookup: {
+        Kind: Dictionary
       }
     }
   }
