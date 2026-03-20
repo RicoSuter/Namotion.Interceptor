@@ -240,7 +240,6 @@ public static class SubjectRegistryExtensions
             return;
         }
 
-        // No registry - just store in Data
         HasSubjectIds = true;
 
         var existing = subject.Data.GetOrAdd((null, SubjectIdKey), id);
