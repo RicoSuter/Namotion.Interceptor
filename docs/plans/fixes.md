@@ -118,7 +118,6 @@ All diagnostics should be removed once investigation is complete.
 | `[DIAG] SUF drop` | `SubjectUpdateFactory.cs` | stderr | Logs when a change is dropped during update creation (unregistered subject) |
 | `[DIAG] Broadcast: all changes dropped` | `WebSocketSubjectHandler.cs` | cycle log | Logs when entire flush batch produces empty update |
 | `[DIAG-REG] ContextDetach` | `SubjectRegistry.cs` | stderr | Logs when `_knownSubjects.Remove` fails (subject already removed) |
-| `[DIAG-LIFE] REFCOUNT MISMATCH` | `LifecycleInterceptor.cs` | stderr | Logs when `refCount=0` but `isLastDetach=false` (set.Count > 0) |
 | `[DIAG] Retry queue flush failed` | `SubjectSourceBackgroundService.cs` | cycle log | Logs when CQP writes go to retry queue during normal operation |
 | `[DIAG] WriteChangesAsync: WebSocket not connected` | `WebSocketSubjectClientSource.cs` | cycle log | Logs when client writes fail due to closed socket |
 | `PendingRetryWrites` property | `SubjectSourceBackgroundService.cs` | N/A | Exposed for future diagnostics |

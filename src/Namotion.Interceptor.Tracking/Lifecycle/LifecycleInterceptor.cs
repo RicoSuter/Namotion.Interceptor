@@ -221,11 +221,11 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 var metadata = entry.Value;
                 if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
                 {
-                    // Use _lastProcessedValues (what the lifecycle has actually attached)
-                    // instead of the backing store (which may have been concurrently modified).
-                    // A concurrent thread can write a new child to the backing store via next()
-                    // before acquiring the lock — reading the backing store would find that
-                    // unattached child instead of the actually-attached one.
+                    // Read _lastProcessedValues (what the lifecycle has actually attached)
+                    // instead of the backing store. A concurrent next() may have written a
+                    // new (unattached) child to the backing store; the parentStillAttached
+                    // guard in WriteProperty prevents attaching children to dead parents,
+                    // so only _lastProcessedValues contains actually-attached children.
                     if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
                     {
                         children ??= GetList();
@@ -240,15 +240,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
 
         var count = subject.DecrementReferenceCount();
-
-        if (count == 0 && !isLastDetach)
-        {
-            // refCount=0 but set still has entries — this causes a leak because
-            // IsContextDetach won't be set and _knownSubjects.Remove won't fire.
-            var remainingRefs = _attachedSubjects.TryGetValue(subject, out var remaining) ? remaining.Count : -1;
-            Console.Error.WriteLine($"[DIAG-LIFE] {DateTimeOffset.UtcNow:HH:mm:ss.fff} REFCOUNT MISMATCH: subject {subject.GetHashCode():x8} refCount=0 but set.Count={remainingRefs}, property={property.Name}@{property.Subject.GetHashCode():x8}");
-        }
-
         var change = new SubjectLifecycleChange
         {
             Subject = subject,
@@ -276,32 +267,33 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             ReturnList(children);
         }
 
-        // After recursive detach, clean up subjects that were concurrently attached
-        // to the just-detached subject's properties. A concurrent WriteProperty can
-        // attach new children between _attachedSubjects.Remove(subject) and this point
-        // because next() writes the backing store without the lock.
+        // Scan for subjects that a concurrent WriteProperty attached to the just-detached
+        // subject's properties before this detach acquired the lock. These are children
+        // whose PropertyReference.Subject points to the now-dead subject.
+        // Collect first to avoid modifying _attachedSubjects during iteration.
         if (isLastDetach)
         {
-            List<(IInterceptorSubject subject, PropertyReference property)>? lateAttachments = null;
+            (IInterceptorSubject subject, PropertyReference property)[]? lateAttachments = null;
+            var lateCount = 0;
+
             foreach (var (attachedSubject, propertyRefs) in _attachedSubjects)
             {
-                foreach (var propRef in propertyRefs)
+                foreach (var propertyReference in propertyRefs)
                 {
-                    if (ReferenceEquals(propRef.Subject, subject))
+                    if (ReferenceEquals(propertyReference.Subject, subject))
                     {
-                        lateAttachments ??= [];
-                        lateAttachments.Add((attachedSubject, propRef));
+                        lateAttachments ??= new (IInterceptorSubject, PropertyReference)[4];
+                        if (lateCount == lateAttachments.Length)
+                            Array.Resize(ref lateAttachments, lateCount * 2);
+                        lateAttachments[lateCount++] = (attachedSubject, propertyReference);
                         break;
                     }
                 }
             }
 
-            if (lateAttachments is not null)
+            for (var i = 0; i < lateCount; i++)
             {
-                foreach (var (lateSubject, lateProp) in lateAttachments)
-                {
-                    DetachFromProperty(lateSubject, context, lateProp, null);
-                }
+                DetachFromProperty(lateAttachments![i].subject, context, lateAttachments[i].property, null);
             }
         }
     }
