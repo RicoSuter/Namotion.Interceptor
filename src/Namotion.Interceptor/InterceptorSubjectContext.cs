@@ -76,7 +76,6 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
                     _readInterceptorFunction = new ConcurrentDictionary<Type, Delegate>();
                     _writeInterceptorFunction = new ConcurrentDictionary<Type, Delegate>();
 
-                    //Must be assigned LAST, it's the guard field read outside the lock.
                     Volatile.Write(ref _serviceCache, new ConcurrentDictionary<Type, object>());
                 }
             }

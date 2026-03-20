@@ -125,6 +125,18 @@ All diagnostics should be removed once investigation is complete.
 
 ---
 
+## Stale value / structural mismatch on client
+
+**Symptom:** Client has stale values or missing structural elements compared to the server. Does not converge within 60 seconds.
+
+**Previous observations:** ~1 per 35 cycles at 900/sec. Client-a-only, all-clients, and full-chaos profiles.
+
+**Analysis of cycle 3 failure snapshot:** Server and client-b had identical subject count (474) and identical structure. Only 3 value properties on a single subject diverged — server had real values (IntValue=1057511, DecimalValue=10540.76, StringValue="001011be"), client-b had defaults (0, 0, ""). The subject was created structurally (correct ID, correct structure) but value updates never arrived.
+
+**Status:** Likely resolved by the EnsureInitialized double-checked locking fix (merged in #227). The broken interceptor chain read path could return wrong values in addition to causing NREs. After that fix: 74+ cycles at 900/sec with zero convergence failures (previously failed ~1 per 35 cycles). Not yet confirmed at scale on this branch.
+
+---
+
 ## Unit Test Changes
 
 | File | Change |
@@ -136,32 +148,6 @@ All diagnostics should be removed once investigation is complete.
 | `ConcurrentStructuralWriteLeakTests.cs` | New file — 9 concurrency tests for lifecycle registry leak (2000 iterations each) |
 | `SubjectUpdateExtensionsTests.cs` | Added `ConcurrentApplySubjectUpdateAndPropertyWrite` — concurrent apply+write (passes) |
 | `SubjectUpdateExtensionsTests.cs` | Added `ConcurrentCompleteUpdateAndStructuralWrites` — reproduces no-parents leak (now passes with Fix 8) |
-
----
-
-## ~~Under Investigation:~~ Likely resolved by Fix 9: Stale value / structural mismatch on client
-
-**Symptom:** Client has stale values or missing structural elements compared to the server. Does not converge within 60 seconds.
-
-**Previous observations:** ~1 per 35 cycles at 900/sec. Client-a-only, all-clients, and full-chaos profiles.
-
-**Analysis of cycle 3 failure snapshot:** Server and client-b had identical subject count (474) and identical structure. Only 3 value properties on a single subject diverged — server had real values (IntValue=1057511, DecimalValue=10540.76, StringValue="001011be"), client-b had defaults (0, 0, ""). The subject was created structurally (correct ID, correct structure) but value updates never arrived.
-
-**Status:** Likely resolved by Fix 9 (EnsureInitialized double-checked locking). The broken interceptor chain read path could return wrong values in addition to causing NREs. After Fix 9: 74+ cycles at 900/sec with zero convergence failures (previously failed ~1 per 35 cycles).
-
----
-
-## Fix 4: Registry reverse ID index guard
-
-**Files changed:** `SubjectRegistry.cs`
-
-**Cause:** `SetSubjectId` and `GetOrAddSubjectId` unconditionally added entries to `_subjectIdToSubject`, even for subjects that were never attached via lifecycle (e.g., written to the backing store then immediately overwritten by another thread). These entries persisted forever since no detach event would fire for an unattached subject.
-
-**Symptom:** Orphaned entries in `_subjectIdToSubject` for subjects not in `_knownSubjects`. Memory-only leak, no incorrect behavior.
-
-**Fix:** Only populate `_subjectIdToSubject` if the subject is already in `_knownSubjects`. The lifecycle attach handler picks up pre-assigned IDs from `subject.Data` when the subject properly enters the graph.
-
-**Status:** Applied. Belt-and-suspenders alongside Fix 5.
 
 ---
 
@@ -267,67 +253,6 @@ Detailed race:
 - `ParentReRegisteredAfterDetach_NoParentsLeakInRegistry` — validates Fix 7 prevents `has-parents` variant
 - `ConcurrentApplySubjectUpdateAndPropertyWrite_NoOrphanedSubjectsInRegistry` — single-level concurrent apply+write
 - `ConcurrentCompleteUpdateAndStructuralWrites_NoOrphanedSubjectsInRegistry` — reproducing test for `no-parents` leak, now passes
-
----
-
-## Fix 9: Broken double-checked locking in EnsureInitialized (NRE in FindSubjectsInProperties)
-
-**Files changed:** `InterceptorSubjectContext.cs`
-
-**Symptom:** `NullReferenceException` in `FindSubjectsInProperties` during `AttachSubjectToContext`, called from `AddFallbackContext` during lifecycle processing. Crashes the MutationEngine BackgroundService. ~1 per 30 cycles at 900 structural mutations/sec.
-
-**Stack trace:**
-```
-LifecycleInterceptor.FindSubjectsInProperties (line 426)
-← LifecycleInterceptor.AttachSubjectToContext (line 39)
-← InterceptorExecutor.AddFallbackContext (line 42)
-← LifecycleInterceptor.InvokeAddedLifecycleHandlers (line 151)
-← LifecycleInterceptor.WriteProperty (line 332)
-← MutationEngine.PerformStructuralMutation
-```
-
-**Root cause:** `EnsureInitialized()` in `InterceptorSubjectContext` had a broken double-checked locking pattern:
-```csharp
-// BEFORE (broken):
-if (_serviceCache is null)
-{
-    lock (_lock)
-    {
-        // Missing inner null check — two threads could both enter and overwrite
-        _serviceCache = new ConcurrentDictionary<Type, object>();
-        _readInterceptorFunction = new ConcurrentDictionary<Type, Delegate>();
-        _writeInterceptorFunction = new ConcurrentDictionary<Type, Delegate>();
-    }
-}
-```
-Two issues:
-1. **Missing inner null check** — two threads passing the outer check simultaneously would both enter the lock and overwrite each other's dictionaries.
-2. **Store ordering** — `_serviceCache` (the guard field read outside the lock) was assigned FIRST, before `_readInterceptorFunction`. The JIT/CPU could make `_serviceCache` visible to other threads while `_readInterceptorFunction` is still null. A thread checking `_serviceCache is null` → false would skip the lock and call `_readInterceptorFunction!.TryGetValue(...)` → **NRE**.
-
-**Fix:**
-```csharp
-// AFTER (correct):
-if (_serviceCache is null)
-{
-    lock (_lock)
-    {
-        if (_serviceCache is null)  // Inner null check
-        {
-            _readInterceptorFunction = new ConcurrentDictionary<Type, Delegate>();
-            _writeInterceptorFunction = new ConcurrentDictionary<Type, Delegate>();
-            // Guard field LAST with volatile write to ensure ordering
-            Volatile.Write(ref _serviceCache, new ConcurrentDictionary<Type, object>());
-        }
-    }
-}
-```
-
-**Diagnostic trail:**
-- First diagnostic: NRE on `property=ObjectRef, subjectType=TestNode, isAttached=True` — subject is valid, not null
-- Refined diagnostic: NRE confirmed in `GetValue?.Invoke(subject)` (not in `FindSubjectsInProperty`)
-- `GetValue` calls the intercepted property getter → interceptor chain → `GetReadInterceptorFunction()` → `_readInterceptorFunction!.TryGetValue(...)` → NRE when field is null
-
-**Status:** Applied. Confirmed: 74+ cycles at 900/sec with zero NRE crashes AND zero convergence failures (previously ~1 NRE per 30 cycles, ~1 convergence failure per 35 cycles).
 
 ---
 
