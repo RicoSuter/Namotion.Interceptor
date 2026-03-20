@@ -321,7 +321,8 @@ public class MarkdownFileTests
     private static MarkdownFile CreateMarkdownFile(IServiceProvider serviceProvider, FluentStorageContainer storage, string path)
     {
         var parser = serviceProvider.GetRequiredService<MarkdownContentParser>();
-        return new MarkdownFile(storage, path, parser);
+        var serializer = serviceProvider.GetRequiredService<ConfigurableSubjectSerializer>();
+        return new MarkdownFile(storage, path, parser, serializer);
     }
 
     private static async Task WriteFileAsync(FluentStorageContainer storage, string path, string content)
