@@ -241,14 +241,13 @@ public static class SubjectRegistryExtensions
         }
 
         // No registry - just store in Data
-        var oldId = subject.TryGetSubjectId();
-        if (oldId is not null && oldId != id)
+        HasSubjectIds = true;
+
+        var existing = subject.Data.GetOrAdd((null, SubjectIdKey), id);
+        if (existing is string existingId && existingId != id)
         {
             throw new InvalidOperationException(
-                $"Subject already has ID '{oldId}'; cannot reassign to '{id}'.");
+                $"Subject already has ID '{existingId}'; cannot reassign to '{id}'.");
         }
-
-        HasSubjectIds = true;
-        subject.Data[(null, SubjectIdKey)] = id;
     }
 }
