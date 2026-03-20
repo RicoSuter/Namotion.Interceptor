@@ -221,11 +221,15 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 var metadata = entry.Value;
                 if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
                 {
-                    var propertyValue = metadata.GetValue?.Invoke(subject);
-                    if (propertyValue is not null)
+                    // Use _lastProcessedValues (what the lifecycle has actually attached)
+                    // instead of the backing store (which may have been concurrently modified).
+                    // A concurrent thread can write a new child to the backing store via next()
+                    // before acquiring the lock — reading the backing store would find that
+                    // unattached child instead of the actually-attached one.
+                    if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
                     {
                         children ??= GetList();
-                        FindSubjectsInProperty(subjectProperty, propertyValue, null, children, null);
+                        FindSubjectsInProperty(subjectProperty, lastProcessed, null, children, null);
                     }
 
                     _lastProcessedValues.Remove(subjectProperty);
@@ -236,6 +240,15 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
 
         var count = subject.DecrementReferenceCount();
+
+        if (count == 0 && !isLastDetach)
+        {
+            // refCount=0 but set still has entries — this causes a leak because
+            // IsContextDetach won't be set and _knownSubjects.Remove won't fire.
+            var remainingRefs = _attachedSubjects.TryGetValue(subject, out var remaining) ? remaining.Count : -1;
+            Console.Error.WriteLine($"[DIAG-LIFE] {DateTimeOffset.UtcNow:HH:mm:ss.fff} REFCOUNT MISMATCH: subject {subject.GetHashCode():x8} refCount=0 but set.Count={remainingRefs}, property={property.Name}@{property.Subject.GetHashCode():x8}");
+        }
+
         var change = new SubjectLifecycleChange
         {
             Subject = subject,
@@ -261,6 +274,35 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             }
 
             ReturnList(children);
+        }
+
+        // After recursive detach, clean up subjects that were concurrently attached
+        // to the just-detached subject's properties. A concurrent WriteProperty can
+        // attach new children between _attachedSubjects.Remove(subject) and this point
+        // because next() writes the backing store without the lock.
+        if (isLastDetach)
+        {
+            List<(IInterceptorSubject subject, PropertyReference property)>? lateAttachments = null;
+            foreach (var (attachedSubject, propertyRefs) in _attachedSubjects)
+            {
+                foreach (var propRef in propertyRefs)
+                {
+                    if (ReferenceEquals(propRef.Subject, subject))
+                    {
+                        lateAttachments ??= [];
+                        lateAttachments.Add((attachedSubject, propRef));
+                        break;
+                    }
+                }
+            }
+
+            if (lateAttachments is not null)
+            {
+                foreach (var (lateSubject, lateProp) in lateAttachments)
+                {
+                    DetachFromProperty(lateSubject, context, lateProp, null);
+                }
+            }
         }
     }
 
@@ -339,10 +381,16 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     }
                 }
 
+                // Only attach new children if the parent subject is still in the graph.
+                // A concurrent DetachFromProperty on the parent may have removed it from
+                // _attachedSubjects; attaching children to a dead parent would leak them.
+                // Detaches always run regardless — previously-attached children must be cleaned up.
+                var parentStillAttached = _attachedSubjects.ContainsKey(context.Property.Subject);
+
                 for (var i = 0; i < newCollectedSubjects.Count; i++)
                 {
                     var (subject, property, index) = newCollectedSubjects[i];
-                    if (!oldTouchedSubjects.Contains(subject))
+                    if (!oldTouchedSubjects.Contains(subject) && parentStillAttached)
                     {
                         AttachToProperty(subject, context.Property.Subject.Context, property, index);
                     }

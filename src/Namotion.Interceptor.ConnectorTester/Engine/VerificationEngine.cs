@@ -7,6 +7,7 @@ using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Logging;
 using Namotion.Interceptor.ConnectorTester.Model;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.ConnectorTester.Engine;
@@ -402,7 +403,47 @@ public class VerificationEngine : BackgroundService
         {
             var registry = ((IInterceptorSubject)p.Value).Context.TryGetService<ISubjectRegistry>();
             var knownCount = registry?.KnownSubjects.Count ?? -1;
-            var reachable = SubjectUpdate.CreateCompleteUpdate(p.Value, []).Subjects.Count;
+            var reachableUpdate = SubjectUpdate.CreateCompleteUpdate(p.Value, []);
+            var reachable = reachableUpdate.Subjects.Count;
+
+            if (registry is not null && knownCount > reachable)
+            {
+                var reachableIds = new HashSet<string>(reachableUpdate.Subjects.Keys);
+                foreach (var kvp in registry.KnownSubjects)
+                {
+                    var id = kvp.Key.TryGetSubjectId();
+                    if (id is not null && !reachableIds.Contains(id))
+                    {
+                        var refCount = kvp.Value.ReferenceCount;
+                        var parents = kvp.Value.Parents;
+                        var parts = new List<string>();
+                        foreach (var parent in parents)
+                        {
+                            // Check what the parent's property actually contains
+                            var actualValue = parent.Property.GetValue();
+                            var actualContainsOrphan = false;
+                            if (actualValue is System.Collections.IEnumerable enumerable and not string)
+                            {
+                                foreach (var item in enumerable)
+                                {
+                                    if (ReferenceEquals(item, kvp.Key)) { actualContainsOrphan = true; break; }
+                                }
+                            }
+                            else
+                            {
+                                actualContainsOrphan = ReferenceEquals(actualValue, kvp.Key);
+                            }
+
+                            parts.Add($"{parent.Property.Name}[{parent.Index}]@{parent.Property.Subject.TryGetSubjectId() ?? "?"}" +
+                                $"(actual:{(actualContainsOrphan ? "FOUND" : "MISSING")})");
+                        }
+                        _logger.LogWarning(
+                            "LEAK: {Participant} orphaned {Id} refCount={RefCount} parents=[{Parents}]",
+                            p.Key, id, refCount, parts.Count > 0 ? string.Join(", ", parts) : "no-parents");
+                    }
+                }
+            }
+
             return $"{p.Key}={knownCount}/{reachable}";
         }));
         line += $", Subjects(registry/reachable): [{registryInfo}]";

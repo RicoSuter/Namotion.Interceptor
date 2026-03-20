@@ -4,6 +4,7 @@ using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -588,7 +589,7 @@ public partial class SubjectUpdateExtensionsTests
 
 
     [Fact]
-    public void WhenApplyingUpdateWithMissingSubjectId_ThenItIsIgnored()
+    public void WhenApplyingUpdateWithMissingSubjectId_ThenSubjectIsCreatedForLaterPropertyUpdates()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
@@ -604,7 +605,7 @@ public partial class SubjectUpdateExtensionsTests
                     ["Father"] = new SubjectPropertyUpdate
                     {
                         Kind = SubjectPropertyUpdateKind.Object,
-                        Id = "nonexistent" // References a subject that doesn't exist
+                        Id = "new-father" // References a subject whose properties may arrive in a later batch
                     }
                 }
             }
@@ -613,8 +614,9 @@ public partial class SubjectUpdateExtensionsTests
         // Act - should not throw
         target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
 
-        // Assert - Father should remain null (not set to anything)
-        Assert.Null(target.Father);
+        // Assert - Father should be created so future value updates can find it by ID
+        Assert.NotNull(target.Father);
+        Assert.Equal("new-father", ((IInterceptorSubject)target.Father).TryGetSubjectId());
     }
 
 
@@ -916,5 +918,422 @@ public partial class SubjectUpdateExtensionsTests
         Assert.Equal(2, target.IntLookup.Count);
         Assert.Equal("Updated", target.IntLookup[1].Name);
         Assert.Equal("NewItem", target.IntLookup[2].Name);
+    }
+
+    [Fact]
+    public void WhenObjectRefPropertiesArriveInLaterBatch_ThenSubjectIsCreatedAndLaterUpdateApplied()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var target = new Person(context) { FirstName = "Parent" };
+
+        // Batch 1: Structural update — ObjectRef points to new subject, but NO properties for it
+        var batch1 = new SubjectUpdate
+        {
+            Root = "root",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["root"] = new()
+                {
+                    ["Father"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Object,
+                        Id = "father-1"
+                    }
+                }
+                // Note: no entry for "father-1" — properties arrive in next batch
+            }
+        };
+
+        target.ApplySubjectUpdate(batch1, DefaultSubjectFactory.Instance);
+
+        // Assert: Father created with default values, ID registered
+        Assert.NotNull(target.Father);
+        Assert.Equal("father-1", ((IInterceptorSubject)target.Father).TryGetSubjectId());
+        Assert.Null(target.Father.FirstName); // defaults
+
+        // Batch 2: Value-only update for the same subject
+        var batch2 = new SubjectUpdate
+        {
+            Root = "root",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["father-1"] = new()
+                {
+                    ["FirstName"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "John"
+                    }
+                }
+            }
+        };
+
+        target.ApplySubjectUpdate(batch2, DefaultSubjectFactory.Instance);
+
+        // Assert: Value update applied to the same subject
+        Assert.NotNull(target.Father);
+        Assert.Equal("John", target.Father.FirstName);
+        Assert.Equal("father-1", ((IInterceptorSubject)target.Father).TryGetSubjectId());
+    }
+
+    [Fact]
+    public void WhenCollectionItemPropertiesArriveInLaterBatch_ThenItemIsCreatedAndLaterUpdateApplied()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var target = new Person(context) { FirstName = "Parent", Children = [] };
+
+        // Batch 1: Collection update with new item, but NO properties for it
+        var batch1 = new SubjectUpdate
+        {
+            Root = "root",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["root"] = new()
+                {
+                    ["Children"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Items = [new SubjectPropertyItemUpdate { Id = "child-1" }]
+                    }
+                }
+                // Note: no entry for "child-1"
+            }
+        };
+
+        target.ApplySubjectUpdate(batch1, DefaultSubjectFactory.Instance);
+
+        // Assert: Child created with defaults, ID registered
+        Assert.Single(target.Children);
+        Assert.Equal("child-1", ((IInterceptorSubject)target.Children[0]).TryGetSubjectId());
+
+        // Batch 2: Value update for the child
+        var batch2 = new SubjectUpdate
+        {
+            Root = "root",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["child-1"] = new()
+                {
+                    ["FirstName"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Alice"
+                    }
+                }
+            }
+        };
+
+        target.ApplySubjectUpdate(batch2, DefaultSubjectFactory.Instance);
+
+        // Assert: Value applied to same child
+        Assert.Single(target.Children);
+        Assert.Equal("Alice", target.Children[0].FirstName);
+        Assert.Equal("child-1", ((IInterceptorSubject)target.Children[0]).TryGetSubjectId());
+    }
+
+    [Fact]
+    public void WhenObjectRefAndPropertiesInSameBatch_ThenSubjectIsFullyPopulated()
+    {
+        // Arrange — the common case where structural + properties arrive together
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var target = new Person(context) { FirstName = "Parent" };
+
+        var update = new SubjectUpdate
+        {
+            Root = "root",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["root"] = new()
+                {
+                    ["Father"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Object,
+                        Id = "father-1"
+                    }
+                },
+                ["father-1"] = new()
+                {
+                    ["FirstName"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Bob"
+                    }
+                }
+            }
+        };
+
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert: Subject created and fully populated in one batch
+        Assert.NotNull(target.Father);
+        Assert.Equal("Bob", target.Father.FirstName);
+        Assert.Equal("father-1", ((IInterceptorSubject)target.Father).TryGetSubjectId());
+    }
+
+    /// <summary>
+    /// Reproduces the "no-parents" registry leak during concurrent ApplySubjectUpdate
+    /// (simulating WebSocket Welcome apply) and direct property writes (simulating
+    /// MutationEngine). Thread A applies updates that replace the child subject,
+    /// Thread B writes grandchildren to the child's structural property.
+    /// The registry re-registers the child as a parent side-effect after it was
+    /// detached by the update apply, leaving it orphaned with refCount=0, no-parents.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public void ConcurrentApplySubjectUpdateAndPropertyWrite_NoOrphanedSubjectsInRegistry()
+    {
+        const int rounds = 10;
+        const int iterationsPerThread = 2000;
+        var totalOrphaned = 0;
+
+        for (var round = 0; round < rounds; round++)
+        {
+            var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+            var registry = context.TryGetService<ISubjectRegistry>()!;
+            var target = new Person(context) { FirstName = "Root" };
+
+            // Give the root a child with a known ID
+            var child = new Person { FirstName = "Child" };
+            target.Father = child;
+
+            var barrier = new Barrier(2);
+            var idCounter = 0;
+
+            // Thread A: repeatedly applies SubjectUpdate that replaces Father
+            // (simulates WebSocket Welcome apply replacing the graph)
+            var updateThread = new Thread(() =>
+            {
+                barrier.SignalAndWait();
+                for (var i = 0; i < iterationsPerThread; i++)
+                {
+                    var newId = $"child-{Interlocked.Increment(ref idCounter)}";
+                    var update = new SubjectUpdate
+                    {
+                        Root = "root",
+                        Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+                        {
+                            ["root"] = new()
+                            {
+                                ["Father"] = new SubjectPropertyUpdate
+                                {
+                                    Kind = SubjectPropertyUpdateKind.Object,
+                                    Id = newId
+                                }
+                            },
+                            [newId] = new()
+                            {
+                                ["FirstName"] = new SubjectPropertyUpdate
+                                {
+                                    Kind = SubjectPropertyUpdateKind.Value,
+                                    Value = $"NewChild_{i}"
+                                }
+                            }
+                        }
+                    };
+
+                    target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+                }
+            });
+            updateThread.IsBackground = true;
+
+            // Thread B: writes grandchild subjects to the current child's Mother property
+            // (simulates MutationEngine writing to subjects in the graph)
+            var writeThread = new Thread(() =>
+            {
+                barrier.SignalAndWait();
+                for (var i = 0; i < iterationsPerThread; i++)
+                {
+                    try
+                    {
+                        var currentChild = target.Father;
+                        if (currentChild is not null)
+                        {
+                            currentChild.Mother = new Person { FirstName = $"Grandchild_{i}" };
+                            currentChild.Mother = null;
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore races (property access on detached subject)
+                    }
+                }
+            });
+            writeThread.IsBackground = true;
+
+            updateThread.Start();
+            writeThread.Start();
+            updateThread.Join();
+            writeThread.Join();
+
+            // Clean up
+            target.Father = null;
+
+            // Count orphans (anything besides the root)
+            var knownSubjects = registry.KnownSubjects;
+            foreach (var kvp in knownSubjects)
+            {
+                if (!ReferenceEquals(kvp.Key, target))
+                {
+                    var name = ((Person)kvp.Key).FirstName;
+                    var refCount = kvp.Value.ReferenceCount;
+                    var parents = kvp.Value.Parents;
+                    var parentDesc = parents.Length > 0 ? "has-parents" : "no-parents";
+                    Console.WriteLine($"  Round {round}: orphan '{name}' refCount={refCount} {parentDesc}");
+                    totalOrphaned++;
+                }
+            }
+        }
+
+        Assert.True(
+            totalOrphaned == 0,
+            $"Detected {totalOrphaned} total orphaned subject(s) across {rounds} rounds. " +
+            $"This indicates a registry leak during concurrent ApplySubjectUpdate " +
+            $"(Welcome apply) and direct property writes (MutationEngine).");
+    }
+
+    /// <summary>
+    /// Reproduces the ConnectorTester "no-parents" leak by simulating WebSocket
+    /// reconnection: complete graph replacement via ApplySubjectUpdate while
+    /// MutationEngine concurrently writes to subjects that may be in the process
+    /// of being replaced. Uses complete updates (like Welcome) that replace the
+    /// entire graph structure.
+    /// </summary>
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public void ConcurrentCompleteUpdateAndStructuralWrites_NoOrphanedSubjectsInRegistry()
+    {
+        const int rounds = 10;
+        const int iterationsPerThread = 1000;
+        var totalOrphaned = 0;
+
+        for (var round = 0; round < rounds; round++)
+        {
+            var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+            var registry = context.TryGetService<ISubjectRegistry>()!;
+            var root = new Person(context) { FirstName = "Root" };
+
+            // Set up initial graph: root → child → grandchild
+            root.Father = new Person { FirstName = "Child0" };
+            root.Father.Mother = new Person { FirstName = "Grandchild0" };
+
+            var barrier = new Barrier(2);
+            var idCounter = 0;
+
+            // Thread A: repeatedly applies COMPLETE SubjectUpdate that replaces
+            // the entire graph (simulating Welcome apply during reconnection)
+            var updateThread = new Thread(() =>
+            {
+                barrier.SignalAndWait();
+                for (var i = 0; i < iterationsPerThread; i++)
+                {
+                    var childId = $"child-{Interlocked.Increment(ref idCounter)}";
+                    var grandchildId = $"gc-{Interlocked.Increment(ref idCounter)}";
+
+                    // Complete update: replaces root's Father AND the child's Mother
+                    var update = SubjectUpdate.CreateCompleteUpdate(root, []);
+
+                    // Apply a fresh complete update that replaces everything
+                    var freshUpdate = new SubjectUpdate
+                    {
+                        Root = "root",
+                        Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+                        {
+                            ["root"] = new()
+                            {
+                                ["Father"] = new SubjectPropertyUpdate
+                                {
+                                    Kind = SubjectPropertyUpdateKind.Object,
+                                    Id = childId
+                                }
+                            },
+                            [childId] = new()
+                            {
+                                ["FirstName"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = $"Child_{i}" },
+                                ["Mother"] = new SubjectPropertyUpdate
+                                {
+                                    Kind = SubjectPropertyUpdateKind.Object,
+                                    Id = grandchildId
+                                }
+                            },
+                            [grandchildId] = new()
+                            {
+                                ["FirstName"] = new SubjectPropertyUpdate { Kind = SubjectPropertyUpdateKind.Value, Value = $"GC_{i}" }
+                            }
+                        }
+                    };
+
+                    root.ApplySubjectUpdate(freshUpdate, DefaultSubjectFactory.Instance);
+                }
+            });
+            updateThread.IsBackground = true;
+
+            // Thread B: concurrently writes to structural properties of current subjects
+            // (simulates MutationEngine modifying the graph during reconnection)
+            var writeThread = new Thread(() =>
+            {
+                barrier.SignalAndWait();
+                for (var i = 0; i < iterationsPerThread; i++)
+                {
+                    try
+                    {
+                        var father = root.Father;
+                        if (father is not null)
+                        {
+                            // Write to the child's structural property
+                            father.Mother = new Person { FirstName = $"MutGC_{i}" };
+                            father.Mother = null;
+
+                            // Also write to the child's collection
+                            father.Children = [new Person { FirstName = $"MutChild_{i}" }];
+                            father.Children = [];
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore races
+                    }
+                }
+            });
+            writeThread.IsBackground = true;
+
+            updateThread.Start();
+            writeThread.Start();
+            updateThread.Join();
+            writeThread.Join();
+
+            // Clean up
+            try
+            {
+                if (root.Father is not null)
+                {
+                    root.Father.Mother = null;
+                    root.Father.Children = [];
+                }
+                root.Father = null;
+            }
+            catch { }
+
+            var knownSubjects = registry.KnownSubjects;
+            foreach (var kvp in knownSubjects)
+            {
+                if (!ReferenceEquals(kvp.Key, root))
+                {
+                    var name = ((Person)kvp.Key).FirstName ?? "?";
+                    var refCount = kvp.Value.ReferenceCount;
+                    var parents = kvp.Value.Parents;
+                    var parentDesc = parents.Length > 0 ? "has-parents" : "no-parents";
+                    Console.WriteLine($"  Round {round}: orphan '{name}' refCount={refCount} {parentDesc}");
+                    totalOrphaned++;
+                }
+            }
+        }
+
+        Assert.True(
+            totalOrphaned == 0,
+            $"Detected {totalOrphaned} total orphaned subject(s) across {rounds} rounds. " +
+            $"This indicates a registry leak during concurrent complete graph replacement " +
+            $"(Welcome apply) and structural property writes (MutationEngine).");
     }
 }

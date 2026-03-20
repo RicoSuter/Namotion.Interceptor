@@ -143,7 +143,7 @@ internal static class SubjectUpdateApplier
         context.Subjects.TryGetValue(propertyUpdate.Id, out var itemProperties);
 
         var existingItem = property.GetValue() as IInterceptorSubject;
-        IInterceptorSubject? targetItem;
+        IInterceptorSubject targetItem;
 
         // Check if the existing item is the SAME logical subject (matching subject ID)
         // or a DIFFERENT subject that needs to be replaced.
@@ -153,40 +153,43 @@ internal static class SubjectUpdateApplier
         if (isSameSubject)
         {
             // Same logical subject — keep the existing CLR object.
-            targetItem = existingItem;
+            targetItem = existingItem!;
         }
         else
         {
             // Either no existing item, or existing item is a DIFFERENT subject (replacement).
             // Try to reuse an existing subject by subject ID (may exist elsewhere in the graph).
-            targetItem = null;
             if (context.SubjectIdRegistry.TryGetSubjectById(propertyUpdate.Id, out var existing))
             {
                 targetItem = existing;
             }
-
-            if (targetItem is null && itemProperties is not null)
+            else
             {
+                // Create the subject even if itemProperties is null — the properties may
+                // arrive in a later update batch. Without creation, the subject would never
+                // be reachable via TryGetSubjectById and all future value updates would be lost.
                 targetItem = context.SubjectFactory.CreateSubject(property);
-                targetItem.Context.AddFallbackContext(parent.Context);
-                targetItem.SetSubjectId(propertyUpdate.Id);
+                // No AddFallbackContext here — ContextInheritanceHandler adds it
+                // automatically when the subject enters the graph via SetValue below.
             }
         }
 
-        if (targetItem is not null)
+        if (existingItem != targetItem)
         {
-            if (itemProperties is not null && context.TryMarkAsProcessed(propertyUpdate.Id))
+            using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
             {
-                ApplyPropertyUpdates(targetItem, itemProperties, context);
+                property.SetValue(targetItem);
             }
+        }
 
-            if (existingItem != targetItem)
-            {
-                using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
-                {
-                    property.SetValue(targetItem);
-                }
-            }
+        if (targetItem.TryGetSubjectId() != propertyUpdate.Id)
+        {
+            targetItem.SetSubjectId(propertyUpdate.Id);
+        }
+
+        if (itemProperties is not null && context.TryMarkAsProcessed(propertyUpdate.Id))
+        {
+            ApplyPropertyUpdates(targetItem, itemProperties, context);
         }
     }
 

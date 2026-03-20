@@ -42,7 +42,14 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
             var id = SubjectRegistryExtensions.GenerateSubjectId();
             SubjectRegistryExtensions.HasSubjectIds = true;
             subject.Data[(null, SubjectRegistryExtensions.SubjectIdKey)] = id;
-            _subjectIdToSubject[id] = subject;
+
+            // Only populate reverse index for attached subjects; the lifecycle
+            // attach handler will register IDs from Data for unattached subjects.
+            if (_knownSubjects.ContainsKey(subject))
+            {
+                _subjectIdToSubject[id] = subject;
+            }
+
             return id;
         }
     }
@@ -67,7 +74,13 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
 
             SubjectRegistryExtensions.HasSubjectIds = true;
             subject.Data[(null, SubjectRegistryExtensions.SubjectIdKey)] = id;
-            _subjectIdToSubject[id] = subject;
+
+            // Only populate reverse index for attached subjects; the lifecycle
+            // attach handler will register IDs from Data for unattached subjects.
+            if (_knownSubjects.ContainsKey(subject))
+            {
+                _subjectIdToSubject[id] = subject;
+            }
         }
     }
 

@@ -79,20 +79,22 @@ public class MutationEngine : BackgroundService
 
     private async Task RunValueMutationsAsync(CancellationToken stoppingToken)
     {
-        var delayMilliseconds = 1000 / Math.Max(1, _configuration.ValueMutationRate);
+        var mutationsPerMs = Math.Max(1, _configuration.ValueMutationRate) / 1000.0;
+        var batchSize = Math.Max(1, (int)Math.Ceiling(mutationsPerMs));
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 _coordinator.WaitIfPaused(stoppingToken);
-                PerformValueMutation();
-                Interlocked.Increment(ref _valueMutationCount);
 
-                if (delayMilliseconds > 0)
+                for (var i = 0; i < batchSize; i++)
                 {
-                    await Task.Delay(delayMilliseconds, stoppingToken);
+                    PerformValueMutation();
+                    Interlocked.Increment(ref _valueMutationCount);
                 }
+
+                await Task.Delay(1, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -103,20 +105,30 @@ public class MutationEngine : BackgroundService
 
     private async Task RunStructuralMutationsAsync(CancellationToken stoppingToken)
     {
-        var delayMilliseconds = 1000 / Math.Max(1, _configuration.StructuralMutationRate);
+        var mutationsPerMs = Math.Max(1, _configuration.StructuralMutationRate) / 1000.0;
+        var batchSize = Math.Max(1, (int)Math.Ceiling(mutationsPerMs));
+        var rebuildCounter = 0;
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 _coordinator.WaitIfPaused(stoppingToken);
-                PerformStructuralMutation();
-                Interlocked.Increment(ref _structuralMutationCount);
 
-                if (delayMilliseconds > 0)
+                for (var i = 0; i < batchSize; i++)
                 {
-                    await Task.Delay(delayMilliseconds, stoppingToken);
+                    PerformStructuralMutation();
+                    Interlocked.Increment(ref _structuralMutationCount);
                 }
+
+                rebuildCounter += batchSize;
+                if (rebuildCounter >= 10)
+                {
+                    RebuildKnownNodes();
+                    rebuildCounter = 0;
+                }
+
+                await Task.Delay(1, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -151,19 +163,28 @@ public class MutationEngine : BackgroundService
             _structuralTargets.Add(node);
         }
 
-        foreach (var child in node.Collection)
+        var collection = node.Collection;
+        if (collection is not null)
         {
-            VisitNode(child, depth + 1, visited);
+            foreach (var child in collection)
+            {
+                VisitNode(child, depth + 1, visited);
+            }
         }
 
-        foreach (var child in node.Items.Values)
+        var items = node.Items;
+        if (items is not null)
         {
-            VisitNode(child, depth + 1, visited);
+            foreach (var child in items.Values)
+            {
+                VisitNode(child, depth + 1, visited);
+            }
         }
 
-        if (node.ObjectRef != null)
+        var objectRef = node.ObjectRef;
+        if (objectRef is not null)
         {
-            VisitNode(node.ObjectRef, depth + 1, visited);
+            VisitNode(objectRef, depth + 1, visited);
         }
     }
 
@@ -233,7 +254,6 @@ public class MutationEngine : BackgroundService
             }
         }
 
-        RebuildKnownNodes();
     }
 
     private void MutateCollection(TestNode target, int totalNodeCount)

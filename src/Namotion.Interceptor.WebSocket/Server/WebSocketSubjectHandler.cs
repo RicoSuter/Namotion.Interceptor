@@ -230,8 +230,8 @@ public sealed class WebSocketSubjectHandler
         {
             // Single batch — use complete structural state because multiple concurrent writers
             // (server mutations + client updates) can cause dedup-based diffs to be incorrect.
-            var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, changes.Span, _processors);
-            await BroadcastUpdateAsync(update, cancellationToken).ConfigureAwait(false);
+            var (update, sequence) = CreateUpdateWithSequence(changes.Span);
+            await BroadcastUpdateAsync(update, sequence, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -240,8 +240,8 @@ public sealed class WebSocketSubjectHandler
             {
                 var currentBatchSize = Math.Min(batchSize, changes.Length - i);
                 var batch = changes.Slice(i, currentBatchSize);
-                var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, batch.Span, _processors);
-                await BroadcastUpdateAsync(update, cancellationToken).ConfigureAwait(false);
+                var (update, sequence) = CreateUpdateWithSequence(batch.Span);
+                await BroadcastUpdateAsync(update, sequence, cancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -250,18 +250,25 @@ public sealed class WebSocketSubjectHandler
     /// Must be called sequentially (not concurrently) to guarantee in-order
     /// sequence delivery to clients. This is ensured by ChangeQueueProcessor
     /// which calls BroadcastChangesAsync from a single flush thread.
-    /// The sequence increment is guarded by _applyUpdateLock to prevent a Welcome
-    /// snapshot from reading a mid-batch sequence number during multi-batch broadcasts.
+    /// Both update creation and sequence assignment are guarded by _applyUpdateLock
+    /// to ensure the subscribe-get-apply pattern works correctly for Welcome snapshots:
+    /// when a Welcome reads _sequence, all partial updates with earlier sequences have
+    /// already been fully created from their change data, preventing stale change data
+    /// from being assigned a post-Welcome sequence number.
     /// </remarks>
-    private async Task BroadcastUpdateAsync(SubjectUpdate update, CancellationToken cancellationToken)
+    private (SubjectUpdate Update, long Sequence) CreateUpdateWithSequence(ReadOnlySpan<SubjectPropertyChange> changes)
     {
-        if (_connections.IsEmpty) return;
-
-        long sequence;
         lock (_applyUpdateLock)
         {
-            sequence = Interlocked.Increment(ref _sequence);
+            var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, changes, _processors);
+            var sequence = Interlocked.Increment(ref _sequence);
+            return (update, sequence);
         }
+    }
+
+    private async Task BroadcastUpdateAsync(SubjectUpdate update, long sequence, CancellationToken cancellationToken)
+    {
+        if (_connections.IsEmpty) return;
 
         var updatePayload = new UpdatePayload
         {

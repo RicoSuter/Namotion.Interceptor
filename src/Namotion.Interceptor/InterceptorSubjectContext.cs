@@ -71,9 +71,14 @@ public class InterceptorSubjectContext : IInterceptorSubjectContext
         {
             lock (_lock)
             {
-                _serviceCache = new ConcurrentDictionary<Type, object>();
-                _readInterceptorFunction = new ConcurrentDictionary<Type, Delegate>();
-                _writeInterceptorFunction = new ConcurrentDictionary<Type, Delegate>();
+                if (_serviceCache is null)
+                {
+                    _readInterceptorFunction = new ConcurrentDictionary<Type, Delegate>();
+                    _writeInterceptorFunction = new ConcurrentDictionary<Type, Delegate>();
+
+                    //Must be assigned LAST, it's the guard field read outside the lock.
+                    Volatile.Write(ref _serviceCache, new ConcurrentDictionary<Type, object>());
+                }
             }
         }
     }
