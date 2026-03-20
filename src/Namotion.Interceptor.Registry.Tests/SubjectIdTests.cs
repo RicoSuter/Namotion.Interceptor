@@ -160,24 +160,18 @@ public class SubjectIdTests
     }
 
     [Fact]
-    public void SetSubjectId_ReplacingExistingId_UnregistersOldId()
+    public void SetSubjectId_ReplacingExistingId_Throws()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
         var person = new Models.Person(context) { FirstName = "Test" };
         var subject = (IInterceptorSubject)person;
-        var idRegistry = context.GetService<ISubjectIdRegistry>();
 
         subject.SetSubjectId("oldId");
-        Assert.True(idRegistry.TryGetSubjectById("oldId", out _));
 
-        // Act
-        subject.SetSubjectId("newId");
-
-        // Assert
-        Assert.False(idRegistry.TryGetSubjectById("oldId", out _));
-        Assert.True(idRegistry.TryGetSubjectById("newId", out var found));
-        Assert.Same(person, found);
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() =>
+            subject.SetSubjectId("newId"));
     }
 
     [Fact]
@@ -223,10 +217,27 @@ public class SubjectIdTests
         var idRegistry = context.GetService<ISubjectIdRegistry>();
 
         // Act - attaching the child to a parent with registry triggers auto-registration
-        var parent = new Models.Person(context) { FirstName = "Parent", Mother = child };
+        _ = new Models.Person(context) { FirstName = "Parent", Mother = child };
 
         // Assert
         Assert.True(idRegistry.TryGetSubjectById("preAssignedId", out var found));
+        Assert.Same(child, found);
+    }
+
+    [Fact]
+    public void GetOrAddSubjectId_BeforeAttach_AutoRegistersOnAttach()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var child = new Models.Person { FirstName = "Child" };
+        var id = child.GetOrAddSubjectId();
+        var idRegistry = context.GetService<ISubjectIdRegistry>();
+
+        // Act - attaching the child to a parent with registry triggers auto-registration
+        _ = new Models.Person(context) { FirstName = "Parent", Mother = child };
+
+        // Assert
+        Assert.True(idRegistry.TryGetSubjectById(id, out var found));
         Assert.Same(child, found);
     }
 
@@ -264,6 +275,37 @@ public class SubjectIdTests
         Assert.Throws<ArgumentNullException>(() => subject.SetSubjectId(null!));
         Assert.Throws<ArgumentException>(() => subject.SetSubjectId(""));
         Assert.Throws<ArgumentException>(() => subject.SetSubjectId("   "));
+    }
+
+    [Fact]
+    public void SetSubjectId_WithoutRegistry_ReplacingExistingId_Throws()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var person = new Models.Person(context) { FirstName = "Test" };
+        var subject = (IInterceptorSubject)person;
+
+        subject.SetSubjectId("oldId");
+
+        // Act & Assert
+        Assert.Throws<InvalidOperationException>(() =>
+            subject.SetSubjectId("newId"));
+    }
+
+    [Fact]
+    public void SetSubjectId_WithoutRegistry_WithSameId_DoesNotFail()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking();
+        var person = new Models.Person(context) { FirstName = "Test" };
+        var subject = (IInterceptorSubject)person;
+
+        // Act
+        subject.SetSubjectId("sameId");
+        subject.SetSubjectId("sameId");
+
+        // Assert
+        Assert.Equal("sameId", subject.TryGetSubjectId());
     }
 
     [Fact]
