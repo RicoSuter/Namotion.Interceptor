@@ -199,13 +199,19 @@ if (idRegistry.TryGetSubjectById("my-car-001", out var subject))
 }
 ```
 
+### ID assignment rules
+
+- **Immutable after first assignment**: Once a subject has an ID, calling `SetSubjectId` with a *different* ID throws `InvalidOperationException`. This prevents accidental ID conflicts in concurrent scenarios.
+- **Same-ID is a no-op**: Calling `SetSubjectId` with the same ID that is already assigned is safe and does nothing.
+- **Unique across subjects**: Calling `SetSubjectId` with an ID that is already in use by a different subject throws `InvalidOperationException`.
+
 ### Lifecycle integration
 
 Subject IDs are automatically managed during the subject lifecycle:
 
 - **On attach**: If a subject already has an ID (e.g., set before attachment), it is auto-registered in the reverse index. If the ID conflicts with an existing subject, registration is silently skipped to avoid aborting the lifecycle — the caller can resolve the conflict later via `SetSubjectId`
 - **On detach**: The reverse index entry is automatically cleaned up
-- **Duplicate prevention**: Calling `SetSubjectId` with an ID that is already in use by a different subject throws an `InvalidOperationException`
+- **Deferred reverse-index registration**: `SetSubjectId` and `GetOrAddSubjectId` only store the ID in the subject's `Data` dictionary until the subject is attached to the graph via the lifecycle. The reverse index (`TryGetSubjectById`) is populated by the lifecycle attach handler, preventing orphaned index entries for subjects that are never attached.
 
 ### Without a registry
 

@@ -32,9 +32,10 @@ internal interface ISubjectIdRegistryWriter
 
     /// <summary>
     /// Assigns a known subject ID, atomically updating both the subject's Data store
-    /// and the reverse index (unregistering any previous ID).
+    /// and the reverse index. Setting the same ID again is a no-op.
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <param name="id">The subject ID to assign.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the subject already has a different ID, or when the ID is already in use by a different subject.</exception>
     void SetSubjectId(IInterceptorSubject subject, string id);
 }
