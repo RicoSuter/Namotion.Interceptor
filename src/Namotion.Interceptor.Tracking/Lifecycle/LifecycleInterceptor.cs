@@ -388,7 +388,15 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     }
                 }
 
-                _lastProcessedValues[context.Property] = newValue;
+                // Only update _lastProcessedValues if the parent is still in the graph.
+                // When parentStillAttached is false, the parent was concurrently detached
+                // and its _lastProcessedValues entries were already cleaned up. Writing here
+                // would create a dangling entry that holds a reference to the new collection/
+                // dictionary (and its children) forever, since no future detach will clean it up.
+                if (parentStillAttached)
+                {
+                    _lastProcessedValues[context.Property] = newValue;
+                }
 
                 // Refresh child index metadata for retained subjects whose
                 // positions may have shifted in the new collection.
