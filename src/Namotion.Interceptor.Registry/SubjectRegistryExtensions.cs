@@ -223,14 +223,16 @@ public static class SubjectRegistryExtensions
     /// Assigns a known subject ID (e.g., from an incoming update).
     /// When a registry is configured, both the subject's Data store and the
     /// reverse index are updated atomically under the registry's lock.
+    /// Setting the same ID again is a no-op.
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <param name="id">The subject ID to assign.</param>
+    /// <exception cref="InvalidOperationException">Thrown when the subject already has a different ID assigned.</exception>
     public static void SetSubjectId(this IInterceptorSubject subject, string id)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(id);
 
-        // Delegate to registry writer for atomic Data + reverse-index update
+        // Delegate to the registry writer for atomic Data + reverse-index update
         var writer = subject.Context.TryGetService<ISubjectIdRegistryWriter>();
         if (writer is not null)
         {
@@ -238,8 +240,13 @@ public static class SubjectRegistryExtensions
             return;
         }
 
-        // No registry - just store in Data
         HasSubjectIds = true;
-        subject.Data[(null, SubjectIdKey)] = id;
+
+        var existing = subject.Data.GetOrAdd((null, SubjectIdKey), id);
+        if (existing is string existingId && existingId != id)
+        {
+            throw new InvalidOperationException(
+                $"Subject already has ID '{existingId}'; cannot reassign to '{id}'.");
+        }
     }
 }
