@@ -1,42 +1,28 @@
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Tests.Models;
 using Namotion.Interceptor.Tracking;
+using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.Registry.Tests;
 
 /// <summary>
-/// Tests that reproduce a registry memory leak caused by concurrent structural
+/// Tests that verify no registry memory leaks occur during concurrent structural
 /// property writes in LifecycleInterceptor.WriteProperty.
 ///
-/// The race condition in WriteProperty:
+/// The concurrency model:
 /// 1. next(ref context) writes the value to the backing store (no lock held)
 /// 2. Lock on _attachedSubjects is acquired
-/// 3. Backing store is re-read (may have been overwritten by another thread between steps 1 and 2)
-/// 4. Diffs lastProcessed vs current backing store
-/// 5. Attaches/detaches subjects based on diff
+/// 3. _lastProcessedValues is read as the baseline, backing store is re-read as new value
+/// 4. Diffs baseline vs new value to determine attach/detach operations
+/// 5. Attaches/detaches subjects, updates _lastProcessedValues
 ///
-/// Scenario A (same property, multiple threads):
-/// Thread A writes X, Thread B writes Y to the same property concurrently.
-/// Both call next(). Thread A acquires lock, re-reads store (sees Y not X),
-/// diffs lastProcessed vs Y, updates lastProcessed=Y. Thread B acquires lock,
-/// sees lastProcessed==store==Y, skips. If the diff in Thread A attached Y's
-/// children but missed detaching X's transient children, subjects leak.
-///
-/// Scenario B (parent detach races with child property write):
-/// Thread A writes parent.Child = null (detaching the child subtree).
-/// Thread B writes child.Mother = newGrandchild (attaching to the child).
-/// Thread B's next() runs first, writing newGrandchild to child.Mother.
-/// Thread A's detach cascade then removes child from the graph, but the
-/// lifecycle never fires IsContextDetach for newGrandchild because it was
-/// attached after the detach cascade started scanning properties.
-///
-/// Scenario C (concurrent writes to different structural properties):
-/// Thread A writes parent.Mother = X, Thread B writes parent.Father = Y.
-/// Both call next() without lock. The interleaving can cause the attach
-/// of X to see a stale lastProcessed for Mother, or miss that Father
-/// was concurrently set, leading to reference count mismatches.
+/// The key race window is between step 1 (next) and step 2 (lock acquisition):
+/// another thread's WriteProperty or DetachFromProperty can complete in this window,
+/// modifying _attachedSubjects and _lastProcessedValues. The parentStillAttached guard
+/// and _lastProcessedValues seeding ensure no orphaned subjects remain after all
+/// concurrent writes settle.
 /// </summary>
-public class ConcurrentStructuralWriteLeakTests
+public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
 {
     /// <summary>
     /// Multiple threads rapidly replace the same ObjectRef property.
@@ -251,7 +237,7 @@ public class ConcurrentStructuralWriteLeakTests
                     var parentDesc = parents.Length > 0
                         ? string.Join(", ", parents.Select(p => $"{p.Property.Name}"))
                         : "no-parents";
-                    Console.WriteLine($"  Round {round}: orphan '{name}' refCount={refCount} parents=[{parentDesc}]");
+                    output.WriteLine($"  Round {round}: orphan '{name}' refCount={refCount} parents=[{parentDesc}]");
                     totalOrphaned++;
                 }
             }
@@ -418,7 +404,7 @@ public class ConcurrentStructuralWriteLeakTests
                 {
                     var name = ((Person)kvp.Key).FirstName;
                     var refCount = kvp.Value.ReferenceCount;
-                    Console.WriteLine($"  Round {round}: orphan '{name}' refCount={refCount}");
+                    output.WriteLine($"  Round {round}: orphan '{name}' refCount={refCount}");
                     totalOrphaned++;
                 }
             }
@@ -433,13 +419,14 @@ public class ConcurrentStructuralWriteLeakTests
     }
 
     /// <summary>
-    /// A subject is placed in both parent.Mother AND parent.Children[0] (two PropertyReferences).
-    /// Concurrent removal from both properties simultaneously. Verify refCount reaches 0
-    /// and subject is properly removed from _knownSubjects (no double-decrement issues).
+    /// Two threads concurrently write to parent.Mother and parent.Children with
+    /// overlapping attach/detach patterns. Verifies that reference counting remains
+    /// consistent when structural properties of different types (ObjectRef vs Collection)
+    /// are written concurrently on the same parent.
     /// </summary>
     [Fact]
     [Trait("Category", "Concurrency")]
-    public void SubjectReferencedFromMultipleParents_ConcurrentRemovalFromBothProperties()
+    public void ConcurrentObjectRefAndCollectionWrites_NoRefCountCorruption()
     {
         const int rounds = 10;
         const int iterationsPerThread = 2000;
@@ -512,7 +499,7 @@ public class ConcurrentStructuralWriteLeakTests
                 {
                     var name = ((Person)kvp.Key).FirstName;
                     var refCount = kvp.Value.ReferenceCount;
-                    Console.WriteLine($"  Round {round}: orphan '{name}' refCount={refCount}");
+                    output.WriteLine($"  Round {round}: orphan '{name}' refCount={refCount}");
                     totalOrphaned++;
                 }
             }
@@ -594,7 +581,7 @@ public class ConcurrentStructuralWriteLeakTests
                 {
                     var name = ((Person)kvp.Key).FirstName;
                     var refCount = kvp.Value.ReferenceCount;
-                    Console.WriteLine($"  Round {round}: orphan '{name}' refCount={refCount}");
+                    output.WriteLine($"  Round {round}: orphan '{name}' refCount={refCount}");
                     totalOrphaned++;
                 }
             }
@@ -682,7 +669,7 @@ public class ConcurrentStructuralWriteLeakTests
                 {
                     var name = ((Person)kvp.Key).FirstName;
                     var refCount = kvp.Value.ReferenceCount;
-                    Console.WriteLine($"  Round {round}: orphan '{name}' refCount={refCount}");
+                    output.WriteLine($"  Round {round}: orphan '{name}' refCount={refCount}");
                     totalOrphaned++;
                 }
             }
@@ -790,7 +777,7 @@ public class ConcurrentStructuralWriteLeakTests
                     var refCount = kvp.Value.ReferenceCount;
                     var parents = kvp.Value.Parents;
                     var parentDesc = parents.Length > 0 ? "has-parents" : "no-parents";
-                    Console.WriteLine($"  Round {round}: orphan '{name}' refCount={refCount} {parentDesc}");
+                    output.WriteLine($"  Round {round}: orphan '{name}' refCount={refCount} {parentDesc}");
                     totalOrphaned++;
                 }
             }
