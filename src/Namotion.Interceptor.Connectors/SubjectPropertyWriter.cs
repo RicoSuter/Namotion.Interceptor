@@ -16,7 +16,6 @@ public sealed class SubjectPropertyWriter
 {
     private readonly ISubjectSource _source;
     private readonly ILogger _logger;
-    private readonly Func<CancellationToken, ValueTask<bool>>? _flushRetryQueueAsync;
     private readonly Lock _lock = new();
 
     private List<Action>? _updates = [];
@@ -25,13 +24,11 @@ public sealed class SubjectPropertyWriter
     /// Initializes a new instance of the <see cref="SubjectPropertyWriter"/> class.
     /// </summary>
     /// <param name="source">The source associated with this writer.</param>
-    /// <param name="flushRetryQueueAsync">Optional callback to flush pending outbound writes from the retry queue.</param>
     /// <param name="logger">The logger.</param>
-    public SubjectPropertyWriter(ISubjectSource source, Func<CancellationToken, ValueTask<bool>>? flushRetryQueueAsync, ILogger logger)
+    public SubjectPropertyWriter(ISubjectSource source, ILogger logger)
     {
         _source = source;
         _logger = logger;
-        _flushRetryQueueAsync = flushRetryQueueAsync;
     }
 
     /// <summary>
@@ -48,25 +45,17 @@ public sealed class SubjectPropertyWriter
     }
 
     /// <summary>
-    /// Completes initialization by flushing pending writes, loading initial state from the source,
+    /// Completes initialization by loading initial state from the source
     /// and replaying all buffered updates. This ensures zero data loss during the initialization period.
     /// </summary>
     /// <remarks>
-    /// The flush happens first so that the server has the latest local changes before we load state,
-    /// avoiding visible state toggles where the UI briefly shows old server values.
-    /// If the flush or load fails, the exception propagates to signal initialization failure
+    /// If the load fails, the exception propagates to signal initialization failure
     /// and trigger reconnection.
     /// </remarks>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The task.</returns>
     public async Task LoadInitialStateAndResumeAsync(CancellationToken cancellationToken)
     {
-        // Flush pending writes first (so server has latest before we load state)
-        if (_flushRetryQueueAsync is not null)
-        {
-            await _flushRetryQueueAsync(cancellationToken).ConfigureAwait(false);
-        }
-
         var applyAction = await _source.LoadInitialStateAsync(cancellationToken).ConfigureAwait(false);
         lock (_lock)
         {

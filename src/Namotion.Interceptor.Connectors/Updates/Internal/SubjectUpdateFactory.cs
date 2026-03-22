@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Performance;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
@@ -121,7 +122,34 @@ internal static class SubjectUpdateFactory
         var registeredProperty = change.Property.TryGetRegisteredProperty();
 
         if (registeredProperty is null)
+        {
+            // Subject is momentarily unregistered (concurrent structural mutation detached it).
+            // For value properties, we can still include the change using the subject's own
+            // property metadata. Dropping it would cause permanent value loss on clients
+            // because no new change notification is generated when the subject is re-attached.
+            // Structural properties (collections, dictionaries, object references) require full
+            // registry metadata to serialize correctly, so those are still skipped.
+            var droppedId = changedSubject.TryGetSubjectId();
+            if (droppedId is not null &&
+                changedSubject.Properties.TryGetValue(change.Property.Name, out var fallbackMetadata) &&
+                !fallbackMetadata.Type.CanContainSubjects())
+            {
+                var fallbackId = builder.GetOrCreateId(changedSubject);
+                var fallbackProps = builder.GetOrCreateProperties(fallbackId);
+
+                if (!fallbackProps.TryGetValue(change.Property.Name, out var fallbackUpdate))
+                {
+                    fallbackUpdate = new SubjectPropertyUpdate();
+                    fallbackProps[change.Property.Name] = fallbackUpdate;
+                }
+
+                fallbackUpdate.Kind = SubjectPropertyUpdateKind.Value;
+                fallbackUpdate.Value = change.GetNewValue<object?>();
+                fallbackUpdate.Timestamp = change.ChangedTimestamp;
+            }
+
             return;
+        }
 
         if (!IsPropertyIncluded(registeredProperty, builder.Processors))
             return;

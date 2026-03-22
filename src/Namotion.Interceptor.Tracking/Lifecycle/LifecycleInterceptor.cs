@@ -36,7 +36,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             lock (_attachedSubjects)
             {
-                FindSubjectsInProperties(subject, collectedSubjects, null);
+                FindSubjectsInProperties(subject, collectedSubjects, null, seedLastProcessedValues: true);
 
                 foreach (var child in collectedSubjects)
                 {
@@ -62,7 +62,26 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             lock (_attachedSubjects)
             {
-                FindSubjectsInProperties(subject, collectedSubjects, null);
+                // Prefer _lastProcessedValues (what's actually attached) over the
+                // backing store, which may have been modified by a concurrent next().
+                // Fall back to the backing store when no _lastProcessedValues entry
+                // exists (e.g., entries were already cleaned up by a prior cascade).
+                foreach (var entry in subject.Properties)
+                {
+                    var metadata = entry.Value;
+                    if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
+                    {
+                        var property = new PropertyReference(subject, entry.Key);
+                        var value = _lastProcessedValues.TryGetValue(property, out var lastProcessed)
+                            ? lastProcessed
+                            : metadata.GetValue?.Invoke(subject);
+
+                        if (value is not null)
+                        {
+                            FindSubjectsInProperty(property, value, null, collectedSubjects, null);
+                        }
+                    }
+                }
 
                 foreach (var child in collectedSubjects)
                 {
@@ -267,33 +286,36 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             ReturnList(children);
         }
 
-        // Scan for subjects that a concurrent WriteProperty attached to the just-detached
-        // subject's properties before this detach acquired the lock. These are children
-        // whose PropertyReference.Subject points to the now-dead subject.
-        // Collect first to avoid modifying _attachedSubjects during iteration.
+        // A concurrent WriteProperty may have added _lastProcessedValues entries for
+        // the just-detached subject AFTER we removed them (line 254). These dangling
+        // entries hold references to collections/dictionaries, preventing GC.
+        // Re-check and clean up any late entries.
         if (isLastDetach)
         {
-            (IInterceptorSubject subject, PropertyReference property)[]? lateAttachments = null;
-            var lateCount = 0;
-
-            foreach (var (attachedSubject, propertyRefs) in _attachedSubjects)
+            List<(IInterceptorSubject subject, PropertyReference property, object? index)>? lateChildren = null;
+            foreach (var entry in subject.Properties)
             {
-                foreach (var propertyReference in propertyRefs)
+                var subjectProperty = new PropertyReference(subject, entry.Key);
+                if (_lastProcessedValues.TryGetValue(subjectProperty, out var lateValue))
                 {
-                    if (ReferenceEquals(propertyReference.Subject, subject))
+                    _lastProcessedValues.Remove(subjectProperty);
+
+                    if (lateValue is not null && entry.Value.Type.CanContainSubjects())
                     {
-                        lateAttachments ??= new (IInterceptorSubject, PropertyReference)[4];
-                        if (lateCount == lateAttachments.Length)
-                            Array.Resize(ref lateAttachments, lateCount * 2);
-                        lateAttachments[lateCount++] = (attachedSubject, propertyReference);
-                        break;
+                        lateChildren ??= GetList();
+                        FindSubjectsInProperty(subjectProperty, lateValue, null, lateChildren, null);
                     }
                 }
             }
 
-            for (var i = 0; i < lateCount; i++)
+            if (lateChildren is not null)
             {
-                DetachFromProperty(lateAttachments![i].subject, context, lateAttachments[i].property, null);
+                foreach (var child in lateChildren)
+                {
+                    DetachFromProperty(child.subject, context, child.property, child.index);
+                }
+
+                ReturnList(lateChildren);
             }
         }
     }
@@ -373,29 +395,33 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                     }
                 }
 
-                // Only attach new children if the parent subject is still in the graph.
-                // A concurrent DetachFromProperty on the parent may have removed it from
-                // _attachedSubjects; attaching children to a dead parent would leak them.
-                // Detaches always run regardless — previously-attached children must be cleaned up.
-                var parentStillAttached = _attachedSubjects.ContainsKey(context.Property.Subject);
-
                 for (var i = 0; i < newCollectedSubjects.Count; i++)
                 {
                     var (subject, property, index) = newCollectedSubjects[i];
-                    if (!oldTouchedSubjects.Contains(subject) && parentStillAttached)
+                    if (!oldTouchedSubjects.Contains(subject))
                     {
                         AttachToProperty(subject, context.Property.Subject.Context, property, index);
                     }
                 }
 
-                // Only update _lastProcessedValues if the parent is still in the graph.
-                // When parentStillAttached is false, the parent was concurrently detached
-                // and its _lastProcessedValues entries were already cleaned up. Writing here
-                // would create a dangling entry that holds a reference to the new collection/
-                // dictionary (and its children) forever, since no future detach will clean it up.
-                if (parentStillAttached)
+                _lastProcessedValues[context.Property] = newValue;
+
+                // If the parent was concurrently detached (by another thread's DetachFromProperty
+                // that ran between our next() and this lock acquisition), the children we just
+                // attached are orphaned — the parent is no longer reachable from the root.
+                // Clean up immediately: remove the dangling _lastProcessedValues entry and
+                // detach the children we just attached to maintain registry consistency.
+                if (!_attachedSubjects.ContainsKey(context.Property.Subject))
                 {
-                    _lastProcessedValues[context.Property] = newValue;
+                    _lastProcessedValues.Remove(context.Property);
+                    for (var i = 0; i < newCollectedSubjects.Count; i++)
+                    {
+                        var (subject, property, index) = newCollectedSubjects[i];
+                        if (!oldTouchedSubjects.Contains(subject))
+                        {
+                            DetachFromProperty(subject, context.Property.Subject.Context, property, index);
+                        }
+                    }
                 }
 
                 // Refresh child index metadata for retained subjects whose
@@ -421,7 +447,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
     private void FindSubjectsInProperties(IInterceptorSubject subject,
         List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
-        HashSet<IInterceptorSubject>? touchedSubjects)
+        HashSet<IInterceptorSubject>? touchedSubjects,
+        bool seedLastProcessedValues = false)
     {
         foreach (var property in subject.Properties)
         {
@@ -432,10 +459,17 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 continue;
             }
 
+            var propertyReference = new PropertyReference(subject, property.Key);
             var propertyValue = metadata.GetValue?.Invoke(subject);
+
+            if (seedLastProcessedValues)
+            {
+                _lastProcessedValues[propertyReference] = propertyValue;
+            }
+
             if (propertyValue is not null)
             {
-                FindSubjectsInProperty(new PropertyReference(subject, property.Key), propertyValue, null, collectedSubjects, touchedSubjects);
+                FindSubjectsInProperty(propertyReference, propertyValue, null, collectedSubjects, touchedSubjects);
             }
         }
     }

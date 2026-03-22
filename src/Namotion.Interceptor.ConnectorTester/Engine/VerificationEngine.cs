@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Runtime;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Logging;
@@ -171,8 +172,7 @@ public class VerificationEngine : BackgroundService
                         Snapshot: CreateSnapshot(participant.Value)))
                     .ToList();
 
-                var firstSnapshot = snapshots[0].Snapshot;
-                if (snapshots.All(snapshot => snapshot.Snapshot == firstSnapshot))
+                if (snapshots.All(snapshot => SnapshotsMatch(snapshots[0].Snapshot, snapshot.Snapshot)))
                 {
                     convergeStopwatch.Stop();
                     cycleStopwatch.Stop();
@@ -210,7 +210,7 @@ public class VerificationEngine : BackgroundService
                 var referenceSnapshot = snapshots[0];
                 foreach (var snapshot in snapshots.Skip(1))
                 {
-                    if (snapshot.Snapshot != referenceSnapshot.Snapshot)
+                    if (!SnapshotsMatch(referenceSnapshot.Snapshot, snapshot.Snapshot))
                     {
                         _logger.LogError("Mismatch between {Reference} and {Other}",
                             referenceSnapshot.Name, snapshot.Name);
@@ -227,6 +227,10 @@ public class VerificationEngine : BackgroundService
                     _logger.LogError("Snapshot [{Name}] written to {FilePath}", snapshot.Name, filePath);
                 }
 
+                // Detailed failure diagnostics
+                LogPropertyDiffsWithTimestamps(snapshots);
+                LogReSyncCheck(snapshots);
+
                 WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, "FAIL");
                 AppendMemoryLog(activeProfileName, "FAIL");
                 _cycleLoggerProvider?.FinishCycle(_cycleNumber, false);
@@ -236,6 +240,185 @@ public class VerificationEngine : BackgroundService
                 return;
             }
         }
+    }
+
+    /// <summary>
+    /// Diffs the snapshots and logs write timestamps for each diverged property.
+    /// Helps distinguish "never written" (null timestamp) from "overwritten with default".
+    /// </summary>
+    private void LogPropertyDiffsWithTimestamps(List<(string Name, string Snapshot)> snapshots)
+    {
+        try
+        {
+            var reference = JsonNode.Parse(snapshots[0].Snapshot)!["subjects"]!.AsObject();
+            var referenceParticipant = _participants[snapshots[0].Name];
+
+            for (var i = 1; i < snapshots.Count; i++)
+            {
+                var other = JsonNode.Parse(snapshots[i].Snapshot)!["subjects"]!.AsObject();
+                var otherParticipant = _participants[snapshots[i].Name];
+
+                foreach (var (subjectId, refSubjectNode) in reference)
+                {
+                    if (refSubjectNode is not JsonObject refProperties)
+                        continue;
+
+                    if (!other.ContainsKey(subjectId))
+                    {
+                        _logger.LogError("  Subject {SubjectId}: missing from {Participant}", subjectId, snapshots[i].Name);
+                        continue;
+                    }
+
+                    var otherProperties = other[subjectId]!.AsObject();
+                    foreach (var (propertyName, refValue) in refProperties)
+                    {
+                        var otherValue = otherProperties[propertyName];
+                        if (refValue?.ToJsonString() != otherValue?.ToJsonString())
+                        {
+                            // Look up write timestamps from actual subjects
+                            var refTimestamp = TryGetWriteTimestamp(referenceParticipant, subjectId, propertyName);
+                            var otherTimestamp = TryGetWriteTimestamp(otherParticipant, subjectId, propertyName);
+
+                            _logger.LogError(
+                                "  {SubjectId}.{Property}: {Reference}={RefValue} (written {RefTimestamp}), {Other}={OtherValue} (written {OtherTimestamp})",
+                                subjectId, propertyName,
+                                snapshots[0].Name, refValue?.ToJsonString() ?? "null", refTimestamp ?? "never",
+                                snapshots[i].Name, otherValue?.ToJsonString() ?? "null", otherTimestamp ?? "never");
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to log property diffs with timestamps");
+        }
+    }
+
+    private static string? TryGetWriteTimestamp(TestNode root, string subjectId, string propertyName)
+    {
+        var registry = ((IInterceptorSubject)root).Context.TryGetService<ISubjectRegistry>();
+        if (registry is null)
+            return null;
+
+        var idRegistry = ((IInterceptorSubject)root).Context.TryGetService<ISubjectIdRegistry>();
+        if (idRegistry is null)
+            return null;
+
+        if (!idRegistry.TryGetSubjectById(subjectId, out var subject))
+            return null;
+
+        var timestamp = new PropertyReference(subject, propertyName).TryGetWriteTimestamp();
+        return timestamp?.ToString("HH:mm:ss.fff");
+    }
+
+    /// <summary>
+    /// Re-sync check: creates a complete update from the reference (server), applies it to
+    /// each diverged participant, then compares again. If they match, the failure was a
+    /// transient delivery gap. If they still differ, it's a structural/applier bug.
+    /// </summary>
+    private void LogReSyncCheck(List<(string Name, string Snapshot)> snapshots)
+    {
+        try
+        {
+            var referenceNode = _participants[snapshots[0].Name];
+            var completeUpdate = SubjectUpdate.CreateCompleteUpdate(referenceNode, []);
+
+            for (var i = 1; i < snapshots.Count; i++)
+            {
+                if (SnapshotsMatch(snapshots[i].Snapshot, snapshots[0].Snapshot))
+                    continue;
+
+                var otherNode = _participants[snapshots[i].Name];
+                otherNode.ApplySubjectUpdate(completeUpdate, DefaultSubjectFactory.Instance);
+
+                var reSnapshotReference = CreateSnapshot(referenceNode);
+                var reSnapshotOther = CreateSnapshot(otherNode);
+
+                if (SnapshotsMatch(reSnapshotReference, reSnapshotOther))
+                {
+                    _logger.LogWarning(
+                        "Re-sync check: {Participant} converged after applying server's complete update → transient delivery gap",
+                        snapshots[i].Name);
+                }
+                else
+                {
+                    _logger.LogError(
+                        "Re-sync check: {Participant} still diverged after applying server's complete update → structural/applier bug",
+                        snapshots[i].Name);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to perform re-sync check");
+        }
+    }
+
+    /// <summary>
+    /// Compares two normalized snapshots. Value property timestamps are compared only when
+    /// both sides have a non-null timestamp. A null timestamp (property never explicitly written)
+    /// matches any timestamp — this is legitimate after server rebuild or when EqualityCheck
+    /// skips a redundant write because the value didn't change.
+    /// </summary>
+    private static bool SnapshotsMatch(string snapshotA, string snapshotB)
+    {
+        if (snapshotA == snapshotB)
+            return true;
+
+        // Fast path failed — check if the only differences are null vs non-null timestamps
+        var a = JsonNode.Parse(snapshotA)!["subjects"]?.AsObject();
+        var b = JsonNode.Parse(snapshotB)!["subjects"]?.AsObject();
+
+        if (a is null || b is null)
+            return a is null && b is null;
+
+        if (a.Count != b.Count)
+            return false;
+
+        foreach (var (subjectId, subjectNodeA) in a)
+        {
+            if (b[subjectId] is not JsonObject propsB)
+                return false;
+
+            var propsA = subjectNodeA!.AsObject();
+            if (propsA.Count != propsB.Count)
+                return false;
+
+            foreach (var (propertyName, propNodeA) in propsA)
+            {
+                if (propsB[propertyName] is not JsonObject propB)
+                    return false;
+
+                var propA = propNodeA!.AsObject();
+
+                // Compare all fields except timestamp first
+                var timestampA = propA["timestamp"];
+                var timestampB = propB["timestamp"];
+
+                // Temporarily remove timestamps for value comparison
+                propA.Remove("timestamp");
+                propB.Remove("timestamp");
+
+                var valuesMatch = propA.ToJsonString() == propB.ToJsonString();
+
+                // Restore timestamps
+                if (timestampA is not null) propA["timestamp"] = timestampA.DeepClone();
+                if (timestampB is not null) propB["timestamp"] = timestampB.DeepClone();
+
+                if (!valuesMatch)
+                    return false;
+
+                // Values match — compare timestamps only when both are non-null
+                if (timestampA is not null && timestampB is not null &&
+                    timestampA.ToJsonString() != timestampB.ToJsonString())
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     private static string CreateSnapshot(TestNode root)
@@ -269,7 +452,9 @@ public class VerificationEngine : BackgroundService
 
                     // Strip timestamps from structural properties (Collection, Dictionary, Object).
                     // These are set during local graph creation and are inherently different per participant.
-                    // Value property timestamps ARE compared and must converge via source timestamps.
+                    // Value timestamps are kept for cross-participant comparison via SnapshotsMatch,
+                    // which treats null timestamps as matching any value (legitimate after server
+                    // rebuild or when EqualityCheck skips a redundant write).
                     if (kind != "Value")
                     {
                         property.Remove("timestamp");

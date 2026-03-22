@@ -47,7 +47,7 @@ Fixes discovered and applied during chaos testing with the ConnectorTester (WebS
 
 For ObjectRef: `SetSubjectId` is called after `SetValue` (single item, no CQP race window). For Collections/Dictionaries: `SetSubjectId` is called before `SetValue` (batched items, CQP flush could race).
 
-**Status:** Applied, needs confirmation at high structural mutation rates.
+**Status:** Applied. Confirmed at 900 structural mutations/sec (58+ cycles).
 
 ---
 
@@ -109,31 +109,30 @@ For ObjectRef: `SetSubjectId` is called after `SetValue` (single item, no CQP ra
 
 ---
 
-## Active Diagnostics (to be removed before merge)
+## Active Diagnostics
 
-All diagnostics should be removed once investigation is complete.
+All `[DIAG]` stderr diagnostics have been removed. The following permanent logging remains:
 
-| Tag | File | Output | Purpose |
-|-----|------|--------|---------|
-| `[DIAG] SUF drop` | `SubjectUpdateFactory.cs` | stderr | Logs when a change is dropped during update creation (unregistered subject) |
-| `[DIAG] Broadcast: all changes dropped` | `WebSocketSubjectHandler.cs` | cycle log | Logs when entire flush batch produces empty update |
-| `[DIAG-REG] ContextDetach` | `SubjectRegistry.cs` | stderr | Logs when `_knownSubjects.Remove` fails (subject already removed) |
-| `[DIAG] Retry queue flush failed` | `SubjectSourceBackgroundService.cs` | cycle log | Logs when CQP writes go to retry queue during normal operation |
-| `[DIAG] WriteChangesAsync: WebSocket not connected` | `WebSocketSubjectClientSource.cs` | cycle log | Logs when client writes fail due to closed socket |
-| `PendingRetryWrites` property | `SubjectSourceBackgroundService.cs` | N/A | Exposed for future diagnostics |
-| LEAK diagnostic | `VerificationEngine.cs` | cycle log | Enhanced orphaned subject detection with refCount and actual:FOUND/MISSING |
+| Log | File | Level | Purpose |
+|-----|------|-------|---------|
+| Retry queue optimistic re-apply summary | `SubjectSourceBackgroundService.cs` | Info/Warn | Logs count of re-applied and dropped changes on reconnection |
+| Retry queue per-change drop | `SubjectSourceBackgroundService.cs` | Warning | Logs each dropped property name with subject type |
+| Orphaned subject detection | `VerificationEngine.cs` (tester) | Warning | Enhanced orphaned subject detection with refCount and actual:FOUND/MISSING |
+| Property diffs with timestamps | `VerificationEngine.cs` (tester) | Error | On failure: logs diverged properties with write timestamps from both participants |
+| Re-sync check | `VerificationEngine.cs` (tester) | Warn/Error | On failure: applies server's complete update to diverged client, reports if transient or structural |
 
 ---
 
-## Stale value / structural mismatch on client
+## ~~Stale value / structural mismatch on client~~ Resolved by Fix 9 + Fix 10
 
 **Symptom:** Client has stale values or missing structural elements compared to the server. Does not converge within 60 seconds.
 
-**Previous observations:** ~1 per 35 cycles at 900/sec. Client-a-only, all-clients, and full-chaos profiles.
+**Resolution:** Two separate root causes, fixed independently:
+- **Value drops** (Pattern A): Fixed by Fix 9 (SUF fallback for momentarily-unregistered subjects)
+- **Structural divergence** (Pattern B): Fixed by Fix 10 (optimistic retry queue re-apply)
+- **Interceptor chain NRE**: Fixed by EnsureInitialized double-checked locking (#227, merged to master)
 
-**Analysis of cycle 3 failure snapshot:** Server and client-b had identical subject count (474) and identical structure. Only 3 value properties on a single subject diverged — server had real values (IntValue=1057511, DecimalValue=10540.76, StringValue="001011be"), client-b had defaults (0, 0, ""). The subject was created structurally (correct ID, correct structure) but value updates never arrived.
-
-**Status:** Likely resolved by the EnsureInitialized double-checked locking fix (merged in #227). The broken interceptor chain read path could return wrong values in addition to causing NREs. After that fix: 74+ cycles at 900/sec with zero convergence failures (previously failed ~1 per 35 cycles). Not yet confirmed at scale on this branch.
+**Status:** Resolved. 48+ cycles at 900/sec full-chaos with zero convergence failures.
 
 ---
 
@@ -170,7 +169,7 @@ Detailed race:
 
 **Fix:** In `WriteProperty`, before attaching new children, check if the parent subject is still in `_attachedSubjects`. If the parent was concurrently detached, skip attaching children — they would be unreachable.
 
-**Status:** Applied. Addresses the `refCount>0` leak case (~2% of leaks at 900/sec). Does NOT address the dominant `refCount=0` leak case (~98%). See "Under Investigation" below.
+**Status:** Applied. Addresses the `refCount>0` leak case. The dominant `refCount=0` leak case was resolved by Fix 8.
 
 ---
 
@@ -256,19 +255,85 @@ Detailed race:
 
 ---
 
-## Under Investigation: HeapMB growth (~5 MB/cycle at 900/sec)
+## ~~Under Investigation:~~ Resolved: HeapMB growth (~5 MB/cycle at 900/sec)
 
-**Symptom:** HeapMB grows linearly at ~5 MB/cycle despite full GC (forced, blocking, compacting) between cycles. Registry counts match perfectly (no subject leak). Process reaches ~900 MB after ~70 cycles.
+**Symptom:** HeapMB grows linearly at ~5 MB/cycle despite full GC (forced, blocking, compacting) between cycles. Registry counts match perfectly (no subject leak).
 
-**GC dump analysis (5-minute diff):**
-- +3,081 `TestNode` instances (62,977 → 66,058) — 126x more than the ~500 in the registry
-- +3,015 `InterceptorExecutor` instances — one per leaked TestNode
-- +6,029 `HashSet<InterceptorSubjectContext>` — `_usedByContexts` + `_fallbackContexts` per executor
-- +4,110 `ConcurrentDictionary<Type,Delegate>` — `_readInterceptorFunction`/`_writeInterceptorFunction` per executor
-- +175,650 `System.Object` — boxed values, lock objects
+**Root cause:** `_lastProcessedValues` in `LifecycleInterceptor.WriteProperty` was updated unconditionally (line 391), even when `parentStillAttached = false`. When a concurrent detach removed the parent from `_attachedSubjects`, the `_lastProcessedValues` entries for that parent were already cleaned up. Writing a new entry created a dangling reference keyed by a `PropertyReference` to the dead parent. This entry was never removed — no future detach would clean it up. The value (collection/dictionary) held references to child subjects, preventing GC.
 
-**Root cause hypothesis:** Child InterceptorExecutors are added to parent context's `_usedByContexts` via `AddFallbackContext`, but `RemoveFallbackContext` is not called for all detached subjects. The parent context (root) holds references to leaked child contexts, preventing GC.
+**Fix:** Guard `_lastProcessedValues` update with the same `parentStillAttached` check used for the attach guard. When the parent is dead, skip the update — the entry would be dangling. On re-attach, `WriteProperty` falls back to `context.CurrentValue` (the normal initial-write path).
 
-**Investigation approach:** Added `AddFallbackContext`/`RemoveFallbackContext` counters to `InterceptorSubjectContext.GetFallbackStats()`. Need to confirm delta grows over time to verify the add/remove imbalance.
+**Confirmed:** 42 cycles at 900/sec with stable HeapMB (23-31 MB range, no growth trend). Previously grew ~5 MB/cycle linearly.
 
-**Status:** Open. Registry-level leak is fixed (Fixes 4-8), but `_usedByContexts` leak persists. Needs heap dump comparison with `dotnet-gcdump` after fresh start to identify exact retention path.
+---
+
+## Fix 9: Value updates dropped for momentarily-unregistered subjects
+
+**Files changed:** `SubjectUpdateFactory.cs`, `ChangeQueueProcessor.cs`
+
+**Cause:** In `SubjectUpdateFactory.ProcessPropertyChange`, when `TryGetRegisteredProperty()` returns null (subject momentarily unregistered due to concurrent structural mutation), the value change was silently dropped. The subject's structural update goes through (it's on the parent's property, parent is registered), so the client creates the subject with defaults. But the value updates are lost and no new change notifications are generated.
+
+**Fix (two parts):**
+1. `SubjectUpdateFactory`: When `registeredProperty` is null but the subject has a valid ID and the property is a value type (not structural), include the change as a simple value update using the subject's own property metadata. Structural properties still require the full registry metadata and are skipped.
+2. `ChangeQueueProcessor`: Refactored `propertyFilter` from `Func<RegisteredSubjectProperty, bool>` to `Func<PropertyReference, bool>`, pushing the null-property decision to each caller. Each consumer now explicitly decides policy for unregistered properties:
+   - `SubjectSourceBackgroundService` (client sources): lets unregistered properties through → SUF fallback handles them
+   - WebSocket/MQTT/OPC UA servers: returns false → drops them (server doesn't need SUF fallback; clients get correct state on next Welcome)
+
+**Reproducing tests:** `DetachedSubjectUpdateDropTests` — 2 deterministic tests.
+
+**Status:** Applied. Validated at 900/sec with chaos testing.
+
+---
+
+## Fix 10: Structural divergence from stale retry queue writes
+
+**Files changed:** `WriteRetryQueue.cs`, `SubjectPropertyWriter.cs`, `SubjectSourceBackgroundService.cs`
+
+**Cause:** On reconnection, `SubjectPropertyWriter.LoadInitialStateAndResumeAsync` flushed the retry queue directly to the server BEFORE applying the initial state (Welcome). These stale changes (made against the client's pre-disconnection state) could corrupt the server's graph when the server had newer state.
+
+**Fix:** Optimistic concurrency with local re-apply. Instead of flushing stale changes to the server, the retry queue is drained after initial state loads and CQP is created. Each queued change is compared locally: if `currentValue == oldValue` (source hasn't changed the property), the change is re-applied locally and flows through CQP to the server as a fresh write. If the values differ, the change is dropped (source wins).
+
+**Design:** See [Retry Queue Optimistic Concurrency Design](2026-03-21-retry-queue-optimistic-concurrency-design.md).
+
+**Key changes:**
+- `WriteRetryQueue`: Added `DrainForLocalReapply()` method
+- `SubjectPropertyWriter`: Removed `_flushRetryQueueAsync` callback, simplified to 2-arg constructor
+- `SubjectSourceBackgroundService`: Added `ReapplyRetryQueue()` between CQP creation and `ProcessAsync`, with per-change Warning logging for dropped changes
+
+**Status:** Applied. Validated 48+ cycles at 900/sec full-chaos with zero convergence failures (previously failed at cycle 5-50).
+
+---
+
+## Fix 11: Unregistered subject in graph — parentStillAttached guard too aggressive
+
+**Files changed:** `LifecycleInterceptor.cs`
+
+**Symptom:** A subject exists in the graph (reachable via dictionary) with a valid subject ID, but has **zero registered properties**. All property values are null/default. Does not converge — even applying a complete update from the server (re-sync check) cannot fix it. ~1 per 66 cycles at 900/sec full-chaos.
+
+**Observed:** Cycle 66. Subject `7aS7PvciN889iOLGCG4fld` in a Dictionary on parent `06qVolpnidSH7AhiK9liJA.Items`. Server has all 6 properties populated. Client-b has the subject with empty properties `{}`. Re-sync check: "still diverged after applying server's complete update → structural/applier bug."
+
+**Root cause:** The `parentStillAttached` guard in `LifecycleInterceptor.WriteProperty` (added for the HeapMB fix) prevented both child attachment AND `_lastProcessedValues` update when the parent was concurrently being detached. This broke the invariant **reachable → registered**: the child CLR object was in the dictionary (reachable) but never registered in the SubjectRegistry. The `ApplyPropertyUpdate` method silently skips unregistered subjects, making them permanently broken — no future update (partial or complete) could fix them.
+
+**Discarded approach — `parentStillAttached` guard:**
+
+The previous fix (HeapMB growth) added a `parentStillAttached` guard that skipped both `AttachToProperty` and `_lastProcessedValues` update when the parent was concurrently detached. This prevented the HeapMB leak but broke the reachable → registered invariant. **Do not re-introduce this guard** — it trades a memory leak for permanently broken subjects, which is worse (broken subjects can never self-heal; leaks are bounded by graph size).
+
+**Fix (three parts):**
+
+1. **Remove the `parentStillAttached` guard entirely.** Children are always attached and `_lastProcessedValues` is always updated. This restores the invariant: if a subject is reachable from the graph, it is registered.
+
+2. **Add parent-dead check after attachment.** If the parent was concurrently detached (removed from `_attachedSubjects` between `next()` and lock acquisition), immediately detach the just-attached children and remove the `_lastProcessedValues` entry. This prevents the HeapMB leak that the original guard was fixing.
+
+3. **Defense-in-depth: late-entry cleanup in DetachFromProperty.** After recursive child detach, re-check `_lastProcessedValues` for entries added by concurrent writes during the detach. Clean up any found. This catches edge cases where the parent-dead check in WriteProperty couldn't run (e.g., the detach completed before the write's lock acquisition).
+
+**Performance note:** This approach does more work than the `parentStillAttached` guard in the concurrent-detach case: it attaches children, updates `_lastProcessedValues`, then immediately detaches and cleans up. The guard would have skipped all of this. However, the concurrent-detach case is rare (only happens when a structural write races with a parent detach). In the normal case (no concurrent detach), the parent-dead check is a single `_attachedSubjects.ContainsKey` lookup — negligible. The correctness guarantee (reachable == registered) is worth the extra work in the rare concurrent case.
+
+**Concurrent path analysis:**
+- Thread A attaches, then Thread B detaches: B's recursive cleanup finds children via `_lastProcessedValues` and detaches them. ✓
+- Thread B detaches, then Thread A attaches: A's parent-dead check detects dead parent, immediately detaches children and cleans `_lastProcessedValues`. ✓
+- Normal case (no concurrent detach): Children attached, parent alive, no cleanup needed. ✓
+- All operations are under `lock (_attachedSubjects)` — no interleaving within the locked section. ✓
+
+**Reproducing test:** `ConcurrentDictWriteDuringParentDetach_AllReachableSubjectsAreRegistered` — verifies both directions: reachable → registered AND not reachable → not registered.
+
+**Status:** Applied. All 10 concurrency tests pass. Awaiting chaos tester validation.

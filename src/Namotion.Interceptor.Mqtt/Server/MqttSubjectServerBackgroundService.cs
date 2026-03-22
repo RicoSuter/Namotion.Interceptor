@@ -85,7 +85,8 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
         configuration.Validate();
     }
 
-    private bool IsPropertyIncluded(RegisteredSubjectProperty property) =>
+    private bool IsPropertyIncluded(PropertyReference propertyReference) =>
+        propertyReference.TryGetRegisteredProperty() is { } property &&
         _configuration.PathProvider.IsPropertyIncluded(property);
 
     /// <inheritdoc />
