@@ -27,7 +27,7 @@ internal static class SubjectUpdateFactory
         var builder = BuilderPool.Rent();
         try
         {
-            builder.Initialize(subject, processors);
+            builder.Initialize(subject, processors, isPartialUpdate: false);
             ProcessSubjectComplete(subject, builder);
             return builder.Build(subject);
         }
@@ -49,7 +49,7 @@ internal static class SubjectUpdateFactory
         var builder = BuilderPool.Rent();
         try
         {
-            builder.Initialize(rootSubject, processors);
+            builder.Initialize(rootSubject, processors, isPartialUpdate: true);
 
             for (var i = 0; i < propertyChanges.Length; i++)
             {
@@ -73,6 +73,8 @@ internal static class SubjectUpdateFactory
 
         if (!builder.ProcessedSubjects.Add(subject))
             return;
+
+        builder.MarkSubjectComplete(subjectId);
 
         var registeredSubject = subject.TryGetRegisteredSubject();
         if (registeredSubject is null)

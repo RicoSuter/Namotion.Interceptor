@@ -277,6 +277,7 @@ builder.Services.AddSingleton(sp => new VerificationEngine(
     chaosEngines,
     cycleLoggerProvider,
     sp.GetRequiredService<IHostApplicationLifetime>(),
+    sp,
     sp.GetRequiredService<ILogger<VerificationEngine>>()));
 
 builder.Services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<VerificationEngine>());

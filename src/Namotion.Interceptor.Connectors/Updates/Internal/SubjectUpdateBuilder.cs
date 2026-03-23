@@ -28,10 +28,27 @@ internal sealed class SubjectUpdateBuilder
     /// </summary>
     public HashSet<IInterceptorSubject> SubjectsWithPartialChanges { get; } = [];
 
-    public void Initialize(IInterceptorSubject rootSubject, ISubjectUpdateProcessor[] processors)
+    private bool _isPartialUpdate;
+    private HashSet<string>? _completeSubjectIds;
+
+    public void Initialize(IInterceptorSubject rootSubject, ISubjectUpdateProcessor[] processors, bool isPartialUpdate = false)
     {
         Processors = processors;
+        _isPartialUpdate = isPartialUpdate;
         GetOrCreateId(rootSubject);
+    }
+
+    /// <summary>
+    /// Marks a subject ID as having complete state in this update.
+    /// Only tracked for partial updates (complete updates are implicitly all-complete).
+    /// </summary>
+    public void MarkSubjectComplete(string subjectId)
+    {
+        if (_isPartialUpdate)
+        {
+            _completeSubjectIds ??= [];
+            _completeSubjectIds.Add(subjectId);
+        }
     }
 
     public string GetOrCreateId(IInterceptorSubject subject)
@@ -99,7 +116,8 @@ internal sealed class SubjectUpdateBuilder
         var update = new SubjectUpdate
         {
             Root = _subjects.ContainsKey(rootId) ? rootId : null,
-            Subjects = orderedSubjects
+            Subjects = orderedSubjects,
+            CompleteSubjectIds = _completeSubjectIds
         };
 
         for (var i = 0; i < Processors.Length; i++)
@@ -122,6 +140,8 @@ internal sealed class SubjectUpdateBuilder
         ProcessedSubjects.Clear();
         SubjectsWithPartialChanges.Clear();
         Processors = [];
+        _isPartialUpdate = false;
+        _completeSubjectIds = null;
     }
 
     private void ApplyTransformations()

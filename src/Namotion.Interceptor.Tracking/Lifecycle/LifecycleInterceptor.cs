@@ -62,26 +62,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             lock (_attachedSubjects)
             {
-                // Prefer _lastProcessedValues (what's actually attached) over the
-                // backing store, which may have been modified by a concurrent next().
-                // Fall back to the backing store when no _lastProcessedValues entry
-                // exists (e.g., entries were already cleaned up by a prior cascade).
-                foreach (var entry in subject.Properties)
-                {
-                    var metadata = entry.Value;
-                    if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
-                    {
-                        var property = new PropertyReference(subject, entry.Key);
-                        var value = _lastProcessedValues.TryGetValue(property, out var lastProcessed)
-                            ? lastProcessed
-                            : metadata.GetValue?.Invoke(subject);
-
-                        if (value is not null)
-                        {
-                            FindSubjectsInProperty(property, value, null, collectedSubjects, null);
-                        }
-                    }
-                }
+                FindSubjectsInProperties(subject, collectedSubjects, null, useLastProcessedValues: true);
 
                 foreach (var child in collectedSubjects)
                 {
@@ -164,7 +145,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             }
         }
     }
-    
+
     private static void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
     {
         var array = context.GetServices<ILifecycleHandler>();
@@ -190,7 +171,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             return;
         }
-        
+
         foreach (var entry in subject.Properties)
         {
             var property = new PropertyReference(subject, entry.Key);
@@ -286,38 +267,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             ReturnList(children);
         }
 
-        // A concurrent WriteProperty may have added _lastProcessedValues entries for
-        // the just-detached subject AFTER we removed them (line 254). These dangling
-        // entries hold references to collections/dictionaries, preventing GC.
-        // Re-check and clean up any late entries.
-        if (isLastDetach)
-        {
-            List<(IInterceptorSubject subject, PropertyReference property, object? index)>? lateChildren = null;
-            foreach (var entry in subject.Properties)
-            {
-                var subjectProperty = new PropertyReference(subject, entry.Key);
-                if (_lastProcessedValues.TryGetValue(subjectProperty, out var lateValue))
-                {
-                    _lastProcessedValues.Remove(subjectProperty);
-
-                    if (lateValue is not null && entry.Value.Type.CanContainSubjects())
-                    {
-                        lateChildren ??= GetList();
-                        FindSubjectsInProperty(subjectProperty, lateValue, null, lateChildren, null);
-                    }
-                }
-            }
-
-            if (lateChildren is not null)
-            {
-                foreach (var child in lateChildren)
-                {
-                    DetachFromProperty(child.subject, context, child.property, child.index);
-                }
-
-                ReturnList(lateChildren);
-            }
-        }
     }
 
     private static void InvokeRemovedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
@@ -448,7 +397,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     private void FindSubjectsInProperties(IInterceptorSubject subject,
         List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
         HashSet<IInterceptorSubject>? touchedSubjects,
-        bool seedLastProcessedValues = false)
+        bool seedLastProcessedValues = false,
+        bool useLastProcessedValues = false)
     {
         foreach (var property in subject.Properties)
         {
@@ -460,7 +410,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             }
 
             var propertyReference = new PropertyReference(subject, property.Key);
-            var propertyValue = metadata.GetValue?.Invoke(subject);
+            var propertyValue = useLastProcessedValues && _lastProcessedValues.TryGetValue(propertyReference, out var lastProcessed)
+                ? lastProcessed
+                : metadata.GetValue?.Invoke(subject);
 
             if (seedLastProcessedValues)
             {

@@ -337,3 +337,127 @@ The previous fix (HeapMB growth) added a `parentStillAttached` guard that skippe
 **Reproducing test:** `ConcurrentDictWriteDuringParentDetach_AllReachableSubjectsAreRegistered` — verifies both directions: reachable → registered AND not reachable → not registered.
 
 **Status:** Applied. All 10 concurrency tests pass. Awaiting chaos tester validation.
+
+---
+
+## ~~Under Investigation:~~ Resolved by Fix 12 + Fix 13: Transient delivery gap — state not propagated
+
+**Symptom:** A subject has stale or default property values on one participant while others have correct values. Sequences match perfectly (all broadcasts delivered). Re-sync check fixes it ("transient delivery gap"). ~1 per 20-60 cycles at 900/sec full-chaos.
+
+**Observed patterns:**
+- Cycle 40 (pre-fix): Server IntValue=0 "written never", both clients IntValue=12823140. Value property divergence.
+- Cycle 30 (post-Fix 12, pre-Fix 13): Server has newer values, client-b has older values across ALL properties (DecimalValue, Items, ObjectRef, StringValue). All "written never" on client-b.
+- Cycle 7/10 (earlier): Server empty structural props, clients populated. Structural property divergence.
+
+**Key finding: sequences always match.** All broadcasts were delivered. The issue is in the **apply path**, not delivery.
+
+**Root cause (two separate races in `SubjectUpdateApplier`):**
+
+Both races occur when `ApplySubjectUpdate` runs concurrently with local structural mutations (e.g., mutation engine modifying the graph while a server broadcast or client update is being applied).
+
+**Race 1 — `TryGetSubjectById` fails, applier creates hollow instance (Fix 12):**
+When a structural property references a subject by ID, the applier calls `TryGetSubjectById`. If a concurrent mutation detaches the subject (removing it from `_subjectIdToSubject`), the lookup fails. The applier then creates a NEW CLR instance with default values for the same ID — permanently destroying the original instance's state. Root cause: the protocol didn't distinguish "new subject with complete state" from "reference to existing subject." See Fix 12.
+
+**Race 2 — `TryGetRegisteredProperty` fails, property update silently skipped (Fix 13):**
+For each property in the update, the applier calls `TryGetRegisteredProperty` which checks the `SubjectRegistry`. If a concurrent mutation detaches the subject (removing it from `_knownSubjects`), the lookup returns null and the property update is silently skipped. The subject keeps its old values. Root cause: the applier depended on the mutable `SubjectRegistry` for property metadata, when the subject's own `Properties` dictionary (compile-time generated, always available) provides the same information. See Fix 13.
+
+**Diagnostics that confirmed the root cause:**
+- `[DIAG-CQP-DROP]`: 1133 events per run — CQP filter drops for unregistered subjects (self-healing via parent structural changes)
+- `[DIAG-APPLY-UNREG]`: 411 events per run — structural property updates skipped (NOT self-healing, caused permanent divergence)
+- Diverged subject `5dK7oMv0is5e8HHvembxZd` (cycle 40): zero CQP-DROP, zero APPLY-UNREG for this subject — the VALUE property drops were completely silent (DIAG only logged structural drops)
+- Diverged subject `0x7ZASWoI09L4hOprdn0CN` (cycle 30): ALL properties diverged with "written never" — entire `ApplyPropertyUpdates` loop was skipped
+
+**Discarded approaches:**
+- Long-lived CQP subscription: The Welcome always sends complete state after restart, making the subscription gap irrelevant. Failed at cycle 7 with the fix in place.
+- Registry-level deferred cleanup (`_subjectIdToSubject`): Would require deferred removal to avoid race, but leads to memory leaks when no more lifecycle events fire. The protocol-level fix (Fix 12) is cleaner.
+- Serialization (lock structural mutations during apply): Would fix the race but requires cooperation from all mutation code. The applier-level fixes are self-contained.
+
+**Resolution:** Fixed by Fix 12 (protocol-level `CompleteSubjectIds`) + Fix 13 (registry-independent `PropertyAccessor` fallback). Together these eliminate both race windows: the applier never creates hollow instances and never silently skips property updates. Awaiting chaos tester validation.
+
+---
+
+## Fix 12: Protocol ambiguity — applier creates hollow subjects for unknown IDs
+
+**Files changed:** `SubjectUpdate.cs`, `SubjectUpdateBuilder.cs`, `SubjectUpdateFactory.cs`, `SubjectUpdateApplier.cs`, `SubjectItemsUpdateApplier.cs`, `SubjectUpdateApplyContext.cs`, `connectors-subject-updates.md`
+
+**Cause:** When a structural property (Collection/Dictionary/ObjectRef) referenced a subject by ID, and `TryGetSubjectById` failed (concurrent mutation detached the subject), the applier unconditionally created a new CLR instance with default values. This destroyed the original subject's state and propagated corrupted defaults to other participants via CQP.
+
+The protocol didn't distinguish between:
+- "Here's a **new** subject with complete state — create it if you don't have it"
+- "Here's a **reference** to an existing subject — you should already have it"
+
+**Fix:** Added `CompleteSubjectIds` field to `SubjectUpdate` (protocol change). The factory populates this set with subject IDs that went through `ProcessSubjectComplete`. The applier checks this before creating new instances:
+- ID in `CompleteSubjectIds` (or set is null for complete updates) → safe to create
+- ID NOT in set → skip the item (don't fabricate defaults, self-heals on next update)
+
+**Protocol details:** `completeSubjectIds` is a nullable JSON array of subject ID strings. `null` means all subjects are complete (backward compatible with complete/initial-state updates). Non-null means only listed IDs have complete state. See [Subject Updates documentation](../connectors-subject-updates.md).
+
+**Status:** Applied. All tests pass. Awaiting chaos tester validation.
+
+---
+
+## Fix 13: Applier silently skips property updates for momentarily-unregistered subjects
+
+**Files changed:** `SubjectUpdateApplier.cs`, `SubjectItemsUpdateApplier.cs`
+
+**Cause:** `ApplyPropertyUpdate` called `TryGetRegisteredProperty` which checks the `SubjectRegistry` (`_knownSubjects`). When a concurrent structural mutation detached the subject, the lookup returned null and the property update was silently skipped. This affected ALL property types (value, structural) and could skip the entire `ApplyPropertyUpdates` loop if the subject was unregistered at loop start.
+
+The fundamental issue: the applier depended on the mutable `SubjectRegistry` for property metadata (get/set delegates, type info), when the subject's own `Properties` dictionary — compile-time generated and always available regardless of registry state — provides the same information.
+
+**Fix:** Introduced `PropertyAccessor` readonly struct that abstracts over `RegisteredSubjectProperty` (normal path) and `SubjectPropertyMetadata` (fallback). When `TryGetRegisteredProperty` returns null, the applier falls back to `subject.Properties[propertyName]`. This ensures property updates are **never silently skipped** — the subject always knows its own properties.
+
+**Correctness guarantee:** Once `TryGetSubjectById` returns a subject CLR instance, all property updates succeed via the `PropertyAccessor` regardless of concurrent registry changes. The only case where updates are skipped is when `TryGetSubjectById` itself fails (subject not in ID registry) — which is handled by Fix 12's `CompleteSubjectIds`.
+
+**Performance note:** The `PropertyAccessor` struct is stack-allocated (no heap allocation). The fallback path through `SubjectPropertyMetadata` uses the same generated get/set delegates as the normal path. The only difference is that `TransformValueBeforeApply` is skipped when the registered property is unavailable (acceptable — it's only used for path-based property mapping, and a momentarily-unregistered subject won't have path info anyway).
+
+**Status:** Applied. All tests pass. Awaiting chaos tester validation.
+
+---
+
+## Fix 14: Pre-resolve subject references before applying updates
+
+**Files changed:** `SubjectUpdateApplyContext.cs`, `SubjectUpdateApplier.cs`, `SubjectRegistry.cs`, `SubjectIdTests.cs`, `StableIdApplyTests.cs`
+
+**Cause:** `ApplyUpdate`'s Step 2 loop iterates `update.Subjects` and looks up each subject by ID via `ISubjectIdRegistry.TryGetSubjectById`. When Step 1's structural processing (root path) detaches a subject from the registry (e.g., ObjectRef set to null, collection replaced), Step 2 can no longer find that subject — its property value updates are permanently lost.
+
+This is a **same-thread sequencing issue**, not a concurrency race: Step 1 runs first and modifies the registry, then Step 2 iterates remaining subjects against the now-modified registry.
+
+**Fix:** Before processing any updates, iterate `update.Subjects.Keys` and resolve each via `TryGetSubjectById`, caching results in `SubjectUpdateApplyContext._preResolvedSubjects`. Step 2 uses `context.TryResolveSubject()` which checks the cache first, then falls back to the live registry (for subjects created during the apply).
+
+**Registry change:** Reverted the deferred `_pendingIdCleanup` queue in `SubjectRegistry` back to eager removal. The deferred cleanup was a global registry behavioral change for what is an `ApplyUpdate`-scoped problem. Pre-resolution is scoped to the apply operation with no side effects on the registry.
+
+**Test:** `ApplyUpdate_WhenStructuralChangeDetachesSubject_ThenStep2PropertyUpdatesStillApplied` — verifies that a value update is applied even when the same update's structural change detaches the subject.
+
+**Status:** Applied. Improved chaos tester from ~7 cycles to ~45 cycles before failure (remaining failures had different root cause — see Fix 15).
+
+---
+
+## Fix 15: Backing store race in structural property apply (Dictionary and ObjectRef)
+
+**Files changed:** `SubjectItemsUpdateApplier.cs`, `SubjectUpdateApplier.cs`
+
+**Cause:** `ApplyDictionaryUpdate` and `ApplyObjectUpdate` read the current property value from the backing store (`metadata.GetValue?.Invoke(parent)`) to find existing CLR instances. This read happens **without the lifecycle lock**. If a concurrent mutation thread's `WriteProperty.next()` has written a different value to the backing store (before acquiring the lifecycle lock), the apply reads the concurrent mutation's value instead of what the lifecycle actually processed.
+
+**Dictionary race sequence:**
+1. Client dict = `{A, B, C, D}` — B has applied values
+2. Concurrent mutation: `next()` writes `{A, C, D}` to backing store (no lock yet)
+3. Apply thread: reads backing store → sees `{A, C, D}` (B missing!)
+4. Server update: dict items = `[A, B, C, D, E]` — B's properties not in update (B didn't change)
+5. Apply processes B as "new key" → `ResolveOrCreateSubject` → if B not in registry (concurrent detach) and not complete (partial update) → **B skipped**
+6. B eventually re-added by subsequent update as fresh instance with **default values**
+
+**ObjectRef race sequence:** Same pattern — concurrent mutation writes different subject to ObjectRef backing store, apply reads it, `isSameSubject` check fails, falls through to registry lookup which may also fail.
+
+**Fix:** Removed all backing store reads from `ApplyDictionaryUpdate` and `ApplyObjectUpdate`. Both now resolve subjects exclusively from the ID registry, matching `ApplyCollectionUpdate`'s existing pattern:
+
+| Structural type | Before | After |
+|----------------|--------|-------|
+| Collection | Registry-only (3-phase) | Unchanged |
+| Dictionary | Backing store + registry fallback | **Registry-only (3-phase)** |
+| ObjectRef | Backing store + registry fallback | **Registry-only** |
+
+The 3-phase pattern (resolve → assign to graph → apply properties) avoids the backing store race entirely. The lifecycle interceptor diffs against `_lastProcessedValues` (lock-protected, always consistent) rather than the backing store.
+
+**Performance:** No meaningful regression. Structural properties only appear in updates when the structure actually changed (partial updates contain only changed properties). The registry lookup cost is comparable to the backing store read it replaces. For complete updates (Welcome on reconnect), the extra SetValue calls on unchanged properties are noops (lifecycle detects `ReferenceEquals` on `_lastProcessedValues`).
+
+**Status:** Applied. Chaos tester reached 70 cycles (up from 6 with dict-only fix). Awaiting extended validation.

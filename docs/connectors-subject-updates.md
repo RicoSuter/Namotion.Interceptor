@@ -18,6 +18,7 @@ Subject updates use a **flat dictionary structure** where all subjects are store
 SubjectUpdate {
   root: string?                  // sender's root subject ID (mapping hint)
   subjects: Map<string, Map<string, PropertyUpdate>>  // subjectId → propertyName → update
+  completeSubjectIds: string[]?  // subject IDs with complete state (null = all complete)
 }
 
 PropertyUpdate {
@@ -39,6 +40,7 @@ ItemRef {
 
 - `root`: The sender's subject ID for the root subject. This is a **mapping hint** that tells the receiver which entry in `subjects` corresponds to the local root subject. The root's ID may differ between sender and receiver because each side generates its own IDs independently. Null when the root subject is not part of this update.
 - `subjects`: All subjects in the update, keyed by the sender's subject IDs. Each subject contains property name to property update mappings.
+- `completeSubjectIds`: Set of subject IDs whose entries in `subjects` contain **complete state** (all properties, from `ProcessSubjectComplete`). `null` means all subjects are complete (used in complete/initial-state updates for backward compatibility). Non-null means only the listed IDs are complete; other entries contain partial state (only changed properties). The applier uses this to decide whether to create new subject instances: subjects marked as complete can be safely created; others are references to subjects that should already exist locally and must not be fabricated with default values.
 
 ### Subject IDs
 
@@ -188,7 +190,7 @@ Set the local property to the `value` from the update.
 1. If `id` is null/omitted, set the local property to null.
 2. If the existing local object already has the same subject ID as `id`, keep it (no replacement needed).
 3. Otherwise, look up `id` in the local ID-to-object map. If found, reuse that object.
-4. If not found, create a new object and register it with `id`.
+4. If not found, check `completeSubjectIds`: if `id` is in the set (or `completeSubjectIds` is null), create a new object and register it with `id`. If `id` is NOT in the set, **skip** — the sender assumed the receiver already has this subject. Creating a new instance with default values would corrupt state. The gap is temporary and self-heals on the next update that includes complete state for this subject.
 5. If the subject's properties are present in `subjects[id]`, apply them.
 6. Set the local property to the resolved object.
 
@@ -196,7 +198,7 @@ Set the local property to the `value` from the update.
 
 1. If `items` is null/omitted, the collection is null. Set the local property to null.
 2. If `items` is present, it defines the **full ordered state**:
-   - For each item, look up `item.id` in the ID-to-object map. If found, reuse it. If not, create a new object and register it with `item.id`.
+   - For each item, look up `item.id` in the ID-to-object map. If found, reuse it. If not found, check `completeSubjectIds`: if `item.id` is complete (or `completeSubjectIds` is null), create a new object and register it with `item.id`. If not complete, **skip** the item.
    - Apply the item's properties from `subjects[item.id]` if present.
    - Replace the local collection with the new ordered list.
 3. An empty `items` array (`[]`) clears the collection.
@@ -205,7 +207,7 @@ Set the local property to the `value` from the update.
 
 1. If `items` is null/omitted, the dictionary is null. Set the local property to null.
 2. If `items` is present, it defines the **full state**:
-   - For each item, look up `item.id` in the ID-to-object map. If found, reuse it. If not, create a new object and register it with `item.id`.
+   - For each item, look up `item.id` in the ID-to-object map. If found, reuse it. If not found, check `completeSubjectIds`: if `item.id` is complete (or `completeSubjectIds` is null), create a new object and register it with `item.id`. If not complete, **skip** the item.
    - Apply the item's properties from `subjects[item.id]` if present.
    - Set the object at `dictionary[item.key]`.
    - Remove any dictionary entries whose keys are not in the `items` array.

@@ -71,5 +71,9 @@
         Kind: Dictionary
       }
     }
-  }
+  },
+  CompleteSubjectIds: [
+    SubjectId_2,
+    SubjectId_3
+  ]
 }
