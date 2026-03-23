@@ -370,6 +370,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                             DetachFromProperty(subject, context.Property.Subject.Context, property, index);
                         }
                     }
+
+                    return;
                 }
 
                 // Refresh child index metadata for retained subjects whose
