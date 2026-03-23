@@ -721,6 +721,59 @@ public class SubjectSourceBackgroundServiceTests
     }
 
     [Fact]
+    public async Task WhenRetryQueueHasNullValues_ThenNullEqualsNullAndChangeIsReapplied()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context); // FirstName starts as null
+
+        var (service, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () => { }); // Server didn't set it either — stays null
+
+        // Pre-fill retry queue: client changed null → "ClientValue"
+        EnqueueRetryChange(service, subject, nameof(Person.FirstName), null, "ClientValue");
+
+        // Act
+        await service.StartAsync(CancellationToken.None);
+        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert — null == null → non-conflicting, re-applied
+        Assert.Equal("ClientValue", subject.FirstName);
+        Assert.Contains(writtenChanges, c =>
+            c.Property.Name == nameof(Person.FirstName) &&
+            c.GetNewValue<string?>() == "ClientValue");
+    }
+
+    [Fact]
+    public async Task WhenRetryQueueHasNullOldValueButServerSetValue_ThenChangeIsDropped()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context); // FirstName starts as null
+
+        var (service, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () => { subject.FirstName = "ServerValue"; }); // Server set it
+
+        // Pre-fill retry queue: client changed null → "ClientValue"
+        EnqueueRetryChange(service, subject, nameof(Person.FirstName), null, "ClientValue");
+
+        // Act
+        await service.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => service.WriteRetryQueue!.IsEmpty,
+            message: "Expected retry queue to be drained by ReapplyRetryQueue");
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert — null != "ServerValue" → conflict, dropped
+        Assert.Equal("ServerValue", subject.FirstName);
+        Assert.DoesNotContain(writtenChanges, c => c.Property.Name == nameof(Person.FirstName));
+    }
+
+    [Fact]
     public async Task WhenRetryQueueIsEmpty_ThenInitializationSucceedsNormally()
     {
         // Arrange
