@@ -1,6 +1,6 @@
 # Derived Property Change Detection: Internal Design
 
-This document describes the internal architecture of the derived property tracking system in `Namotion.Interceptor.Tracking`. For user-facing documentation, see [tracking.md](../tracking.md).
+This document describes the internal architecture of the derived property tracking system in `Namotion.Interceptor.Tracking`. For user-facing documentation, see the [Tracking](../tracking.md) documentation.
 
 ## Overview
 
