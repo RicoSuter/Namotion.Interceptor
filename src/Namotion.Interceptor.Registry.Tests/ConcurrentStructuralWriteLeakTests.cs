@@ -18,9 +18,9 @@ namespace Namotion.Interceptor.Registry.Tests;
 ///
 /// The key race window is between step 1 (next) and step 2 (lock acquisition):
 /// another thread's WriteProperty or DetachFromProperty can complete in this window,
-/// modifying _attachedSubjects and _lastProcessedValues. The parentStillAttached guard
-/// and _lastProcessedValues seeding ensure no orphaned subjects remain after all
-/// concurrent writes settle.
+/// modifying _attachedSubjects and _lastProcessedValues. The parent-dead check
+/// (which undoes attachments to concurrently detached parents) and _lastProcessedValues
+/// seeding ensure no orphaned subjects remain after all concurrent writes settle.
 /// </summary>
 public class ConcurrentStructuralWriteLeakTests(ITestOutputHelper output)
 {

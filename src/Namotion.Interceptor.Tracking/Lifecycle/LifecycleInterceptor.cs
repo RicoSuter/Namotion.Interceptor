@@ -36,7 +36,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             lock (_attachedSubjects)
             {
-                FindSubjectsInProperties(subject, collectedSubjects, null, seedLastProcessedValues: true);
+                FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Seed);
 
                 foreach (var child in collectedSubjects)
                 {
@@ -62,7 +62,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             lock (_attachedSubjects)
             {
-                FindSubjectsInProperties(subject, collectedSubjects, null, useLastProcessedValues: true);
+                FindSubjectsInProperties(subject, collectedSubjects, null, LastProcessedValuesMode.Use);
 
                 foreach (var child in collectedSubjects)
                 {
@@ -145,7 +145,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             }
         }
     }
-
+    
     private static void InvokeAddedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
     {
         var array = context.GetServices<ILifecycleHandler>();
@@ -171,7 +171,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         {
             return;
         }
-
+        
         foreach (var entry in subject.Properties)
         {
             var property = new PropertyReference(subject, entry.Key);
@@ -221,11 +221,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 var metadata = entry.Value;
                 if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
                 {
-                    // Read _lastProcessedValues (what the lifecycle has actually attached)
-                    // instead of the backing store. A concurrent next() may have written a
-                    // new (unattached) child to the backing store; the parentStillAttached
-                    // guard in WriteProperty prevents attaching children to dead parents,
-                    // so only _lastProcessedValues contains actually-attached children.
+                    // Use _lastProcessedValues (what was actually attached) instead of the backing
+                    // store, which may contain unattached children from a concurrent next() call.
                     if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
                     {
                         children ??= GetList();
@@ -266,7 +263,6 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
             ReturnList(children);
         }
-
     }
 
     private static void InvokeRemovedLifecycleHandlers(IInterceptorSubject subject, IInterceptorSubjectContext context, SubjectLifecycleChange change)
@@ -355,11 +351,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
                 _lastProcessedValues[context.Property] = newValue;
 
-                // If the parent was concurrently detached (by another thread's DetachFromProperty
-                // that ran between our next() and this lock acquisition), the children we just
-                // attached are orphaned — the parent is no longer reachable from the root.
-                // Clean up immediately: remove the dangling _lastProcessedValues entry and
-                // detach the children we just attached to maintain registry consistency.
+                // Parent was concurrently detached between next() and lock acquisition —
+                // undo: remove dangling _lastProcessedValues and detach orphaned children.
                 if (!_attachedSubjects.ContainsKey(context.Property.Subject))
                 {
                     _lastProcessedValues.Remove(context.Property);
@@ -371,6 +364,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                             DetachFromProperty(subject, context.Property.Subject.Context, property, index);
                         }
                     }
+
+                    return;
                 }
 
                 // Refresh child index metadata for retained subjects whose
@@ -394,11 +389,22 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         }
     }
 
+    private enum LastProcessedValuesMode
+    {
+        /// <summary>Read property values from the backing store (default).</summary>
+        None,
+
+        /// <summary>Read from backing store and seed _lastProcessedValues (used during attach).</summary>
+        Seed,
+
+        /// <summary>Read from _lastProcessedValues instead of backing store (used during detach).</summary>
+        Use
+    }
+
     private void FindSubjectsInProperties(IInterceptorSubject subject,
         List<(IInterceptorSubject subject, PropertyReference property, object? index)> collectedSubjects,
         HashSet<IInterceptorSubject>? touchedSubjects,
-        bool seedLastProcessedValues = false,
-        bool useLastProcessedValues = false)
+        LastProcessedValuesMode lastProcessedValuesMode = LastProcessedValuesMode.None)
     {
         foreach (var property in subject.Properties)
         {
@@ -410,11 +416,11 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
             }
 
             var propertyReference = new PropertyReference(subject, property.Key);
-            var propertyValue = useLastProcessedValues && _lastProcessedValues.TryGetValue(propertyReference, out var lastProcessed)
+            var propertyValue = lastProcessedValuesMode == LastProcessedValuesMode.Use && _lastProcessedValues.TryGetValue(propertyReference, out var lastProcessed)
                 ? lastProcessed
                 : metadata.GetValue?.Invoke(subject);
 
-            if (seedLastProcessedValues)
+            if (lastProcessedValuesMode == LastProcessedValuesMode.Seed)
             {
                 _lastProcessedValues[propertyReference] = propertyValue;
             }
