@@ -83,9 +83,10 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
         _configuration = configuration;
     }
 
-    private bool IsPropertyIncluded(RegisteredSubjectProperty property)
+    private bool IsPropertyIncluded(PropertyReference propertyReference)
     {
-        return property.IsPropertyIncluded(_configuration.NodeMapper);
+        return propertyReference.TryGetRegisteredProperty() is { } property &&
+               property.IsPropertyIncluded(_configuration.NodeMapper);
     }
 
     private ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)

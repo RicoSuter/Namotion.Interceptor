@@ -134,35 +134,21 @@ For **servers**, the pattern is similar: local writes are applied immediately, t
 
 #### Source-First Writes with Transactions
 
-If you need the external source to accept the change *before* updating the local model, use transactions with `WithSourceTransactions()`. This inverts the write order: changes are buffered in memory, written to the external source on commit, and only applied to the local model if the source write succeeds.
-
-```csharp
-var context = InterceptorSubjectContext
-    .Create()
-    .WithFullPropertyTracking()
-    .WithTransactions()
-    .WithSourceTransactions(); // Enables source-first commit
-
-using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
-sensor.Temperature = 42.0m; // Buffered, not applied yet
-await tx.CommitAsync(ct);   // Writes to source first, then applies locally
-```
-
-Without `WithSourceTransactions()`, transactions are purely in-memory: changes are buffered and applied atomically to the local model on commit, but no external sources are involved. See [Transactions](tracking-transactions.md) for full details.
+If you need the external source to accept the change *before* updating the local model, use source transactions. This inverts the write order so the source confirms before the local model changes. See [Write Consistency Guarantees](#write-consistency-guarantees) for a comparison of both approaches and [Transactions](tracking-transactions.md) for full details.
 
 ### Initialization Sequence
 
-Sources use a buffer-flush-load-replay pattern during initialization and reconnection:
+Sources use a buffer-load-replay pattern during initialization and reconnection:
 
 1. **Buffer**: During `StartListeningAsync()`, inbound updates are buffered
-2. **Flush**: Pending writes from the retry queue are flushed to the external system
-3. **Load**: `LoadInitialStateAsync()` fetches complete state from external system
-4. **Replay**: Buffered updates are replayed in order after initial state is applied
+2. **Load**: `LoadInitialStateAsync()` fetches complete state from external system
+3. **Replay**: Buffered updates are replayed in order after initial state is applied
+4. **Optimistic retry re-apply**: Queued writes from the retry queue are compared against current property values and re-applied locally if the source hasn't changed them (see [Write Retry Queue](#write-retry-queue))
 
 This ensures:
 - Updates received during initialization are not lost
 - Updates are applied in the correct order relative to the initial state
-- No visible state toggle (flush before load avoids showing stale server values)
+- Stale queued writes don't overwrite newer source values
 
 ### Inbound Update Error Handling
 
@@ -480,9 +466,46 @@ services.AddHostedService(sp =>
 
 **Behavior:**
 - Ring buffer semantics: oldest writes dropped when capacity reached
-- FIFO flush order when connection restored
-- Automatic retry when `WriteChangesAsync` throws an exception
+- Automatic retry when `WriteChangesAsync` fails during normal operation
+- Optimistic re-apply on reconnection: after loading initial state, queued changes are compared against the current (post-reconnection) property values. Only changes where the source hasn't modified the property are re-applied locally and sent to the source as fresh writes. Changes where the source value diverged are dropped (source wins).
 - In-memory only: queued writes are lost on process restart
+
+## Write Consistency Guarantees
+
+Property writes to sources follow a **local-first** model: the local property is updated immediately, and the change is sent to the source asynchronously. This means the local model and the source can be temporarily out of sync.
+
+| Scenario | Local Model | Source | Outcome |
+|---|---|---|---|
+| Write succeeds | Updated immediately | Updated via async write | In sync |
+| Write fails, retry succeeds | Updated immediately | Updated on retry | Eventually in sync |
+| Disconnect + reconnect, source unchanged | Initial state restores source state, retry re-applies change | Receives change via fresh write | In sync |
+| Disconnect + reconnect, source changed | Initial state applies source's new value, retry dropped | Unchanged (source wins) | In sync |
+
+In all cases, the local model and source converge after reconnection. However, in the last scenario the local model temporarily shows a value that the source never accepted — users may briefly see the local value before it snaps back to the source's value on reconnect.
+
+### Confirmed writes with transactions
+
+If you need the source to accept a change **before** updating the local model, use [source transactions](tracking-transactions.md). With transactions, the source is written first during commit — the local model is only updated if the source accepts the change. If the source is unreachable, the commit fails and the local model remains unchanged.
+
+```csharp
+var context = InterceptorSubjectContext
+    .Create()
+    .WithFullPropertyTracking()
+    .WithTransactions()
+    .WithSourceTransactions();
+
+using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+sensor.Temperature = 42.0m; // Captured, NOT applied locally yet
+await tx.CommitAsync(ct);   // Writes to source first, then applies locally
+                             // If source rejects → local model unchanged
+```
+
+| Approach | Local update | Source guarantee | On disconnect |
+|---|---|---|---|
+| Without transactions | Immediate | Eventual (async + retry) | Optimistic re-apply or snap-back |
+| With source transactions | After source confirms | Confirmed before local apply | Commit fails, local unchanged |
+
+Choose based on your consistency requirements: local-first for responsiveness, transactions for confirmed delivery.
 
 ## Thread Safety
 
