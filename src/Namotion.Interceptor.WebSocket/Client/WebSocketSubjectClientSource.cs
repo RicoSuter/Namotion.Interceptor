@@ -44,6 +44,13 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
 
     private readonly ClientSequenceTracker _sequenceTracker = new();
+
+    /// <summary>
+    /// Gets the last successfully received sequence number from the server.
+    /// Returns the Welcome sequence if no updates have been received yet, or -1 if not connected.
+    /// </summary>
+    public long LastReceivedSequence => _sequenceTracker.ExpectedNextSequence - 1;
+
     private volatile bool _isStarted;
     private volatile bool _isForceKill;
     private volatile CancellationTokenSource? _forceKillCts;

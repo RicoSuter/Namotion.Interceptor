@@ -233,6 +233,7 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
                     config.ServerUri = new Uri($"ws://localhost:{serverPort}/ws");
                     config.ReconnectDelay = TimeSpan.FromSeconds(1);
                     config.MaxReconnectDelay = TimeSpan.FromSeconds(10);
+                    config.WriteRetryQueueSize = 10000;
                     config.PathProvider = new AttributeBasedPathProvider("ws");
                 });
             break;
@@ -276,6 +277,7 @@ builder.Services.AddSingleton(sp => new VerificationEngine(
     chaosEngines,
     cycleLoggerProvider,
     sp.GetRequiredService<IHostApplicationLifetime>(),
+    sp,
     sp.GetRequiredService<ILogger<VerificationEngine>>()));
 
 builder.Services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<VerificationEngine>());
