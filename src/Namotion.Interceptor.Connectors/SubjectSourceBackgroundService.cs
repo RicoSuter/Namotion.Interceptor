@@ -35,10 +35,7 @@ public class SubjectSourceBackgroundService : BackgroundService
             _writeRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger);
         }
 
-        _propertyWriter = new SubjectPropertyWriter(
-            source,
-            _writeRetryQueue is not null ? ct => _writeRetryQueue.FlushAsync(source, ct) : null,
-            logger);
+        _propertyWriter = new SubjectPropertyWriter(source, logger);
     }
 
     /// <inheritdoc />
@@ -57,10 +54,15 @@ public class SubjectSourceBackgroundService : BackgroundService
                     using var processor = new ChangeQueueProcessor(
                         _source,
                         _context,
-                        property => property.Reference.TryGetSource(out var source) && source == _source,
+                        propertyReference => propertyReference.TryGetSource(out var source) && source == _source,
                         WriteChangesAsync,
                         _bufferTime,
                         _logger);
+
+                    // Optimistic retry re-apply: after Welcome + CQP creation,
+                    // re-apply queued changes locally if the server hasn't changed the property.
+                    // CQP picks up re-applied changes and sends them to the server as fresh writes.
+                    ReapplyRetryQueue();
 
                     await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
                 }
@@ -142,6 +144,49 @@ public class SubjectSourceBackgroundService : BackgroundService
         {
             _logger.LogWarning(e, "Failed to write {Count} changes to source, queuing for retry.", changes.Length);
             _writeRetryQueue.Enqueue(changes);
+        }
+    }
+
+    private void ReapplyRetryQueue()
+    {
+        var retryChanges = _writeRetryQueue?.DrainForLocalReapply();
+        if (retryChanges is null || retryChanges.Length == 0)
+        {
+            return;
+        }
+
+        var applied = 0;
+        var dropped = 0;
+        foreach (var change in retryChanges)
+        {
+            var property = change.Property;
+            var currentValue = property.Metadata.GetValue?.Invoke(property.Subject);
+            var oldValue = change.GetOldValue<object>();
+
+            if (Equals(currentValue, oldValue))
+            {
+                // Server hasn't changed this property — re-apply client's change locally.
+                // The interceptor chain fires, CQP captures the change, and sends it to the server.
+                property.Metadata.SetValue?.Invoke(property.Subject, change.GetNewValue<object>());
+                applied++;
+            }
+            else
+            {
+                dropped++;
+            }
+        }
+
+        if (dropped > 0)
+        {
+            _logger.LogWarning(
+                "Retry queue optimistic re-apply: {Applied} re-applied, {Dropped} dropped (source wins).",
+                applied, dropped);
+        }
+        else if (applied > 0)
+        {
+            _logger.LogInformation(
+                "Retry queue optimistic re-apply: {Applied} re-applied, {Dropped} dropped.",
+                applied, dropped);
         }
     }
 

@@ -15,7 +15,7 @@ public class SubjectPropertyWriterTests
             .Setup(c => c.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync((Action?)null);
 
-        var writer = new SubjectPropertyWriter(sourceMock.Object, null, NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(sourceMock.Object, NullLogger.Instance);
         var updates = new List<string>();
 
         writer.StartBuffering();
@@ -30,7 +30,7 @@ public class SubjectPropertyWriterTests
     }
 
     [Fact]
-    public async Task WhenCallbackProvided_ThenOrderIsFlushThenInitialStateThenBuffered()
+    public async Task WhenInitialStateProvided_ThenOrderIsInitialStateThenBuffered()
     {
         // Arrange
         var sourceMock = new Mock<ISubjectSource>();
@@ -40,28 +40,17 @@ public class SubjectPropertyWriterTests
             .Setup(c => c.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => { order.Add("InitialState"); });
 
-        var flushInvoked = false;
-        var writer = new SubjectPropertyWriter(
-            sourceMock.Object,
-            ct =>
-            {
-                order.Add("Flush");
-                flushInvoked = true;
-                return ValueTask.FromResult(true);
-            },
-            NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(sourceMock.Object, NullLogger.Instance);
 
         // Act
         writer.StartBuffering();
         writer.Write(order, o => o.Add("BufferedUpdate"));
         await writer.LoadInitialStateAndResumeAsync(CancellationToken.None);
 
-        // Assert - order: flush first, then initial state, then buffered (avoids state toggle)
-        Assert.True(flushInvoked);
-        Assert.Equal(3, order.Count);
-        Assert.Equal("Flush", order[0]);
-        Assert.Equal("InitialState", order[1]);
-        Assert.Equal("BufferedUpdate", order[2]);
+        // Assert - order: initial state first, then buffered
+        Assert.Equal(2, order.Count);
+        Assert.Equal("InitialState", order[0]);
+        Assert.Equal("BufferedUpdate", order[1]);
     }
 
     [Fact]
@@ -73,7 +62,7 @@ public class SubjectPropertyWriterTests
             .Setup(c => c.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync((Action?)null);
 
-        var writer = new SubjectPropertyWriter(sourceMock.Object, null, NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(sourceMock.Object, NullLogger.Instance);
         var updates = new List<string>();
 
         // Act
@@ -99,7 +88,7 @@ public class SubjectPropertyWriterTests
             .Setup(c => c.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync((Action?)null);
 
-        var writer = new SubjectPropertyWriter(sourceMock.Object, null, NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(sourceMock.Object, NullLogger.Instance);
 
         writer.StartBuffering();
         await writer.LoadInitialStateAndResumeAsync(CancellationToken.None);
@@ -117,7 +106,7 @@ public class SubjectPropertyWriterTests
             .Setup(c => c.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync((Action?)null);
 
-        var writer = new SubjectPropertyWriter(sourceMock.Object, null, NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(sourceMock.Object, NullLogger.Instance);
         var updates = new List<string>();
 
         // Act
@@ -146,7 +135,7 @@ public class SubjectPropertyWriterTests
             .Setup(c => c.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => { loadCount++; });
 
-        var writer = new SubjectPropertyWriter(sourceMock.Object, null, NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(sourceMock.Object, NullLogger.Instance);
 
         // Act
         writer.StartBuffering();
@@ -165,7 +154,7 @@ public class SubjectPropertyWriterTests
     {
         // Arrange - using ISubjectSource (not ISubjectSource)
         var sourceMock = new Mock<ISubjectSource>();
-        var writer = new SubjectPropertyWriter(sourceMock.Object, null, NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(sourceMock.Object, NullLogger.Instance);
         var updates = new List<string>();
 
         // Act
@@ -183,7 +172,7 @@ public class SubjectPropertyWriterTests
     {
         // Arrange - _updates starts as empty list (buffering by default)
         var sourceMock = new Mock<ISubjectSource>();
-        var writer = new SubjectPropertyWriter(sourceMock.Object, null, NullLogger.Instance);
+        var writer = new SubjectPropertyWriter(sourceMock.Object, NullLogger.Instance);
         var updates = new List<string>();
 
         // Act

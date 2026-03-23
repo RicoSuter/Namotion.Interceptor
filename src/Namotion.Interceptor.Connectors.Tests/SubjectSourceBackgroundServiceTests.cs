@@ -1,10 +1,12 @@
 using System.Collections.Concurrent;
+using System.Reflection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Tests;
@@ -487,5 +489,354 @@ public class SubjectSourceBackgroundServiceTests
             batch.Any(v => v == "FailedValue"));
         Assert.True(failedValueCallCount >= 2,
             $"Expected 'FailedValue' in at least 2 write calls (original + retry), appeared in {failedValueCallCount}");
+    }
+
+    // Optimistic retry re-apply tests
+
+    [Fact]
+    public async Task WhenRetryQueueHasNonConflictingValueChange_ThenChangeIsReappliedAndSentToServer()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context) { FirstName = "Original" };
+
+        var (service, sourceMock, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
+            welcomeAction: () => { subject.FirstName = "Original"; }); // Server didn't change it
+
+        // Pre-fill retry queue: client changed "Original" → "ClientChange"
+        EnqueueRetryChange(service, subject, nameof(Person.FirstName), "Original", "ClientChange");
+
+        // Act
+        await service.StartAsync(CancellationToken.None);
+        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert — change was re-applied locally and sent to server
+        Assert.Equal("ClientChange", subject.FirstName);
+        Assert.Contains(writtenChanges, c =>
+            c.Property.Name == nameof(Person.FirstName) &&
+            c.GetNewValue<string?>() == "ClientChange");
+    }
+
+    [Fact]
+    public async Task WhenRetryQueueHasConflictingValueChange_ThenChangeIsDropped()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context) { FirstName = "Original" };
+
+        var (service, sourceMock, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
+            welcomeAction: () => { subject.FirstName = "ServerChanged"; }); // Server DID change it
+
+        // Pre-fill retry queue: client changed "Original" → "ClientChange"
+        EnqueueRetryChange(service, subject, nameof(Person.FirstName), "Original", "ClientChange");
+
+        // Act
+        await service.StartAsync(CancellationToken.None);
+        await Task.Delay(500); // Give time for any potential re-apply
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert — server wins, change was dropped
+        Assert.Equal("ServerChanged", subject.FirstName);
+        Assert.DoesNotContain(writtenChanges, c => c.Property.Name == nameof(Person.FirstName));
+    }
+
+    [Fact]
+    public async Task WhenRetryQueueHasNonConflictingObjectRefChange_ThenChangeIsReapplied()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var personA = new Person(context) { FirstName = "A" };
+        var personB = new Person(context) { FirstName = "B" };
+        var subject = new Person(context) { Father = personA };
+
+        var (service, sourceMock, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
+            welcomeAction: () => { subject.Father = personA; }); // Server didn't change it
+
+        // Pre-fill retry queue: client changed Father from personA → personB
+        EnqueueRetryChange<Person?>(service, subject, nameof(Person.Father), personA, personB);
+
+        // Act
+        await service.StartAsync(CancellationToken.None);
+        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert — re-applied
+        Assert.Same(personB, subject.Father);
+    }
+
+    [Fact]
+    public async Task WhenRetryQueueHasConflictingObjectRefChange_ThenChangeIsDropped()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var personA = new Person(context) { FirstName = "A" };
+        var personB = new Person(context) { FirstName = "B" };
+        var personC = new Person(context) { FirstName = "C" };
+        var subject = new Person(context) { Father = personA };
+
+        var (service, sourceMock, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
+            welcomeAction: () => { subject.Father = personC; }); // Server replaced with C
+
+        // Pre-fill retry queue: client changed Father from personA → personB
+        EnqueueRetryChange<Person?>(service, subject, nameof(Person.Father), personA, personB);
+
+        // Act
+        await service.StartAsync(CancellationToken.None);
+        await Task.Delay(500);
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert — server wins
+        Assert.Same(personC, subject.Father);
+    }
+
+    [Fact]
+    public async Task WhenRetryQueueHasNonConflictingCollectionChange_ThenChangeIsReapplied()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var listA = new List<Person>();
+        var listB = new List<Person> { new Person(context) { FirstName = "Child" } };
+        var subject = new Person(context) { Children = listA };
+
+        var (service, sourceMock, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
+            welcomeAction: () => { subject.Children = listA; }); // Server didn't replace it
+
+        // Pre-fill retry queue: client replaced collection listA → listB
+        EnqueueRetryChange(service, subject, nameof(Person.Children), listA, listB);
+
+        // Act
+        await service.StartAsync(CancellationToken.None);
+        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert — re-applied (reference equality)
+        Assert.Same(listB, subject.Children);
+    }
+
+    [Fact]
+    public async Task WhenRetryQueueHasConflictingCollectionChange_ThenChangeIsDropped()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var listA = new List<Person>();
+        var listB = new List<Person> { new Person(context) { FirstName = "ClientChild" } };
+        var listC = new List<Person> { new Person(context) { FirstName = "ServerChild" } };
+        var subject = new Person(context) { Children = listA };
+
+        var (service, sourceMock, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
+            welcomeAction: () => { subject.Children = listC; }); // Server replaced collection
+
+        // Pre-fill retry queue: client replaced listA → listB
+        EnqueueRetryChange(service, subject, nameof(Person.Children), listA, listB);
+
+        // Act
+        await service.StartAsync(CancellationToken.None);
+        await Task.Delay(500);
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert — server wins
+        Assert.Same(listC, subject.Children);
+    }
+
+    [Fact]
+    public async Task WhenRetryQueueHasMixedChanges_ThenOnlyNonConflictingAreReapplied()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context) { FirstName = "OrigFirst", LastName = "OrigLast" };
+
+        var (service, sourceMock, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
+            welcomeAction: () =>
+            {
+                subject.FirstName = "ServerFirst"; // Server changed this → conflict
+                subject.LastName = "OrigLast";     // Server didn't change this → no conflict
+            });
+
+        EnqueueRetryChange(service, subject, nameof(Person.FirstName), "OrigFirst", "ClientFirst");
+        EnqueueRetryChange(service, subject, nameof(Person.LastName), "OrigLast", "ClientLast");
+
+        // Act
+        await service.StartAsync(CancellationToken.None);
+        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert — FirstName dropped (server wins), LastName re-applied
+        Assert.Equal("ServerFirst", subject.FirstName);
+        Assert.Equal("ClientLast", subject.LastName);
+        Assert.DoesNotContain(writtenChanges, c => c.Property.Name == nameof(Person.FirstName));
+        Assert.Contains(writtenChanges, c =>
+            c.Property.Name == nameof(Person.LastName) &&
+            c.GetNewValue<string?>() == "ClientLast");
+    }
+
+    [Fact]
+    public async Task WhenAllRetryChangesConflict_ThenAllDroppedAndServiceRunsNormally()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context) { FirstName = "OrigFirst", LastName = "OrigLast" };
+
+        var (service, sourceMock, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
+            welcomeAction: () =>
+            {
+                subject.FirstName = "ServerFirst";
+                subject.LastName = "ServerLast";
+            });
+
+        EnqueueRetryChange(service, subject, nameof(Person.FirstName), "OrigFirst", "ClientFirst");
+        EnqueueRetryChange(service, subject, nameof(Person.LastName), "OrigLast", "ClientLast");
+
+        // Act
+        await service.StartAsync(CancellationToken.None);
+        await Task.Delay(500);
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert — all dropped, server values remain
+        Assert.Equal("ServerFirst", subject.FirstName);
+        Assert.Equal("ServerLast", subject.LastName);
+        Assert.Empty(writtenChanges);
+    }
+
+    [Fact]
+    public async Task WhenRetryQueueIsEmpty_ThenInitializationSucceedsNormally()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context) { FirstName = "Original" };
+
+        var (service, sourceMock, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
+            welcomeAction: () => { subject.FirstName = "ServerValue"; });
+
+        // No retry changes enqueued
+
+        // Act
+        await service.StartAsync(CancellationToken.None);
+        await Task.Delay(500);
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert — Welcome applied, no retry changes sent
+        Assert.Equal("ServerValue", subject.FirstName);
+        Assert.Empty(writtenChanges);
+    }
+
+    [Fact]
+    public async Task WhenRetryQueueDisabled_ThenInitializationSucceedsWithoutReapply()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context) { FirstName = "Original" };
+
+        var sourceMock = new Mock<ISubjectSource>();
+        sourceMock.Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IDisposable?)null);
+        sourceMock.Setup(s => s.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => { subject.FirstName = "ServerValue"; });
+        sourceMock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns(new ValueTask<WriteResult>(WriteResult.Success));
+
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(sourceMock.Object);
+
+        // writeRetryQueueSize: 0 disables the queue
+        var service = new SubjectSourceBackgroundService(
+            sourceMock.Object, context, NullLogger.Instance,
+            writeRetryQueueSize: 0);
+
+        // Act
+        await service.StartAsync(CancellationToken.None);
+        await Task.Delay(500);
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert — service runs normally without retry queue
+        Assert.Equal("ServerValue", subject.FirstName);
+    }
+
+    private static (SubjectSourceBackgroundService service, Mock<ISubjectSource> sourceMock,
+        ConcurrentBag<SubjectPropertyChange> writtenChanges, TaskCompletionSource writeTcs)
+        CreateServiceWithRetryQueue(Person subject, IInterceptorSubjectContext context, Action welcomeAction)
+    {
+        var sourceMock = new Mock<ISubjectSource>();
+        var writtenChanges = new ConcurrentBag<SubjectPropertyChange>();
+        var writeTcs = new TaskCompletionSource();
+
+        sourceMock.Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((IDisposable?)null);
+
+        sourceMock.Setup(s => s.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                using (SubjectChangeContext.WithSource(sourceMock.Object))
+                {
+                    welcomeAction();
+                }
+            });
+
+        sourceMock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
+            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            {
+                foreach (var change in changes.ToArray())
+                {
+                    writtenChanges.Add(change);
+                }
+                writeTcs.TrySetResult();
+                return new ValueTask<WriteResult>(WriteResult.Success);
+            });
+
+        // Claim source ownership for common properties
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(sourceMock.Object);
+        new PropertyReference(subject, nameof(Person.LastName)).SetSource(sourceMock.Object);
+        new PropertyReference(subject, nameof(Person.Father)).SetSource(sourceMock.Object);
+        new PropertyReference(subject, nameof(Person.Mother)).SetSource(sourceMock.Object);
+        new PropertyReference(subject, nameof(Person.Children)).SetSource(sourceMock.Object);
+
+        var service = new SubjectSourceBackgroundService(
+            sourceMock.Object, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMilliseconds(50));
+
+        return (service, sourceMock, writtenChanges, writeTcs);
+    }
+
+    private static void EnqueueRetryChange(SubjectSourceBackgroundService service,
+        IInterceptorSubject subject, string propertyName, string? oldValue, string? newValue)
+    {
+        EnqueueRetryChange<string?>(service, subject, propertyName, oldValue, newValue);
+    }
+
+    private static void EnqueueRetryChange<TValue>(SubjectSourceBackgroundService service,
+        IInterceptorSubject subject, string propertyName, TValue oldValue, TValue newValue)
+    {
+        var queueField = typeof(SubjectSourceBackgroundService)
+            .GetField("_writeRetryQueue", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var queue = (WriteRetryQueue)queueField.GetValue(service)!;
+
+        var change = SubjectPropertyChange.Create(
+            new PropertyReference(subject, propertyName),
+            null,
+            DateTimeOffset.UtcNow,
+            null,
+            oldValue,
+            newValue);
+
+        queue.Enqueue(new[] { change });
     }
 }
