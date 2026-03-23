@@ -113,19 +113,6 @@ public class RegisteredSubject
         }
     }
 
-    /// <summary>
-    /// Clears all parent references. Called on context detach to release references
-    /// to parent <see cref="RegisteredSubjectProperty"/> instances that may have
-    /// already been removed from the registry.
-    /// </summary>
-    internal void ClearParents()
-    {
-        lock (_parentsLock)
-        {
-            _parents = [];
-        }
-    }
-
     internal void UpdateParentIndex(RegisteredSubjectProperty property, object? oldIndex, object? newIndex)
     {
         lock (_parentsLock)
