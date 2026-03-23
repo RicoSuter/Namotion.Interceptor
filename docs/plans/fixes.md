@@ -460,4 +460,49 @@ The 3-phase pattern (resolve → assign to graph → apply properties) avoids th
 
 **Performance:** No meaningful regression. Structural properties only appear in updates when the structure actually changed (partial updates contain only changed properties). The registry lookup cost is comparable to the backing store read it replaces. For complete updates (Welcome on reconnect), the extra SetValue calls on unchanged properties are noops (lifecycle detects `ReferenceEquals` on `_lastProcessedValues`).
 
-**Status:** Applied. Chaos tester reached 70 cycles (up from 6 with dict-only fix). Awaiting extended validation.
+**Status:** Applied. Chaos tester reached 190+ cycles with no convergence failures. Extended validation passed.
+
+---
+
+## Under Investigation: Slow heap growth (~0.12 MB/cycle)
+
+**Symptom:** HeapMB grows linearly from ~28 MB to ~51 MB over 190 cycles despite forced full GC (Gen2, compacting, with finalizer wait) between cycles. No orphaned subjects detected (registry/reachable always match). Growth rate is consistent (~0.12 MB/cycle) with no sign of plateau.
+
+**GC dump comparison (cycle 172 vs 180):**
+
+| Growth | Type | Notes |
+|--------|------|-------|
+| +676 | `RuntimeParameterInfo` | .NET reflection cache — may be one-time warm-up |
+| +288 | `System.Byte[]` | Buffer pools (ArrayPool, RecyclableMemoryStream) |
+| +286 | `ParameterInfo[]` | Same root as RuntimeParameterInfo |
+| +71 | `BufferSegment` (IO.Pipelines) | Kestrel/WebSocket pipe segments |
+| +52 | `ValueTuple<IInterceptorSubject, PropertyReference, Object>[]` | LifecycleInterceptor `_listPool` (ThreadStatic, never shrinks) |
+| +31 | `Entry<IInterceptorSubject>[]` | LifecycleInterceptor `_subjectHashSetPool` (ThreadStatic, never shrinks) |
+
+**Suspected sources:**
+- `DefaultSubjectFactory.CreateSubjectCollection` and `CreateSubjectDictionary` call `MakeGenericType` on every invocation — should be cached by runtime but worth verifying
+- `ActivatorUtilities.CreateInstance` / `Activator.CreateInstance` reflection metadata
+- ThreadStatic pools in LifecycleInterceptor grow capacity but never shrink
+- Dictionary internal arrays (`_lastProcessedValues`, `_knownSubjects`, `_subjectIdToSubject`) keep high-water-mark capacity after Remove
+
+**GC dump comparison (4 dumps, cycles 172→180→186→190):**
+
+| Type | D1 | D2 | D3 | D4 | Verdict |
+|------|-----|-----|-----|-----|---------|
+| `RuntimeParameterInfo` | 311 | 987 | 987 | 987 | Stabilized (one-time warm-up) |
+| `ParameterInfo[]` | 171 | 457 | 457 | 457 | Stabilized |
+| `SubjectPropertyChild[]` | 401 | 581 | 859 | 894 | **Growing** — registry child lists |
+| `BufferSegment` | 59 | 130 | 80 | ~80 | Fluctuates (GC collects) |
+| Heap bytes | 54.7M | 60.5M | 51.1M | 65.2M | Fluctuates (not monotonic) |
+
+**Prime suspect: `SubjectPropertyChild[]`** — backing arrays for `List<SubjectPropertyChild>` in `RegisteredSubjectProperty._children`. These lists grow via `Add` and shrink via `RemoveAt` but never trim capacity. The count of arrays is growing (401→894 over 18 cycles) which suggests either:
+1. `RegisteredSubjectProperty` instances accumulating (not being GC'd when subjects are removed)
+2. Or `List<T>` capacity growth causing array churn that GC hasn't collected yet
+
+**Mitigation applied:** Cached `MakeGenericType` results in `DefaultSubjectFactory` to avoid repeated reflection metadata creation.
+
+**Root cause found:** `RegisteredSubject._parents` retains stale references to parent `RegisteredSubjectProperty` instances. When a parent is detached before its child, `RemoveParent` is skipped (parent not in `_knownSubjects`), leaving the child's `_parents` list holding a reference to the old parent's `RegisteredSubjectProperty` (and its `_children` backing array). This prevents GC of the parent's registry metadata.
+
+**Fix:** Call `registeredSubject.ClearParents()` on `IsContextDetach` before removing from `_knownSubjects`. At this point the subject has zero valid parents (last reference removed), so any remaining entries are stale. Thread-safe: all under `lock(_knownSubjects)`, same lock order as `AddParent`/`RemoveParent`.
+
+**Status:** Applied. Awaiting tester validation.

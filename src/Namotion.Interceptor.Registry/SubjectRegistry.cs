@@ -166,6 +166,10 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                     
                     if (change.IsContextDetach)
                     {
+                        // Clear parent references before removal to release references to
+                        // parent RegisteredSubjectProperty instances that may have already
+                        // been removed from _knownSubjects (parent detached before child).
+                        registeredSubject.ClearParents();
                         _knownSubjects.Remove(change.Subject);
 
                         // Clean up subject ID reverse index
