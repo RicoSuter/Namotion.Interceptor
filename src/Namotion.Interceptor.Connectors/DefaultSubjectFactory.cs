@@ -64,10 +64,11 @@ public class DefaultSubjectFactory : ISubjectFactory
             return typeof(Dictionary<,>).MakeGenericType(keyType, valueType);
         });
 
+        var keyType = dictionaryType.GenericTypeArguments[0];
         var dictionary = (IDictionary)Activator.CreateInstance(dictionaryType)!;
         foreach (var entry in entries)
         {
-            var key = DictionaryKeyConverter.Convert(entry.Key, dictionaryType.GenericTypeArguments[0]);
+            var key = DictionaryKeyConverter.Convert(entry.Key, keyType);
             dictionary.Add(key, entry.Value);
         }
 
