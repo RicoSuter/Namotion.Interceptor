@@ -182,7 +182,6 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                             property.ClearChildren();
                         }
 
-
                         _knownSubjects.Remove(change.Subject);
 
                         // Clean up subject ID reverse index
