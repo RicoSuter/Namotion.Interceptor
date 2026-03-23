@@ -132,6 +132,54 @@ public class StableIdApplyTests
     }
 
     [Fact]
+    public void ApplyUpdate_WhenStructuralChangeDetachesSubject_ThenStep2PropertyUpdatesStillApplied()
+    {
+        // Arrange: root → child via object ref
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var child = new CycleTestNode { Name = "OriginalName" };
+        var root = new CycleTestNode(context) { Name = "Root", Child = child };
+
+        var rootId = root.GetOrAddSubjectId();
+        var childId = child.GetOrAddSubjectId();
+
+        // Build an update that BOTH removes child (structural) AND updates child's Name (value).
+        // This happens when CQP batches a value change and a structural change together:
+        //   1. Sender sets child.Name = "UpdatedName"
+        //   2. Sender sets root.Child = null
+        //   3. Both changes are flushed in the same CQP batch
+        var update = new SubjectUpdate
+        {
+            Root = rootId,
+            Subjects = new()
+            {
+                [rootId] = new()
+                {
+                    ["Child"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Object,
+                        Id = null // Remove child
+                    }
+                },
+                [childId] = new()
+                {
+                    ["Name"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "UpdatedName"
+                    }
+                }
+            }
+        };
+
+        // Act
+        SubjectUpdateApplier.ApplyUpdate(root, update, new DefaultSubjectFactory());
+
+        // Assert
+        Assert.Null(root.Child); // structural change applied
+        Assert.Equal("UpdatedName", child.Name); // value applied despite detach
+    }
+
+    [Fact]
     public void ApplyPartialUpdate_RootScalarAndNonRootChange_BothApplied()
     {
         var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();

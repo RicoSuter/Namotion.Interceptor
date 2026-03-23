@@ -33,6 +33,9 @@
           Kind: Collection
         }
       }
-    }
+    },
+    CompleteSubjectIds: [
+      SubjectId_2
+    ]
   }
 }

@@ -6,6 +6,9 @@ using System.Text.Json.Nodes;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.ConnectorTester.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor.WebSocket.Client;
+using Namotion.Interceptor.WebSocket.Server;
 using Namotion.Interceptor.ConnectorTester.Logging;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Registry;
@@ -39,6 +42,7 @@ public class VerificationEngine : BackgroundService
     private readonly List<ChaosEngine> _chaosEngines;
     private readonly CycleLoggerProvider? _cycleLoggerProvider;
     private readonly IHostApplicationLifetime _applicationLifetime;
+    private readonly IServiceProvider _serviceProvider;
     private readonly ILogger _logger;
 
     private int _cycleNumber;
@@ -57,6 +61,7 @@ public class VerificationEngine : BackgroundService
         List<ChaosEngine> chaosEngines,
         CycleLoggerProvider? cycleLoggerProvider,
         IHostApplicationLifetime applicationLifetime,
+        IServiceProvider serviceProvider,
         ILogger logger)
     {
         _configuration = configuration;
@@ -66,6 +71,7 @@ public class VerificationEngine : BackgroundService
         _chaosEngines = chaosEngines;
         _cycleLoggerProvider = cycleLoggerProvider;
         _applicationLifetime = applicationLifetime;
+        _serviceProvider = serviceProvider;
         _logger = logger;
     }
 
@@ -229,6 +235,7 @@ public class VerificationEngine : BackgroundService
 
                 // Detailed failure diagnostics
                 LogPropertyDiffsWithTimestamps(snapshots);
+                LogSequenceDiagnostics();
                 LogReSyncCheck(snapshots);
 
                 WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, "FAIL");
@@ -310,6 +317,35 @@ public class VerificationEngine : BackgroundService
 
         var timestamp = new PropertyReference(subject, propertyName).TryGetWriteTimestamp();
         return timestamp?.ToString("HH:mm:ss.fff");
+    }
+
+    /// <summary>
+    /// Logs WebSocket sequence numbers on failure to detect delivery gaps.
+    /// If server sequence > client's last received, updates were lost in transit.
+    /// </summary>
+    private void LogSequenceDiagnostics()
+    {
+        try
+        {
+            var hostedServices = _serviceProvider.GetServices<IHostedService>();
+
+            foreach (var service in hostedServices)
+            {
+                if (service is WebSocketSubjectServer server)
+                {
+                    _logger.LogError("  Server broadcast sequence: {Sequence}", server.CurrentSequence);
+                }
+                else if (service is WebSocketSubjectClientSource client)
+                {
+                    _logger.LogError("  Client last received sequence: {Sequence} (root: {RootType})",
+                        client.LastReceivedSequence, client.RootSubject.GetType().Name);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to log sequence diagnostics");
+        }
     }
 
     /// <summary>

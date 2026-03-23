@@ -1072,6 +1072,218 @@ public partial class SubjectUpdateExtensionsTests
         Assert.Equal("father-1", ((IInterceptorSubject)target.Father).TryGetSubjectId());
     }
 
+    [Fact]
+    public void WhenObjectRefNotFoundAndNotComplete_ThenSkipsCreation()
+    {
+        // Arrange: partial update references a subject by ID that doesn't exist locally
+        // and is NOT in CompleteSubjectIds (sender considered it "existing")
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new Person(context) { FirstName = "Parent" };
+
+        var update = new SubjectUpdate
+        {
+            Root = "root",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["root"] = new()
+                {
+                    ["Father"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Object,
+                        Id = "unknown-subject-id"
+                    }
+                }
+            },
+            CompleteSubjectIds = [] // empty set = no subjects are complete
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert: Father should remain null — the unknown subject was skipped, not created with defaults
+        Assert.Null(target.Father);
+    }
+
+    [Fact]
+    public void WhenObjectRefNotFoundButIsComplete_ThenCreatesSubject()
+    {
+        // Arrange: partial update references a subject with complete state
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new Person(context) { FirstName = "Parent" };
+
+        var update = new SubjectUpdate
+        {
+            Root = "root",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["root"] = new()
+                {
+                    ["Father"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Object,
+                        Id = "new-father"
+                    }
+                },
+                ["new-father"] = new()
+                {
+                    ["FirstName"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "John"
+                    }
+                }
+            },
+            CompleteSubjectIds = ["new-father"] // explicitly marked as complete
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert: Father created and populated
+        Assert.NotNull(target.Father);
+        Assert.Equal("John", target.Father.FirstName);
+    }
+
+    [Fact]
+    public void WhenObjectRefNotFoundAndCompleteSubjectIdsNull_ThenCreatesSubject()
+    {
+        // Arrange: null CompleteSubjectIds means "all subjects are complete" (e.g., complete update)
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new Person(context) { FirstName = "Parent" };
+
+        var update = new SubjectUpdate
+        {
+            Root = "root",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["root"] = new()
+                {
+                    ["Father"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Object,
+                        Id = "new-father"
+                    }
+                }
+            },
+            CompleteSubjectIds = null // null = all complete (backward compatible)
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert: Father created (null means all complete)
+        Assert.NotNull(target.Father);
+    }
+
+    [Fact]
+    public void WhenCollectionItemNotFoundAndNotComplete_ThenSkipsItem()
+    {
+        // Arrange: collection references a subject that doesn't exist locally and isn't complete
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new Person(context) { FirstName = "Parent", Children = [] };
+
+        var update = new SubjectUpdate
+        {
+            Root = "root",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["root"] = new()
+                {
+                    ["Children"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Items =
+                        [
+                            new SubjectPropertyItemUpdate { Id = "unknown-child" }
+                        ]
+                    }
+                }
+            },
+            CompleteSubjectIds = [] // not complete
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert: collection should be empty — unknown item was skipped
+        Assert.Empty(target.Children);
+    }
+
+    [Fact]
+    public void WhenDictionaryItemNotFoundAndNotComplete_ThenSkipsItem()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var target = new Person(context) { FirstName = "Root" };
+
+        var update = new SubjectUpdate
+        {
+            Root = "root",
+            Subjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>
+            {
+                ["root"] = new()
+                {
+                    ["Relationships"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Dictionary,
+                        Items =
+                        [
+                            new SubjectPropertyItemUpdate { Id = "unknown-item", Key = "friend" }
+                        ]
+                    }
+                }
+            },
+            CompleteSubjectIds = [] // not complete
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert: dictionary should be empty — unknown item was skipped
+        Assert.NotNull(target.Relationships);
+        Assert.Empty(target.Relationships);
+    }
+
+    [Fact]
+    public void WhenPartialUpdateFromChanges_ThenCompleteSubjectIdsIsPopulated()
+    {
+        // Arrange: create a model and make changes that trigger ProcessSubjectComplete
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new Person(context) { FirstName = "Root" };
+
+        var changes = new List<SubjectPropertyChange>();
+        using (context.GetPropertyChangeObservable(System.Reactive.Concurrency.ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c)))
+        {
+            // Structural change — adds a new subject that needs ProcessSubjectComplete
+            root.Father = new Person(context) { FirstName = "Father" };
+        }
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(root, changes.ToArray(), []);
+
+        // Assert: CompleteSubjectIds should be non-null and contain the new subject's ID
+        Assert.NotNull(update.CompleteSubjectIds);
+        Assert.NotEmpty(update.CompleteSubjectIds);
+
+        var fatherId = ((IInterceptorSubject)root.Father).TryGetSubjectId()!;
+        Assert.Contains(fatherId, update.CompleteSubjectIds);
+    }
+
+    [Fact]
+    public void WhenCompleteUpdate_ThenCompleteSubjectIdsIsNull()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new Person(context) { FirstName = "Root", Father = new Person(context) { FirstName = "Father" } };
+
+        // Act
+        var update = SubjectUpdate.CreateCompleteUpdate(root, []);
+
+        // Assert: null means "all subjects are complete"
+        Assert.Null(update.CompleteSubjectIds);
+    }
+
     /// <summary>
     /// Reproduces the "no-parents" registry leak during concurrent ApplySubjectUpdate
     /// (simulating WebSocket Welcome apply) and direct property writes (simulating

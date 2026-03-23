@@ -10,10 +10,11 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 internal sealed class SubjectUpdateApplyContext
 {
     private readonly HashSet<string> _processedSubjectIds = [];
+    private readonly Dictionary<string, IInterceptorSubject> _preResolvedSubjects = [];
 
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; private set; } = null!;
     public ISubjectFactory SubjectFactory { get; private set; } = null!;
-    public Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? TransformValueBeforeApply { get; private set; }
+    public Action<PropertyReference, SubjectPropertyUpdate>? TransformValueBeforeApply { get; private set; }
 
     /// <summary>
     /// The subject registry from the root subject's context.
@@ -28,17 +29,62 @@ internal sealed class SubjectUpdateApplyContext
     /// </summary>
     public ISubjectIdRegistry SubjectIdRegistry { get; private set; } = null!;
 
+    private HashSet<string>? _completeSubjectIds;
+
+    /// <summary>
+    /// Returns true if the subject ID has complete state in this update.
+    /// null means all subjects are complete (e.g., a full initial-state update).
+    /// </summary>
+    public bool IsSubjectComplete(string subjectId)
+        => _completeSubjectIds is null || _completeSubjectIds.Contains(subjectId);
+
     public void Initialize(
         IInterceptorSubjectContext rootContext,
         Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> subjects,
+        HashSet<string>? completeSubjectIds,
         ISubjectFactory subjectFactory,
-        Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply)
+        Action<PropertyReference, SubjectPropertyUpdate>? transformValueBeforeApply)
     {
         Subjects = subjects;
+        _completeSubjectIds = completeSubjectIds;
         SubjectFactory = subjectFactory;
         TransformValueBeforeApply = transformValueBeforeApply;
         SubjectRegistry = rootContext.GetService<ISubjectRegistry>();
         SubjectIdRegistry = rootContext.GetService<ISubjectIdRegistry>();
+    }
+
+    /// <summary>
+    /// Pre-resolves all subject IDs in <paramref name="subjectIds"/> to their
+    /// <see cref="IInterceptorSubject"/> instances using the live registry.
+    /// Must be called before any structural changes are applied, so that subjects
+    /// detached by the apply's own processing can still be found in Step 2.
+    /// </summary>
+    public void PreResolveSubjects(
+        IEnumerable<string> subjectIds,
+        ISubjectIdRegistry idRegistry)
+    {
+        foreach (var subjectId in subjectIds)
+        {
+            if (idRegistry.TryGetSubjectById(subjectId, out var subject))
+            {
+                _preResolvedSubjects[subjectId] = subject;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Tries to resolve a subject by ID. Checks the pre-resolved cache first
+    /// (captured before structural changes), then falls back to the live registry
+    /// (for subjects created during the apply, e.g., by structural processing).
+    /// </summary>
+    public bool TryResolveSubject(string subjectId, out IInterceptorSubject subject)
+    {
+        if (_preResolvedSubjects.TryGetValue(subjectId, out subject!))
+        {
+            return true;
+        }
+
+        return SubjectIdRegistry.TryGetSubjectById(subjectId, out subject!);
     }
 
     public bool TryMarkAsProcessed(string subjectId)
@@ -50,6 +96,8 @@ internal sealed class SubjectUpdateApplyContext
     public void Clear()
     {
         _processedSubjectIds.Clear();
+        _preResolvedSubjects.Clear();
+        _completeSubjectIds = null;
         Subjects = null!;
         SubjectFactory = null!;
         TransformValueBeforeApply = null;
