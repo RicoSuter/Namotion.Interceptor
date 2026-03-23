@@ -113,6 +113,14 @@ public class RegisteredSubject
         }
     }
 
+    internal void RemoveParentsByProperty(RegisteredSubjectProperty parent)
+    {
+        lock (_parentsLock)
+        {
+            _parents = _parents.RemoveAll(p => p.Property == parent);
+        }
+    }
+
     internal void UpdateParentIndex(RegisteredSubjectProperty property, object? oldIndex, object? newIndex)
     {
         lock (_parentsLock)
