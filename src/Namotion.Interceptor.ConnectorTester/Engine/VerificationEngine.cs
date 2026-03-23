@@ -356,17 +356,16 @@ public class VerificationEngine : BackgroundService
     }
 
     /// <summary>
-    /// Compares two normalized snapshots. Value property timestamps are compared only when
-    /// both sides have a non-null timestamp. A null timestamp (property never explicitly written)
-    /// matches any timestamp — this is legitimate after server rebuild or when EqualityCheck
-    /// skips a redundant write because the value didn't change.
+    /// Compares two normalized snapshots by traversing the JSON tree field-by-field.
+    /// Value property timestamps are compared only when both sides have a non-null timestamp.
+    /// A null timestamp (property never explicitly written) matches any timestamp — this is
+    /// legitimate after server rebuild or when EqualityCheck skips a redundant write.
     /// </summary>
     private static bool SnapshotsMatch(string snapshotA, string snapshotB)
     {
         if (snapshotA == snapshotB)
             return true;
 
-        // Fast path failed — check if the only differences are null vs non-null timestamps
         var a = JsonNode.Parse(snapshotA)!["subjects"]?.AsObject();
         var b = JsonNode.Parse(snapshotB)!["subjects"]?.AsObject();
 
@@ -392,33 +391,59 @@ public class VerificationEngine : BackgroundService
 
                 var propA = propNodeA!.AsObject();
 
-                // Compare all fields except timestamp first
-                var timestampA = propA["timestamp"];
-                var timestampB = propB["timestamp"];
-
-                // Temporarily remove timestamps for value comparison
-                propA.Remove("timestamp");
-                propB.Remove("timestamp");
-
-                var valuesMatch = propA.ToJsonString() == propB.ToJsonString();
-
-                // Restore timestamps
-                if (timestampA is not null) propA["timestamp"] = timestampA.DeepClone();
-                if (timestampB is not null) propB["timestamp"] = timestampB.DeepClone();
-
-                if (!valuesMatch)
+                if (!PropertiesMatch(propA, propB))
                     return false;
-
-                // Values match — compare timestamps only when both are non-null
-                if (timestampA is not null && timestampB is not null &&
-                    timestampA.ToJsonString() != timestampB.ToJsonString())
-                {
-                    return false;
-                }
             }
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Compares two property JSON objects by iterating all fields generically.
+    /// The only special case is "timestamp": compared only when both sides are non-null
+    /// (a null timestamp is legitimate after server rebuild or equality-check skip).
+    /// All other fields are compared directly, so new fields added to SubjectPropertyUpdate
+    /// are automatically included without code changes here.
+    /// </summary>
+    private static bool PropertiesMatch(JsonObject propA, JsonObject propB)
+    {
+        // Collect all keys from both sides
+        var allKeys = new HashSet<string>(propA.Select(kvp => kvp.Key));
+        allKeys.UnionWith(propB.Select(kvp => kvp.Key));
+
+        foreach (var key in allKeys)
+        {
+            var valueA = propA[key];
+            var valueB = propB[key];
+
+            if (key == "timestamp")
+            {
+                // Only compare when both sides have a non-null timestamp
+                if (valueA is not null && valueB is not null &&
+                    !JsonValuesEqual(valueA, valueB))
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                if (!JsonValuesEqual(valueA, valueB))
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool JsonValuesEqual(JsonNode? a, JsonNode? b)
+    {
+        if (a is null && b is null)
+            return true;
+        if (a is null || b is null)
+            return false;
+
+        return a.ToJsonString() == b.ToJsonString();
     }
 
     private static string CreateSnapshot(TestNode root)
