@@ -166,10 +166,8 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                     
                     if (change.IsContextDetach)
                     {
-                        // Clean up parent/child references for properties that
-                        // can contain subjects. Removes stale parent references from
-                        // children that may still be alive (multi-parent) or are about
-                        // to detach (recursive), and clears the children list.
+                        // Remove stale parent references from children and clear
+                        // children lists before this subject leaves _knownSubjects.
                         foreach (var property in registeredSubject.Properties)
                         {
                             if (!property.CanContainSubjects)
