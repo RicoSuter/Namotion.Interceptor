@@ -117,7 +117,16 @@ public class RegisteredSubject
     {
         lock (_parentsLock)
         {
-            _parents = _parents.RemoveAll(p => p.Property == parent);
+            var parents = _parents;
+            for (var i = parents.Length - 1; i >= 0; i--)
+            {
+                if (parents[i].Property == parent)
+                {
+                    parents = parents.RemoveAt(i);
+                }
+            }
+
+            _parents = parents;
         }
     }
 
