@@ -113,6 +113,23 @@ public class RegisteredSubject
         }
     }
 
+    internal void RemoveParentsByProperty(RegisteredSubjectProperty parent)
+    {
+        lock (_parentsLock)
+        {
+            var parents = _parents;
+            for (var i = parents.Length - 1; i >= 0; i--)
+            {
+                if (parents[i].Property == parent)
+                {
+                    parents = parents.RemoveAt(i);
+                }
+            }
+
+            _parents = parents;
+        }
+    }
+
     internal void UpdateParentIndex(RegisteredSubjectProperty property, object? oldIndex, object? newIndex)
     {
         lock (_parentsLock)
