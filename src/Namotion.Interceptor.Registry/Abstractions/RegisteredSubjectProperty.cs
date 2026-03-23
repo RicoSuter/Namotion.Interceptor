@@ -320,6 +320,15 @@ public class RegisteredSubjectProperty
         return property.Reference;
     }
 
+    internal void ClearChildren()
+    {
+        lock (_children)
+        {
+            _children.Clear();
+            _childrenCache = default;
+        }
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void AddChild(SubjectPropertyChild child)
     {
