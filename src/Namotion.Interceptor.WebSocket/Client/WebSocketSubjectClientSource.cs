@@ -264,7 +264,10 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             // are forwarded to the server.
             var lifecycle = _subject.Context.TryGetLifecycleInterceptor();
             if (lifecycle is not null)
+            {
+                lifecycle.SubjectAttached -= OnSubjectAttached;
                 lifecycle.SubjectAttached += OnSubjectAttached;
+            }
 
             _initialState = null;
         });
