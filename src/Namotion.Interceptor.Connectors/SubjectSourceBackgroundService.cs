@@ -12,8 +12,9 @@ public class SubjectSourceBackgroundService : BackgroundService
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
     private readonly TimeSpan _retryTime;
-    private readonly WriteRetryQueue? _writeRetryQueue;
     private readonly SubjectPropertyWriter _propertyWriter;
+
+    internal WriteRetryQueue? WriteRetryQueue { get; }
 
     public SubjectSourceBackgroundService(
         ISubjectSource source,
@@ -31,7 +32,7 @@ public class SubjectSourceBackgroundService : BackgroundService
 
         if (writeRetryQueueSize > 0)
         {
-            _writeRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger);
+            WriteRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger);
         }
 
         _propertyWriter = new SubjectPropertyWriter(source, logger);
@@ -93,7 +94,7 @@ public class SubjectSourceBackgroundService : BackgroundService
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
     private async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        if (_writeRetryQueue is null)
+        if (WriteRetryQueue is null)
         {
             // No retry queue - write directly
             try
@@ -117,10 +118,10 @@ public class SubjectSourceBackgroundService : BackgroundService
         }
 
         // First flush any queued changes
-        var succeeded = await _writeRetryQueue.FlushAsync(_source, cancellationToken).ConfigureAwait(false);
+        var succeeded = await WriteRetryQueue.FlushAsync(_source, cancellationToken).ConfigureAwait(false);
         if (!succeeded)
         {
-            _writeRetryQueue.Enqueue(changes);
+            WriteRetryQueue.Enqueue(changes);
             return;
         }
 
@@ -132,7 +133,7 @@ public class SubjectSourceBackgroundService : BackgroundService
             {
                 _logger.LogWarning(result.Error, "Failed to write {Count} changes to source, queuing for retry.",
                     result.FailedChanges.Length);
-                _writeRetryQueue.Enqueue(result.FailedChanges.ToArray());
+                WriteRetryQueue.Enqueue(result.FailedChanges.ToArray());
             }
         }
         catch (OperationCanceledException)
@@ -142,13 +143,13 @@ public class SubjectSourceBackgroundService : BackgroundService
         catch (Exception e)
         {
             _logger.LogWarning(e, "Failed to write {Count} changes to source, queuing for retry.", changes.Length);
-            _writeRetryQueue.Enqueue(changes);
+            WriteRetryQueue.Enqueue(changes);
         }
     }
 
     private void ReapplyRetryQueue()
     {
-        var retryChanges = _writeRetryQueue?.DrainForLocalReapply();
+        var retryChanges = WriteRetryQueue?.DrainForLocalReapply();
         if (retryChanges is null || retryChanges.Length == 0)
         {
             return;
@@ -192,7 +193,7 @@ public class SubjectSourceBackgroundService : BackgroundService
     /// <inheritdoc />
     public override void Dispose()
     {
-        _writeRetryQueue?.Dispose();
+        WriteRetryQueue?.Dispose();
         base.Dispose();
     }
 }
