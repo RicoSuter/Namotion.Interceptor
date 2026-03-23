@@ -221,11 +221,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
                 var metadata = entry.Value;
                 if (metadata is { IsIntercepted: true } && metadata.Type.CanContainSubjects())
                 {
-                    // Read _lastProcessedValues (what the lifecycle has actually attached)
-                    // instead of the backing store. A concurrent next() may have written a
-                    // new (unattached) child to the backing store. The parent-dead check
-                    // in WriteProperty undoes attachments to concurrently detached parents,
-                    // so only _lastProcessedValues contains actually-attached children.
+                    // Use _lastProcessedValues (what was actually attached) instead of the backing
+                    // store, which may contain unattached children from a concurrent next() call.
                     if (_lastProcessedValues.TryGetValue(subjectProperty, out var lastProcessed) && lastProcessed is not null)
                     {
                         children ??= GetList();
@@ -354,11 +351,8 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
                 _lastProcessedValues[context.Property] = newValue;
 
-                // If the parent was concurrently detached (by another thread's DetachFromProperty
-                // that ran between our next() and this lock acquisition), the children we just
-                // attached are orphaned — the parent is no longer reachable from the root.
-                // Clean up immediately: remove the dangling _lastProcessedValues entry and
-                // detach the children we just attached to maintain registry consistency.
+                // Parent was concurrently detached between next() and lock acquisition —
+                // undo: remove dangling _lastProcessedValues and detach orphaned children.
                 if (!_attachedSubjects.ContainsKey(context.Property.Subject))
                 {
                     _lastProcessedValues.Remove(context.Property);
