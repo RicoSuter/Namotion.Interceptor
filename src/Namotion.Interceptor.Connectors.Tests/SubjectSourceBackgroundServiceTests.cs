@@ -502,8 +502,8 @@ public class SubjectSourceBackgroundServiceTests
             .WithRegistry();
         var subject = new Person(context) { FirstName = "Original" };
 
-        var (service, sourceMock, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
-            welcomeAction: () => { subject.FirstName = "Original"; }); // Server didn't change it
+        var (service, _, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () => { subject.FirstName = "Original"; }); // Server didn't change it
 
         // Pre-fill retry queue: client changed "Original" → "ClientChange"
         EnqueueRetryChange(service, subject, nameof(Person.FirstName), "Original", "ClientChange");
@@ -529,8 +529,8 @@ public class SubjectSourceBackgroundServiceTests
             .WithRegistry();
         var subject = new Person(context) { FirstName = "Original" };
 
-        var (service, sourceMock, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
-            welcomeAction: () => { subject.FirstName = "ServerChanged"; }); // Server DID change it
+        var (service, _, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () => { subject.FirstName = "ServerChanged"; }); // Server DID change it
 
         // Pre-fill retry queue: client changed "Original" → "ClientChange"
         EnqueueRetryChange(service, subject, nameof(Person.FirstName), "Original", "ClientChange");
@@ -556,8 +556,8 @@ public class SubjectSourceBackgroundServiceTests
         var personB = new Person(context) { FirstName = "B" };
         var subject = new Person(context) { Father = personA };
 
-        var (service, sourceMock, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
-            welcomeAction: () => { subject.Father = personA; }); // Server didn't change it
+        var (service, _, _, writeTcs) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () => { subject.Father = personA; }); // Server didn't change it
 
         // Pre-fill retry queue: client changed Father from personA → personB
         EnqueueRetryChange<Person?>(service, subject, nameof(Person.Father), personA, personB);
@@ -583,8 +583,8 @@ public class SubjectSourceBackgroundServiceTests
         var personC = new Person(context) { FirstName = "C" };
         var subject = new Person(context) { Father = personA };
 
-        var (service, sourceMock, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
-            welcomeAction: () => { subject.Father = personC; }); // Server replaced with C
+        var (service, _, _, _) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () => { subject.Father = personC; }); // Server replaced with C
 
         // Pre-fill retry queue: client changed Father from personA → personB
         EnqueueRetryChange<Person?>(service, subject, nameof(Person.Father), personA, personB);
@@ -609,8 +609,8 @@ public class SubjectSourceBackgroundServiceTests
         var listB = new List<Person> { new Person(context) { FirstName = "Child" } };
         var subject = new Person(context) { Children = listA };
 
-        var (service, sourceMock, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
-            welcomeAction: () => { subject.Children = listA; }); // Server didn't replace it
+        var (service, _, _, writeTcs) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () => { subject.Children = listA; }); // Server didn't replace it
 
         // Pre-fill retry queue: client replaced collection listA → listB
         EnqueueRetryChange(service, subject, nameof(Person.Children), listA, listB);
@@ -636,8 +636,8 @@ public class SubjectSourceBackgroundServiceTests
         var listC = new List<Person> { new Person(context) { FirstName = "ServerChild" } };
         var subject = new Person(context) { Children = listA };
 
-        var (service, sourceMock, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
-            welcomeAction: () => { subject.Children = listC; }); // Server replaced collection
+        var (service, _, _, _) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () => { subject.Children = listC; }); // Server replaced collection
 
         // Pre-fill retry queue: client replaced listA → listB
         EnqueueRetryChange(service, subject, nameof(Person.Children), listA, listB);
@@ -660,8 +660,8 @@ public class SubjectSourceBackgroundServiceTests
             .WithRegistry();
         var subject = new Person(context) { FirstName = "OrigFirst", LastName = "OrigLast" };
 
-        var (service, sourceMock, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
-            welcomeAction: () =>
+        var (service, _, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () =>
             {
                 subject.FirstName = "ServerFirst"; // Server changed this → conflict
                 subject.LastName = "OrigLast";     // Server didn't change this → no conflict
@@ -693,8 +693,8 @@ public class SubjectSourceBackgroundServiceTests
             .WithRegistry();
         var subject = new Person(context) { FirstName = "OrigFirst", LastName = "OrigLast" };
 
-        var (service, sourceMock, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
-            welcomeAction: () =>
+        var (service, _, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () =>
             {
                 subject.FirstName = "ServerFirst";
                 subject.LastName = "ServerLast";
@@ -723,8 +723,8 @@ public class SubjectSourceBackgroundServiceTests
             .WithRegistry();
         var subject = new Person(context) { FirstName = "Original" };
 
-        var (service, sourceMock, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
-            welcomeAction: () => { subject.FirstName = "ServerValue"; });
+        var (service, _, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () => { subject.FirstName = "ServerValue"; });
 
         // No retry changes enqueued
 
@@ -733,7 +733,7 @@ public class SubjectSourceBackgroundServiceTests
         await Task.Delay(500);
         await service.StopAsync(CancellationToken.None);
 
-        // Assert — Welcome applied, no retry changes sent
+        // Assert — Initial state applied, no retry changes sent
         Assert.Equal("ServerValue", subject.FirstName);
         Assert.Empty(writtenChanges);
     }
@@ -773,7 +773,7 @@ public class SubjectSourceBackgroundServiceTests
 
     private static (SubjectSourceBackgroundService service, Mock<ISubjectSource> sourceMock,
         ConcurrentBag<SubjectPropertyChange> writtenChanges, TaskCompletionSource writeTcs)
-        CreateServiceWithRetryQueue(Person subject, IInterceptorSubjectContext context, Action welcomeAction)
+        CreateServiceWithRetryQueue(Person subject, IInterceptorSubjectContext context, Action initialStateAction)
     {
         var sourceMock = new Mock<ISubjectSource>();
         var writtenChanges = new ConcurrentBag<SubjectPropertyChange>();
@@ -787,7 +787,7 @@ public class SubjectSourceBackgroundServiceTests
             {
                 using (SubjectChangeContext.WithSource(sourceMock.Object))
                 {
-                    welcomeAction();
+                    initialStateAction();
                 }
             });
 

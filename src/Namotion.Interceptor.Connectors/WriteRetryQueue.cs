@@ -192,7 +192,7 @@ internal sealed class WriteRetryQueue : IDisposable
     /// <summary>
     /// Drains all pending writes from the queue for local re-application with optimistic concurrency.
     /// Used on reconnection: instead of flushing stale changes to the server, the caller compares
-    /// each change's old value with the current (post-Welcome) value and re-applies locally if non-conflicting.
+    /// each change's old value with the current (post-reconnection) value and re-applies locally if non-conflicting.
     /// </summary>
     public SubjectPropertyChange[] DrainForLocalReapply()
     {

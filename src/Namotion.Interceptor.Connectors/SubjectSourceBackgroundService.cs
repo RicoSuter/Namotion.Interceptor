@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Namotion.Interceptor.Connectors.Transactions;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors;
@@ -59,9 +58,9 @@ public class SubjectSourceBackgroundService : BackgroundService
                         _bufferTime,
                         _logger);
 
-                    // Optimistic retry re-apply: after Welcome + CQP creation,
-                    // re-apply queued changes locally if the server hasn't changed the property.
-                    // CQP picks up re-applied changes and sends them to the server as fresh writes.
+                    // Optimistic retry re-apply: after initial state load + ChangeQueueProcessor creation,
+                    // re-apply queued changes locally if the source hasn't changed the property.
+                    // ChangeQueueProcessor picks up re-applied changes and sends them to the source as fresh writes.
                     ReapplyRetryQueue();
 
                     await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
@@ -129,7 +128,7 @@ public class SubjectSourceBackgroundService : BackgroundService
         try
         {
             var result = await _source.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
-            if (!result.IsFullySuccessful && !result.FailedChanges.IsEmpty)
+            if (result is { IsFullySuccessful: false, FailedChanges.IsEmpty: false })
             {
                 _logger.LogWarning(result.Error, "Failed to write {Count} changes to source, queuing for retry.",
                     result.FailedChanges.Length);
@@ -166,7 +165,7 @@ public class SubjectSourceBackgroundService : BackgroundService
             if (Equals(currentValue, oldValue))
             {
                 // Server hasn't changed this property — re-apply client's change locally.
-                // The interceptor chain fires, CQP captures the change, and sends it to the server.
+                // The interceptor chain fires, ChangeQueueProcessor captures the change, and sends it to the source.
                 property.Metadata.SetValue?.Invoke(property.Subject, change.GetNewValue<object>());
                 applied++;
             }
