@@ -310,6 +310,8 @@ Events are useful for:
 
 The lifecycle interceptor is fully thread-safe. Multiple threads can concurrently write to the same structural property — reference counts remain consistent, no subjects are orphaned, and all attach/detach callbacks fire exactly once per transition.
 
+> **Internal design:** For details on the concurrency model and correctness guarantees, see [Lifecycle Interceptor Design](design/tracking-lifecycle.md).
+
 ### Handler Requirements
 
 > **Important**: Both `ILifecycleHandler` methods and lifecycle events are invoked **synchronously inside a lock**. Handlers must follow these requirements:
