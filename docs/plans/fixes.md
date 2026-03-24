@@ -536,3 +536,47 @@ For EXISTING subjects (found in registry, have context + interceptors), properti
 **Tests:** `ApplyUpdate_NewDictItem_HasPropertiesAppliedBeforeGraphEntry`, `ApplyUpdate_NewCollectionItem_HasPropertiesAppliedBeforeGraphEntry`, `ApplyUpdate_NewObjectRef_HasPropertiesAppliedBeforeGraphEntry`, `ApplyUpdate_NewDictItemWithNestedObjectRef_FullSubgraphPopulated`
 
 **Status:** Applied. All tests pass. Awaiting chaos tester validation.
+
+---
+
+## Open Problem: Temporary unregistration during update apply (subject moves between properties)
+
+**Symptom:** When a subject moves between structural properties within the same update (e.g., DictA → DictB), the apply algorithm processes properties sequentially. Dictionary iteration order determines which property is processed first. If the source property is processed first, the subject is fully detached — removed from both `_knownSubjects` and `_subjectIdToSubject`. If the CQP flushes during this window, its property filter calls `TryGetRegisteredProperty()` which returns null → value change silently dropped → permanent divergence that does not self-heal without reconnection.
+
+Subject swaps (DictA: X↔Y, DictB: Y↔X) make this unsolvable by ordering — no safe processing order exists.
+
+**Root cause:** The `LifecycleInterceptor` processes each `SetValue` independently. Setting DictA (without X) triggers a full lifecycle detach of X (removed from `_knownSubjects`, `_subjectIdToSubject`, parent/child cleanup). Moments later, setting DictB (with X) re-attaches X from scratch. The gap between detach and re-attach is visible to the CQP flush thread.
+
+**Impact:** Narrow race — requires a concurrent local mutation to change a property on a subject that is exactly mid-move, AND the CQP to flush during that window. Extremely unlikely but not impossible at high mutation rates during chaos testing.
+
+### Potential Fix A: Deferred ID removal (stashed)
+
+Add `SuppressIdRemoval()` to `ISubjectIdRegistry`. During suppression, `_subjectIdToSubject.Remove(id)` is deferred. On resume, only IDs removed but NOT re-added are actually removed (set difference).
+
+**Limitation:** Only preserves `_subjectIdToSubject` (the ID reverse index). Subjects are still removed from `_knownSubjects` on detach. The CQP filter uses `TryGetRegisteredProperty()` which depends on `_knownSubjects`, not `_subjectIdToSubject`. So the CQP value-loss gap for concurrent mutations during subject moves is NOT fully fixed. The fix does help the applier's own `TryGetSubjectById` calls within the apply session.
+
+Could be extended to also defer `_knownSubjects` removal, but this adds complexity and leaves parent/child links in an inconsistent state during the window.
+
+**Implementation:** Complete, stashed in `git stash` ("deferred-id-removal-implementation"). Design doc at `docs/plans/2026-03-24-deferred-id-removal.md`.
+
+### Potential Fix B: Lifecycle scope (preferred direction)
+
+Add a batching mechanism to the `LifecycleInterceptor` — `CreateScope()` returns an `IDisposable` scope. Within the scope:
+
+- `SetValue` still writes to the backing store via `next()` (values must be immediately visible)
+- Lifecycle diff/attach/detach processing is **deferred**, not immediate
+- On dispose: compute the **net diff** (initial state → final state) for each changed property
+
+Benefits:
+- Subjects present in both initial AND final state are **never detached** — no temporary unregistration at any level
+- Single lifecycle diff per scope instead of N diffs per SetValue → potential performance improvement for bulk operations (e.g., adding many collection items)
+- Fixes the CQP gap completely: `_knownSubjects` and `_subjectIdToSubject` are never temporarily inconsistent
+
+Open questions:
+- Thread safety: `LifecycleInterceptor` uses `lock(_attachedSubjects)` and `_lastProcessedValues` — how does deferred processing interact?
+- Other interceptors (change tracking, equality) may depend on immediate lifecycle processing
+- `SubjectRegistry` hooks into lifecycle events — needs to see correct net changes, not intermediate states
+- How does this interact with concurrent mutations during the scope window?
+- Performance benchmarking: does batching actually improve `addLotsOfCars` and similar benchmarks?
+
+**Status:** Under investigation. Needs design and prototyping.
