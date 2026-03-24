@@ -220,4 +220,204 @@ public class StableIdApplyTests
         Assert.Equal("RootUpdated", node.Name);
         Assert.Equal("ChildUpdated", child.Name);
     }
+
+    [Fact]
+    public void ApplyUpdate_NewDictItem_HasPropertiesAppliedBeforeGraphEntry()
+    {
+        // Arrange: root with empty dict
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new CycleTestNode(context) { Name = "Root" };
+        var rootId = root.GetOrAddSubjectId();
+
+        // Update adds a new dict item with properties — the new subject should have
+        // values applied BEFORE entering the graph (no interceptors on new instance).
+        var newItemId = "new-dict-item-id";
+        var update = new SubjectUpdate
+        {
+            Root = rootId,
+            Subjects = new()
+            {
+                [rootId] = new()
+                {
+                    ["Lookup"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Dictionary,
+                        Items =
+                        [
+                            new SubjectPropertyItemUpdate { Id = newItemId, Key = "key1" }
+                        ]
+                    }
+                },
+                [newItemId] = new()
+                {
+                    ["Name"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "NewItemName"
+                    }
+                }
+            },
+            CompleteSubjectIds = [newItemId]
+        };
+
+        // Act
+        SubjectUpdateApplier.ApplyUpdate(root, update, new DefaultSubjectFactory());
+
+        // Assert: new dict item exists with property value applied
+        Assert.Single(root.Lookup);
+        Assert.Equal("NewItemName", root.Lookup["key1"].Name);
+        Assert.Equal(newItemId, ((IInterceptorSubject)root.Lookup["key1"]).TryGetSubjectId());
+    }
+
+    [Fact]
+    public void ApplyUpdate_NewCollectionItem_HasPropertiesAppliedBeforeGraphEntry()
+    {
+        // Arrange: root with empty collection
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new CycleTestNode(context) { Name = "Root" };
+        var rootId = root.GetOrAddSubjectId();
+
+        var newItemId = "new-collection-item-id";
+        var update = new SubjectUpdate
+        {
+            Root = rootId,
+            Subjects = new()
+            {
+                [rootId] = new()
+                {
+                    ["Items"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Items =
+                        [
+                            new SubjectPropertyItemUpdate { Id = newItemId }
+                        ]
+                    }
+                },
+                [newItemId] = new()
+                {
+                    ["Name"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "NewCollectionItem"
+                    }
+                }
+            },
+            CompleteSubjectIds = [newItemId]
+        };
+
+        // Act
+        SubjectUpdateApplier.ApplyUpdate(root, update, new DefaultSubjectFactory());
+
+        // Assert
+        Assert.Single(root.Items);
+        Assert.Equal("NewCollectionItem", root.Items.First().Name);
+    }
+
+    [Fact]
+    public void ApplyUpdate_NewObjectRef_HasPropertiesAppliedBeforeGraphEntry()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new CycleTestNode(context) { Name = "Root" };
+        var rootId = root.GetOrAddSubjectId();
+
+        var newChildId = "new-objectref-child-id";
+        var update = new SubjectUpdate
+        {
+            Root = rootId,
+            Subjects = new()
+            {
+                [rootId] = new()
+                {
+                    ["Child"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Object,
+                        Id = newChildId
+                    }
+                },
+                [newChildId] = new()
+                {
+                    ["Name"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "NewChild"
+                    }
+                }
+            },
+            CompleteSubjectIds = [newChildId]
+        };
+
+        // Act
+        SubjectUpdateApplier.ApplyUpdate(root, update, new DefaultSubjectFactory());
+
+        // Assert
+        Assert.NotNull(root.Child);
+        Assert.Equal("NewChild", root.Child!.Name);
+        Assert.Equal(newChildId, ((IInterceptorSubject)root.Child).TryGetSubjectId());
+    }
+
+    [Fact]
+    public void ApplyUpdate_NewDictItemWithNestedObjectRef_FullSubgraphPopulated()
+    {
+        // Arrange: verifies that nested structural properties on new subjects
+        // are also populated before graph entry (recursive subgraph build).
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var root = new CycleTestNode(context) { Name = "Root" };
+        var rootId = root.GetOrAddSubjectId();
+
+        var dictItemId = "dict-item-id";
+        var nestedChildId = "nested-child-id";
+
+        var update = new SubjectUpdate
+        {
+            Root = rootId,
+            Subjects = new()
+            {
+                [rootId] = new()
+                {
+                    ["Lookup"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Dictionary,
+                        Items =
+                        [
+                            new SubjectPropertyItemUpdate { Id = dictItemId, Key = "k1" }
+                        ]
+                    }
+                },
+                [dictItemId] = new()
+                {
+                    ["Name"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "DictItem"
+                    },
+                    ["Child"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Object,
+                        Id = nestedChildId
+                    }
+                },
+                [nestedChildId] = new()
+                {
+                    ["Name"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "NestedChild"
+                    }
+                }
+            },
+            CompleteSubjectIds = [dictItemId, nestedChildId]
+        };
+
+        // Act
+        SubjectUpdateApplier.ApplyUpdate(root, update, new DefaultSubjectFactory());
+
+        // Assert: full subgraph populated
+        Assert.Single(root.Lookup);
+        var dictItem = root.Lookup["k1"];
+        Assert.Equal("DictItem", dictItem.Name);
+        Assert.NotNull(dictItem.Child);
+        Assert.Equal("NestedChild", dictItem.Child!.Name);
+    }
 }

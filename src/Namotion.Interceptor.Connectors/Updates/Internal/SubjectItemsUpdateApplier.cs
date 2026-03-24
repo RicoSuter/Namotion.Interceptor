@@ -32,9 +32,11 @@ internal static class SubjectItemsUpdateApplier
 
         var idRegistry = context.SubjectIdRegistry;
 
-        // Phase 1: Resolve or create subjects, set IDs on new subjects immediately
-        // so that GetOrAddSubjectId (called by ChangeQueueProcessor flush) finds the
-        // pre-assigned ID instead of generating a conflicting one.
+        // Phase 1: Resolve or create subjects, set IDs on new subjects.
+        // For NEW subjects (no context, no interceptors): apply properties immediately.
+        // This builds the full subgraph before it enters the graph, so concurrent
+        // mutations that read the backing store after Phase 2 get fully-populated instances.
+        // For EXISTING subjects (have context + interceptors): defer to Phase 3 (after rooting).
         var newItems = new List<(IInterceptorSubject Subject, string Id)>(propertyUpdate.Items.Count);
         foreach (var itemUpdate in propertyUpdate.Items)
         {
@@ -47,13 +49,14 @@ internal static class SubjectItemsUpdateApplier
             if (isNew)
             {
                 item.SetSubjectId(itemUpdate.Id);
+                ApplyPropertiesIfAvailable(item, itemUpdate.Id, context);
             }
 
             newItems.Add((item, itemUpdate.Id));
         }
 
         // Phase 2: Assign collection to graph (roots all items via lifecycle attach,
-        // which populates the reverse ID index from the pre-assigned IDs in Data)
+        // which discovers the fully-populated subgraph from backing store values)
         var subjects = new IInterceptorSubject[newItems.Count];
         for (var i = 0; i < newItems.Count; i++)
             subjects[i] = newItems[i].Subject;
@@ -64,7 +67,8 @@ internal static class SubjectItemsUpdateApplier
             metadata.SetValue?.Invoke(parent, collection);
         }
 
-        // Phase 3: Apply properties (subjects are now rooted with IDs set)
+        // Phase 3: Apply properties for EXISTING subjects (now rooted, lifecycle works correctly).
+        // New subjects were already applied in Phase 1.
         foreach (var (item, id) in newItems)
         {
             ApplyPropertiesIfAvailable(item, id, context);
@@ -95,9 +99,11 @@ internal static class SubjectItemsUpdateApplier
         var idRegistry = context.SubjectIdRegistry;
         var targetKeyType = metadata.Type.GenericTypeArguments[0];
 
-        // Phase 1: Resolve or create subjects, set IDs on new subjects immediately
-        // so that GetOrAddSubjectId (called by ChangeQueueProcessor flush) finds the
-        // pre-assigned ID instead of generating a conflicting one.
+        // Phase 1: Resolve or create subjects, set IDs on new subjects.
+        // For NEW subjects (no context, no interceptors): apply properties immediately.
+        // This builds the full subgraph before it enters the graph, so concurrent
+        // mutations that read the backing store after Phase 2 get fully-populated instances.
+        // For EXISTING subjects (have context + interceptors): defer to Phase 3 (after rooting).
         // Does NOT read the backing store — avoids race with concurrent structural mutations
         // whose next() wrote a different dictionary before acquiring the lifecycle lock.
         var newItems = new List<(object Key, IInterceptorSubject Subject, string Id)>(propertyUpdate.Items.Count);
@@ -116,13 +122,14 @@ internal static class SubjectItemsUpdateApplier
             if (isNew)
             {
                 item.SetSubjectId(itemUpdate.Id);
+                ApplyPropertiesIfAvailable(item, itemUpdate.Id, context);
             }
 
             newItems.Add((key, item, itemUpdate.Id));
         }
 
         // Phase 2: Build dictionary and assign to graph (roots all items via lifecycle attach,
-        // which populates the reverse ID index from the pre-assigned IDs in Data)
+        // which discovers the fully-populated subgraph from backing store values)
         var workingDictionary = new Dictionary<object, IInterceptorSubject>(newItems.Count);
         foreach (var (key, subject, _) in newItems)
             workingDictionary[key] = subject;
@@ -133,7 +140,8 @@ internal static class SubjectItemsUpdateApplier
             metadata.SetValue?.Invoke(parent, dictionary);
         }
 
-        // Phase 3: Apply properties (subjects are now rooted with IDs set)
+        // Phase 3: Apply properties for EXISTING subjects (now rooted, lifecycle works correctly).
+        // New subjects were already applied in Phase 1.
         foreach (var (_, subject, id) in newItems)
         {
             ApplyPropertiesIfAvailable(subject, id, context);

@@ -181,17 +181,33 @@ internal static class SubjectUpdateApplier
             targetItem.SetSubjectId(propertyUpdate.Id);
         }
 
-        // Always call SetValue — the lifecycle interceptor diffs against _lastProcessedValues
-        // and handles attach/detach correctly even if the subject is the same instance.
+        // For NEW subjects (no context, no interceptors): apply properties before SetValue.
+        // This builds the full subgraph before it enters the graph, so concurrent mutations
+        // that read the backing store after SetValue get fully-populated instances.
+        if (isNew)
+        {
+            if (context.Subjects.TryGetValue(propertyUpdate.Id, out var newItemProperties) &&
+                context.TryMarkAsProcessed(propertyUpdate.Id))
+            {
+                ApplyPropertyUpdates(targetItem, newItemProperties, context);
+            }
+        }
+
+        // Assign to graph — lifecycle interceptor diffs against _lastProcessedValues
+        // and discovers the fully-populated subgraph from backing store values.
         using (SubjectChangeContext.WithChangedTimestamp(propertyUpdate.Timestamp))
         {
             metadata.SetValue?.Invoke(parent, targetItem);
         }
 
-        if (context.Subjects.TryGetValue(propertyUpdate.Id, out var itemProperties) &&
-            context.TryMarkAsProcessed(propertyUpdate.Id))
+        // For EXISTING subjects (have context + interceptors): apply properties after rooting.
+        if (!isNew)
         {
-            ApplyPropertyUpdates(targetItem, itemProperties, context);
+            if (context.Subjects.TryGetValue(propertyUpdate.Id, out var itemProperties) &&
+                context.TryMarkAsProcessed(propertyUpdate.Id))
+            {
+                ApplyPropertyUpdates(targetItem, itemProperties, context);
+            }
         }
     }
 

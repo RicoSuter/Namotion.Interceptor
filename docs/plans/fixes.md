@@ -505,4 +505,34 @@ The 3-phase pattern (resolve → assign to graph → apply properties) avoids th
 
 **Fix:** Call `registeredSubject.ClearParents()` on `IsContextDetach` before removing from `_knownSubjects`. At this point the subject has zero valid parents (last reference removed), so any remaining entries are stale. Thread-safe: all under `lock(_knownSubjects)`, same lock order as `AddParent`/`RemoveParent`.
 
-**Status:** Applied. Awaiting tester validation.
+**Status:** Applied (via PR #233). Tester validated: `SubjectPropertyChild[]` count now fluctuates (980→815→850→728) instead of monotonically growing. `Action<SubjectLifecycleChange>` delegate leak also fixed (duplicate `SubjectAttached` subscription on WebSocket client reconnection: `-=` before `+=`).
+
+---
+
+## Fix 16: Phase 1 property application for new subjects
+
+**Files changed:** `SubjectItemsUpdateApplier.cs`, `SubjectUpdateApplier.cs`, `StableIdApplyTests.cs`
+
+**Cause:** The 3-phase apply pattern (Phase 1: create subjects, Phase 2: SetValue to root, Phase 3: apply properties) has a gap between Phase 2 and Phase 3. A concurrent structural mutation on the same thread can read the backing store after Phase 2, obtaining CLR instances with default values (properties not yet applied). If the mutation's dict overwrites the apply's dict and then the subject is later re-created, it gets fresh defaults permanently.
+
+**Race sequence:**
+1. Apply creates new subject X (Phase 1), assigns dict with X to graph (Phase 2)
+2. Concurrent mutation reads `target.Items` → gets dict WITH X → X has default values
+3. Phase 3 applies `X.DecimalValue = 2116803.35` → but mutation already captured X with defaults
+4. Mutation rebuilds dict → X has values (same CLR instance) → OK in this case
+5. BUT if mutation read BEFORE Phase 2, X is not in mutation's dict at all → X lost → later re-created with defaults
+
+**Fix:** For NEW subjects only (created without context, no interceptors), apply properties in Phase 1 before SetValue. Since new subjects have no interceptors, `SetValue` delegates are direct field writes — no lifecycle fires, no parent-dead check, no CQP captures. The full subgraph (including nested structural properties) is built entirely in memory before entering the graph.
+
+For EXISTING subjects (found in registry, have context + interceptors), properties are still applied in Phase 3 after rooting — the lifecycle must fire correctly for these.
+
+**Why this is safe:**
+- New subjects created by `Activator.CreateInstance` have no context and no interceptors
+- Property writes are direct field assignments — no side effects
+- `TryMarkAsProcessed` prevents double-application (Phase 1 marks, Phase 3 skips)
+- On Phase 2 SetValue, lifecycle discovers the fully-populated subgraph from backing store values
+- Recursive subgraphs work: nested new subjects are also context-less, build entirely in memory
+
+**Tests:** `ApplyUpdate_NewDictItem_HasPropertiesAppliedBeforeGraphEntry`, `ApplyUpdate_NewCollectionItem_HasPropertiesAppliedBeforeGraphEntry`, `ApplyUpdate_NewObjectRef_HasPropertiesAppliedBeforeGraphEntry`, `ApplyUpdate_NewDictItemWithNestedObjectRef_FullSubgraphPopulated`
+
+**Status:** Applied. All tests pass. Awaiting chaos tester validation.
