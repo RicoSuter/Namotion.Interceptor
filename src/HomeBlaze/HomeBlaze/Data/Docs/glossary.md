@@ -357,7 +357,7 @@ See `StateUnit` enum for full list.
 
 ## Related Documentation
 
-- [Architecture](Architecture.md) - System design overview
-- [Building Subjects](BuildingSubjects.md) - Creating custom subject types
-- [Configuration Guide](Configuration.md) - Configuring HomeBlaze
-- [Markdown Pages](Pages.md) - Creating interactive pages
+- [Architecture](architecture/overview.md) - System design overview
+- [Building Subjects](development/building-subjects.md) - Creating custom subject types
+- [Configuration Guide](administration/configuration.md) - Configuring HomeBlaze
+- [Markdown Pages](development/pages.md) - Creating interactive pages

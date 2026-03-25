@@ -65,7 +65,7 @@ Expressions resolve relative to the current page's embedded subjects first, then
 | `mymotor.Speed` | Inline subject named `mymotor` embedded in current page |
 | `Root.Demo.Conveyor.CurrentSpeed` | Absolute path from root |
 
-See [Configuration Guide - Path Syntax](Configuration.md#path-syntax) for full path documentation including `this.`, `../`, brackets for keys with dots, and more.
+See [Configuration Guide - Path Syntax](../administration/configuration.md#path-syntax) for full path documentation including `this.`, `../`, brackets for keys with dots, and more.
 
 ### Expression Features
 
@@ -128,9 +128,9 @@ The motor's current speed is {{ motor1.CurrentSpeed }} RPM.
 Links between markdown pages use relative paths that HomeBlaze converts to proper routes:
 
 ```markdown
-See the [Architecture Guide](Architecture.md) for details.
+See the [Project Structure](../architecture/project-structure.md) for details.
 
-Check the [demo setup](../Demo/Setup.md) for examples.
+Check the [installation guide](../administration/installation.md) for examples.
 ```
 
 ### Link Resolution
@@ -204,6 +204,5 @@ For more details, see [Motor Setup Guide](../samples/MotorSetup.md).
 
 ## Related Documentation
 
-- [Building Custom Subjects](BuildingSubjects.md) - Create subject types for embedding
-- [Configuration Guide](Configuration.md) - Configure storage and subjects
-- [Demo Setup Guide](../Demo/Setup.md) - See embedded subjects in action
+- [Building Custom Subjects](building-subjects.md) - Create subject types for embedding
+- [Configuration Guide](../administration/configuration.md) - Configure storage and subjects
