@@ -1,3 +1,9 @@
+---
+title: Building Custom Subjects
+navTitle: Building Subjects
+position: 0
+---
+
 # Building Custom Subjects
 
 This guide explains how to create custom subjects for HomeBlaze, using the Motor example as reference.
@@ -627,7 +633,7 @@ public partial class Widget : IConfigurableSubject
 
 ### Referencing Other Subjects
 
-Use paths to reference subjects in the object graph. See [Configuration Guide - Path Syntax](Configuration.md#path-syntax) for full documentation.
+Use paths to reference subjects in the object graph. See [Configuration Guide - Path Syntax](../administration/configuration.md#path-syntax) for full documentation.
 
 **Quick Reference:**
 

@@ -226,8 +226,6 @@ The demo includes pre-configured motors in the `demo/` folder:
 | Water Pump | 2,400 RPM | 1s |
 | Compressor | 3,000 RPM | 1s |
 
-See the [Demo Setup Guide](../Demo/Setup.md) for details.
-
 ---
 
 ## Tips & Best Practices
@@ -242,6 +240,6 @@ See the [Demo Setup Guide](../Demo/Setup.md) for details.
 
 ## Related Documentation
 
-- [Markdown Pages](Pages.md) - Creating interactive pages
-- [Building Subjects](BuildingSubjects.md) - Creating custom subject types
-- [Architecture](Architecture.md) - System design overview
+- [Markdown Pages](../development/pages.md) - Creating interactive pages
+- [Building Subjects](../development/building-subjects.md) - Creating custom subject types
+- [Architecture](../architecture/overview.md) - System design overview
