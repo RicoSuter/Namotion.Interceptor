@@ -185,8 +185,8 @@ public class SubjectSourceBackgroundService : BackgroundService
         else if (applied > 0)
         {
             _logger.LogInformation(
-                "Retry queue optimistic re-apply: {Applied} re-applied, {Dropped} dropped.",
-                applied, dropped);
+                "Retry queue optimistic re-apply: {Applied} changes re-applied.",
+                applied);
         }
     }
 
