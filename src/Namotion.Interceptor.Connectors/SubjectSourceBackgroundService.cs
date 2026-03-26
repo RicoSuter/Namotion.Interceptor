@@ -157,30 +157,41 @@ public class SubjectSourceBackgroundService : BackgroundService
 
         var applied = 0;
         var dropped = 0;
+        var failed = 0;
         foreach (var change in retryChanges)
         {
-            var property = change.Property;
-            var currentValue = property.Metadata.GetValue?.Invoke(property.Subject);
-            var oldValue = change.GetOldValue<object>();
+            try
+            {
+                var property = change.Property;
+                var currentValue = property.Metadata.GetValue?.Invoke(property.Subject);
+                var oldValue = change.GetOldValue<object>();
 
-            if (Equals(currentValue, oldValue))
-            {
-                // Server hasn't changed this property — re-apply client's change locally.
-                // The interceptor chain fires, ChangeQueueProcessor captures the change, and sends it to the source.
-                property.Metadata.SetValue?.Invoke(property.Subject, change.GetNewValue<object>());
-                applied++;
+                if (Equals(currentValue, oldValue))
+                {
+                    // Server hasn't changed this property — re-apply client's change locally.
+                    // The interceptor chain fires, ChangeQueueProcessor captures the change, and sends it to the source.
+                    property.Metadata.SetValue?.Invoke(property.Subject, change.GetNewValue<object>());
+                    applied++;
+                }
+                else
+                {
+                    dropped++;
+                }
             }
-            else
+            catch (Exception exception)
             {
-                dropped++;
+                _logger.LogWarning(exception,
+                    "Failed to re-apply retry queue change for property '{PropertyName}', dropping.",
+                    change.Property.Name);
+                failed++;
             }
         }
 
-        if (dropped > 0)
+        if (dropped > 0 || failed > 0)
         {
             _logger.LogWarning(
-                "Retry queue optimistic re-apply: {Applied} re-applied, {Dropped} dropped (source wins).",
-                applied, dropped);
+                "Retry queue optimistic re-apply: {Applied} re-applied, {Dropped} dropped (source wins), {Failed} failed.",
+                applied, dropped, failed);
         }
         else if (applied > 0)
         {

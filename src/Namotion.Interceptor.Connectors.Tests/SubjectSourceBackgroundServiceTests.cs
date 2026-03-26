@@ -832,6 +832,36 @@ public class SubjectSourceBackgroundServiceTests
         Assert.Equal("ServerValue", subject.FirstName);
     }
 
+    [Fact]
+    public async Task WhenRetryChangeThrowsDuringReapply_ThenRemainingChangesAreStillProcessed()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context) { FirstName = "Original", LastName = "Original" };
+
+        var (service, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () => { }); // Server didn't change anything
+
+        // Enqueue a change with a bogus property name — Metadata access will throw
+        EnqueueRetryChange(service, subject, "NonExistentProperty", "old", "new");
+
+        // Enqueue a valid change after the broken one
+        EnqueueRetryChange(service, subject, nameof(Person.LastName), "Original", "ClientLast");
+
+        // Act
+        await service.StartAsync(CancellationToken.None);
+        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert — broken change failed, but LastName was still re-applied
+        Assert.Equal("ClientLast", subject.LastName);
+        Assert.Contains(writtenChanges, c =>
+            c.Property.Name == nameof(Person.LastName) &&
+            c.GetNewValue<string?>() == "ClientLast");
+    }
+
     private static (SubjectSourceBackgroundService service,
         ConcurrentBag<SubjectPropertyChange> writtenChanges, TaskCompletionSource writeTcs)
         CreateServiceWithRetryQueue(Person subject, IInterceptorSubjectContext context, Action initialStateAction)
