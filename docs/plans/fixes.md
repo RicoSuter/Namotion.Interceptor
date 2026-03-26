@@ -539,44 +539,27 @@ For EXISTING subjects (found in registry, have context + interceptors), properti
 
 ---
 
-## Open Problem: Temporary unregistration during update apply (subject moves between properties)
+## Fix 17: Deferred subject removal and CQP filter resilience
 
-**Symptom:** When a subject moves between structural properties within the same update (e.g., DictA → DictB), the apply algorithm processes properties sequentially. Dictionary iteration order determines which property is processed first. If the source property is processed first, the subject is fully detached — removed from both `_knownSubjects` and `_subjectIdToSubject`. If the CQP flushes during this window, its property filter calls `TryGetRegisteredProperty()` which returns null → value change silently dropped → permanent divergence that does not self-heal without reconnection.
+**Files changed:** `SubjectRegistry.cs`, `SubjectUpdateApplier.cs`, `WebSocketSubjectHandler.cs`, `MqttSubjectServerBackgroundService.cs`
 
-Subject swaps (DictA: X↔Y, DictB: Y↔X) make this unsolvable by ordering — no safe processing order exists.
+**Symptom:** When a subject is momentarily unregistered during a concurrent structural mutation, the CQP filter drops value changes for that subject → permanent divergence. Two distinct race windows:
 
-**Root cause:** The `LifecycleInterceptor` processes each `SetValue` independently. Setting DictA (without X) triggers a full lifecycle detach of X (removed from `_knownSubjects`, `_subjectIdToSubject`, parent/child cleanup). Moments later, setting DictB (with X) re-attaches X from scratch. The gap between detach and re-attach is visible to the CQP flush thread.
+1. **Apply-path race:** Subject moves between structural properties within the same update (e.g., DictA → DictB). The applier processes properties sequentially; if the source is processed first, the subject is fully detached before re-attachment.
+2. **Local-mutation race:** Server (or any participant) performs a local structural mutation that temporarily unregisters a subject while a concurrent value write is in flight. The CQP flush thread checks `TryGetRegisteredProperty()`, gets null, drops the value change.
 
-**Impact:** Narrow race — requires a concurrent local mutation to change a property on a subject that is exactly mid-move, AND the CQP to flush during that window. Extremely unlikely but not impossible at high mutation rates during chaos testing.
+**Observed:** Cycle 453 of ConnectorTester. `4DyQWHvyVckYvtxP494DTy.DecimalValue` — server wrote 1517170.33, client-a had 0 ("written never"). Sequences matched. Re-sync fixed it (transient delivery gap). Root cause: server CQP filter dropped the value because the subject was momentarily unregistered during one of ~127K structural mutations.
 
-### Potential Fix A: Deferred ID removal (stashed)
+**Fix (two parts):**
 
-Add `SuppressIdRemoval()` to `ISubjectIdRegistry`. During suppression, `_subjectIdToSubject.Remove(id)` is deferred. On resume, only IDs removed but NOT re-added are actually removed (set difference).
+1. **`SuppressRemoval()` on `SubjectRegistry`:** `[ThreadStatic]` counter and deferred detach set. During suppression, `ContextDetach` cleanup is deferred — subjects stay in `_knownSubjects` and `_subjectIdToSubject`. On scope dispose, only genuinely orphaned subjects (no parents) are removed. `SubjectUpdateApplier.ApplyUpdate` wraps all structural processing in this scope. Because `_knownSubjects` is shared, the deferred removal on the applier thread also keeps subjects visible to the CQP flush thread.
 
-**Limitation:** Only preserves `_subjectIdToSubject` (the ID reverse index). Subjects are still removed from `_knownSubjects` on detach. The CQP filter uses `TryGetRegisteredProperty()` which depends on `_knownSubjects`, not `_subjectIdToSubject`. So the CQP value-loss gap for concurrent mutations during subject moves is NOT fully fixed. The fix does help the applier's own `TryGetSubjectById` calls within the apply session.
+2. **Resilient server CQP filters:** When `TryGetRegisteredProperty()` returns null, fall back to checking the subject's ID (`TryGetSubjectId()`). A subject ID proves prior registration — let the value change through. This closes the local-mutation race where structural mutations go through the lifecycle directly (not the applier) and no `SuppressRemoval()` scope is active.
 
-Could be extended to also defer `_knownSubjects` removal, but this adds complexity and leaves parent/child links in an inconsistent state during the window.
+**Design:** See [Deferred Subject Removal design](../design/deferred-subject-removal.md) for full rationale, thread model, and correctness analysis.
 
-**Implementation:** Complete, stashed in `git stash` ("deferred-id-removal-implementation"). Design doc at `docs/plans/2026-03-24-deferred-id-removal.md`.
+**Implementation plan:** See [2026-03-25-deferred-subject-removal.md](2026-03-25-deferred-subject-removal.md) for step-by-step tasks.
 
-### Potential Fix B: Lifecycle scope (preferred direction)
+**Supersedes:** Potential Fix A (deferred ID removal — stashed, narrower scope) and Potential Fix B (lifecycle scope — more complex, not needed for this specific race).
 
-Add a batching mechanism to the `LifecycleInterceptor` — `CreateScope()` returns an `IDisposable` scope. Within the scope:
-
-- `SetValue` still writes to the backing store via `next()` (values must be immediately visible)
-- Lifecycle diff/attach/detach processing is **deferred**, not immediate
-- On dispose: compute the **net diff** (initial state → final state) for each changed property
-
-Benefits:
-- Subjects present in both initial AND final state are **never detached** — no temporary unregistration at any level
-- Single lifecycle diff per scope instead of N diffs per SetValue → potential performance improvement for bulk operations (e.g., adding many collection items)
-- Fixes the CQP gap completely: `_knownSubjects` and `_subjectIdToSubject` are never temporarily inconsistent
-
-Open questions:
-- Thread safety: `LifecycleInterceptor` uses `lock(_attachedSubjects)` and `_lastProcessedValues` — how does deferred processing interact?
-- Other interceptors (change tracking, equality) may depend on immediate lifecycle processing
-- `SubjectRegistry` hooks into lifecycle events — needs to see correct net changes, not intermediate states
-- How does this interact with concurrent mutations during the scope window?
-- Performance benchmarking: does batching actually improve `addLotsOfCars` and similar benchmarks?
-
-**Status:** Under investigation. Needs design and prototyping.
+**Status:** Planned. Design and implementation plan complete. Awaiting implementation.

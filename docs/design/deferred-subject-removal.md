@@ -71,7 +71,9 @@ On ContextDetach when `s_suppressRemovalCount > 0`:
 - `PropertyReferenceAdded` — per-link parent/child addition (always correct, always immediate)
 - `ContextAttach` — subject registration (if subject is already in `_knownSubjects` due to deferred removal, reuses existing `RegisteredSubject`)
 
-### Call Site
+### Call Sites
+
+#### 1. SubjectUpdateApplier (apply-path race)
 
 `SubjectUpdateApplier.ApplyUpdate` wraps the entire structural processing in the scope:
 
@@ -84,6 +86,55 @@ using (registry?.SuppressRemoval())
 ```
 
 By the time `ApplyUpdate` returns, the scope is disposed, deferred cleanup has run, and registry state is fully consistent with model state.
+
+This protects against subject moves within a single update (e.g., DictA → DictB). Because `_knownSubjects` is a shared data structure, the deferred removal on the applier thread also keeps subjects visible to the CQP filter running on a background flush thread.
+
+#### 2. Server-side CQP filter (local-mutation race)
+
+The applier call site does NOT protect against local structural mutations on the server (or any participant). When the mutation engine directly writes structural properties (e.g., `target.Items = newItems`), the lifecycle processes the detach immediately — no `SuppressRemoval()` scope is active.
+
+**Race sequence (observed in cycle 453 of ConnectorTester):**
+
+1. Structural mutation thread: `target.Items = newDictionary` (without subject X) → lifecycle processes diff → X detached → X removed from `_knownSubjects`
+2. Value mutation thread: `node.DecimalValue = 1517170.33` (where node == X) → lifecycle fires → CQP captures change → CQP filter calls `TryGetRegisteredProperty()` → returns null → **change dropped**
+3. X may later be re-added (or not), but the value change is permanently lost
+
+**The server-side CQP filter** (`WebSocketSubjectHandler.CreateChangeQueueProcessor`) currently drops unregistered property changes:
+
+```csharp
+propertyFilter: propertyReference =>
+    propertyReference.TryGetRegisteredProperty() is { } property &&
+    (_configuration.PathProvider?.IsPropertyIncluded(property) ?? true),
+```
+
+This same pattern exists in MQTT (`MqttSubjectServerBackgroundService.IsPropertyIncluded`).
+
+**Fix:** When `TryGetRegisteredProperty()` returns null, check if the subject has a valid subject ID (proving it was previously registered). If so, the unregistration is momentary — let the value change through. Structural updates handle graph consistency; value changes on momentarily-unregistered subjects are safe to broadcast.
+
+```csharp
+propertyFilter: propertyReference =>
+{
+    if (propertyReference.TryGetRegisteredProperty() is { } property)
+    {
+        return _configuration.PathProvider?.IsPropertyIncluded(property) ?? true;
+    }
+
+    // Momentarily unregistered due to concurrent structural mutation.
+    // A subject ID proves prior registration; let the value through.
+    // Structural updates handle graph consistency independently.
+    return propertyReference.Subject.TryGetSubjectId() is not null;
+},
+```
+
+**Why this is safe:**
+- A subject ID is only assigned when the subject enters the registry. If it has an ID, its properties were previously included by PathProvider.
+- Value changes on momentarily-unregistered subjects are either: (a) relevant — the subject is mid-move and will be re-registered, or (b) irrelevant — the subject is genuinely removed, and the structural removal broadcast makes the value change moot.
+- The PathProvider configuration does not change at runtime. A property previously included will remain includable.
+- Properties on subjects that never had a context cannot reach the CQP (no interceptors fire).
+
+**Why SuppressRemoval alone is insufficient for this race:** `SuppressRemoval()` is ThreadStatic. The structural mutation thread and the CQP flush thread are different threads. Wrapping the structural mutation in a scope would only defer removal on THAT thread. But the issue is that the structural mutation's lifecycle processing happens on the structural mutation thread (which could use `SuppressRemoval`), while the CQP filter runs on the flush thread (which cannot benefit from the structural thread's scope). However, `SuppressRemoval()` keeps subjects in the shared `_knownSubjects` map, which IS visible to the flush thread. So `SuppressRemoval()` on the structural thread WOULD prevent the drop — but only if the application wraps its structural mutations. Since this is application code (not library code), we cannot guarantee it.
+
+The CQP filter resilience fix is defense-in-depth: it makes the CQP filter itself tolerant of momentary unregistration, regardless of whether the cause is an applier-path move or a local structural mutation. Combined with `SuppressRemoval()` on the applier (which prevents the applier's own `TryGetSubjectById` failures and parent/child inconsistency), both gaps are closed.
 
 ### Nested Scopes
 
@@ -101,6 +152,8 @@ The counter supports nesting. First dispose decrements to N-1 (no processing). L
 |------|--------|
 | `SubjectRegistry.cs` | Add ThreadStatic fields, modify `HandleLifecycleChange` detach path, add `SuppressRemoval()`/resume logic |
 | `SubjectUpdateApplier.cs` | Wrap apply in `using (registry?.SuppressRemoval())` |
+| `WebSocketSubjectHandler.cs` | Make server CQP filter resilient to momentarily-unregistered subjects |
+| `MqttSubjectServerBackgroundService.cs` | Same CQP filter resilience fix |
 | `SubjectIdTests.cs` | Unit tests for suppression/resume |
 | `StableIdApplyTests.cs` | Integration test for subject move during apply |
 
@@ -110,4 +163,4 @@ The counter supports nesting. First dispose decrements to N-1 (no processing). L
 |------|--------|
 | `docs/registry.md` | Add "Deferred Subject Removal" section explaining `SuppressRemoval()` API |
 | `docs/connectors-subject-updates.md` | Add section explaining deferred removal during structural apply |
-| `docs/plans/fixes.md` | Close "Open Problem" and add as Fix 17 |
+| `docs/plans/fixes.md` | Close "Open Problem" and add as Fix 17 (SuppressRemoval + CQP filter resilience) |

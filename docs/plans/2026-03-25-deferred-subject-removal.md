@@ -2,9 +2,11 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Prevent temporary subject unregistration during update apply when subjects move between structural properties.
+**Goal:** Prevent value changes from being silently dropped when subjects are momentarily unregistered during concurrent structural mutations. Two complementary fixes close two distinct race windows.
 
-**Architecture:** Add `SuppressRemoval()` to `SubjectRegistry` using `[ThreadStatic]` counter and deferred detach set. During suppression, context-detach cleanup is deferred. On resume, check actual parent state to determine if removal is still warranted. See `docs/design/deferred-subject-removal.md` for full rationale.
+**Architecture:**
+1. **SuppressRemoval on applier** (Tasks 1-4): Add `SuppressRemoval()` to `SubjectRegistry` using `[ThreadStatic]` counter and deferred detach set. During suppression, context-detach cleanup is deferred. On resume, check actual parent state to determine if removal is still warranted. Wrap `SubjectUpdateApplier.ApplyUpdate` in this scope. See `docs/design/deferred-subject-removal.md` for full rationale.
+2. **CQP filter resilience** (Task 5): Make server-side CQP filters (WebSocket, MQTT) tolerant of momentarily-unregistered subjects by falling back to a subject ID check instead of dropping value changes. This closes the local-mutation race where structural mutations go through the lifecycle directly, not through the applier.
 
 **Tech Stack:** C# 13, .NET 9.0, xUnit
 
@@ -361,7 +363,89 @@ git commit -m "test: Add integration test for subject move between properties du
 
 ---
 
-### Task 5: Update documentation
+### Task 5: Make server CQP filters resilient to momentarily-unregistered subjects
+
+**Context:** `SuppressRemoval()` on the applier closes the apply-path race (subject moves within an update). But a second race exists: **local structural mutations** on any participant can temporarily unregister subjects, causing the CQP filter to drop concurrent value changes. This race caused the cycle 453 failure in ConnectorTester (server wrote `DecimalValue = 1517170.33`, CQP dropped it because a concurrent structural mutation had temporarily unregistered the subject).
+
+The CQP filter on server connectors uses `TryGetRegisteredProperty()` to check both (a) that the subject is registered and (b) that the PathProvider includes the property. When a concurrent structural mutation detaches a subject, `TryGetRegisteredProperty()` returns null and the value change is silently dropped.
+
+**Fix:** When `TryGetRegisteredProperty()` returns null, fall back to checking whether the subject has a valid subject ID (proving it was previously registered). If it does, the unregistration is momentary — let the value change through.
+
+**Why this is safe:**
+- A subject ID is only assigned when the subject enters the registry, proving prior registration
+- The PathProvider configuration is static — a previously included property remains includable
+- Value changes on momentarily-unregistered subjects are either relevant (subject mid-move) or moot (subject genuinely removed, structural update covers it)
+- Properties on subjects without a context cannot reach the CQP (no interceptors)
+
+**Files:**
+- Modify: `src/Namotion.Interceptor.WebSocket/Server/WebSocketSubjectHandler.cs`
+- Modify: `src/Namotion.Interceptor.Mqtt/Server/MqttSubjectServerBackgroundService.cs`
+
+**Step 1: Update WebSocket server CQP filter**
+
+In `CreateChangeQueueProcessor` (around line 377), replace the `propertyFilter` lambda:
+
+```csharp
+// Before:
+propertyFilter: propertyReference =>
+    propertyReference.TryGetRegisteredProperty() is { } property &&
+    (_configuration.PathProvider?.IsPropertyIncluded(property) ?? true),
+
+// After:
+propertyFilter: propertyReference =>
+{
+    if (propertyReference.TryGetRegisteredProperty() is { } property)
+    {
+        return _configuration.PathProvider?.IsPropertyIncluded(property) ?? true;
+    }
+
+    // Momentarily unregistered due to concurrent structural mutation.
+    // A subject ID proves prior registration — let value changes through.
+    // Structural updates handle graph consistency independently.
+    return propertyReference.Subject.TryGetSubjectId() is not null;
+},
+```
+
+**Step 2: Update MQTT server CQP filter**
+
+In `IsPropertyIncluded` (around line 88), apply the same pattern:
+
+```csharp
+// Before:
+private bool IsPropertyIncluded(PropertyReference propertyReference) =>
+    propertyReference.TryGetRegisteredProperty() is { } property &&
+    _configuration.PathProvider.IsPropertyIncluded(property);
+
+// After:
+private bool IsPropertyIncluded(PropertyReference propertyReference)
+{
+    if (propertyReference.TryGetRegisteredProperty() is { } property)
+    {
+        return _configuration.PathProvider.IsPropertyIncluded(property);
+    }
+
+    // Momentarily unregistered due to concurrent structural mutation.
+    return propertyReference.Subject.TryGetSubjectId() is not null;
+}
+```
+
+Also update the MQTT server write handler (around line 235) and client write handler (around line 173) — anywhere `TryGetRegisteredProperty()` returning null causes a silent skip of value changes. For structural property checks (`CanContainSubjects`), the null guard is correct (structural changes for unregistered subjects should be skipped).
+
+**Step 3: Build and test**
+
+Run: `dotnet build src/Namotion.Interceptor.slnx && dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"`
+Expected: Build succeeds, all tests pass
+
+**Step 4: Commit**
+
+```bash
+git add src/Namotion.Interceptor.WebSocket/Server/WebSocketSubjectHandler.cs src/Namotion.Interceptor.Mqtt/Server/MqttSubjectServerBackgroundService.cs
+git commit -m "fix: Make server CQP filters resilient to momentarily-unregistered subjects during concurrent structural mutations"
+```
+
+---
+
+### Task 6: Update documentation
 
 **Files:**
 - Modify: `docs/registry.md`
@@ -407,17 +491,29 @@ Add a section "Deferred removal during structural apply":
 Without suppression, the sequential processing of properties could fully detach a subject (removing it from `_knownSubjects` and `_subjectIdToSubject`) before re-attaching it to the target property. During this gap, the `ChangeQueueProcessor` filter — which depends on `_knownSubjects` via `TryGetRegisteredProperty()` — could drop value changes for the subject, causing permanent divergence.
 
 With suppression, the subject stays visible in both maps throughout the apply window. On scope dispose, only subjects that are genuinely orphaned (removed but never re-attached, verified by checking `RegisteredSubject.Parents.Length == 0`) are cleaned up.
+
+### CQP filter resilience for server connectors
+
+Server-side CQP filters (WebSocket, MQTT) are resilient to momentarily-unregistered subjects. When `TryGetRegisteredProperty()` returns null during a concurrent structural mutation, the filter checks whether the subject has a valid subject ID (proving prior registration) and lets value changes through rather than dropping them.
+
+This is defense-in-depth for cases where `SuppressRemoval()` is not active — e.g., local structural mutations on the server that go through the lifecycle directly, not through `SubjectUpdateApplier`.
 ```
 
 **Step 3: Update fixes.md**
 
 Close the "Open Problem" section and add Fix 17:
 
-Replace the "Open Problem" section header with `## Fix 17: Deferred subject removal during update apply` and update the content to reflect the implemented solution. Remove the "Under investigation" status, mark as "Applied".
+Replace the "Open Problem" section with `## Fix 17: Deferred subject removal and CQP filter resilience` and update the content to reflect the two-part solution:
+
+1. **SuppressRemoval on SubjectUpdateApplier** — prevents temporary unregistration during subject moves within a single update (apply-path race). Keeps subjects visible in `_knownSubjects` and `_subjectIdToSubject` throughout the apply window.
+
+2. **Resilient server CQP filters** — when `TryGetRegisteredProperty()` returns null, falls back to checking the subject's ID rather than dropping the value change. Closes the local-mutation race where structural mutations on any thread can temporarily unregister subjects while the CQP flush thread is checking property registration.
+
+Mark as "Applied".
 
 **Step 4: Commit**
 
 ```bash
 git add docs/registry.md docs/connectors-subject-updates.md docs/plans/fixes.md
-git commit -m "docs: Document deferred subject removal (Fix 17)"
+git commit -m "docs: Document deferred subject removal and CQP filter resilience (Fix 17)"
 ```
