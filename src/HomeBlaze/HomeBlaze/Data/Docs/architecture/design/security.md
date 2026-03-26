@@ -9,7 +9,7 @@ navTitle: Security
 
 Security in HomeBlaze covers graph-level authorization (who can read/write which properties and invoke which operations), inter-node authentication, and MCP access control. Graph authorization is in progress ([PR #137](https://github.com/RicoSuter/Namotion.Interceptor/pull/137)); other aspects are planned.
 
-## Graph Authorization
+## Graph Authorization [In Progress]
 
 Authorization operates at three levels, from broad to specific:
 
@@ -42,13 +42,13 @@ Properties and operations are categorized by their nature, each with different d
 
 Authorization is role-based with OR logic — any matching role grants access. Roles are managed through the Blazor UI (user management, role assignment).
 
-## Inter-Node Authentication
+## Inter-Node Authentication [Planned]
 
 Planned. WebSocket connections between instances (satellite-to-central, primary-to-standby) need authentication to prevent unauthorized nodes from joining the topology.
 
 Likely approach: mutual TLS or token-based authentication on WebSocket connections.
 
-## MCP Access Control
+## MCP Access Control [Planned]
 
 Planned. When an external agent connects via MCP, the authorization context determines which subjects, properties, and operations are accessible. The same graph authorization model applies — the MCP session carries a role/identity.
 

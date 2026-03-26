@@ -591,6 +591,39 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 
 ---
 
+## Abstraction Libraries
+
+HomeBlaze provides several abstraction packages with standard interfaces that subjects can implement. These enable interoperability between plugins — for example, a dashboard can display any subject implementing `ITemperatureSensor`, regardless of which plugin provides it.
+
+### HomeBlaze.Abstractions
+
+Core platform interfaces and attributes:
+
+| Area | Contents |
+|------|----------|
+| Attributes | `[Configuration]`, `[State]`, `[Operation]`, `[Query]`, `StateUnit` |
+| Display | `ITitleProvider`, `IIconProvider` |
+| Lifecycle | `IConfigurableSubject`, `IHostedSubject`, `IServerSubject` |
+| Messaging | `IEvent`, `ICommand`, `IMessageBus`, `INotificationPublisher` |
+| Security | `IAuthenticatedSubject` |
+| Networking | `IConnectionState`, `IConnectedSubject` |
+| Devices | Switches, lighting, covers, locks, energy, media, input devices |
+| Sensors | Temperature, humidity, presence, light, door, rain, soil, power, camera |
+
+Subjects implement these interfaces to declare their capabilities. For example, a Zigbee temperature sensor plugin would implement `ITemperatureSensor`, and a Philips Hue light plugin would implement `ILightbulb` (which composes `ISwitchDevice`, `IBrightnessController`, `IColorController`).
+
+### HomeBlaze.Storage.Abstractions
+
+Storage contracts: `IStorageContainer`, `IStorageFile`, `IConfigurationWriter`, `StorageStatus`, `[FileExtension]`.
+
+### HomeBlaze.Components.Abstractions
+
+UI component contracts: `ISubjectComponent`, `ISubjectEditComponent`, `[SubjectComponent]`, `SubjectComponentType`.
+
+See [Project Structure](../architecture/project-structure.md) for the full dependency graph between these packages.
+
+---
+
 ## Advanced Patterns
 
 ### Constructor Injection
