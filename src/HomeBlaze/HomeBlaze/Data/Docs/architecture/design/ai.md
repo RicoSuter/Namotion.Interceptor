@@ -5,7 +5,7 @@ navTitle: AI
 
 # AI Integration Design
 
-## Overview
+## Overview [Planned]
 
 HomeBlaze treats AI as a first-class concern with two complementary modes: **built-in agents** running in-process as subjects, and **external agents** connecting via MCP (Model Context Protocol). Both modes access the knowledge graph through the same tool interface.
 
@@ -26,14 +26,14 @@ HomeBlaze treats AI as a first-class concern with two complementary modes: **bui
 | Interaction | Pull (poll) + push (change subscription) | Pull only (push TBD, depends on MCP evolution) |
 | Use cases | Reactive automation, continuous monitoring | Operator copilot, ad-hoc queries, debugging |
 
-### MCP Tool Layering
+### MCP Tool Layering [In Progress]
 
 MCP tools are split across two packages:
 
 | Package | Tools | Scope |
 |---------|-------|-------|
-| `Namotion.Interceptor.Mcp` | `get_property`, `set_property`, `list_types`, basic subject browse | Any Namotion.Interceptor application |
-| `HomeBlaze.Mcp` | `query` (with rich metadata: `$type`, `$icon`, `$title`, `$methods`), `invoke_method`, `list_methods`, `get_history` | HomeBlaze-specific features |
+| `Namotion.Interceptor.Mcp` | `query`, `get_property`, `set_property`, `list_types`, `list_methods`, `invoke_method` | Any Namotion.Interceptor application |
+| `HomeBlaze.Mcp` | `get_property_history`, `get_event_history`, `get_command_history` + metadata enrichment (`$type`, `$icon`, `$title`, units, methods via `[Operation]`/`[Query]`) | HomeBlaze-specific features |
 
 This keeps the interceptor library independently usable. HomeBlaze adds richer tools on top.
 
@@ -74,3 +74,4 @@ Agent writes are local writes — they flow through the normal write path (local
 - Agent audit trail — how to attribute changes to specific agents (see [Audit](audit.md))
 - Authorization — which agents can access which subjects (see [Security](security.md))
 - Agent-as-tool — exposing built-in agents as MCP tools for external copilots (deferred)
+- **Capacity planning** — many built-in agents watching many paths means aggregate LLM API cost and rate limits. Budget/rate limiting per agent, queueing when multiple agents trigger simultaneously, and fallback behavior when the LLM API is unavailable all need design

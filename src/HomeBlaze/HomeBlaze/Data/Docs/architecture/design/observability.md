@@ -3,7 +3,7 @@ title: Observability
 navTitle: Observability
 ---
 
-# Observability Design
+# Observability Design [Planned]
 
 ## Overview
 
@@ -32,13 +32,48 @@ HomeBlaze provides observability through two complementary mechanisms: **OpenTel
 | Operation invocation | Including cross-instance proxy hops |
 | MCP tool call | External agent interaction |
 
+## Health Checks
+
+Any subject can report its health by implementing a health check interface (similar to ASP.NET Core's `IHealthCheck` pattern). This provides a uniform way to surface health across connectors, agents, storage containers, plugins, and custom domain subjects.
+
+### Health Check Interface
+
+A subject implementing the health check interface exposes:
+
+| Member | Description |
+|--------|-------------|
+| Health status | `Healthy`, `Degraded`, or `Unhealthy` |
+| Health message | Human-readable description of current state (e.g., "OPC UA: 3 monitored items failing") |
+
+When health status transitions (e.g., Healthy→Degraded), the subject publishes a health changed event via the message bus (see [Messages](messages.md)). This enables live updates without polling.
+
+### Existing Building Blocks
+
+Several patterns already exist that would implement this interface:
+
+| Subject | Current Health Reporting | Maps To |
+|---------|------------------------|---------|
+| OPC UA client | `OpcUaClientDiagnostics`: IsConnected, IsReconnecting, ConsecutiveFailures, LastError | Unhealthy when disconnected, Degraded when reconnecting or items failing |
+| OPC UA server | `OpcUaServerDiagnostics`: IsRunning, LastError, ConsecutiveFailures | Unhealthy when not running or consecutive failures |
+| MQTT client/server | Connection state, error tracking | Unhealthy when disconnected |
+| Storage containers | `StorageStatus` enum (Connected/Disconnected/Error) | Maps directly to health status |
+| Background services | `ServiceStatus` enum (Running/Error/Unavailable) | Maps directly to health status |
+| Network subjects | `IConnectionState.IsConnected` | Unhealthy when disconnected |
+
+### Health Page
+
+The Blazor UI provides a health page that:
+1. Queries the registry for all subjects implementing the health check interface
+2. Subscribes to health changed events on the message bus for live updates
+3. Displays aggregated health status across the entire knowledge graph
+
+No special aggregator subject is needed — the page queries and subscribes directly. AI agents can do the same via MCP tools (query by interface type, subscribe to events).
+
 ## Health Subjects
 
-Each instance exposes its own health as subjects in the knowledge graph. This means AI agents can monitor the system itself using the standard MCP tools — no separate monitoring integration needed.
+Each instance also exposes instance-level health as subjects in the knowledge graph — node role, property count, changes per second, uptime, last heartbeat. These are separate from per-subject health checks; they describe the health of the platform itself rather than individual subjects.
 
-Health subjects include node role, connection state, property count, changes per second, uptime, and last heartbeat. Derived properties compute overall status from these inputs.
-
-Operators see health information in the Blazor UI alongside business subjects. AI agents can detect degradation and alert or take corrective action.
+AI agents can monitor both levels using the standard MCP tools — no separate monitoring integration needed. Operators see health information in the Blazor UI alongside business subjects.
 
 ## Key Decisions
 

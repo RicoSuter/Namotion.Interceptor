@@ -31,18 +31,28 @@ Tracks the implementation status of building blocks described in [Architecture O
 
 | Building Block | Status | Notes |
 |---|---|---|
-| Operations (`[Operation]`/`[Query]`) | In Progress | Implemented in HomeBlaze, migrating to Namotion.Interceptor registry |
+| Operations (`[Operation]`/`[Query]`) | Implemented | Working in HomeBlaze. Refactoring to move into Namotion.Interceptor registry for reuse across all interceptor applications |
 | Cross-instance operation proxying (RPC) | Planned | WebSocket message types 5-6 |
 | Time-series history | Planned | `HomeBlaze.History.Abstractions` + sink model |
 | Document store | Planned | Documents as subjects |
 | Dynamic metadata / annotations | Planned | User-created attributes stored in config JSON |
+
+## Events and Health
+
+| Building Block | Status | Notes |
+|---|---|---|
+| Message bus (`IMessageBus`) | Planned | Abstractions defined, implementation and DI wiring not yet done |
+| Domain events (`IEvent`) | Planned | Abstractions defined (`DeviceEvent`, `SwitchEvent`), no subjects publishing yet |
+| Commands (`ICommand`) | Planned | Abstraction defined |
+| Health check interface | Planned | Uniform health reporting for any subject — see [Observability](design/observability.md) |
+| Cross-instance event propagation | Planned | Events currently in-process only — see [Messages](design/messages.md) |
 
 ## AI Integration
 
 | Building Block | Status | Notes |
 |---|---|---|
 | MCP server (base tools) | In Progress | `Namotion.Interceptor.Mcp`, [PR #158](https://github.com/RicoSuter/Namotion.Interceptor/pull/158) |
-| MCP server (HomeBlaze tools) | Planned | `HomeBlaze.Mcp` — query, methods, history |
+| MCP server (HomeBlaze tools) | Planned | `HomeBlaze.Mcp` — `get_property_history`, `get_event_history`, `get_command_history` + metadata enrichment (base tools `query`, `list_methods`, `invoke_method` are in `Namotion.Interceptor.Mcp`) |
 | Built-in agents | Planned | Agent subjects with LLM integration |
 
 ## Platform
@@ -57,5 +67,11 @@ Tracks the implementation status of building blocks described in [Architecture O
 | Authorization | In Progress | Graph-level access control, [PR #137](https://github.com/RicoSuter/Namotion.Interceptor/pull/137) |
 | Observability (OpenTelemetry) | Planned | |
 | Observability (health subjects) | Planned | |
+| Storage layer | Implemented | `IStorageContainer` + `FluentStorageContainer` (filesystem, in-memory). Shared/cloud backends planned — see [Storage](design/storage.md) |
+| Deployment (UI scaling, multi-primary) | Planned | Bidirectional WebSocket sync between peer UNS instances — see [Deployment](design/deployment.md) |
+| Scalability optimizations | Planned | Centralized path cache, registry indexing, Welcome compression — see [Scalability](design/scalability.md) |
+| Resilience hardening | Planned | Write durability, split-brain, graceful degradation — see [Resilience](design/resilience.md) |
+| Upgrade and migration | Planned | Config migration, backward compatibility, rolling upgrades — see [Upgrade and Migration](design/upgrade-and-migration.md) |
+| System testing | Planned | Topology-level testing and chaos injection — see [System Testing](design/testing.md) |
 | Audit trail | Planned | Change attribution |
 | Alarms / events | Planned | |

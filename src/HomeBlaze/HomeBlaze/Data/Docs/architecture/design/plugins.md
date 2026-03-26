@@ -9,7 +9,7 @@ navTitle: Plugins
 
 Everything in HomeBlaze is a subject, and a plugin is simply a NuGet package that provides subject types. Connectors, agents, document stores, device subjects, UI components, and business logic are all delivered as plugins.
 
-## What a Plugin Provides
+## What a Plugin Provides [Implemented]
 
 One or more `[InterceptorSubject]` classes. That is the only contract.
 
@@ -23,7 +23,7 @@ One or more `[InterceptorSubject]` classes. That is the only contract.
 | Business logic | A subject with `[Operation]` methods and `[Derived]` properties |
 | Domain model | A domain-specific subject (Press, Motor, Thermostat) |
 
-## UI Association
+## UI Association [Implemented]
 
 Plugins can associate custom Blazor UI components with their subjects:
 
@@ -39,7 +39,7 @@ public partial class Press
 
 ## Plugin Loading
 
-### Build-time (compiled in)
+### Build-time (compiled in) [Implemented]
 
 Core plugins are standard NuGet package references:
 
@@ -51,7 +51,7 @@ Core plugins are standard NuGet package references:
 </ItemGroup>
 ```
 
-### Runtime (dynamic)
+### Runtime (dynamic) [Planned]
 
 Additional plugins specified in configuration as NuGet packages, resolved and loaded at startup:
 
@@ -72,7 +72,7 @@ Additional plugins specified in configuration as NuGet packages, resolved and lo
 
 On startup: resolve packages from feeds, download to local cache, load assemblies, scan for `[InterceptorSubject]` types, register with subject type registry, and make available for instantiation.
 
-### Bootstrap Ordering
+### Bootstrap Ordering [Planned]
 
 Plugin loading must happen before configuration is loaded, because configuration references subject types from plugins. The bootstrap sequence is:
 
@@ -83,7 +83,7 @@ Plugin loading must happen before configuration is loaded, because configuration
 
 The plugin loading mechanism itself needs its own detailed design — it is a core DI service rather than a subject, as it must bootstrap before the subject infrastructure is available.
 
-## Same Binary, Different Config
+## Same Binary, Different Config [Implemented]
 
 The HomeBlaze binary ships with all core plugins compiled in. Each deployment's configuration determines which additional packages to load, which subjects to instantiate, which connectors to activate, whether the UI is enabled, and the node's role in the topology.
 
@@ -101,3 +101,4 @@ The HomeBlaze binary ships with all core plugins compiled in. Each deployment's 
 - Runtime plugin loader detailed design (NuGet resolution, assembly loading, error handling)
 - Plugin update mechanism (hot reload vs. restart required)
 - Plugin dependency resolution (what if two plugins need different versions of a shared dependency)
+- **Assembly isolation strategy** — Loading all plugins into the default `AssemblyLoadContext` is simplest but means two plugins with conflicting transitive dependencies (e.g., different versions of the same library) crash the host. Using isolated `AssemblyLoadContext` per plugin solves conflicts but introduces type identity problems: if plugin A and plugin B each load their own copy of `HomeBlaze.Abstractions`, their interfaces are incompatible types — casting fails, registry can't discover them. The standard workaround is loading shared abstractions in the default context while isolating plugin-specific dependencies, but this requires a well-defined boundary of "shared" packages and still doesn't cover all conflict scenarios. This is a fundamental design decision for the runtime loader
