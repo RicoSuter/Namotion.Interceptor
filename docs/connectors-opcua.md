@@ -429,7 +429,7 @@ For mapping patterns with companion specs, see [OPC UA Mapping Guide — Compani
 
 ### Write Retry Queue During Disconnection
 
-The library automatically queues write operations when the connection is lost, preventing data loss during brief network interruptions. Queued writes are flushed in FIFO order when the connection is restored. This feature is provided by the `SubjectSourceBackgroundService`.
+The library automatically queues write operations when the connection is lost, preventing data loss during brief network interruptions. On reconnection, queued writes are optimistically re-applied: after loading the server's current state, each queued change is compared against the current property value and only re-applied if the server hasn't changed it (source wins on conflict). This feature is provided by the `SubjectSourceBackgroundService` (see [Connectors — Write Retry Queue](connectors.md#write-retry-queue)).
 
 ```csharp
 builder.Services.AddOpcUaSubjectClientSource(
@@ -447,7 +447,7 @@ machine.Speed = 100; // Queued if disconnected, written immediately if connected
 **Configuration:**
 - `WriteRetryQueueSize`: Maximum writes to buffer (default: 1000, set to 0 to disable)
 - Ring buffer semantics: drops oldest when full, keeps latest values
-- Automatic flush after reconnection
+- Optimistic re-apply after reconnection (source wins on conflict)
 
 ### Polling Fallback for Unsupported Nodes
 
@@ -553,7 +553,7 @@ Between the SDK's `OnReconnectComplete` (step 3) and the health check's full sta
 
 This window is bounded and self-correcting: the health check's full state read overwrites all values with the server's current state. For most industrial applications, this brief window is acceptable. If tighter consistency is required, reduce `SubscriptionHealthCheckInterval`.
 
-**No-loss guarantee for writes**: Client-to-server writes during disconnection are buffered in the write retry queue (see above) and flushed after reconnection. Combined with the full state read for server-to-client values, this provides bidirectional eventual consistency.
+**Eventual consistency for writes**: Client-to-server writes during disconnection are buffered in the write retry queue (see above). On reconnection, after loading the server's current state, queued changes are optimistically re-applied only if the server hasn't changed the property (source wins on conflict). Combined with the full state read for server-to-client values, this provides bidirectional eventual consistency.
 
 ### Resilience Configuration
 
