@@ -24,33 +24,39 @@ internal static class SubjectUpdateApplier
             context.Initialize(subject.Context, update.Subjects, update.CompleteSubjectIds, subjectFactory, transformValueBeforeApply);
             context.PreResolveSubjects(update.Subjects.Keys, context.SubjectIdRegistry);
 
-            if (update.Root is not null && update.Subjects.TryGetValue(update.Root, out var rootProperties))
+            // Suppress subject removal during the apply window to prevent temporary
+            // unregistration when subjects move between structural properties.
+            var registry = subject.Context.TryGetService<ISubjectRegistry>() as SubjectRegistry;
+            using (registry?.SuppressRemoval())
             {
-                // The Root field identifies which subject ID in the update
-                // corresponds to the local root subject. The root's ID may
-                // differ between sender and receiver — Root is a mapping hint,
-                // not an identity assignment.
-                context.TryMarkAsProcessed(update.Root);
-
-                ApplyPropertyUpdates(subject, rootProperties, context);
-            }
-
-            // Always process remaining subjects by subject ID lookup.
-            // When the root path ran above, it recursively processed subjects reachable
-            // from the root's structural properties. But partial updates can contain changes
-            // to subjects NOT reachable from the root's changed properties (e.g., a deeply
-            // nested ObjectRef change in the same batch as a root scalar change).
-            // TryMarkAsProcessed ensures no subject is processed twice.
-            foreach (var (subjectId, properties) in update.Subjects)
-            {
-                // Subjects not found by TryResolveSubject are expected: they are new subjects
-                // whose structural parent (collection/dictionary/object ref) will create them
-                // and apply their properties via ApplyPropertiesIfAvailable during this same update.
-                if (context.TryResolveSubject(subjectId, out var targetSubject))
+                if (update.Root is not null && update.Subjects.TryGetValue(update.Root, out var rootProperties))
                 {
-                    if (context.TryMarkAsProcessed(subjectId))
+                    // The Root field identifies which subject ID in the update
+                    // corresponds to the local root subject. The root's ID may
+                    // differ between sender and receiver — Root is a mapping hint,
+                    // not an identity assignment.
+                    context.TryMarkAsProcessed(update.Root);
+
+                    ApplyPropertyUpdates(subject, rootProperties, context);
+                }
+
+                // Always process remaining subjects by subject ID lookup.
+                // When the root path ran above, it recursively processed subjects reachable
+                // from the root's structural properties. But partial updates can contain changes
+                // to subjects NOT reachable from the root's changed properties (e.g., a deeply
+                // nested ObjectRef change in the same batch as a root scalar change).
+                // TryMarkAsProcessed ensures no subject is processed twice.
+                foreach (var (subjectId, properties) in update.Subjects)
+                {
+                    // Subjects not found by TryResolveSubject are expected: they are new subjects
+                    // whose structural parent (collection/dictionary/object ref) will create them
+                    // and apply their properties via ApplyPropertiesIfAvailable during this same update.
+                    if (context.TryResolveSubject(subjectId, out var targetSubject))
                     {
-                        ApplyPropertyUpdates(targetSubject, properties, context);
+                        if (context.TryMarkAsProcessed(subjectId))
+                        {
+                            ApplyPropertyUpdates(targetSubject, properties, context);
+                        }
                     }
                 }
             }

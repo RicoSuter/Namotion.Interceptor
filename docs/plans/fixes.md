@@ -564,6 +564,6 @@ For EXISTING subjects (found in registry, have context + interceptors), properti
 
 **Known limitation:** The `SubjectUpdateFactory` fallback (Fix 9) only recovers VALUE property changes for unregistered subjects. Structural property changes are still dropped because the factory needs `RegisteredSubjectProperty` to enumerate child subject IDs. This requires concurrent structural-on-structural writes to the same subject from independent threads — near-zero probability with the current mutation engine (single structural thread per participant). See design doc "Known Limitations" for details and future fix approach.
 
-**Implementation pitfall:** The MQTT server has a secondary `TryGetRegisteredProperty()` check in `BroadcastChangesAsync` (line ~235) that drops unregistered changes AFTER the CQP filter. Fixing only the CQP filter is insufficient for MQTT — the write handler must also be updated. See design doc "Implementation Notes" and plan Task 5 Step 2.
+**Scope reduced after review:** CQP filter resilience (Part 2) was removed. The subject ID fallback would bypass PathProvider for momentarily-unregistered subjects, potentially leaking internal properties. The cycle 453 failure was a genuinely removed subject — the CQP filter correctly dropped the value change (the client also removes the subject via the structural update, so the dropped value is moot). Only Part 1 (SuppressRemoval on applier) is applied, which prevents temporary unregistration during subject moves within a single update.
 
-**Status:** Planned. Design and implementation plan complete. Awaiting implementation.
+**Status:** Part 1 applied. All tests pass. Awaiting ConnectorTester chaos validation.

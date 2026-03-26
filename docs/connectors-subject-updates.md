@@ -253,6 +253,14 @@ Circular references are handled naturally by the flat structure. Each subject ap
 
 Dictionary keys are normalized to strings during transport. Non-string keys (int, enum) must be convertible via `Convert.ChangeType` or `Enum.Parse`.
 
+### Deferred removal during structural apply
+
+`SubjectUpdateApplier.ApplyUpdate` wraps all structural processing in `SubjectRegistry.SuppressRemoval()`. This prevents subjects from being temporarily unregistered when they move between structural properties within the same update (e.g., removed from one dictionary, added to another).
+
+Without suppression, the sequential processing of properties could fully detach a subject (removing it from `_knownSubjects` and `_subjectIdToSubject`) before re-attaching it to the target property. During this gap, the `ChangeQueueProcessor` filter — which depends on `_knownSubjects` via `TryGetRegisteredProperty()` — could drop value changes for the subject, causing permanent divergence.
+
+With suppression, the subject stays visible in both maps throughout the apply window. On scope dispose, only subjects that are genuinely orphaned (removed but never re-attached, verified by checking `RegisteredSubject.Parents.Length == 0`) are cleaned up.
+
 ## Implementing a Custom Client
 
 ### Subject ID to Object Mapping

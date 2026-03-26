@@ -2,6 +2,7 @@ using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Connectors.Updates.Internal;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Connectors.Tests.Updates;
@@ -266,7 +267,7 @@ public class StableIdApplyTests
         // Assert: new dict item exists with property value applied
         Assert.Single(root.Lookup);
         Assert.Equal("NewItemName", root.Lookup["key1"].Name);
-        Assert.Equal(newItemId, ((IInterceptorSubject)root.Lookup["key1"]).TryGetSubjectId());
+        Assert.Equal(newItemId, root.Lookup["key1"].TryGetSubjectId());
     }
 
     [Fact]
@@ -354,7 +355,67 @@ public class StableIdApplyTests
         // Assert
         Assert.NotNull(root.Child);
         Assert.Equal("NewChild", root.Child!.Name);
-        Assert.Equal(newChildId, ((IInterceptorSubject)root.Child).TryGetSubjectId());
+        Assert.Equal(newChildId, root.Child.TryGetSubjectId());
+    }
+
+    [Fact]
+    public void ApplyUpdate_SubjectMoveBetweenCollectionAndObjectRef_SubjectStaysRegistered()
+    {
+        // Arrange: root with subject X in Items collection
+        var context = InterceptorSubjectContext.Create().WithFullPropertyTracking().WithRegistry();
+        var x = new CycleTestNode { Name = "X" };
+        var root = new CycleTestNode(context)
+        {
+            Name = "Root",
+            Items = [x],
+        };
+
+        var rootId = root.GetOrAddSubjectId();
+        var xId = x.GetOrAddSubjectId();
+        var idRegistry = context.GetService<ISubjectIdRegistry>();
+
+        // Verify X is registered before apply
+        Assert.True(idRegistry.TryGetSubjectById(xId, out _));
+
+        // Build update that moves X from Items to Child (different structural property)
+        var update = new SubjectUpdate
+        {
+            Root = rootId,
+            Subjects = new()
+            {
+                [rootId] = new()
+                {
+                    ["Items"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Collection,
+                        Items = [] // Remove all items (removes X)
+                    },
+                    ["Child"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Object,
+                        Id = xId // Add X as ObjectRef
+                    }
+                },
+                [xId] = new()
+                {
+                    ["Name"] = new SubjectPropertyUpdate
+                    {
+                        Kind = SubjectPropertyUpdateKind.Value,
+                        Value = "Moved"
+                    }
+                }
+            }
+        };
+
+        // Act
+        SubjectUpdateApplier.ApplyUpdate(root, update, new DefaultSubjectFactory());
+
+        // Assert: X should still be registered (never temporarily unregistered)
+        Assert.True(idRegistry.TryGetSubjectById(xId, out var resolved));
+        Assert.Same(x, resolved);
+        Assert.Equal("Moved", x.Name);
+        Assert.Same(x, root.Child);
+        Assert.Empty(root.Items);
     }
 
     [Fact]
