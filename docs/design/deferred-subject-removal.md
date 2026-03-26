@@ -146,6 +146,56 @@ The counter supports nesting. First dispose decrements to N-1 (no processing). L
 - **Resume overhead**: One iteration over `s_deferredDetaches` inside `lock(_knownSubjects)`. For typical update sizes (10-100 subjects), negligible.
 - **No suppression active**: Zero overhead. The `s_suppressRemovalCount` check is a single comparison against zero.
 
+## Implementation Notes
+
+### Lock ordering
+
+All lock acquisitions follow the same order — no deadlock risk:
+
+1. `_applyUpdateLock` (outermost, WebSocket server only)
+2. `_attachedSubjects` (lifecycle, per-context)
+3. `_knownSubjects` (registry, per-context)
+
+`SuppressRemoval()` only increments a ThreadStatic counter (no lock). `ResumeRemoval()` acquires `lock(_knownSubjects)` — always the innermost lock. The CQP flush thread only reads `_knownSubjects` (via `TryGetRegisteredProperty`), never holds the outer locks.
+
+### TryGetSubjectId() is thread-safe and stable
+
+The CQP filter fallback depends on `TryGetSubjectId()` returning a non-null value for previously-registered subjects. This is safe because:
+
+- Subject IDs are stored in `subject.Data` — a `ConcurrentDictionary` (lock-free reads).
+- IDs are set once via `GetOrAddSubjectId()`/`SetSubjectId()` and **never cleared**. The registry only removes the reverse mapping `_subjectIdToSubject[id]`; the subject's own data is untouched.
+- If this invariant is ever broken (IDs cleared on removal), the CQP filter fallback would silently fail. This must not happen.
+
+### MQTT write handler has a secondary TryGetRegisteredProperty check
+
+The MQTT server's `BroadcastChangesAsync` (line ~235) has its own `TryGetRegisteredProperty()` check that runs AFTER the CQP filter. Even if the CQP filter lets the change through, this secondary check drops it:
+
+```csharp
+var registeredProperty = change.Property.TryGetRegisteredProperty();
+if (registeredProperty is not { CanContainSubjects: false })
+    continue; // drops BOTH structural AND unregistered
+```
+
+This must be updated alongside the CQP filter. For unregistered subjects, fall back to `SubjectPropertyMetadata.Type` to determine `CanContainSubjects`. The plan's Task 5 Step 2 covers this — do not skip it.
+
+The WebSocket server does NOT have this issue — it routes changes through `SubjectUpdateFactory` which has Fix 9's fallback.
+
+## Known Limitations
+
+### Structural property changes on unregistered subjects are still dropped
+
+The `SubjectUpdateFactory` fallback (Fix 9, line 126-154) only handles **value** properties when `registeredProperty` is null. Structural properties (collections, dictionaries, object references) are skipped because serializing them requires enumerating child subject IDs via `RegisteredSubjectProperty.Children`.
+
+This means: if a subject is momentarily unregistered AND a concurrent thread writes to its **structural** property (e.g., `X.Items = newDict`), the CQP filter lets it through (Fix 17 Part 2) but the factory silently drops it.
+
+**Why this is acceptable:** This requires concurrent structural writes to the same subject from two independent threads, neither using `SuppressRemoval()`. In the ConnectorTester, the mutation engine uses a single thread for structural mutations per participant. The only concurrent structural source is the applier, which uses `SuppressRemoval` (keeping subjects registered). The race is near-zero probability.
+
+**Future fix if observed:** Extend the factory fallback to handle structural properties using `SubjectPropertyMetadata` (available on `subject.Properties[name]`). `SubjectPropertyMetadata.Type` supports the same `IsSubjectDictionaryType()`/`IsSubjectCollectionType()`/`IsSubjectReferenceType()` checks, and `SubjectPropertyMetadata.GetValue` can read the current value. The harder part is recursive child processing (`ProcessSubjectComplete`) and `CompleteSubjectIds` tracking, which would need a parallel implementation using `SubjectPropertyMetadata` instead of `RegisteredSubjectProperty`.
+
+### Double-reconnection in cycle 453 logs is benign
+
+The cycle 453 logs show two heartbeat gap detections and two reconnections at 04:12:11-04:12:12. Investigation confirmed these are **two separate `WebSocketSubjectClientSource` instances** (client-a and client-b), not one client reconnecting twice. Each client has its own `_connectionLock`, `ExecuteAsync` loop, and property ownership on its own object graph. The simultaneous heartbeat gaps occurred because the server's sequence advanced while both clients fell behind during client-a's chaos events. Not a bug — no fix needed.
+
 ## Files To Modify
 
 | File | Change |

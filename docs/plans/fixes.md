@@ -562,4 +562,8 @@ For EXISTING subjects (found in registry, have context + interceptors), properti
 
 **Supersedes:** Potential Fix A (deferred ID removal — stashed, narrower scope) and Potential Fix B (lifecycle scope — more complex, not needed for this specific race).
 
+**Known limitation:** The `SubjectUpdateFactory` fallback (Fix 9) only recovers VALUE property changes for unregistered subjects. Structural property changes are still dropped because the factory needs `RegisteredSubjectProperty` to enumerate child subject IDs. This requires concurrent structural-on-structural writes to the same subject from independent threads — near-zero probability with the current mutation engine (single structural thread per participant). See design doc "Known Limitations" for details and future fix approach.
+
+**Implementation pitfall:** The MQTT server has a secondary `TryGetRegisteredProperty()` check in `BroadcastChangesAsync` (line ~235) that drops unregistered changes AFTER the CQP filter. Fixing only the CQP filter is insufficient for MQTT — the write handler must also be updated. See design doc "Implementation Notes" and plan Task 5 Step 2.
+
 **Status:** Planned. Design and implementation plan complete. Awaiting implementation.
