@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Namotion.Interceptor.Connectors.Transactions;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors;
@@ -13,8 +12,9 @@ public class SubjectSourceBackgroundService : BackgroundService
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
     private readonly TimeSpan _retryTime;
-    private readonly WriteRetryQueue? _writeRetryQueue;
     private readonly SubjectPropertyWriter _propertyWriter;
+
+    internal WriteRetryQueue? WriteRetryQueue { get; }
 
     public SubjectSourceBackgroundService(
         ISubjectSource source,
@@ -32,13 +32,10 @@ public class SubjectSourceBackgroundService : BackgroundService
 
         if (writeRetryQueueSize > 0)
         {
-            _writeRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger);
+            WriteRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger);
         }
 
-        _propertyWriter = new SubjectPropertyWriter(
-            source,
-            _writeRetryQueue is not null ? ct => _writeRetryQueue.FlushAsync(source, ct) : null,
-            logger);
+        _propertyWriter = new SubjectPropertyWriter(source, logger);
     }
 
     /// <inheritdoc />
@@ -57,10 +54,15 @@ public class SubjectSourceBackgroundService : BackgroundService
                     using var processor = new ChangeQueueProcessor(
                         _source,
                         _context,
-                        property => property.Reference.TryGetSource(out var source) && source == _source,
+                        propertyReference => propertyReference.TryGetSource(out var source) && source == _source,
                         WriteChangesAsync,
                         _bufferTime,
                         _logger);
+
+                    // Optimistic retry re-apply: after initial state load + ChangeQueueProcessor creation,
+                    // re-apply queued changes locally if the source hasn't changed the property.
+                    // ChangeQueueProcessor picks up re-applied changes and sends them to the source as fresh writes.
+                    ReapplyRetryQueue();
 
                     await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
                 }
@@ -92,7 +94,7 @@ public class SubjectSourceBackgroundService : BackgroundService
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
     private async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        if (_writeRetryQueue is null)
+        if (WriteRetryQueue is null)
         {
             // No retry queue - write directly
             try
@@ -116,10 +118,10 @@ public class SubjectSourceBackgroundService : BackgroundService
         }
 
         // First flush any queued changes
-        var succeeded = await _writeRetryQueue.FlushAsync(_source, cancellationToken).ConfigureAwait(false);
+        var succeeded = await WriteRetryQueue.FlushAsync(_source, cancellationToken).ConfigureAwait(false);
         if (!succeeded)
         {
-            _writeRetryQueue.Enqueue(changes);
+            WriteRetryQueue.Enqueue(changes);
             return;
         }
 
@@ -127,11 +129,11 @@ public class SubjectSourceBackgroundService : BackgroundService
         try
         {
             var result = await _source.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
-            if (!result.IsFullySuccessful && !result.FailedChanges.IsEmpty)
+            if (result is { IsFullySuccessful: false, FailedChanges.IsEmpty: false })
             {
                 _logger.LogWarning(result.Error, "Failed to write {Count} changes to source, queuing for retry.",
                     result.FailedChanges.Length);
-                _writeRetryQueue.Enqueue(result.FailedChanges.ToArray());
+                WriteRetryQueue.Enqueue(result.FailedChanges.ToArray());
             }
         }
         catch (OperationCanceledException)
@@ -141,14 +143,68 @@ public class SubjectSourceBackgroundService : BackgroundService
         catch (Exception e)
         {
             _logger.LogWarning(e, "Failed to write {Count} changes to source, queuing for retry.", changes.Length);
-            _writeRetryQueue.Enqueue(changes);
+            WriteRetryQueue.Enqueue(changes);
+        }
+    }
+
+    private void ReapplyRetryQueue()
+    {
+        var retryChanges = WriteRetryQueue?.DrainForLocalReapply();
+        if (retryChanges is null || retryChanges.Length == 0)
+        {
+            return;
+        }
+
+        var applied = 0;
+        var dropped = 0;
+        var failed = 0;
+        foreach (var change in retryChanges)
+        {
+            try
+            {
+                var property = change.Property;
+                var currentValue = property.Metadata.GetValue?.Invoke(property.Subject);
+                var oldValue = change.GetOldValue<object>();
+
+                if (Equals(currentValue, oldValue))
+                {
+                    // Server hasn't changed this property — re-apply client's change locally.
+                    // The interceptor chain fires, ChangeQueueProcessor captures the change, and sends it to the source.
+                    property.Metadata.SetValue?.Invoke(property.Subject, change.GetNewValue<object>());
+                    applied++;
+                }
+                else
+                {
+                    dropped++;
+                }
+            }
+            catch (Exception exception)
+            {
+                _logger.LogWarning(exception,
+                    "Failed to re-apply retry queue change for property '{PropertyName}', dropping.",
+                    change.Property.Name);
+                failed++;
+            }
+        }
+
+        if (dropped > 0 || failed > 0)
+        {
+            _logger.LogWarning(
+                "Retry queue optimistic re-apply: {Applied} re-applied, {Dropped} dropped (source wins), {Failed} failed.",
+                applied, dropped, failed);
+        }
+        else if (applied > 0)
+        {
+            _logger.LogInformation(
+                "Retry queue optimistic re-apply: {Applied} changes re-applied.",
+                applied);
         }
     }
 
     /// <inheritdoc />
     public override void Dispose()
     {
-        _writeRetryQueue?.Dispose();
+        WriteRetryQueue?.Dispose();
         base.Dispose();
     }
 }

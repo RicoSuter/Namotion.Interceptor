@@ -189,6 +189,22 @@ internal sealed class WriteRetryQueue : IDisposable
         }
     }
 
+    /// <summary>
+    /// Drains all pending writes from the queue for local re-application with optimistic concurrency.
+    /// Used on reconnection: instead of flushing stale changes to the server, the caller compares
+    /// each change's old value with the current (post-reconnection) value and re-applies locally if non-conflicting.
+    /// </summary>
+    public SubjectPropertyChange[] DrainForLocalReapply()
+    {
+        lock (_lock)
+        {
+            var changes = _pendingWrites.ToArray();
+            _pendingWrites.Clear();
+            Volatile.Write(ref _count, 0);
+            return changes;
+        }
+    }
+
     private void RequeueChanges(ImmutableArray<SubjectPropertyChange> changes)
     {
         lock (_lock)
