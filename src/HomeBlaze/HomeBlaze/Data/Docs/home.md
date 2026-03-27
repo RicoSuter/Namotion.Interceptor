@@ -28,7 +28,6 @@ System architecture, scaling stages, deployment topology, and design decisions. 
 Working design documents for features not yet implemented. During implementation, the relevant content migrates into [design documents](architecture/design/) and [architecture decisions](architecture/decisions/). Completed plans are removed. [Implementation State](architecture/state.md) tracks overall status.
 
 - [Dynamic Subject Proxying](plans/dynamic-subject-proxying.md) — WebSocket sync with dynamic proxy subjects
-- [Registry Attribute Migration](plans/registry-attribute-migration.md) — Migrate from reflection to registry attributes
 - [AI Agents](plans/ai-agents.md) — Built-in LLM-powered agent subjects
 
 ### [Administration](administration/installation.md)

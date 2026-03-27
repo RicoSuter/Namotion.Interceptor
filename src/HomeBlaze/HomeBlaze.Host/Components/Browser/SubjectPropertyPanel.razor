@@ -1,13 +1,10 @@
-@using HomeBlaze.Abstractions
-@using HomeBlaze.Abstractions.Services
+@using HomeBlaze.Abstractions.Metadata
 @using HomeBlaze.Host.Components.Dialogs
-@using HomeBlaze.Services
 @using HomeBlaze.Storage.Abstractions
 
 @inject IDialogService DialogService
 @inject SubjectComponentRegistry ComponentRegistry
 @inject DeveloperModeService DeveloperMode
-@inject ISubjectMethodInvoker MethodInvoker
 @inject IServiceProvider ServiceProvider
 
 <TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
@@ -68,10 +65,10 @@
                 <MudStack Class="pl-4 pr-4">
                     @foreach (var method in methods)
                     {
-                        var isQuery = method.Kind == SubjectMethodKind.Query;
+                        var isQuery = method.Kind == MethodKind.Query;
                         var defaultIcon = isQuery ? "Search" : "PlayArrow";
-                        var methodName = method.MethodInfo.Name.Replace("Async", string.Empty, StringComparison.OrdinalIgnoreCase);
-                        var methodProperty = _registeredSubject?.TryGetProperty(methodName);
+                        var methodProperty = _registeredSubject?.Properties
+                            .FirstOrDefault(p => p.GetValue() == method);
                         var isEnabledAttribute = methodProperty?.TryGetAttribute(KnownAttributes.IsEnabled);
                         var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
                         <MudButton Variant="Variant.Filled"
@@ -188,7 +185,7 @@
     private readonly HashSet<string> _expandedProperties = [];
 
     private RegisteredSubject? _registeredSubject;
-    private SubjectMethodInfo? _executingOperation;
+    private MethodMetadata? _executingOperation;
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
@@ -259,7 +256,7 @@
             return [];
 
         return _registeredSubject.Properties
-            .Where(p => p.GetStateAttribute() != null && !CanContainSubjects(p))
+            .Where(p => p.GetStateMetadata() != null && !CanContainSubjects(p))
             .OrderBy(p => p.GetDisplayPosition());
     }
 
@@ -283,7 +280,10 @@
     {
         // Property reads are automatically recorded via the context-based ReadPropertyRecorder
         var value = prop.GetValue();
-        var attributes = prop.Attributes.ToArray();
+        var attributes = prop.Attributes
+            .Where(a => a.AttributeMetadata.AttributeName != KnownAttributes.State &&
+                        a.AttributeMetadata.AttributeName != KnownAttributes.Configuration)
+            .ToArray();
         var hasAttributes = attributes.Length > 0;
         var isExpanded = _expandedProperties.Contains(prop.Name);
         var marginLeft = depth * 24;
@@ -367,10 +367,10 @@
         await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, $"Edit {title}");
     }
 
-    private IReadOnlyList<SubjectMethodInfo> GetMethods() =>
+    private IReadOnlyList<MethodMetadata> GetMethods() =>
         _registeredSubject?.GetAllMethods() ?? [];
 
-    private async Task ExecuteMethodAsync(SubjectMethodInfo operation)
+    private async Task ExecuteMethodAsync(MethodMetadata operation)
     {
         if (Subject == null || _executingOperation != null)
             return;
@@ -383,9 +383,11 @@
             var resolvedParameters = new Dictionary<string, object?>();
             foreach (var parameter in operation.Parameters)
             {
-                if (SubjectMethodInvoker.IsAutoInjectedParameter(parameter.Type))
+                if (parameter.IsRuntimeProvided)
                 {
-                    resolvedParameters[parameter.Name] = null; // Placeholder, invoker will provide actual value
+                    resolvedParameters[parameter.Name] = parameter.Type == typeof(CancellationToken)
+                        ? CancellationToken.None
+                        : null;
                     continue;
                 }
 
@@ -396,7 +398,7 @@
             }
 
             // Check if there are any parameters that need user input
-            var needsParameterDialog = operation.Parameters.Length > resolvedParameters.Count;
+            var needsParameterDialog = operation.Parameters.Any(p => p.RequiresInput);
 
             // If operation has parameters that need user input, show parameter dialog
             if (needsParameterDialog)
@@ -432,25 +434,14 @@
             _executingOperation = operation;
             StateHasChanged();
 
-            var result = await MethodInvoker.InvokeAsync(
-                Subject,
-                operation,
-                parameters ?? []);
+            var result = await operation.InvokeAsync(Subject, parameters);
 
             _executingOperation = null;
             StateHasChanged();
 
-            // Show result or error dialog
-            if (result.Success)
+            if (result != null)
             {
-                if (result.Result != null)
-                {
-                    await MethodResultDialog.ShowAsync(DialogService, operation.Title, result.Result);
-                }
-            }
-            else
-            {
-                await MethodErrorDialog.ShowAsync(DialogService, operation.Title, result.Exception!);
+                await MethodResultDialog.ShowAsync(DialogService, operation.Title, result);
             }
         }
         catch (Exception ex)

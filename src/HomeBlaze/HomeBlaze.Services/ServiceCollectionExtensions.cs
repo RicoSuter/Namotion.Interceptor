@@ -1,4 +1,3 @@
-using HomeBlaze.Abstractions.Services;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace HomeBlaze.Services;
@@ -27,7 +26,6 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<RootManager>();
         services.AddSingleton<SubjectPathResolver>();
         services.AddSingleton<DeveloperModeService>();
-        services.AddScoped<ISubjectMethodInvoker, SubjectMethodInvoker>();
         services.AddHostedService(sp => sp.GetRequiredService<RootManager>());
 
         return services;

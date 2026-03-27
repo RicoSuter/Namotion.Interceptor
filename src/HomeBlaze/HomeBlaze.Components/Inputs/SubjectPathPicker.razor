@@ -232,7 +232,7 @@
                     continue;
 
                 // Determine if property has state attribute
-                var hasState = property.GetStateAttribute() != null;
+                var hasState = property.GetStateMetadata() != null;
 
                 // Determine if this property is expandable
                 var isExpandable = false;
@@ -363,7 +363,7 @@
                 return false;
 
             // Has state attribute - will be shown
-            if (p.GetStateAttribute() != null)
+            if (p.GetStateMetadata() != null)
                 return true;
 
             // Collection/Dictionary with children - will be shown
