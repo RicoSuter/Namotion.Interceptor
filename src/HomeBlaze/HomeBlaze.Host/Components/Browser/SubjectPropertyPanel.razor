@@ -434,7 +434,7 @@
             _executingOperation = operation;
             StateHasChanged();
 
-            var result = await operation.InvokeAsync(Subject, parameters);
+            var result = await operation.InvokeAsync(parameters);
 
             _executingOperation = null;
             StateHasChanged();
