@@ -94,22 +94,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
         var resultType = GetUnwrappedResultType(method.ReturnType);
         var requiresConfirmation = attribute is OperationAttribute { RequiresConfirmation: true };
 
-        var capturedMethod = method;
-        var metadata = new MethodMetadata(subject, async (target, arguments) =>
-        {
-            var result = capturedMethod.Invoke(target, arguments);
-            if (result is Task task)
-            {
-                await task.ConfigureAwait(false);
-                var taskType = task.GetType();
-                if (taskType.IsGenericType && taskType.GetGenericTypeDefinition() == typeof(Task<>))
-                {
-                    return taskType.GetProperty("Result")?.GetValue(task);
-                }
-                return null;
-            }
-            return result;
-        })
+        var metadata = new MethodMetadata(subject, method)
         {
             Kind = kind,
             Title = attribute.Title ?? propertyName,
@@ -126,7 +111,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
             typeof(MethodMetadata),
             _ => metadata,
             null,
-            [.. capturedMethod.GetCustomAttributes<Attribute>()]);
+            [.. method.GetCustomAttributes<Attribute>()]);
     }
 
     private static Type? GetUnwrappedResultType(Type returnType)
