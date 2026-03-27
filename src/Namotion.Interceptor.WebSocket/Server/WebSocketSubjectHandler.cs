@@ -8,7 +8,6 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.WebSocket.Protocol;
 using Namotion.Interceptor.WebSocket.Serialization;
@@ -377,10 +376,6 @@ public sealed class WebSocketSubjectHandler
     public ChangeQueueProcessor CreateChangeQueueProcessor(ILogger logger) =>
         new(source: this, Context,
             propertyFilter: propertyReference =>
-                // Return false for unregistered properties: the PathProvider defines the API
-                // surface exposed to clients — bypassing it could leak internal property values.
-                // Rare value-loss for momentarily-unregistered subjects is acceptable; clients
-                // receive correct state on next Welcome (reconnect).
                 propertyReference.TryGetRegisteredProperty() is { } property &&
                 (_configuration.PathProvider?.IsPropertyIncluded(property) ?? true),
             writeHandler: BroadcastChangesAsync, BufferTime, logger);

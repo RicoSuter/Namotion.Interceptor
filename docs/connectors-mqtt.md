@@ -194,7 +194,7 @@ public class CustomMqttValueConverter : IMqttValueConverter
 
 ### Write Retry Queue
 
-The client automatically queues write operations when the connection is lost. Queued writes are flushed in FIFO order when the connection is restored.
+The client automatically queues write operations when the connection is lost. On reconnection, queued writes are optimistically re-applied: after loading the server's current state, each queued change is compared against the current property value and only re-applied if the server hasn't changed it (source wins on conflict). See [Connectors — Write Retry Queue](connectors.md#write-retry-queue).
 
 ```csharp
 new MqttClientConfiguration
@@ -204,7 +204,7 @@ new MqttClientConfiguration
 ```
 
 - Ring buffer semantics: drops oldest when full
-- Automatic flush after reconnection
+- Optimistic re-apply after reconnection (source wins on conflict)
 - Set to 0 to disable
 
 ### Circuit Breaker

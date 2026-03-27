@@ -64,6 +64,7 @@ public class DefaultSubjectFactory : ISubjectFactory
             return typeof(Dictionary<,>).MakeGenericType(keyType, valueType);
         });
 
+        var keyType = propertyType.GenericTypeArguments[0];
         var dictionary = (IDictionary)Activator.CreateInstance(dictionaryType)!;
         foreach (var entry in entries)
         {

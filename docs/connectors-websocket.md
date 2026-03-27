@@ -353,22 +353,20 @@ configuration.ReconnectDelay = TimeSpan.FromSeconds(5);      // Initial delay
 configuration.MaxReconnectDelay = TimeSpan.FromSeconds(60);  // Maximum delay
 ```
 
-On reconnection, the client follows the buffer-flush-load-replay pattern:
+On reconnection, the client follows the buffer-load-replay-reapply pattern (see [Connectors — Initialization Sequence](connectors.md#initialization-sequence)):
 
 1. **Buffer**: Start buffering inbound updates (via `SubjectPropertyWriter`)
 2. **Reconnect**: Connect and perform Hello/Welcome handshake (server registers connection, builds snapshot, sends Welcome)
-3. **Flush**: Flush pending writes from the retry queue to the server
-4. **Load**: Apply the Welcome snapshot as a baseline
-5. **Replay**: Replay all buffered updates received since reconnection (catches up to current state)
-6. **Resume**: Switch to direct update application (buffer mode off)
+3. **Load**: Apply the Welcome snapshot as a baseline
+4. **Replay**: Replay all buffered updates received since reconnection (catches up to current state)
+5. **Resume**: Switch to direct update application (buffer mode off)
+6. **Optimistic retry re-apply**: Queued writes from the retry queue are compared against current property values and re-applied locally if the source hasn't changed them (see [Connectors — Write Retry Queue](connectors.md#write-retry-queue))
 
 This ensures:
 - No updates are lost during the reconnection window
 - The snapshot provides a consistent baseline
-- Buffered updates (including echoed retry queue changes) bring the state to current
+- Stale queued writes don't overwrite newer source values (source wins on conflict)
 - Client and server converge to the same state (eventual consistency)
-
-> **Note**: The retry queue echo (server broadcasting the client's flushed changes back) may arrive during or shortly after the replay phase. If it arrives during replay, it is included in the buffer. If it arrives after, it is applied immediately. Either way, the state converges within one round trip.
 
 ### Sequence Numbers and Gap Detection
 

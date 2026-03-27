@@ -1,11 +1,11 @@
 using System.Collections.Concurrent;
-using System.Reflection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -54,7 +54,8 @@ public class SubjectSourceBackgroundServiceTests
         var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, subjectContextMock.Object, NullLogger.Instance);
 
         await service.StartAsync(cancellationTokenSource.Token);
-        await Task.Delay(1000, cancellationTokenSource.Token);
+        await AsyncTestHelpers.WaitUntilAsync(() => updates.Count >= 3,
+            message: "Expected 3 updates (Complete + Update1 + Update2)");
         await service.StopAsync(cancellationTokenSource.Token);
 
         await cancellationTokenSource.CancelAsync();
@@ -64,7 +65,7 @@ public class SubjectSourceBackgroundServiceTests
         // first apply complete state
         Assert.Equal("Complete", updates.ElementAt(0));
 
-        // than replay since requesting complete state
+        // then replay since requesting complete state
         Assert.Equal("Update1", updates.ElementAt(1));
         Assert.Equal("Update2", updates.ElementAt(2));
     }
@@ -113,8 +114,9 @@ public class SubjectSourceBackgroundServiceTests
             subject.GetPropertyReference(nameof(Person.FirstName)), null, "Bar");
 
         propertyChangedChannel.WriteProperty(ref writeContext, (ref _) => { });
-        
-        await Task.Delay(1000, cancellationTokenSource.Token);
+
+        await AsyncTestHelpers.WaitUntilAsync(() => changes != null,
+            message: "Expected WriteChangesAsync to be called");
         await service.StopAsync(cancellationTokenSource.Token);
 
         await cancellationTokenSource.CancelAsync();
@@ -491,7 +493,7 @@ public class SubjectSourceBackgroundServiceTests
             $"Expected 'FailedValue' in at least 2 write calls (original + retry), appeared in {failedValueCallCount}");
     }
 
-    #region Optimistic retry re-apply tests
+    // Optimistic retry re-apply tests
 
     [Fact]
     public async Task WhenRetryQueueHasNonConflictingValueChange_ThenChangeIsReappliedAndSentToServer()
@@ -502,8 +504,8 @@ public class SubjectSourceBackgroundServiceTests
             .WithRegistry();
         var subject = new Person(context) { FirstName = "Original" };
 
-        var (service, sourceMock, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
-            welcomeAction: () => { subject.FirstName = "Original"; }); // Server didn't change it
+        var (service, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () => { subject.FirstName = "Original"; }); // Server didn't change it
 
         // Pre-fill retry queue: client changed "Original" → "ClientChange"
         EnqueueRetryChange(service, subject, nameof(Person.FirstName), "Original", "ClientChange");
@@ -529,15 +531,16 @@ public class SubjectSourceBackgroundServiceTests
             .WithRegistry();
         var subject = new Person(context) { FirstName = "Original" };
 
-        var (service, sourceMock, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
-            welcomeAction: () => { subject.FirstName = "ServerChanged"; }); // Server DID change it
+        var (service, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () => { subject.FirstName = "ServerChanged"; }); // Server DID change it
 
         // Pre-fill retry queue: client changed "Original" → "ClientChange"
         EnqueueRetryChange(service, subject, nameof(Person.FirstName), "Original", "ClientChange");
 
         // Act
         await service.StartAsync(CancellationToken.None);
-        await Task.Delay(500); // Give time for any potential re-apply
+        await AsyncTestHelpers.WaitUntilAsync(() => service.WriteRetryQueue!.IsEmpty,
+            message: "Expected retry queue to be drained by ReapplyRetryQueue");
         await service.StopAsync(CancellationToken.None);
 
         // Assert — server wins, change was dropped
@@ -556,8 +559,8 @@ public class SubjectSourceBackgroundServiceTests
         var personB = new Person(context) { FirstName = "B" };
         var subject = new Person(context) { Father = personA };
 
-        var (service, sourceMock, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
-            welcomeAction: () => { subject.Father = personA; }); // Server didn't change it
+        var (service, _, writeTcs) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () => { subject.Father = personA; }); // Server didn't change it
 
         // Pre-fill retry queue: client changed Father from personA → personB
         EnqueueRetryChange<Person?>(service, subject, nameof(Person.Father), personA, personB);
@@ -583,15 +586,16 @@ public class SubjectSourceBackgroundServiceTests
         var personC = new Person(context) { FirstName = "C" };
         var subject = new Person(context) { Father = personA };
 
-        var (service, sourceMock, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
-            welcomeAction: () => { subject.Father = personC; }); // Server replaced with C
+        var (service, _, _) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () => { subject.Father = personC; }); // Server replaced with C
 
         // Pre-fill retry queue: client changed Father from personA → personB
         EnqueueRetryChange<Person?>(service, subject, nameof(Person.Father), personA, personB);
 
         // Act
         await service.StartAsync(CancellationToken.None);
-        await Task.Delay(500);
+        await AsyncTestHelpers.WaitUntilAsync(() => service.WriteRetryQueue!.IsEmpty,
+            message: "Expected retry queue to be drained by ReapplyRetryQueue");
         await service.StopAsync(CancellationToken.None);
 
         // Assert — server wins
@@ -609,8 +613,8 @@ public class SubjectSourceBackgroundServiceTests
         var listB = new List<Person> { new Person(context) { FirstName = "Child" } };
         var subject = new Person(context) { Children = listA };
 
-        var (service, sourceMock, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
-            welcomeAction: () => { subject.Children = listA; }); // Server didn't replace it
+        var (service, _, writeTcs) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () => { subject.Children = listA; }); // Server didn't replace it
 
         // Pre-fill retry queue: client replaced collection listA → listB
         EnqueueRetryChange(service, subject, nameof(Person.Children), listA, listB);
@@ -636,15 +640,16 @@ public class SubjectSourceBackgroundServiceTests
         var listC = new List<Person> { new Person(context) { FirstName = "ServerChild" } };
         var subject = new Person(context) { Children = listA };
 
-        var (service, sourceMock, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
-            welcomeAction: () => { subject.Children = listC; }); // Server replaced collection
+        var (service, _, _) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () => { subject.Children = listC; }); // Server replaced collection
 
         // Pre-fill retry queue: client replaced listA → listB
         EnqueueRetryChange(service, subject, nameof(Person.Children), listA, listB);
 
         // Act
         await service.StartAsync(CancellationToken.None);
-        await Task.Delay(500);
+        await AsyncTestHelpers.WaitUntilAsync(() => service.WriteRetryQueue!.IsEmpty,
+            message: "Expected retry queue to be drained by ReapplyRetryQueue");
         await service.StopAsync(CancellationToken.None);
 
         // Assert — server wins
@@ -660,8 +665,8 @@ public class SubjectSourceBackgroundServiceTests
             .WithRegistry();
         var subject = new Person(context) { FirstName = "OrigFirst", LastName = "OrigLast" };
 
-        var (service, sourceMock, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
-            welcomeAction: () =>
+        var (service, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () =>
             {
                 subject.FirstName = "ServerFirst"; // Server changed this → conflict
                 subject.LastName = "OrigLast";     // Server didn't change this → no conflict
@@ -693,8 +698,8 @@ public class SubjectSourceBackgroundServiceTests
             .WithRegistry();
         var subject = new Person(context) { FirstName = "OrigFirst", LastName = "OrigLast" };
 
-        var (service, sourceMock, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
-            welcomeAction: () =>
+        var (service, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () =>
             {
                 subject.FirstName = "ServerFirst";
                 subject.LastName = "ServerLast";
@@ -705,13 +710,67 @@ public class SubjectSourceBackgroundServiceTests
 
         // Act
         await service.StartAsync(CancellationToken.None);
-        await Task.Delay(500);
+        await AsyncTestHelpers.WaitUntilAsync(() => service.WriteRetryQueue!.IsEmpty,
+            message: "Expected retry queue to be drained by ReapplyRetryQueue");
         await service.StopAsync(CancellationToken.None);
 
         // Assert — all dropped, server values remain
         Assert.Equal("ServerFirst", subject.FirstName);
         Assert.Equal("ServerLast", subject.LastName);
         Assert.Empty(writtenChanges);
+    }
+
+    [Fact]
+    public async Task WhenRetryQueueHasNullValues_ThenNullEqualsNullAndChangeIsReapplied()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context); // FirstName starts as null
+
+        var (service, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () => { }); // Server didn't set it either — stays null
+
+        // Pre-fill retry queue: client changed null → "ClientValue"
+        EnqueueRetryChange(service, subject, nameof(Person.FirstName), null, "ClientValue");
+
+        // Act
+        await service.StartAsync(CancellationToken.None);
+        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert — null == null → non-conflicting, re-applied
+        Assert.Equal("ClientValue", subject.FirstName);
+        Assert.Contains(writtenChanges, c =>
+            c.Property.Name == nameof(Person.FirstName) &&
+            c.GetNewValue<string?>() == "ClientValue");
+    }
+
+    [Fact]
+    public async Task WhenRetryQueueHasNullOldValueButServerSetValue_ThenChangeIsDropped()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context); // FirstName starts as null
+
+        var (service, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () => { subject.FirstName = "ServerValue"; }); // Server set it
+
+        // Pre-fill retry queue: client changed null → "ClientValue"
+        EnqueueRetryChange(service, subject, nameof(Person.FirstName), null, "ClientValue");
+
+        // Act
+        await service.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => service.WriteRetryQueue!.IsEmpty,
+            message: "Expected retry queue to be drained by ReapplyRetryQueue");
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert — null != "ServerValue" → conflict, dropped
+        Assert.Equal("ServerValue", subject.FirstName);
+        Assert.DoesNotContain(writtenChanges, c => c.Property.Name == nameof(Person.FirstName));
     }
 
     [Fact]
@@ -723,17 +782,18 @@ public class SubjectSourceBackgroundServiceTests
             .WithRegistry();
         var subject = new Person(context) { FirstName = "Original" };
 
-        var (service, sourceMock, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
-            welcomeAction: () => { subject.FirstName = "ServerValue"; });
+        var (service, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () => { subject.FirstName = "ServerValue"; });
 
         // No retry changes enqueued
 
         // Act
         await service.StartAsync(CancellationToken.None);
-        await Task.Delay(500);
+        await AsyncTestHelpers.WaitUntilAsync(() => subject.FirstName == "ServerValue",
+            message: "Expected initial state to be applied");
         await service.StopAsync(CancellationToken.None);
 
-        // Assert — Welcome applied, no retry changes sent
+        // Assert — Initial state applied, no retry changes sent
         Assert.Equal("ServerValue", subject.FirstName);
         Assert.Empty(writtenChanges);
     }
@@ -764,20 +824,47 @@ public class SubjectSourceBackgroundServiceTests
 
         // Act
         await service.StartAsync(CancellationToken.None);
-        await Task.Delay(500);
+        await AsyncTestHelpers.WaitUntilAsync(() => subject.FirstName == "ServerValue",
+            message: "Expected initial state to be applied");
         await service.StopAsync(CancellationToken.None);
 
         // Assert — service runs normally without retry queue
         Assert.Equal("ServerValue", subject.FirstName);
     }
 
-    #endregion
+    [Fact]
+    public async Task WhenRetryChangeThrowsDuringReapply_ThenRemainingChangesAreStillProcessed()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context) { FirstName = "Original", LastName = "Original" };
 
-    #region Helpers for optimistic re-apply tests
+        var (service, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
+            initialStateAction: () => { }); // Server didn't change anything
 
-    private static (SubjectSourceBackgroundService service, Mock<ISubjectSource> sourceMock,
+        // Enqueue a change with a bogus property name — Metadata access will throw
+        EnqueueRetryChange(service, subject, "NonExistentProperty", "old", "new");
+
+        // Enqueue a valid change after the broken one
+        EnqueueRetryChange(service, subject, nameof(Person.LastName), "Original", "ClientLast");
+
+        // Act
+        await service.StartAsync(CancellationToken.None);
+        await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await service.StopAsync(CancellationToken.None);
+
+        // Assert — broken change failed, but LastName was still re-applied
+        Assert.Equal("ClientLast", subject.LastName);
+        Assert.Contains(writtenChanges, c =>
+            c.Property.Name == nameof(Person.LastName) &&
+            c.GetNewValue<string?>() == "ClientLast");
+    }
+
+    private static (SubjectSourceBackgroundService service,
         ConcurrentBag<SubjectPropertyChange> writtenChanges, TaskCompletionSource writeTcs)
-        CreateServiceWithRetryQueue(Person subject, IInterceptorSubjectContext context, Action welcomeAction)
+        CreateServiceWithRetryQueue(Person subject, IInterceptorSubjectContext context, Action initialStateAction)
     {
         var sourceMock = new Mock<ISubjectSource>();
         var writtenChanges = new ConcurrentBag<SubjectPropertyChange>();
@@ -791,7 +878,7 @@ public class SubjectSourceBackgroundServiceTests
             {
                 using (SubjectChangeContext.WithSource(sourceMock.Object))
                 {
-                    welcomeAction();
+                    initialStateAction();
                 }
             });
 
@@ -817,7 +904,7 @@ public class SubjectSourceBackgroundServiceTests
             sourceMock.Object, context, NullLogger.Instance,
             bufferTime: TimeSpan.FromMilliseconds(50));
 
-        return (service, sourceMock, writtenChanges, writeTcs);
+        return (service, writtenChanges, writeTcs);
     }
 
     private static void EnqueueRetryChange(SubjectSourceBackgroundService service,
@@ -829,9 +916,7 @@ public class SubjectSourceBackgroundServiceTests
     private static void EnqueueRetryChange<TValue>(SubjectSourceBackgroundService service,
         IInterceptorSubject subject, string propertyName, TValue oldValue, TValue newValue)
     {
-        var queueField = typeof(SubjectSourceBackgroundService)
-            .GetField("_writeRetryQueue", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        var queue = (WriteRetryQueue)queueField.GetValue(service)!;
+        var queue = service.WriteRetryQueue!;
 
         var change = SubjectPropertyChange.Create(
             new PropertyReference(subject, propertyName),
@@ -843,6 +928,4 @@ public class SubjectSourceBackgroundServiceTests
 
         queue.Enqueue(new[] { change });
     }
-
-    #endregion
 }
