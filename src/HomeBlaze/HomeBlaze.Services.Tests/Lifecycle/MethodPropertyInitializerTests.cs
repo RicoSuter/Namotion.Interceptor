@@ -439,6 +439,57 @@ public class MethodPropertyInitializerTests
         // Assert
         Assert.Null(property);
     }
+
+    [Fact]
+    public async Task TrulyAsyncMethod_InvokeAsync_PropagatesException()
+    {
+        // Arrange — tests that exceptions thrown after an await are correctly propagated
+        var context = CreateContext();
+        var subject = new TrulyAsyncThrowingSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty("FailAfterAwait");
+        var metadata = property!.GetValue() as MethodMetadata;
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => metadata!.InvokeAsync(null, null, CancellationToken.None));
+        Assert.Equal("truly async failure", exception.Message);
+    }
+
+    [Fact]
+    public void ConcreteMethodTakesPrecedenceOverInterface()
+    {
+        // Arrange — when both type and interface have the same method name,
+        // the concrete type's version is registered (deduplication by name)
+        var context = CreateContext();
+        var subject = new MethodTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act — InterfaceOperationAsync is defined on both the interface and the type.
+        // The interface declares [Operation(Title = "Interface Op")] but the concrete
+        // implementation has no attribute, so the interface attribute is what gets discovered.
+        var property = registered.TryGetProperty("InterfaceOperation");
+        var metadata = property!.GetValue() as MethodMetadata;
+
+        // Assert — only one property registered for this method name
+        var allMethods = registered.GetAllMethods();
+        Assert.Equal(1, allMethods.Count(m => m.Title == "Interface Op" || m.Title == "InterfaceOperation"));
+    }
+
+    [Fact]
+    public void SubjectWithNoMethods_HasNoMethodProperties()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new NoMethodsSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var methods = registered.GetAllMethods();
+
+        // Assert
+        Assert.Empty(methods);
+    }
 }
 
 public interface IMethodTestInterface
@@ -530,4 +581,21 @@ public partial class DescribedMethodSubject
     {
         return Task.CompletedTask;
     }
+}
+
+[InterceptorSubject]
+public partial class TrulyAsyncThrowingSubject
+{
+    [Operation(Title = "Fail After Await")]
+    public async Task FailAfterAwaitAsync()
+    {
+        await Task.Yield();
+        throw new InvalidOperationException("truly async failure");
+    }
+}
+
+[InterceptorSubject]
+public partial class NoMethodsSubject
+{
+    public partial string? Name { get; set; }
 }
