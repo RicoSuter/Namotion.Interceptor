@@ -20,17 +20,17 @@ Operations and queries are implemented in HomeBlaze today:
 - Blazor UI renders operations as buttons with parameter dialogs, confirmation, and result display
 - MCP tools `list_methods` and `invoke_method` in `Namotion.Interceptor.Mcp` (in progress, [PR #158](https://github.com/RicoSuter/Namotion.Interceptor/pull/158))
 
-## Migration to Interceptor Core [Implemented]
+## Migration to Namotion.Interceptor.Reflection [Planned]
 
-Operations have been migrated from reflection-based discovery to registry attributes. Method metadata is now stored in the registry as `MethodMetadata` dynamic properties, making operations usable across all interceptor applications.
+Operations currently use registry attributes (`MethodMetadata` dynamic properties) but all types still live in HomeBlaze. The goal is to move the core abstractions into a `Namotion.Interceptor.Reflection` package so operations are reusable across all interceptor applications (OPC UA method mapping, MCP tool support, etc.).
 
-What moved to core:
+What should move to `Namotion.Interceptor.Reflection`:
 - `[Operation]` and `[Query]` attributes
-- Method discovery via `MethodMetadata` properties in the registry
-- Invocation via `MethodMetadata.InvokeAsync`
+- `MethodMetadata`, `MethodParameter`, `MethodKind` types
+- `MethodPropertyInitializer` lifecycle handler
+- Method discovery and invocation via `MethodMetadata.InvokeAsync`
 
 What stays in HomeBlaze:
-- `MethodPropertyInitializer` (registers `MethodMetadata` as dynamic properties for UI integration like `IsEnabled`)
 - Blazor UI components (parameter dialogs, confirmation, result display)
 - Domain-specific operation patterns
 
@@ -59,7 +59,7 @@ For most operations, at-most-once (fail on disconnect) is acceptable. For critic
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Method attributes | `[Operation]` (state-changing) and `[Query]` (read-only) | Clear semantic distinction enables different authorization defaults and UI treatment |
-| Migration to core | Attributes and discovery moved into Namotion.Interceptor registry via `MethodMetadata` | Enables OPC UA method mapping, MCP tool support, and reuse outside HomeBlaze |
+| Migration to Namotion.Interceptor.Reflection | Planned — attributes and discovery to move into dedicated package | Enables OPC UA method mapping, MCP tool support, and reuse outside HomeBlaze |
 | RPC semantics | Execute-all, not last-writer-wins | Operations are commands, not state — every invocation matters |
 
 ## Open Questions
