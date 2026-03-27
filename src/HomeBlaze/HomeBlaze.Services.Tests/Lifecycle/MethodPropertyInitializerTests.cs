@@ -243,6 +243,202 @@ public class MethodPropertyInitializerTests
         Assert.Equal(42, subject.LastValue);
         Assert.Equal(cts.Token, subject.LastToken);
     }
+
+    [Fact]
+    public void ParameterlessMethod_HasEmptyParameters()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new MethodTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var property = registered.TryGetProperty("Stop");
+        var metadata = property!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Empty(metadata!.Parameters);
+    }
+
+    [Fact]
+    public async Task ParameterlessMethod_InvokeAsync_WithNullParameters()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new MethodTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty("Stop");
+        var metadata = property!.GetValue() as MethodMetadata;
+
+        // Act
+        await metadata!.InvokeAsync(null, null, CancellationToken.None);
+
+        // Assert
+        Assert.True(subject.StopCalled);
+    }
+
+    [Fact]
+    public async Task ParameterlessMethod_InvokeAsync_WithEmptyParameters()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new MethodTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty("Stop");
+        var metadata = property!.GetValue() as MethodMetadata;
+
+        // Act
+        await metadata!.InvokeAsync([], null, CancellationToken.None);
+
+        // Assert
+        Assert.True(subject.StopCalled);
+    }
+
+    [Fact]
+    public void VoidMethod_HasNullResultType()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new VoidMethodSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var property = registered.TryGetProperty("Reset");
+        var metadata = property!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Null(metadata!.ResultType);
+    }
+
+    [Fact]
+    public async Task VoidMethod_InvokeAsync_ReturnsNull()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new VoidMethodSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty("Reset");
+        var metadata = property!.GetValue() as MethodMetadata;
+
+        // Act
+        var result = await metadata!.InvokeAsync(null, null, CancellationToken.None);
+
+        // Assert
+        Assert.Null(result);
+        Assert.True(subject.ResetCalled);
+    }
+
+    [Fact]
+    public async Task TaskMethod_WithNoGenericResult_HasNullResultType()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new MethodTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var property = registered.TryGetProperty("Stop");
+        var metadata = property!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Null(metadata!.ResultType);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_MethodThrows_ExceptionPropagates()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new ThrowingMethodSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty("Fail");
+        var metadata = property!.GetValue() as MethodMetadata;
+
+        // Act & Assert — TargetInvocationException is unwrapped to surface the original exception
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => metadata!.InvokeAsync(null, null, CancellationToken.None));
+        Assert.Equal("Something went wrong", exception.Message);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_AsyncMethodThrows_ExceptionPropagates()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new ThrowingMethodSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty("FailAsync");
+        var metadata = property!.GetValue() as MethodMetadata;
+
+        // Act & Assert — TargetInvocationException is unwrapped to surface the original exception
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => metadata!.InvokeAsync(null, null, CancellationToken.None));
+        Assert.Equal("Async failure", exception.Message);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_TooFewUserParameters_ThrowsArgumentException()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new MethodWithSpecialParamsSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty("DoWork");
+        var metadata = property!.GetValue() as MethodMetadata;
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => metadata!.InvokeAsync(null, null, CancellationToken.None));
+        Assert.Contains("Expected 1", exception.Message);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_TooManyUserParameters_ThrowsArgumentException()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new MethodWithSpecialParamsSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var property = registered.TryGetProperty("DoWork");
+        var metadata = property!.GetValue() as MethodMetadata;
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<ArgumentException>(
+            () => metadata!.InvokeAsync([1, 2], null, CancellationToken.None));
+        Assert.Contains("Expected 1", exception.Message);
+        Assert.Contains("received 2", exception.Message);
+    }
+
+    [Fact]
+    public void MethodWithDescription_PreservesDescription()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new DescribedMethodSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var property = registered.TryGetProperty("Shutdown");
+        var metadata = property!.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("Shuts down the system safely", metadata!.Description);
+    }
+
+    [Fact]
+    public void MethodWithoutAttributes_NotDiscovered()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new MethodTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act — InterfaceOperationAsync exists but "ToString" should not be a method property
+        var property = registered.TryGetProperty("ToString");
+
+        // Assert
+        Assert.Null(property);
+    }
 }
 
 public interface IMethodTestInterface
@@ -294,6 +490,44 @@ public partial class MethodWithSpecialParamsSubject
     {
         LastValue = value;
         LastToken = cancellationToken;
+        return Task.CompletedTask;
+    }
+}
+
+[InterceptorSubject]
+public partial class VoidMethodSubject
+{
+    public bool ResetCalled { get; set; }
+
+    [Operation(Title = "Reset")]
+    public void Reset()
+    {
+        ResetCalled = true;
+    }
+}
+
+[InterceptorSubject]
+public partial class ThrowingMethodSubject
+{
+    [Operation(Title = "Fail")]
+    public void Fail()
+    {
+        throw new InvalidOperationException("Something went wrong");
+    }
+
+    [Operation(Title = "Fail Async")]
+    public Task FailAsyncAsync()
+    {
+        throw new InvalidOperationException("Async failure");
+    }
+}
+
+[InterceptorSubject]
+public partial class DescribedMethodSubject
+{
+    [Operation(Title = "Shutdown", Description = "Shuts down the system safely")]
+    public Task ShutdownAsync()
+    {
         return Task.CompletedTask;
     }
 }

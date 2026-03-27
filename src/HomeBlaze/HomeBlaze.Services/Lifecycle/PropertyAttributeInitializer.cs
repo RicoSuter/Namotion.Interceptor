@@ -17,9 +17,8 @@ public class PropertyAttributeInitializer : ILifecycleHandler
         if (!change.IsContextAttach)
             return;
 
-        var registeredSubject = change.Subject.TryGetRegisteredSubject();
-        if (registeredSubject == null)
-            return;
+        var registeredSubject = change.Subject.TryGetRegisteredSubject()
+            ?? throw new InvalidOperationException("Subject not registered");
 
         foreach (var property in registeredSubject.Properties)
         {
