@@ -1,6 +1,7 @@
 ---
 title: Resilience and Fault Tolerance
 navTitle: Resilience
+status: Partial
 ---
 
 # Resilience and Fault Tolerance Design

@@ -1,6 +1,7 @@
 ---
 title: AI Integration
 navTitle: AI
+status: Planned
 ---
 
 # AI Integration Design

@@ -1,6 +1,7 @@
 ---
 title: Scalability
 navTitle: Scalability
+status: Planned
 ---
 
 # Scalability Design [Planned]

@@ -17,9 +17,18 @@ Multiple HomeBlaze instances can form a distributed topology: satellites connect
 System architecture, scaling stages, deployment topology, and design decisions. Start here to understand how HomeBlaze works as a system.
 
 - [Architecture Overview](architecture/overview.md) — Arc42 system architecture
+- [Runtime Scenarios](architecture/runtime-scenarios.md) — Step-by-step system flows
 - [Implementation State](architecture/state.md) — What is implemented vs. planned
 - [Project Structure](architecture/project-structure.md) — .NET project layout and dependencies
 - [Design Documents](architecture/design/) — Detailed designs for individual building blocks
+- [Architecture Decisions](architecture/decisions/) — ADRs for significant design choices
+
+### [Plans](plans/)
+
+Working design documents for features not yet implemented. During implementation, the relevant content migrates into [design documents](architecture/design/) and [architecture decisions](architecture/decisions/). Completed plans are removed. [Implementation State](architecture/state.md) tracks overall status.
+
+- [Dynamic Subject Proxying](plans/dynamic-subject-proxying.md) — WebSocket sync with dynamic proxy subjects
+- [Registry Attribute Migration](plans/registry-attribute-migration.md) — Migrate from reflection to registry attributes
 
 ### [Administration](administration/installation.md)
 
@@ -27,6 +36,9 @@ Setup, deployment, and runtime configuration for operators and administrators.
 
 - [Installation](administration/installation.md) — Getting started
 - [Configuration](administration/configuration.md) — Storage, paths, and subject configuration
+- [Monitoring](administration/monitoring.md) — Health checks and observability
+- [Troubleshooting](administration/troubleshooting.md) — Diagnostics and common issues
+- [Upgrading](administration/upgrading.md) — Version upgrades and migration
 
 ### [Development](development/building-subjects.md)
 

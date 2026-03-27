@@ -16,6 +16,25 @@ HomeBlaze transforms files into a reactive object graph with automatic UI genera
 
 ---
 
+## Managing Configuration
+
+Configuration can be managed in two ways — both produce the same result:
+
+**Via the Blazor UI:**
+- **Create subjects** — The subject browser lets you create new subjects by selecting a type from the registry and filling in configuration properties via an auto-generated editor
+- **Edit subjects** — Select any subject to view and edit its `[Configuration]` properties in the property panel. Changes are saved back to the JSON file automatically
+- **Create and edit files** — New JSON and Markdown files can be created from the UI. Markdown files open in an integrated Monaco editor with live preview
+- **Manage folders** — Create, rename, and delete folders in the storage tree
+
+**Via files directly:**
+- Edit JSON and Markdown files in the `Data/` folder with any editor
+- Changes are picked up automatically via file system watching
+- This is useful for bulk setup, version control, or scripting
+
+Both approaches work on the same underlying files — the UI is a management layer on top of the file-based storage, not a separate configuration system.
+
+---
+
 ## The Object Graph
 
 HomeBlaze organizes everything as **subjects** in a tree structure:

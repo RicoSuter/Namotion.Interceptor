@@ -1,6 +1,7 @@
 ---
 title: Audit Trail
 navTitle: Audit
+status: Planned
 ---
 
 # Audit Trail Design [Planned]

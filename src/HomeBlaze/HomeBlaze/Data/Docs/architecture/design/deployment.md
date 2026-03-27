@@ -1,6 +1,7 @@
 ---
 title: Deployment
 navTitle: Deployment
+status: Planned
 ---
 
 # Deployment Design [Planned]

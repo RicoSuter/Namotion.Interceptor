@@ -1,6 +1,7 @@
 ---
 title: Plugin System
 navTitle: Plugins
+status: Implemented
 ---
 
 # Plugin System Design

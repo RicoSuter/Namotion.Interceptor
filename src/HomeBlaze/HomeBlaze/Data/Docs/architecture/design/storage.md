@@ -1,6 +1,7 @@
 ---
 title: Storage
 navTitle: Storage
+status: Implemented
 ---
 
 # Storage Design
@@ -28,7 +29,7 @@ Each layer recovers from its source of truth:
 | Instance | Recovers from | Mechanism |
 |----------|--------------|-----------|
 | Satellite | Field devices | Connectors reconnect, read current values |
-| Central UNS | Satellites | Satellites reconnect, send Welcome snapshot with full state |
+| Central UNS | Satellites | Satellites reconnect, send Welcome snapshot with full state. Disconnected satellites are not visible — central only shows live-connected data |
 | Standby | Primary | Reconnects, receives Welcome snapshot |
 
 ## Storage Abstraction [Implemented]
@@ -111,7 +112,14 @@ The `[State]` attribute marks runtime-only properties that are not persisted.
 
 User-created metadata (annotations, tags, links between subjects) are stored as dynamic attributes on the registry. These are persisted in their own JSON files, separate from subject configuration, so they survive restarts and can be reapplied to subjects as they are instantiated.
 
-This enables operators and integrators to enrich the knowledge graph with domain-specific metadata without modifying subject code.
+This enables operators and integrators to enrich the knowledge graph with domain-specific metadata without modifying subject code. Examples:
+
+- `tags: ["floor-2", "critical", "hvac"]` — cross-cutting grouping independent of folder hierarchy
+- `area: "Kitchen"` — physical location assignment (equivalent to Home Assistant areas)
+- `group: "cooling-system"` — logical grouping across different folders
+- `owner: "maintenance-team-b"` — organizational metadata
+
+All dynamic attributes are queryable through the registry, transmitted over the wire via WebSocket sync, and visible in the UI — no separate subsystem needed.
 
 ## HA and Multi-Instance Storage [Planned]
 
@@ -190,7 +198,7 @@ Live state has zero data loss — it recovers to the current device state, not t
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| No live state persistence | Recover from source of truth | External world (devices, peers) is authoritative. Avoids stale state |
+| No live state persistence | Recover from source of truth | External world (devices, peers) is authoritative. Avoids stale state. Individual subjects may cache last known state locally as an implementation detail (e.g., restore from history or file in `ExecuteAsync` before device reconnects), but the platform does not prescribe or automate this |
 | Storage abstraction | `IStorageContainer` with FluentStorage backends | Pluggable without code changes; local filesystem for dev, cloud storage for production |
 | File format | JSON for configuration, Markdown for knowledge | Human-readable, diffable, version-controllable |
 | Configuration vs state | `[Configuration]` (persisted) vs `[State]` (runtime-only) | Clear developer intent, explicit persistence boundary |
