@@ -68,9 +68,11 @@ For a query spanning the last 24 hours, the in-memory store provides the most re
 
 Initial implementation will likely start with in-memory + InfluxDB only.
 
-### AI Access
+### AI Access [Planned]
 
-A dedicated MCP tool in `HomeBlaze.Mcp`:
+History tools are deferred beyond stage 1. The core MCP tools (see [MCP Server plan](../../../../docs/plans/mcp-server.md)) provide current-state access; history tools will be added once the history subsystem is stable.
+
+Planned tools in `HomeBlaze.AI`:
 
 | Tool | Parameters | Description |
 |------|-----------|-------------|
