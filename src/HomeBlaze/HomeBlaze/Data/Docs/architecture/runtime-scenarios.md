@@ -87,12 +87,12 @@ When an operation is executed from the UI:
 
 ```
 User clicks "Emergency Stop" button
-  -> SubjectPropertyPanel reads [Operation] metadata
+  -> SubjectPropertyPanel reads [Operation] metadata from registry (MethodMetadata)
   -> If RequiresConfirmation: shows confirmation dialog
-  -> ISubjectMethodInvoker.InvokeAsync(subject, method, parameters)
+  -> MethodMetadata.InvokeAsync(parameters)
      -> Parameter conversion (string inputs -> typed values)
-     -> Method invoked via reflection
-     -> Result wrapped in MethodInvocationResult
+     -> Method invoked via delegate
+     -> Result returned directly (or null for void)
   -> UI refreshes to reflect state changes
 ```
 

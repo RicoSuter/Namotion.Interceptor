@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Collections.Concurrent;
-using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Attributes;
@@ -53,17 +52,43 @@ public class SubjectPathResolver : ILifecycleHandler
             return bracketPath.Replace('.', '/');
         }
 
-        // Bracket mode: convert bracket patterns, preserving dots inside brackets
-        // Use this for paths with file extensions: "Root.[Demo].[Inline.md]"
-        var result = bracketPath
-            .Replace("].[", "/")  // Handle [key].[key] from [InlinePaths]
-            .Replace("].", "/")   // Handle Property[key].Next
-            .Replace(".[", "/")   // Handle Segment.[key] (mixed mode: Demo.[Setup.md])
-            .Replace("[", "/")    // Handle Property[key] opening bracket
-            .Replace("]", "");    // Handle trailing bracket
+        // Bracket mode: single-pass conversion that treats dots outside brackets as
+        // hierarchy separators (→ '/') while preserving dots inside brackets (file extensions).
+        // Brackets themselves become '/' (opening) or are dropped (closing).
+        var sb = new System.Text.StringBuilder(bracketPath.Length);
+        var insideBracket = false;
+        var lastWasSeparator = false; // avoid consecutive slashes
 
-        // Trim leading slash (from paths starting with [key])
-        return result.TrimStart('/');
+        foreach (var ch in bracketPath)
+        {
+            switch (ch)
+            {
+                case '[':
+                    insideBracket = true;
+                    if (!lastWasSeparator && sb.Length > 0)
+                        sb.Append('/');
+                    lastWasSeparator = true;
+                    break;
+
+                case ']':
+                    insideBracket = false;
+                    lastWasSeparator = false;
+                    break;
+
+                case '.' when !insideBracket:
+                    if (!lastWasSeparator && sb.Length > 0)
+                        sb.Append('/');
+                    lastWasSeparator = true;
+                    break;
+
+                default:
+                    sb.Append(ch);
+                    lastWasSeparator = false;
+                    break;
+            }
+        }
+
+        return sb.ToString();
     }
 
     /// <summary>

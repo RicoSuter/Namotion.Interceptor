@@ -1,13 +1,10 @@
-@using HomeBlaze.Abstractions
-@using HomeBlaze.Abstractions.Services
+@using HomeBlaze.Abstractions.Metadata
 @using HomeBlaze.Host.Components.Dialogs
-@using HomeBlaze.Services
 @using HomeBlaze.Storage.Abstractions
 
 @inject IDialogService DialogService
 @inject SubjectComponentRegistry ComponentRegistry
 @inject DeveloperModeService DeveloperMode
-@inject ISubjectMethodInvoker MethodInvoker
 @inject IServiceProvider ServiceProvider
 
 <TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
@@ -68,10 +65,9 @@
                 <MudStack Class="pl-4 pr-4">
                     @foreach (var method in methods)
                     {
-                        var isQuery = method.Kind == SubjectMethodKind.Query;
+                        var isQuery = method.Kind == MethodKind.Query;
                         var defaultIcon = isQuery ? "Search" : "PlayArrow";
-                        var methodName = method.MethodInfo.Name.Replace("Async", string.Empty, StringComparison.OrdinalIgnoreCase);
-                        var methodProperty = _registeredSubject?.TryGetProperty(methodName);
+                        var methodProperty = _registeredSubject?.TryGetProperty(method.PropertyName);
                         var isEnabledAttribute = methodProperty?.TryGetAttribute(KnownAttributes.IsEnabled);
                         var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
                         <MudButton Variant="Variant.Filled"
@@ -79,9 +75,9 @@
                                    Size="Size.Small"
                                    FullWidth="true"
                                    StartIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(method.Icon ?? defaultIcon)"
-                                   Disabled="@(_executingOperation == method || !isEnabled)"
+                                   Disabled="@(_executingMethod == method || !isEnabled)"
                                    OnClick="@(() => ExecuteMethodAsync(method))">
-                            @if (_executingOperation == method)
+                            @if (_executingMethod == method)
                             {
                                 <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
                             }
@@ -188,7 +184,7 @@
     private readonly HashSet<string> _expandedProperties = [];
 
     private RegisteredSubject? _registeredSubject;
-    private SubjectMethodInfo? _executingOperation;
+    private MethodMetadata? _executingMethod;
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
@@ -259,7 +255,7 @@
             return [];
 
         return _registeredSubject.Properties
-            .Where(p => p.GetStateAttribute() != null && !CanContainSubjects(p))
+            .Where(p => p.GetStateMetadata() != null && !CanContainSubjects(p))
             .OrderBy(p => p.GetDisplayPosition());
     }
 
@@ -283,7 +279,10 @@
     {
         // Property reads are automatically recorded via the context-based ReadPropertyRecorder
         var value = prop.GetValue();
-        var attributes = prop.Attributes.ToArray();
+        var attributes = prop.Attributes
+            .Where(a => a.AttributeMetadata.AttributeName != KnownAttributes.State &&
+                        a.AttributeMetadata.AttributeName != KnownAttributes.Configuration)
+            .ToArray();
         var hasAttributes = attributes.Length > 0;
         var isExpanded = _expandedProperties.Contains(prop.Name);
         var marginLeft = depth * 24;
@@ -367,96 +366,60 @@
         await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, $"Edit {title}");
     }
 
-    private IReadOnlyList<SubjectMethodInfo> GetMethods() =>
+    private IReadOnlyList<MethodMetadata> GetMethods() =>
         _registeredSubject?.GetAllMethods() ?? [];
 
-    private async Task ExecuteMethodAsync(SubjectMethodInfo operation)
+    private async Task ExecuteMethodAsync(MethodMetadata method)
     {
-        if (Subject == null || _executingOperation != null)
+        if (Subject == null || _executingMethod != null)
+        {
             return;
+        }
 
         try
         {
             object?[]? parameters = null;
 
-            // Pre-resolve auto-injected and [FromServices] parameters
-            var resolvedParameters = new Dictionary<string, object?>();
-            foreach (var parameter in operation.Parameters)
-            {
-                if (SubjectMethodInvoker.IsAutoInjectedParameter(parameter.Type))
-                {
-                    resolvedParameters[parameter.Name] = null; // Placeholder, invoker will provide actual value
-                    continue;
-                }
-
-                if (parameter.IsFromServices)
-                {
-                    resolvedParameters[parameter.Name] = ServiceProvider.GetService(parameter.Type);
-                }
-            }
-
             // Check if there are any parameters that need user input
-            var needsParameterDialog = operation.Parameters.Length > resolvedParameters.Count;
-
-            // If operation has parameters that need user input, show parameter dialog
-            if (needsParameterDialog)
+            if (method.Parameters.Any(p => p.RequiresInput))
             {
-                var parameterDialog = await MethodParameterDialog.ShowAsync(
-                    DialogService, operation, resolvedParameters);
+                var parameterDialog = await MethodParameterDialog.ShowAsync(DialogService, method);
                 var parameterResult = await parameterDialog.Result;
                 if (parameterResult == null || parameterResult.Canceled)
                     return;
 
                 parameters = parameterResult.Data as object?[];
             }
-            // If all parameters were DI-resolved, build parameters array
-            else if (resolvedParameters.Count > 0)
+            else if (method.RequiresConfirmation)
             {
-                parameters = new object?[operation.Parameters.Length];
-                for (var i = 0; i < operation.Parameters.Length; i++)
-                {
-                    var parameter = operation.Parameters[i];
-                    parameters[i] = resolvedParameters[parameter.Name];
-                }
-            }
-            // If operation requires confirmation, show confirmation dialog
-            else if (operation.RequiresConfirmation)
-            {
-                var confirmDialog = await MethodConfirmationDialog.ShowAsync(DialogService, operation);
+                var confirmDialog = await MethodConfirmationDialog.ShowAsync(DialogService, method);
                 var confirmResult = await confirmDialog.Result;
                 if (confirmResult == null || confirmResult.Canceled)
                     return;
             }
 
-            // Execute the operation
-            _executingOperation = operation;
+            // Execute the method
+            _executingMethod = method;
             StateHasChanged();
 
-            var result = await MethodInvoker.InvokeAsync(
-                Subject,
-                operation,
-                parameters ?? []);
+            var result = await method.InvokeAsync(parameters, ServiceProvider, CancellationToken.None);
 
-            _executingOperation = null;
+            _executingMethod = null;
             StateHasChanged();
 
-            // Show result or error dialog
-            if (result.Success)
+            if (result != null)
             {
-                if (result.Result != null)
-                {
-                    await MethodResultDialog.ShowAsync(DialogService, operation.Title, result.Result);
-                }
+                await MethodResultDialog.ShowAsync(DialogService, method.Title, result);
             }
-            else
-            {
-                await MethodErrorDialog.ShowAsync(DialogService, operation.Title, result.Exception!);
-            }
+        }
+        catch (OperationCanceledException)
+        {
+            _executingMethod = null;
         }
         catch (Exception ex)
         {
-            _executingOperation = null;
-            await MethodErrorDialog.ShowAsync(DialogService, operation.Title, ex);
+            _executingMethod = null;
+            await MethodErrorDialog.ShowAsync(DialogService, method.Title, ex);
         }
     }
 }

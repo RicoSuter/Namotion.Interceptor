@@ -1,28 +1,22 @@
 @using HomeBlaze.Abstractions.Attributes
-@using HomeBlaze.Abstractions.Services
-@using HomeBlaze.Services
+@using HomeBlaze.Abstractions.Metadata
 
 <MudDialog>
     <DialogContent>
-        @if (!string.IsNullOrEmpty(Operation?.Description))
+        @if (!string.IsNullOrEmpty(Method?.Description))
         {
-            <MudText Typo="Typo.body2" Class="mb-4">@Operation.Description</MudText>
+            <MudText Typo="Typo.body2" Class="mb-4">@Method.Description</MudText>
         }
 
-        @if (Operation != null)
+        @if (Method != null)
         {
             <MudStack Spacing="3">
-                @foreach (var parameter in Operation.Parameters)
+                @foreach (var parameter in Method.Parameters.Where(p => p.RequiresInput))
                 {
-                    @if (IsDIResolved(parameter))
-                    {
-                        <!-- Parameter will be DI-injected, no UI input needed -->
-                        continue;
-                    }
-                    else if (!ParameterConverter.IsSupported(parameter.Type))
+                    @if (!ParameterConverter.IsSupported(parameter.Type))
                     {
                         <MudAlert Severity="Severity.Error">
-                            Parameter '@parameter.Name' (type @parameter.Type.Name) cannot be provided via UI or dependency injection
+                            Parameter '@parameter.Name' (type @parameter.Type.Name) cannot be provided via UI
                         </MudAlert>
                         continue;
                     }
@@ -61,7 +55,7 @@
                                           ValueChanged="@(v => SetValue(parameter.Name, v))"
                                           Error="@HasError(parameter.Name)"
                                           ErrorText="@GetError(parameter.Name)"
-                                          Required="@IsRequired(parameter)"
+                                          Required="@(!parameter.IsNullable)"
                                           Immediate="true"
                                           Adornment="@(unitSuffix != null ? Adornment.End : Adornment.None)"
                                           AdornmentText="@unitSuffix" />
@@ -83,77 +77,48 @@
 @code {
     [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
 
-    [Parameter] public SubjectMethodInfo? Operation { get; set; }
-
-    /// <summary>
-    /// Pre-resolved DI parameters (parameter name -> resolved value).
-    /// These parameters won't be shown in the UI.
-    /// </summary>
-    [Parameter] public Dictionary<string, object?>? ResolvedParameters { get; set; }
+    [Parameter] public MethodMetadata? Method { get; set; }
 
     private Dictionary<string, string?> _inputValues = new();
     private Dictionary<string, string?> _errors = new();
-    private Dictionary<string, object?> _diResolvedValues = new();
 
     protected override void OnParametersSet()
     {
-        if (Operation != null)
+        if (Method != null)
         {
-            // Use pre-resolved DI parameters if provided
-            _diResolvedValues.Clear();
-            if (ResolvedParameters != null)
+            foreach (var parameter in Method.Parameters.Where(p => p.RequiresInput))
             {
-                foreach (var kvp in ResolvedParameters)
-                {
-                    _diResolvedValues[kvp.Key] = kvp.Value;
-                }
-            }
-
-            // Initialize input values for non-DI parameters
-            foreach (var parameter in Operation.Parameters)
-            {
-                if (!_diResolvedValues.ContainsKey(parameter.Name) &&
-                    !_inputValues.ContainsKey(parameter.Name))
+                if (!_inputValues.ContainsKey(parameter.Name))
                 {
                     _inputValues[parameter.Name] = GetDefaultValue(parameter);
                 }
             }
 
-            // Validate all parameters initially
             ValidateAll();
         }
     }
 
     private void ValidateAll()
     {
-        if (Operation == null)
+        if (Method == null)
             return;
 
-        foreach (var parameter in Operation.Parameters)
+        foreach (var parameter in Method.Parameters.Where(p => p.RequiresInput))
         {
-            if (!IsDIResolved(parameter))
-            {
-                ValidateParameter(parameter.Name);
-            }
+            ValidateParameter(parameter.Name);
         }
     }
 
-    private bool IsDIResolved(SubjectMethodParameter parameter)
-    {
-        return _diResolvedValues.ContainsKey(parameter.Name);
-    }
-
-    private string GetParameterLabel(SubjectMethodParameter parameter)
+    private string GetParameterLabel(MethodParameter parameter)
     {
         var label = char.ToUpperInvariant(parameter.Name[0]) + parameter.Name.Substring(1);
-        var isNullable = Nullable.GetUnderlyingType(parameter.Type) != null || parameter.Type == typeof(string);
-        return isNullable ? label : $"{label} *";
+        return parameter.IsNullable ? label : $"{label} *";
     }
 
     private static string? GetUnitSuffix(StateUnit? unit) =>
         unit.HasValue ? StateUnitExtensions.GetUnitSuffix(unit.Value) : null;
 
-    private string? GetDefaultValue(SubjectMethodParameter parameter)
+    private string? GetDefaultValue(MethodParameter parameter)
     {
         if (parameter.Type == typeof(bool))
             return "false";
@@ -184,7 +149,7 @@
     private void ValidateParameter(string name)
     {
         _errors.Remove(name);
-        var parameter = Operation?.Parameters.FirstOrDefault(p => p.Name == name);
+        var parameter = Method?.Parameters.FirstOrDefault(p => p.Name == name);
         if (parameter == null)
             return;
 
@@ -192,7 +157,7 @@
 
         if (string.IsNullOrEmpty(input))
         {
-            if (IsRequired(parameter))
+            if (!parameter.IsNullable)
             {
                 _errors[name] = "This field is required";
             }
@@ -205,11 +170,6 @@
         }
     }
 
-    private bool IsRequired(SubjectMethodParameter parameter)
-    {
-        return Nullable.GetUnderlyingType(parameter.Type) == null && parameter.Type != typeof(string);
-    }
-
     private bool HasError(string name) => _errors.ContainsKey(name);
 
     private string? GetError(string name) => _errors.GetValueOrDefault(name);
@@ -218,13 +178,14 @@
     {
         get
         {
-            if (Operation == null)
-                return false;
-
-            // Check if any parameter is neither DI-resolvable nor UI-supported
-            foreach (var parameter in Operation.Parameters)
+            if (Method == null)
             {
-                if (!IsDIResolved(parameter) && !ParameterConverter.IsSupported(parameter.Type))
+                return false;
+            }
+
+            foreach (var parameter in Method.Parameters.Where(p => p.RequiresInput))
+            {
+                if (!ParameterConverter.IsSupported(parameter.Type))
                 {
                     return false;
                 }
@@ -238,26 +199,19 @@
 
     private void Execute()
     {
-        if (Operation == null || !IsValid)
-            return;
-
-        var parameters = new object?[Operation.Parameters.Length];
-        for (var i = 0; i < Operation.Parameters.Length; i++)
+        if (Method == null || !IsValid)
         {
-            var parameter = Operation.Parameters[i];
+            return;
+        }
 
-            // Use DI-resolved value if available
-            if (_diResolvedValues.TryGetValue(parameter.Name, out var diValue))
+        var inputParameters = Method.Parameters.Where(p => p.RequiresInput).ToArray();
+        var parameters = new object?[inputParameters.Length];
+        for (var i = 0; i < inputParameters.Length; i++)
+        {
+            var input = _inputValues.GetValueOrDefault(inputParameters[i].Name);
+            if (ParameterConverter.TryConvert(input, inputParameters[i].Type, out var value))
             {
-                parameters[i] = diValue;
-            }
-            else
-            {
-                var input = _inputValues.GetValueOrDefault(parameter.Name);
-                if (ParameterConverter.TryConvert(input, parameter.Type, out var value))
-                {
-                    parameters[i] = value;
-                }
+                parameters[i] = value;
             }
         }
 
@@ -266,13 +220,11 @@
 
     public static Task<IDialogReference> ShowAsync(
         IDialogService dialogService,
-        SubjectMethodInfo operation,
-        Dictionary<string, object?>? resolvedParameters = null)
+        MethodMetadata method)
     {
         var parameters = new DialogParameters<MethodParameterDialog>
         {
-            { x => x.Operation, operation },
-            { x => x.ResolvedParameters, resolvedParameters }
+            { x => x.Method, method }
         };
 
         var options = new DialogOptions
@@ -282,6 +234,6 @@
             CloseButton = true
         };
 
-        return dialogService.ShowAsync<MethodParameterDialog>(operation.Title, parameters, options);
+        return dialogService.ShowAsync<MethodParameterDialog>(method.Title, parameters, options);
     }
 }

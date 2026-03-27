@@ -15,22 +15,22 @@ Subjects expose executable behavior through methods marked with `[Operation]` (s
 Operations and queries are implemented in HomeBlaze today:
 
 - `[Operation]` and `[Query]` attributes defined in `HomeBlaze.Abstractions`
-- Method discovery via `SubjectMethodInfo` and `ISubjectMethodInvoker`
-- `MethodPropertyInitializer` creates virtual properties for methods, enabling `[PropertyAttribute]` on operations (e.g., `IsEnabled` for conditional enable/disable)
+- Method discovery via `MethodMetadata` registered as dynamic properties in the registry
+- `MethodPropertyInitializer` registers `MethodMetadata` (with `InvokeAsync` capability) as dynamic properties, enabling `[PropertyAttribute]` on operations (e.g., `IsEnabled` for conditional enable/disable)
 - Blazor UI renders operations as buttons with parameter dialogs, confirmation, and result display
 - MCP tools `list_methods` and `invoke_method` in `Namotion.Interceptor.Mcp` (in progress, [PR #158](https://github.com/RicoSuter/Namotion.Interceptor/pull/158))
 
-## Migration to Interceptor Core [In Progress]
+## Migration to Namotion.Interceptor.Reflection [Planned]
 
-Operations are currently defined in `HomeBlaze.Abstractions` but are being refactored to move into `Namotion.Interceptor` registry. This makes them usable across all interceptor applications, not just HomeBlaze.
+Operations currently use registry attributes (`MethodMetadata` dynamic properties) but all types still live in HomeBlaze. The goal is to move the core abstractions into a `Namotion.Interceptor.Reflection` package so operations are reusable across all interceptor applications (OPC UA method mapping, MCP tool support, etc.).
 
-What moves to core:
+What should move to `Namotion.Interceptor.Reflection`:
 - `[Operation]` and `[Query]` attributes
-- Method discovery and invocation infrastructure
-- `ISubjectMethodInvoker`
+- `MethodMetadata`, `MethodParameter`, `MethodKind` types
+- `MethodPropertyInitializer` lifecycle handler
+- Method discovery and invocation via `MethodMetadata.InvokeAsync`
 
 What stays in HomeBlaze:
-- `MethodPropertyInitializer` (virtual properties for UI integration like `IsEnabled`)
 - Blazor UI components (parameter dialogs, confirmation, result display)
 - Domain-specific operation patterns
 
@@ -59,7 +59,7 @@ For most operations, at-most-once (fail on disconnect) is acceptable. For critic
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Method attributes | `[Operation]` (state-changing) and `[Query]` (read-only) | Clear semantic distinction enables different authorization defaults and UI treatment |
-| Migration to core | Move attributes and discovery into Namotion.Interceptor registry | Enables OPC UA method mapping, MCP tool support, and reuse outside HomeBlaze |
+| Migration to Namotion.Interceptor.Reflection | Planned — attributes and discovery to move into dedicated package | Enables OPC UA method mapping, MCP tool support, and reuse outside HomeBlaze |
 | RPC semantics | Execute-all, not last-writer-wins | Operations are commands, not state — every invocation matters |
 
 ## Open Questions

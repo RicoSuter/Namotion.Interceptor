@@ -31,7 +31,7 @@ Tracks the implementation status of building blocks described in [Architecture O
 
 | Building Block | Status | Notes |
 |---|---|---|
-| Operations (`[Operation]`/`[Query]`) | Implemented | Working in HomeBlaze. Refactoring to move into Namotion.Interceptor registry for reuse across all interceptor applications |
+| Operations (`[Operation]`/`[Query]`) | Implemented | Metadata migrated to registry attributes (`MethodMetadata`). Discoverable and invocable via registry for all interceptor applications |
 | Cross-instance operation proxying (RPC) | Planned | WebSocket message types 5-6 |
 | Time-series history | Planned | `HomeBlaze.History.Abstractions` + sink model |
 | Document store | Planned | Documents as subjects |
