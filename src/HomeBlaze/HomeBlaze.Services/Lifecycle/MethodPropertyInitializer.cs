@@ -95,7 +95,21 @@ public class MethodPropertyInitializer : ILifecycleHandler
         var requiresConfirmation = attribute is OperationAttribute { RequiresConfirmation: true };
 
         var capturedMethod = method;
-        var metadata = new MethodMetadata
+        var metadata = new MethodMetadata(subject, async (target, arguments) =>
+        {
+            var result = capturedMethod.Invoke(target, arguments);
+            if (result is Task task)
+            {
+                await task.ConfigureAwait(false);
+                var taskType = task.GetType();
+                if (taskType.IsGenericType && taskType.GetGenericTypeDefinition() == typeof(Task<>))
+                {
+                    return taskType.GetProperty("Result")?.GetValue(task);
+                }
+                return null;
+            }
+            return result;
+        })
         {
             Kind = kind,
             Title = attribute.Title ?? propertyName,
@@ -105,22 +119,6 @@ public class MethodPropertyInitializer : ILifecycleHandler
             RequiresConfirmation = requiresConfirmation,
             Parameters = parameters,
             ResultType = resultType,
-            InvokeAsync = async (target, arguments) =>
-            {
-                var result = capturedMethod.Invoke(target, arguments);
-                if (result is Task task)
-                {
-                    await task.ConfigureAwait(false);
-                    // Extract result from Task<T>
-                    var taskType = task.GetType();
-                    if (taskType.IsGenericType && taskType.GetGenericTypeDefinition() == typeof(Task<>))
-                    {
-                        return taskType.GetProperty("Result")?.GetValue(task);
-                    }
-                    return null;
-                }
-                return result;
-            }
         };
 
         registeredSubject.AddProperty(
