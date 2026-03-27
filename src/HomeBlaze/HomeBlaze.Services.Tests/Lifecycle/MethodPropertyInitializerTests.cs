@@ -492,7 +492,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void ConcreteMethodTakesPrecedenceOverInterface()
+    public void InterfaceMethodDiscovered_WhenConcreteMethodLacksAttribute()
     {
         // Arrange — when both type and interface have the same method name,
         // the concrete type's version is registered (deduplication by name)

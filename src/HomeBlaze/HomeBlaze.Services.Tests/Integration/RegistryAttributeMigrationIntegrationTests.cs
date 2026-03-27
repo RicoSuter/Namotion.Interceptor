@@ -6,6 +6,7 @@ using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
+using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services.Tests.Integration;
@@ -113,10 +114,38 @@ public class RegistryAttributeMigrationIntegrationTests
 
         Assert.True(subject.HasConfigurationProperties());
     }
+    [Fact]
+    public void SerializationRoundTrip_WithRegistryAttributes_PreservesConfigurationProperties()
+    {
+        // Arrange
+        var context = CreateFullContext();
+        var subject = new FullIntegrationSubject(context)
+        {
+            Temperature = 21.5m,
+            ApiKey = "secret-key"
+        };
+
+        var typeProvider = new TypeProvider();
+        typeProvider.AddTypes([typeof(FullIntegrationSubject)]);
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        var serviceProvider = services.BuildServiceProvider();
+        var serializer = new ConfigurableSubjectSerializer(typeProvider, serviceProvider);
+
+        // Act
+        var json = serializer.Serialize(subject);
+        var deserialized = serializer.Deserialize(json) as FullIntegrationSubject;
+
+        // Assert — configuration property survives roundtrip
+        Assert.NotNull(deserialized);
+        Assert.Equal("secret-key", deserialized.ApiKey);
+
+        // Assert — state property does not survive roundtrip (only config is serialized)
+        Assert.Equal(0m, deserialized.Temperature);
+    }
 }
 
 [InterceptorSubject]
-public partial class FullIntegrationSubject
+public partial class FullIntegrationSubject : IConfigurableSubject
 {
     [State(Name = "Temp", Unit = StateUnit.DegreeCelsius)]
     public partial decimal Temperature { get; set; }
@@ -138,6 +167,8 @@ public partial class FullIntegrationSubject
     {
         return Task.FromResult("ok");
     }
+
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
 [InterceptorSubject]

@@ -11,30 +11,30 @@ public class StateMetadata
     /// <summary>
     /// The display name override for this state property (null uses the property name).
     /// </summary>
-    public string? Name { get; set; }
+    public string? Name { get; init; }
 
     /// <summary>
     /// The physical unit of the state value.
     /// </summary>
-    public StateUnit Unit { get; set; } = StateUnit.Default;
+    public StateUnit Unit { get; init; } = StateUnit.Default;
 
     /// <summary>
     /// Display order position (lower values appear first).
     /// </summary>
-    public int Position { get; set; }
+    public int Position { get; init; }
 
     /// <summary>
     /// Whether the value is cumulative (e.g., total energy consumption).
     /// </summary>
-    public bool IsCumulative { get; set; }
+    public bool IsCumulative { get; init; }
 
     /// <summary>
     /// Whether the value is discrete rather than continuous.
     /// </summary>
-    public bool IsDiscrete { get; set; }
+    public bool IsDiscrete { get; init; }
 
     /// <summary>
     /// Whether the value is an estimate rather than a measured value.
     /// </summary>
-    public bool IsEstimated { get; set; }
+    public bool IsEstimated { get; init; }
 }

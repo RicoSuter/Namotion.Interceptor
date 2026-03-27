@@ -71,6 +71,54 @@ public class RegisteredSubjectMethodExtensionsTests
         Assert.Single(queries);
         Assert.Equal(MethodKind.Query, queries[0].Kind);
     }
+    [Fact]
+    public void GetAllMethods_IncludesDynamicallyAddedMethodMetadata()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new MethodExtTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        var dynamicMetadata = new MethodMetadata(_ => Task.CompletedTask)
+        {
+            Title = "Dynamic",
+            Kind = MethodKind.Operation,
+            PropertyName = "DynamicOp",
+            Position = 0,
+        };
+        registered.AddProperty("DynamicOp", typeof(MethodMetadata), _ => dynamicMetadata, null);
+
+        // Act
+        var methods = registered.GetAllMethods();
+
+        // Assert — dynamic method should appear first (Position = 0) alongside the 3 attribute-based methods
+        Assert.Equal(4, methods.Count);
+        Assert.Equal("Dynamic", methods[0].Title);
+    }
+
+    [Fact]
+    public void GetOperationMethods_IncludesDynamicallyAddedOperationMetadata()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new MethodExtTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        var dynamicMetadata = new MethodMetadata(_ => Task.CompletedTask)
+        {
+            Title = "DynamicOp",
+            Kind = MethodKind.Operation,
+            PropertyName = "DynamicOp",
+        };
+        registered.AddProperty("DynamicOp", typeof(MethodMetadata), _ => dynamicMetadata, null);
+
+        // Act
+        var operations = registered.GetOperationMethods();
+
+        // Assert — should include both attribute-based operations and the dynamic one
+        Assert.Equal(3, operations.Count);
+        Assert.All(operations, m => Assert.Equal(MethodKind.Operation, m.Kind));
+    }
 }
 
 [InterceptorSubject]

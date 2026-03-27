@@ -55,7 +55,7 @@
                                           ValueChanged="@(v => SetValue(parameter.Name, v))"
                                           Error="@HasError(parameter.Name)"
                                           ErrorText="@GetError(parameter.Name)"
-                                          Required="@IsRequired(parameter)"
+                                          Required="@(!parameter.IsNullable)"
                                           Immediate="true"
                                           Adornment="@(unitSuffix != null ? Adornment.End : Adornment.None)"
                                           AdornmentText="@unitSuffix" />
@@ -112,8 +112,7 @@
     private string GetParameterLabel(MethodParameter parameter)
     {
         var label = char.ToUpperInvariant(parameter.Name[0]) + parameter.Name.Substring(1);
-        var isNullable = Nullable.GetUnderlyingType(parameter.Type) != null || parameter.Type == typeof(string);
-        return isNullable ? label : $"{label} *";
+        return parameter.IsNullable ? label : $"{label} *";
     }
 
     private static string? GetUnitSuffix(StateUnit? unit) =>
@@ -158,7 +157,7 @@
 
         if (string.IsNullOrEmpty(input))
         {
-            if (IsRequired(parameter))
+            if (!parameter.IsNullable)
             {
                 _errors[name] = "This field is required";
             }
@@ -169,11 +168,6 @@
         {
             _errors[name] = $"Invalid value for {parameter.Type.Name}";
         }
-    }
-
-    private bool IsRequired(MethodParameter parameter)
-    {
-        return Nullable.GetUnderlyingType(parameter.Type) == null && parameter.Type != typeof(string);
     }
 
     private bool HasError(string name) => _errors.ContainsKey(name);

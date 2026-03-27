@@ -4,8 +4,6 @@
 
 Expose the subject registry via MCP (Model Context Protocol) server, enabling external AI agents to browse, query, and interact with the knowledge graph.
 
-**Prerequisite:** [Registry Attribute Migration](../../src/HomeBlaze/HomeBlaze/Data/Docs/plans/registry-attribute-migration.md) — HomeBlaze metadata provider reads from registry attributes instead of reflection.
-
 ## Overview
 
 Create `Namotion.Interceptor.Mcp` package that exposes the subject registry via MCP, enabling AI assistants and autonomous agents to browse, read, and write properties and discover types on the object graph.
@@ -197,5 +195,5 @@ MCP exposes `set_property`, so unrestricted access is unsafe even for developmen
 - `Namotion.Interceptor.Registry`: subject and property discovery
 - `ModelContextProtocol` (v1.1.0): MCP server SDK
 - `Microsoft.Extensions.AI.Abstractions`: `AIFunction` for in-process tool reuse
-- [Registry Attribute Migration](../../src/HomeBlaze/HomeBlaze/Data/Docs/plans/registry-attribute-migration.md): HomeBlaze metadata provider reads from registry attributes
+- Registry Attribute Migration (completed): HomeBlaze metadata discovery uses registry attributes
 - Graph-level authorization: access control before exposing write tools

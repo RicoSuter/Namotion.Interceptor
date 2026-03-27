@@ -12,7 +12,10 @@ namespace HomeBlaze.Services.Lifecycle;
 /// </summary>
 public class MethodPropertyInitializer : ILifecycleHandler
 {
-    private static readonly NullabilityInfoContext NullabilityContext = new();
+    [ThreadStatic]
+    private static NullabilityInfoContext? _nullabilityContext;
+
+    private static NullabilityInfoContext NullabilityContext => _nullabilityContext ??= new();
 
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
