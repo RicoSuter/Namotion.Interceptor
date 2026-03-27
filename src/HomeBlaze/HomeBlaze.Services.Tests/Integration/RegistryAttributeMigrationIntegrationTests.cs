@@ -82,7 +82,7 @@ public class RegistryAttributeMigrationIntegrationTests
         var stopMetadata = stopProperty!.GetValue() as MethodMetadata;
 
         // Act
-        await stopMetadata!.InvokeAsync();
+        await stopMetadata!.InvokeAsync(null, null, CancellationToken.None);
 
         // Assert
         Assert.True(subject.WasStopped);

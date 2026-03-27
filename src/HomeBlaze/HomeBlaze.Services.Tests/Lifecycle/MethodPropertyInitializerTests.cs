@@ -95,7 +95,7 @@ public class MethodPropertyInitializerTests
         var metadata = property!.GetValue() as MethodMetadata;
 
         // Act
-        await metadata!.InvokeAsync();
+        await metadata!.InvokeAsync(null, null, CancellationToken.None);
 
         // Assert
         Assert.True(subject.StopCalled);
@@ -112,7 +112,7 @@ public class MethodPropertyInitializerTests
         var metadata = property!.GetValue() as MethodMetadata;
 
         // Act
-        var result = await metadata!.InvokeAsync();
+        var result = await metadata!.InvokeAsync(null, null, CancellationToken.None);
 
         // Assert
         Assert.Equal("diagnostics-result", result);
@@ -236,8 +236,8 @@ public class MethodPropertyInitializerTests
         var metadata = property!.GetValue() as MethodMetadata;
         var cts = new CancellationTokenSource();
 
-        // Act
-        await metadata!.InvokeAsync([42, null, cts.Token]);
+        // Act — only pass user parameters; CancellationToken is injected via the argument
+        await metadata!.InvokeAsync([42], null, cts.Token);
 
         // Assert
         Assert.Equal(42, subject.LastValue);
