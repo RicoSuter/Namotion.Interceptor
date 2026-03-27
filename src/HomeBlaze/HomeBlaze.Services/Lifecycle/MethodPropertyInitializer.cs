@@ -45,7 +45,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
         MethodInfo method,
         HashSet<string> discoveredMethods)
     {
-        // Skip if already discovered from the type itself
+        // Skip if already discovered — deduplicates by name (overloaded methods register only once)
         if (discoveredMethods.Contains(method.Name))
             return;
 

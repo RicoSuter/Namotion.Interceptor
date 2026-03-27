@@ -246,6 +246,44 @@ public class ConfigurationJsonTypeInfoResolverTests
         Assert.DoesNotContain("not-saved", json);
     }
 
+    [Fact]
+    public void Serialize_ValueObject_UsesReflectionFallback()
+    {
+        // Arrange — value objects are not IInterceptorSubject, so ShouldSerialize
+        // falls back to reflection-based [Configuration] attribute detection
+        var valueObject = new TestValueObject
+        {
+            PropertyOne = "one",
+            PropertyTwo = "two"
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(valueObject, _options);
+
+        // Assert
+        Assert.Contains("propertyOne", json);
+        Assert.Contains("propertyTwo", json);
+    }
+
+    [Fact]
+    public void Serialize_SubjectWithoutRegistry_UsesReflectionFallback()
+    {
+        // Arrange — subject created with no registry, so TryGetRegisteredSubject returns null
+        var context = InterceptorSubjectContext.Create();
+        var subject = new TestSubject(context)
+        {
+            ConfigProperty = "config-via-reflection",
+            StateProperty = "state-via-reflection"
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(subject, subject.GetType(), _options);
+
+        // Assert — reflection fallback correctly filters to [Configuration] only
+        Assert.Contains("configProperty", json);
+        Assert.DoesNotContain("stateProperty", json);
+    }
+
     #endregion
 
     #region Polymorphism Tests

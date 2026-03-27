@@ -130,9 +130,174 @@ public class MethodMetadataTests
             () => metadata.InvokeAsync(null, null, CancellationToken.None));
         Assert.Equal("func failure", exception.Message);
     }
+
+    [Fact]
+    public async Task InvokeAsync_TrulyAsyncMethodThrows_ExceptionPropagates()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new MetadataTestSubject(context);
+
+        var metadata = new MethodMetadata(subject, _ =>
+        {
+            async Task ThrowAfterAwait()
+            {
+                await Task.Yield();
+                throw new InvalidOperationException("async throw after await");
+            }
+            return ThrowAfterAwait();
+        });
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => metadata.InvokeAsync(null, null, CancellationToken.None));
+        Assert.Equal("async throw after await", exception.Message);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_FromServicesParameter_ResolvesFromServiceProvider()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new MetadataTestSubject(context);
+        var logger = new TestLoggerImpl();
+        object?[]? receivedArguments = null;
+
+        var metadata = new MethodMetadata(subject, arguments =>
+        {
+            receivedArguments = arguments;
+            return null;
+        })
+        {
+            Parameters =
+            [
+                new MethodParameter { Name = "logger", Type = typeof(ITestLoggerService), IsFromServices = true },
+            ],
+        };
+
+        var serviceProvider = new SimpleServiceProvider(typeof(ITestLoggerService), logger);
+
+        // Act
+        await metadata.InvokeAsync([], serviceProvider, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(receivedArguments);
+        Assert.Single(receivedArguments);
+        Assert.Same(logger, receivedArguments[0]);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_FromServicesParameter_NullWhenServiceNotRegistered()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new MetadataTestSubject(context);
+        object?[]? receivedArguments = null;
+
+        var metadata = new MethodMetadata(subject, arguments =>
+        {
+            receivedArguments = arguments;
+            return null;
+        })
+        {
+            Parameters =
+            [
+                new MethodParameter { Name = "logger", Type = typeof(ITestLoggerService), IsFromServices = true },
+            ],
+        };
+
+        var serviceProvider = new SimpleServiceProvider(typeof(string), "not-the-right-type");
+
+        // Act
+        await metadata.InvokeAsync([], serviceProvider, CancellationToken.None);
+
+        // Assert
+        Assert.NotNull(receivedArguments);
+        Assert.Single(receivedArguments);
+        Assert.Null(receivedArguments[0]);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_WithMethodInfoConstructor_UnwrapsTargetInvocationException()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new MethodMetadataReflectionTestSubject(context);
+        var method = typeof(MethodMetadataReflectionTestSubject).GetMethod(nameof(MethodMetadataReflectionTestSubject.ThrowSync))!;
+
+        var metadata = new MethodMetadata(subject, method);
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => metadata.InvokeAsync(null, null, CancellationToken.None));
+        Assert.Equal("sync reflection throw", exception.Message);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_DynamicMethodMetadata_AddedToRegistry_Works()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new MetadataTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+        var invoked = false;
+
+        var metadata = new MethodMetadata(subject, _ =>
+        {
+            invoked = true;
+            return Task.FromResult<object?>("dynamic-result");
+        })
+        {
+            Title = "DynamicOp",
+            Kind = MethodKind.Operation,
+            ResultType = typeof(string),
+        };
+
+        registered.AddProperty("DynamicOp", typeof(MethodMetadata), _ => metadata, null);
+
+        // Act
+        var property = registered.TryGetProperty("DynamicOp");
+        var retrievedMetadata = property!.GetValue() as MethodMetadata;
+        var result = await retrievedMetadata!.InvokeAsync(null, null, CancellationToken.None);
+
+        // Assert
+        Assert.True(invoked);
+        Assert.Equal("dynamic-result", result);
+    }
+}
+
+public interface ITestLoggerService { }
+
+public class TestLoggerImpl : ITestLoggerService { }
+
+/// <summary>
+/// Minimal service provider for testing [FromServices] resolution.
+/// </summary>
+public class SimpleServiceProvider : IServiceProvider
+{
+    private readonly Type _serviceType;
+    private readonly object _instance;
+
+    public SimpleServiceProvider(Type serviceType, object instance)
+    {
+        _serviceType = serviceType;
+        _instance = instance;
+    }
+
+    public object? GetService(Type serviceType) =>
+        serviceType == _serviceType ? _instance : null;
 }
 
 [InterceptorSubject]
 public partial class MetadataTestSubject
 {
+}
+
+[InterceptorSubject]
+public partial class MethodMetadataReflectionTestSubject
+{
+    public void ThrowSync()
+    {
+        throw new InvalidOperationException("sync reflection throw");
+    }
 }
