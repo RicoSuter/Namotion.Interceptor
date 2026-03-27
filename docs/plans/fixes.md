@@ -566,4 +566,39 @@ For EXISTING subjects (found in registry, have context + interceptors), properti
 
 **Scope reduced after review:** CQP filter resilience (Part 2) was removed. The subject ID fallback would bypass PathProvider for momentarily-unregistered subjects, potentially leaking internal properties. The cycle 453 failure was a genuinely removed subject — the CQP filter correctly dropped the value change (the client also removes the subject via the structural update, so the dropped value is moot). Only Part 1 (SuppressRemoval on applier) is applied, which prevents temporary unregistration during subject moves within a single update.
 
-**Status:** Part 1 applied. All tests pass. Awaiting ConnectorTester chaos validation.
+**Status:** Part 1 REVERTED (disabled in applier). Caused a new regression — see below.
+
+### Regression: SuppressRemoval causes re-sync failure (cycle 6, no-chaos)
+
+**Observed:** Cycle 6 of ConnectorTester (profile: `no-chaos`, zero chaos events). Failed with `structural/applier bug` — re-sync could NOT fix client-a even after applying the server's complete state.
+
+**Symptoms:**
+- Subject `3SLcJRErhWK1fyqvaTOgM3`: Items (empty vs populated dict), ObjectRef (different subject ID), StringValue — all "written never" on client-a
+- 3 subjects entirely missing from client-a
+- 13 registry leaks on client-a: `refCount=0 parents=[Collection[N]@...(actual:FOUND)]` — subjects reachable from graph but registry says orphaned
+- Re-sync check: "still diverged after applying server's complete update → structural/applier bug"
+
+**Root cause:** `SuppressRemoval` only defers `SubjectRegistry._knownSubjects` removal. The `LifecycleInterceptor._attachedSubjects` is a **separate tracking structure** that is NOT suppressed — subjects are removed from it immediately during detach. This desynchronizes the two maps:
+
+1. Applier (SuppressRemoval active): detaches subject X from a structural property
+   - `_attachedSubjects.Remove(X)` — **immediate** (lifecycle's own tracking)
+   - `HandleLifecycleChange(IsContextDetach)` — **deferred** (X stays in `_knownSubjects`)
+
+2. During the window between detach and re-attach, the mutation engine's structural thread writes to X's structural property (e.g., `X.Items = newDict`). The lifecycle's `WriteProperty` runs. `next()` updates the backing store. Then the parent-dead check fires:
+   ```csharp
+   if (!_attachedSubjects.ContainsKey(context.Property.Subject))  // X not in _attachedSubjects!
+   {
+       _lastProcessedValues.Remove(context.Property);
+       // detach newly attached children → children NOT registered
+       return;
+   }
+   ```
+   The lifecycle rolls back its tracking. Children from the structural mutation are NOT attached. Backing store has the new value, but the lifecycle/registry don't track the children.
+
+3. These untracked children become the `refCount=0, actual:FOUND` leaks — in the backing store (reachable) but invisible to the lifecycle and registry.
+
+4. When the re-sync later applies the server's complete state, `CreateSnapshot` calls `TryGetRegisteredSubject()` for untracked subjects → null → creates empty property entries. Snapshot diverges from server.
+
+**Why this didn't happen before SuppressRemoval:** Without SuppressRemoval, `IsContextDetach` fires immediately. The subject is removed from BOTH `_knownSubjects` and `_attachedSubjects` at the same time. No desynchronization. The parent-dead check still fires for concurrent mutations, but those mutations write to genuinely-detached subjects (no longer in the graph), so the rollback is correct.
+
+**Fix direction:** The `SuppressRemoval` mechanism needs to also prevent removal from `_attachedSubjects`, or the parent-dead check needs to consult `_knownSubjects` (which SuppressRemoval keeps populated) instead of relying solely on `_attachedSubjects`. This likely requires the `LifecycleInterceptor` to be aware of the suppression scope.

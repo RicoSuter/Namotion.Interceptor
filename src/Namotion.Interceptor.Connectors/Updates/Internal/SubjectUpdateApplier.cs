@@ -24,10 +24,12 @@ internal static class SubjectUpdateApplier
             context.Initialize(subject.Context, update.Subjects, update.CompleteSubjectIds, subjectFactory, transformValueBeforeApply);
             context.PreResolveSubjects(update.Subjects.Keys, context.SubjectIdRegistry);
 
-            // Suppress subject removal during the apply window to prevent temporary
-            // unregistration when subjects move between structural properties.
-            var registry = subject.Context.TryGetService<ISubjectRegistry>() as SubjectRegistry;
-            using (registry?.SuppressRemoval())
+            // TODO: SuppressRemoval disabled for testing — see cycle 6 failure investigation.
+            // The interaction between SuppressRemoval and LifecycleInterceptor._attachedSubjects
+            // causes the parent-dead check to fire for mid-move subjects, breaking the registry.
+            // var registry = subject.Context.TryGetService<ISubjectRegistry>() as SubjectRegistry;
+            // using (registry?.SuppressRemoval())
+            if (true)
             {
                 if (update.Root is not null && update.Subjects.TryGetValue(update.Root, out var rootProperties))
                 {
