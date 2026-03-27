@@ -207,6 +207,41 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
+    public void NullableFromServicesParameter_IsNullable()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new MethodWithSpecialParamsSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var property = registered.TryGetProperty("DoWork");
+        var metadata = property!.GetValue() as MethodMetadata;
+
+        // Assert — ITestLogger? is nullable
+        var svcParam = metadata!.Parameters.Single(p => p.Name == "logger");
+        Assert.True(svcParam.IsNullable);
+    }
+
+    [Fact]
+    public void NonNullableFromServicesParameter_IsNotNullable()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new MethodWithRequiredServiceSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var property = registered.TryGetProperty("DoWork");
+        var metadata = property!.GetValue() as MethodMetadata;
+
+        // Assert — ITestLogger (non-nullable) is not nullable
+        var svcParam = metadata!.Parameters.Single(p => p.Name == "logger");
+        Assert.True(svcParam.IsFromServices);
+        Assert.False(svcParam.IsNullable);
+    }
+
+    [Fact]
     public void RegularParameter_RequiresInput()
     {
         // Arrange
@@ -591,6 +626,16 @@ public partial class TrulyAsyncThrowingSubject
     {
         await Task.Yield();
         throw new InvalidOperationException("truly async failure");
+    }
+}
+
+[InterceptorSubject]
+public partial class MethodWithRequiredServiceSubject
+{
+    [Operation]
+    public Task DoWorkAsync([FromServices] ITestLogger logger)
+    {
+        return Task.CompletedTask;
     }
 }
 

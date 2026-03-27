@@ -12,6 +12,8 @@ namespace HomeBlaze.Services.Lifecycle;
 /// </summary>
 public class MethodPropertyInitializer : ILifecycleHandler
 {
+    private static readonly NullabilityInfoContext NullabilityContext = new();
+
     public void HandleLifecycleChange(SubjectLifecycleChange change)
     {
         if (change.IsContextAttach)
@@ -80,13 +82,19 @@ public class MethodPropertyInitializer : ILifecycleHandler
             .Select(parameter =>
             {
                 var operationParameterAttribute = parameter.GetCustomAttribute<OperationParameterAttribute>();
+                var nullabilityInfo = NullabilityContext.Create(parameter);
+                var isNullable = Nullable.GetUnderlyingType(parameter.ParameterType) != null
+                    || nullabilityInfo.WriteState == NullabilityState.Nullable
+                    || parameter is { HasDefaultValue: true, DefaultValue: null };
+                
                 return new MethodParameter
                 {
                     Name = parameter.Name ?? $"arg{parameter.Position}",
                     Type = parameter.ParameterType,
                     Unit = operationParameterAttribute?.Unit,
                     IsFromServices = parameter.GetCustomAttribute<FromServicesAttribute>() != null,
-                    IsRuntimeProvided = parameter.ParameterType == typeof(CancellationToken)
+                    IsRuntimeProvided = parameter.ParameterType == typeof(CancellationToken),
+                    IsNullable = isNullable,
                 };
             })
             .ToArray();
@@ -97,6 +105,7 @@ public class MethodPropertyInitializer : ILifecycleHandler
         var metadata = new MethodMetadata(subject, method)
         {
             Kind = kind,
+            PropertyName = propertyName,
             Title = attribute.Title ?? propertyName,
             Description = attribute.Description,
             Icon = attribute.Icon,

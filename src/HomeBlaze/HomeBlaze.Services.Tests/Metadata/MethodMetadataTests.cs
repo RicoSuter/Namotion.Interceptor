@@ -187,7 +187,7 @@ public class MethodMetadataTests
     }
 
     [Fact]
-    public async Task InvokeAsync_FromServicesParameter_NullWhenServiceNotRegistered()
+    public async Task InvokeAsync_FromServicesParameter_NullWhenServiceNotRegistered_AndNullable()
     {
         // Arrange
         var context = CreateContext();
@@ -202,7 +202,7 @@ public class MethodMetadataTests
         {
             Parameters =
             [
-                new MethodParameter { Name = "logger", Type = typeof(ITestLoggerService), IsFromServices = true },
+                new MethodParameter { Name = "logger", Type = typeof(ITestLoggerService), IsFromServices = true, IsNullable = true },
             ],
         };
 
@@ -215,6 +215,30 @@ public class MethodMetadataTests
         Assert.NotNull(receivedArguments);
         Assert.Single(receivedArguments);
         Assert.Null(receivedArguments[0]);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_FromServicesParameter_ThrowsWhenServiceNotRegistered_AndNotNullable()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new MetadataTestSubject(context);
+
+        var metadata = new MethodMetadata(subject, _ => null)
+        {
+            Parameters =
+            [
+                new MethodParameter { Name = "logger", Type = typeof(ITestLoggerService), IsFromServices = true, IsNullable = false },
+            ],
+        };
+
+        var serviceProvider = new SimpleServiceProvider(typeof(string), "not-the-right-type");
+
+        // Act & Assert
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => metadata.InvokeAsync([], serviceProvider, CancellationToken.None));
+        Assert.Contains("ITestLoggerService", exception.Message);
+        Assert.Contains("logger", exception.Message);
     }
 
     [Fact]
