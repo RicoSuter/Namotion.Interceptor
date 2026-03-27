@@ -1,6 +1,5 @@
 @using HomeBlaze.Abstractions.Attributes
-@using HomeBlaze.Abstractions.Services
-@using HomeBlaze.Services
+@using HomeBlaze.Abstractions.Metadata
 
 <MudDialog>
     <DialogContent>
@@ -83,7 +82,7 @@
 @code {
     [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
 
-    [Parameter] public SubjectMethodInfo? Operation { get; set; }
+    [Parameter] public MethodMetadata? Operation { get; set; }
 
     /// <summary>
     /// Pre-resolved DI parameters (parameter name -> resolved value).
@@ -138,12 +137,12 @@
         }
     }
 
-    private bool IsDIResolved(SubjectMethodParameter parameter)
+    private bool IsDIResolved(MethodParameter parameter)
     {
         return _diResolvedValues.ContainsKey(parameter.Name);
     }
 
-    private string GetParameterLabel(SubjectMethodParameter parameter)
+    private string GetParameterLabel(MethodParameter parameter)
     {
         var label = char.ToUpperInvariant(parameter.Name[0]) + parameter.Name.Substring(1);
         var isNullable = Nullable.GetUnderlyingType(parameter.Type) != null || parameter.Type == typeof(string);
@@ -153,7 +152,7 @@
     private static string? GetUnitSuffix(StateUnit? unit) =>
         unit.HasValue ? StateUnitExtensions.GetUnitSuffix(unit.Value) : null;
 
-    private string? GetDefaultValue(SubjectMethodParameter parameter)
+    private string? GetDefaultValue(MethodParameter parameter)
     {
         if (parameter.Type == typeof(bool))
             return "false";
@@ -205,7 +204,7 @@
         }
     }
 
-    private bool IsRequired(SubjectMethodParameter parameter)
+    private bool IsRequired(MethodParameter parameter)
     {
         return Nullable.GetUnderlyingType(parameter.Type) == null && parameter.Type != typeof(string);
     }
@@ -266,7 +265,7 @@
 
     public static Task<IDialogReference> ShowAsync(
         IDialogService dialogService,
-        SubjectMethodInfo operation,
+        MethodMetadata operation,
         Dictionary<string, object?>? resolvedParameters = null)
     {
         var parameters = new DialogParameters<MethodParameterDialog>

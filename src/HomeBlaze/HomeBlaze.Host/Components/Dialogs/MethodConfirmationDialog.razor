@@ -1,4 +1,4 @@
-@using HomeBlaze.Abstractions.Services
+@using HomeBlaze.Abstractions.Metadata
 
 <MudDialog>
     <DialogContent>
@@ -20,13 +20,13 @@
 @code {
     [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
 
-    [Parameter] public SubjectMethodInfo? Operation { get; set; }
+    [Parameter] public MethodMetadata? Operation { get; set; }
 
     private void Cancel() => MudDialog?.Cancel();
 
     private void Execute() => MudDialog?.Close(DialogResult.Ok(true));
 
-    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, SubjectMethodInfo operation)
+    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, MethodMetadata operation)
     {
         var parameters = new DialogParameters<MethodConfirmationDialog>
         {

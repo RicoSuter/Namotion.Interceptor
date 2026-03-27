@@ -296,20 +296,28 @@ public interface IConfigurableSubject
 }
 ```
 
-### ISubjectMethodInvoker
+### MethodMetadata
 
-Service for invoking operation and query methods on subjects.
+Registry-based metadata for subject methods (operations and queries). Registered as dynamic properties in the registry by `MethodPropertyInitializer`. Contains all method information (`MethodKind`, title, parameters, `InvokeAsync` delegate).
 
 ```csharp
-public interface ISubjectMethodInvoker
+public class MethodMetadata
 {
-    Task<MethodInvocationResult> InvokeAsync(
-        IInterceptorSubject subject,
-        SubjectMethodInfo method,
-        object?[] parameters,
-        CancellationToken cancellationToken = default);
+    public MethodKind Kind { get; set; }
+    public string? Title { get; set; }
+    public string? Description { get; set; }
+    public MethodParameter[] Parameters { get; set; }
+    public Func<object, object?[]?, Task<object?>> InvokeAsync { get; set; }
 }
 ```
+
+### StateMetadata
+
+Registry attribute metadata for `[State]` properties. Auto-registered by `PropertyAttributeInitializer` on subject attach. Contains display name, unit, position, and flags (cumulative, discrete, estimated).
+
+### ConfigurationMetadata
+
+Registry attribute metadata for `[Configuration]` properties. Auto-registered by `PropertyAttributeInitializer` on subject attach.
 
 ---
 

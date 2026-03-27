@@ -1,9 +1,9 @@
-namespace HomeBlaze.Abstractions.Services;
+namespace HomeBlaze.Abstractions.Metadata;
 
 /// <summary>
 /// Type of subject method.
 /// </summary>
-public enum SubjectMethodKind
+public enum MethodKind
 {
     /// <summary>
     /// Method with side effects.

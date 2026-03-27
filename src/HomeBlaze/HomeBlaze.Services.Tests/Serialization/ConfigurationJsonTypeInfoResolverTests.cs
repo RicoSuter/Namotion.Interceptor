@@ -1,8 +1,11 @@
 using System.Text.Json;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Services.Lifecycle;
 using HomeBlaze.Services.Serialization;
 using Namotion.Interceptor;
-using Xunit;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services.Tests.Serialization;
 
@@ -214,6 +217,33 @@ public class ConfigurationJsonTypeInfoResolverTests
         Assert.DoesNotContain("stateOne", json);
         Assert.DoesNotContain("state-value", json);
         Assert.DoesNotContain("stateTwo", json);
+    }
+
+    [Fact]
+    public void Serialize_SubjectWithRegistry_UsesRegistryForFiltering()
+    {
+        // Arrange — subject has registry so ShouldSerialize can check registry attributes
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithService<ILifecycleHandler>(
+                () => new PropertyAttributeInitializer(),
+                handler => handler is PropertyAttributeInitializer);
+        var subject = new TestSubject(context)
+        {
+            ConfigProperty = "saved",
+            StateProperty = "not-saved"
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(subject, subject.GetType(), _options);
+
+        // Assert
+        Assert.Contains("configProperty", json);
+        Assert.Contains("saved", json);
+        Assert.DoesNotContain("stateProperty", json);
+        Assert.DoesNotContain("not-saved", json);
     }
 
     #endregion

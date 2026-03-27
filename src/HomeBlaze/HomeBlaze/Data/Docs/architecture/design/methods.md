@@ -15,22 +15,22 @@ Subjects expose executable behavior through methods marked with `[Operation]` (s
 Operations and queries are implemented in HomeBlaze today:
 
 - `[Operation]` and `[Query]` attributes defined in `HomeBlaze.Abstractions`
-- Method discovery via `SubjectMethodInfo` and `ISubjectMethodInvoker`
-- `MethodPropertyInitializer` creates virtual properties for methods, enabling `[PropertyAttribute]` on operations (e.g., `IsEnabled` for conditional enable/disable)
+- Method discovery via `MethodMetadata` registered as dynamic properties in the registry
+- `MethodPropertyInitializer` registers `MethodMetadata` (with `InvokeAsync` capability) as dynamic properties, enabling `[PropertyAttribute]` on operations (e.g., `IsEnabled` for conditional enable/disable)
 - Blazor UI renders operations as buttons with parameter dialogs, confirmation, and result display
 - MCP tools `list_methods` and `invoke_method` in `Namotion.Interceptor.Mcp` (in progress, [PR #158](https://github.com/RicoSuter/Namotion.Interceptor/pull/158))
 
-## Migration to Interceptor Core [In Progress]
+## Migration to Interceptor Core [Implemented]
 
-Operations are currently defined in `HomeBlaze.Abstractions` but are being refactored to move into `Namotion.Interceptor` registry. This makes them usable across all interceptor applications, not just HomeBlaze.
+Operations have been migrated from reflection-based discovery to registry attributes. Method metadata is now stored in the registry as `MethodMetadata` dynamic properties, making operations usable across all interceptor applications.
 
-What moves to core:
+What moved to core:
 - `[Operation]` and `[Query]` attributes
-- Method discovery and invocation infrastructure
-- `ISubjectMethodInvoker`
+- Method discovery via `MethodMetadata` properties in the registry
+- Invocation via `MethodMetadata.InvokeAsync`
 
 What stays in HomeBlaze:
-- `MethodPropertyInitializer` (virtual properties for UI integration like `IsEnabled`)
+- `MethodPropertyInitializer` (registers `MethodMetadata` as dynamic properties for UI integration like `IsEnabled`)
 - Blazor UI components (parameter dialogs, confirmation, result display)
 - Domain-specific operation patterns
 
@@ -59,7 +59,7 @@ For most operations, at-most-once (fail on disconnect) is acceptable. For critic
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Method attributes | `[Operation]` (state-changing) and `[Query]` (read-only) | Clear semantic distinction enables different authorization defaults and UI treatment |
-| Migration to core | Move attributes and discovery into Namotion.Interceptor registry | Enables OPC UA method mapping, MCP tool support, and reuse outside HomeBlaze |
+| Migration to core | Attributes and discovery moved into Namotion.Interceptor registry via `MethodMetadata` | Enables OPC UA method mapping, MCP tool support, and reuse outside HomeBlaze |
 | RPC semantics | Execute-all, not last-writer-wins | Operations are commands, not state — every invocation matters |
 
 ## Open Questions
