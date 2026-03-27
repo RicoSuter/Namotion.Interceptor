@@ -29,6 +29,7 @@ Working design documents for features not yet implemented. During implementation
 
 - [Dynamic Subject Proxying](plans/dynamic-subject-proxying.md) — WebSocket sync with dynamic proxy subjects
 - [Registry Attribute Migration](plans/registry-attribute-migration.md) — Migrate from reflection to registry attributes
+- [AI Agents](plans/ai-agents.md) — Built-in LLM-powered agent subjects
 
 ### [Administration](administration/installation.md)
 
