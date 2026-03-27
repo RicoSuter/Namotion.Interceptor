@@ -1,6 +1,7 @@
 ---
 title: Time-Series History
 navTitle: History
+status: Planned
 ---
 
 # Time-Series History Design [Planned]

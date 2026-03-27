@@ -1,6 +1,7 @@
 ---
 title: Events and Commands (Messages)
 navTitle: Messages
+status: Planned
 ---
 
 # Events and Commands (Messages)

@@ -1,6 +1,7 @@
 ---
 title: Observability
 navTitle: Observability
+status: Planned
 ---
 
 # Observability Design [Planned]

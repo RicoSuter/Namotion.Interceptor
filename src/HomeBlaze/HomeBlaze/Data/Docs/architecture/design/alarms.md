@@ -1,6 +1,7 @@
 ---
 title: Alarms and Events
 navTitle: Alarms
+status: Planned
 ---
 
 # Alarms and Events Design [Planned]

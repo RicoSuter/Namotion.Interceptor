@@ -1,6 +1,7 @@
 ---
 title: Upgrade and Migration
 navTitle: Upgrade
+status: Planned
 ---
 
 # Upgrade and Migration Design [Planned]
