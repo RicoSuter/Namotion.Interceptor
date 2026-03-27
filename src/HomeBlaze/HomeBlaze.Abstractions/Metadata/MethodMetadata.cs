@@ -11,13 +11,12 @@ public class MethodMetadata
 {
     private readonly Func<object?[]?, object?> _invoke;
 
-    /// <param name="subject">The subject instance this method is bound to.</param>
     /// <param name="invoke">
     /// A delegate that invokes the method with the fully resolved parameter array.
     /// May return a <see cref="Task"/> or <see cref="Task{T}"/>; the result is awaited
     /// and unwrapped automatically by <see cref="InvokeAsync"/>.
     /// </param>
-    public MethodMetadata(IInterceptorSubject subject, Func<object?[]?, object?> invoke)
+    public MethodMetadata(Func<object?[]?, object?> invoke)
     {
         _invoke = invoke;
     }
@@ -26,7 +25,7 @@ public class MethodMetadata
     /// Creates a <see cref="MethodMetadata"/> that invokes a reflected method on the bound subject.
     /// </summary>
     public MethodMetadata(IInterceptorSubject subject, MethodInfo method)
-        : this(subject, arguments =>
+        : this(arguments =>
         {
             try
             {

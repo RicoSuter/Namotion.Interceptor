@@ -116,7 +116,7 @@ public class ConfigurableSubjectSerializer
                             var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.Type, _options);
                             property.SetValue(value);
                         }
-                        catch
+                        catch (JsonException)
                         {
                             // Skip properties that can't be deserialized
                         }
@@ -141,7 +141,7 @@ public class ConfigurableSubjectSerializer
                     var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.PropertyType, _options);
                     property.SetValue(subject, value);
                 }
-                catch
+                catch (JsonException)
                 {
                     // Skip properties that can't be deserialized
                 }
@@ -170,7 +170,7 @@ public class ConfigurableSubjectSerializer
                     var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.Type, _options);
                     property.SetValue(value);
                 }
-                catch
+                catch (JsonException)
                 {
                     // Skip properties that can't be deserialized
                 }

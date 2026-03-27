@@ -26,22 +26,23 @@ public class PropertyAttributeInitializer : ILifecycleHandler
             {
                 if (reflectionAttribute is StateAttribute stateAttribute)
                 {
+                    var metadata = new StateMetadata
+                    {
+                        Name = stateAttribute.Name,
+                        Unit = stateAttribute.Unit,
+                        Position = stateAttribute.Position,
+                        IsCumulative = stateAttribute.IsCumulative,
+                        IsDiscrete = stateAttribute.IsDiscrete,
+                        IsEstimated = stateAttribute.IsEstimated,
+                    };
                     property.AddAttribute(KnownAttributes.State, typeof(StateMetadata),
-                        _ => new StateMetadata
-                        {
-                            Name = stateAttribute.Name,
-                            Unit = stateAttribute.Unit,
-                            Position = stateAttribute.Position,
-                            IsCumulative = stateAttribute.IsCumulative,
-                            IsDiscrete = stateAttribute.IsDiscrete,
-                            IsEstimated = stateAttribute.IsEstimated,
-                        },
-                        null);
+                        _ => metadata, null);
                 }
                 else if (reflectionAttribute is ConfigurationAttribute)
                 {
+                    var metadata = new ConfigurationMetadata();
                     property.AddAttribute(KnownAttributes.Configuration, typeof(ConfigurationMetadata),
-                        _ => new ConfigurationMetadata(), null);
+                        _ => metadata, null);
                 }
             }
         }

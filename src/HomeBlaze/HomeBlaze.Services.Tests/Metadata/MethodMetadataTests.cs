@@ -19,11 +19,9 @@ public class MethodMetadataTests
     public async Task InvokeAsync_WithFuncConstructor_CallsDelegate()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new MetadataTestSubject(context);
         var called = false;
 
-        var metadata = new MethodMetadata(subject, arguments =>
+        var metadata = new MethodMetadata(arguments =>
         {
             called = true;
             return "result-from-func";
@@ -45,11 +43,9 @@ public class MethodMetadataTests
     public async Task InvokeAsync_WithFuncConstructor_ResolvesParameters()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new MetadataTestSubject(context);
         object?[]? receivedArguments = null;
 
-        var metadata = new MethodMetadata(subject, arguments =>
+        var metadata = new MethodMetadata(arguments =>
         {
             receivedArguments = arguments;
             return null;
@@ -78,10 +74,7 @@ public class MethodMetadataTests
     public async Task InvokeAsync_WithFuncConstructor_UnwrapsTaskResult()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new MetadataTestSubject(context);
-
-        var metadata = new MethodMetadata(subject, _ => Task.FromResult<object?>("async-result"))
+        var metadata = new MethodMetadata(_ => Task.FromResult<object?>("async-result"))
         {
             ResultType = typeof(string),
         };
@@ -97,11 +90,9 @@ public class MethodMetadataTests
     public async Task InvokeAsync_WithFuncConstructor_AwaitsPlainTask()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new MetadataTestSubject(context);
         var executed = false;
 
-        var metadata = new MethodMetadata(subject, _ =>
+        var metadata = new MethodMetadata(_ =>
         {
             executed = true;
             return Task.CompletedTask;
@@ -119,10 +110,7 @@ public class MethodMetadataTests
     public async Task InvokeAsync_WithFuncConstructor_PropagatesException()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new MetadataTestSubject(context);
-
-        var metadata = new MethodMetadata(subject, _ =>
+        var metadata = new MethodMetadata(_ =>
             throw new InvalidOperationException("func failure"));
 
         // Act & Assert
@@ -135,10 +123,7 @@ public class MethodMetadataTests
     public async Task InvokeAsync_TrulyAsyncMethodThrows_ExceptionPropagates()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new MetadataTestSubject(context);
-
-        var metadata = new MethodMetadata(subject, _ =>
+        var metadata = new MethodMetadata(_ =>
         {
             async Task ThrowAfterAwait()
             {
@@ -158,12 +143,10 @@ public class MethodMetadataTests
     public async Task InvokeAsync_FromServicesParameter_ResolvesFromServiceProvider()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new MetadataTestSubject(context);
         var logger = new TestLoggerImpl();
         object?[]? receivedArguments = null;
 
-        var metadata = new MethodMetadata(subject, arguments =>
+        var metadata = new MethodMetadata(arguments =>
         {
             receivedArguments = arguments;
             return null;
@@ -190,11 +173,9 @@ public class MethodMetadataTests
     public async Task InvokeAsync_FromServicesParameter_NullWhenServiceNotRegistered_AndNullable()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new MetadataTestSubject(context);
         object?[]? receivedArguments = null;
 
-        var metadata = new MethodMetadata(subject, arguments =>
+        var metadata = new MethodMetadata(arguments =>
         {
             receivedArguments = arguments;
             return null;
@@ -221,10 +202,7 @@ public class MethodMetadataTests
     public async Task InvokeAsync_FromServicesParameter_ThrowsWhenServiceNotRegistered_AndNotNullable()
     {
         // Arrange
-        var context = CreateContext();
-        var subject = new MetadataTestSubject(context);
-
-        var metadata = new MethodMetadata(subject, _ => null)
+        var metadata = new MethodMetadata(_ => null)
         {
             Parameters =
             [
@@ -237,6 +215,25 @@ public class MethodMetadataTests
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => metadata.InvokeAsync([], serviceProvider, CancellationToken.None));
+        Assert.Contains("ITestLoggerService", exception.Message);
+        Assert.Contains("logger", exception.Message);
+    }
+
+    [Fact]
+    public async Task InvokeAsync_FromServicesParameter_ThrowsWhenServiceProviderIsNull_AndNotNullable()
+    {
+        // Arrange
+        var metadata = new MethodMetadata(_ => null)
+        {
+            Parameters =
+            [
+                new MethodParameter { Name = "logger", Type = typeof(ITestLoggerService), IsFromServices = true, IsNullable = false },
+            ],
+        };
+
+        // Act & Assert — null serviceProvider means GetService returns null, which throws for non-nullable
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => metadata.InvokeAsync([], null, CancellationToken.None));
         Assert.Contains("ITestLoggerService", exception.Message);
         Assert.Contains("logger", exception.Message);
     }
@@ -266,7 +263,7 @@ public class MethodMetadataTests
         var registered = subject.TryGetRegisteredSubject()!;
         var invoked = false;
 
-        var metadata = new MethodMetadata(subject, _ =>
+        var metadata = new MethodMetadata(_ =>
         {
             invoked = true;
             return Task.FromResult<object?>("dynamic-result");
