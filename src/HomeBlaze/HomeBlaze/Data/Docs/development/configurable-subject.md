@@ -1,3 +1,9 @@
+---
+title: Configurable Subject Serialization
+navTitle: Configurable Subjects
+position: 1
+---
+
 # Configurable Subject Serialization
 
 ## Overview

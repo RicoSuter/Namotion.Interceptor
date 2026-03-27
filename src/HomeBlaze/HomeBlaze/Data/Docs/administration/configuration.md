@@ -16,6 +16,25 @@ HomeBlaze transforms files into a reactive object graph with automatic UI genera
 
 ---
 
+## Managing Configuration
+
+Configuration can be managed in two ways — both produce the same result:
+
+**Via the Blazor UI:**
+- **Create subjects** — The subject browser lets you create new subjects by selecting a type from the registry and filling in configuration properties via an auto-generated editor
+- **Edit subjects** — Select any subject to view and edit its `[Configuration]` properties in the property panel. Changes are saved back to the JSON file automatically
+- **Create and edit files** — New JSON and Markdown files can be created from the UI. Markdown files open in an integrated Monaco editor with live preview
+- **Manage folders** — Create, rename, and delete folders in the storage tree
+
+**Via files directly:**
+- Edit JSON and Markdown files in the `Data/` folder with any editor
+- Changes are picked up automatically via file system watching
+- This is useful for bulk setup, version control, or scripting
+
+Both approaches work on the same underlying files — the UI is a management layer on top of the file-based storage, not a separate configuration system.
+
+---
+
 ## The Object Graph
 
 HomeBlaze organizes everything as **subjects** in a tree structure:
@@ -226,8 +245,6 @@ The demo includes pre-configured motors in the `demo/` folder:
 | Water Pump | 2,400 RPM | 1s |
 | Compressor | 3,000 RPM | 1s |
 
-See the [Demo Setup Guide](../Demo/Setup.md) for details.
-
 ---
 
 ## Tips & Best Practices
@@ -242,6 +259,6 @@ See the [Demo Setup Guide](../Demo/Setup.md) for details.
 
 ## Related Documentation
 
-- [Markdown Pages](Pages.md) - Creating interactive pages
-- [Building Subjects](BuildingSubjects.md) - Creating custom subject types
-- [Architecture](Architecture.md) - System design overview
+- [Markdown Pages](../development/pages.md) - Creating interactive pages
+- [Building Subjects](../development/building-subjects.md) - Creating custom subject types
+- [Architecture](../architecture/overview.md) - System design overview

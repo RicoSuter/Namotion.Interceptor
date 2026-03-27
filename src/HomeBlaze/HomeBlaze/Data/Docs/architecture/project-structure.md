@@ -1,4 +1,10 @@
-# HomeBlaze v2 Architecture
+---
+title: Project Structure
+navTitle: Project Structure
+position: 2
+---
+
+# Project Structure
 
 This document describes the modular architecture for HomeBlaze v2.
 
