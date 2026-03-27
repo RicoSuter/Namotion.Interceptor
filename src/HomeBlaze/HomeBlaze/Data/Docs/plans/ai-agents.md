@@ -9,7 +9,6 @@ status: Planned
 **Status: Planned**
 
 **Prerequisites:**
-- [Registry Attribute Migration](registry-attribute-migration.md) — HomeBlaze metadata provider reads from registry attributes instead of reflection
 - [MCP Server](../../../../../docs/plans/mcp-server.md) — core tool implementations reused by built-in agents as `AIFunction` objects
 
 ## Problem
@@ -366,7 +365,6 @@ public class HomeBlazeMcpMetadataProvider : IMcpMetadataProvider
 - `Namotion.Interceptor.Mcp`: core tool implementations reused as `AIFunction`
 - `HomeBlaze.Abstractions`: `INotificationChannel`, `ITitleProvider`
 - `HomeBlaze.Services`: `SubjectPathResolver` for provider/watch path resolution
-- [Registry Attribute Migration](registry-attribute-migration.md): `HomeBlazeMcpMetadataProvider` and `StateAttributePathProvider` read from registry attributes
 - Graph-level authorization: gating write access per agent
 
 ## Open Questions

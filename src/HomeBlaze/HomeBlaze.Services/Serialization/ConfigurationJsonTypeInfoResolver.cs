@@ -1,9 +1,11 @@
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Services.Serialization;
 
@@ -51,14 +53,31 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
         {
             foreach (var property in typeInfo.Properties)
             {
-                var hasConfigurationAttribute = property.AttributeProvider?
-                    .GetCustomAttributes(typeof(ConfigurationAttribute), true)
-                    .Any() ?? false;
-
-                if (!hasConfigurationAttribute)
+                var propertyName = (property.AttributeProvider as MemberInfo)?.Name ?? property.Name;
+                var ignoreNulls = options.DefaultIgnoreCondition == JsonIgnoreCondition.WhenWritingNull;
+                property.ShouldSerialize = (parent, value) =>
                 {
-                    property.ShouldSerialize = static (_, _) => false;
-                }
+                    // Respect WhenWritingNull since setting ShouldSerialize overrides default behavior
+                    if (ignoreNulls && value is null)
+                        return false;
+
+                    if (parent is IInterceptorSubject subject)
+                    {
+                        var registered = subject.TryGetRegisteredSubject();
+                        if (registered != null)
+                        {
+                            var registeredProperty = registered.TryGetProperty(propertyName);
+                            return registeredProperty?.TryGetAttribute(KnownAttributes.Configuration) != null;
+                        }
+                    }
+
+                    // For non-subject types (value objects) or subjects without registry, fall back to reflection
+                    var hasConfigurationAttribute = property.AttributeProvider?
+                        .GetCustomAttributes(typeof(ConfigurationAttribute), true)
+                        .Any() ?? false;
+
+                    return hasConfigurationAttribute;
+                };
             }
         }
 

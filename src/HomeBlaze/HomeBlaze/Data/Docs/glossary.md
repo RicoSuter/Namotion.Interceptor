@@ -83,7 +83,7 @@ Marks a method as an executable action from the UI. Operations appear as buttons
 
 ### `[Query]`
 
-Marks a method as a read-only query (no side effects). Similar to `[Operation]` but semantically indicates the method doesn't modify state. UI support deferred to V2.
+Marks a method as a read-only query (no side effects). Similar to `[Operation]` but semantically indicates the method doesn't modify state.
 
 ### `[PropertyAttribute]`
 
@@ -265,51 +265,31 @@ Use brackets when keys contain dots (like file extensions): `Root.Demo[Setup.md]
 
 ### ITitleProvider
 
-Interface for subjects that provide a display title.
-
-```csharp
-public interface ITitleProvider
-{
-    string? Title { get; }
-}
-```
+Interface for subjects that provide a display title. Used by the UI to show a human-readable name instead of the type name.
 
 ### IIconProvider
 
-Interface for subjects that provide a display icon.
-
-```csharp
-public interface IIconProvider
-{
-    string? Icon { get; }
-}
-```
+Interface for subjects that provide a display icon. Used by the UI to show an icon next to the subject name.
 
 ### IConfigurableSubject
 
-Interface for subjects that react to configuration changes.
+Interface for subjects that react to configuration changes. Called after `[Configuration]` properties are updated (e.g., after deserialization or editing).
 
-```csharp
-public interface IConfigurableSubject
-{
-    Task ApplyConfigurationAsync(CancellationToken cancellationToken = default);
-}
-```
+### MethodMetadata
 
-### ISubjectMethodInvoker
+Registry-based metadata for subject methods (operations and queries). Bound to a specific subject instance and registered as a dynamic property in the registry by `MethodPropertyInitializer`. Describes the method's kind, title, parameters, and provides direct invocation via `InvokeAsync`. Runtime-provided parameters (e.g., `CancellationToken`) are injected automatically.
 
-Service for invoking operation and query methods on subjects.
+### MethodParameter
 
-```csharp
-public interface ISubjectMethodInvoker
-{
-    Task<MethodInvocationResult> InvokeAsync(
-        IInterceptorSubject subject,
-        SubjectMethodInfo method,
-        object?[] parameters,
-        CancellationToken cancellationToken = default);
-}
-```
+Describes a parameter of a subject method. Each parameter knows whether it requires user input, is resolved from DI (`IsFromServices`), or is provided by the runtime (`IsRuntimeProvided`, e.g., `CancellationToken`).
+
+### StateMetadata
+
+Registry attribute metadata for `[State]` properties. Auto-registered by `PropertyAttributeInitializer` on subject attach. Contains display name, unit, position, and flags (cumulative, discrete, estimated).
+
+### ConfigurationMetadata
+
+Registry attribute metadata for `[Configuration]` properties. Auto-registered by `PropertyAttributeInitializer` on subject attach.
 
 ---
 

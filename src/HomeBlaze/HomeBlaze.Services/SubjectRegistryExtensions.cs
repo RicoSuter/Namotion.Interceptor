@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.RegularExpressions;
-using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Storage.Abstractions.Attributes;
+using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Metadata;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
@@ -10,18 +10,10 @@ namespace HomeBlaze.Services;
 
 /// <summary>
 /// HomeBlaze-specific extension methods for the interceptor registry.
-/// Uses registry APIs instead of .NET reflection for better performance.
+/// Uses registry attribute queries instead of .NET reflection for better performance.
 /// </summary>
 public static partial class SubjectRegistryExtensions
 {
-    // Cache by (SubjectType, PropertyName) -> attribute info
-    // All instances of same subject type have identical attributes
-    private static readonly ConcurrentDictionary<(Type, string), bool>
-        IsConfigurationPropertyCache = new();
-
-    private static readonly ConcurrentDictionary<(Type, string), StateAttribute?>
-        StateAttributeCache = new();
-
     private static readonly ConcurrentDictionary<string, string>
         CamelCaseCache = new();
 
@@ -54,65 +46,46 @@ public static partial class SubjectRegistryExtensions
 
         foreach (var property in registered.Properties)
         {
-            if (property.GetStateAttribute() != null)
+            if (property.GetStateMetadata() != null)
                 yield return property;
         }
     }
 
     /// <summary>
-    /// Checks if a property has [Configuration] attribute.
-    /// Uses cached lookup by (Type, PropertyName) for O(1) performance after first call.
+    /// Checks if a property has [Configuration] attribute via registry lookup.
     /// </summary>
     public static bool IsConfigurationProperty(this RegisteredSubjectProperty property)
     {
-        var key = (property.Subject.GetType(), property.Name);
-        return IsConfigurationPropertyCache.GetOrAdd(key, _ =>
-        {
-            foreach (var attr in property.ReflectionAttributes)
-            {
-                if (attr is ConfigurationAttribute)
-                    return true;
-            }
-            return false;
-        });
+        return property.TryGetAttribute(KnownAttributes.Configuration) != null;
     }
 
     /// <summary>
-    /// Gets the [State] attribute for a property, or null if not present.
-    /// Uses cached lookup by (Type, PropertyName).
+    /// Gets the <see cref="StateMetadata"/> for a property, or null if not present.
+    /// Uses registry attribute lookup instead of reflection.
     /// </summary>
-    public static StateAttribute? GetStateAttribute(this RegisteredSubjectProperty property)
+    public static StateMetadata? GetStateMetadata(this RegisteredSubjectProperty property)
     {
-        var key = (property.Subject.GetType(), property.Name);
-        return StateAttributeCache.GetOrAdd(key, _ =>
-        {
-            foreach (var attr in property.ReflectionAttributes)
-            {
-                if (attr is StateAttribute sa)
-                    return sa;
-            }
-            return null;
-        });
+        return property.TryGetAttribute(KnownAttributes.State)?.GetValue() as StateMetadata;
     }
 
     /// <summary>
-    /// Gets the display name for a property (from StateAttribute or camelCase split).
+    /// Gets the display name for a property (from StateMetadata or camelCase split).
     /// </summary>
     public static string GetDisplayName(this RegisteredSubjectProperty property)
     {
-        var stateAttr = property.GetStateAttribute();
-        if (!string.IsNullOrEmpty(stateAttr?.Name))
-            return stateAttr.Name;
+        var metadata = property.GetStateMetadata();
+        if (!string.IsNullOrEmpty(metadata?.Name))
+            return metadata.Name;
 
         return SplitCamelCase(property.Name);
     }
 
     /// <summary>
-    /// Gets the display position for a property (from StateAttribute).
+    /// Gets the display position for a property (from StateMetadata).
     /// </summary>
     public static int GetDisplayPosition(this RegisteredSubjectProperty property)
     {
-        return property.GetStateAttribute()?.Position ?? int.MaxValue;
+        return property.GetStateMetadata()?.Position ?? int.MaxValue;
     }
 
     /// <summary>

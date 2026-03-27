@@ -8,7 +8,7 @@ status: Planned
 
 **Status: Work in Progress**
 
-**Prerequisite:** [Registry Attribute Migration](registry-attribute-migration.md) — HomeBlaze UI/services must read from registry attributes instead of C# reflection for dynamic proxies to be fully functional.
+
 
 ## Problem
 

@@ -1,7 +1,9 @@
+using HomeBlaze.Services.Lifecycle;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Registry;
-using Xunit;
+using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services.Tests.Serialization;
 
@@ -421,7 +423,13 @@ public class ConfigurableSubjectSerializerTests
     public void UpdateConfiguration_UpdatesExistingProperties()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithService<ILifecycleHandler>(
+                () => new PropertyAttributeInitializer(),
+                handler => handler is PropertyAttributeInitializer);
         var subject = new TestSubject(context) { ConfigProperty = "original" };
         var json = """{ "configProperty": "updated" }""";
 
@@ -436,7 +444,13 @@ public class ConfigurableSubjectSerializerTests
     public void UpdateConfiguration_DoesNotCreateNewInstance()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithService<ILifecycleHandler>(
+                () => new PropertyAttributeInitializer(),
+                handler => handler is PropertyAttributeInitializer);
         var subject = new TestSubject(context) { ConfigProperty = "original" };
         var originalReference = subject;
         var json = """{ "configProperty": "updated" }""";
@@ -452,7 +466,13 @@ public class ConfigurableSubjectSerializerTests
     public void UpdateConfiguration_IgnoresMissingProperties()
     {
         // Arrange
-        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithService<ILifecycleHandler>(
+                () => new PropertyAttributeInitializer(),
+                handler => handler is PropertyAttributeInitializer);
         var subject = new SubjectWithMixedProperties(context)
         {
             ConfigOne = "original-one",
