@@ -9,7 +9,6 @@ namespace HomeBlaze.Abstractions.Metadata;
 /// </summary>
 public class MethodMetadata
 {
-    private readonly IInterceptorSubject _subject;
     private readonly Func<object?[]?, object?> _invoke;
 
     /// <param name="subject">The subject instance this method is bound to.</param>
@@ -20,7 +19,6 @@ public class MethodMetadata
     /// </param>
     public MethodMetadata(IInterceptorSubject subject, Func<object?[]?, object?> invoke)
     {
-        _subject = subject;
         _invoke = invoke;
     }
 
@@ -56,6 +54,11 @@ public class MethodMetadata
     /// An optional longer description of what the method does.
     /// </summary>
     public string? Description { get; init; }
+
+    /// <summary>
+    /// The name of the registry property this metadata is registered under.
+    /// </summary>
+    public string PropertyName { get; init; } = string.Empty;
 
     /// <summary>
     /// An optional icon identifier for UI rendering.
@@ -148,7 +151,13 @@ public class MethodMetadata
             }
             else if (parameter.IsFromServices)
             {
-                resolved[i] = serviceProvider?.GetService(parameter.Type);
+                var service = serviceProvider?.GetService(parameter.Type);
+                if (service == null && !parameter.IsNullable)
+                {
+                    throw new InvalidOperationException(
+                        $"Service '{parameter.Type.Name}' not found for parameter '{parameter.Name}'.");
+                }
+                resolved[i] = service;
             }
             else
             {

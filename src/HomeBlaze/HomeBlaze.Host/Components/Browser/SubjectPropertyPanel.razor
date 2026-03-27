@@ -67,8 +67,7 @@
                     {
                         var isQuery = method.Kind == MethodKind.Query;
                         var defaultIcon = isQuery ? "Search" : "PlayArrow";
-                        var methodProperty = _registeredSubject?.Properties
-                            .FirstOrDefault(p => p.GetValue() == method);
+                        var methodProperty = _registeredSubject?.TryGetProperty(method.PropertyName);
                         var isEnabledAttribute = methodProperty?.TryGetAttribute(KnownAttributes.IsEnabled);
                         var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
                         <MudButton Variant="Variant.Filled"
@@ -412,6 +411,10 @@
             {
                 await MethodResultDialog.ShowAsync(DialogService, method.Title, result);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            _executingMethod = null;
         }
         catch (Exception ex)
         {

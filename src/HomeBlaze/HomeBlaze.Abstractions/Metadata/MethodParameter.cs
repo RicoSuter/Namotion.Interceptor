@@ -28,6 +28,11 @@ public class MethodParameter
     public bool IsFromServices { get; init; }
 
     /// <summary>
+    /// Whether this parameter accepts null (nullable reference type or <see cref="Nullable{T}"/>).
+    /// </summary>
+    public bool IsNullable { get; init; }
+
+    /// <summary>
     /// Whether this parameter is provided by the runtime (e.g., <see cref="CancellationToken"/>).
     /// Runtime-provided parameters require neither user input nor DI registration.
     /// </summary>
