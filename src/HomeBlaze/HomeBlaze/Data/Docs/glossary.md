@@ -83,7 +83,7 @@ Marks a method as an executable action from the UI. Operations appear as buttons
 
 ### `[Query]`
 
-Marks a method as a read-only query (no side effects). Similar to `[Operation]` but semantically indicates the method doesn't modify state. UI support deferred to V2.
+Marks a method as a read-only query (no side effects). Similar to `[Operation]` but semantically indicates the method doesn't modify state.
 
 ### `[PropertyAttribute]`
 
@@ -265,51 +265,23 @@ Use brackets when keys contain dots (like file extensions): `Root.Demo[Setup.md]
 
 ### ITitleProvider
 
-Interface for subjects that provide a display title.
-
-```csharp
-public interface ITitleProvider
-{
-    string? Title { get; }
-}
-```
+Interface for subjects that provide a display title. Used by the UI to show a human-readable name instead of the type name.
 
 ### IIconProvider
 
-Interface for subjects that provide a display icon.
-
-```csharp
-public interface IIconProvider
-{
-    string? Icon { get; }
-}
-```
+Interface for subjects that provide a display icon. Used by the UI to show an icon next to the subject name.
 
 ### IConfigurableSubject
 
-Interface for subjects that react to configuration changes.
-
-```csharp
-public interface IConfigurableSubject
-{
-    Task ApplyConfigurationAsync(CancellationToken cancellationToken = default);
-}
-```
+Interface for subjects that react to configuration changes. Called after `[Configuration]` properties are updated (e.g., after deserialization or editing).
 
 ### MethodMetadata
 
-Registry-based metadata for subject methods (operations and queries). Registered as dynamic properties in the registry by `MethodPropertyInitializer`. Contains all method information (`MethodKind`, title, parameters, `InvokeAsync` delegate).
+Registry-based metadata for subject methods (operations and queries). Bound to a specific subject instance and registered as a dynamic property in the registry by `MethodPropertyInitializer`. Describes the method's kind, title, parameters, and provides direct invocation via `InvokeAsync`. Runtime-provided parameters (e.g., `CancellationToken`) are injected automatically.
 
-```csharp
-public class MethodMetadata
-{
-    public MethodKind Kind { get; set; }
-    public string? Title { get; set; }
-    public string? Description { get; set; }
-    public MethodParameter[] Parameters { get; set; }
-    public Func<object, object?[]?, Task<object?>> InvokeAsync { get; set; }
-}
-```
+### MethodParameter
+
+Describes a parameter of a subject method. Each parameter knows whether it requires user input, is resolved from DI (`IsFromServices`), or is provided by the runtime (`IsRuntimeProvided`, e.g., `CancellationToken`).
 
 ### StateMetadata
 

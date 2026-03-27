@@ -1,3 +1,5 @@
+using Namotion.Interceptor;
+
 namespace HomeBlaze.Abstractions.Metadata;
 
 /// <summary>
@@ -6,12 +8,12 @@ namespace HomeBlaze.Abstractions.Metadata;
 /// </summary>
 public class MethodMetadata
 {
-    private readonly object _subject;
+    private readonly IInterceptorSubject _subject;
     private readonly Func<object, object?[]?, Task<object?>> _invoke;
 
     /// <param name="subject">The subject instance this method is bound to.</param>
     /// <param name="invoke">The delegate that performs the actual method invocation.</param>
-    public MethodMetadata(object subject, Func<object, object?[]?, Task<object?>> invoke)
+    public MethodMetadata(IInterceptorSubject subject, Func<object, object?[]?, Task<object?>> invoke)
     {
         _subject = subject;
         _invoke = invoke;
@@ -59,10 +61,56 @@ public class MethodMetadata
     public Type? ResultType { get; init; }
 
     /// <summary>
-    /// Invokes the method on the bound subject with the provided parameters.
+    /// Invokes the method on the bound subject with the provided user-input parameters.
+    /// <see cref="MethodParameter.IsRuntimeProvided"/> parameters (e.g., <see cref="CancellationToken"/>)
+    /// and <see cref="MethodParameter.IsFromServices"/> parameters are resolved automatically.
     /// </summary>
-    public Task<object?> InvokeAsync(object?[]? parameters = null)
+    /// <param name="parameters">Only parameters where <see cref="MethodParameter.RequiresInput"/> is true.</param>
+    /// <param name="serviceProvider">Service provider for resolving [FromServices] parameters.</param>
+    /// <param name="cancellationToken">Cancellation token injected into runtime-provided parameters.</param>
+    public Task<object?> InvokeAsync(
+        object?[]? parameters,
+        IServiceProvider? serviceProvider,
+        CancellationToken cancellationToken)
     {
-        return _invoke(_subject, parameters);
+        var resolved = ResolveParameters(parameters, serviceProvider, cancellationToken);
+        return _invoke(_subject, resolved);
+    }
+
+    private object?[] ResolveParameters(
+        object?[]? userParameters,
+        IServiceProvider? serviceProvider,
+        CancellationToken cancellationToken)
+    {
+        if (Parameters.Length == 0)
+        {
+            return [];
+        }
+
+        var resolved = new object?[Parameters.Length];
+        var userIndex = 0;
+
+        for (var i = 0; i < Parameters.Length; i++)
+        {
+            var parameter = Parameters[i];
+            if (parameter.IsRuntimeProvided)
+            {
+                resolved[i] = parameter.Type == typeof(CancellationToken)
+                    ? cancellationToken
+                    : null;
+            }
+            else if (parameter.IsFromServices)
+            {
+                resolved[i] = serviceProvider?.GetService(parameter.Type);
+            }
+            else
+            {
+                resolved[i] = userParameters != null && userIndex < userParameters.Length
+                    ? userParameters[userIndex++]
+                    : null;
+            }
+        }
+
+        return resolved;
     }
 }
