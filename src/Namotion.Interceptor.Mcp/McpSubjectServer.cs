@@ -25,6 +25,17 @@ public class McpSubjectServer
     }
 
     /// <summary>
+    /// Initializes a new instance of the <see cref="McpSubjectServer"/> class with lazy root subject resolution.
+    /// Use this when the root subject is not available at registration time (e.g., loaded asynchronously at startup).
+    /// </summary>
+    /// <param name="rootSubjectProvider">A function that resolves the root subject at tool invocation time.</param>
+    /// <param name="configuration">The server configuration controlling tool behavior.</param>
+    public McpSubjectServer(Func<IInterceptorSubject> rootSubjectProvider, McpServerConfiguration configuration)
+    {
+        _toolFactory = new McpToolFactory(rootSubjectProvider, configuration);
+    }
+
+    /// <summary>
     /// Gets the transport-agnostic tool descriptors for all registered tools.
     /// </summary>
     /// <returns>A read-only list of tool descriptors.</returns>
