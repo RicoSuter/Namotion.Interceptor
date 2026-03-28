@@ -390,7 +390,21 @@ public class McpToolFactory
         }
 
         var previousValue = property.GetValue();
-        var newValue = JsonSerializer.Deserialize(input.GetProperty("value").GetRawText(), property.Type);
+        var valueElement = input.GetProperty("value");
+
+        // The MCP SDK may pass values as strings (e.g., "true" instead of true).
+        // If the value is a string but the target type is not, try to deserialize the string content.
+        object? newValue;
+        if (valueElement.ValueKind == JsonValueKind.String && property.Type != typeof(string))
+        {
+            var stringValue = valueElement.GetString()!;
+            newValue = JsonSerializer.Deserialize(stringValue, property.Type);
+        }
+        else
+        {
+            newValue = JsonSerializer.Deserialize(valueElement.GetRawText(), property.Type);
+        }
+
         property.SetValue(newValue);
 
         return Task.FromResult<object?>(new { success = true, previousValue });
