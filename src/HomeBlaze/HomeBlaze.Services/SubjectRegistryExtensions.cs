@@ -74,8 +74,8 @@ public static partial class SubjectRegistryExtensions
     public static string GetDisplayName(this RegisteredSubjectProperty property)
     {
         var metadata = property.GetStateMetadata();
-        if (!string.IsNullOrEmpty(metadata?.Name))
-            return metadata.Name;
+        if (!string.IsNullOrEmpty(metadata?.Title))
+            return metadata.Title;
 
         return SplitCamelCase(property.Name);
     }

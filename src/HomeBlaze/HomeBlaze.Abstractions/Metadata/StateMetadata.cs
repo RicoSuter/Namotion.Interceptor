@@ -9,9 +9,9 @@ namespace HomeBlaze.Abstractions.Metadata;
 public class StateMetadata
 {
     /// <summary>
-    /// The display name override for this state property (null uses the property name).
+    /// The display title override for this state property (null uses the property name).
     /// </summary>
-    public string? Name { get; init; }
+    public string? Title { get; init; }
 
     /// <summary>
     /// The physical unit of the state value.
