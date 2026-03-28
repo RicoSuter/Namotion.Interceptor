@@ -1,0 +1,188 @@
+using System.Text.Json;
+using Namotion.Interceptor.Mcp.Abstractions;
+using Namotion.Interceptor.Mcp.Tools;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Paths;
+using Namotion.Interceptor.Tracking;
+using Xunit;
+
+namespace Namotion.Interceptor.Mcp.Tests.Tools;
+
+public class QueryToolTests
+{
+    [Fact]
+    public async Task Query_returns_subject_tree_with_children()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
+        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
+
+        var config = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance
+        };
+        var factory = new McpToolFactory(room, config);
+        var tools = factory.CreateTools();
+        var queryTool = tools.First(t => t.Name == "query");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { depth = 1, includeProperties = true });
+        var result = await queryTool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert
+        Assert.True(json.TryGetProperty("subjects", out _));
+        Assert.True(json.GetProperty("subjectCount").GetInt32() > 0);
+    }
+
+    [Fact]
+    public async Task Query_depth_zero_returns_no_children()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
+        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
+
+        var config = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance
+        };
+        var factory = new McpToolFactory(room, config);
+        var tools = factory.CreateTools();
+        var queryTool = tools.First(t => t.Name == "query");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { depth = 0, includeProperties = true });
+        var result = await queryTool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert - depth=0 means subject properties only, no child subjects expanded
+        Assert.Equal(0, json.GetProperty("subjectCount").GetInt32());
+    }
+
+    [Fact]
+    public async Task Query_includeProperties_controls_property_values()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
+
+        var config = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance
+        };
+        var factory = new McpToolFactory(room, config);
+        var queryTool = factory.CreateTools().First(t => t.Name == "query");
+
+        // Act - without properties
+        var inputWithout = JsonSerializer.SerializeToElement(new { depth = 0, includeProperties = false });
+        var resultWithout = await queryTool.Handler(inputWithout, CancellationToken.None);
+        var jsonWithout = JsonSerializer.SerializeToElement(resultWithout);
+
+        // Act - with properties
+        var inputWith = JsonSerializer.SerializeToElement(new { depth = 0, includeProperties = true });
+        var resultWith = await queryTool.Handler(inputWith, CancellationToken.None);
+        var jsonWith = JsonSerializer.SerializeToElement(resultWith);
+
+        // Assert - without properties, subjects tree should not contain property values
+        var subjectsWithout = jsonWithout.GetProperty("subjects");
+        var subjectsWith = jsonWith.GetProperty("subjects");
+
+        // With properties enabled, Name and Temperature should appear
+        Assert.True(subjectsWith.TryGetProperty("Name", out _));
+        Assert.True(subjectsWith.TryGetProperty("Temperature", out _));
+
+        // Without properties, Name and Temperature should not appear
+        Assert.False(subjectsWithout.TryGetProperty("Name", out _));
+        Assert.False(subjectsWithout.TryGetProperty("Temperature", out _));
+    }
+
+    [Fact]
+    public async Task Query_subject_enrichers_are_called()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
+        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
+
+        var enricher = new TestSubjectEnricher();
+        var config = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance,
+            SubjectEnrichers = { enricher }
+        };
+        var factory = new McpToolFactory(room, config);
+        var queryTool = factory.CreateTools().First(t => t.Name == "query");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { depth = 1, includeProperties = false });
+        var result = await queryTool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert - enricher should have been called for the Device child subject
+        Assert.True(enricher.EnrichedSubjects.Count > 0);
+
+        // The Device node should contain the $test field from the enricher
+        var subjects = json.GetProperty("subjects");
+        var deviceNode = subjects.GetProperty("Device");
+        Assert.Equal("enriched", deviceNode.GetProperty("$test").GetString());
+    }
+
+    [Fact]
+    public async Task Query_truncates_when_max_subjects_exceeded()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
+        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
+
+        var config = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance,
+            MaxSubjectsPerResponse = 0  // Force truncation immediately
+        };
+        var factory = new McpToolFactory(room, config);
+        var queryTool = factory.CreateTools().First(t => t.Name == "query");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { depth = 1, includeProperties = true });
+        var result = await queryTool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert
+        Assert.True(json.GetProperty("truncated").GetBoolean());
+    }
+
+    private class TestSubjectEnricher : IMcpSubjectEnricher
+    {
+        public List<RegisteredSubject> EnrichedSubjects { get; } = [];
+
+        public void EnrichSubject(RegisteredSubject subject, IDictionary<string, object?> metadata)
+        {
+            EnrichedSubjects.Add(subject);
+            metadata["$test"] = "enriched";
+        }
+    }
+}
