@@ -83,7 +83,7 @@ public static class ServiceCollectionExtensions
         };
 
         services.AddMcpServer()
-            .WithStdioServerTransport()
+            .WithHttpTransport(options => options.Stateless = true)
             .WithSubjectServerTools(ResolveRoot, configuration);
 
         // Store the initialization action as a singleton so InitializeHomeBlazeMcpServer can run it.

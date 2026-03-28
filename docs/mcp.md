@@ -11,19 +11,19 @@ Namotion.Interceptor.Mcp exposes the subject registry via [MCP (Model Context Pr
 ## Quick Start
 
 ```csharp
-var context = InterceptorSubjectContext
-    .Create()
-    .WithFullPropertyTracking()
-    .WithRegistry();
+// 1. Configure MCP server with HTTP transport
+services.AddMcpServer()
+    .WithHttpTransport(options => options.Stateless = true)
+    .WithSubjectServerTools(resolveRootSubject, new McpServerConfiguration
+    {
+        PathProvider = new DefaultPathProvider()
+    });
 
-var root = new MyRootSubject(context);
-
-// Configure MCP server
-services.AddMcpSubjectServer(root, new McpServerConfiguration
-{
-    PathProvider = new DefaultPathProvider()
-});
+// 2. Map the MCP endpoint
+app.MapMcp("/mcp");
 ```
+
+The MCP server is exposed as an HTTP endpoint. AI agents (Claude Desktop, custom MCP clients) connect to `/mcp` using the MCP protocol over HTTP with Server-Sent Events (SSE).
 
 ## Tools
 
@@ -140,3 +140,27 @@ public class MyToolProvider : IMcpToolProvider
 ```
 
 Tools are transport-agnostic `McpToolDescriptor` instances. They can be wrapped as MCP tools for external agents or `AIFunction` objects for in-process use.
+
+## Connecting Claude Desktop (Local Development)
+
+When running with a local development HTTPS certificate, Claude Desktop requires `mcp-remote` as a proxy since the MCP protocol runs over HTTP/SSE.
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS):
+
+```json
+{
+  "mcpServers": {
+    "my-app": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://localhost:7298/mcp"],
+      "env": {
+        "NODE_TLS_REJECT_UNAUTHORIZED": "0"
+      }
+    }
+  }
+}
+```
+
+`NODE_TLS_REJECT_UNAUTHORIZED=0` disables TLS certificate verification for the proxy process only — required because Node.js does not trust the ASP.NET Core development certificate by default. This is scoped to the `mcp-remote` process and only affects connections to your local server.
+
+Restart Claude Desktop after editing the config. The MCP tools should appear in the tools menu.
