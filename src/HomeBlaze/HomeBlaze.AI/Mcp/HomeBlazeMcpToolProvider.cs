@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.Services;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
@@ -7,7 +8,7 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 
-namespace HomeBlaze.Services.Mcp;
+namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
 /// Provides list_methods and invoke_method tools for HomeBlaze subjects.
@@ -16,29 +17,24 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
 {
     private readonly Func<IInterceptorSubject> _rootSubjectProvider;
     private readonly PathProviderBase _pathProvider;
+    private readonly IServiceProvider _serviceProvider;
     private readonly bool _isReadOnly;
-
-    public HomeBlazeMcpToolProvider(
-        IInterceptorSubject rootSubject,
-        PathProviderBase pathProvider,
-        bool isReadOnly)
-        : this(() => rootSubject, pathProvider, isReadOnly)
-    {
-    }
 
     public HomeBlazeMcpToolProvider(
         Func<IInterceptorSubject> rootSubjectProvider,
         PathProviderBase pathProvider,
+        IServiceProvider serviceProvider,
         bool isReadOnly)
     {
         _rootSubjectProvider = rootSubjectProvider;
         _pathProvider = pathProvider;
+        _serviceProvider = serviceProvider;
         _isReadOnly = isReadOnly;
     }
 
-    public IEnumerable<McpToolDescriptor> GetTools()
+    public IEnumerable<McpToolInfo> GetTools()
     {
-        yield return new McpToolDescriptor
+        yield return new McpToolInfo
         {
             Name = "list_methods",
             Description = "List operations and queries available on a subject at the given path.",
@@ -51,7 +47,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             Handler = HandleListMethodsAsync
         };
 
-        yield return new McpToolDescriptor
+        yield return new McpToolInfo
         {
             Name = "invoke_method",
             Description = "Execute a method on a subject. When server is read-only, only query methods are allowed.",
@@ -62,7 +58,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
                 {
                     path = new { type = "string", description = "Subject path" },
                     method = new { type = "string", description = "Method name" },
-                    arguments = new { type = "object", description = "Method arguments (optional)" }
+                    parameters = new { type = "object", description = "Method parameters (optional)" }
                 },
                 required = new[] { "path", "method" }
             }),
@@ -115,7 +111,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         {
             // Parse user-input arguments from JSON
             object?[]? userParameters = null;
-            if (input.TryGetProperty("arguments", out var argumentsElement))
+            if (input.TryGetProperty("parameters", out var argumentsElement))
             {
                 var inputParams = method.Parameters.Where(parameter => parameter.RequiresInput).ToArray();
                 userParameters = new object?[inputParams.Length];
@@ -130,8 +126,8 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
                 }
             }
 
-            var result = await method.InvokeAsync(userParameters, null, cancellationToken);
-            return result is not null ? new { success = true, result } : (object)new { success = true };
+            var result = await method.InvokeAsync(userParameters, _serviceProvider, cancellationToken);
+            return result is not null ? new { success = true, result } : new { success = true };
         }
         catch (Exception exception)
         {

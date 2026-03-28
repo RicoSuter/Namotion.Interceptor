@@ -14,10 +14,12 @@ Namotion.Interceptor.Mcp exposes the subject registry via [MCP (Model Context Pr
 // 1. Configure MCP server with HTTP transport
 services.AddMcpServer()
     .WithHttpTransport(options => options.Stateless = true)
-    .WithSubjectServerTools(resolveRootSubject, new McpServerConfiguration
-    {
-        PathProvider = new DefaultPathProvider()
-    });
+    .WithSubjectRegistryTools(
+        sp => resolveRootSubject(sp),
+        sp => new McpServerConfiguration
+        {
+            PathProvider = new DefaultPathProvider()
+        });
 
 // 2. Map the MCP endpoint
 app.MapMcp("/mcp");
@@ -38,12 +40,12 @@ The MCP server provides 4 core tools:
 
 ### Path Format
 
-Paths use dot notation with bracket indexing:
+The path format depends on the `PathProvider` configuration. The default uses dot notation with bracket indexing:
 
 ```
-root.livingRoom.temperature
-root.sensors[0].value
-root.devices[myDevice].status
+LivingRoom.Temperature
+Sensors[0].Value
+Devices[myDevice].Status
 ```
 
 ### Query Parameters
@@ -96,9 +98,12 @@ Add subject-level metadata (prefixed with `$`) to query responses:
 ```csharp
 public class MyEnricher : IMcpSubjectEnricher
 {
-    public void EnrichSubject(RegisteredSubject subject, IDictionary<string, object?> metadata)
+    public IDictionary<string, object?> GetSubjectEnrichments(RegisteredSubject subject)
     {
-        metadata["$customField"] = "value";
+        return new Dictionary<string, object?>
+        {
+            ["$customField"] = "value"
+        };
     }
 }
 ```
@@ -112,7 +117,11 @@ public class MyTypeProvider : IMcpTypeProvider
 {
     public IEnumerable<McpTypeInfo> GetTypes()
     {
-        yield return new McpTypeInfo("MyNamespace.IMyInterface", "Description", IsInterface: true);
+        yield return new McpTypeInfo(
+            "MyNamespace.IMyInterface",
+            "Description",
+            IsInterface: true,
+            Type: typeof(IMyInterface));
     }
 }
 ```
@@ -126,9 +135,9 @@ Add custom tools:
 ```csharp
 public class MyToolProvider : IMcpToolProvider
 {
-    public IEnumerable<McpToolDescriptor> GetTools()
+    public IEnumerable<McpToolInfo> GetTools()
     {
-        yield return new McpToolDescriptor
+        yield return new McpToolInfo
         {
             Name = "my_tool",
             Description = "My custom tool",
@@ -139,7 +148,7 @@ public class MyToolProvider : IMcpToolProvider
 }
 ```
 
-Tools are transport-agnostic `McpToolDescriptor` instances. They can be wrapped as MCP tools for external agents or `AIFunction` objects for in-process use.
+Tools are transport-agnostic `McpToolInfo` instances registered via `WithSubjectRegistryTools`.
 
 ## Connecting Claude Desktop (Local Development)
 

@@ -8,10 +8,22 @@ namespace Namotion.Interceptor.Mcp.Implementations;
 /// </summary>
 public class SubjectAbstractionsAssemblyTypeProvider : IMcpTypeProvider
 {
+    private readonly IEnumerable<Assembly>? _assemblies;
+
+    public SubjectAbstractionsAssemblyTypeProvider()
+    {
+    }
+
+    public SubjectAbstractionsAssemblyTypeProvider(IEnumerable<Assembly> assemblies)
+    {
+        _assemblies = assemblies;
+    }
+
     /// <inheritdoc />
     public IEnumerable<McpTypeInfo> GetTypes()
     {
-        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+        var assemblies = _assemblies ?? AppDomain.CurrentDomain.GetAssemblies();
+        foreach (var assembly in assemblies)
         {
             if (assembly.GetCustomAttribute<SubjectAbstractionsAssemblyAttribute>() is null)
             {
@@ -22,7 +34,7 @@ public class SubjectAbstractionsAssemblyTypeProvider : IMcpTypeProvider
             {
                 if (type.IsInterface)
                 {
-                    yield return new McpTypeInfo(type.FullName!, null, IsInterface: true);
+                    yield return new McpTypeInfo(type.FullName!, null, IsInterface: true, Type: type);
                 }
             }
         }

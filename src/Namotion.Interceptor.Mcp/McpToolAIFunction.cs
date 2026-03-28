@@ -4,14 +4,14 @@ using Microsoft.Extensions.AI;
 namespace Namotion.Interceptor.Mcp;
 
 /// <summary>
-/// Bridges an <see cref="McpToolDescriptor"/> to the <see cref="AIFunction"/> abstraction,
+/// Bridges an <see cref="McpToolInfo"/> to the <see cref="AIFunction"/> abstraction,
 /// enabling it to be used with the ModelContextProtocol SDK and other AI function consumers.
 /// </summary>
 internal sealed class McpToolAIFunction : AIFunction
 {
-    private readonly McpToolDescriptor _descriptor;
+    private readonly McpToolInfo _descriptor;
 
-    public McpToolAIFunction(McpToolDescriptor descriptor)
+    public McpToolAIFunction(McpToolInfo descriptor)
     {
         _descriptor = descriptor;
     }

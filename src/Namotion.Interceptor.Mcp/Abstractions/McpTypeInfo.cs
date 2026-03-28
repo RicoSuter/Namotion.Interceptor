@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Namotion.Interceptor.Mcp.Abstractions;
 
 /// <summary>
@@ -6,4 +8,9 @@ namespace Namotion.Interceptor.Mcp.Abstractions;
 /// <param name="Name">Full type name.</param>
 /// <param name="Description">Optional description.</param>
 /// <param name="IsInterface">True for abstraction interfaces, false for concrete types.</param>
-public record McpTypeInfo(string Name, string? Description, bool IsInterface);
+/// <param name="Type">The CLR type (excluded from JSON serialization).</param>
+public record McpTypeInfo(
+    string Name,
+    string? Description,
+    bool IsInterface,
+    [property: JsonIgnore] Type Type);

@@ -1,6 +1,7 @@
+using HomeBlaze.Services;
 using Namotion.Interceptor.Mcp.Abstractions;
 
-namespace HomeBlaze.Services.Mcp;
+namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
 /// Returns concrete subject types from HomeBlaze's SubjectTypeRegistry.
@@ -18,7 +19,10 @@ public class SubjectTypeRegistryTypeProvider : IMcpTypeProvider
     {
         foreach (var type in _typeRegistry.RegisteredTypes)
         {
-            yield return new McpTypeInfo(type.FullName!, null, IsInterface: false);
+            if (string.IsNullOrEmpty(type.FullName))
+                continue;
+           
+            yield return new McpTypeInfo(type.FullName, null, IsInterface: false, Type: type);
         }
     }
 }

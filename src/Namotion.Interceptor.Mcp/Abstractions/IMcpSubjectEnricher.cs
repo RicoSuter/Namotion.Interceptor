@@ -8,9 +8,9 @@ namespace Namotion.Interceptor.Mcp.Abstractions;
 public interface IMcpSubjectEnricher
 {
     /// <summary>
-    /// Enriches the subject with additional metadata fields.
+    /// Gets enrichment metadata for the subject.
     /// </summary>
     /// <param name="subject">The registered subject to enrich.</param>
-    /// <param name="metadata">The metadata dictionary to add fields to.</param>
-    void EnrichSubject(RegisteredSubject subject, IDictionary<string, object?> metadata);
+    /// <returns>A dictionary of metadata fields to add to the subject node.</returns>
+    IDictionary<string, object?> GetSubjectEnrichments(RegisteredSubject subject);
 }

@@ -19,7 +19,6 @@
         <ProjectReference Include="..\..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Tracking\Namotion.Interceptor.Tracking.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Validation\Namotion.Interceptor.Validation.csproj" />
-        <ProjectReference Include="..\..\Namotion.Interceptor.Mcp\Namotion.Interceptor.Mcp.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor\Namotion.Interceptor.csproj" />
         <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.*" />
     </ItemGroup>

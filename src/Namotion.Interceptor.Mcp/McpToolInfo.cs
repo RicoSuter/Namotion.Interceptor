@@ -5,7 +5,7 @@ namespace Namotion.Interceptor.Mcp;
 /// <summary>
 /// Transport-agnostic tool descriptor. Consumers wrap as MCP tools or AIFunction.
 /// </summary>
-public class McpToolDescriptor
+public class McpToolInfo
 {
     /// <summary>
     /// Gets the tool name.

@@ -179,10 +179,10 @@ public class QueryToolTests
     {
         public List<RegisteredSubject> EnrichedSubjects { get; } = [];
 
-        public void EnrichSubject(RegisteredSubject subject, IDictionary<string, object?> metadata)
+        public IDictionary<string, object?> GetSubjectEnrichments(RegisteredSubject subject)
         {
             EnrichedSubjects.Add(subject);
-            metadata["$test"] = "enriched";
+            return new Dictionary<string, object?> { ["$test"] = "enriched" };
         }
     }
 }

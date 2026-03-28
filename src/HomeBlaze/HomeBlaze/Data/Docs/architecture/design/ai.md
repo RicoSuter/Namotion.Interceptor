@@ -38,7 +38,7 @@ MCP tools are split across two packages, configured via a single `McpServerConfi
 
 This keeps the interceptor library independently usable. Method tools are HomeBlaze-specific because method discovery uses `MethodMetadata` with `[Operation]`/`[Query]` registry attributes — a HomeBlaze convention, not a core interceptor concept. Property-level metadata (units, position) is already in the registry as `StateMetadata` attributes — included directly in `query` responses when `includeAttributes=true`.
 
-Tool implementations are transport-agnostic `McpToolDescriptor` instances (metadata + plain function). Consumers wrap them as MCP tools (for external agents) or `AIFunction` objects (for built-in agents). One implementation, any delivery mode.
+Tool implementations are transport-agnostic `McpToolInfo` instances (metadata + plain function). Consumers wrap them as MCP tools (for external agents) or `AIFunction` objects (for built-in agents). One implementation, any delivery mode.
 
 See [MCP Server plan](../../../../docs/plans/mcp-server.md) for the core MCP server design, [HomeBlaze MCP Extensions plan](../../plans/mcp-extensions.md) for HomeBlaze-specific enrichers, type providers, and tools, and [AI Agents plan](../../plans/ai-agents.md) for the built-in agent design.
 

@@ -1,4 +1,5 @@
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 
 namespace Namotion.Interceptor.Registry.Tests.Paths;
 
@@ -23,5 +24,22 @@ public partial class TestItem
     public TestItem()
     {
         Children = new Dictionary<string, TestItem>();
+    }
+}
+
+/// <summary>
+/// Test model with [InlinePaths] — dictionary keys become direct path segments.
+/// </summary>
+[InterceptorSubject]
+public partial class TestInlineContainer
+{
+    public partial string Name { get; set; }
+
+    [InlinePaths]
+    public partial Dictionary<string, TestInlineContainer> Children { get; set; }
+
+    public TestInlineContainer()
+    {
+        Children = new Dictionary<string, TestInlineContainer>();
     }
 }

@@ -1,3 +1,4 @@
+using HomeBlaze.AI;
 using HomeBlaze.Components;
 using HomeBlaze.Host;
 using HomeBlaze.Samples;
@@ -22,7 +23,9 @@ builder.Services.AddHotKeys2();
 // Optionally add the MCP subject server (default: false, enabled in Development)
 if (builder.Configuration.GetValue<bool>("UseMcpServer"))
 {
-    builder.Services.AddHomeBlazeMcpServer();
+    builder.Services.AddMcpServer()
+        .WithHttpTransport(options => options.Stateless = true)
+        .WithHomeBlazeMcpTools();
 }
 
 // Add services to the container.
@@ -30,12 +33,6 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 var app = builder.Build();
-
-// Initialize the MCP server if it was registered
-if (builder.Configuration.GetValue<bool>("UseMcpServer"))
-{
-    app.Services.InitializeHomeBlazeMcpServer();
-}
 
 // Configure TypeProvider with application-specific assemblies
 // This must happen before any service that depends on TypeProvider is used
