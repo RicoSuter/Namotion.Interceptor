@@ -16,6 +16,30 @@ public class StateAttributePathProvider : PathProviderBase
     public override string? TryGetPropertySegment(RegisteredSubjectProperty property)
     {
         var metadata = property.TryGetAttribute(KnownAttributes.State)?.GetValue() as StateMetadata;
-        return metadata?.Name ?? property.Name;
+        return metadata?.Name ?? (property.CanContainSubjects ? property.Name : null);
+    }
+
+    public override RegisteredSubjectProperty? TryGetPropertyFromSegment(
+        RegisteredSubject subject, string segment)
+    {
+        // First try base lookup (matches State properties and [InlinePaths] fallback)
+        var result = base.TryGetPropertyFromSegment(subject, segment);
+        if (result is not null)
+        {
+            return result;
+        }
+
+        // Also match structural properties (CanContainSubjects) by name,
+        // so navigation through Children dictionaries works even when
+        // the property doesn't have a [State] attribute.
+        foreach (var property in subject.Properties)
+        {
+            if (property.CanContainSubjects && property.Name == segment)
+            {
+                return property;
+            }
+        }
+
+        return null;
     }
 }

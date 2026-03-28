@@ -71,8 +71,8 @@ public static class PathExtensions
     /// <param name="pathProvider">The path provider to use.</param>
     /// <param name="rootSubject">The root subject to start from.</param>
     /// <param name="path">The path to resolve.</param>
-    /// <returns>The property at the path, or null if not found.</returns>
-    public static RegisteredSubjectProperty? TryGetPropertyFromPath(
+    /// <returns>The property and its last-segment index at the path, or null if not found.</returns>
+    public static (RegisteredSubjectProperty Property, object? Index)? TryGetPropertyFromPath(
         this PathProviderBase pathProvider,
         RegisteredSubject rootSubject,
         string path)
@@ -85,6 +85,7 @@ public static class PathExtensions
 
         var currentSubject = rootSubject;
         RegisteredSubjectProperty? currentProperty = null;
+        object? lastIndex = null;
 
         for (var i = 0; i < segments.Count; i++)
         {
@@ -95,6 +96,8 @@ public static class PathExtensions
             {
                 return null;
             }
+
+            lastIndex = index;
 
             // If not the last segment, navigate to the child subject
             if (i < segments.Count - 1)
@@ -110,7 +113,33 @@ public static class PathExtensions
             }
         }
 
-        return currentProperty;
+        return currentProperty is not null ? (currentProperty, lastIndex) : null;
+    }
+
+    /// <summary>
+    /// Tries to get a subject from a path starting at the given subject.
+    /// Handles indices on the last segment (e.g., "Children[key]" resolves to the child subject).
+    /// For paths ending in a subject reference property without an index (e.g., "Device"),
+    /// the referenced subject is returned.
+    /// </summary>
+    /// <param name="pathProvider">The path provider to use.</param>
+    /// <param name="rootSubject">The root subject to start from.</param>
+    /// <param name="path">The path to resolve.</param>
+    /// <returns>The subject at the path, or null if not found.</returns>
+    public static RegisteredSubject? TryGetSubjectFromPath(
+        this PathProviderBase pathProvider,
+        RegisteredSubject rootSubject,
+        string path)
+    {
+        var result = pathProvider.TryGetPropertyFromPath(rootSubject, path);
+        if (result is null)
+        {
+            return null;
+        }
+
+        var (property, index) = result.Value;
+        var childSubject = GetChildSubject(property, index);
+        return childSubject?.TryGetRegisteredSubject();
     }
 
     /// <summary>
@@ -119,18 +148,18 @@ public static class PathExtensions
     /// <param name="pathProvider">The path provider to use.</param>
     /// <param name="rootSubject">The root subject to start from.</param>
     /// <param name="paths">The paths to resolve.</param>
-    /// <returns>An enumerable of properties that were found.</returns>
-    public static IEnumerable<RegisteredSubjectProperty> GetPropertiesFromPaths(
+    /// <returns>An enumerable of property and index tuples that were found.</returns>
+    public static IEnumerable<(RegisteredSubjectProperty Property, object? Index)> GetPropertiesFromPaths(
         this PathProviderBase pathProvider,
         RegisteredSubject rootSubject,
         IEnumerable<string> paths)
     {
         foreach (var path in paths)
         {
-            var property = pathProvider.TryGetPropertyFromPath(rootSubject, path);
-            if (property is not null)
+            var result = pathProvider.TryGetPropertyFromPath(rootSubject, path);
+            if (result is not null)
             {
-                yield return property;
+                yield return result.Value;
             }
         }
     }

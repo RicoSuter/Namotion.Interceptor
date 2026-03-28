@@ -16,3 +16,15 @@ public partial class TestDevice
     public partial string DeviceName { get; set; }
     public partial bool IsOn { get; set; }
 }
+
+[InterceptorSubject]
+public partial class TestContainer
+{
+    public partial string Name { get; set; }
+    public partial Dictionary<string, TestContainer> Children { get; set; }
+
+    public TestContainer()
+    {
+        Children = new Dictionary<string, TestContainer>();
+    }
+}

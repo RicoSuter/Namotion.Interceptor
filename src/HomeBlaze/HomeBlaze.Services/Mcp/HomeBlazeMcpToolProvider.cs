@@ -152,8 +152,6 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             return rootRegistered;
         }
 
-        var property = _pathProvider.TryGetPropertyFromPath(rootRegistered, path);
-        var childSubject = property?.GetValue() as IInterceptorSubject;
-        return childSubject?.TryGetRegisteredSubject();
+        return _pathProvider.TryGetSubjectFromPath(rootRegistered, path);
     }
 }
