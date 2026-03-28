@@ -15,7 +15,7 @@
         <ProjectReference Include="..\..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Tracking\Namotion.Interceptor.Tracking.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor\Namotion.Interceptor.csproj" />
-        <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.*" />
+        <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.*" />
         <PackageReference Include="MudBlazor" Version="8.*" />
     </ItemGroup>
 
