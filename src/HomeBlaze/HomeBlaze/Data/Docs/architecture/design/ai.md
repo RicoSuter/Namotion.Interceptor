@@ -29,18 +29,18 @@ HomeBlaze treats AI as a first-class concern with two complementary modes: **bui
 
 ### MCP Tool Layering [Planned]
 
-MCP tools are split across two packages:
+MCP tools are split across two packages, configured via a single `McpServerConfiguration` object:
 
 | Package | Tools | Scope |
 |---------|-------|-------|
 | `Namotion.Interceptor.Mcp` | `query`, `get_property`, `set_property`, `list_types` | Any Namotion.Interceptor application |
-| `HomeBlaze.AI` | `list_methods`, `invoke_method` + metadata enrichment (`$type`, `$icon`, `$title`, units). History tools (`get_property_history`, `get_event_history`, `get_command_history`) planned for later | HomeBlaze-specific features |
+| `HomeBlaze.AI` | `list_methods`, `invoke_method` (via `IMcpToolProvider`) + subject enrichment (`$type`, `$icon`, `$title` via `IMcpSubjectEnricher`) + concrete type discovery (via `IMcpTypeProvider`). History tools (`get_property_history`, `get_event_history`, `get_command_history`) planned for later | HomeBlaze-specific features |
 
-This keeps the interceptor library independently usable. Method tools are HomeBlaze-specific because method discovery uses `"operation"` and `"query"` registry attributes — a HomeBlaze convention, not a core interceptor concept.
+This keeps the interceptor library independently usable. Method tools are HomeBlaze-specific because method discovery uses `MethodMetadata` with `[Operation]`/`[Query]` registry attributes — a HomeBlaze convention, not a core interceptor concept. Property-level metadata (units, position) is already in the registry as `StateMetadata` attributes — included directly in `query` responses when `includeAttributes=true`.
 
-Tool implementations are plain methods, wrapped as both MCP tools (for external agents) and `AIFunction` objects (for built-in agents). One implementation, two delivery modes.
+Tool implementations are transport-agnostic `McpToolDescriptor` instances (metadata + plain function). Consumers wrap them as MCP tools (for external agents) or `AIFunction` objects (for built-in agents). One implementation, any delivery mode.
 
-See [MCP Server plan](../../../../docs/plans/mcp-server.md) for the core MCP server design and [AI Agents plan](../../plans/ai-agents.md) for the built-in agent design.
+See [MCP Server plan](../../../../docs/plans/mcp-server.md) for the core MCP server design, [HomeBlaze MCP Extensions plan](../../plans/mcp-extensions.md) for HomeBlaze-specific enrichers, type providers, and tools, and [AI Agents plan](../../plans/ai-agents.md) for the built-in agent design.
 
 ### Interaction Patterns
 
