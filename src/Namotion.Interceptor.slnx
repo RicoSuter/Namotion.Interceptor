@@ -30,6 +30,7 @@
     <Project Path="Namotion.Interceptor.AspNetCore/Namotion.Interceptor.AspNetCore.csproj" />
     <Project Path="Namotion.Interceptor.Blazor/Namotion.Interceptor.Blazor.csproj" />
     <Project Path="Namotion.Interceptor.GraphQL/Namotion.Interceptor.GraphQL.csproj" />
+    <Project Path="Namotion.Interceptor.Mcp/Namotion.Interceptor.Mcp.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/">
     <Project Path="HomeBlaze/HomeBlaze.Components/HomeBlaze.Components.csproj" />
@@ -75,6 +76,7 @@
     <Project Path="Namotion.Interceptor.OpcUa.Tests/Namotion.Interceptor.OpcUa.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Registry.Tests/Namotion.Interceptor.Registry.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Connectors.Tests/Namotion.Interceptor.Connectors.Tests.csproj" />
+    <Project Path="Namotion.Interceptor.Mcp.Tests/Namotion.Interceptor.Mcp.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Tests/Namotion.Interceptor.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Validation.Tests/Namotion.Interceptor.Validation.Tests.csproj" />
