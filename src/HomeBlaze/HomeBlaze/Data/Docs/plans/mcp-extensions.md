@@ -32,9 +32,21 @@ Internally, `WithHomeBlazeMcpTools()` resolves `RootManager`, `SubjectTypeRegist
 
 ## Implementations
 
+### Path Format
+
+HomeBlaze MCP uses slash (`/`) separator with `[InlinePaths]` flattening. Dictionary keys in `[InlinePaths]` properties become direct path segments, so `VirtualFolder.Children` entries are accessed without the `Children` wrapper:
+
+```
+Servers/OpcUaServer/Port
+Demo/WaterPump/IsEnabled
+Dashboard.md/Size
+```
+
+File names with dots (e.g., `Dashboard.md`) work because `/` is the separator, not `.`. See #239 for unifying this format across all HomeBlaze path representations.
+
 ### StateAttributePathProvider (IPathProvider)
 
-Determines which properties are exposed via MCP. Extends `PathProviderBase` and reads the `"State"` registry attribute so all `[State]` properties are automatically visible. Also matches structural properties (CanContainSubjects) by name for navigation through children dictionaries.
+Determines which properties are exposed via MCP. Extends `PathProviderBase` with `/` as path separator and reads the `"State"` registry attribute so all `[State]` properties are automatically visible. Also matches structural properties (CanContainSubjects) by name for navigation through children dictionaries.
 
 ### HomeBlazeMcpSubjectEnricher (IMcpSubjectEnricher)
 
@@ -58,7 +70,7 @@ Registers two additional tools. These are HomeBlaze-specific because method disc
 
 List operations and queries on a subject, discovered from `MethodMetadata` registry properties.
 
-**Parameters:** `path` (required) — subject path (e.g., `Root.Servers.OpcUaServer`)
+**Parameters:** `path` (required) — subject path (e.g., `Servers/OpcUaServer`)
 
 **Response:** Array of methods with `name`, `kind` (operation/query), and `parameters` (name + type for user-input parameters).
 
