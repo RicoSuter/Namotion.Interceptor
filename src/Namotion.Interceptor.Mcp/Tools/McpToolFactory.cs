@@ -97,15 +97,13 @@ public class McpToolFactory
         }
         else
         {
-            var property = pathProvider.TryGetPropertyFromPath(rootRegistered, path);
-            if (property is null)
+            var resolved = pathProvider.TryGetSubjectFromPath(rootRegistered, path);
+            if (resolved is null)
             {
                 return new { error = $"Path not found: {path}" };
             }
 
-            var childSubject = property.GetValue() as IInterceptorSubject;
-            startSubject = childSubject?.TryGetRegisteredSubject()
-                ?? throw new InvalidOperationException($"Path '{path}' does not resolve to a subject.");
+            startSubject = resolved;
         }
 
         var subjectCount = 0;
@@ -333,12 +331,14 @@ public class McpToolFactory
             ?? throw new InvalidOperationException("Root subject is not registered.");
 
         var path = input.GetProperty("path").GetString()!;
-        var property = pathProvider.TryGetPropertyFromPath(rootRegistered, path);
+        var result = pathProvider.TryGetPropertyFromPath(rootRegistered, path);
 
-        if (property is null)
+        if (result is null)
         {
             return Task.FromResult<object?>(new { error = $"Path not found: {path}" });
         }
+
+        var (property, _) = result.Value;
 
         var attributes = new Dictionary<string, object?>();
         foreach (var attribute in property.Attributes)
@@ -346,7 +346,7 @@ public class McpToolFactory
             attributes[attribute.BrowseName] = attribute.GetValue();
         }
 
-        var result = new Dictionary<string, object?>
+        var response = new Dictionary<string, object?>
         {
             ["value"] = property.GetValue(),
             ["type"] = property.Type.Name,
@@ -355,10 +355,10 @@ public class McpToolFactory
 
         if (attributes.Count > 0)
         {
-            result["attributes"] = attributes;
+            response["attributes"] = attributes;
         }
 
-        return Task.FromResult<object?>(result);
+        return Task.FromResult<object?>(response);
     }
 
     private Task<object?> HandleSetPropertyAsync(JsonElement input, CancellationToken cancellationToken)
@@ -375,12 +375,14 @@ public class McpToolFactory
             ?? throw new InvalidOperationException("Root subject is not registered.");
 
         var path = input.GetProperty("path").GetString()!;
-        var property = pathProvider.TryGetPropertyFromPath(rootRegistered, path);
+        var result = pathProvider.TryGetPropertyFromPath(rootRegistered, path);
 
-        if (property is null)
+        if (result is null)
         {
             return Task.FromResult<object?>(new { error = $"Path not found: {path}" });
         }
+
+        var (property, _) = result.Value;
 
         if (!property.HasSetter)
         {

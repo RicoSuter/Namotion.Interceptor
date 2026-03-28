@@ -444,10 +444,10 @@ public class PathExtensionsTests
 
         // Assert
         Assert.Equal(2, results.Count);
-        Assert.Equal("FirstName", results[0].Name);
-        Assert.Equal("FirstName", results[1].Name);
-        Assert.Equal(person, results[0].Subject);
-        Assert.Equal(person.Father, results[1].Subject);
+        Assert.Equal("FirstName", results[0].Property.Name);
+        Assert.Equal("FirstName", results[1].Property.Name);
+        Assert.Equal(person, results[0].Property.Subject);
+        Assert.Equal(person.Father, results[1].Property.Subject);
     }
 
     [Theory]
