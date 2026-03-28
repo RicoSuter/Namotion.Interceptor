@@ -254,7 +254,10 @@ public static class PathExtensions
             {
                 var (prop, index) = buffer[i];
 
-                // [InlinePaths] properties: emit just the index as a plain segment
+                // [InlinePaths] properties: emit just the index as a plain segment.
+                // IsPropertyIncluded is not checked here because intermediate properties
+                // are traversed for navigation, and PathProviderBase implementations
+                // (e.g., AttributeBasedPathProvider) already include [InlinePaths] properties.
                 if (index is not null &&
                     InlinePathsAttribute.IsInlinePathsProperty(
                         prop.Subject.GetType(), prop.Name))

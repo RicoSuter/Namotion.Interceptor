@@ -1,4 +1,4 @@
-using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 using Xunit;
 
 [assembly: SubjectAbstractionsAssembly]

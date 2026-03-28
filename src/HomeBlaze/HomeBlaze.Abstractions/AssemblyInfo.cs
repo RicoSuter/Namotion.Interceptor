@@ -1,3 +1,3 @@
-using Namotion.Interceptor;
+using Namotion.Interceptor.Attributes;
 
 [assembly: SubjectAbstractionsAssembly]
