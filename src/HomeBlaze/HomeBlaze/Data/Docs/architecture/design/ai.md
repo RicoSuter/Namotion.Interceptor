@@ -27,7 +27,7 @@ HomeBlaze treats AI as a first-class concern with two complementary modes: **bui
 | Interaction | Pull (poll) + push (change subscription with filter rules) | Pull only (push TBD, depends on MCP evolution) |
 | Use cases | Reactive automation, continuous monitoring | Operator copilot, ad-hoc queries, debugging |
 
-### MCP Tool Layering [Planned]
+### MCP Tool Layering [Implemented]
 
 MCP tools are split across two packages, configured via a single `McpServerConfiguration` object:
 
