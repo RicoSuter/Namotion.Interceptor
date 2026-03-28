@@ -89,6 +89,13 @@ public class McpToolFactory
 
         depth = Math.Min(depth, _configuration.MaxDepth);
 
+        // When a type filter is provided, do a flat search over KnownSubjects
+        if (typeFilter is not null && typeFilter.Length > 0)
+        {
+            return HandleFilteredQuery(rootRegistered, pathProvider, typeFilter,
+                includeProperties, includeAttributes);
+        }
+
         // Resolve starting subject
         RegisteredSubject startSubject;
         if (string.IsNullOrEmpty(path))
@@ -109,7 +116,7 @@ public class McpToolFactory
         var subjectCount = 0;
         var truncated = false;
         var subjects = BuildSubjectTree(startSubject, pathProvider, depth, includeProperties,
-            includeAttributes, typeFilter, ref subjectCount, ref truncated);
+            includeAttributes, null, ref subjectCount, ref truncated);
 
         return new
         {
@@ -117,6 +124,84 @@ public class McpToolFactory
             subjects,
             truncated,
             subjectCount
+        };
+    }
+
+    private object HandleFilteredQuery(
+        RegisteredSubject rootRegistered,
+        PathProviderBase pathProvider,
+        string[] typeFilter,
+        bool includeProperties,
+        bool includeAttributes)
+    {
+        var registry = _rootSubjectProvider().Context.TryGetService<ISubjectRegistry>();
+        if (registry is null)
+        {
+            return new { error = "Subject registry is not available." };
+        }
+
+        var subjects = new Dictionary<string, object?>();
+        var truncated = false;
+        var rootSubject = _rootSubjectProvider();
+
+        foreach (var (subject, registered) in registry.KnownSubjects)
+        {
+            if (ShouldFilterOut(registered, typeFilter))
+            {
+                continue;
+            }
+
+            if (subjects.Count >= _configuration.MaxSubjectsPerResponse)
+            {
+                truncated = true;
+                break;
+            }
+
+            // Compute subject path from any included property
+            var anyProperty = registered.Properties.FirstOrDefault(p =>
+                !p.IsAttribute && pathProvider.IsPropertyIncluded(p));
+
+            var propertyPath = anyProperty?.TryGetPath(pathProvider, rootSubject);
+            if (propertyPath is null)
+            {
+                continue;
+            }
+
+            // Strip the last segment (property name) to get the subject path
+            var lastDot = propertyPath.LastIndexOf(pathProvider.PathSeparator);
+            var subjectPath = lastDot >= 0 ? propertyPath[..lastDot] : "";
+
+            var node = new Dictionary<string, object?>();
+
+            // Enrichers
+            foreach (var enricher in _configuration.SubjectEnrichers)
+            {
+                enricher.EnrichSubject(registered, node);
+            }
+
+            // Properties
+            if (includeProperties)
+            {
+                foreach (var property in registered.Properties)
+                {
+                    if (property.IsAttribute || !pathProvider.IsPropertyIncluded(property) || property.CanContainSubjects)
+                    {
+                        continue;
+                    }
+
+                    var segment = pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
+                    node[segment] = BuildPropertyValue(property, includeAttributes);
+                }
+            }
+
+            subjects[subjectPath] = node;
+        }
+
+        return new
+        {
+            subjects,
+            truncated,
+            subjectCount = subjects.Count
         };
     }
 
