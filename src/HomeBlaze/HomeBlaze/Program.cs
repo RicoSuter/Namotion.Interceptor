@@ -60,6 +60,12 @@ if (!app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 app.UseAntiforgery();
 
+// Map MCP server endpoint if enabled
+if (builder.Configuration.GetValue<bool>("UseMcpServer"))
+{
+    app.MapMcp("/mcp");
+}
+
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

@@ -86,25 +86,33 @@ public interface IMcpToolProvider
 ### Usage
 
 ```csharp
-// Generic usage
-services.AddMcpSubjectServer(subject, new McpServerConfiguration
-{
-    PathProvider = new CamelCasePathProvider()
-});
+// Generic usage — HTTP transport with stateless mode
+services.AddMcpServer()
+    .WithHttpTransport(options => options.Stateless = true)
+    .WithSubjectServerTools(resolveRootSubject, new McpServerConfiguration
+    {
+        PathProvider = new CamelCasePathProvider()
+    });
+
+app.MapMcp("/mcp");
 
 // HomeBlaze usage — all extensions configured in one place
-services.AddMcpSubjectServer(subject, new McpServerConfiguration
-{
-    PathProvider = new StateAttributePathProvider(),
-    SubjectEnrichers = { new HomeBlazeMcpSubjectEnricher() },
-    TypeProviders =
+services.AddMcpServer()
+    .WithHttpTransport(options => options.Stateless = true)
+    .WithSubjectServerTools(resolveRootSubject, new McpServerConfiguration
     {
-        new SubjectAbstractionsAssemblyTypeProvider(),
-        new SubjectTypeRegistryTypeProvider(typeRegistry)
-    },
-    ToolProviders = { new HomeBlazeMcpToolProvider() },
-    IsReadOnly = false
-});
+        PathProvider = new StateAttributePathProvider(),
+        SubjectEnrichers = { new HomeBlazeMcpSubjectEnricher() },
+        TypeProviders =
+        {
+            new SubjectAbstractionsAssemblyTypeProvider(),
+            new SubjectTypeRegistryTypeProvider(typeRegistry)
+        },
+        ToolProviders = { new HomeBlazeMcpToolProvider() },
+        IsReadOnly = false
+    });
+
+app.MapMcp("/mcp");
 ```
 
 ## Path Format
@@ -453,5 +461,6 @@ MCP uses JSON-RPC 2.0. Tool calls return `CallToolResult` which supports `isErro
 
 - `Namotion.Interceptor.Registry`: subject and property discovery, `IPathProvider`
 - `ModelContextProtocol`: MCP server SDK
+- `ModelContextProtocol.AspNetCore`: HTTP transport with `MapMcp()` endpoint mapping
 - `SubjectAbstractionsAssemblyAttribute`: from core `Namotion.Interceptor` (shared with dynamic proxying)
 - Graph-level authorization: access control before exposing write tools (future)
