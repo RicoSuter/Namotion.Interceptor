@@ -281,7 +281,6 @@ public class McpToolFactory
         return true;
     }
 
-    // Stub implementations for remaining tools - implemented in subsequent tasks
     private McpToolDescriptor CreateGetPropertyTool() => new()
     {
         Name = "get_property",
@@ -321,11 +320,81 @@ public class McpToolFactory
     };
 
     private Task<object?> HandleGetPropertyAsync(JsonElement input, CancellationToken cancellationToken)
-        => throw new NotImplementedException();
+    {
+        var pathProvider = _configuration.PathProvider as PathProviderBase
+            ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase.");
+
+        var rootRegistered = _rootSubject.TryGetRegisteredSubject()
+            ?? throw new InvalidOperationException("Root subject is not registered.");
+
+        var path = input.GetProperty("path").GetString()!;
+        var property = pathProvider.TryGetPropertyFromPath(rootRegistered, path);
+
+        if (property is null)
+        {
+            return Task.FromResult<object?>(new { error = $"Path not found: {path}" });
+        }
+
+        var attributes = new Dictionary<string, object?>();
+        foreach (var attribute in property.Attributes)
+        {
+            attributes[attribute.BrowseName] = attribute.GetValue();
+        }
+
+        var result = new Dictionary<string, object?>
+        {
+            ["value"] = property.GetValue(),
+            ["type"] = property.Type.Name,
+            ["isWritable"] = property.HasSetter
+        };
+
+        if (attributes.Count > 0)
+        {
+            result["attributes"] = attributes;
+        }
+
+        return Task.FromResult<object?>(result);
+    }
 
     private Task<object?> HandleSetPropertyAsync(JsonElement input, CancellationToken cancellationToken)
-        => throw new NotImplementedException();
+    {
+        if (_configuration.IsReadOnly)
+        {
+            return Task.FromResult<object?>(new { error = "Server is in read-only mode." });
+        }
+
+        var pathProvider = _configuration.PathProvider as PathProviderBase
+            ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase.");
+
+        var rootRegistered = _rootSubject.TryGetRegisteredSubject()
+            ?? throw new InvalidOperationException("Root subject is not registered.");
+
+        var path = input.GetProperty("path").GetString()!;
+        var property = pathProvider.TryGetPropertyFromPath(rootRegistered, path);
+
+        if (property is null)
+        {
+            return Task.FromResult<object?>(new { error = $"Path not found: {path}" });
+        }
+
+        if (!property.HasSetter)
+        {
+            return Task.FromResult<object?>(new { error = $"Property is not writable: {path}" });
+        }
+
+        var previousValue = property.GetValue();
+        var newValue = JsonSerializer.Deserialize(input.GetProperty("value").GetRawText(), property.Type);
+        property.SetValue(newValue);
+
+        return Task.FromResult<object?>(new { success = true, previousValue });
+    }
 
     private Task<object?> HandleListTypesAsync(JsonElement input, CancellationToken cancellationToken)
-        => throw new NotImplementedException();
+    {
+        var types = _configuration.TypeProviders
+            .SelectMany(provider => provider.GetTypes())
+            .ToList();
+
+        return Task.FromResult<object?>(new { types });
+    }
 }
