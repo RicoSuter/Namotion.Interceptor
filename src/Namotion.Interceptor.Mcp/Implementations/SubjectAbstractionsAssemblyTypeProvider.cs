@@ -1,4 +1,5 @@
 using System.Reflection;
+using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Mcp.Abstractions;
 
 namespace Namotion.Interceptor.Mcp.Implementations;
