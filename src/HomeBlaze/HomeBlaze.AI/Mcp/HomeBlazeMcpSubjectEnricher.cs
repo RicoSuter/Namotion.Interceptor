@@ -6,13 +6,18 @@ namespace HomeBlaze.AI.Mcp;
 
 public class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
 {
-    private readonly IEnumerable<IMcpTypeProvider> _typeProviders;
-    private volatile HashSet<Type>? _knownConcreteTypes;
-    private volatile HashSet<Type>? _knownInterfaceTypes;
+    private readonly Lazy<(HashSet<Type> Concrete, HashSet<Type> Interfaces)> _typeCache;
 
     public HomeBlazeMcpSubjectEnricher(IEnumerable<IMcpTypeProvider> typeProviders)
     {
-        _typeProviders = typeProviders;
+        _typeCache = new Lazy<(HashSet<Type>, HashSet<Type>)>(() =>
+        {
+            var allTypes = typeProviders.SelectMany(p => p.GetTypes()).ToList();
+            return (
+                new HashSet<Type>(allTypes.Where(t => !t.IsInterface).Select(t => t.Type)),
+                new HashSet<Type>(allTypes.Where(t => t.IsInterface).Select(t => t.Type))
+            );
+        });
     }
 
     public IDictionary<string, object?> GetSubjectEnrichments(RegisteredSubject subject)
@@ -29,17 +34,16 @@ public class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
             metadata["$icon"] = iconProvider.IconName;
         }
 
-        EnsureTypeCachesBuilt();
-
+        var (knownConcreteTypes, knownInterfaceTypes) = _typeCache.Value;
         var subjectType = subject.Subject.GetType();
 
-        if (_knownConcreteTypes!.Contains(subjectType))
+        if (knownConcreteTypes.Contains(subjectType))
         {
             metadata["$type"] = subjectType.FullName;
         }
 
         var interfaces = subjectType.GetInterfaces()
-            .Where(i => _knownInterfaceTypes!.Contains(i))
+            .Where(i => knownInterfaceTypes.Contains(i))
             .Select(i => i.FullName!)
             .ToList();
 
@@ -49,15 +53,5 @@ public class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
         }
 
         return metadata;
-    }
-
-    private void EnsureTypeCachesBuilt()
-    {
-        if (_knownConcreteTypes is not null)
-            return;
-
-        var allTypes = _typeProviders.SelectMany(p => p.GetTypes()).ToList();
-        _knownConcreteTypes = new HashSet<Type>(allTypes.Where(t => !t.IsInterface).Select(t => t.Type));
-        _knownInterfaceTypes = new HashSet<Type>(allTypes.Where(t => t.IsInterface).Select(t => t.Type));
     }
 }

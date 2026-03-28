@@ -7,6 +7,12 @@ namespace Namotion.Interceptor.Mcp.Tools;
 /// </summary>
 internal class ListTypesTool
 {
+    private static readonly JsonElement Schema = JsonSerializer.SerializeToElement(new
+    {
+        type = "object",
+        properties = new { }
+    });
+
     private readonly McpServerConfiguration _configuration;
 
     public ListTypesTool(McpServerConfiguration configuration)
@@ -18,11 +24,7 @@ internal class ListTypesTool
     {
         Name = "list_types",
         Description = "List available types (interfaces and concrete types).",
-        InputSchema = JsonSerializer.SerializeToElement(new
-        {
-            type = "object",
-            properties = new { }
-        }),
+        InputSchema = Schema,
         Handler = HandleListTypesAsync
     };
 

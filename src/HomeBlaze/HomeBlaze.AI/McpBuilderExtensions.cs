@@ -1,6 +1,7 @@
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Extensions;
@@ -40,7 +41,11 @@ public static class McpBuilderExtensions
                     TypeProviders = typeProviders,
                     ToolProviders =
                     {
-                        new HomeBlazeMcpToolProvider(() => sp.GetRequiredService<RootManager>().Root!, pathProvider, sp, isReadOnly)
+                        new HomeBlazeMcpToolProvider(
+                            () => sp.GetRequiredService<RootManager>().Root!,
+                            pathProvider, sp,
+                            sp.GetRequiredService<ILoggerFactory>().CreateLogger<HomeBlazeMcpToolProvider>(),
+                            isReadOnly)
                     },
                     IsReadOnly = isReadOnly
                 };

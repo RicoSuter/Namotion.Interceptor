@@ -1,6 +1,7 @@
 using System.Text.Json;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
+using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
@@ -15,20 +16,42 @@ namespace HomeBlaze.AI.Mcp;
 /// </summary>
 public class HomeBlazeMcpToolProvider : IMcpToolProvider
 {
+    private static readonly JsonElement ListMethodsSchema = JsonSerializer.SerializeToElement(new
+    {
+        type = "object",
+        properties = new { path = new { type = "string", description = "Subject path" } },
+        required = new[] { "path" }
+    });
+
+    private static readonly JsonElement InvokeMethodSchema = JsonSerializer.SerializeToElement(new
+    {
+        type = "object",
+        properties = new
+        {
+            path = new { type = "string", description = "Subject path" },
+            method = new { type = "string", description = "Method name" },
+            parameters = new { type = "object", description = "Method parameters (optional)" }
+        },
+        required = new[] { "path", "method" }
+    });
+
     private readonly Func<IInterceptorSubject> _rootSubjectProvider;
     private readonly PathProviderBase _pathProvider;
     private readonly IServiceProvider _serviceProvider;
+    private readonly ILogger<HomeBlazeMcpToolProvider> _logger;
     private readonly bool _isReadOnly;
 
     public HomeBlazeMcpToolProvider(
         Func<IInterceptorSubject> rootSubjectProvider,
         PathProviderBase pathProvider,
         IServiceProvider serviceProvider,
+        ILogger<HomeBlazeMcpToolProvider> logger,
         bool isReadOnly)
     {
         _rootSubjectProvider = rootSubjectProvider;
         _pathProvider = pathProvider;
         _serviceProvider = serviceProvider;
+        _logger = logger;
         _isReadOnly = isReadOnly;
     }
 
@@ -38,12 +61,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         {
             Name = "list_methods",
             Description = "List operations and queries available on a subject at the given path.",
-            InputSchema = JsonSerializer.SerializeToElement(new
-            {
-                type = "object",
-                properties = new { path = new { type = "string", description = "Subject path" } },
-                required = new[] { "path" }
-            }),
+            InputSchema = ListMethodsSchema,
             Handler = HandleListMethodsAsync
         };
 
@@ -51,17 +69,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         {
             Name = "invoke_method",
             Description = "Execute a method on a subject. When server is read-only, only query methods are allowed.",
-            InputSchema = JsonSerializer.SerializeToElement(new
-            {
-                type = "object",
-                properties = new
-                {
-                    path = new { type = "string", description = "Subject path" },
-                    method = new { type = "string", description = "Method name" },
-                    parameters = new { type = "object", description = "Method parameters (optional)" }
-                },
-                required = new[] { "path", "method" }
-            }),
+            InputSchema = InvokeMethodSchema,
             Handler = HandleInvokeMethodAsync
         };
     }
@@ -131,7 +139,8 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         }
         catch (Exception exception)
         {
-            return new { error = exception.Message };
+            _logger.LogError(exception, "Failed to invoke method '{MethodName}' on subject.", methodName);
+            return new { error = "Method invocation failed. Check server logs for details." };
         }
     }
 

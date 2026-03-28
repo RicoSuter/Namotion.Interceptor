@@ -1,4 +1,6 @@
-# MCP Server
+# MCP Server (Experimental)
+
+> **Note:** This package is experimental and its API may change between versions.
 
 Namotion.Interceptor.Mcp exposes the subject registry via [MCP (Model Context Protocol)](https://modelcontextprotocol.io), enabling AI agents to browse, query, and interact with the object graph.
 
@@ -40,12 +42,39 @@ The MCP server provides 4 core tools:
 
 ### Path Format
 
-The path format depends on the `PathProvider` configuration. The default uses dot notation with bracket indexing:
+The path format depends on the `PathProvider` configuration. The separator and index characters are configurable:
 
 ```
-LivingRoom.Temperature
-Sensors[0].Value
-Devices[myDevice].Status
+Folder/SubFolder/Device          (separator notation)
+Pins[0]                          (collection index)
+Items[myKey]                     (dictionary key)
+Folder/SubFolder/Device/Status   (property path)
+```
+
+Properties marked with `[InlinePaths]` flatten dictionary keys into the path (e.g., `Demo/MyMotor` instead of `Demo/Children[MyMotor]`).
+
+### Query Response Format
+
+The query response mirrors the C# object graph structure without flattening:
+
+- **Subjects** include `$path` for use with `get_property`/`set_property`
+- **Properties with children** at depth 0 show `$count` instead of expanding
+- **Scalar properties** are shown as `{ "value": ... }` when `includeProperties` is true
+
+```json
+{
+  "path": "Demo",
+  "subjects": {
+    "Children": {
+      "MyDevice": {
+        "$path": "Demo/MyDevice",
+        "$type": "MyApp.Device",
+        "Temperature": { "value": 23.5 },
+        "Sensors": { "$count": 3 }
+      }
+    }
+  }
+}
 ```
 
 ### Query Parameters
@@ -53,7 +82,7 @@ Devices[myDevice].Status
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `path` | root | Starting path |
-| `depth` | 1 | Max traversal depth (0 = properties only, no children) |
+| `depth` | 1 | Max traversal depth (0 = properties only) |
 | `includeProperties` | false | Include property values |
 | `includeAttributes` | false | Include registry attributes on properties |
 | `types` | all | Filter subjects by type/interface full names |

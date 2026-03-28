@@ -9,6 +9,13 @@ namespace Namotion.Interceptor.Mcp.Tools;
 /// </summary>
 internal class SetPropertyTool
 {
+    private static readonly JsonElement Schema = JsonSerializer.SerializeToElement(new
+    {
+        type = "object",
+        properties = new { path = new { type = "string" }, value = new { } },
+        required = new[] { "path", "value" }
+    });
+
     private readonly Func<IInterceptorSubject> _rootSubjectProvider;
     private readonly McpServerConfiguration _configuration;
 
@@ -22,12 +29,7 @@ internal class SetPropertyTool
     {
         Name = "set_property",
         Description = "Write a property value by path.",
-        InputSchema = JsonSerializer.SerializeToElement(new
-        {
-            type = "object",
-            properties = new { path = new { type = "string" }, value = new { } },
-            required = new[] { "path", "value" }
-        }),
+        InputSchema = Schema,
         Handler = HandleSetPropertyAsync
     };
 
