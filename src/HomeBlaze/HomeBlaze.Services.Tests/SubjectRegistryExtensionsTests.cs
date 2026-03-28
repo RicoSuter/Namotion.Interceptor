@@ -63,7 +63,7 @@ public class SubjectRegistryExtensionsTests
 
         // Assert
         Assert.NotNull(metadata);
-        Assert.Equal("Temp", metadata.Name);
+        Assert.Equal("Temp", metadata.Title);
         Assert.Equal(StateUnit.DegreeCelsius, metadata.Unit);
         Assert.Equal(1, metadata.Position);
     }
@@ -197,13 +197,13 @@ public class SubjectRegistryExtensionsTests
 
         // Act
         property.AddAttribute(KnownAttributes.State, typeof(StateMetadata),
-            _ => new StateMetadata { Name = "Dynamic Value", Unit = StateUnit.Watt, Position = 5 },
+            _ => new StateMetadata { Title = "Dynamic Value", Unit = StateUnit.Watt, Position = 5 },
             null);
 
         // Assert
         var metadata = property.GetStateMetadata();
         Assert.NotNull(metadata);
-        Assert.Equal("Dynamic Value", metadata.Name);
+        Assert.Equal("Dynamic Value", metadata.Title);
         Assert.Equal(StateUnit.Watt, metadata.Unit);
         Assert.Equal(5, metadata.Position);
     }
@@ -212,7 +212,7 @@ public class SubjectRegistryExtensionsTests
 [InterceptorSubject]
 public partial class ExtensionsTestSubject
 {
-    [State(Name = "Temp", Unit = StateUnit.DegreeCelsius, Position = 1)]
+    [State(Title = "Temp", Unit = StateUnit.DegreeCelsius, Position = 1)]
     public partial decimal Temperature { get; set; }
 
     [State]

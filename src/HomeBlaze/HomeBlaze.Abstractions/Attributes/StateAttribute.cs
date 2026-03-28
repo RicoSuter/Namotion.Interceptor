@@ -8,9 +8,9 @@ namespace HomeBlaze.Abstractions.Attributes;
 public class StateAttribute : Attribute
 {
     /// <summary>
-    /// Gets or sets the display name (if not null, overrides the property name).
+    /// Gets or sets the display title (if not null, overrides the property name in the UI).
     /// </summary>
-    public string? Name { get; set; }
+    public string? Title { get; set; }
 
     /// <summary>
     /// Gets or sets the unit of the state property for formatting.
@@ -42,8 +42,8 @@ public class StateAttribute : Attribute
     {
     }
 
-    public StateAttribute(string? name)
+    public StateAttribute(string? title)
     {
-        Name = name;
+        Title = title;
     }
 }
