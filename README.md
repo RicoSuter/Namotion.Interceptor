@@ -272,5 +272,6 @@ Namotion.Interceptor is designed to be extended:
 | **Namotion.Interceptor.AspNetCore** | ASP.NET Core integration for web APIs | [ASP.NET Core](docs/aspnetcore.md) |
 | **Namotion.Interceptor.Blazor** | Automatic re-rendering on property changes | [Blazor](docs/blazor.md) |
 | **Namotion.Interceptor.GraphQL** | GraphQL subscriptions for real-time updates | [GraphQL](docs/graphql.md) |
+| **Namotion.Interceptor.Mcp** | MCP server for AI agent access to the subject registry | [MCP](docs/mcp.md) |
 
 For more examples, see the `Samples` directory in the solution.
