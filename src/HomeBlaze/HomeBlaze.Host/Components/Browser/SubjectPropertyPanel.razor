@@ -255,7 +255,7 @@
             return [];
 
         return _registeredSubject.Properties
-            .Where(p => p.GetStateMetadata() != null && !CanContainSubjects(p))
+            .Where(p => p.GetStateMetadata() != null && !p.CanContainSubjects)
             .OrderBy(p => p.GetDisplayPosition());
     }
 
@@ -265,7 +265,7 @@
             return [];
 
         return _registeredSubject.Properties
-            .Where(p => !p.IsAttribute && CanContainSubjects(p))
+            .Where(p => p is { IsAttribute: false, CanContainSubjects: true })
             .OrderBy(p => p.GetDisplayPosition());
     }
 
@@ -319,11 +319,6 @@
         return property.GetDisplayName();
     }
 
-    private bool CanContainSubjects(RegisteredSubjectProperty property)
-    {
-        return property.CanContainSubjects;
-    }
-
     private string GetSubjectDisplayName(SubjectPropertyChild child)
     {
         var subject = child.Subject;
@@ -340,7 +335,7 @@
         if (registered == null) return 0;
 
         return registered.Properties
-            .Where(p => !p.IsAttribute && CanContainSubjects(p))
+            .Where(p => p is { IsAttribute: false, CanContainSubjects: true })
             .Sum(p => p.Children.Length);
     }
 

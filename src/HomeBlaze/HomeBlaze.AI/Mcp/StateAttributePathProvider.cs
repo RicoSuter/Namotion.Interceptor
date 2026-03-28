@@ -13,7 +13,7 @@ public class StateAttributePathProvider : PathProviderBase
     public override char PathSeparator => '/';
 
     public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
-        => property.TryGetAttribute(KnownAttributes.State) is not null;
+        => property.TryGetAttribute(KnownAttributes.State) is not null || property.CanContainSubjects;
 
     public override string? TryGetPropertySegment(RegisteredSubjectProperty property)
     {

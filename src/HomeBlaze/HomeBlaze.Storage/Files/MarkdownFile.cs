@@ -107,6 +107,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         Children = await _parser.ParseAsync(Content, this, Children, cancellationToken);
     }
 
+    [Query(Title = "Read Content", Description = "Returns the markdown file content", Icon = "Description")]
+    public string? ReadContent() => Content;
+
     public Task OnFileChangedAsync(CancellationToken cancellationToken)
     {
         return LoadFileAsync(cancellationToken);

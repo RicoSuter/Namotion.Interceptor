@@ -1,8 +1,6 @@
 using System.Text.Json;
-using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Registry.Paths;
 
 namespace Namotion.Interceptor.Mcp.Tools;
@@ -21,25 +19,29 @@ internal class QueryTool
         _configuration = configuration;
     }
 
+    private static readonly JsonElement Schema = JsonSerializer.SerializeToElement(new
+    {
+        type = "object",
+        properties = new
+        {
+            path = new { type = "string", description = "Starting path (default: root)" },
+            depth = new { type = "integer", description = "Max depth (default: 1)" },
+            includeProperties = new { type = "boolean", description = "Include property values (default: false)" },
+            includeAttributes = new { type = "boolean", description = "Include registry attributes on properties (default: false)" },
+            types = new { type = "array", items = new { type = "string" }, description = "Filter subjects by type/interface full names" }
+        }
+    });
+
     public McpToolInfo CreateTool()
     {
         return new McpToolInfo
         {
             Name = "query",
-            Description = "Browse the subject tree. Paths use dot notation (e.g., root.livingRoom.temperature). " +
-                          "Collections use brackets (e.g., sensors[0], devices[myDevice]).",
-            InputSchema = JsonSerializer.SerializeToElement(new
-            {
-                type = "object",
-                properties = new
-                {
-                    path = new { type = "string", description = "Starting path (default: root)" },
-                    depth = new { type = "integer", description = "Max depth (default: 1)" },
-                    includeProperties = new { type = "boolean", description = "Include property values (default: false)" },
-                    includeAttributes = new { type = "boolean", description = "Include registry attributes on properties (default: false)" },
-                    types = new { type = "array", items = new { type = "string" }, description = "Filter subjects by type/interface full names" }
-                }
-            }),
+            Description = "Browse the subject tree. Paths use separator notation (e.g., Folder/SubFolder/Device). " +
+                          "Collections use brackets (e.g., Pins[0], Items[myKey]). " +
+                          "Subjects in the response include $path for use with get_property/set_property. " +
+                          "At depth 0, properties with children show $count instead of expanding.",
+            InputSchema = Schema,
             Handler = HandleQueryAsync
         };
     }
@@ -70,7 +72,7 @@ internal class QueryTool
         // When a type filter is provided, do a flat search over KnownSubjects
         if (typeFilter is not null && typeFilter.Length > 0)
         {
-            return HandleFilteredQuery(rootRegistered, pathProvider, typeFilter,
+            return HandleFilteredQuery(pathProvider, typeFilter,
                 includeProperties, includeAttributes);
         }
 
@@ -93,8 +95,9 @@ internal class QueryTool
 
         var subjectCount = 0;
         var truncated = false;
+        var visited = new HashSet<IInterceptorSubject>();
         var subjects = BuildSubjectTree(startSubject, pathProvider, depth, includeProperties,
-            includeAttributes, null, ref subjectCount, ref truncated);
+            includeAttributes, null, visited, ref subjectCount, ref truncated);
 
         return new
         {
@@ -106,7 +109,6 @@ internal class QueryTool
     }
 
     private object HandleFilteredQuery(
-        RegisteredSubject rootRegistered,
         PathProviderBase pathProvider,
         string[] typeFilter,
         bool includeProperties,
@@ -122,7 +124,7 @@ internal class QueryTool
         var truncated = false;
         var rootSubject = _rootSubjectProvider();
 
-        foreach (var (subject, registered) in registry.KnownSubjects)
+        foreach (var (_, registered) in registry.KnownSubjects)
         {
             if (ShouldFilterOut(registered, typeFilter))
             {
@@ -135,19 +137,26 @@ internal class QueryTool
                 break;
             }
 
-            // Compute subject path from any included property
-            var anyProperty = registered.Properties.FirstOrDefault(p =>
-                !p.IsAttribute && pathProvider.IsPropertyIncluded(p));
-
-            var propertyPath = anyProperty?.TryGetPath(pathProvider, rootSubject);
-            if (propertyPath is null)
+            // Compute subject path via its parent property + index
+            string? subjectPath;
+            if (registered.Subject == rootSubject)
+            {
+                subjectPath = "";
+            }
+            else if (registered.Parents.Length > 0)
+            {
+                var parent = registered.Parents[0];
+                subjectPath = parent.Property.TryGetPath(pathProvider, rootSubject, parent.Index);
+            }
+            else
             {
                 continue;
             }
 
-            // Strip the last segment (property name) to get the subject path
-            var lastDot = propertyPath.LastIndexOf(pathProvider.PathSeparator);
-            var subjectPath = lastDot >= 0 ? propertyPath[..lastDot] : "";
+            if (subjectPath is null)
+            {
+                continue;
+            }
 
             var node = new Dictionary<string, object?>();
 
@@ -186,13 +195,14 @@ internal class QueryTool
         };
     }
 
-    internal Dictionary<string, object?> BuildSubjectTree(
+    private Dictionary<string, object?> BuildSubjectTree(
         RegisteredSubject subject,
         PathProviderBase pathProvider,
         int remainingDepth,
         bool includeProperties,
         bool includeAttributes,
         string[]? typeFilter,
+        HashSet<IInterceptorSubject> visited,
         ref int subjectCount,
         ref bool truncated)
     {
@@ -207,60 +217,73 @@ internal class QueryTool
 
             var segment = pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
 
-            if (property.CanContainSubjects && remainingDepth > 0)
+            if (property.CanContainSubjects)
             {
-                if (property.IsSubjectReference)
+                if (remainingDepth > 0)
                 {
-                    var childSubject = (property.GetValue() as IInterceptorSubject)?.TryGetRegisteredSubject();
-                    if (childSubject is not null && !ShouldFilterOut(childSubject, typeFilter))
+                    if (property.IsSubjectReference)
                     {
-                        if (subjectCount >= _configuration.MaxSubjectsPerResponse)
+                        var child = property.Children.FirstOrDefault();
+                        var childSubject = child.Subject?.TryGetRegisteredSubject();
+                        if (child.Subject is not null &&
+                            childSubject is not null &&
+                            !ShouldFilterOut(childSubject, typeFilter) &&
+                            visited.Add(child.Subject))
                         {
-                            truncated = true;
-                            continue;
+                            if (subjectCount >= _configuration.MaxSubjectsPerResponse)
+                            {
+                                truncated = true;
+                                continue;
+                            }
+
+                            subjectCount++;
+                            result[segment] = BuildSubjectNode(childSubject, pathProvider,
+                                remainingDepth - 1, includeProperties, includeAttributes, typeFilter,
+                                visited, ref subjectCount, ref truncated);
+                        }
+                    }
+                    else if (property.IsSubjectDictionary || property.IsSubjectCollection)
+                    {
+                        var target = new Dictionary<string, object?>();
+
+                        foreach (var child in property.Children)
+                        {
+                            var childRegistered = child.Subject.TryGetRegisteredSubject();
+                            if (childRegistered is null ||
+                                ShouldFilterOut(childRegistered, typeFilter) ||
+                                !visited.Add(child.Subject))
+                            {
+                                continue;
+                            }
+
+                            if (subjectCount >= _configuration.MaxSubjectsPerResponse)
+                            {
+                                truncated = true;
+                                break;
+                            }
+
+                            subjectCount++;
+                            var key = child.Index?.ToString() ?? child.Subject.GetHashCode().ToString();
+                            target[key] = BuildSubjectNode(childRegistered, pathProvider,
+                                remainingDepth - 1, includeProperties, includeAttributes, typeFilter,
+                                visited, ref subjectCount, ref truncated);
                         }
 
-                        subjectCount++;
-                        result[segment] = BuildSubjectNode(childSubject, pathProvider,
-                            remainingDepth - 1, includeProperties, includeAttributes, typeFilter,
-                            ref subjectCount, ref truncated);
+                        if (target.Count > 0)
+                        {
+                            result[segment] = target;
+                        }
                     }
                 }
-                else if (property.IsSubjectDictionary || property.IsSubjectCollection)
+                else if (property.Children.Length > 0)
                 {
-                    // [InlinePaths]: children are inlined directly into the parent result
-                    var isInline = InlinePathsAttribute.IsInlinePathsProperty(
-                        subject.Subject.GetType(), property.Name);
-                    var target = isInline ? result : new Dictionary<string, object?>();
-
-                    foreach (var child in property.Children)
+                    result[segment] = new Dictionary<string, object?>
                     {
-                        var childRegistered = child.Subject.TryGetRegisteredSubject();
-                        if (childRegistered is null || ShouldFilterOut(childRegistered, typeFilter))
-                        {
-                            continue;
-                        }
-
-                        if (subjectCount >= _configuration.MaxSubjectsPerResponse)
-                        {
-                            truncated = true;
-                            break;
-                        }
-
-                        subjectCount++;
-                        var key = child.Index?.ToString() ?? child.Subject.GetHashCode().ToString();
-                        target[key] = BuildSubjectNode(childRegistered, pathProvider,
-                            remainingDepth - 1, includeProperties, includeAttributes, typeFilter,
-                            ref subjectCount, ref truncated);
-                    }
-
-                    if (!isInline && target.Count > 0)
-                    {
-                        result[segment] = target;
-                    }
+                        ["$count"] = property.Children.Length
+                    };
                 }
             }
-            else if (includeProperties && !property.CanContainSubjects)
+            else if (includeProperties)
             {
                 result[segment] = McpToolHelper.BuildPropertyValue(property, includeAttributes);
             }
@@ -269,17 +292,30 @@ internal class QueryTool
         return result;
     }
 
-    internal Dictionary<string, object?> BuildSubjectNode(
+    private Dictionary<string, object?> BuildSubjectNode(
         RegisteredSubject subject,
         PathProviderBase pathProvider,
         int remainingDepth,
         bool includeProperties,
         bool includeAttributes,
         string[]? typeFilter,
+        HashSet<IInterceptorSubject> visited,
         ref int subjectCount,
         ref bool truncated)
     {
         var node = new Dictionary<string, object?>();
+        var rootSubject = _rootSubjectProvider();
+
+        // $path — compute the path to this subject for use with get_property/set_property
+        if (subject.Subject != rootSubject && subject.Parents.Length > 0)
+        {
+            var parent = subject.Parents[0];
+            var subjectPath = parent.Property.TryGetPath(pathProvider, rootSubject, parent.Index);
+            if (subjectPath is not null)
+            {
+                node["$path"] = subjectPath;
+            }
+        }
 
         // Subject-level metadata from enrichers
         foreach (var enricher in _configuration.SubjectEnrichers)
@@ -290,14 +326,9 @@ internal class QueryTool
             }
         }
 
-        // $hasChildren
-        var hasChildren = subject.Properties.Any(property =>
-            !property.IsAttribute && pathProvider.IsPropertyIncluded(property) && property.CanContainSubjects);
-        node["$hasChildren"] = hasChildren;
-
         // Properties and child subjects
         var tree = BuildSubjectTree(subject, pathProvider, remainingDepth,
-            includeProperties, includeAttributes, typeFilter, ref subjectCount, ref truncated);
+            includeProperties, includeAttributes, typeFilter, visited, ref subjectCount, ref truncated);
 
         foreach (var kvp in tree)
         {
@@ -307,7 +338,7 @@ internal class QueryTool
         return node;
     }
 
-    internal static bool ShouldFilterOut(RegisteredSubject subject, string[]? typeFilter)
+    private static bool ShouldFilterOut(RegisteredSubject subject, string[]? typeFilter)
     {
         if (typeFilter is null || typeFilter.Length == 0)
         {

@@ -9,6 +9,13 @@ namespace Namotion.Interceptor.Mcp.Tools;
 /// </summary>
 internal class GetPropertyTool
 {
+    private static readonly JsonElement Schema = JsonSerializer.SerializeToElement(new
+    {
+        type = "object",
+        properties = new { path = new { type = "string" } },
+        required = new[] { "path" }
+    });
+
     private readonly Func<IInterceptorSubject> _rootSubjectProvider;
     private readonly McpServerConfiguration _configuration;
 
@@ -22,12 +29,7 @@ internal class GetPropertyTool
     {
         Name = "get_property",
         Description = "Read a property value by path.",
-        InputSchema = JsonSerializer.SerializeToElement(new
-        {
-            type = "object",
-            properties = new { path = new { type = "string" } },
-            required = new[] { "path" }
-        }),
+        InputSchema = Schema,
         Handler = HandleGetPropertyAsync
     };
 

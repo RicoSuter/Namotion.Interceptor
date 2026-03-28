@@ -207,8 +207,11 @@ public static class PathExtensions
     /// <param name="property">The property.</param>
     /// <param name="pathProvider">The path provider.</param>
     /// <param name="rootSubject">The root subject or null.</param>
+    /// <param name="propertyIndex">Optional index for the property (e.g., dictionary key or collection index).
+    /// When provided, the property path includes this index, which is useful for computing
+    /// the path to a child subject held at a specific index within this property.</param>
     /// <returns>The path.</returns>
-    public static string? TryGetPath(this RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject? rootSubject)
+    public static string? TryGetPath(this RegisteredSubjectProperty property, PathProviderBase pathProvider, IInterceptorSubject? rootSubject, object? propertyIndex = null)
     {
         if (!pathProvider.IsPropertyIncluded(property))
         {
@@ -220,7 +223,7 @@ public static class PathExtensions
         {
             var count = 0;
             var current = property;
-            object? pendingIndex = null;
+            object? pendingIndex = propertyIndex;
 
             while (current is not null)
             {
