@@ -15,8 +15,14 @@ public class StateAttributePathProvider : PathProviderBase
 
     public override string? TryGetPropertySegment(RegisteredSubjectProperty property)
     {
-        var metadata = property.TryGetAttribute(KnownAttributes.State)?.GetValue() as StateMetadata;
-        return metadata?.Name ?? (property.CanContainSubjects ? property.Name : null);
+        var stateAttribute = property.TryGetAttribute(KnownAttributes.State);
+        if (stateAttribute is not null)
+        {
+            var metadata = stateAttribute.GetValue() as StateMetadata;
+            return metadata?.Name ?? property.Name;
+        }
+
+        return property.CanContainSubjects ? property.Name : null;
     }
 
     public override RegisteredSubjectProperty? TryGetPropertyFromSegment(
