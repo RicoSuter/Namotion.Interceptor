@@ -211,12 +211,17 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         // Outer loop handles the post-notification RecalculationNeeded check without recursion,
         // preventing stack overflow under sustained concurrent writes.
-        for (var outerIteration = 0; outerIteration < MaxStabilizationIterations; outerIteration++)
+        // The try-finally at this level ensures IsRecalculating is always cleared on exit.
+        // Crucially, IsRecalculating stays true during NotifyDerivedPropertyChanged — this
+        // serializes notification delivery with recalculation, preventing a stale notification
+        // from being delivered after a newer one (TOCTOU race between guard checks and delivery).
+        try
         {
-            object? newValue;
-            long sequence;
-            try
+            for (var outerIteration = 0; outerIteration < MaxStabilizationIterations; outerIteration++)
             {
+                object? newValue;
+                long sequence;
+
                 // Inner loop: re-evaluates when the state changes during evaluation.
                 while (true)
                 {
@@ -255,43 +260,49 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                         break;
                     }
                 }
-            }
-            finally
-            {
+
+                // Deliver notification while IsRecalculating is still true.
+                // Any concurrent writes during delivery set RecalculationNeeded=true and bail out,
+                // so no new recalculation (or notification) can start until delivery completes.
+                NotifyDerivedPropertyChanged(ref derivedProperty, data, sequence, newValue, oldValue);
+
+                // Handle recalculations that arrived during evaluation or notification delivery.
+                // Uses a loop (not recursion) to prevent stack overflow under sustained concurrent writes.
                 lock (data)
                 {
-                    data.IsRecalculating = false;
+                    if (!data.RecalculationNeeded || !data.IsAttached)
+                    {
+                        return;
+                    }
+
+                    data.RecalculationNeeded = false;
+                    // IsRecalculating stays true for next iteration
+                    oldValue = data.LastKnownValue;
                 }
             }
 
-            NotifyDerivedPropertyChanged(ref derivedProperty, data, sequence, newValue, oldValue);
-
-            // Handle recalculations that arrived after commit but before IsRecalculating was cleared.
-            // Uses a loop (not recursion) to prevent stack overflow under sustained concurrent writes.
+            // Safety: if the outer loop exhausted MaxStabilizationIterations, log a warning.
+            Trace.TraceWarning(
+                $"DerivedPropertyChangeHandler: MaxStabilizationIterations ({MaxStabilizationIterations}) exhausted for " +
+                $"'{derivedProperty.Metadata.Name}' on {derivedProperty.Subject.GetType().Name}. " +
+                "This indicates a derived getter with circular side effects.");
+        }
+        finally
+        {
+            // Atomically clear IsRecalculating. If a write set RecalculationNeeded
+            // in the gap between the outer loop's return-check and this finally,
+            // we must re-trigger so the derived property reflects the latest state.
+            bool needsRetrigger;
             lock (data)
             {
-                if (!data.RecalculationNeeded || !data.IsAttached)
-                {
-                    return;
-                }
-
-                data.RecalculationNeeded = false;
-                data.IsRecalculating = true;
-                oldValue = data.LastKnownValue;
+                needsRetrigger = data is { RecalculationNeeded: true, IsAttached: true };
+                data.IsRecalculating = false;
             }
-        }
 
-        // Safety: if the outer loop exhausted MaxStabilizationIterations, the post-notification
-        // check may have set IsRecalculating=true for the next iteration that never ran.
-        // Clear it to prevent permanently blocking future recalculations.
-        Trace.TraceWarning(
-            $"DerivedPropertyChangeHandler: MaxStabilizationIterations ({MaxStabilizationIterations}) exhausted for " +
-            $"'{derivedProperty.Metadata.Name}' on {derivedProperty.Subject.GetType().Name}. " +
-            "This indicates a derived getter with circular side effects.");
-       
-        lock (data)
-        {
-            data.IsRecalculating = false;
+            if (needsRetrigger)
+            {
+                RecalculateDerivedProperty(ref derivedProperty, timestampUtcTicks);
+            }
         }
     }
 
