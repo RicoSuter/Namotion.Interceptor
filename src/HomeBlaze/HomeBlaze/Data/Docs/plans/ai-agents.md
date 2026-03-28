@@ -205,7 +205,7 @@ When an agent runs (timer or property change trigger):
 
 ### Tool Access
 
-Built-in agents reuse `McpToolDescriptor` handlers (from core MCP + [HomeBlaze MCP extensions](mcp-extensions.md)) wrapped as `AIFunction` objects — direct in-process calls, no MCP protocol overhead.
+Built-in agents reuse `McpToolInfo` handlers (from core MCP + [HomeBlaze MCP extensions](mcp-extensions.md)) wrapped as `AIFunction` objects — direct in-process calls, no MCP protocol overhead.
 
 Stage 1 restricts write access:
 
@@ -262,7 +262,7 @@ On failure (LLM API down, rate limited, timeout), set `Status` to error message,
 | Provider interface | `ILlmProvider` with `CreateChatClient()` only (no `Model`) | Consumer doesn't care which model — that's a provider config detail |
 | Provider as subject | Referenced by path | Centralized credentials, multiple agents share one provider |
 | Base class from day one | `LlmAgentBase` for specialized agents, `LlmAgent` for config-driven | Developers can subclass immediately, no waiting for later stages |
-| Tool reuse | Transport-agnostic `McpToolDescriptor` (metadata + plain function), wrapped as `AIFunction` by agent | One implementation, any delivery mode. See [MCP Server](../../../../../docs/plans/mcp-server.md) |
+| Tool reuse | Transport-agnostic `McpToolInfo` (metadata + plain function), wrapped as `AIFunction` by agent | One implementation, any delivery mode. See [MCP Server](../../../../../docs/plans/mcp-server.md) |
 | Safe by default | Read-only + notify, write access gated on authorization | Prevents accidental graph modification |
 | Pre-fetched context | Watch paths queried before LLM call | Reduces round-trips and API cost |
 | Per-run agent | Fresh `ChatClientAgent` per run, no session persistence | Simpler, cheaper, no conversation drift |
@@ -274,7 +274,7 @@ On failure (LLM API down, rate limited, timeout), set `Status` to error message,
 - `Microsoft.Agents.AI`: MAF `ChatClientAgent`, `AgentResponse`
 - `Microsoft.Extensions.AI`: `IChatClient`, `AIFunction`, `AIFunctionFactory`
 - `Anthropic` SDK (official): `IChatClient` implementation for Claude
-- `Namotion.Interceptor.Mcp`: `McpToolDescriptor` handlers wrapped as `AIFunction` for built-in agents
+- `Namotion.Interceptor.Mcp`: `McpToolInfo` handlers wrapped as `AIFunction` for built-in agents
 - `HomeBlaze.Abstractions`: `INotificationChannel`, `ITitleProvider`
 - `HomeBlaze.Services`: `SubjectPathResolver` for provider/watch path resolution
 - Graph-level authorization: gating write access per agent

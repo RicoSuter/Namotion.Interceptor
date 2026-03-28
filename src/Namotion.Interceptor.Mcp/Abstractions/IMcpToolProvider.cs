@@ -9,5 +9,5 @@ public interface IMcpToolProvider
     /// Gets the additional tool descriptors.
     /// </summary>
     /// <returns>An enumerable of tool descriptors.</returns>
-    IEnumerable<McpToolDescriptor> GetTools();
+    IEnumerable<McpToolInfo> GetTools();
 }

@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Collections;
 using System.Text;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Registry.Paths;
@@ -97,12 +98,22 @@ public static class PathExtensions
                 return null;
             }
 
-            lastIndex = index;
+            // When the property is an [InlinePaths] dictionary and no bracket index
+            // was provided, the segment name itself is the dictionary key.
+            var effectiveIndex = index;
+            if (effectiveIndex is null &&
+                InlinePathsAttribute.IsInlinePathsProperty(
+                    currentSubject.Subject.GetType(), currentProperty.Name))
+            {
+                effectiveIndex = segment;
+            }
+
+            lastIndex = effectiveIndex;
 
             // If not the last segment, navigate to the child subject
             if (i < segments.Count - 1)
             {
-                var childSubject = GetChildSubject(currentProperty, index);
+                var childSubject = GetChildSubject(currentProperty, effectiveIndex);
                 var registeredChild = childSubject?.TryGetRegisteredSubject();
                 if (registeredChild is null)
                 {
@@ -242,6 +253,21 @@ public static class PathExtensions
             for (var i = count - 1; i >= 0; i--)
             {
                 var (prop, index) = buffer[i];
+
+                // [InlinePaths] properties: emit just the index as a plain segment
+                if (index is not null &&
+                    InlinePathsAttribute.IsInlinePathsProperty(
+                        prop.Subject.GetType(), prop.Name))
+                {
+                    if (sb.Length > 0)
+                    {
+                        sb.Append(pathProvider.PathSeparator);
+                    }
+
+                    sb.Append(index);
+                    continue;
+                }
+
                 var segment = pathProvider.TryGetPropertySegment(prop) ?? prop.BrowseName;
                 if (sb.Length > 0)
                 {

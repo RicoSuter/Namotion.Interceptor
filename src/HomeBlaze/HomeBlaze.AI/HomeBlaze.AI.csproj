@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\HomeBlaze.Services\HomeBlaze.Services.csproj" />
+        <ProjectReference Include="..\..\Namotion.Interceptor.Mcp\Namotion.Interceptor.Mcp.csproj" />
+    </ItemGroup>
+
+</Project>

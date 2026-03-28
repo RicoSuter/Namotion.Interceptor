@@ -3,13 +3,16 @@ using HomeBlaze.Abstractions.Metadata;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 
-namespace HomeBlaze.Services.Mcp;
+namespace HomeBlaze.AI.Mcp;
 
 /// <summary>
-/// Exposes [State] properties via MCP. Uses state metadata name as path segment.
+/// Exposes [State] properties via MCP. Uses slash separator for InlinePaths compatibility
+/// (file names with dots like "Dashboard.md" are valid single segments with slash notation).
 /// </summary>
 public class StateAttributePathProvider : PathProviderBase
 {
+    public override char PathSeparator => '/';
+
     public override bool IsPropertyIncluded(RegisteredSubjectProperty property)
         => property.TryGetAttribute(KnownAttributes.State) is not null;
 

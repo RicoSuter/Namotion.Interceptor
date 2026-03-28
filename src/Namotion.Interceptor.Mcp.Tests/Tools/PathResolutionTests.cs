@@ -10,7 +10,7 @@ namespace Namotion.Interceptor.Mcp.Tests.Tools;
 public class PathResolutionTests
 {
     [Fact]
-    public async Task Query_resolves_subject_through_dictionary_path()
+    public async Task WhenQueryWithDictionaryPath_ThenSubjectIsResolved()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -48,7 +48,7 @@ public class PathResolutionTests
     }
 
     [Fact]
-    public async Task GetProperty_resolves_through_dictionary_path()
+    public async Task WhenGetPropertyWithDictionaryPath_ThenPropertyIsResolved()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -82,7 +82,7 @@ public class PathResolutionTests
     }
 
     [Fact]
-    public async Task SetProperty_resolves_through_dictionary_path()
+    public async Task WhenSetPropertyWithDictionaryPath_ThenPropertyIsUpdated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -118,7 +118,7 @@ public class PathResolutionTests
     }
 
     [Fact]
-    public void TryGetSubjectFromPath_resolves_through_nested_dictionaries()
+    public void WhenTryGetSubjectFromPathWithNestedDictionaries_ThenSubjectIsResolved()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -143,7 +143,7 @@ public class PathResolutionTests
     }
 
     [Fact]
-    public void TryGetSubjectFromPath_resolves_subject_reference()
+    public void WhenTryGetSubjectFromPathWithSubjectReference_ThenSubjectIsResolved()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -165,7 +165,7 @@ public class PathResolutionTests
     }
 
     [Fact]
-    public void TryGetSubjectFromPath_returns_null_for_invalid_path()
+    public void WhenTryGetSubjectFromPathWithInvalidPath_ThenReturnsNull()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
