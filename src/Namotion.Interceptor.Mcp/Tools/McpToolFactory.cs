@@ -11,12 +11,17 @@ namespace Namotion.Interceptor.Mcp.Tools;
 /// </summary>
 public class McpToolFactory
 {
-    private readonly IInterceptorSubject _rootSubject;
+    private readonly Func<IInterceptorSubject> _rootSubjectProvider;
     private readonly McpServerConfiguration _configuration;
 
     public McpToolFactory(IInterceptorSubject rootSubject, McpServerConfiguration configuration)
+        : this(() => rootSubject, configuration)
     {
-        _rootSubject = rootSubject;
+    }
+
+    public McpToolFactory(Func<IInterceptorSubject> rootSubjectProvider, McpServerConfiguration configuration)
+    {
+        _rootSubjectProvider = rootSubjectProvider;
         _configuration = configuration;
     }
 
@@ -68,7 +73,7 @@ public class McpToolFactory
         var pathProvider = _configuration.PathProvider as PathProviderBase
             ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase for path resolution.");
 
-        var rootRegistered = _rootSubject.TryGetRegisteredSubject()
+        var rootRegistered = _rootSubjectProvider().TryGetRegisteredSubject()
             ?? throw new InvalidOperationException("Root subject is not registered.");
 
         var path = input.TryGetProperty("path", out var pathElement) ? pathElement.GetString() : null;
@@ -324,7 +329,7 @@ public class McpToolFactory
         var pathProvider = _configuration.PathProvider as PathProviderBase
             ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase.");
 
-        var rootRegistered = _rootSubject.TryGetRegisteredSubject()
+        var rootRegistered = _rootSubjectProvider().TryGetRegisteredSubject()
             ?? throw new InvalidOperationException("Root subject is not registered.");
 
         var path = input.GetProperty("path").GetString()!;
@@ -366,7 +371,7 @@ public class McpToolFactory
         var pathProvider = _configuration.PathProvider as PathProviderBase
             ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase.");
 
-        var rootRegistered = _rootSubject.TryGetRegisteredSubject()
+        var rootRegistered = _rootSubjectProvider().TryGetRegisteredSubject()
             ?? throw new InvalidOperationException("Root subject is not registered.");
 
         var path = input.GetProperty("path").GetString()!;

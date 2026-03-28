@@ -14,7 +14,7 @@ namespace HomeBlaze.Services.Mcp;
 /// </summary>
 public class HomeBlazeMcpToolProvider : IMcpToolProvider
 {
-    private readonly IInterceptorSubject _rootSubject;
+    private readonly Func<IInterceptorSubject> _rootSubjectProvider;
     private readonly PathProviderBase _pathProvider;
     private readonly bool _isReadOnly;
 
@@ -22,8 +22,16 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         IInterceptorSubject rootSubject,
         PathProviderBase pathProvider,
         bool isReadOnly)
+        : this(() => rootSubject, pathProvider, isReadOnly)
     {
-        _rootSubject = rootSubject;
+    }
+
+    public HomeBlazeMcpToolProvider(
+        Func<IInterceptorSubject> rootSubjectProvider,
+        PathProviderBase pathProvider,
+        bool isReadOnly)
+    {
+        _rootSubjectProvider = rootSubjectProvider;
         _pathProvider = pathProvider;
         _isReadOnly = isReadOnly;
     }
@@ -133,7 +141,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
 
     private RegisteredSubject? ResolveSubject(string path)
     {
-        var rootRegistered = _rootSubject.TryGetRegisteredSubject();
+        var rootRegistered = _rootSubjectProvider().TryGetRegisteredSubject();
         if (rootRegistered is null)
         {
             return null;
