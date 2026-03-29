@@ -34,9 +34,10 @@ public class McpServerConfiguration
     public int MaxDepth { get; init; } = 10;
 
     /// <summary>
-    /// Maximum subjects in a single query response (default: 100).
+    /// Server-side maximum subjects per response (default: 500).
+    /// Agents can request a lower limit via the maxSubjects parameter.
     /// </summary>
-    public int MaxSubjectsPerResponse { get; init; } = 100;
+    public int MaxSubjectsPerResponse { get; init; } = 500;
 
     /// <summary>
     /// When true, set_property is blocked and invoke_method only allows Query methods.

@@ -27,7 +27,12 @@ internal class SearchTool
             text = new { type = "string", description = "Search text (matches against title and path, case-insensitive)" },
             types = new { type = "array", items = new { type = "string" }, description = "Filter by type/interface names" },
             includeProperties = new { type = "boolean", description = "Include property values (default: false)" },
-            includeAttributes = new { type = "boolean", description = "Include registry attributes on properties (default: false)" }
+            includeAttributes = new { type = "boolean", description = "Include registry attributes on properties (default: false)" },
+            includeMethods = new { type = "boolean", description = "Include $methods in subject nodes (default: false)" },
+            includeInterfaces = new { type = "boolean", description = "Include $interfaces in subject nodes (default: false)" },
+            maxSubjects = new { type = "integer", description = "Maximum subjects to return (default: server limit)" },
+            excludeTypes = new { type = "array", items = new { type = "string" }, description = "Exclude subjects matching these type/interface names" },
+            path = new { type = "string", description = "Scope search to a subtree path prefix" }
         }
     });
 
@@ -35,6 +40,9 @@ internal class SearchTool
     {
         Name = "search",
         Description = "Search across all subjects. Filter by text (matches title and path) and/or type names. " +
+                      "Use path to scope search to a subtree. " +
+                      "Use includeMethods/includeInterfaces to see capabilities. " +
+                      "Use excludeTypes to hide noisy types. " +
                       "Returns a flat list of matching subjects with $path for use with get_property/set_property.",
         InputSchema = Schema,
         Handler = HandleSearchAsync
@@ -54,12 +62,26 @@ internal class SearchTool
         var text = input.TryGetProperty("text", out var textElement) ? textElement.GetString() : null;
         var includeProperties = input.TryGetProperty("includeProperties", out var propsElement) && propsElement.GetBoolean();
         var includeAttributes = input.TryGetProperty("includeAttributes", out var attrsElement) && attrsElement.GetBoolean();
+        var includeMethods = input.TryGetProperty("includeMethods", out var methodsElement) && methodsElement.GetBoolean();
+        var includeInterfaces = input.TryGetProperty("includeInterfaces", out var interfacesElement) && interfacesElement.GetBoolean();
+
+        var maxSubjects = input.TryGetProperty("maxSubjects", out var maxElement)
+            ? Math.Min(maxElement.GetInt32(), _configuration.MaxSubjectsPerResponse)
+            : _configuration.MaxSubjectsPerResponse;
 
         string[]? typeFilter = null;
         if (input.TryGetProperty("types", out var typesElement))
         {
             typeFilter = typesElement.EnumerateArray().Select(element => element.GetString()!).ToArray();
         }
+
+        string[]? excludeTypes = null;
+        if (input.TryGetProperty("excludeTypes", out var excludeElement))
+        {
+            excludeTypes = excludeElement.EnumerateArray().Select(e => e.GetString()!).ToArray();
+        }
+
+        var pathPrefix = input.TryGetProperty("path", out var pathPrefixElement) ? pathPrefixElement.GetString() : null;
 
         var subjects = new Dictionary<string, object?>();
         var truncated = false;
@@ -72,8 +94,19 @@ internal class SearchTool
                 continue;
             }
 
+            if (McpToolHelper.ShouldExcludeByType(registered, excludeTypes))
+            {
+                continue;
+            }
+
             var subjectPath = McpToolHelper.TryGetSubjectPath(registered, pathProvider, rootSubject);
             if (subjectPath is null)
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(pathPrefix) &&
+                !subjectPath.StartsWith(pathPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
@@ -96,11 +129,13 @@ internal class SearchTool
                 }
             }
 
-            if (subjects.Count >= _configuration.MaxSubjectsPerResponse)
+            if (subjects.Count >= maxSubjects)
             {
                 truncated = true;
                 break;
             }
+
+            McpToolHelper.FilterEnrichments(node, includeMethods, includeInterfaces);
 
             McpToolHelper.ApplyProperties(node, registered, pathProvider,
                 includeProperties, includeAttributes, _configuration.IsReadOnly);
@@ -110,7 +145,7 @@ internal class SearchTool
 
         return Task.FromResult<object?>(new
         {
-            subjects,
+            results = subjects,
             truncated,
             subjectCount = subjects.Count
         });

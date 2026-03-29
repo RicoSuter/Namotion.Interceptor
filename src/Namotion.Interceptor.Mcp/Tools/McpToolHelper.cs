@@ -96,6 +96,46 @@ internal static class McpToolHelper
         }
     }
 
+    internal static void FilterEnrichments(
+        Dictionary<string, object?> node,
+        bool includeMethods,
+        bool includeInterfaces)
+    {
+        if (!includeMethods)
+        {
+            node.Remove("$methods");
+        }
+
+        if (!includeInterfaces)
+        {
+            node.Remove("$interfaces");
+        }
+    }
+
+    internal static bool ShouldExcludeByType(RegisteredSubject subject, string[]? excludeTypes)
+    {
+        if (excludeTypes is null || excludeTypes.Length == 0)
+        {
+            return false;
+        }
+
+        var subjectType = subject.Subject.GetType();
+        foreach (var exclude in excludeTypes)
+        {
+            if (subjectType.FullName == exclude || subjectType.Name == exclude)
+            {
+                return true;
+            }
+
+            if (subjectType.GetInterfaces().Any(i => i.FullName == exclude || i.Name == exclude))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     internal static void ApplyProperties(
         Dictionary<string, object?> node,
         RegisteredSubject subject,
