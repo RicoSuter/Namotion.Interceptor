@@ -73,17 +73,18 @@ public class SubjectPathResolver : ILifecycleHandler
             return ResolveInternal(baseSubject, path[2..], style);
         }
 
-        // Parent navigation: ../...
-        if (path.StartsWith("../"))
+        // Parent navigation: ../... or ".." alone
+        if (path.StartsWith("../") || path == "..")
         {
             var current = relativeTo;
             if (current == null)
                 return null;
 
             var remaining = path;
-            while (remaining.StartsWith("../"))
+            while (remaining.StartsWith("../") || remaining == "..")
             {
-                remaining = remaining[3..];
+                var consumed = remaining.StartsWith("../") ? 3 : 2;
+                remaining = remaining[consumed..];
                 var registered = current.TryGetRegisteredSubject();
                 if (registered == null)
                     return null;
