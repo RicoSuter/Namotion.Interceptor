@@ -21,7 +21,8 @@ public class GetPropertyToolTests
 
         var config = new McpServerConfiguration
         {
-            PathProvider = DefaultPathProvider.Instance
+            PathProvider = DefaultPathProvider.Instance,
+            IsReadOnly = false
         };
         var factory = new McpToolFactory(room, config);
         var tool = factory.CreateTools().First(t => t.Name == "get_property");
@@ -33,7 +34,7 @@ public class GetPropertyToolTests
 
         // Assert
         Assert.Equal(21.5m, json.GetProperty("value").GetDecimal());
-        Assert.Equal("Decimal", json.GetProperty("type").GetString());
+        Assert.Equal("number", json.GetProperty("type").GetString());
         Assert.True(json.GetProperty("isWritable").GetBoolean());
     }
 
@@ -61,6 +62,33 @@ public class GetPropertyToolTests
 
         // Assert
         Assert.True(json.TryGetProperty("error", out _));
+    }
+
+    [Fact]
+    public async Task GetProperty_omits_isWritable_when_read_only()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Test", Temperature = 21.5m };
+
+        var config = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance,
+            IsReadOnly = true
+        };
+        var factory = new McpToolFactory(room, config);
+        var tool = factory.CreateTools().First(t => t.Name == "get_property");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { path = "Temperature" });
+        var result = await tool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert
+        Assert.False(json.TryGetProperty("isWritable", out _));
     }
 
     [Fact]

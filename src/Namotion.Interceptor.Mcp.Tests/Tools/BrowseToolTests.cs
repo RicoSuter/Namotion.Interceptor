@@ -9,10 +9,10 @@ using Xunit;
 
 namespace Namotion.Interceptor.Mcp.Tests.Tools;
 
-public class QueryToolTests
+public class BrowseToolTests
 {
     [Fact]
-    public async Task Query_returns_subject_tree_with_children()
+    public async Task Browse_returns_subject_tree_with_children()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -29,11 +29,11 @@ public class QueryToolTests
         };
         var factory = new McpToolFactory(room, config);
         var tools = factory.CreateTools();
-        var queryTool = tools.First(t => t.Name == "query");
+        var browseTool = tools.First(t => t.Name == "browse");
 
         // Act
         var input = JsonSerializer.SerializeToElement(new { depth = 1, includeProperties = true });
-        var result = await queryTool.Handler(input, CancellationToken.None);
+        var result = await browseTool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
         // Assert
@@ -42,7 +42,7 @@ public class QueryToolTests
     }
 
     [Fact]
-    public async Task Query_depth_zero_returns_no_children()
+    public async Task Browse_depth_zero_returns_no_children()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -59,11 +59,11 @@ public class QueryToolTests
         };
         var factory = new McpToolFactory(room, config);
         var tools = factory.CreateTools();
-        var queryTool = tools.First(t => t.Name == "query");
+        var browseTool = tools.First(t => t.Name == "browse");
 
         // Act
         var input = JsonSerializer.SerializeToElement(new { depth = 0, includeProperties = true });
-        var result = await queryTool.Handler(input, CancellationToken.None);
+        var result = await browseTool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
         // Assert - depth=0 means subject properties only, no child subjects expanded
@@ -71,7 +71,7 @@ public class QueryToolTests
     }
 
     [Fact]
-    public async Task Query_includeProperties_controls_property_values()
+    public async Task Browse_includeProperties_controls_property_values()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -86,16 +86,16 @@ public class QueryToolTests
             PathProvider = DefaultPathProvider.Instance
         };
         var factory = new McpToolFactory(room, config);
-        var queryTool = factory.CreateTools().First(t => t.Name == "query");
+        var browseTool = factory.CreateTools().First(t => t.Name == "browse");
 
         // Act - without properties
         var inputWithout = JsonSerializer.SerializeToElement(new { depth = 0, includeProperties = false });
-        var resultWithout = await queryTool.Handler(inputWithout, CancellationToken.None);
+        var resultWithout = await browseTool.Handler(inputWithout, CancellationToken.None);
         var jsonWithout = JsonSerializer.SerializeToElement(resultWithout);
 
         // Act - with properties
         var inputWith = JsonSerializer.SerializeToElement(new { depth = 0, includeProperties = true });
-        var resultWith = await queryTool.Handler(inputWith, CancellationToken.None);
+        var resultWith = await browseTool.Handler(inputWith, CancellationToken.None);
         var jsonWith = JsonSerializer.SerializeToElement(resultWith);
 
         // Assert - without properties, subjects tree should not contain property values
@@ -112,7 +112,7 @@ public class QueryToolTests
     }
 
     [Fact]
-    public async Task Query_subject_enrichers_are_called()
+    public async Task Browse_subject_enrichers_are_called()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -130,11 +130,11 @@ public class QueryToolTests
             SubjectEnrichers = { enricher }
         };
         var factory = new McpToolFactory(room, config);
-        var queryTool = factory.CreateTools().First(t => t.Name == "query");
+        var browseTool = factory.CreateTools().First(t => t.Name == "browse");
 
         // Act
         var input = JsonSerializer.SerializeToElement(new { depth = 1, includeProperties = false });
-        var result = await queryTool.Handler(input, CancellationToken.None);
+        var result = await browseTool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
         // Assert - enricher should have been called for the Device child subject
@@ -147,7 +147,7 @@ public class QueryToolTests
     }
 
     [Fact]
-    public async Task Query_truncates_when_max_subjects_exceeded()
+    public async Task Browse_truncates_when_max_subjects_exceeded()
     {
         // Arrange
         var context = InterceptorSubjectContext
@@ -164,15 +164,77 @@ public class QueryToolTests
             MaxSubjectsPerResponse = 0  // Force truncation immediately
         };
         var factory = new McpToolFactory(room, config);
-        var queryTool = factory.CreateTools().First(t => t.Name == "query");
+        var browseTool = factory.CreateTools().First(t => t.Name == "browse");
 
         // Act
         var input = JsonSerializer.SerializeToElement(new { depth = 1, includeProperties = true });
-        var result = await queryTool.Handler(input, CancellationToken.None);
+        var result = await browseTool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
         // Assert
         Assert.True(json.GetProperty("truncated").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Browse_property_values_include_type_and_isWritable()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
+
+        var config = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance,
+            IsReadOnly = false
+        };
+        var factory = new McpToolFactory(room, config);
+        var browseTool = factory.CreateTools().First(t => t.Name == "browse");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { depth = 0, includeProperties = true });
+        var result = await browseTool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert
+        var subjects = json.GetProperty("subjects");
+        var temperature = subjects.GetProperty("Temperature");
+        Assert.Equal("number", temperature.GetProperty("type").GetString());
+        Assert.True(temperature.GetProperty("isWritable").GetBoolean());
+    }
+
+    [Fact]
+    public async Task Browse_property_values_omit_isWritable_when_read_only()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
+
+        var config = new McpServerConfiguration
+        {
+            PathProvider = DefaultPathProvider.Instance,
+            IsReadOnly = true
+        };
+        var factory = new McpToolFactory(room, config);
+        var browseTool = factory.CreateTools().First(t => t.Name == "browse");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { depth = 0, includeProperties = true });
+        var result = await browseTool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert
+        var subjects = json.GetProperty("subjects");
+        var temperature = subjects.GetProperty("Temperature");
+        Assert.Equal("number", temperature.GetProperty("type").GetString());
+        Assert.False(temperature.TryGetProperty("isWritable", out _));
     }
 
     private class TestSubjectEnricher : IMcpSubjectEnricher

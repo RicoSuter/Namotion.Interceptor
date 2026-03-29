@@ -28,7 +28,7 @@ internal class SetPropertyTool
     public McpToolInfo CreateTool() => new()
     {
         Name = "set_property",
-        Description = "Write a property value by path.",
+        Description = "Write a property value by path (e.g., Folder/Device/TargetSpeed). Blocked when server is read-only.",
         InputSchema = Schema,
         Handler = HandleSetPropertyAsync
     };
@@ -55,13 +55,19 @@ internal class SetPropertyTool
         }
 
         var (property, _) = result.Value;
+        if (property.CanContainSubjects)
+        {
+            return Task.FromResult<object?>(new
+            {
+                error = $"Path '{path}' points to a subject, not a scalar property."
+            });
+        }
 
         if (!property.HasSetter)
         {
             return Task.FromResult<object?>(new { error = $"Property is not writable: {path}" });
         }
 
-        var previousValue = property.GetValue();
         var valueElement = input.GetProperty("value");
 
         // The MCP SDK may pass values as strings (e.g., "true" instead of true).
@@ -77,6 +83,7 @@ internal class SetPropertyTool
             newValue = JsonSerializer.Deserialize(valueElement.GetRawText(), property.Type);
         }
 
+        var previousValue = property.GetValue();
         property.SetValue(newValue);
 
         return Task.FromResult<object?>(new { success = true, previousValue });

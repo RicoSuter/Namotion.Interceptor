@@ -28,7 +28,7 @@ public class PathResolutionTests
             PathProvider = DefaultPathProvider.Instance
         };
         var factory = new McpToolFactory(root, config);
-        var queryTool = factory.CreateTools().First(tool => tool.Name == "query");
+        var queryTool = factory.CreateTools().First(tool => tool.Name == "browse");
 
         // Act - query with path through two dictionary levels
         var input = JsonSerializer.SerializeToElement(new

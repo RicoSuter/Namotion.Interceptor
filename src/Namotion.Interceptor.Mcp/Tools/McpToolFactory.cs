@@ -23,7 +23,8 @@ public class McpToolFactory
     {
         var tools = new List<McpToolInfo>
         {
-            new QueryTool(_rootSubjectProvider, _configuration).CreateTool(),
+            new BrowseTool(_rootSubjectProvider, _configuration).CreateTool(),
+            new SearchTool(_rootSubjectProvider, _configuration).CreateTool(),
             new GetPropertyTool(_rootSubjectProvider, _configuration).CreateTool(),
             new SetPropertyTool(_rootSubjectProvider, _configuration).CreateTool(),
             new ListTypesTool(_configuration).CreateTool(),

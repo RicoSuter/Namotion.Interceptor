@@ -28,7 +28,7 @@ internal class GetPropertyTool
     public McpToolInfo CreateTool() => new()
     {
         Name = "get_property",
-        Description = "Read a property value by path.",
+        Description = "Read a property value by path (e.g., Folder/Device/Temperature).",
         InputSchema = Schema,
         Handler = HandleGetPropertyAsync
     };
@@ -50,6 +50,13 @@ internal class GetPropertyTool
         }
 
         var (property, _) = result.Value;
+        if (property.CanContainSubjects)
+        {
+            return Task.FromResult<object?>(new
+            {
+                error = $"Path '{path}' points to a subject, not a scalar property. Use the 'browse' tool with this path to browse it."
+            });
+        }
 
         var attributes = new Dictionary<string, object?>();
         foreach (var attribute in property.Attributes)
@@ -60,9 +67,13 @@ internal class GetPropertyTool
         var response = new Dictionary<string, object?>
         {
             ["value"] = property.GetValue(),
-            ["type"] = property.Type.Name,
-            ["isWritable"] = property.HasSetter
+            ["type"] = JsonSchemaTypeMapper.ToJsonSchemaType(property.Type)
         };
+
+        if (!_configuration.IsReadOnly && property.HasSetter)
+        {
+            response["isWritable"] = true;
+        }
 
         if (attributes.Count > 0)
         {
