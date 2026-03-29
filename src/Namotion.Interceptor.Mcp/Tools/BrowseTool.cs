@@ -40,12 +40,10 @@ internal class BrowseTool
         return new McpToolInfo
         {
             Name = "browse",
-            Description = "Browse the subject tree. Paths use '/' separators (e.g., Folder/SubFolder/Device). " +
-                          "Collections use brackets (e.g., Pins[0], Items[myKey]). " +
-                          "Subjects include $path for use with get_property/set_property. " +
-                          "Use includeMethods/includeInterfaces to see capabilities. " +
-                          "Use excludeTypes to hide noisy types. " +
-                          "Use maxSubjects to limit response size.",
+            Description = "Browse the subject tree at a path with configurable depth. " +
+                          "Use depth=0 with includeProperties=true to see all properties of a subject. " +
+                          "Paths: '/' separators, brackets for indices (Pins[0]). " +
+                          "To find subjects by type, use search with types instead.",
             InputSchema = Schema,
             Handler = HandleBrowseAsync
         };
@@ -79,13 +77,16 @@ internal class BrowseTool
 
         // Resolve starting subject
         RegisteredSubject startSubject;
-        if (string.IsNullOrEmpty(path))
+        var isRootPath = string.IsNullOrEmpty(path) ||
+            (_configuration.PathPrefix.Length > 0 && path == _configuration.PathPrefix);
+
+        if (isRootPath)
         {
             startSubject = rootRegistered;
         }
         else
         {
-            var resolved = pathProvider.TryGetSubjectFromPath(rootRegistered, path);
+            var resolved = pathProvider.TryGetSubjectFromPath(rootRegistered, path!);
             if (resolved is null)
             {
                 return Task.FromResult<object?>(new { error = $"Path not found: {path}" });

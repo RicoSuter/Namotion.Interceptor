@@ -39,11 +39,9 @@ internal class SearchTool
     public McpToolInfo CreateTool() => new()
     {
         Name = "search",
-        Description = "Search across all subjects. Filter by text (matches title and path) and/or type names. " +
-                      "Use path to scope search to a subtree. " +
-                      "Use includeMethods/includeInterfaces to see capabilities. " +
-                      "Use excludeTypes to hide noisy types. " +
-                      "Returns a flat list of matching subjects with $path for use with get_property/set_property.",
+        Description = "Search subjects by text and/or type/interface names. " +
+                      "Use list_types to discover interface names first, then pass to types parameter. " +
+                      "Returns flat list of matching subjects with $path.",
         InputSchema = Schema,
         Handler = HandleSearchAsync
     };
@@ -99,7 +97,7 @@ internal class SearchTool
                 continue;
             }
 
-            var subjectPath = McpToolHelper.TryGetSubjectPath(registered, pathProvider, rootSubject);
+            var subjectPath = McpToolHelper.TryGetSubjectPath(registered, pathProvider, rootSubject, _configuration.PathPrefix);
             if (subjectPath is null)
             {
                 continue;
