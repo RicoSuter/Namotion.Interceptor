@@ -9,6 +9,7 @@ using HomeBlaze.Storage.Abstractions.Attributes;
 using HomeBlaze.Storage.Internal;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
+using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking.Parent;
 using MarkdownContentParser = HomeBlaze.Storage.Internal.MarkdownContentParser;
 
@@ -61,6 +62,7 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
     /// Child subjects parsed from markdown content.
     /// Contains HtmlSegments, RenderExpressions, and embedded subjects.
     /// </summary>
+    [InlinePaths]
     public partial IDictionary<string, IInterceptorSubject> Children { get; private set; }
 
     /// <summary>
@@ -104,6 +106,9 @@ public partial class MarkdownFile : IStorageFile, ITitleProvider, IIconProvider,
         Frontmatter = FrontmatterParser.Parse<MarkdownFrontmatter>(Content);
         Children = await _parser.ParseAsync(Content, this, Children, cancellationToken);
     }
+
+    [Query(Title = "Read Content", Description = "Returns the markdown file content", Icon = "Description")]
+    public string? ReadContent() => Content;
 
     public Task OnFileChangedAsync(CancellationToken cancellationToken)
     {

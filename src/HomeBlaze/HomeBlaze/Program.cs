@@ -1,3 +1,4 @@
+using HomeBlaze.AI;
 using HomeBlaze.Components;
 using HomeBlaze.Host;
 using HomeBlaze.Samples;
@@ -18,6 +19,14 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHomeBlazeHost();
 builder.Services.AddHomeBlazeStorage();
 builder.Services.AddHotKeys2();
+
+// Optionally add the MCP subject server (default: false, enabled in Development)
+if (builder.Configuration.GetValue<bool>("UseMcpServer"))
+{
+    builder.Services.AddMcpServer()
+        .WithHttpTransport(options => options.Stateless = true)
+        .WithHomeBlazeMcpTools();
+}
 
 // Add services to the container.
 builder.Services.AddRazorComponents()
@@ -47,6 +56,12 @@ if (!app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseAntiforgery();
+
+// Map MCP server endpoint if enabled
+if (builder.Configuration.GetValue<bool>("UseMcpServer"))
+{
+    app.MapMcp("/mcp");
+}
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
