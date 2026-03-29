@@ -6,6 +6,12 @@
 
 Replace all dot/bracket path notation with slash (`/`) notation as the single canonical format across HomeBlaze — UI, JSON, MCP, markdown expressions, and code.
 
+### Why `/` instead of `.`
+
+Dictionary keys in `[InlinePaths]` collections often contain dots (e.g., `Setup.md`, `config.json`). Dot-separated paths require bracket escaping for these keys (`[Setup.md]`), while slash-separated paths handle them naturally (`/Setup.md`). The `/` separator eliminates this ambiguity.
+
+The core Namotion.Interceptor library continues to use dot notation internally. The slash format is a HomeBlaze presentation concern — translation lives in `SubjectPathResolver` in HomeBlaze.Services.
+
 ## Path Format
 
 ### Canonical Paths (JSON, UI, MCP, expressions)
@@ -13,15 +19,18 @@ Replace all dot/bracket path notation with slash (`/`) notation as the single ca
 | Prefix | Meaning | Example |
 |--------|---------|---------|
 | `/` | Absolute from root | `/Servers/OpcUaServer/Port` |
-| `./` | Relative to current subject | `./Speed` |
+| `./` | Relative (explicit) | `./Speed` |
 | `../` | Navigate to parent | `../Sibling/Temperature` |
+| No prefix | Relative (implicit) | `motor/Speed` |
 
 Rules:
 - `/` alone references the root subject
 - Empty string is never valid
 - `Root` never appears in paths
-- Collection/dictionary indices use brackets: `/Items[0]/Name`, `/Demo[Setup.md]`
-- Inline subjects in markdown: `{{ conveyor/Temperature }}` (not dot)
+- `[InlinePaths]` dictionary keys become path segments directly: `/Demo/Setup.md/Temperature`
+- Regular (non-InlinePaths) collection/dictionary indices use brackets on the property: `/Items[0]/Name`, `/Children[key]/Name`
+- `../` with multiple parents returns null (ambiguous, cannot decide)
+- Inline subjects in markdown: `{{ motor/Speed }}` — resolved as a normal relative path via `[InlinePaths]`, no special lookup needed
 
 ### Browser Routes (URL navigation only)
 
@@ -31,40 +40,75 @@ This is a separate format used only for URL routing — not part of the canonica
 
 ## API Changes
 
+### PathStyle enum (replaces PathFormat)
+
+```csharp
+public enum PathStyle
+{
+    Canonical,  // /Items[0]/Name - brackets for non-InlinePaths indices
+    Route       // /Items/0/Name  - flat segments, no brackets (URL routing only)
+}
+```
+
+Replaces the old `PathFormat` enum (Bracket/Slash).
+
 ### SubjectPathResolver
 
-Merge relative path handling from `SubjectPathResolverExtensions` into `ResolveSubject`:
+**`ResolveSubject`** — unified resolution, handles all prefix styles:
 
 ```csharp
 public IInterceptorSubject? ResolveSubject(
     string path,
+    PathStyle style,
     IInterceptorSubject? relativeTo = null)
 ```
 
 - `/` or `/...` → absolute (resolve from root, `relativeTo` ignored)
 - `./...` → relative to `relativeTo`
-- `../...` → navigate up from `relativeTo`
-- No prefix → throw (force explicit `/` or `./`)
+- `../...` → navigate up from `relativeTo`, null if multiple parents
+- No prefix → relative to `relativeTo`
 
-`ResolveSubject("/")` returns the root subject directly — no consumer-side special-casing needed.
+`ResolveSubject("/")` returns the root subject directly.
 
-### GetPath / GetPaths
+Resolution needs `PathStyle` to correctly interpret ambiguous segments (e.g., is `0` a dictionary key or a property name?).
+
+**`GetPath` / `GetPaths`** — output with style:
+
+```csharp
+public string? GetPath(IInterceptorSubject subject, PathStyle style)
+public IReadOnlyList<string> GetPaths(IInterceptorSubject subject, PathStyle style)
+```
 
 Output changes from `Child.Child` to `/Child/Child`. Slash-first caching (reverse current strategy).
 
-### ResolveValue
+### ResolveValue (extension method)
 
-`FindLastPropertySeparator` switches from dot-aware bracket-depth tracking to simple last-`/`-segment split.
+Unified value resolution replacing `ResolveValue`, `ResolveValueFromRelativePath`, and `ResolveFromRelativePath`:
 
-Inline subject lookup in `ResolveValueFromRelativePath` changes from `conveyor.Temperature` to `conveyor/Temperature`.
+```csharp
+public static object? ResolveValue(
+    this SubjectPathResolver resolver,
+    string path,
+    PathStyle style,
+    IInterceptorSubject? relativeTo = null)
+```
 
-### PathFormat enum
+- Split on last `/` → subject path + property name
+- Call `ResolveSubject` for the subject part
+- Return property value or null
 
-Remove or simplify — bracket format is no longer needed.
+The `inlineSubjects` parameter is eliminated — `[InlinePaths]` navigation handles inline subject lookup through normal path resolution.
 
-### BracketToSlash
+`FindLastPropertySeparator` simplifies to finding the last `/` (no bracket-depth tracking needed in canonical style, though brackets on property names like `Items[0]` still need consideration).
 
-Remove — no longer needed when slash is the only format.
+### Removed
+
+- `SubjectPathResolverExtensions.ResolveFromRelativePath` → merged into `ResolveSubject`
+- `SubjectPathResolverExtensions.ResolveValueFromRelativePath` → merged into `ResolveValue`
+- `PathFormat` enum → replaced by `PathStyle`
+- `BracketToSlash` → no longer needed
+- `JoinPathSegments` → no longer needed
+- `inlineSubjects` parameter on `ResolveValueFromRelativePath` → `[InlinePaths]` handles it
 
 ## Components to Change
 
@@ -72,20 +116,20 @@ Remove — no longer needed when slash is the only format.
 
 | File | Change |
 |------|--------|
-| `SubjectPathResolver.cs` | Slash-first caching, `/` = root, output paths with leading `/`, remove `BracketToSlash`, remove `JoinPathSegments` |
-| `SubjectPathResolverExtensions.cs` | Merge `ResolveFromRelativePath` logic into `ResolveSubject` (`./`, `../`); update `ResolveValue`/`ResolveValueFromRelativePath` for slash format; update inline subject separator from `.` to `/` |
-| `PathFormat.cs` | Remove or simplify |
+| `SubjectPathResolver.cs` | Slash-first caching, `/` = root, output paths with leading `/`, remove `BracketToSlash`, remove `JoinPathSegments`, accept `PathStyle` parameter |
+| `SubjectPathResolverExtensions.cs` | Collapse to single `ResolveValue` extension; remove `ResolveFromRelativePath`, `ResolveValueFromRelativePath`, `inlineSubjects` parameter; simplify `FindLastPropertySeparator` |
+| `PathFormat.cs` | Replace with `PathStyle` enum (Canonical/Route) |
 
 ### Code (Consumers)
 
 | File | Change |
 |------|--------|
-| `OpcUaServer.cs` | Remove `Path == "Root"` special case — just call `_pathResolver.ResolveSubject(Path)`; update doc comment |
-| `Widget.cs` | Update doc comment from `Root.folder.file.json` to `/folder/file.json` |
-| `SubjectBrowser.razor` | Build paths in `/` format; rename `ObjectPath` → `Path` in `SubjectPane` class and path-building logic |
+| `OpcUaServer.cs` | Remove `Path == "Root"` special case — just call `_pathResolver.ResolveSubject(Path, PathStyle.Canonical)`; update doc comment |
+| `Widget.cs` | Update to use `ResolveSubject` with `PathStyle.Canonical`; update doc comment from `Root.folder.file.json` to `/folder/file.json` |
+| `SubjectBrowser.razor` | Build paths in `/` format with `PathStyle.Route`; rename `ObjectPath` → `Path` in `SubjectPane` class and path-building logic |
 | `SubjectPropertyPanel.razor` | Rename label "ID" → "Path"; rename parameter `ObjectPath` → `Path` |
-| `RenderExpression.cs` | Verify works with new format (uses `ResolveValueFromRelativePath`) |
-| `NavigationItemResolver.cs` | Already uses slash — verify still works |
+| `RenderExpression.cs` | Simplify to use `ResolveValue` with `PathStyle.Canonical` and `relativeTo: Parent` — no special inline subject handling |
+| `NavigationItemResolver.cs` | Already uses slash — update to `PathStyle.Route` |
 
 ### MCP Tools
 
@@ -115,7 +159,7 @@ Prepend `/` to output paths, strip leading `/` on input for core library compati
 
 All 5 test files need rewriting for new format:
 - `SubjectPathResolverResolveSubjectTests.cs`
-- `SubjectPathResolverRelativePathTests.cs`
+- `SubjectPathResolverRelativePathTests.cs` — may merge into ResolveSubject tests
 - `SubjectPathResolverGetPathTests.cs`
 - `SubjectPathResolverBracketToSlashTests.cs` — remove (no longer needed)
 - `SubjectPathResolverCacheTests.cs`
@@ -123,5 +167,6 @@ All 5 test files need rewriting for new format:
 ## Migration Notes
 
 - No backward compatibility needed — issue notes "no installations yet"
-- Clean break: old bracket format is not accepted
-- `PathFormat` enum can be removed entirely
+- Clean break: old bracket/dot format is not accepted
+- `PathFormat` enum removed entirely, replaced by `PathStyle`
+- Core Namotion.Interceptor library unchanged — dot notation remains internal

@@ -422,7 +422,7 @@
 
         try
         {
-            var value = PathResolver.ResolveValueFromRelativePath(Value, null, LocalSubjects);
+            var value = PathResolver.ResolveValue(Value, PathStyle.Canonical);
 
             if (value != null)
             {
@@ -441,7 +441,7 @@
                         var key = Value[..dotIndex];
                         if (LocalSubjects.TryGetValue(key, out var local))
                         {
-                            subject = PathResolver.ResolveSubject(Value[(dotIndex + 1)..], root: local);
+                            subject = PathResolver.ResolveSubject(Value[(dotIndex + 1)..], PathStyle.Canonical, relativeTo: local);
                         }
                     }
                     else if (LocalSubjects.TryGetValue(Value, out var directLocal))
@@ -450,7 +450,7 @@
                     }
                 }
 
-                subject ??= PathResolver.ResolveSubject(Value);
+                subject ??= PathResolver.ResolveSubject(Value, PathStyle.Canonical);
 
                 if (subject != null)
                 {
