@@ -242,7 +242,7 @@
         var displayName = index != null
             ? (isInlinePathsProperty ? index.ToString()! : $"{propertyName}[{index}]")
             : propertyName;
-        var parentPath = clickedPane.Path;
+        var parentPath = clickedPane.Path.TrimEnd('/');
         var path = index != null
             ? (isInlinePathsProperty
                 ? $"{parentPath}/{index}"
