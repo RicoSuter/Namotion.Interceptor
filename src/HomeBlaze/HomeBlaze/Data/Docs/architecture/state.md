@@ -51,9 +51,9 @@ Tracks the implementation status of building blocks described in [Architecture O
 
 | Building Block | Status | Notes |
 |---|---|---|
-| MCP server (base tools) | In Progress | `Namotion.Interceptor.Mcp`, [PR #158](https://github.com/RicoSuter/Namotion.Interceptor/pull/158) |
-| MCP server (HomeBlaze tools) | Planned | `HomeBlaze.Mcp` — `get_property_history`, `get_event_history`, `get_command_history` + metadata enrichment (base tools `query`, `list_methods`, `invoke_method` are in `Namotion.Interceptor.Mcp`) |
-| Built-in agents | Planned | Agent subjects with LLM integration |
+| MCP server (core tools) | Implemented | `Namotion.Interceptor.Mcp` — `query`, `get_property`, `set_property`, `list_types` |
+| MCP server (HomeBlaze extensions) | Implemented | Subject enrichment, type discovery, `list_methods`, `invoke_method` via `McpServerConfiguration` extension points |
+| Built-in agents | Planned | Agent subjects with LLM integration. See [AI Agents plan](../../plans/ai-agents.md) |
 
 ## Platform
 

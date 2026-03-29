@@ -42,7 +42,7 @@ public class StateAttributeInitializerTests
         Assert.NotNull(attribute);
         var metadata = attribute.GetValue() as StateMetadata;
         Assert.NotNull(metadata);
-        Assert.Equal("Temp", metadata.Name);
+        Assert.Equal("Temp", metadata.Title);
         Assert.Equal(StateUnit.DegreeCelsius, metadata.Unit);
         Assert.Equal(1, metadata.Position);
         Assert.True(metadata.IsCumulative);
@@ -66,7 +66,7 @@ public class StateAttributeInitializerTests
         Assert.NotNull(attribute);
         var metadata = attribute.GetValue() as StateMetadata;
         Assert.NotNull(metadata);
-        Assert.Null(metadata.Name);
+        Assert.Null(metadata.Title);
         Assert.Equal(StateUnit.Default, metadata.Unit);
         Assert.Equal(0, metadata.Position);
         Assert.False(metadata.IsCumulative);
@@ -94,7 +94,7 @@ public class StateAttributeInitializerTests
 [InterceptorSubject]
 public partial class StateTestSubject
 {
-    [State(Name = "Temp", Unit = StateUnit.DegreeCelsius, Position = 1,
+    [State(Title ="Temp", Unit = StateUnit.DegreeCelsius, Position = 1,
            IsCumulative = true, IsDiscrete = true, IsEstimated = true)]
     public partial decimal Temperature { get; set; }
 

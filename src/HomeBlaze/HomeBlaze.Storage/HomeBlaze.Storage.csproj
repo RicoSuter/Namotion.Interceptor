@@ -22,7 +22,7 @@
         <PackageReference Include="FluentStorage" Version="5.*" />
         <PackageReference Include="Markdig" Version="0.*" />
         <PackageReference Include="YamlDotNet" Version="16.*" />
-        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.*" />
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.*" />
     </ItemGroup>
 
 </Project>

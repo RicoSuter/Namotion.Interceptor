@@ -28,7 +28,7 @@ public class PropertyAttributeInitializer : ILifecycleHandler
                 {
                     var metadata = new StateMetadata
                     {
-                        Name = stateAttribute.Name,
+                        Title = stateAttribute.Title,
                         Unit = stateAttribute.Unit,
                         Position = stateAttribute.Position,
                         IsCumulative = stateAttribute.IsCumulative,
