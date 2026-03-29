@@ -14,11 +14,11 @@ The demo simulates a small factory with the following equipment (live data):
 
 | Equipment | Current Speed | Target Speed | Temperature | Status |
 |-----------|---------------|--------------|-------------|--------|
-| **Conveyor Belt** | {{ Root.Children[Demo].Children[Conveyor].CurrentSpeed }} | {{ Root.Children[Demo].Children[Conveyor].TargetSpeed }} | {{ Root.Children[Demo].Children[Conveyor].Temperature }} | {{ Root.Children[Demo].Children[Conveyor].Status }} |
-| **Exhaust Fan** | {{ Root.Children[Demo].Children[ExhaustFan].CurrentSpeed }} | {{ Root.Children[Demo].Children[ExhaustFan].TargetSpeed }} | {{ Root.Children[Demo].Children[ExhaustFan].Temperature }} | {{ Root.Children[Demo].Children[ExhaustFan].Status }} |
-| **Cooling Fan** | {{ Root.Children[Demo].Children[CoolingFan].CurrentSpeed }} | {{ Root.Children[Demo].Children[CoolingFan].TargetSpeed }} | {{ Root.Children[Demo].Children[CoolingFan].Temperature }} | {{ Root.Children[Demo].Children[CoolingFan].Status }} |
-| **Water Pump** | {{ Root.Children[Demo].Children[WaterPump].CurrentSpeed }} | {{ Root.Children[Demo].Children[WaterPump].TargetSpeed }} | {{ Root.Children[Demo].Children[WaterPump].Temperature }} | {{ Root.Children[Demo].Children[WaterPump].Status }} |
-| **Compressor** | {{ Root.Children[Demo].Children[Compressor].CurrentSpeed }} | {{ Root.Children[Demo].Children[Compressor].TargetSpeed }} | {{ Root.Children[Demo].Children[Compressor].Temperature }} | {{ Root.Children[Demo].Children[Compressor].Status }} |
+| **Conveyor Belt** | {{ /Demo/Conveyor/CurrentSpeed }} | {{ /Demo/Conveyor/TargetSpeed }} | {{ /Demo/Conveyor/Temperature }} | {{ /Demo/Conveyor/Status }} |
+| **Exhaust Fan** | {{ /Demo/ExhaustFan/CurrentSpeed }} | {{ /Demo/ExhaustFan/TargetSpeed }} | {{ /Demo/ExhaustFan/Temperature }} | {{ /Demo/ExhaustFan/Status }} |
+| **Cooling Fan** | {{ /Demo/CoolingFan/CurrentSpeed }} | {{ /Demo/CoolingFan/TargetSpeed }} | {{ /Demo/CoolingFan/Temperature }} | {{ /Demo/CoolingFan/Status }} |
+| **Water Pump** | {{ /Demo/WaterPump/CurrentSpeed }} | {{ /Demo/WaterPump/TargetSpeed }} | {{ /Demo/WaterPump/Temperature }} | {{ /Demo/WaterPump/Status }} |
+| **Compressor** | {{ /Demo/Compressor/CurrentSpeed }} | {{ /Demo/Compressor/TargetSpeed }} | {{ /Demo/Compressor/Temperature }} | {{ /Demo/Compressor/Status }} |
 
 ## Motor Properties
 

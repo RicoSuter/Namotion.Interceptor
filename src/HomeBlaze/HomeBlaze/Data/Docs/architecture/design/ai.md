@@ -40,7 +40,7 @@ This keeps the interceptor library independently usable. Method tools are HomeBl
 
 Tool implementations are transport-agnostic `McpToolInfo` instances (metadata + plain function). Consumers wrap them as MCP tools (for external agents) or `AIFunction` objects (for built-in agents). One implementation, any delivery mode.
 
-HomeBlaze MCP uses slash (`/`) separator with `[InlinePaths]` flattening (e.g., `Servers/OpcUaServer/Port`). See [MCP Server docs](../../../../docs/mcp.md) for the core MCP server design and [AI Agents plan](../../plans/ai-agents.md) for the built-in agent design.
+HomeBlaze MCP uses slash (`/`) separator with `[InlinePaths]` flattening (e.g., `/Servers/OpcUaServer/Port`). See [MCP Server docs](../../../../docs/mcp.md) for the core MCP server design and [AI Agents plan](../../plans/ai-agents.md) for the built-in agent design.
 
 ### Interaction Patterns
 
