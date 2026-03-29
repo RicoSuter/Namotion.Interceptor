@@ -131,6 +131,9 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
 
     // Interface implementations
 
+    [Derived]
+    public bool IsServerRunning => Status == ServiceStatus.Running;
+
     public string? Title => Name;
 
     public string? IconName => "Dns";
