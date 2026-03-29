@@ -23,9 +23,9 @@ Motor:
 
 ## Live Expression
 
-Temperature: {{ mymotor.Temperature }}
+Temperature: {{ mymotor/Temperature }}
 
-Speed: {{ mymotor.CurrentSpeed }}
+Speed: {{ mymotor/CurrentSpeed }}
 
 ## Widget Reference
 

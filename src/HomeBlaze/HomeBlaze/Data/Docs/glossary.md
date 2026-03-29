@@ -221,7 +221,7 @@ position: 1
 Dynamic value binding in markdown using `{{ path }}` syntax. Updates automatically when the source property changes.
 
 ```markdown
-Speed: {{ motor.CurrentSpeed }} RPM
+Speed: {{ motor/CurrentSpeed }} RPM
 ```
 
 ### Embedded Subject

@@ -64,7 +64,7 @@
     public string Label { get; set; } = "Path";
 
     [Parameter]
-    public string Placeholder { get; set; } = "Enter path (e.g., motor.Temperature)";
+    public string Placeholder { get; set; } = "Enter path (e.g., motor/Temperature)";
 
     [Parameter]
     public IDictionary<string, IInterceptorSubject>? LocalSubjects { get; set; }
@@ -108,7 +108,7 @@
         // Add Root
         if (RootManager.Root != null)
         {
-            var rootItem = CreateSubjectTreeItem(RootManager.Root, "Root", "Root");
+            var rootItem = CreateSubjectTreeItem(RootManager.Root, "Root", "/");
             rootItem.Value!.Icon = Icons.Material.Filled.Home;
             _treeItems.Add(rootItem);
         }
@@ -190,9 +190,18 @@
                 // For collection/dictionary, show child subjects by index
                 foreach (var child in parent.Property.Children)
                 {
-                    var childPath = isInlinePathsProperty
-                        ? $"{parent.Path}.{child.Index}"  // Simplified path
-                        : $"{parent.Path}[{child.Index}]"; // Standard bracket path
+                    string childPath;
+                    if (isInlinePathsProperty)
+                    {
+                        // InlinePaths: strip property name, use key directly
+                        var lastSlash = parent.Path.LastIndexOf('/');
+                        var basePath = lastSlash >= 0 ? parent.Path[..lastSlash] : "";
+                        childPath = basePath.Length > 0 ? $"{basePath}/{child.Index}" : child.Index?.ToString() ?? "";
+                    }
+                    else
+                    {
+                        childPath = $"{parent.Path}[{child.Index}]";
+                    }
                     var childDisplayName = $"[{child.Index}]";
 
                     children.Add(CreateSubjectTreeItem(child.Subject, childDisplayName, childPath));
@@ -231,6 +240,18 @@
                 if (IsPropertyVisible != null && !IsPropertyVisible(property))
                     continue;
 
+                // [InlinePaths] properties: show children directly instead of the property node
+                if (InlinePathsAttribute.IsInlinePathsProperty(subject.GetType(), property.Name))
+                {
+                    foreach (var child in property.Children)
+                    {
+                        var childKey = child.Index?.ToString() ?? "";
+                        var childPath = $"{basePath.TrimEnd('/')}/{childKey}";
+                        children.Add(CreateSubjectTreeItem(child.Subject, childKey, childPath));
+                    }
+                    continue;
+                }
+
                 // Determine if property has state attribute
                 var hasState = property.GetStateMetadata() != null;
 
@@ -249,7 +270,7 @@
                 if (!hasState && !isExpandable)
                     continue;
 
-                var propertyPath = $"{basePath}.{property.Name}";
+                var propertyPath = $"{basePath.TrimEnd('/')}/{property.Name}";
 
                 // Check IsEnabled for visual styling
                 var isEnabledAttribute = property.TryGetAttribute(KnownAttributes.IsEnabled);
@@ -312,8 +333,11 @@
             }
 
             // Check if target path is under this item
-            if (targetPath.StartsWith(itemPath + ".", StringComparison.OrdinalIgnoreCase) ||
-                targetPath.StartsWith(itemPath + "[", StringComparison.OrdinalIgnoreCase))
+            var isUnderItem = itemPath == "/"
+                ? targetPath.StartsWith("/", StringComparison.OrdinalIgnoreCase)
+                : targetPath.StartsWith(itemPath + "/", StringComparison.OrdinalIgnoreCase) ||
+                  targetPath.StartsWith(itemPath + "[", StringComparison.OrdinalIgnoreCase);
+            if (isUnderItem)
             {
                 // Expand this node
                 item.Expanded = true;
@@ -422,7 +446,24 @@
 
         try
         {
-            var value = PathResolver.ResolveValue(Value, PathStyle.Canonical);
+            object? value = null;
+
+            // Try local subject resolution first (e.g., "mymotor/Temperature")
+            if (LocalSubjects != null)
+            {
+                var slashIndex = Value.IndexOf('/');
+                if (slashIndex > 0)
+                {
+                    var key = Value[..slashIndex];
+                    if (LocalSubjects.TryGetValue(key, out var local))
+                    {
+                        value = PathResolver.ResolveValue(Value[(slashIndex + 1)..], PathStyle.Canonical, relativeTo: local);
+                    }
+                }
+            }
+
+            // Then try absolute/root resolution (e.g., "/Demo/Conveyor/Temperature")
+            value ??= PathResolver.ResolveValue(Value, PathStyle.Canonical);
 
             if (value != null)
             {
@@ -431,17 +472,18 @@
             }
             else
             {
+                // Try resolving as a subject (not a property value)
                 IInterceptorSubject? subject = null;
 
                 if (LocalSubjects != null)
                 {
-                    var dotIndex = Value.IndexOf('.');
-                    if (dotIndex > 0)
+                    var slashIndex = Value.IndexOf('/');
+                    if (slashIndex > 0)
                     {
-                        var key = Value[..dotIndex];
+                        var key = Value[..slashIndex];
                         if (LocalSubjects.TryGetValue(key, out var local))
                         {
-                            subject = PathResolver.ResolveSubject(Value[(dotIndex + 1)..], PathStyle.Canonical, relativeTo: local);
+                            subject = PathResolver.ResolveSubject(Value[(slashIndex + 1)..], PathStyle.Canonical, relativeTo: local);
                         }
                     }
                     else if (LocalSubjects.TryGetValue(Value, out var directLocal))
