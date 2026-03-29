@@ -36,7 +36,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
     public partial string Name { get; set; }
 
     /// <summary>
-    /// Subject path to expose via OPC UA (e.g., "Root" or "Root.Children[demo]").
+    /// Subject path to expose via OPC UA (e.g., "/" or "/Children[demo]").
     /// </summary>
     [Configuration]
     public partial string Path { get; set; }
@@ -212,9 +212,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
             }
 
             // Resolve the target subject from path
-            var targetSubject = Path == "Root"
-                ? _rootManager.Root
-                : _pathResolver.ResolveSubject(Path);
+            var targetSubject = _pathResolver.ResolveSubject(Path, PathStyle.Canonical);
             if (targetSubject == null)
             {
                 Status = ServiceStatus.Error;

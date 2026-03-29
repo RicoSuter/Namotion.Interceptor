@@ -672,12 +672,12 @@ Use paths to reference subjects in the object graph. See [Configuration Guide - 
 
 | Prefix | Example |
 |--------|---------|
-| `Root.` | `Root.Demo.Conveyor` |
-| `this.` | `this.Child.Property` |
-| `../` | `../Sibling.Property` |
-| Brackets | `Root.Demo[Setup.md]` (for keys with dots) |
+| `/` (absolute) | `/Demo/Conveyor` |
+| `./` (relative) | `./Child/Property` |
+| `../` (parent) | `../Sibling/Property` |
+| Brackets | `/Demo/Children[Setup.md]` (for collection indices) |
 
-Use `SubjectPathResolver.ResolveFromRelativePath()` to resolve paths in code:
+Use `SubjectPathResolver.ResolveSubject()` to resolve paths in code:
 
 ```csharp
 [Derived]
@@ -688,8 +688,8 @@ private IInterceptorSubject? ResolveSubject()
     if (string.IsNullOrEmpty(Path))
         return null;
 
-    // ResolveFromRelativePath handles Root., this., ../, and relative paths
-    return _pathResolver.ResolveFromRelativePath(Path);
+    // ResolveSubject handles /, ./, ../, and relative paths
+    return _pathResolver.ResolveSubject(Path, PathStyle.Canonical);
 }
 ```
 

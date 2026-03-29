@@ -7,7 +7,7 @@ namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
 /// Resolves and displays a property value from a path expression.
-/// Supports local paths (relative to parent) and global paths (Root. prefix).
+/// Supports local paths (relative to parent) and global paths (/ prefix).
 /// </summary>
 [InterceptorSubject]
 public partial class RenderExpression : ITitleProvider
@@ -36,7 +36,7 @@ public partial class RenderExpression : ITitleProvider
     {
         try
         {
-            return _pathResolver.ResolveValueFromRelativePath(Path, Parent, Parent.Children);
+            return _pathResolver.ResolveValue(Path, PathStyle.Canonical, relativeTo: Parent);
         }
         catch
         {
