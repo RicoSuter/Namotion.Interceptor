@@ -61,7 +61,7 @@ public class BrowseToolEdgeCaseTests
         var json = JsonSerializer.SerializeToElement(result);
 
         // Assert — Device at depth 0 should show $count
-        var subjects = json.GetProperty("subjects");
+        var subjects = json.GetProperty("result");
         Assert.True(subjects.TryGetProperty("Device", out var deviceNode));
         Assert.True(deviceNode.TryGetProperty("$count", out var countElement));
         Assert.Equal(1, countElement.GetInt32());
@@ -116,7 +116,7 @@ public class BrowseToolEdgeCaseTests
         var json = JsonSerializer.SerializeToElement(result);
 
         // Assert — empty dictionary should not appear in output
-        var subjects = json.GetProperty("subjects");
+        var subjects = json.GetProperty("result");
         Assert.False(subjects.TryGetProperty("Children", out _));
     }
 
@@ -144,7 +144,7 @@ public class BrowseToolEdgeCaseTests
         var json = JsonSerializer.SerializeToElement(result);
 
         // Assert — should show Device's properties
-        var subjects = json.GetProperty("subjects");
+        var subjects = json.GetProperty("result");
         Assert.True(subjects.TryGetProperty("DeviceName", out var deviceName));
         Assert.Equal("Light", deviceName.GetProperty("value").GetString());
     }

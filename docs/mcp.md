@@ -54,31 +54,31 @@ Folder/SubFolder/Device/Status   (property path)
 
 Properties marked with `[InlinePaths]` flatten dictionary keys into the path (e.g., `Demo/MyMotor` instead of `Demo/Children[MyMotor]`).
 
-### Browse Response Format
+### `browse`
 
-The browse response mirrors the C# object graph structure without flattening:
+Browse the subject tree starting at a path. The `result` is the browsed subject node with its children inline:
 
-- **Subjects** include `$path` for use with `get_property`/`set_property`
-- **Properties with children** at depth 0 show `$count` instead of expanding
+- **Subject nodes** include `$path` for use with `get_property`/`set_property`
+- **Properties with children** at depth 0 show `$count` instead of expanding; homogeneous collections also include `$itemType`
 - **Scalar properties** are shown as `{ "value": ... }` when `includeProperties` is true
 
 ```json
 {
-  "path": "Demo",
-  "subjects": {
+  "result": {
+    "$path": "Demo",
     "Children": {
       "MyDevice": {
         "$path": "Demo/MyDevice",
         "$type": "MyApp.Device",
         "Temperature": { "value": 23.5 },
-        "Sensors": { "$count": 3 }
+        "Sensors": { "$count": 3, "$itemType": "Sensor" }
       }
     }
-  }
+  },
+  "truncated": false,
+  "subjectCount": 1
 }
 ```
-
-### Browse Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
@@ -86,15 +86,57 @@ The browse response mirrors the C# object graph structure without flattening:
 | `depth` | 1 | Max traversal depth (0 = properties only) |
 | `includeProperties` | false | Include property values |
 | `includeAttributes` | false | Include registry attributes on properties |
+| `includeMethods` | false | Include `$methods` in subject nodes |
+| `includeInterfaces` | false | Include `$interfaces` in subject nodes |
+| `excludeTypes` | (none) | Exclude subjects matching these type/interface names |
+| `maxSubjects` | server limit | Maximum subjects to return |
 
-### Search Parameters
+### `search`
+
+Search across all subjects. Returns `results` as a flat dictionary keyed by path:
+
+```json
+{
+  "results": {
+    "Demo/MyDevice": {
+      "$path": "Demo/MyDevice",
+      "$title": "My Device",
+      "Temperature": { "value": 23.5 }
+    }
+  },
+  "truncated": false,
+  "subjectCount": 1
+}
+```
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `text` | (none) | Filter by text (matches title and path) |
+| `text` | (none) | Filter by text (matches title and path, case-insensitive) |
 | `types` | all | Filter subjects by type/interface full names |
+| `path` | (none) | Scope search to a subtree path prefix |
 | `includeProperties` | false | Include property values |
 | `includeAttributes` | false | Include registry attributes on properties |
+| `includeMethods` | false | Include `$methods` in subject nodes |
+| `includeInterfaces` | false | Include `$interfaces` in subject nodes |
+| `excludeTypes` | (none) | Exclude subjects matching these type/interface names |
+| `maxSubjects` | server limit | Maximum subjects to return |
+
+### `get_property`
+
+Read a property value by path. Returns the value, JSON schema type, and optional writeability flag.
+
+### `set_property`
+
+Write a property value by path. Blocked when `IsReadOnly` is true.
+
+### `list_types`
+
+List available types from registered type providers. Interface types include property and method schemas; concrete types list their implemented interfaces.
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `kind` | `all` | Filter by kind: `interfaces`, `concrete`, or `all` |
+| `type` | (none) | Search type names (case-insensitive contains match) |
 
 ## Configuration
 
@@ -115,7 +157,7 @@ var config = new McpServerConfiguration
 
     // Safety limits
     MaxDepth = 10,
-    MaxSubjectsPerResponse = 100,
+    MaxSubjectsPerResponse = 500,
     IsReadOnly = true
 };
 ```

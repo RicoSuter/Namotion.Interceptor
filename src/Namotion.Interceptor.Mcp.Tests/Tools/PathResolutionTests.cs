@@ -42,7 +42,7 @@ public class PathResolutionTests
 
         // Assert - should resolve to the OpcUaServer subject
         Assert.False(json.TryGetProperty("error", out _), "Expected no error");
-        var subjects = json.GetProperty("subjects");
+        var subjects = json.GetProperty("result");
         Assert.True(subjects.TryGetProperty("Name", out var nameProperty));
         Assert.Equal("OpcUaServer", nameProperty.GetProperty("value").GetString());
     }

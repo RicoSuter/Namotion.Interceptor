@@ -10,7 +10,11 @@ internal class ListTypesTool
     private static readonly JsonElement Schema = JsonSerializer.SerializeToElement(new
     {
         type = "object",
-        properties = new { }
+        properties = new
+        {
+            kind = new { type = "string", description = "Filter by kind: 'interfaces', 'concrete', or 'all' (default: 'all')" },
+            type = new { type = "string", description = "Search type names (case-insensitive contains match)" }
+        }
     });
 
     private readonly McpServerConfiguration _configuration;
@@ -23,8 +27,9 @@ internal class ListTypesTool
     public McpToolInfo CreateTool() => new()
     {
         Name = "list_types",
-        Description = "List available types. Interface types include their property and method schemas. " +
-                      "Concrete types list their implemented interfaces — use browse for instance-specific details.",
+        Description = "List available types. Use kind to filter interfaces/concrete. Use type to search by name. " +
+                      "Interface types include property and method schemas. " +
+                      "Concrete types list implemented interfaces.",
         InputSchema = Schema,
         Handler = HandleListTypesAsync
     };
@@ -35,10 +40,31 @@ internal class ListTypesTool
             .SelectMany(provider => provider.GetTypes())
             .ToList();
 
+        // Build interfaceNames from ALL types (before filtering)
         var interfaceNames = new HashSet<string>(
             allTypes.Where(t => t.IsInterface).Select(t => t.Type.FullName!));
 
-        var types = allTypes.Select(typeInfo =>
+        var kind = input.TryGetProperty("kind", out var kindElement) ? kindElement.GetString() : "all";
+        var typeSearch = input.TryGetProperty("type", out var typeSearchElement) ? typeSearchElement.GetString() : null;
+
+        var filteredTypes = allTypes.AsEnumerable();
+
+        if (kind == "interfaces")
+        {
+            filteredTypes = filteredTypes.Where(t => t.IsInterface);
+        }
+        else if (kind == "concrete")
+        {
+            filteredTypes = filteredTypes.Where(t => !t.IsInterface);
+        }
+
+        if (!string.IsNullOrEmpty(typeSearch))
+        {
+            filteredTypes = filteredTypes.Where(t =>
+                t.Name.Contains(typeSearch, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var types = filteredTypes.Select(typeInfo =>
         {
             if (typeInfo.IsInterface)
             {
