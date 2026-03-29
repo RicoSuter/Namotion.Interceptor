@@ -8,7 +8,7 @@ alignment: Left
 
 # Dashboard
 
-Welcome to your HomeBlaze dashboard.222
+Welcome to your HomeBlaze dashboard.
 
 ## Motor Status
 
