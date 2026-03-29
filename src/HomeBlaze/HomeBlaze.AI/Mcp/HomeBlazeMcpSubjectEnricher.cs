@@ -1,15 +1,19 @@
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry.Abstractions;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Metadata;
+using HomeBlaze.Services;
 
 namespace HomeBlaze.AI.Mcp;
 
 public class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
 {
     private readonly Lazy<(HashSet<Type> Concrete, HashSet<Type> Interfaces)> _typeCache;
+    private readonly bool _isReadOnly;
 
-    public HomeBlazeMcpSubjectEnricher(IEnumerable<IMcpTypeProvider> typeProviders)
+    public HomeBlazeMcpSubjectEnricher(IEnumerable<IMcpTypeProvider> typeProviders, bool isReadOnly)
     {
+        _isReadOnly = isReadOnly;
         _typeCache = new Lazy<(HashSet<Type>, HashSet<Type>)>(() =>
         {
             var allTypes = typeProviders.SelectMany(p => p.GetTypes()).ToList();
@@ -50,6 +54,16 @@ public class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
         if (interfaces.Count > 0)
         {
             metadata["$interfaces"] = interfaces;
+        }
+
+        var methods = subject.GetAllMethods()
+            .Where(method => !_isReadOnly || method.Kind == MethodKind.Query)
+            .Select(method => method.PropertyName)
+            .ToArray();
+
+        if (methods.Length > 0)
+        {
+            metadata["$methods"] = methods;
         }
 
         return metadata;

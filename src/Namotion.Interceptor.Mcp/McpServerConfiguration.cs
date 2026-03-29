@@ -24,7 +24,7 @@ public class McpServerConfiguration
     public IList<IMcpTypeProvider> TypeProviders { get; init; } = [];
 
     /// <summary>
-    /// Additional tools beyond the 4 core tools (e.g., list_methods, invoke_method).
+    /// Additional tools beyond the 5 core tools (e.g., list_methods, invoke_method).
     /// </summary>
     public IList<IMcpToolProvider> ToolProviders { get; init; } = [];
 

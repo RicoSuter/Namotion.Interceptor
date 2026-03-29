@@ -86,9 +86,16 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         {
             name = method.PropertyName,
             kind = method.Kind.ToString().ToLowerInvariant(),
+            title = method.Title,
+            description = method.Description,
+            returnType = Namotion.Interceptor.Mcp.Tools.JsonSchemaTypeMapper.ToJsonSchemaType(method.ResultType),
             parameters = method.Parameters
                 .Where(parameter => parameter.RequiresInput)
-                .Select(parameter => new { name = parameter.Name, type = parameter.Type.Name })
+                .Select(parameter => new
+                {
+                    name = parameter.Name,
+                    type = Namotion.Interceptor.Mcp.Tools.JsonSchemaTypeMapper.ToJsonSchemaType(parameter.Type)
+                })
                 .ToArray()
         });
 

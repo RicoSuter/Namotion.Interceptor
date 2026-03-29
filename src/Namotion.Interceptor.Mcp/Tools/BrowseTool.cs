@@ -6,14 +6,14 @@ using Namotion.Interceptor.Registry.Paths;
 namespace Namotion.Interceptor.Mcp.Tools;
 
 /// <summary>
-/// Creates the "query" tool for browsing the subject tree.
+/// Creates the "browse" tool for browsing the subject tree.
 /// </summary>
-internal class QueryTool
+internal class BrowseTool
 {
     private readonly Func<IInterceptorSubject> _rootSubjectProvider;
     private readonly McpServerConfiguration _configuration;
 
-    public QueryTool(Func<IInterceptorSubject> rootSubjectProvider, McpServerConfiguration configuration)
+    public BrowseTool(Func<IInterceptorSubject> rootSubjectProvider, McpServerConfiguration configuration)
     {
         _rootSubjectProvider = rootSubjectProvider;
         _configuration = configuration;
@@ -27,8 +27,7 @@ internal class QueryTool
             path = new { type = "string", description = "Starting path (default: root)" },
             depth = new { type = "integer", description = "Max depth (default: 1)" },
             includeProperties = new { type = "boolean", description = "Include property values (default: false)" },
-            includeAttributes = new { type = "boolean", description = "Include registry attributes on properties (default: false)" },
-            types = new { type = "array", items = new { type = "string" }, description = "Filter subjects by type/interface full names" }
+            includeAttributes = new { type = "boolean", description = "Include registry attributes on properties (default: false)" }
         }
     });
 
@@ -36,20 +35,18 @@ internal class QueryTool
     {
         return new McpToolInfo
         {
-            Name = "query",
-            Description = "Browse the subject tree. Paths use separator notation (e.g., Folder/SubFolder/Device). " +
+            Name = "browse",
+            Description = "Browse the subject tree. Paths use '/' separators (e.g., Folder/SubFolder/Device). " +
                           "Collections use brackets (e.g., Pins[0], Items[myKey]). " +
-                          "Subjects in the response include $path for use with get_property/set_property. " +
+                          "Subjects include $path for use with get_property/set_property. " +
                           "At depth 0, properties with children show $count instead of expanding.",
             InputSchema = Schema,
-            Handler = HandleQueryAsync
+            Handler = HandleBrowseAsync
         };
     }
 
-    private async Task<object?> HandleQueryAsync(JsonElement input, CancellationToken cancellationToken)
+    private Task<object?> HandleBrowseAsync(JsonElement input, CancellationToken cancellationToken)
     {
-        await Task.CompletedTask;
-
         var pathProvider = _configuration.PathProvider as PathProviderBase
             ?? throw new InvalidOperationException("PathProvider must extend PathProviderBase for path resolution.");
 
@@ -61,20 +58,7 @@ internal class QueryTool
         var includeProperties = input.TryGetProperty("includeProperties", out var propsElement) && propsElement.GetBoolean();
         var includeAttributes = input.TryGetProperty("includeAttributes", out var attrsElement) && attrsElement.GetBoolean();
 
-        string[]? typeFilter = null;
-        if (input.TryGetProperty("types", out var typesElement))
-        {
-            typeFilter = typesElement.EnumerateArray().Select(element => element.GetString()!).ToArray();
-        }
-
         depth = Math.Min(depth, _configuration.MaxDepth);
-
-        // When a type filter is provided, do a flat search over KnownSubjects
-        if (typeFilter is not null && typeFilter.Length > 0)
-        {
-            return HandleFilteredQuery(pathProvider, typeFilter,
-                includeProperties, includeAttributes);
-        }
 
         // Resolve starting subject
         RegisteredSubject startSubject;
@@ -87,7 +71,7 @@ internal class QueryTool
             var resolved = pathProvider.TryGetSubjectFromPath(rootRegistered, path);
             if (resolved is null)
             {
-                return new { error = $"Path not found: {path}" };
+                return Task.FromResult<object?>(new { error = $"Path not found: {path}" });
             }
 
             startSubject = resolved;
@@ -97,102 +81,15 @@ internal class QueryTool
         var truncated = false;
         var visited = new HashSet<IInterceptorSubject>();
         var subjects = BuildSubjectTree(startSubject, pathProvider, depth, includeProperties,
-            includeAttributes, null, visited, ref subjectCount, ref truncated);
+            includeAttributes, visited, ref subjectCount, ref truncated);
 
-        return new
+        return Task.FromResult<object?>(new
         {
             path = path ?? "",
             subjects,
             truncated,
             subjectCount
-        };
-    }
-
-    private object HandleFilteredQuery(
-        PathProviderBase pathProvider,
-        string[] typeFilter,
-        bool includeProperties,
-        bool includeAttributes)
-    {
-        var registry = _rootSubjectProvider().Context.TryGetService<ISubjectRegistry>();
-        if (registry is null)
-        {
-            return new { error = "Subject registry is not available." };
-        }
-
-        var subjects = new Dictionary<string, object?>();
-        var truncated = false;
-        var rootSubject = _rootSubjectProvider();
-
-        foreach (var (_, registered) in registry.KnownSubjects)
-        {
-            if (ShouldFilterOut(registered, typeFilter))
-            {
-                continue;
-            }
-
-            if (subjects.Count >= _configuration.MaxSubjectsPerResponse)
-            {
-                truncated = true;
-                break;
-            }
-
-            // Compute subject path via its parent property + index
-            string? subjectPath;
-            if (registered.Subject == rootSubject)
-            {
-                subjectPath = "";
-            }
-            else if (registered.Parents.Length > 0)
-            {
-                var parent = registered.Parents[0];
-                subjectPath = parent.Property.TryGetPath(pathProvider, rootSubject, parent.Index);
-            }
-            else
-            {
-                continue;
-            }
-
-            if (subjectPath is null)
-            {
-                continue;
-            }
-
-            var node = new Dictionary<string, object?>();
-
-            // Enrichers
-            foreach (var enricher in _configuration.SubjectEnrichers)
-            {
-                foreach (var kvp in enricher.GetSubjectEnrichments(registered))
-                {
-                    node[kvp.Key] = kvp.Value;
-                }
-            }
-
-            // Properties
-            if (includeProperties)
-            {
-                foreach (var property in registered.Properties)
-                {
-                    if (property.IsAttribute || !pathProvider.IsPropertyIncluded(property) || property.CanContainSubjects)
-                    {
-                        continue;
-                    }
-
-                    var segment = pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
-                    node[segment] = McpToolHelper.BuildPropertyValue(property, includeAttributes);
-                }
-            }
-
-            subjects[subjectPath] = node;
-        }
-
-        return new
-        {
-            subjects,
-            truncated,
-            subjectCount = subjects.Count
-        };
+        });
     }
 
     private Dictionary<string, object?> BuildSubjectTree(
@@ -201,7 +98,6 @@ internal class QueryTool
         int remainingDepth,
         bool includeProperties,
         bool includeAttributes,
-        string[]? typeFilter,
         HashSet<IInterceptorSubject> visited,
         ref int subjectCount,
         ref bool truncated)
@@ -227,7 +123,6 @@ internal class QueryTool
                         var childSubject = child.Subject?.TryGetRegisteredSubject();
                         if (child.Subject is not null &&
                             childSubject is not null &&
-                            !ShouldFilterOut(childSubject, typeFilter) &&
                             visited.Add(child.Subject))
                         {
                             if (subjectCount >= _configuration.MaxSubjectsPerResponse)
@@ -238,7 +133,7 @@ internal class QueryTool
 
                             subjectCount++;
                             result[segment] = BuildSubjectNode(childSubject, pathProvider,
-                                remainingDepth - 1, includeProperties, includeAttributes, typeFilter,
+                                remainingDepth - 1, includeProperties, includeAttributes,
                                 visited, ref subjectCount, ref truncated);
                         }
                     }
@@ -250,7 +145,6 @@ internal class QueryTool
                         {
                             var childRegistered = child.Subject.TryGetRegisteredSubject();
                             if (childRegistered is null ||
-                                ShouldFilterOut(childRegistered, typeFilter) ||
                                 !visited.Add(child.Subject))
                             {
                                 continue;
@@ -265,7 +159,7 @@ internal class QueryTool
                             subjectCount++;
                             var key = child.Index?.ToString() ?? child.Subject.GetHashCode().ToString();
                             target[key] = BuildSubjectNode(childRegistered, pathProvider,
-                                remainingDepth - 1, includeProperties, includeAttributes, typeFilter,
+                                remainingDepth - 1, includeProperties, includeAttributes,
                                 visited, ref subjectCount, ref truncated);
                         }
 
@@ -285,7 +179,7 @@ internal class QueryTool
             }
             else if (includeProperties)
             {
-                result[segment] = McpToolHelper.BuildPropertyValue(property, includeAttributes);
+                result[segment] = McpToolHelper.BuildPropertyValue(property, includeAttributes, _configuration.IsReadOnly);
             }
         }
 
@@ -298,37 +192,17 @@ internal class QueryTool
         int remainingDepth,
         bool includeProperties,
         bool includeAttributes,
-        string[]? typeFilter,
         HashSet<IInterceptorSubject> visited,
         ref int subjectCount,
         ref bool truncated)
     {
-        var node = new Dictionary<string, object?>();
-        var rootSubject = _rootSubjectProvider();
+        var node = McpToolHelper.BuildSubjectNode(
+            subject, pathProvider, _rootSubjectProvider(), _configuration,
+            includeProperties: false, includeAttributes: false);
 
-        // $path — compute the path to this subject for use with get_property/set_property
-        if (subject.Subject != rootSubject && subject.Parents.Length > 0)
-        {
-            var parent = subject.Parents[0];
-            var subjectPath = parent.Property.TryGetPath(pathProvider, rootSubject, parent.Index);
-            if (subjectPath is not null)
-            {
-                node["$path"] = subjectPath;
-            }
-        }
-
-        // Subject-level metadata from enrichers
-        foreach (var enricher in _configuration.SubjectEnrichers)
-        {
-            foreach (var kvp in enricher.GetSubjectEnrichments(subject))
-            {
-                node[kvp.Key] = kvp.Value;
-            }
-        }
-
-        // Properties and child subjects
+        // Properties and child subjects (handled by tree traversal, not flat helper)
         var tree = BuildSubjectTree(subject, pathProvider, remainingDepth,
-            includeProperties, includeAttributes, typeFilter, visited, ref subjectCount, ref truncated);
+            includeProperties, includeAttributes, visited, ref subjectCount, ref truncated);
 
         foreach (var kvp in tree)
         {
@@ -336,29 +210,5 @@ internal class QueryTool
         }
 
         return node;
-    }
-
-    private static bool ShouldFilterOut(RegisteredSubject subject, string[]? typeFilter)
-    {
-        if (typeFilter is null || typeFilter.Length == 0)
-        {
-            return false;
-        }
-
-        var subjectType = subject.Subject.GetType();
-        foreach (var filter in typeFilter)
-        {
-            if (subjectType.FullName == filter || subjectType.Name == filter)
-            {
-                return false;
-            }
-
-            if (subjectType.GetInterfaces().Any(interfaceType => interfaceType.FullName == filter || interfaceType.Name == filter))
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 }

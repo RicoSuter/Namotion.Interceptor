@@ -247,7 +247,8 @@ public partial class Machine
 
 With `[InlinePaths]`:
 - Path `Line.CNC01.Status` resolves to `Line.Machines["CNC01"].Status`
-- Direct properties take precedence over child keys
+- Direct properties take precedence over child keys — if a subject has both a direct property and a dictionary key with the same name, the property wins and the key is unreachable via that segment
+- Only one property per class may be marked with `[InlinePaths]`; multiple properties throws `InvalidOperationException`
 - Works with `AttributeBasedPathProvider` without requiring `[Path]` attribute on the dictionary
 - Built into `PathProviderBase.TryGetPropertyFromSegment`
 

@@ -2,12 +2,12 @@
 
 > **Note:** This package is experimental and its API may change between versions.
 
-Namotion.Interceptor.Mcp exposes the subject registry via [MCP (Model Context Protocol)](https://modelcontextprotocol.io), enabling AI agents to browse, query, and interact with the object graph.
+Namotion.Interceptor.Mcp exposes the subject registry via [MCP (Model Context Protocol)](https://modelcontextprotocol.io), enabling AI agents to browse, search, and interact with the object graph.
 
 ## Installation
 
 ```xml
-<PackageReference Include="Namotion.Interceptor.Mcp" Version="0.1.0" />
+<PackageReference Include="Namotion.Interceptor.Mcp" />
 ```
 
 ## Quick Start
@@ -31,21 +31,22 @@ The MCP server is exposed as an HTTP endpoint. AI agents (Claude Desktop, custom
 
 ## Tools
 
-The MCP server provides 4 core tools:
+The MCP server provides 5 core tools:
 
 | Tool | Description |
 |------|-------------|
-| `query` | Browse the subject tree with depth control, property inclusion, and type filtering |
-| `get_property` | Read a property value with type and registry attributes |
-| `set_property` | Write a property value (blocked when `IsReadOnly`) |
-| `list_types` | List available types from registered type providers |
+| `browse` | Browse the subject tree with depth control and property inclusion |
+| `search` | Search across all subjects by text and/or type names |
+| `get_property` | Read a property value by path (e.g., `Folder/Device/Temperature`) |
+| `set_property` | Write a property value by path (e.g., `Folder/Device/TargetSpeed`). Blocked when `IsReadOnly` |
+| `list_types` | List available types with interface property and method schemas |
 
 ### Path Format
 
 The path format depends on the `PathProvider` configuration. The separator and index characters are configurable:
 
 ```
-Folder/SubFolder/Device          (separator notation)
+Folder/SubFolder/Device          (slash path notation)
 Pins[0]                          (collection index)
 Items[myKey]                     (dictionary key)
 Folder/SubFolder/Device/Status   (property path)
@@ -53,9 +54,9 @@ Folder/SubFolder/Device/Status   (property path)
 
 Properties marked with `[InlinePaths]` flatten dictionary keys into the path (e.g., `Demo/MyMotor` instead of `Demo/Children[MyMotor]`).
 
-### Query Response Format
+### Browse Response Format
 
-The query response mirrors the C# object graph structure without flattening:
+The browse response mirrors the C# object graph structure without flattening:
 
 - **Subjects** include `$path` for use with `get_property`/`set_property`
 - **Properties with children** at depth 0 show `$count` instead of expanding
@@ -77,15 +78,23 @@ The query response mirrors the C# object graph structure without flattening:
 }
 ```
 
-### Query Parameters
+### Browse Parameters
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `path` | root | Starting path |
+| `path` | root | Starting path (e.g., `Folder/Device`) |
 | `depth` | 1 | Max traversal depth (0 = properties only) |
 | `includeProperties` | false | Include property values |
 | `includeAttributes` | false | Include registry attributes on properties |
+
+### Search Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `text` | (none) | Filter by text (matches title and path) |
 | `types` | all | Filter subjects by type/interface full names |
+| `includeProperties` | false | Include property values |
+| `includeAttributes` | false | Include registry attributes on properties |
 
 ## Configuration
 
@@ -113,7 +122,7 @@ var config = new McpServerConfiguration
 
 ### Access Control
 
-| `IsReadOnly` | `set_property` | `invoke_method` (Query) | `invoke_method` (Operation) |
+| `IsReadOnly` | `set_property` | `invoke_method` (Browse) | `invoke_method` (Operation) |
 |--------------|---------------|------------------------|-----------------------------|
 | `true` | Blocked | Allowed | Blocked |
 | `false` | Allowed | Allowed | Allowed |
@@ -122,7 +131,7 @@ var config = new McpServerConfiguration
 
 ### IMcpSubjectEnricher
 
-Add subject-level metadata (prefixed with `$`) to query responses:
+Add subject-level metadata (prefixed with `$`) to browse responses:
 
 ```csharp
 public class MyEnricher : IMcpSubjectEnricher
