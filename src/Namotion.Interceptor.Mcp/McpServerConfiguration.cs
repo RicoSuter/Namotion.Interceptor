@@ -40,6 +40,12 @@ public class McpServerConfiguration
     public int MaxSubjectsPerResponse { get; init; } = 500;
 
     /// <summary>
+    /// Prefix prepended to all output paths. Default is empty.
+    /// Set to "/" for slash-based paths that should be absolute.
+    /// </summary>
+    public string PathPrefix { get; init; } = "";
+
+    /// <summary>
     /// When true, set_property is blocked and invoke_method only allows Query methods.
     /// </summary>
     public bool IsReadOnly { get; init; } = true;

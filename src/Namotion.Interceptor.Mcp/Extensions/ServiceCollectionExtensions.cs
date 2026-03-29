@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Protocol;
 using Namotion.Interceptor.Mcp.Tools;
@@ -10,6 +11,11 @@ namespace Namotion.Interceptor.Mcp.Extensions;
 /// </summary>
 public static class ServiceCollectionExtensions
 {
+    internal static readonly JsonSerializerOptions SerializerOptions = new()
+    {
+        Converters = { new JsonStringEnumConverter() }
+    };
+
     /// <summary>
     /// Registers subject registry tools with the MCP server builder.
     /// Tools are listed and called via custom MCP handlers that lazily resolve configuration from the service provider.
@@ -65,7 +71,7 @@ public static class ServiceCollectionExtensions
                 var result = await tool.Handler(input, cancellationToken);
                 return new CallToolResult
                 {
-                    Content = [new TextContentBlock { Text = JsonSerializer.Serialize(result) }]
+                    Content = [new TextContentBlock { Text = JsonSerializer.Serialize(result, SerializerOptions) }]
                 };
             }
             catch (Exception exception)

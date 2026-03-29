@@ -159,7 +159,9 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
             return null;
         }
 
-        if (string.IsNullOrEmpty(path))
+        var isRootPath = string.IsNullOrEmpty(path) || path == "/";
+
+        if (isRootPath)
         {
             return rootRegistered;
         }

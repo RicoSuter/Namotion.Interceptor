@@ -44,17 +44,19 @@ internal static class McpToolHelper
     internal static string? TryGetSubjectPath(
         RegisteredSubject subject,
         PathProviderBase pathProvider,
-        IInterceptorSubject rootSubject)
+        IInterceptorSubject rootSubject,
+        string pathPrefix = "")
     {
         if (subject.Subject == rootSubject)
         {
-            return "";
+            return pathPrefix.Length > 0 ? pathPrefix : null;
         }
 
         if (subject.Parents.Length > 0)
         {
             var parent = subject.Parents[0];
-            return parent.Property.TryGetPath(pathProvider, rootSubject, parent.Index);
+            var path = parent.Property.TryGetPath(pathProvider, rootSubject, parent.Index);
+            return path is not null ? $"{pathPrefix}{path}" : null;
         }
 
         return null;
@@ -70,7 +72,7 @@ internal static class McpToolHelper
     {
         var node = new Dictionary<string, object?>();
 
-        var subjectPath = TryGetSubjectPath(subject, pathProvider, rootSubject);
+        var subjectPath = TryGetSubjectPath(subject, pathProvider, rootSubject, configuration.PathPrefix);
         if (subjectPath is not null)
         {
             node["$path"] = subjectPath;

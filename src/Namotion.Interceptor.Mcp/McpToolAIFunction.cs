@@ -30,14 +30,28 @@ internal sealed class McpToolAIFunction : AIFunction
         AIFunctionArguments arguments,
         CancellationToken cancellationToken)
     {
-        // Convert the AIFunctionArguments dictionary to a JsonElement for the handler.
-        var argumentsDictionary = new Dictionary<string, object?>();
-        foreach (var kvp in arguments)
+        // Build a JSON object from the arguments, preserving JsonElement values as-is
+        // to avoid double-serialization (e.g., a JsonElement boolean becoming a string "true").
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
         {
-            argumentsDictionary[kvp.Key] = kvp.Value;
+            writer.WriteStartObject();
+            foreach (var kvp in arguments)
+            {
+                writer.WritePropertyName(kvp.Key);
+                if (kvp.Value is JsonElement jsonElement)
+                {
+                    jsonElement.WriteTo(writer);
+                }
+                else
+                {
+                    JsonSerializer.Serialize(writer, kvp.Value);
+                }
+            }
+            writer.WriteEndObject();
         }
 
-        var inputElement = JsonSerializer.SerializeToElement(argumentsDictionary);
+        var inputElement = JsonSerializer.Deserialize<JsonElement>(stream.ToArray());
         return await _descriptor.Handler(inputElement, cancellationToken);
     }
 }

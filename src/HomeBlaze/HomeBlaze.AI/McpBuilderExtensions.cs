@@ -37,6 +37,7 @@ public static class McpBuilderExtensions
                 return new McpServerConfiguration
                 {
                     PathProvider = pathProvider,
+                    PathPrefix = "/",
                     SubjectEnrichers = { new HomeBlazeMcpSubjectEnricher(typeProviders, isReadOnly) },
                     TypeProviders = typeProviders,
                     ToolProviders =

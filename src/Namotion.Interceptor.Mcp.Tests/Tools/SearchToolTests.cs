@@ -258,7 +258,7 @@ public class SearchToolTests
     [Fact]
     public async Task Search_excludeTypes_filters_out_matching_subjects()
     {
-        // Arrange
+        // Arrange — TestDevice is a child of TestRoom (root), giving it a valid path
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
@@ -273,17 +273,28 @@ public class SearchToolTests
         var factory = new McpToolFactory(room, config);
         var tool = factory.CreateTools().First(t => t.Name == "search");
 
-        // Act — search all but exclude TestDevice
-        var input = JsonSerializer.SerializeToElement(new
+        // Act — search for TestDevice but also exclude it
+        var inputWithExclude = JsonSerializer.SerializeToElement(new
         {
-            types = new[] { "TestDevice", "TestRoom" },
+            types = new[] { "TestDevice" },
             excludeTypes = new[] { "TestDevice" }
         });
-        var result = await tool.Handler(input, CancellationToken.None);
-        var json = JsonSerializer.SerializeToElement(result);
+        var resultWithExclude = await tool.Handler(inputWithExclude, CancellationToken.None);
+        var jsonWithExclude = JsonSerializer.SerializeToElement(resultWithExclude);
 
-        // Assert — only TestRoom should remain
-        Assert.Equal(1, json.GetProperty("subjectCount").GetInt32());
+        // Assert — TestDevice excluded, root (TestRoom) has no path with default provider
+        Assert.Equal(0, jsonWithExclude.GetProperty("subjectCount").GetInt32());
+
+        // Act — search for TestDevice without excluding
+        var inputWithoutExclude = JsonSerializer.SerializeToElement(new
+        {
+            types = new[] { "TestDevice" }
+        });
+        var resultWithoutExclude = await tool.Handler(inputWithoutExclude, CancellationToken.None);
+        var jsonWithoutExclude = JsonSerializer.SerializeToElement(resultWithoutExclude);
+
+        // Assert — TestDevice found (has path "Device")
+        Assert.Equal(1, jsonWithoutExclude.GetProperty("subjectCount").GetInt32());
     }
 
     [Fact]
