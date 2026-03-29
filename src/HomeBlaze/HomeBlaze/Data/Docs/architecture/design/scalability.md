@@ -94,7 +94,7 @@ A **shared path cache service** registered on the `IInterceptorSubjectContext`, 
 ### Open Questions
 
 - Should the cache be per path provider instance or support multiple providers in one cache?
-- Should full path resolution (multi-segment, e.g., `Root.Machines.CNC01.Temperature`) also be cached, or only single-segment lookups?
+- Should full path resolution (multi-segment, e.g., `/Machines/CNC01/Temperature`) also be cached, or only single-segment lookups?
 - Should connectors be able to opt out (e.g., if they need custom key spaces like OPC UA NodeIds)?
 - How to handle `[InlinePaths]` dictionary keys that are dynamic (keys added/removed at runtime)?
 

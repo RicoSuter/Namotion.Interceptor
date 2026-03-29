@@ -703,7 +703,7 @@ For subject path configuration properties, use the `SubjectPathField` component 
 <SubjectPathField @bind-Value="_path"
                   @bind-Value:after="OnFieldChanged"
                   Label="Subject Path"
-                  Placeholder="e.g., Root or Root.Demo.Conveyor"
+                  Placeholder="e.g., / or /Demo/Conveyor"
                   Class="mt-4" />
 ```
 

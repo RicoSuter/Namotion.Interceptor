@@ -14,8 +14,8 @@ Welcome to your HomeBlaze dashboard.222
 
 | Motor | Temperature | Speed | Target |
 |-------|-------------|-------|--------|
-| **Conveyor** | {{ Root.Children[Demo].Children[Conveyor].Temperature }} | {{ Root.Children[Demo].Children[Conveyor].CurrentSpeed }} | {{ Root.Children[Demo].Children[Conveyor].TargetSpeed }} |
-| **Water Pump** | {{ Root.Children[Demo].Children[WaterPump].Temperature }} | {{ Root.Children[Demo].Children[WaterPump].CurrentSpeed }} | {{ Root.Children[Demo].Children[WaterPump].TargetSpeed }} |
-| **Cooling Fan** | {{ Root.Children[Demo].Children[CoolingFan].Temperature }} | {{ Root.Children[Demo].Children[CoolingFan].CurrentSpeed }} | {{ Root.Children[Demo].Children[CoolingFan].TargetSpeed }} |
-| **Compressor** | {{ Root.Children[Demo].Children[Compressor].Temperature }} | {{ Root.Children[Demo].Children[Compressor].CurrentSpeed }} | {{ Root.Children[Demo].Children[Compressor].TargetSpeed }} |
-| **Exhaust Fan** | {{ Root.Children[Demo].Children[ExhaustFan].Temperature }} | {{ Root.Children[Demo].Children[ExhaustFan].CurrentSpeed }} | {{ Root.Children[Demo].Children[ExhaustFan].TargetSpeed }} |
+| **Conveyor** | {{ /Demo/Conveyor/Temperature }} | {{ /Demo/Conveyor/CurrentSpeed }} | {{ /Demo/Conveyor/TargetSpeed }} |
+| **Water Pump** | {{ /Demo/WaterPump/Temperature }} | {{ /Demo/WaterPump/CurrentSpeed }} | {{ /Demo/WaterPump/TargetSpeed }} |
+| **Cooling Fan** | {{ /Demo/CoolingFan/Temperature }} | {{ /Demo/CoolingFan/CurrentSpeed }} | {{ /Demo/CoolingFan/TargetSpeed }} |
+| **Compressor** | {{ /Demo/Compressor/Temperature }} | {{ /Demo/Compressor/CurrentSpeed }} | {{ /Demo/Compressor/TargetSpeed }} |
+| **Exhaust Fan** | {{ /Demo/ExhaustFan/Temperature }} | {{ /Demo/ExhaustFan/CurrentSpeed }} | {{ /Demo/ExhaustFan/TargetSpeed }} |
