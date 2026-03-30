@@ -93,7 +93,7 @@
         @foreach (var property in GetChildProperties())
         {
             var children = GetVisibleChildren(property);
-            @if (children.Length == 1)
+            @if (children.Length == 1 && property.IsSubjectReference)
             {
                 @* Single child - no expansion panel *@
                 <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Class="pt-4" Style="padding-top: 0; padding-bottom: 0">
@@ -122,7 +122,7 @@
                     <MudDivider />
                 </MudList>
             }
-            else if (children.Length > 1)
+            else if (children.Length >= 1)
             {
                 <MudExpansionPanel Gutters="false" Dense="true" Expanded="true" Class="px-4">
                     <TitleContent>

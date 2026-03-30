@@ -11,7 +11,6 @@ using HueApi.BridgeLocator;
 using HueApi.Models.Responses;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Newtonsoft.Json.Linq;
 
@@ -34,7 +33,6 @@ public partial class HueBridge : BackgroundService,
     IIconProvider,
     ILastUpdatedProvider
 {
-    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<HueBridge> _logger;
     private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
 
@@ -56,19 +54,19 @@ public partial class HueBridge : BackgroundService,
     public partial bool IsConnected { get; set; }
 
     [State]
-    public partial HueLightbulb[] Lights { get; set; }
+    public partial HueGroup[] Rooms { get; set; }
 
     [State]
-    public partial HueMotionDevice[] MotionSensors { get; set; }
+    public partial HueGroup[] Zones { get; set; }
+    
+    [State]
+    public partial HueLightbulb[] Lights { get; set; }
 
     [State]
     public partial HueButtonDevice[] ButtonDevices { get; set; }
 
     [State]
-    public partial HueGroup[] Rooms { get; set; }
-
-    [State]
-    public partial HueGroup[] Zones { get; set; }
+    public partial HueMotionDevice[] MotionSensors { get; set; }
 
     [State]
     public partial HueDevice[] Devices { get; set; }
@@ -86,7 +84,7 @@ public partial class HueBridge : BackgroundService,
     public string? Title => "Hue Bridge (" + (_bridge?.IpAddress ?? "?") + ")";
 
     [Derived]
-    public string? IconName => IsConnected ? "Hub" : "HubOutlined";
+    public string IconName => IsConnected ? "Hub" : "HubOutlined";
 
     [Derived]
     public string? IconColor =>
@@ -99,14 +97,8 @@ public partial class HueBridge : BackgroundService,
     [Derived]
     public decimal? EnergyConsumed => null;
 
-    public HueBridge(
-        IHttpClientFactory httpClientFactory,
-        ILogger<HueBridge> logger,
-        IInterceptorSubjectContext context)
+    public HueBridge(ILogger<HueBridge> logger)
     {
-        ((IInterceptorSubject)this).Context.AddFallbackContext(context);
-
-        _httpClientFactory = httpClientFactory;
         _logger = logger;
 
         PollingInterval = TimeSpan.FromMilliseconds(500);
@@ -293,135 +285,142 @@ public partial class HueBridge : BackgroundService,
         var rooms = await client.GetRoomsAsync();
         var zones = await client.GetZonesAsync();
 
-        var lights = await client.GetLightsAsync();
-        var buttons = await client.GetButtonsAsync();
-        var motions = await client.GetMotionsAsync();
-        var groupedLights = await client.GetGroupedLightsAsync();
-        var temperatures = await client.GetTemperaturesAsync();
-        var lightLevels = await client.GetLightLevelsAsync();
+        var lights = await client.Light.GetAllAsync();
+        var buttons = await client.Button.GetAllAsync();
+        var motions = await client.Motion.GetAllAsync();
+        var groupedLights = await client.GroupedLight.GetAllAsync();
+        var temperatures = await client.Temperature.GetAllAsync();
+        var lightLevels = await client.LightLevel.GetAllAsync();
 
         var existingDevices = Devices;
 
-        var allDevices = devices.Data.Select(device =>
-        {
-            var services = device.Services?.Select(service => service.Rid).ToArray() ?? [];
-            var zigbeeConnectivity = zigbeeConnectivities.Data.SingleOrDefault(item => services.Contains(item.Id));
-            var devicePower = devicePowers.Data.SingleOrDefault(item => services.Contains(item.Id));
-
-            // Try to find existing device by ResourceId
-            var existingDevice = existingDevices.SingleOrDefault(existing => existing.ResourceId == device.Id);
-
-            // Light device
-            var lightService = device.Services?.SingleOrDefault(service => service.Rtype == "light");
-            if (lightService is not null)
+        var allDevices = devices.Data
+            .Select(device =>
             {
-                var light = lights.Data.SingleOrDefault(item => item.Id == lightService.Rid);
-                if (light is not null)
+                var services = device.Services?.Select(service => service.Rid).ToArray() ?? [];
+                var zigbeeConnectivity = zigbeeConnectivities.Data.SingleOrDefault(item => services.Contains(item.Id));
+                var devicePower = devicePowers.Data.SingleOrDefault(item => services.Contains(item.Id));
+
+                // Try to find existing device by ResourceId
+                var existingDevice = existingDevices.SingleOrDefault(existing => existing.ResourceId == device.Id);
+
+                // Light device
+                var lightService = device.Services?.SingleOrDefault(service => service.Rtype == "light");
+                if (lightService is not null)
                 {
-                    if (existingDevice is HueLightbulb existingLightbulb)
+                    var light = lights.Data.SingleOrDefault(item => item.Id == lightService.Rid);
+                    if (light is not null)
                     {
-                        return existingLightbulb.Update(device, zigbeeConnectivity, light);
+                        if (existingDevice is HueLightbulb existingLightbulb)
+                        {
+                            return existingLightbulb.Update(device, zigbeeConnectivity, light);
+                        }
+
+                        return new HueLightbulb(device, zigbeeConnectivity, light, this);
+                    }
+                }
+
+                // Motion sensor device
+                var motionService = device.Services?.SingleOrDefault(service => service.Rtype == "motion");
+                if (motionService is not null)
+                {
+                    var motion = motions.Data.SingleOrDefault(item => item.Id == motionService.Rid);
+                    if (motion is not null)
+                    {
+                        var temperature = temperatures.Data.SingleOrDefault(item => services.Contains(item.Id));
+                        var lightLevel = lightLevels.Data.SingleOrDefault(item => services.Contains(item.Id));
+
+                        if (existingDevice is HueMotionDevice existingMotion)
+                        {
+                            return existingMotion.Update(device, zigbeeConnectivity, devicePower, temperature, lightLevel, motion);
+                        }
+
+                        return new HueMotionDevice(device, zigbeeConnectivity, devicePower, temperature, lightLevel, motion, this);
+                    }
+                }
+
+                // Button device
+                var buttonServices = device.Services?
+                    .Where(service => service.Rtype == "button")
+                    .Select(service => buttons.Data.SingleOrDefault(button => button.Id == service.Rid))
+                    .Where(button => button is not null)
+                    .ToArray();
+
+                if (buttonServices is not null && buttonServices.Length > 0)
+                {
+                    if (existingDevice is HueButtonDevice existingButtonDevice)
+                    {
+                        return existingButtonDevice.Update(device, zigbeeConnectivity, devicePower, buttonServices!);
                     }
 
-                    return new HueLightbulb(device, zigbeeConnectivity, light, this);
+                    return new HueButtonDevice(device, zigbeeConnectivity, devicePower, buttonServices!, this);
                 }
-            }
 
-            // Motion sensor device
-            var motionService = device.Services?.SingleOrDefault(service => service.Rtype == "motion");
-            if (motionService is not null)
-            {
-                var motion = motions.Data.SingleOrDefault(item => item.Id == motionService.Rid);
-                if (motion is not null)
+                // Generic device
+                if (existingDevice is not null)
                 {
-                    var temperature = temperatures.Data.SingleOrDefault(item => services.Contains(item.Id));
-                    var lightLevel = lightLevels.Data.SingleOrDefault(item => services.Contains(item.Id));
-
-                    if (existingDevice is HueMotionDevice existingMotion)
-                    {
-                        return existingMotion.Update(device, zigbeeConnectivity, devicePower, temperature, lightLevel, motion);
-                    }
-
-                    return new HueMotionDevice(device, zigbeeConnectivity, devicePower, temperature, lightLevel, motion, this);
-                }
-            }
-
-            // Button device
-            var buttonServices = device.Services?
-                .Where(service => service.Rtype == "button")
-                .Select(service => buttons.Data.SingleOrDefault(button => button.Id == service.Rid))
-                .Where(button => button is not null)
-                .ToArray();
-
-            if (buttonServices is not null && buttonServices.Length > 0)
-            {
-                if (existingDevice is HueButtonDevice existingButtonDevice)
-                {
-                    return existingButtonDevice.Update(device, zigbeeConnectivity, devicePower, buttonServices!);
+                    return existingDevice.Update(device, zigbeeConnectivity);
                 }
 
-                return new HueButtonDevice(device, zigbeeConnectivity, devicePower, buttonServices!, this);
-            }
-
-            // Generic device
-            if (existingDevice is not null)
-            {
-                return existingDevice.Update(device, zigbeeConnectivity);
-            }
-
-            return new HueDevice(device, zigbeeConnectivity, this);
-        })
-        .OrderBy(device => device.Title)
-        .ToArray();
+                return new HueDevice(device, zigbeeConnectivity, this);
+            })
+            .OrderBy(device => device.Title)
+            .ToArray();
 
         Lights = allDevices.OfType<HueLightbulb>().ToArray();
         MotionSensors = allDevices.OfType<HueMotionDevice>().ToArray();
         ButtonDevices = allDevices.OfType<HueButtonDevice>().ToArray();
-        Devices = allDevices;
+        Devices = allDevices
+            .Except(Lights)
+            .Except(MotionSensors)
+            .Except(ButtonDevices)
+            .ToArray();
 
         // Rooms
         var existingRooms = Rooms;
-        Rooms = rooms.Data.Select(room =>
-        {
-            var roomServices = room.Services?.Select(service => service.Rid).ToArray() ?? [];
-            var groupedLight = groupedLights.Data.SingleOrDefault(grouped => roomServices.Contains(grouped.Id));
-            var roomLights = allDevices
-                .OfType<HueLightbulb>()
-                .Where(light => room.Children.Any(child => child.Rid == light.ResourceId || child.Rid == light.ReferenceId))
-                .ToArray();
-
-            var existingRoom = existingRooms.SingleOrDefault(existing => existing.ResourceId == room.Id);
-            if (existingRoom is not null)
+        Rooms = rooms.Data
+            .Select(room =>
             {
-                return existingRoom.Update(room, groupedLight, roomLights);
-            }
+                var roomServices = room.Services?.Select(service => service.Rid).ToArray() ?? [];
+                var groupedLight = groupedLights.Data.SingleOrDefault(grouped => roomServices.Contains(grouped.Id));
+                var roomLights = allDevices
+                    .OfType<HueLightbulb>()
+                    .Where(light => room.Children.Any(child => child.Rid == light.ResourceId || child.Rid == light.ReferenceId))
+                    .ToArray();
 
-            return new HueGroup(room, groupedLight, roomLights, this);
-        })
-        .OrderBy(room => room.Title)
-        .ToArray();
+                var existingRoom = existingRooms.SingleOrDefault(existing => existing.ResourceId == room.Id);
+                if (existingRoom is not null)
+                {
+                    return existingRoom.Update(room, groupedLight, roomLights);
+                }
+
+                return new HueGroup(room, groupedLight, roomLights, this);
+            })
+            .OrderBy(room => room.Title)
+            .ToArray();
 
         // Zones
         var existingZones = Zones;
-        Zones = zones.Data.Select(zone =>
-        {
-            var zoneServices = zone.Services?.Select(service => service.Rid).ToArray() ?? [];
-            var groupedLight = groupedLights.Data.SingleOrDefault(grouped => zoneServices.Contains(grouped.Id));
-            var zoneLights = allDevices
-                .OfType<HueLightbulb>()
-                .Where(light => zone.Children.Any(child => child.Rid == light.ResourceId || child.Rid == light.ReferenceId))
-                .ToArray();
-
-            var existingZone = existingZones.SingleOrDefault(existing => existing.ResourceId == zone.Id);
-            if (existingZone is not null)
+        Zones = zones.Data
+            .Select(zone =>
             {
-                return existingZone.Update(zone, groupedLight, zoneLights);
-            }
+                var zoneServices = zone.Services?.Select(service => service.Rid).ToArray() ?? [];
+                var groupedLight = groupedLights.Data.SingleOrDefault(grouped => zoneServices.Contains(grouped.Id));
+                var zoneLights = allDevices
+                    .OfType<HueLightbulb>()
+                    .Where(light => zone.Children.Any(child => child.Rid == light.ResourceId || child.Rid == light.ReferenceId))
+                    .ToArray();
 
-            return new HueGroup(zone, groupedLight, zoneLights, this);
-        })
-        .OrderBy(zone => zone.Title)
-        .ToArray();
+                var existingZone = existingZones.SingleOrDefault(existing => existing.ResourceId == zone.Id);
+                if (existingZone is not null)
+                {
+                    return existingZone.Update(zone, groupedLight, zoneLights);
+                }
+
+                return new HueGroup(zone, groupedLight, zoneLights, this);
+            })
+            .OrderBy(zone => zone.Title)
+            .ToArray();
 
         LastUpdated = DateTimeOffset.Now;
     }
