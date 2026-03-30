@@ -6,7 +6,6 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Extensions;
-using Namotion.Interceptor.Mcp.Implementations;
 
 namespace HomeBlaze.AI;
 
@@ -31,7 +30,7 @@ public static class McpBuilderExtensions
                 var pathProvider = new StateAttributePathProvider();
                 var typeProviders = new IMcpTypeProvider[]
                 {
-                    new SubjectAbstractionsAssemblyTypeProvider(),
+                    new SubjectAbstractionTypeProvider(),
                     new SubjectTypeRegistryTypeProvider(typeRegistry)
                 };
 

@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Devices.Covers;
@@ -5,6 +7,8 @@ namespace HomeBlaze.Abstractions.Devices.Covers;
 /// <summary>
 /// Controller interface for roller shutters.
 /// </summary>
+[SubjectAbstraction]
+[Description("Controls a roller shutter with open, close, stop, and position operations.")]
 public interface IRollerShutterController : IPositionController
 {
     /// <summary>
