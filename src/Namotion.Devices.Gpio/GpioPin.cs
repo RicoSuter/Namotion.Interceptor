@@ -11,7 +11,7 @@ namespace Namotion.Devices.Gpio;
 /// Represents a single GPIO pin with mode, value, and availability status.
 /// </summary>
 [InterceptorSubject]
-public partial class GpioPin : IHostedSubject, ITitleProvider, IIconProvider, ISwitchDevice
+public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider, ISwitchDevice
 {
     internal GpioController? Controller { get; set; }
     internal Action<int>? RegisterInterrupt { get; set; }

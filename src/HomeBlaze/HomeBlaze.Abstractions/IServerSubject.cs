@@ -8,7 +8,7 @@ namespace HomeBlaze.Abstractions;
 /// </summary>
 [SubjectAbstraction]
 [Description("Subject that acts as a server with URL and port.")]
-public interface IServerSubject : IHostedSubject
+public interface IServerSubject : IMonitoredService
 {
     /// <summary>
     /// The server URL (e.g., "opc.tcp://localhost:4840/").

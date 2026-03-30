@@ -603,7 +603,7 @@ Core platform interfaces and attributes:
 |------|----------|
 | Attributes | `[Configuration]`, `[State]`, `[Operation]`, `[Query]`, `StateUnit` |
 | Display | `ITitleProvider`, `IIconProvider` |
-| Lifecycle | `IConfigurable`, `IHostedSubject`, `IServerSubject` |
+| Lifecycle | `IConfigurable`, `IMonitoredService`, `IServerSubject` |
 | Messaging | `IEvent`, `ICommand`, `IMessageBus`, `INotificationPublisher` |
 | Security | `IAuthenticatedSubject` |
 | Networking | `IConnectionState`, `IConnectedSubject` |
