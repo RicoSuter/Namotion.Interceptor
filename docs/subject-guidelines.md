@@ -385,6 +385,64 @@ The event fires only when a property actually changes:
 
 Most other C# patterns (nullable, required, init, virtual, override, data annotations) work naturally.
 
+## Constructor Dependency Injection
+
+Subjects can receive DI-injected services via constructor parameters alongside `IInterceptorSubjectContext`. When you define a constructor that accepts additional parameters, the source generator detects the user-defined constructor and does not generate an additional one.
+
+### Pattern
+
+```csharp
+[InterceptorSubject]
+public partial class HueBridge : BackgroundService, IConfigurable
+{
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly ILogger<HueBridge> _logger;
+
+    [Configuration]
+    public partial string? BridgeId { get; set; }
+
+    [Configuration(IsSecret = true)]
+    public partial string? AppKey { get; set; }
+
+    public HueBridge(
+        IHttpClientFactory httpClientFactory,
+        ILogger<HueBridge> logger,
+        IInterceptorSubjectContext context)
+    {
+        ((IInterceptorSubject)this).Context.AddFallbackContext(context);
+
+        _httpClientFactory = httpClientFactory;
+        _logger = logger;
+
+        BridgeId = null;
+        AppKey = null;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        // Use _httpClientFactory, _logger, etc.
+    }
+
+    public Task ApplyConfigurationAsync(CancellationToken ct = default)
+    {
+        return Task.CompletedTask;
+    }
+}
+```
+
+### How It Works
+
+1. **Source generator detection**: When a user-defined constructor exists, the generator does not emit a parameterless or context-only constructor. The user constructor is responsible for calling `Context.AddFallbackContext(context)` to wire up the interceptor context.
+
+2. **ActivatorUtilities resolution**: When the subject is instantiated via DI (e.g., through `AddHostedSubject`), `ActivatorUtilities.CreateInstance` resolves all constructor parameters from the service provider. Services like `IHttpClientFactory`, `ILogger<T>`, and any other registered services are injected automatically.
+
+3. **Interaction with AddHostedSubject**: The `AddHostedSubject<T>` method detects whether the subject type has a constructor accepting `IInterceptorSubjectContext`. If it does, the context is passed during construction. The `contextResolver` parameter allows overriding which context is provided.
+
+### Examples in the Codebase
+
+- **HueBridge** (`Namotion.Devices.Philips.Hue`): Injects `IHttpClientFactory` and `ILogger<HueBridge>` alongside the interceptor context for HTTP communication with the Hue Bridge API.
+- **OpcUaSubjectServer** (`Namotion.Interceptor.OpcUa`): Injects OPC UA server configuration and telemetry services.
+
 ## Implementing Hosted Subjects for DI
 
 > See [Hosting](hosting.md) for foundational concepts on hosted subjects and the hosting lifecycle.
