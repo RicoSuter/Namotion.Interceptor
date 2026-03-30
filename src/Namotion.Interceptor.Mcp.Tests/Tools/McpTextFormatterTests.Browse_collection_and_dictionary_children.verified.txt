@@ -1,0 +1,9 @@
+﻿# path [Type] "title" $key=value | prop: value | type | @attr: value | Collection/ (Nx Type)
+# Use get_property for exact values or browse with format=json for structured data.
+
+/Root [MyApp.Root]
+  /Root/Pins[0] [MyApp.Pin]
+  /Root/Pins[1] [MyApp.Pin]
+  /Root/Items[A] [MyApp.Item]
+  /Root/Items[B] [MyApp.Item]
+[5 subjects]

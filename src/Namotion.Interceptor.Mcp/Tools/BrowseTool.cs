@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Namotion.Interceptor.Mcp.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
@@ -24,6 +25,7 @@ internal class BrowseTool
         type = "object",
         properties = new
         {
+            format = new { type = "string", @enum = new[] { "text", "json" }, description = "Output format: 'text' (default) for LLM-readable overview, 'json' for exact structured data" },
             path = new { type = "string", description = "Starting path (default: root)" },
             depth = new { type = "integer", description = "Max depth (default: 1)" },
             includeProperties = new { type = "boolean", description = "Include property values (default: false)" },
@@ -41,6 +43,8 @@ internal class BrowseTool
         {
             Name = "browse",
             Description = "Browse the subject tree at a path with configurable depth. " +
+                          "Default text format is optimized for overview and navigation. " +
+                          "Use format=json when you need exact property values or structured data for processing. " +
                           "Use depth=0 with includeProperties=true to see all properties of a subject. " +
                           "Paths: '/' separators, brackets for indices (Pins[0]). " +
                           "To find subjects by type, use search with types instead.",
@@ -57,6 +61,7 @@ internal class BrowseTool
         var rootRegistered = _rootSubjectProvider().TryGetRegisteredSubject()
             ?? throw new InvalidOperationException("Root subject is not registered.");
 
+        var format = input.TryGetProperty("format", out var formatElement) ? formatElement.GetString() : "text";
         var path = input.TryGetProperty("path", out var pathElement) ? pathElement.GetString() : null;
         var depth = input.TryGetProperty("depth", out var depthElement) ? depthElement.GetInt32() : 1;
         var includeProperties = input.TryGetProperty("includeProperties", out var propsElement) && propsElement.GetBoolean();
@@ -101,15 +106,17 @@ internal class BrowseTool
         var result = BuildSubjectNode(startSubject, pathProvider, depth, includeProperties,
             includeAttributes, includeMethods, includeInterfaces, excludeTypes, visited, maxSubjects, ref subjectCount, ref truncated);
 
-        return Task.FromResult<object?>(new
+        var browseResult = new BrowseResult { Result = result, SubjectCount = subjectCount, Truncated = truncated };
+
+        if (format == "json")
         {
-            result,
-            truncated,
-            subjectCount
-        });
+            return Task.FromResult<object?>(browseResult);
+        }
+
+        return Task.FromResult<object?>(McpTextFormatter.FormatBrowseResult(browseResult));
     }
 
-    private Dictionary<string, object?> BuildSubjectTree(
+    private SubjectNode BuildSubjectNode(
         RegisteredSubject subject,
         PathProviderBase pathProvider,
         int remainingDepth,
@@ -123,7 +130,34 @@ internal class BrowseTool
         ref int subjectCount,
         ref bool truncated)
     {
-        var result = new Dictionary<string, object?>();
+        var node = McpToolHelper.BuildSubjectNodeDto(
+            subject, pathProvider, _rootSubjectProvider(), _configuration,
+            includeProperties, includeAttributes, includeMethods, includeInterfaces);
+
+        // Add subject-containing properties via tree traversal
+        BuildSubjectTree(node, subject, pathProvider, remainingDepth,
+            includeProperties, includeAttributes, includeMethods, includeInterfaces, excludeTypes,
+            visited, maxSubjects, ref subjectCount, ref truncated);
+
+        return node;
+    }
+
+    private void BuildSubjectTree(
+        SubjectNode node,
+        RegisteredSubject subject,
+        PathProviderBase pathProvider,
+        int remainingDepth,
+        bool includeProperties,
+        bool includeAttributes,
+        bool includeMethods,
+        bool includeInterfaces,
+        string[]? excludeTypes,
+        HashSet<IInterceptorSubject> visited,
+        int maxSubjects,
+        ref int subjectCount,
+        ref bool truncated)
+    {
+        node.Properties ??= [];
 
         foreach (var property in subject.Properties)
         {
@@ -132,124 +166,128 @@ internal class BrowseTool
                 continue;
             }
 
+            if (!property.CanContainSubjects)
+            {
+                continue; // Scalar properties already handled by BuildSubjectNodeDto
+            }
+
             var segment = pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
 
-            if (property.CanContainSubjects)
+            if (remainingDepth > 0)
             {
-                if (remainingDepth > 0)
+                if (property.IsSubjectReference)
                 {
-                    if (property.IsSubjectReference)
+                    var child = property.Children.FirstOrDefault();
+                    var childSubject = child.Subject?.TryGetRegisteredSubject();
+                    if (child.Subject is not null &&
+                        childSubject is not null &&
+                        !McpToolHelper.ShouldExcludeByType(childSubject, excludeTypes) &&
+                        visited.Add(child.Subject))
                     {
-                        var child = property.Children.FirstOrDefault();
-                        var childSubject = child.Subject?.TryGetRegisteredSubject();
-                        if (child.Subject is not null &&
-                            childSubject is not null &&
-                            !McpToolHelper.ShouldExcludeByType(childSubject, excludeTypes) &&
-                            visited.Add(child.Subject))
+                        if (subjectCount >= maxSubjects)
                         {
-                            if (subjectCount >= maxSubjects)
-                            {
-                                truncated = true;
-                                continue;
-                            }
-
-                            subjectCount++;
-                            result[segment] = BuildSubjectNode(childSubject, pathProvider,
-                                remainingDepth - 1, includeProperties, includeAttributes,
-                                includeMethods, includeInterfaces, excludeTypes,
-                                visited, maxSubjects, ref subjectCount, ref truncated);
-                        }
-                    }
-                    else if (property.IsSubjectDictionary || property.IsSubjectCollection)
-                    {
-                        var target = new Dictionary<string, object?>();
-
-                        foreach (var child in property.Children)
-                        {
-                            var childRegistered = child.Subject.TryGetRegisteredSubject();
-                            if (childRegistered is null ||
-                                McpToolHelper.ShouldExcludeByType(childRegistered, excludeTypes) ||
-                                !visited.Add(child.Subject))
-                            {
-                                continue;
-                            }
-
-                            if (subjectCount >= maxSubjects)
-                            {
-                                truncated = true;
-                                break;
-                            }
-
-                            subjectCount++;
-                            var key = child.Index?.ToString() ?? child.Subject.GetHashCode().ToString();
-                            target[key] = BuildSubjectNode(childRegistered, pathProvider,
-                                remainingDepth - 1, includeProperties, includeAttributes,
-                                includeMethods, includeInterfaces, excludeTypes,
-                                visited, maxSubjects, ref subjectCount, ref truncated);
+                            truncated = true;
+                            continue;
                         }
 
-                        if (target.Count > 0)
-                        {
-                            result[segment] = target;
-                        }
+                        subjectCount++;
+                        var childNode = BuildSubjectNode(childSubject, pathProvider,
+                            remainingDepth - 1, includeProperties, includeAttributes,
+                            includeMethods, includeInterfaces, excludeTypes,
+                            visited, maxSubjects, ref subjectCount, ref truncated);
+                        node.Properties.Add(new SubjectObjectProperty(segment, childNode));
                     }
                 }
-                else if (property.Children.Length > 0)
+                else if (property.IsSubjectDictionary)
                 {
-                    var summary = new Dictionary<string, object?>
-                    {
-                        ["$count"] = property.Children.Length
-                    };
+                    var children = new Dictionary<string, SubjectNode>();
 
-                    // Auto-detect child type if all children share the same type
-                    var firstType = property.Children[0].Subject.GetType();
-                    if (property.Children.All(child => child.Subject.GetType() == firstType))
+                    foreach (var child in property.Children)
                     {
-                        summary["$itemType"] = firstType.Name;
+                        var childRegistered = child.Subject.TryGetRegisteredSubject();
+                        if (childRegistered is null ||
+                            McpToolHelper.ShouldExcludeByType(childRegistered, excludeTypes) ||
+                            !visited.Add(child.Subject))
+                        {
+                            continue;
+                        }
+
+                        if (subjectCount >= maxSubjects)
+                        {
+                            truncated = true;
+                            break;
+                        }
+
+                        subjectCount++;
+                        var key = child.Index?.ToString() ?? child.Subject.GetHashCode().ToString();
+                        children[key] = BuildSubjectNode(childRegistered, pathProvider,
+                            remainingDepth - 1, includeProperties, includeAttributes,
+                            includeMethods, includeInterfaces, excludeTypes,
+                            visited, maxSubjects, ref subjectCount, ref truncated);
                     }
 
-                    result[segment] = summary;
+                    if (children.Count > 0)
+                    {
+                        node.Properties.Add(new SubjectDictionaryProperty(segment, Children: children));
+                    }
+                }
+                else if (property.IsSubjectCollection)
+                {
+                    var children = new List<SubjectNode>();
+
+                    foreach (var child in property.Children)
+                    {
+                        var childRegistered = child.Subject.TryGetRegisteredSubject();
+                        if (childRegistered is null ||
+                            McpToolHelper.ShouldExcludeByType(childRegistered, excludeTypes) ||
+                            !visited.Add(child.Subject))
+                        {
+                            continue;
+                        }
+
+                        if (subjectCount >= maxSubjects)
+                        {
+                            truncated = true;
+                            break;
+                        }
+
+                        subjectCount++;
+                        children.Add(BuildSubjectNode(childRegistered, pathProvider,
+                            remainingDepth - 1, includeProperties, includeAttributes,
+                            includeMethods, includeInterfaces, excludeTypes,
+                            visited, maxSubjects, ref subjectCount, ref truncated));
+                    }
+
+                    if (children.Count > 0)
+                    {
+                        node.Properties.Add(new SubjectCollectionProperty(segment, Children: children));
+                    }
                 }
             }
-            else if (includeProperties)
+            else if (property.Children.Length > 0)
             {
-                result[segment] = McpToolHelper.BuildPropertyValue(property, includeAttributes, _configuration.IsReadOnly);
+                // Collapsed at depth boundary
+                var count = property.Children.Length;
+                string? itemType = null;
+                var firstType = property.Children[0].Subject.GetType();
+                if (property.Children.All(child => child.Subject.GetType() == firstType))
+                {
+                    itemType = firstType.Name;
+                }
+
+                if (property.IsSubjectReference)
+                {
+                    node.Properties.Add(new SubjectObjectProperty(segment, Child: null, IsCollapsed: true));
+                }
+                else if (property.IsSubjectDictionary)
+                {
+                    node.Properties.Add(new SubjectDictionaryProperty(segment, IsCollapsed: true, Count: count, ItemType: itemType));
+                }
+                else
+                {
+                    node.Properties.Add(new SubjectCollectionProperty(segment, IsCollapsed: true, Count: count, ItemType: itemType));
+                }
             }
         }
-
-        return result;
-    }
-
-    private Dictionary<string, object?> BuildSubjectNode(
-        RegisteredSubject subject,
-        PathProviderBase pathProvider,
-        int remainingDepth,
-        bool includeProperties,
-        bool includeAttributes,
-        bool includeMethods,
-        bool includeInterfaces,
-        string[]? excludeTypes,
-        HashSet<IInterceptorSubject> visited,
-        int maxSubjects,
-        ref int subjectCount,
-        ref bool truncated)
-    {
-        var node = McpToolHelper.BuildSubjectNode(
-            subject, pathProvider, _rootSubjectProvider(), _configuration,
-            includeProperties: false, includeAttributes: false);
-
-        McpToolHelper.FilterEnrichments(node, includeMethods, includeInterfaces);
-
-        // Properties and child subjects (handled by tree traversal, not flat helper)
-        var tree = BuildSubjectTree(subject, pathProvider, remainingDepth,
-            includeProperties, includeAttributes, includeMethods, includeInterfaces, excludeTypes,
-            visited, maxSubjects, ref subjectCount, ref truncated);
-
-        foreach (var kvp in tree)
-        {
-            node[kvp.Key] = kvp.Value;
-        }
-
-        return node;
     }
 }

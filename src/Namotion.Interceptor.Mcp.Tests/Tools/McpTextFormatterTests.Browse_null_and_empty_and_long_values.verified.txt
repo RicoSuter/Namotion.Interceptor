@@ -1,0 +1,8 @@
+﻿# path [Type] "title" $key=value | prop: value | type | @attr: value | Collection/ (Nx Type)
+# Use get_property for exact values or browse with format=json for structured data.
+
+/Device [MyApp.Device]
+  NullProp: null | string
+  EmptyProp: "" | string
+  LongProp: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx... | string
+[1 subject]

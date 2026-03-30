@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Namotion.Interceptor.Mcp.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
@@ -24,6 +25,7 @@ internal class SearchTool
         type = "object",
         properties = new
         {
+            format = new { type = "string", @enum = new[] { "text", "json" }, description = "Output format: 'text' (default) for LLM-readable overview, 'json' for exact structured data" },
             text = new { type = "string", description = "Search text (matches against title and path, case-insensitive)" },
             types = new { type = "array", items = new { type = "string" }, description = "Filter by type/interface names" },
             includeProperties = new { type = "boolean", description = "Include property values (default: false)" },
@@ -40,8 +42,10 @@ internal class SearchTool
     {
         Name = "search",
         Description = "Search subjects by text and/or type/interface names. " +
+                      "Default text format is optimized for scanning results. " +
+                      "Use format=json when you need exact property values or structured data for processing. " +
                       "Use list_types to discover interface names first, then pass to types parameter. " +
-                      "Returns flat list of matching subjects with $path.",
+                      "Returns flat list of matching subjects with paths.",
         InputSchema = Schema,
         Handler = HandleSearchAsync
     };
@@ -57,6 +61,7 @@ internal class SearchTool
             return Task.FromResult<object?>(new { error = "Subject registry is not available." });
         }
 
+        var format = input.TryGetProperty("format", out var formatElement) ? formatElement.GetString() : "text";
         var text = input.TryGetProperty("text", out var textElement) ? textElement.GetString() : null;
         var includeProperties = input.TryGetProperty("includeProperties", out var propsElement) && propsElement.GetBoolean();
         var includeAttributes = input.TryGetProperty("includeAttributes", out var attrsElement) && attrsElement.GetBoolean();
@@ -81,7 +86,7 @@ internal class SearchTool
 
         var pathPrefix = input.TryGetProperty("path", out var pathPrefixElement) ? pathPrefixElement.GetString() : null;
 
-        var subjects = new Dictionary<string, object?>();
+        var subjects = new Dictionary<string, SubjectNode>();
         var truncated = false;
         var rootSubject = _rootSubjectProvider();
 
@@ -97,29 +102,26 @@ internal class SearchTool
                 continue;
             }
 
-            var subjectPath = McpToolHelper.TryGetSubjectPath(registered, pathProvider, rootSubject, _configuration.PathPrefix);
-            if (subjectPath is null)
+            var node = McpToolHelper.BuildSubjectNodeDto(
+                registered, pathProvider, rootSubject, _configuration,
+                includeProperties, includeAttributes, includeMethods, includeInterfaces);
+
+            if (node.Path is null)
             {
                 continue;
             }
 
             if (!string.IsNullOrEmpty(pathPrefix) &&
-                !subjectPath.StartsWith(pathPrefix, StringComparison.OrdinalIgnoreCase))
+                !node.Path.StartsWith(pathPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            // Compute enrichments early (needed for text matching on $title)
-            var node = new Dictionary<string, object?> { ["$path"] = subjectPath };
-            McpToolHelper.ApplyEnrichments(node, registered, _configuration);
-
-            // Text filter — match against path and $title
+            // Text filter — match against path and title
             if (!string.IsNullOrEmpty(text))
             {
-                var matchesPath = subjectPath.Contains(text, StringComparison.OrdinalIgnoreCase);
-                var matchesTitle = node.TryGetValue("$title", out var title) &&
-                                   title is string titleString &&
-                                   titleString.Contains(text, StringComparison.OrdinalIgnoreCase);
+                var matchesPath = node.Path.Contains(text, StringComparison.OrdinalIgnoreCase);
+                var matchesTitle = node.Title?.Contains(text, StringComparison.OrdinalIgnoreCase) == true;
 
                 if (!matchesPath && !matchesTitle)
                 {
@@ -133,20 +135,22 @@ internal class SearchTool
                 break;
             }
 
-            McpToolHelper.FilterEnrichments(node, includeMethods, includeInterfaces);
-
-            McpToolHelper.ApplyProperties(node, registered, pathProvider,
-                includeProperties, includeAttributes, _configuration.IsReadOnly);
-
-            subjects[subjectPath] = node;
+            subjects[node.Path] = node;
         }
 
-        return Task.FromResult<object?>(new
+        var searchResult = new SearchResult
         {
-            results = subjects,
-            truncated,
-            subjectCount = subjects.Count
-        });
+            Results = subjects,
+            SubjectCount = subjects.Count,
+            Truncated = truncated
+        };
+
+        if (format == "json")
+        {
+            return Task.FromResult<object?>(searchResult);
+        }
+
+        return Task.FromResult<object?>(McpTextFormatter.FormatSearchResult(searchResult));
     }
 
     private static bool ShouldFilterOutByType(RegisteredSubject subject, string[] typeFilter)
