@@ -22,7 +22,7 @@ namespace Namotion.Devices.Gpio;
 [Category("Devices")]
 [Description("GPIO pins and analog channels for Raspberry Pi and other Linux boards")]
 [InterceptorSubject]
-public partial class GpioSubject : BackgroundService, IConfigurable, IHostedSubject, ITitleProvider, IIconProvider
+public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredService, ITitleProvider, IIconProvider
 {
     private readonly GpioDriver? _driver;
     private readonly ConcurrentDictionary<int, PinChangeEventHandler> _interruptHandlers = new();
