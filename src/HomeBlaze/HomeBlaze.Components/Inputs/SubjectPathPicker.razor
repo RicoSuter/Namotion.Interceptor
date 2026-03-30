@@ -35,11 +35,11 @@
             <ItemTemplate>
                 <MudTreeViewItem T="PathTreeItem"
                                  Value="@context.Value"
-                                 Items="@context.Children"
+                                 Items="@GetChildItems(context)"
                                  Text="@context.Value?.DisplayName"
                                  Icon="@context.Value?.Icon"
                                  Expanded="@context.Expanded"
-                                 ExpandedChanged="@(expanded => OnExpandedChanged(context, expanded))"
+                                 ExpandedChanged="@(expanded => OnExpandedChanged((TreeItemData<PathTreeItem>)context, expanded))"
                                  Style="@GetItemStyle(context.Value)" />
             </ItemTemplate>
         </MudTreeView>
@@ -75,7 +75,7 @@
     [Parameter]
     public Func<RegisteredSubjectProperty, bool>? CanSelectProperty { get; set; }
 
-    private readonly List<TreeItemData<PathTreeItem>> _treeItems = new();
+    private readonly List<TreeItemData<PathTreeItem>> _treeItems = [];
 
     private PathTreeItem? _selectedItem;
     private object? _previewValue;
@@ -158,7 +158,8 @@
 
     private bool HasPlaceholderChild(TreeItemData<PathTreeItem> treeItem)
     {
-        return treeItem.Children is [{ Value.IsPlaceholder: true }];
+        return treeItem.Children?.Count == 1 &&
+               treeItem.Children.First() is TreeItemData<PathTreeItem> { Value.IsPlaceholder: true };
     }
 
     private void OnExpandedChanged(TreeItemData<PathTreeItem> treeItem, bool expanded)
@@ -313,12 +314,12 @@
         StateHasChanged();
     }
 
-    private bool ExpandPath(List<TreeItemData<PathTreeItem>>? items, string targetPath)
+    private bool ExpandPath(IReadOnlyCollection<ITreeItemData<PathTreeItem>>? items, string targetPath)
     {
         if (items == null)
             return false;
 
-        foreach (var item in items)
+        foreach (var item in items.OfType<TreeItemData<PathTreeItem>>())
         {
             if (item.Value == null)
                 continue;
@@ -504,6 +505,11 @@
         {
             // Invalid path - ignore
         }
+    }
+
+    private static List<TreeItemData<PathTreeItem>>? GetChildItems(ITreeItemData<PathTreeItem> context)
+    {
+        return context.Children?.OfType<TreeItemData<PathTreeItem>>().ToList();
     }
 
     private class PathTreeItem
