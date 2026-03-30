@@ -178,7 +178,7 @@ Data/
 {
     "$type": "HomeBlaze.AI.LlmAgent",
     "name": "Temperature Monitor",
-    "providerPath": "/config/claude-provider.json",
+    "providerPath": "/config/claude-provider",
     "instructions": "You monitor temperature sensors. Alert via notification if any reading exceeds 80°C. Include the sensor path and current value in the alert.",
     "watchPaths": ["/sensors"],
     "pollInterval": "00:05:00"
