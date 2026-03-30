@@ -32,7 +32,7 @@ entirely configuration by definition - no need to annotate every field.
 
 ```csharp
 [InterceptorSubject]
-public partial class GpioSubject : IConfigurableSubject
+public partial class GpioSubject : IConfigurable
 {
     [Configuration]
     public partial Mcp3008Configuration? Mcp3008 { get; set; }  // Saved

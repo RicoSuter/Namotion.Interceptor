@@ -179,10 +179,10 @@ public partial class Motor : IIconProvider
 
 ## Configuration Lifecycle
 
-Implement `IConfigurableSubject` to react when configuration changes:
+Implement `IConfigurable` to react when configuration changes:
 
 ```csharp
-public partial class Motor : IConfigurableSubject
+public partial class Motor : IConfigurable
 {
     [Configuration]
     public partial string ConnectionString { get; set; }
@@ -382,7 +382,7 @@ using Namotion.Interceptor.Registry.Attributes;
 namespace HomeBlaze.Samples;
 
 [InterceptorSubject]
-public partial class Motor : BackgroundService, IConfigurableSubject, ITitleProvider, IIconProvider
+public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, IIconProvider
 {
     // Configuration (persisted to JSON)
 
@@ -587,7 +587,7 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 |-----------|---------|
 | `ITitleProvider` | Display name in navigation |
 | `IIconProvider` | Icon in navigation/browser |
-| `IConfigurableSubject` | React to configuration changes |
+| `IConfigurable` | React to configuration changes |
 
 ---
 
@@ -603,7 +603,7 @@ Core platform interfaces and attributes:
 |------|----------|
 | Attributes | `[Configuration]`, `[State]`, `[Operation]`, `[Query]`, `StateUnit` |
 | Display | `ITitleProvider`, `IIconProvider` |
-| Lifecycle | `IConfigurableSubject`, `IHostedSubject`, `IServerSubject` |
+| Lifecycle | `IConfigurable`, `IHostedSubject`, `IServerSubject` |
 | Messaging | `IEvent`, `ICommand`, `IMessageBus`, `INotificationPublisher` |
 | Security | `IAuthenticatedSubject` |
 | Networking | `IConnectionState`, `IConnectedSubject` |
@@ -632,7 +632,7 @@ Subjects can inject services via constructor. The system uses `ActivatorUtilitie
 
 ```csharp
 [InterceptorSubject]
-public partial class Widget : IConfigurableSubject
+public partial class Widget : IConfigurable
 {
     private readonly SubjectPathResolver _pathResolver;
     private readonly RootManager _rootManager;

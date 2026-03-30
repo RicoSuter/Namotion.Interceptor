@@ -38,7 +38,7 @@
                            Size="Size.Small"
                            Class="mr-2" />
         }
-        @if (Subject is IStorageFile or IConfigurableSubject)
+        @if (Subject is IStorageFile or IConfigurable)
         {
             <MudIconButton OnClick="@(() => OnDelete.InvokeAsync())"
                            Icon="@Icons.Material.Filled.Delete"
