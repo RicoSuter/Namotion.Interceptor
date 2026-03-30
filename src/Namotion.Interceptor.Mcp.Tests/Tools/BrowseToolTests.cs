@@ -331,7 +331,7 @@ public class BrowseToolTests
         {
             format = "json",
             depth = 1,
-            excludeTypes = new[] { "TestDevice" }
+            excludeTypes = new[] { typeof(TestDevice).FullName }
         });
         var result = await browseTool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);

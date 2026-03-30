@@ -27,8 +27,10 @@ internal class ListTypesTool
     public McpToolInfo CreateTool() => new()
     {
         Name = "list_types",
-        Description = "List available types. Use to discover interface names for search's types parameter. " +
-                      "Search by name with type parameter. Filter with kind ('interfaces'/'concrete').",
+        Description = "REQUIRED first step before searching by capability: discover interface/type names by keyword (e.g. type='battery' → IBatteryState). " +
+                      "search's query parameter only matches names/titles — it cannot filter by capability. " +
+                      "Call this first, then pass the returned type names to search's types parameter (full names with namespace preferred). " +
+                      "Filter with kind ('interfaces'/'concrete').",
         InputSchema = Schema,
         Handler = HandleListTypesAsync
     };

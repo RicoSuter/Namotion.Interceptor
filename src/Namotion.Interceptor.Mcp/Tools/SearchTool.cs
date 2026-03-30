@@ -26,27 +26,25 @@ internal class SearchTool
         properties = new
         {
             format = new { type = "string", @enum = new[] { "text", "json" }, description = "Output format: 'text' (default) for LLM-readable overview, 'json' for exact structured data" },
-            types = new { type = "array", items = new { type = "string" }, description = "Filter by type/interface names" },
+            types = new { type = "array", items = new { type = "string" }, description = "Filter by type/interface names (short or full). Use list_types first to discover the correct names." },
             includeProperties = new { type = "boolean", description = "Include property values (default: false)" },
             includeAttributes = new { type = "boolean", description = "Include registry attributes on properties (default: false)" },
             includeMethods = new { type = "boolean", description = "Include $methods in subject nodes (default: false)" },
             includeInterfaces = new { type = "boolean", description = "Include $interfaces in subject nodes (default: false)" },
             maxSubjects = new { type = "integer", description = "Maximum subjects to return (default: server limit)" },
-            excludeTypes = new { type = "array", items = new { type = "string" }, description = "Exclude subjects matching these type/interface names" },
+            excludeTypes = new { type = "array", items = new { type = "string" }, description = "Exclude subjects matching these type/interface names (short or full)" },
             path = new { type = "string", description = "Scope search to a subtree path prefix" },
-            query = new { type = "string", description = "Filter by case-insensitive substring match on path and all string enrichments (e.g. $title, $icon)" }
+            query = new { type = "string", description = "Filter by path and enrichment values (e.g. $title, $icon) ONLY — does NOT match types, interfaces, or property names. Use list_types + types parameter for capability filtering" }
         }
     });
 
     public McpToolInfo CreateTool() => new()
     {
         Name = "search",
-        Description = "Search subjects by type/interface names. " +
-                      "Default text format is optimized for scanning results. " +
-                      "Use format=json when you need exact property values or structured data for processing. " +
-                      "Use list_types to discover interface names first, then pass to types parameter. " +
-                      "Use query to filter by name or title without loading all subjects. " +
-                      "Returns flat list of matching subjects with paths.",
+        Description = "Find subjects by type/interface names or by enrichments (e.g. title, path). " +
+                      "IMPORTANT: query only matches path and enrichment values (e.g. $title, $icon) — NOT types, interfaces, capabilities, or property names. " +
+                      "To find subjects by capability (e.g. battery, light, temperature), call list_types first to get the interface name, then pass it to types. " +
+                      "Use format=json for structured data, text (default) for overview.",
         InputSchema = Schema,
         Handler = HandleSearchAsync
     };
