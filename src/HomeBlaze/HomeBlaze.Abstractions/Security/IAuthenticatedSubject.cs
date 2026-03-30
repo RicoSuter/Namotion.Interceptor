@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Security;
@@ -5,6 +6,8 @@ namespace HomeBlaze.Abstractions.Security;
 /// <summary>
 /// Interface for subjects that track authentication status.
 /// </summary>
+[SubjectAbstraction]
+[Description("Tracks authentication status, user identity, and authentication time.")]
 public interface IAuthenticatedSubject
 {
     /// <summary>

@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Devices.Light;
@@ -5,6 +7,8 @@ namespace HomeBlaze.Abstractions.Devices.Light;
 /// <summary>
 /// State interface for devices with RGB color.
 /// </summary>
+[SubjectAbstraction]
+[Description("Reports current RGB color as a hex string.")]
 public interface IColorState
 {
     /// <summary>

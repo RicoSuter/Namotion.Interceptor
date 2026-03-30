@@ -29,6 +29,39 @@ app.MapMcp("/mcp");
 
 The MCP server is exposed as an HTTP endpoint. AI agents (Claude Desktop, custom MCP clients) connect to `/mcp` using the MCP protocol over HTTP with Server-Sent Events (SSE).
 
+## Output Format
+
+The `browse` and `search` tools support a `format` parameter:
+
+| Format | Default | Description |
+|--------|---------|-------------|
+| `text` | Yes | Purpose-built indented format optimized for LLM comprehension. One subject per line, one property per line, tree structure via indentation. Best for navigating and understanding the subject tree. |
+| `json` | No | Pretty-printed JSON using typed DTOs with polymorphic property serialization. Use when exact structured data is needed for processing. |
+
+### Text Format
+
+Every text response starts with a one-line legend, followed by subjects in a compact indented format:
+
+```
+# path [Type] "title" $key=value | prop: value | type | @attr: value | Collection/ (Nx Type)
+# Use get_property for exact values or browse with format=json for structured data.
+
+/Demo [MyApp.VirtualFolder] "Demo" $icon=Folder
+  /Demo/MyDevice [MyApp.Device] "My Device"
+    Temperature: 23.5 | number, writable
+      @Unit: °C
+    Sensors/ (3x Sensor)
+[2 subjects]
+```
+
+Key conventions:
+- **Subject line:** `path [FullyQualifiedType] "title" $enrichment=value`
+- **Property:** `name: value | type` or `name: value | type, writable`
+- **Attribute:** `@name: value` (scalar) or `@name: {json}` (complex object)
+- **Collapsed collection:** `Name/ (Nx ItemType)` or `Name/ (N children)`
+- **Footer:** `[N subjects]` or `[N subjects, truncated]`
+- Special values: `null` for null, `""` for empty strings, `...` for truncated strings (>100 chars)
+
 ## Tools
 
 The MCP server provides 5 core tools:
@@ -56,32 +89,53 @@ Properties marked with `[InlinePaths]` flatten dictionary keys into the path (e.
 
 ### `browse`
 
-Browse the subject tree starting at a path. The `result` is the browsed subject node with its children inline:
+Browse the subject tree starting at a path. Use `text` format (default) for overview and navigation, `json` for exact structured data.
 
-- **Subject nodes** include `$path` for use with `get_property`/`set_property`
-- **Properties with children** at depth 0 show `$count` instead of expanding; homogeneous collections also include `$itemType`
-- **Scalar properties** are shown as `{ "value": ... }` when `includeProperties` is true
+**Text format (default):**
+
+```
+# path [Type] "title" $key=value | prop: value | type | @attr: value | Collection/ (Nx Type)
+# Use get_property for exact values or browse with format=json for structured data.
+
+/Demo [MyApp.VirtualFolder] "Demo"
+  /Demo/MyDevice [MyApp.Device] "My Device"
+    Temperature: 23.5 | number, writable
+    Sensors/ (3x Sensor)
+[2 subjects]
+```
+
+**JSON format** (`format=json`):
 
 ```json
 {
   "result": {
     "$path": "Demo",
-    "Children": {
-      "MyDevice": {
-        "$path": "Demo/MyDevice",
-        "$type": "MyApp.Device",
-        "Temperature": { "value": 23.5 },
-        "Sensors": { "$count": 3, "$itemType": "Sensor" }
+    "$type": "MyApp.VirtualFolder",
+    "$title": "Demo",
+    "properties": {
+      "Children": {
+        "kind": "dictionary",
+        "children": {
+          "MyDevice": {
+            "$path": "Demo/MyDevice",
+            "$type": "MyApp.Device",
+            "properties": {
+              "Temperature": { "kind": "value", "value": 23.5, "type": "number" },
+              "Sensors": { "kind": "collection", "count": 3, "itemType": "Sensor", "isCollapsed": true }
+            }
+          }
+        }
       }
     }
   },
-  "truncated": false,
-  "subjectCount": 1
+  "subjectCount": 1,
+  "truncated": false
 }
 ```
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| `format` | `text` | Output format: `text` for LLM-readable overview, `json` for exact structured data |
 | `path` | root | Starting path (e.g., `Folder/Device`) |
 | `depth` | 1 | Max traversal depth (0 = properties only) |
 | `includeProperties` | false | Include property values |
@@ -93,24 +147,42 @@ Browse the subject tree starting at a path. The `result` is the browsed subject 
 
 ### `search`
 
-Search across all subjects. Returns `results` as a flat dictionary keyed by path:
+Search across all subjects. Use `text` format (default) for overview, `json` for exact structured data.
+
+**Text format (default):**
+
+```
+# path [Type] "title" $key=value | prop: value | type | @attr: value | Collection/ (Nx Type)
+# Use get_property for exact values or browse with format=json for structured data.
+
+/Demo/MyDevice [MyApp.Device] "My Device"
+  Temperature: 23.5 | number, writable
+
+[1 subject]
+```
+
+**JSON format** (`format=json`):
 
 ```json
 {
   "results": {
     "Demo/MyDevice": {
       "$path": "Demo/MyDevice",
+      "$type": "MyApp.Device",
       "$title": "My Device",
-      "Temperature": { "value": 23.5 }
+      "properties": {
+        "Temperature": { "kind": "value", "value": 23.5, "type": "number" }
+      }
     }
   },
-  "truncated": false,
-  "subjectCount": 1
+  "subjectCount": 1,
+  "truncated": false
 }
 ```
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| `format` | `text` | Output format: `text` for LLM-readable overview, `json` for exact structured data |
 | `text` | (none) | Filter by text (matches title and path, case-insensitive) |
 | `types` | all | Filter subjects by type/interface full names |
 | `path` | (none) | Scope search to a subtree path prefix |

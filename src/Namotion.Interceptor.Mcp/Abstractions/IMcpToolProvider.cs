@@ -1,7 +1,7 @@
 namespace Namotion.Interceptor.Mcp.Abstractions;
 
 /// <summary>
-/// Provides additional tools beyond the 4 core tools.
+/// Provides additional tools beyond the 5 core tools.
 /// </summary>
 public interface IMcpToolProvider
 {

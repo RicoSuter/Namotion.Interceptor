@@ -1,4 +1,5 @@
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services;
 using HomeBlaze.Storage.Files;
 using Namotion.Interceptor.Attributes;
@@ -10,6 +11,7 @@ namespace HomeBlaze.Storage.Internal;
 /// Supports local paths (relative to parent) and global paths (/ prefix).
 /// </summary>
 [InterceptorSubject]
+[ExcludeFromBrowsing]
 public partial class RenderExpression : ITitleProvider
 {
     private readonly SubjectPathResolver _pathResolver;

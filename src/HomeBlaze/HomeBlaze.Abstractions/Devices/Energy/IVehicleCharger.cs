@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Devices.Energy;
@@ -5,6 +7,8 @@ namespace HomeBlaze.Abstractions.Devices.Energy;
 /// <summary>
 /// Interface for electric vehicle chargers.
 /// </summary>
+[SubjectAbstraction]
+[Description("Electric vehicle charger with charge level and power consumption.")]
 public interface IVehicleCharger : IEnergyCharger
 {
     /// <summary>

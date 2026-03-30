@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Namotion.Interceptor.Mcp.Models;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
@@ -24,7 +25,7 @@ internal class SearchTool
         type = "object",
         properties = new
         {
-            text = new { type = "string", description = "Search text (matches against title and path, case-insensitive)" },
+            format = new { type = "string", @enum = new[] { "text", "json" }, description = "Output format: 'text' (default) for LLM-readable overview, 'json' for exact structured data" },
             types = new { type = "array", items = new { type = "string" }, description = "Filter by type/interface names" },
             includeProperties = new { type = "boolean", description = "Include property values (default: false)" },
             includeAttributes = new { type = "boolean", description = "Include registry attributes on properties (default: false)" },
@@ -39,11 +40,11 @@ internal class SearchTool
     public McpToolInfo CreateTool() => new()
     {
         Name = "search",
-        Description = "Search across all subjects. Filter by text (matches title and path) and/or type names. " +
-                      "Use path to scope search to a subtree. " +
-                      "Use includeMethods/includeInterfaces to see capabilities. " +
-                      "Use excludeTypes to hide noisy types. " +
-                      "Returns a flat list of matching subjects with $path for use with get_property/set_property.",
+        Description = "Search subjects by type/interface names. " +
+                      "Default text format is optimized for scanning results. " +
+                      "Use format=json when you need exact property values or structured data for processing. " +
+                      "Use list_types to discover interface names first, then pass to types parameter. " +
+                      "Returns flat list of matching subjects with paths.",
         InputSchema = Schema,
         Handler = HandleSearchAsync
     };
@@ -59,7 +60,7 @@ internal class SearchTool
             return Task.FromResult<object?>(new { error = "Subject registry is not available." });
         }
 
-        var text = input.TryGetProperty("text", out var textElement) ? textElement.GetString() : null;
+        var format = input.TryGetProperty("format", out var formatElement) ? formatElement.GetString() : "text";
         var includeProperties = input.TryGetProperty("includeProperties", out var propsElement) && propsElement.GetBoolean();
         var includeAttributes = input.TryGetProperty("includeAttributes", out var attrsElement) && attrsElement.GetBoolean();
         var includeMethods = input.TryGetProperty("includeMethods", out var methodsElement) && methodsElement.GetBoolean();
@@ -83,7 +84,7 @@ internal class SearchTool
 
         var pathPrefix = input.TryGetProperty("path", out var pathPrefixElement) ? pathPrefixElement.GetString() : null;
 
-        var subjects = new Dictionary<string, object?>();
+        var subjects = new Dictionary<string, SubjectNode>();
         var truncated = false;
         var rootSubject = _rootSubjectProvider();
 
@@ -94,39 +95,22 @@ internal class SearchTool
                 continue;
             }
 
-            if (McpToolHelper.ShouldExcludeByType(registered, excludeTypes))
+            if (McpToolHelper.ShouldExcludeByType(registered, _configuration.ExcludeTypes, excludeTypes))
             {
                 continue;
             }
 
-            var subjectPath = McpToolHelper.TryGetSubjectPath(registered, pathProvider, rootSubject);
-            if (subjectPath is null)
+            // Compute path cheaply before building full DTO
+            var path = McpToolHelper.TryGetSubjectPath(registered, pathProvider, rootSubject, _configuration.PathPrefix);
+            if (path is null)
             {
                 continue;
             }
 
             if (!string.IsNullOrEmpty(pathPrefix) &&
-                !subjectPath.StartsWith(pathPrefix, StringComparison.OrdinalIgnoreCase))
+                !path.StartsWith(pathPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
-            }
-
-            // Compute enrichments early (needed for text matching on $title)
-            var node = new Dictionary<string, object?> { ["$path"] = subjectPath };
-            McpToolHelper.ApplyEnrichments(node, registered, _configuration);
-
-            // Text filter — match against path and $title
-            if (!string.IsNullOrEmpty(text))
-            {
-                var matchesPath = subjectPath.Contains(text, StringComparison.OrdinalIgnoreCase);
-                var matchesTitle = node.TryGetValue("$title", out var title) &&
-                                   title is string titleString &&
-                                   titleString.Contains(text, StringComparison.OrdinalIgnoreCase);
-
-                if (!matchesPath && !matchesTitle)
-                {
-                    continue;
-                }
             }
 
             if (subjects.Count >= maxSubjects)
@@ -135,20 +119,27 @@ internal class SearchTool
                 break;
             }
 
-            McpToolHelper.FilterEnrichments(node, includeMethods, includeInterfaces);
+            // Build full DTO only for subjects that pass all filters
+            var node = McpToolHelper.BuildSubjectNodeDto(
+                registered, pathProvider, rootSubject, _configuration,
+                includeProperties, includeAttributes, includeMethods, includeInterfaces);
 
-            McpToolHelper.ApplyProperties(node, registered, pathProvider,
-                includeProperties, includeAttributes, _configuration.IsReadOnly);
-
-            subjects[subjectPath] = node;
+            subjects[path] = node;
         }
 
-        return Task.FromResult<object?>(new
+        var searchResult = new SearchResult
         {
-            results = subjects,
-            truncated,
-            subjectCount = subjects.Count
-        });
+            Results = subjects,
+            SubjectCount = subjects.Count,
+            Truncated = truncated
+        };
+
+        if (format == "json")
+        {
+            return Task.FromResult<object?>(searchResult);
+        }
+
+        return Task.FromResult<object?>(McpTextFormatter.FormatSearchResult(searchResult));
     }
 
     private static bool ShouldFilterOutByType(RegisteredSubject subject, string[] typeFilter)

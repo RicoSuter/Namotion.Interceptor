@@ -27,9 +27,8 @@ internal class ListTypesTool
     public McpToolInfo CreateTool() => new()
     {
         Name = "list_types",
-        Description = "List available types. Use kind to filter interfaces/concrete. Use type to search by name. " +
-                      "Interface types include property and method schemas. " +
-                      "Concrete types list implemented interfaces.",
+        Description = "List available types. Use to discover interface names for search's types parameter. " +
+                      "Search by name with type parameter. Filter with kind ('interfaces'/'concrete').",
         InputSchema = Schema,
         Handler = HandleListTypesAsync
     };
@@ -68,11 +67,14 @@ internal class ListTypesTool
         {
             if (typeInfo.IsInterface)
             {
-                return (object)new
+                return new
                 {
                     name = typeInfo.Name,
                     description = typeInfo.Description,
                     isInterface = true,
+                    
+                    // TODO: Properties and methods are currently dangerous, should only include state properties and query/operation methods (need a way to filter here) - maybe add to McpTypeInfo?
+                    // TODO: Also parameters should only include HomeBlaze required parameters (also add to McpTypeInfo? so provider can control what is included?
                     properties = typeInfo.Type.GetProperties()
                         .Select(property => new
                         {
@@ -89,6 +91,7 @@ internal class ListTypesTool
                             returnType = JsonSchemaTypeMapper.ToJsonSchemaType(
                                 method.ReturnType == typeof(void) ? null : method.ReturnType),
                             parameters = method.GetParameters()
+                                .Where(parameter => parameter.ParameterType != typeof(CancellationToken))
                                 .Select(parameter => new
                                 {
                                     name = parameter.Name,

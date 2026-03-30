@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Sensors;
@@ -5,6 +6,8 @@ namespace HomeBlaze.Abstractions.Sensors;
 /// <summary>
 /// Interface for rain sensors.
 /// </summary>
+[SubjectAbstraction]
+[Description("Reports rain status, rate in mm/h, and total accumulation.")]
 public interface IRainSensor
 {
     /// <summary>

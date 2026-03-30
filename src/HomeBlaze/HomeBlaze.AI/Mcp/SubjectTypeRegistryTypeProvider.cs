@@ -1,3 +1,5 @@
+using System.ComponentModel;
+using System.Reflection;
 using HomeBlaze.Services;
 using Namotion.Interceptor.Mcp.Abstractions;
 
@@ -22,7 +24,8 @@ public class SubjectTypeRegistryTypeProvider : IMcpTypeProvider
             if (string.IsNullOrEmpty(type.FullName))
                 continue;
            
-            yield return new McpTypeInfo(type.FullName, null, IsInterface: false, Type: type);
+            var description = type.GetCustomAttribute<DescriptionAttribute>()?.Description;
+            yield return new McpTypeInfo(type.FullName, description, IsInterface: false, Type: type);
         }
     }
 }

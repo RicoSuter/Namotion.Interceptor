@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Devices.Light;
@@ -5,6 +7,8 @@ namespace HomeBlaze.Abstractions.Devices.Light;
 /// <summary>
 /// Controller interface for devices with adjustable brightness.
 /// </summary>
+[SubjectAbstraction]
+[Description("Controls brightness level of a light device.")]
 public interface IBrightnessController
 {
     /// <summary>
