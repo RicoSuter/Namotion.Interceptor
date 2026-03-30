@@ -21,8 +21,12 @@ public record ScalarProperty(
     string Name,
     [property: JsonPropertyName("value")] object? Value,
     [property: JsonPropertyName("type")] string Type,
-    [property: JsonPropertyName("isWritable")] bool IsWritable = false,
-    [property: JsonPropertyName("attributes")] List<PropertyAttribute>? Attributes = null
+    [property: JsonPropertyName("isWritable")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    bool IsWritable = false,
+    [property: JsonPropertyName("attributes")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    List<PropertyAttribute>? Attributes = null
 ) : SubjectNodeProperty(Name);
 
 /// <summary>
@@ -31,7 +35,9 @@ public record ScalarProperty(
 public record SubjectObjectProperty(
     string Name,
     [property: JsonPropertyName("child")] SubjectNode? Child,
-    [property: JsonPropertyName("isCollapsed")] bool IsCollapsed = false
+    [property: JsonPropertyName("isCollapsed")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    bool IsCollapsed = false
 ) : SubjectNodeProperty(Name);
 
 /// <summary>
@@ -39,10 +45,18 @@ public record SubjectObjectProperty(
 /// </summary>
 public record SubjectCollectionProperty(
     string Name,
-    [property: JsonPropertyName("children")] List<SubjectNode>? Children = null,
-    [property: JsonPropertyName("count")] int? Count = null,
-    [property: JsonPropertyName("itemType")] string? ItemType = null,
-    [property: JsonPropertyName("isCollapsed")] bool IsCollapsed = false
+    [property: JsonPropertyName("children")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    List<SubjectNode>? Children = null,
+    [property: JsonPropertyName("count")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? Count = null,
+    [property: JsonPropertyName("itemType")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? ItemType = null,
+    [property: JsonPropertyName("isCollapsed")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    bool IsCollapsed = false
 ) : SubjectNodeProperty(Name);
 
 /// <summary>
@@ -50,10 +64,18 @@ public record SubjectCollectionProperty(
 /// </summary>
 public record SubjectDictionaryProperty(
     string Name,
-    [property: JsonPropertyName("children")] Dictionary<string, SubjectNode>? Children = null,
-    [property: JsonPropertyName("count")] int? Count = null,
-    [property: JsonPropertyName("itemType")] string? ItemType = null,
-    [property: JsonPropertyName("isCollapsed")] bool IsCollapsed = false
+    [property: JsonPropertyName("children")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    Dictionary<string, SubjectNode>? Children = null,
+    [property: JsonPropertyName("count")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    int? Count = null,
+    [property: JsonPropertyName("itemType")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    string? ItemType = null,
+    [property: JsonPropertyName("isCollapsed")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    bool IsCollapsed = false
 ) : SubjectNodeProperty(Name);
 
 /// <summary>

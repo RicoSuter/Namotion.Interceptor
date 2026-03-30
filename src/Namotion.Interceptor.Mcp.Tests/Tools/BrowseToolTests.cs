@@ -205,7 +205,7 @@ public class BrowseToolTests
         var temperature = properties.EnumerateArray()
             .First(p => p.GetProperty("name").GetString() == "Temperature");
         Assert.Equal("number", temperature.GetProperty("type").GetString());
-        Assert.False(temperature.GetProperty("isWritable").GetBoolean());
+        Assert.False(temperature.TryGetProperty("isWritable", out _));
     }
 
     [Fact]
