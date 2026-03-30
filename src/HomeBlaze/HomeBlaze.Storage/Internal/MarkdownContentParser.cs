@@ -19,8 +19,8 @@ namespace HomeBlaze.Storage.Internal;
 public sealed partial class MarkdownContentParser
 {
     // Constants for key prefixes
-    private const string HtmlKeyPrefix = "_html_";
-    private const string ExpressionKeyPrefix = "_expr_";
+    private const string HtmlKeyPrefix = "Html_";
+    private const string ExpressionKeyPrefix = "Expression_";
     private const string SubjectMarkerPrefix = "<!--SUBJECT:";
     private const string SubjectMarkerSuffix = "-->";
 
@@ -302,7 +302,7 @@ public sealed partial class MarkdownContentParser
             var bytesWritten = Encoding.UTF8.GetBytes(content, buffer);
             Span<byte> hashBuffer = stackalloc byte[32];
             SHA256.HashData(buffer.AsSpan(0, bytesWritten), hashBuffer);
-            return Convert.ToHexStringLower(hashBuffer.Slice(0, 8));
+            return Convert.ToHexStringLower(hashBuffer[..8]);
         }
         finally
         {

@@ -176,7 +176,7 @@ With `[InlinePaths]` dictionaries (like folder children), keys become direct seg
 
 ```
 /Demo/Setup.md
-/Docs/Pages.md/Title
+/Docs/Welcome.md/Title
 ```
 
 ### Examples
@@ -258,11 +258,3 @@ The demo includes pre-configured motors in the `demo/` folder:
 3. **Keep paths short** - Deep nesting makes paths harder to maintain
 4. **Use inline subjects for page-specific data** - Don't pollute the global graph
 5. **Leverage live updates** - Properties update automatically, no refresh needed
-
----
-
-## Related Documentation
-
-- [Markdown Pages](../development/pages.md) - Creating interactive pages
-- [Building Subjects](../development/building-subjects.md) - Creating custom subject types
-- [Architecture](../architecture/overview.md) - System design overview
