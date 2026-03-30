@@ -1,0 +1,125 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(HueBridge))]
+@implements ISubjectEditComponent
+
+<MudForm>
+    <MudTextField @bind-Value="_bridgeId"
+                  Label="Bridge ID"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged" />
+
+    <MudTextField @bind-Value="_appKey"
+                  Label="App Key"
+                  Required="true"
+                  RequiredError="App Key is required"
+                  InputType="InputType.Password"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged"
+                  Class="mt-4" />
+
+    <MudNumericField @bind-Value="_pollingIntervalMs"
+                     Label="Polling Interval (ms)"
+                     Min="100"
+                     Max="60000"
+                     Class="mt-4" />
+
+    <MudNumericField @bind-Value="_retryIntervalSeconds"
+                     Label="Retry Interval (seconds)"
+                     Min="5"
+                     Max="300"
+                     Class="mt-4" />
+
+    <MudDivider Class="my-4" />
+
+    <MudText Typo="Typo.subtitle2" Class="mb-2">Current State</MudText>
+    <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+        <MudText>Connection:</MudText>
+        <MudChip T="string"
+                 Size="Size.Small"
+                 Color="@(BridgeSubject?.IsConnected == true ? Color.Success : Color.Error)"
+                 Variant="Variant.Filled">
+            @(BridgeSubject?.IsConnected == true ? "Connected" : "Disconnected")
+        </MudChip>
+    </MudStack>
+    <MudText Class="mt-1">Lights: @(BridgeSubject?.Lights?.Length ?? 0)</MudText>
+    <MudText>Rooms: @(BridgeSubject?.Rooms?.Length ?? 0)</MudText>
+    <MudText>Zones: @(BridgeSubject?.Zones?.Length ?? 0)</MudText>
+</MudForm>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private HueBridge? BridgeSubject => Subject as HueBridge;
+
+    private string? _bridgeId;
+    private string? _appKey;
+    private int _pollingIntervalMs;
+    private int _retryIntervalSeconds;
+
+    private string? _originalBridgeId;
+    private string? _originalAppKey;
+    private int _originalPollingIntervalMs;
+    private int _originalRetryIntervalSeconds;
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(_appKey);
+    public bool IsDirty => _bridgeId != _originalBridgeId ||
+                           _appKey != _originalAppKey ||
+                           _pollingIntervalMs != _originalPollingIntervalMs ||
+                           _retryIntervalSeconds != _originalRetryIntervalSeconds;
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        if (BridgeSubject != null)
+        {
+            _bridgeId = BridgeSubject.BridgeId;
+            _appKey = BridgeSubject.AppKey;
+            _pollingIntervalMs = (int)BridgeSubject.PollingInterval.TotalMilliseconds;
+            _retryIntervalSeconds = (int)BridgeSubject.RetryInterval.TotalSeconds;
+
+            _originalBridgeId = _bridgeId;
+            _originalAppKey = _appKey;
+            _originalPollingIntervalMs = _pollingIntervalMs;
+            _originalRetryIntervalSeconds = _retryIntervalSeconds;
+        }
+        else
+        {
+            _pollingIntervalMs = 500;
+            _retryIntervalSeconds = 30;
+
+            _originalPollingIntervalMs = _pollingIntervalMs;
+            _originalRetryIntervalSeconds = _retryIntervalSeconds;
+        }
+    }
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (BridgeSubject != null && IsValid)
+        {
+            BridgeSubject.BridgeId = _bridgeId;
+            BridgeSubject.AppKey = _appKey;
+            BridgeSubject.PollingInterval = TimeSpan.FromMilliseconds(_pollingIntervalMs);
+            BridgeSubject.RetryInterval = TimeSpan.FromSeconds(_retryIntervalSeconds);
+
+            _originalBridgeId = _bridgeId;
+            _originalAppKey = _appKey;
+            _originalPollingIntervalMs = _pollingIntervalMs;
+            _originalRetryIntervalSeconds = _retryIntervalSeconds;
+
+            IsDirtyChanged?.Invoke(false);
+        }
+
+        return Task.CompletedTask;
+    }
+}
