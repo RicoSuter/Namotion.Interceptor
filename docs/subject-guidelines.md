@@ -393,39 +393,16 @@ Subjects can receive DI-injected services via constructor parameters alongside `
 
 ```csharp
 [InterceptorSubject]
-public partial class HueBridge : BackgroundService, IConfigurable
+public partial class HueBridge
 {
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly ILogger<HueBridge> _logger;
-
-    [Configuration]
-    public partial string? BridgeId { get; set; }
-
-    [Configuration(IsSecret = true)]
-    public partial string? AppKey { get; set; }
-
     public HueBridge(
         IHttpClientFactory httpClientFactory,
         ILogger<HueBridge> logger,
         IInterceptorSubjectContext context)
     {
         ((IInterceptorSubject)this).Context.AddFallbackContext(context);
-
         _httpClientFactory = httpClientFactory;
         _logger = logger;
-
-        BridgeId = null;
-        AppKey = null;
-    }
-
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
-    {
-        // Use _httpClientFactory, _logger, etc.
-    }
-
-    public Task ApplyConfigurationAsync(CancellationToken ct = default)
-    {
-        return Task.CompletedTask;
     }
 }
 ```
