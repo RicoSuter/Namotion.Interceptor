@@ -31,7 +31,11 @@ if (builder.Configuration.GetValue<bool>("UseMcpServer"))
 }
 
 // Add services to the container.
-builder.Services.AddRazorComponents()
+builder.Services
+    .AddHttpClient();
+
+builder.Services
+    .AddRazorComponents()
     .AddInteractiveServerComponents();
 
 var app = builder.Build();
