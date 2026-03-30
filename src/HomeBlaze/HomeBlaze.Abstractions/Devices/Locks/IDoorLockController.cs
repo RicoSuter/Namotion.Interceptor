@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Devices.Locks;
@@ -5,6 +7,8 @@ namespace HomeBlaze.Abstractions.Devices.Locks;
 /// <summary>
 /// Controller interface for door locks.
 /// </summary>
+[SubjectAbstraction]
+[Description("Controls a door lock with lock, unlock, and toggle operations.")]
 public interface IDoorLockController
 {
     /// <summary>

@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Devices;
@@ -5,6 +7,8 @@ namespace HomeBlaze.Abstractions.Devices;
 /// <summary>
 /// State-only interface for switch devices.
 /// </summary>
+[SubjectAbstraction]
+[Description("Reports whether a switch is on, off, or unknown.")]
 public interface ISwitchState
 {
     /// <summary>

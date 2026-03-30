@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Media;
@@ -5,6 +6,8 @@ namespace HomeBlaze.Abstractions.Media;
 /// <summary>
 /// State interface for audio players.
 /// </summary>
+[SubjectAbstraction]
+[Description("Reports audio player state including track, position, and playback status.")]
 public interface IAudioPlayerState : IVolumeState
 {
     /// <summary>
