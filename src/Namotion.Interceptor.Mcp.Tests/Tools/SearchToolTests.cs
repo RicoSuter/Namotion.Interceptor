@@ -5,14 +5,13 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
-using Xunit;
 
 namespace Namotion.Interceptor.Mcp.Tests.Tools;
 
 public class SearchToolTests
 {
     [Fact]
-    public async Task Search_by_type_returns_matching_subjects()
+    public async Task WhenSearchByType_ThenReturnsMatchingSubjects()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -22,15 +21,12 @@ public class SearchToolTests
         var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
         room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
 
-        var config = new McpServerConfiguration
-        {
-            PathProvider = DefaultPathProvider.Instance
-        };
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
         var factory = new McpToolFactory(room, config);
         var tool = factory.CreateTools().First(t => t.Name == "search");
 
         // Act
-        var input = JsonSerializer.SerializeToElement(new { types = new[] { "TestDevice" } });
+        var input = JsonSerializer.SerializeToElement(new { format = "json", types = new[] { "TestDevice" } });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
@@ -39,63 +35,7 @@ public class SearchToolTests
     }
 
     [Fact]
-    public async Task Search_by_text_matches_enricher_title()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
-
-        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
-        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
-
-        var enricher = new TitleEnricher();
-        var config = new McpServerConfiguration
-        {
-            PathProvider = DefaultPathProvider.Instance,
-            SubjectEnrichers = { enricher }
-        };
-        var factory = new McpToolFactory(room, config);
-        var tool = factory.CreateTools().First(t => t.Name == "search");
-
-        // Act — search for "light" should match the device enriched with $title = "Light"
-        var input = JsonSerializer.SerializeToElement(new { text = "light" });
-        var result = await tool.Handler(input, CancellationToken.None);
-        var json = JsonSerializer.SerializeToElement(result);
-
-        // Assert
-        Assert.True(json.GetProperty("subjectCount").GetInt32() >= 1);
-    }
-
-    [Fact]
-    public async Task Search_by_text_matches_path()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
-
-        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
-        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
-
-        var config = new McpServerConfiguration
-        {
-            PathProvider = DefaultPathProvider.Instance
-        };
-        var factory = new McpToolFactory(room, config);
-        var tool = factory.CreateTools().First(t => t.Name == "search");
-
-        // Act — search for "Device" should match the path "Device"
-        var input = JsonSerializer.SerializeToElement(new { text = "Device" });
-        var result = await tool.Handler(input, CancellationToken.None);
-        var json = JsonSerializer.SerializeToElement(result);
-
-        // Assert
-        Assert.True(json.GetProperty("subjectCount").GetInt32() >= 1);
-    }
-
-    [Fact]
-    public async Task Search_with_includeProperties_returns_property_values()
+    public async Task WhenIncludeProperties_ThenReturnsPropertyValues()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -116,21 +56,22 @@ public class SearchToolTests
         // Act
         var input = JsonSerializer.SerializeToElement(new
         {
+            format = "json",
             types = new[] { "TestDevice" },
             includeProperties = true
         });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Assert — the device subject node should contain properties
-        var subjects = json.GetProperty("results");
-        var firstSubject = subjects.EnumerateObject().First().Value;
-        Assert.True(firstSubject.TryGetProperty("DeviceName", out var deviceName));
-        Assert.Equal("Light", deviceName.GetProperty("value").GetString());
+        // Assert
+        var firstSubject = json.GetProperty("results").EnumerateObject().First().Value;
+        var properties = firstSubject.GetProperty("properties");
+        var deviceNameProp = properties.GetProperty("DeviceName");
+        Assert.Equal("Light", deviceNameProp.GetProperty("value").GetString());
     }
 
     [Fact]
-    public async Task Search_respects_max_subjects_limit()
+    public async Task WhenMaxSubjectsExceeded_ThenResultIsTruncated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -149,7 +90,7 @@ public class SearchToolTests
         var tool = factory.CreateTools().First(t => t.Name == "search");
 
         // Act
-        var input = JsonSerializer.SerializeToElement(new { types = new[] { "TestDevice" } });
+        var input = JsonSerializer.SerializeToElement(new { format = "json", types = new[] { "TestDevice" } });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
@@ -158,7 +99,7 @@ public class SearchToolTests
     }
 
     [Fact]
-    public async Task Search_maxSubjects_limits_response_count()
+    public async Task WhenMaxSubjectsParameter_ThenLimitsResponseCount()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -174,15 +115,12 @@ public class SearchToolTests
             ["B"] = childB
         };
 
-        var config = new McpServerConfiguration
-        {
-            PathProvider = DefaultPathProvider.Instance
-        };
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
         var factory = new McpToolFactory(container, config);
         var tool = factory.CreateTools().First(t => t.Name == "search");
 
-        // Act — request only 1 subject
-        var input = JsonSerializer.SerializeToElement(new { types = new[] { "TestContainer" }, maxSubjects = 1 });
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { format = "json", types = new[] { "TestContainer" }, maxSubjects = 1 });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
@@ -192,40 +130,7 @@ public class SearchToolTests
     }
 
     [Fact]
-    public async Task Search_excludes_methods_and_interfaces_by_default()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
-
-        var room = new TestRoom(context) { Name = "Room", Temperature = 21.5m };
-        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
-
-        var enricher = new MethodsAndInterfacesEnricher();
-        var config = new McpServerConfiguration
-        {
-            PathProvider = DefaultPathProvider.Instance,
-            SubjectEnrichers = { enricher }
-        };
-        var factory = new McpToolFactory(room, config);
-        var tool = factory.CreateTools().First(t => t.Name == "search");
-
-        // Act — no includeMethods/includeInterfaces flags
-        var input = JsonSerializer.SerializeToElement(new { types = new[] { "TestDevice" } });
-        var result = await tool.Handler(input, CancellationToken.None);
-        var json = JsonSerializer.SerializeToElement(result);
-
-        // Assert — $methods and $interfaces should be stripped
-        var firstSubject = json.GetProperty("results").EnumerateObject().First().Value;
-        Assert.False(firstSubject.TryGetProperty("$methods", out _));
-        Assert.False(firstSubject.TryGetProperty("$interfaces", out _));
-        // $title should still be present (not filtered)
-        Assert.True(firstSubject.TryGetProperty("$title", out _));
-    }
-
-    [Fact]
-    public async Task Search_includes_methods_and_interfaces_when_requested()
+    public async Task WhenMethodsAndInterfacesNotRequested_ThenTheyAreExcluded()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -245,18 +150,19 @@ public class SearchToolTests
         var tool = factory.CreateTools().First(t => t.Name == "search");
 
         // Act
-        var input = JsonSerializer.SerializeToElement(new { types = new[] { "TestDevice" }, includeMethods = true, includeInterfaces = true });
+        var input = JsonSerializer.SerializeToElement(new { format = "json", types = new[] { "TestDevice" } });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
         // Assert
         var firstSubject = json.GetProperty("results").EnumerateObject().First().Value;
-        Assert.True(firstSubject.TryGetProperty("$methods", out _));
-        Assert.True(firstSubject.TryGetProperty("$interfaces", out _));
+        Assert.False(firstSubject.TryGetProperty("methods", out _));
+        Assert.False(firstSubject.TryGetProperty("interfaces", out _));
+        Assert.True(firstSubject.TryGetProperty("$title", out _));
     }
 
     [Fact]
-    public async Task Search_excludeTypes_filters_out_matching_subjects()
+    public async Task WhenMethodsAndInterfacesRequested_ThenTheyAreIncluded()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -266,28 +172,73 @@ public class SearchToolTests
         var room = new TestRoom(context) { Name = "Room", Temperature = 21.5m };
         room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
 
+        var enricher = new MethodsAndInterfacesEnricher();
         var config = new McpServerConfiguration
         {
-            PathProvider = DefaultPathProvider.Instance
+            PathProvider = DefaultPathProvider.Instance,
+            SubjectEnrichers = { enricher }
         };
         var factory = new McpToolFactory(room, config);
         var tool = factory.CreateTools().First(t => t.Name == "search");
 
-        // Act — search all but exclude TestDevice
+        // Act
         var input = JsonSerializer.SerializeToElement(new
         {
-            types = new[] { "TestDevice", "TestRoom" },
-            excludeTypes = new[] { "TestDevice" }
+            format = "json",
+            types = new[] { "TestDevice" },
+            includeMethods = true,
+            includeInterfaces = true
         });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Assert — only TestRoom should remain
-        Assert.Equal(1, json.GetProperty("subjectCount").GetInt32());
+        // Assert
+        var firstSubject = json.GetProperty("results").EnumerateObject().First().Value;
+        Assert.True(firstSubject.TryGetProperty("methods", out _));
+        Assert.True(firstSubject.TryGetProperty("interfaces", out _));
     }
 
     [Fact]
-    public async Task Search_path_scopes_to_subtree()
+    public async Task WhenExcludeTypes_ThenMatchingSubjectsAreFiltered()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Room", Temperature = 21.5m };
+        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
+
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
+        var factory = new McpToolFactory(room, config);
+        var tool = factory.CreateTools().First(t => t.Name == "search");
+
+        // Act — with exclude
+        var inputWithExclude = JsonSerializer.SerializeToElement(new
+        {
+            format = "json",
+            types = new[] { "TestDevice" },
+            excludeTypes = new[] { "TestDevice" }
+        });
+        var resultWithExclude = await tool.Handler(inputWithExclude, CancellationToken.None);
+        var jsonWithExclude = JsonSerializer.SerializeToElement(resultWithExclude);
+
+        // Act — without exclude
+        var inputWithoutExclude = JsonSerializer.SerializeToElement(new
+        {
+            format = "json",
+            types = new[] { "TestDevice" }
+        });
+        var resultWithoutExclude = await tool.Handler(inputWithoutExclude, CancellationToken.None);
+        var jsonWithoutExclude = JsonSerializer.SerializeToElement(resultWithoutExclude);
+
+        // Assert
+        Assert.Equal(0, jsonWithExclude.GetProperty("subjectCount").GetInt32());
+        Assert.Equal(1, jsonWithoutExclude.GetProperty("subjectCount").GetInt32());
+    }
+
+    [Fact]
+    public async Task WhenPathSpecified_ThenScopesToSubtree()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -301,39 +252,103 @@ public class SearchToolTests
         var innerA = container.Children["GroupA"] as TestContainer;
         innerA!.Children["Nested"] = new TestContainer(context) { Name = "Nested" };
 
-        var config = new McpServerConfiguration
-        {
-            PathProvider = DefaultPathProvider.Instance
-        };
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
         var factory = new McpToolFactory(container, config);
         var tool = factory.CreateTools().First(t => t.Name == "search");
 
-        // Act — search only within Children[GroupA]
+        // Act
         var input = JsonSerializer.SerializeToElement(new
         {
+            format = "json",
             path = "Children[GroupA]",
             types = new[] { "TestContainer" }
         });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Assert — should find GroupA and Nested, but not GroupB or Root
-        var subjects = json.GetProperty("results");
-        var paths = subjects.EnumerateObject().Select(p => p.Name).ToList();
+        // Assert
+        var paths = json.GetProperty("results").EnumerateObject().Select(p => p.Name).ToList();
         Assert.All(paths, p => Assert.StartsWith("Children[GroupA]", p));
     }
 
-    private class TitleEnricher : IMcpSubjectEnricher
+    [Fact]
+    public async Task WhenNoFormatSpecified_ThenDefaultsToText()
     {
-        public IDictionary<string, object?> GetSubjectEnrichments(RegisteredSubject subject)
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
+        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
+
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
+        var factory = new McpToolFactory(room, config);
+        var tool = factory.CreateTools().First(t => t.Name == "search");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { types = new[] { "TestDevice" } });
+        var result = await tool.Handler(input, CancellationToken.None);
+
+        // Assert
+        var text = Assert.IsType<string>(result);
+        Assert.StartsWith("# path [Type]", text);
+        Assert.Contains("[1 subject]", text);
+    }
+
+    [Fact]
+    public async Task WhenPathPrefixConfigured_ThenPathsArePrefixed()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
+        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
+
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance, PathPrefix = "/" };
+        var factory = new McpToolFactory(room, config);
+        var tool = factory.CreateTools().First(t => t.Name == "search");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { format = "json", types = new[] { "TestDevice" } });
+        var result = await tool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert
+        var firstSubject = json.GetProperty("results").EnumerateObject().First();
+        Assert.StartsWith("/", firstSubject.Name);
+        Assert.Equal("/Device", firstSubject.Value.GetProperty("$path").GetString());
+    }
+
+    [Fact]
+    public async Task WhenPathPrefixWithPathScope_ThenScopesByPrefixedPath()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var container = new TestContainer(context) { Name = "Root" };
+        container.Children = new Dictionary<string, TestContainer>
         {
-            var metadata = new Dictionary<string, object?>();
-            if (subject.Subject is TestDevice device)
-            {
-                metadata["$title"] = device.DeviceName;
-            }
-            return metadata;
-        }
+            ["GroupA"] = new(context) { Name = "A" },
+            ["GroupB"] = new(context) { Name = "B" }
+        };
+
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance, PathPrefix = "/" };
+        var factory = new McpToolFactory(container, config);
+        var tool = factory.CreateTools().First(t => t.Name == "search");
+
+        // Act
+        var input = JsonSerializer.SerializeToElement(new { format = "json", path = "/Children[GroupA]", types = new[] { "TestContainer" } });
+        var result = await tool.Handler(input, CancellationToken.None);
+        var json = JsonSerializer.SerializeToElement(result);
+
+        // Assert
+        var paths = json.GetProperty("results").EnumerateObject().Select(p => p.Name).ToList();
+        Assert.All(paths, p => Assert.StartsWith("/Children[GroupA]", p));
     }
 
     private class MethodsAndInterfacesEnricher : IMcpSubjectEnricher

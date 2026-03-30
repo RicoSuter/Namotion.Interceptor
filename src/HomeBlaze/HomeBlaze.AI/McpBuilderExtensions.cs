@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -5,7 +6,6 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Extensions;
-using Namotion.Interceptor.Mcp.Implementations;
 
 namespace HomeBlaze.AI;
 
@@ -30,13 +30,19 @@ public static class McpBuilderExtensions
                 var pathProvider = new StateAttributePathProvider();
                 var typeProviders = new IMcpTypeProvider[]
                 {
-                    new SubjectAbstractionsAssemblyTypeProvider(),
+                    new SubjectAbstractionTypeProvider(),
                     new SubjectTypeRegistryTypeProvider(typeRegistry)
                 };
+
+                var excludeTypes = typeRegistry.RegisteredTypes
+                    .Where(type => type.GetCustomAttributes(typeof(ExcludeFromBrowsingAttribute), true).Length > 0)
+                    .ToArray();
 
                 return new McpServerConfiguration
                 {
                     PathProvider = pathProvider,
+                    PathPrefix = "/",
+                    ExcludeTypes = excludeTypes,
                     SubjectEnrichers = { new HomeBlazeMcpSubjectEnricher(typeProviders, isReadOnly) },
                     TypeProviders = typeProviders,
                     ToolProviders =

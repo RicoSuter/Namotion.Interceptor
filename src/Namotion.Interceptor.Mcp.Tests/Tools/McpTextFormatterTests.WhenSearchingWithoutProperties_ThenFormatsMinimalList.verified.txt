@@ -1,0 +1,7 @@
+﻿# path [Type] $key=value | prop: value | type | @attr: value | Collection/ (Nx Type)
+# Use get_property for exact values or browse with format=json for structured data.
+
+/Demo/Motor1 [MyApp.Motor] $title=Motor 1
+
+/Demo/Motor2 [MyApp.Motor] $title=Motor 2
+[2 subjects, truncated]

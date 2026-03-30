@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Devices.Covers;
@@ -5,6 +7,8 @@ namespace HomeBlaze.Abstractions.Devices.Covers;
 /// <summary>
 /// State interface for roller shutters.
 /// </summary>
+[SubjectAbstraction]
+[Description("Reports roller shutter state including position, movement, and calibration.")]
 public interface IRollerShutterState : IPositionState
 {
     /// <summary>

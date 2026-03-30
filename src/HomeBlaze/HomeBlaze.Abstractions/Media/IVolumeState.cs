@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Media;
@@ -5,6 +6,8 @@ namespace HomeBlaze.Abstractions.Media;
 /// <summary>
 /// State interface for devices with volume control.
 /// </summary>
+[SubjectAbstraction]
+[Description("Reports volume level as a percentage (0=muted, 1=maximum).")]
 public interface IVolumeState
 {
     /// <summary>

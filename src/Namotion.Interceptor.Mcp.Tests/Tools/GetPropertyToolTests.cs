@@ -3,14 +3,13 @@ using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
-using Xunit;
 
 namespace Namotion.Interceptor.Mcp.Tests.Tools;
 
 public class GetPropertyToolTests
 {
     [Fact]
-    public async Task GetProperty_returns_value_and_type()
+    public async Task WhenGettingProperty_ThenReturnsValueAndType()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -39,7 +38,7 @@ public class GetPropertyToolTests
     }
 
     [Fact]
-    public async Task GetProperty_returns_error_for_invalid_path()
+    public async Task WhenInvalidPath_ThenReturnsError()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -65,7 +64,7 @@ public class GetPropertyToolTests
     }
 
     [Fact]
-    public async Task GetProperty_omits_isWritable_when_read_only()
+    public async Task WhenReadOnly_ThenIsWritableIsOmitted()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -92,7 +91,7 @@ public class GetPropertyToolTests
     }
 
     [Fact]
-    public async Task GetProperty_includes_registry_attributes()
+    public async Task WhenPropertyHasAttributes_ThenAttributesAreIncluded()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -101,7 +100,6 @@ public class GetPropertyToolTests
 
         var room = new TestRoom(context) { Name = "Test", Temperature = 21.5m };
 
-        // Add an attribute to the Temperature property
         var registered = room.TryGetRegisteredSubject()!;
         var temperatureProperty = registered.TryGetProperty("Temperature")!;
         temperatureProperty.AddAttribute<string>("Unit", _ => "Celsius");

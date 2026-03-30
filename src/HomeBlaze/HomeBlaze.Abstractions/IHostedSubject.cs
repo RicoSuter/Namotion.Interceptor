@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions;
@@ -5,6 +6,8 @@ namespace HomeBlaze.Abstractions;
 /// <summary>
 /// Base interface for subjects with lifecycle status (services, devices, servers).
 /// </summary>
+[SubjectAbstraction]
+[Description("Subject with lifecycle status tracking (running, stopped, error).")]
 public interface IHostedSubject
 {
     /// <summary>

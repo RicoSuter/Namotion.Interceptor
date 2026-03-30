@@ -3,7 +3,6 @@ using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
-using Xunit;
 
 namespace Namotion.Interceptor.Mcp.Tests.Tools;
 
@@ -33,6 +32,7 @@ public class PathResolutionTests
         // Act - query with path through two dictionary levels
         var input = JsonSerializer.SerializeToElement(new
         {
+            format = "json",
             path = "Children[Servers].Children[OpcUaServer]",
             depth = 1,
             includeProperties = true
@@ -42,8 +42,9 @@ public class PathResolutionTests
 
         // Assert - should resolve to the OpcUaServer subject
         Assert.False(json.TryGetProperty("error", out _), "Expected no error");
-        var subjects = json.GetProperty("result");
-        Assert.True(subjects.TryGetProperty("Name", out var nameProperty));
+        var resultNode = json.GetProperty("result");
+        var properties = resultNode.GetProperty("properties");
+        var nameProperty = properties.GetProperty("Name");
         Assert.Equal("OpcUaServer", nameProperty.GetProperty("value").GetString());
     }
 
