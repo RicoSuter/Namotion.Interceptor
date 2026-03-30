@@ -50,9 +50,7 @@ public class BrowseToolEdgeCaseTests
 
         // Device at depth 0 should be collapsed
         var properties = json.GetProperty("result").GetProperty("properties");
-        var deviceProp = properties.EnumerateArray()
-            .FirstOrDefault(p => p.TryGetProperty("name", out var n) && n.GetString() == "Device");
-        Assert.NotEqual(default, deviceProp);
+        var deviceProp = properties.GetProperty("Device");
         Assert.Equal("object", deviceProp.GetProperty("kind").GetString());
         Assert.True(deviceProp.GetProperty("isCollapsed").GetBoolean());
     }
@@ -101,9 +99,7 @@ public class BrowseToolEdgeCaseTests
         var resultNode = json.GetProperty("result");
         if (resultNode.TryGetProperty("properties", out var props))
         {
-            var hasChildren = props.EnumerateArray()
-                .Any(p => p.TryGetProperty("name", out var n) && n.GetString() == "Children");
-            Assert.False(hasChildren);
+            Assert.False(props.TryGetProperty("Children", out _));
         }
     }
 
@@ -127,8 +123,7 @@ public class BrowseToolEdgeCaseTests
 
         // Device's scalar properties should include DeviceName
         var properties = json.GetProperty("result").GetProperty("properties");
-        var deviceName = properties.EnumerateArray()
-            .First(p => p.GetProperty("name").GetString() == "DeviceName");
+        var deviceName = properties.GetProperty("DeviceName");
         Assert.Equal("Light", deviceName.GetProperty("value").GetString());
     }
 

@@ -1,3 +1,4 @@
+@using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Metadata
 @using HomeBlaze.Host.Components.Dialogs
 @using HomeBlaze.Storage.Abstractions
@@ -91,7 +92,7 @@
         @* Child Collections *@
         @foreach (var property in GetChildProperties())
         {
-            var children = property.Children;
+            var children = GetVisibleChildren(property);
             @if (children.Length == 1)
             {
                 @* Single child - no expansion panel *@
@@ -267,6 +268,13 @@
         return _registeredSubject.Properties
             .Where(p => p is { IsAttribute: false, CanContainSubjects: true })
             .OrderBy(p => p.GetDisplayPosition());
+    }
+
+    private static SubjectPropertyChild[] GetVisibleChildren(RegisteredSubjectProperty property)
+    {
+        return property.Children
+            .Where(child => !Attribute.IsDefined(child.Subject.GetType(), typeof(ExcludeFromBrowsingAttribute), true))
+            .ToArray();
     }
 
     private void TogglePropertyExpanded(string propertyName)

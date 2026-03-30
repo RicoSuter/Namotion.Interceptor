@@ -157,7 +157,7 @@ internal class BrowseTool
         ref int subjectCount,
         ref bool truncated)
     {
-        node.Properties ??= [];
+        node.Properties ??= new Dictionary<string, SubjectNodeProperty>();
 
         foreach (var property in subject.Properties)
         {
@@ -181,7 +181,7 @@ internal class BrowseTool
                     var childSubject = child.Subject?.TryGetRegisteredSubject();
                     if (child.Subject is not null &&
                         childSubject is not null &&
-                        !McpToolHelper.ShouldExcludeByType(childSubject, excludeTypes) &&
+                        !McpToolHelper.ShouldExcludeByType(childSubject, _configuration.ExcludeTypes, excludeTypes) &&
                         visited.Add(child.Subject))
                     {
                         if (subjectCount >= maxSubjects)
@@ -195,7 +195,7 @@ internal class BrowseTool
                             remainingDepth - 1, includeProperties, includeAttributes,
                             includeMethods, includeInterfaces, excludeTypes,
                             visited, maxSubjects, ref subjectCount, ref truncated);
-                        node.Properties.Add(new SubjectObjectProperty(segment, childNode));
+                        node.Properties[segment] = new SubjectObjectProperty(childNode);
                     }
                 }
                 else if (property.IsSubjectDictionary)
@@ -206,7 +206,7 @@ internal class BrowseTool
                     {
                         var childRegistered = child.Subject.TryGetRegisteredSubject();
                         if (childRegistered is null ||
-                            McpToolHelper.ShouldExcludeByType(childRegistered, excludeTypes) ||
+                            McpToolHelper.ShouldExcludeByType(childRegistered, _configuration.ExcludeTypes, excludeTypes) ||
                             !visited.Add(child.Subject))
                         {
                             continue;
@@ -228,7 +228,7 @@ internal class BrowseTool
 
                     if (children.Count > 0)
                     {
-                        node.Properties.Add(new SubjectDictionaryProperty(segment, Children: children));
+                        node.Properties[segment] = new SubjectDictionaryProperty(Children: children);
                     }
                 }
                 else if (property.IsSubjectCollection)
@@ -239,7 +239,7 @@ internal class BrowseTool
                     {
                         var childRegistered = child.Subject.TryGetRegisteredSubject();
                         if (childRegistered is null ||
-                            McpToolHelper.ShouldExcludeByType(childRegistered, excludeTypes) ||
+                            McpToolHelper.ShouldExcludeByType(childRegistered, _configuration.ExcludeTypes, excludeTypes) ||
                             !visited.Add(child.Subject))
                         {
                             continue;
@@ -260,7 +260,7 @@ internal class BrowseTool
 
                     if (children.Count > 0)
                     {
-                        node.Properties.Add(new SubjectCollectionProperty(segment, Children: children));
+                        node.Properties[segment] = new SubjectCollectionProperty(Children: children);
                     }
                 }
             }
@@ -277,15 +277,15 @@ internal class BrowseTool
 
                 if (property.IsSubjectReference)
                 {
-                    node.Properties.Add(new SubjectObjectProperty(segment, Child: null, IsCollapsed: true));
+                    node.Properties[segment] = new SubjectObjectProperty(Child: null, IsCollapsed: true);
                 }
                 else if (property.IsSubjectDictionary)
                 {
-                    node.Properties.Add(new SubjectDictionaryProperty(segment, IsCollapsed: true, Count: count, ItemType: itemType));
+                    node.Properties[segment] = new SubjectDictionaryProperty(IsCollapsed: true, Count: count, ItemType: itemType);
                 }
                 else
                 {
-                    node.Properties.Add(new SubjectCollectionProperty(segment, IsCollapsed: true, Count: count, ItemType: itemType));
+                    node.Properties[segment] = new SubjectCollectionProperty(IsCollapsed: true, Count: count, ItemType: itemType);
                 }
             }
         }

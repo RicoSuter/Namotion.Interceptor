@@ -76,21 +76,17 @@ public class BrowseToolTests
         var resultWith = await browseTool.Handler(inputWith, CancellationToken.None);
         var jsonWith = JsonSerializer.SerializeToElement(resultWith);
 
-        // Without properties, result should not have properties array with scalar values
+        // Without properties, result should not have scalar value properties
         var resultWithoutProps = jsonWithout.GetProperty("result");
         var hasScalarsWithout = resultWithoutProps.TryGetProperty("properties", out var propsWithout) &&
-            propsWithout.EnumerateArray().Any(p => p.GetProperty("kind").GetString() == "value");
+            propsWithout.EnumerateObject().Any(p => p.Value.GetProperty("kind").GetString() == "value");
         Assert.False(hasScalarsWithout);
 
         // With properties, should have Name and Temperature as scalar properties
         var resultWithProps = jsonWith.GetProperty("result");
-        var propsArray = resultWithProps.GetProperty("properties");
-        var propNames = propsArray.EnumerateArray()
-            .Where(p => p.GetProperty("kind").GetString() == "value")
-            .Select(p => p.GetProperty("name").GetString())
-            .ToList();
-        Assert.Contains("Name", propNames);
-        Assert.Contains("Temperature", propNames);
+        var properties = resultWithProps.GetProperty("properties");
+        Assert.True(properties.TryGetProperty("Name", out _));
+        Assert.True(properties.TryGetProperty("Temperature", out _));
     }
 
     [Fact]
@@ -119,11 +115,9 @@ public class BrowseToolTests
         // Enricher should have been called
         Assert.True(enricher.EnrichedSubjects.Count > 0);
 
-        // Find the Device child in the properties array
+        // Find the Device child in properties
         var properties = json.GetProperty("result").GetProperty("properties");
-        var deviceProp = properties.EnumerateArray()
-            .First(p => p.GetProperty("kind").GetString() == "object" && p.GetProperty("name").GetString() == "Device");
-        var deviceNode = deviceProp.GetProperty("child");
+        var deviceNode = properties.GetProperty("Device").GetProperty("child");
         Assert.Equal("enriched", deviceNode.GetProperty("$test").GetString());
     }
 
@@ -174,8 +168,7 @@ public class BrowseToolTests
         var json = JsonSerializer.SerializeToElement(result);
 
         var properties = json.GetProperty("result").GetProperty("properties");
-        var temperature = properties.EnumerateArray()
-            .First(p => p.GetProperty("name").GetString() == "Temperature");
+        var temperature = properties.GetProperty("Temperature");
         Assert.Equal("number", temperature.GetProperty("type").GetString());
         Assert.True(temperature.GetProperty("isWritable").GetBoolean());
     }
@@ -202,8 +195,7 @@ public class BrowseToolTests
         var json = JsonSerializer.SerializeToElement(result);
 
         var properties = json.GetProperty("result").GetProperty("properties");
-        var temperature = properties.EnumerateArray()
-            .First(p => p.GetProperty("name").GetString() == "Temperature");
+        var temperature = properties.GetProperty("Temperature");
         Assert.Equal("number", temperature.GetProperty("type").GetString());
         Assert.False(temperature.TryGetProperty("isWritable", out _));
     }
@@ -259,11 +251,9 @@ public class BrowseToolTests
         var result = await browseTool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Find Device child node in properties array
+        // Find Device child node in properties
         var properties = json.GetProperty("result").GetProperty("properties");
-        var deviceProp = properties.EnumerateArray()
-            .First(p => p.GetProperty("kind").GetString() == "object" && p.GetProperty("name").GetString() == "Device");
-        var device = deviceProp.GetProperty("child");
+        var device = properties.GetProperty("Device").GetProperty("child");
 
         // Methods and interfaces should NOT be present
         Assert.False(device.TryGetProperty("methods", out _));
@@ -297,9 +287,7 @@ public class BrowseToolTests
 
         // Find Device child node
         var properties = json.GetProperty("result").GetProperty("properties");
-        var deviceProp = properties.EnumerateArray()
-            .First(p => p.GetProperty("kind").GetString() == "object" && p.GetProperty("name").GetString() == "Device");
-        var device = deviceProp.GetProperty("child");
+        var device = properties.GetProperty("Device").GetProperty("child");
 
         Assert.True(device.TryGetProperty("methods", out _));
         Assert.True(device.TryGetProperty("interfaces", out _));
@@ -328,15 +316,14 @@ public class BrowseToolTests
         var result = await browseTool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Device should NOT appear in properties
+        // Device should NOT appear in properties (or should have null child)
         var resultNode = json.GetProperty("result");
         if (resultNode.TryGetProperty("properties", out var properties))
         {
-            var hasDevice = properties.EnumerateArray()
-                .Any(p => p.TryGetProperty("name", out var n) && n.GetString() == "Device" &&
-                          p.GetProperty("kind").GetString() == "object" &&
-                          p.TryGetProperty("child", out var c) && c.ValueKind != JsonValueKind.Null);
-            Assert.False(hasDevice);
+            if (properties.TryGetProperty("Device", out var deviceProp))
+            {
+                Assert.True(deviceProp.TryGetProperty("child", out var c) && c.ValueKind == JsonValueKind.Null);
+            }
         }
     }
 
@@ -350,8 +337,8 @@ public class BrowseToolTests
         var container = new TestContainer(context) { Name = "Root" };
         container.Children = new Dictionary<string, TestContainer>
         {
-            ["A"] = new TestContainer(context) { Name = "A" },
-            ["B"] = new TestContainer(context) { Name = "B" }
+            ["A"] = new(context) { Name = "A" },
+            ["B"] = new(context) { Name = "B" }
         };
 
         var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
@@ -364,8 +351,7 @@ public class BrowseToolTests
 
         // Children should be a collapsed dictionary property
         var properties = json.GetProperty("result").GetProperty("properties");
-        var children = properties.EnumerateArray()
-            .First(p => p.GetProperty("name").GetString() == "Children");
+        var children = properties.GetProperty("Children");
         Assert.Equal("dictionary", children.GetProperty("kind").GetString());
         Assert.True(children.GetProperty("isCollapsed").GetBoolean());
         Assert.Equal(2, children.GetProperty("count").GetInt32());

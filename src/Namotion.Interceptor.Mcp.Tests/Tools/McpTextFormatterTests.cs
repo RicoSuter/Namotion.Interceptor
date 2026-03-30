@@ -16,17 +16,17 @@ public class McpTextFormatterTests
                 Type = "MyApp.Root",
                 Title = "Root",
                 Enrichments = new Dictionary<string, object?> { ["$icon"] = "Storage" },
-                Properties =
-                [
-                    new SubjectObjectProperty("Device",
+                Properties = new Dictionary<string, SubjectNodeProperty>
+                {
+                    ["Device"] = new SubjectObjectProperty(
                         Child: new SubjectNode
                         {
                             Path = "/Device",
                             Type = "MyApp.Device",
                             Title = "Light"
                         }),
-                    new SubjectCollectionProperty("Sensors", IsCollapsed: true, Count: 3, ItemType: "Sensor")
-                ]
+                    ["Sensors"] = new SubjectCollectionProperty(IsCollapsed: true, Count: 3, ItemType: "Sensor")
+                }
             },
             SubjectCount = 2
         };
@@ -43,17 +43,17 @@ public class McpTextFormatterTests
             {
                 Path = "/Device",
                 Type = "MyApp.Device",
-                Properties =
-                [
-                    new ScalarProperty("Speed", 1500, "integer", IsWritable: true, Attributes:
+                Properties = new Dictionary<string, SubjectNodeProperty>
+                {
+                    ["Speed"] = new ScalarProperty(1500, "integer", IsWritable: true, Attributes:
                     [
                         new PropertyAttribute("Minimum", 0),
                         new PropertyAttribute("Maximum", 3000),
                         new PropertyAttribute("State", new Dictionary<string, object?> { ["Title"] = "Speed", ["Unit"] = 0 })
                     ]),
-                    new ScalarProperty("Name", "Motor", "string"),
-                    new ScalarProperty("IsActive", true, "boolean")
-                ]
+                    ["Name"] = new ScalarProperty("Motor", "string"),
+                    ["IsActive"] = new ScalarProperty(true, "boolean")
+                }
             },
             SubjectCount = 1
         };
@@ -88,12 +88,12 @@ public class McpTextFormatterTests
             {
                 Path = "/Device",
                 Type = "MyApp.Device",
-                Properties =
-                [
-                    new ScalarProperty("NullProp", null, "string"),
-                    new ScalarProperty("EmptyProp", "", "string"),
-                    new ScalarProperty("LongProp", new string('x', 150), "string")
-                ]
+                Properties = new Dictionary<string, SubjectNodeProperty>
+                {
+                    ["NullProp"] = new ScalarProperty(null, "string"),
+                    ["EmptyProp"] = new ScalarProperty("", "string"),
+                    ["LongProp"] = new ScalarProperty(new string('x', 150), "string")
+                }
             },
             SubjectCount = 1
         };
@@ -110,19 +110,19 @@ public class McpTextFormatterTests
             {
                 Path = "/Root",
                 Type = "MyApp.Root",
-                Properties =
-                [
-                    new SubjectCollectionProperty("Pins", Children:
+                Properties = new Dictionary<string, SubjectNodeProperty>
+                {
+                    ["Pins"] = new SubjectCollectionProperty(Children:
                     [
                         new SubjectNode { Path = "/Root/Pins[0]", Type = "MyApp.Pin" },
                         new SubjectNode { Path = "/Root/Pins[1]", Type = "MyApp.Pin" }
                     ]),
-                    new SubjectDictionaryProperty("Items", Children: new Dictionary<string, SubjectNode>
+                    ["Items"] = new SubjectDictionaryProperty(Children: new Dictionary<string, SubjectNode>
                     {
-                        ["A"] = new SubjectNode { Path = "/Root/Items[A]", Type = "MyApp.Item" },
-                        ["B"] = new SubjectNode { Path = "/Root/Items[B]", Type = "MyApp.Item" }
+                        ["A"] = new() { Path = "/Root/Items[A]", Type = "MyApp.Item" },
+                        ["B"] = new() { Path = "/Root/Items[B]", Type = "MyApp.Item" }
                     })
-                ]
+                }
             },
             SubjectCount = 5
         };
@@ -139,10 +139,10 @@ public class McpTextFormatterTests
             {
                 Path = "/Root",
                 Type = "MyApp.Root",
-                Properties =
-                [
-                    new SubjectDictionaryProperty("Children", IsCollapsed: true, Count: 7)
-                ]
+                Properties = new Dictionary<string, SubjectNodeProperty>
+                {
+                    ["Children"] = new SubjectDictionaryProperty(IsCollapsed: true, Count: 7)
+                }
             },
             SubjectCount = 1
         };
@@ -186,27 +186,27 @@ public class McpTextFormatterTests
         {
             Results = new Dictionary<string, SubjectNode>
             {
-                ["/Demo/Motor1"] = new SubjectNode
+                ["/Demo/Motor1"] = new()
                 {
                     Path = "/Demo/Motor1",
                     Type = "MyApp.Motor",
                     Title = "Motor 1",
-                    Properties =
-                    [
-                        new ScalarProperty("Speed", 1500, "integer", IsWritable: true),
-                        new ScalarProperty("IsRunning", true, "boolean")
-                    ]
+                    Properties = new Dictionary<string, SubjectNodeProperty>
+                    {
+                        ["Speed"] = new ScalarProperty(1500, "integer", IsWritable: true),
+                        ["IsRunning"] = new ScalarProperty(true, "boolean")
+                    }
                 },
-                ["/Demo/Motor2"] = new SubjectNode
+                ["/Demo/Motor2"] = new()
                 {
                     Path = "/Demo/Motor2",
                     Type = "MyApp.Motor",
                     Title = "Motor 2",
-                    Properties =
-                    [
-                        new ScalarProperty("Speed", 2400, "integer", IsWritable: true),
-                        new ScalarProperty("IsRunning", false, "boolean")
-                    ]
+                    Properties = new Dictionary<string, SubjectNodeProperty>
+                    {
+                        ["Speed"] = new ScalarProperty(2400, "integer", IsWritable: true),
+                        ["IsRunning"] = new ScalarProperty(false, "boolean")
+                    }
                 }
             },
             SubjectCount = 2
@@ -222,8 +222,8 @@ public class McpTextFormatterTests
         {
             Results = new Dictionary<string, SubjectNode>
             {
-                ["/Demo/Motor1"] = new SubjectNode { Path = "/Demo/Motor1", Type = "MyApp.Motor", Title = "Motor 1" },
-                ["/Demo/Motor2"] = new SubjectNode { Path = "/Demo/Motor2", Type = "MyApp.Motor", Title = "Motor 2" }
+                ["/Demo/Motor1"] = new() { Path = "/Demo/Motor1", Type = "MyApp.Motor", Title = "Motor 1" },
+                ["/Demo/Motor2"] = new() { Path = "/Demo/Motor2", Type = "MyApp.Motor", Title = "Motor 2" }
             },
             SubjectCount = 2,
             Truncated = true

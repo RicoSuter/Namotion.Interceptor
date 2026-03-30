@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
 
 namespace HomeBlaze.Storage.Internal;
@@ -7,6 +8,7 @@ namespace HomeBlaze.Storage.Internal;
 /// Rendered directly without a component wrapper to allow split HTML tags.
 /// </summary>
 [InterceptorSubject]
+[ExcludeFromBrowsing]
 public partial class HtmlSegment
 {
     public string Html { get; }

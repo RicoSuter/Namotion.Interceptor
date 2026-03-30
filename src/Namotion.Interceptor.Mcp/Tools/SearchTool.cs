@@ -97,7 +97,7 @@ internal class SearchTool
                 continue;
             }
 
-            if (McpToolHelper.ShouldExcludeByType(registered, excludeTypes))
+            if (McpToolHelper.ShouldExcludeByType(registered, _configuration.ExcludeTypes, excludeTypes))
             {
                 continue;
             }

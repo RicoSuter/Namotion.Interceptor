@@ -44,8 +44,7 @@ public class PathResolutionTests
         Assert.False(json.TryGetProperty("error", out _), "Expected no error");
         var resultNode = json.GetProperty("result");
         var properties = resultNode.GetProperty("properties");
-        var nameProperty = properties.EnumerateArray()
-            .First(p => p.GetProperty("name").GetString() == "Name");
+        var nameProperty = properties.GetProperty("Name");
         Assert.Equal("OpcUaServer", nameProperty.GetProperty("value").GetString());
     }
 

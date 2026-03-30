@@ -84,12 +84,12 @@ internal static class McpTextFormatter
             var childIndent = indentStr + "  ";
             var attributeIndent = indentStr + "    ";
 
-            foreach (var property in node.Properties)
+            foreach (var (propertyName, property) in node.Properties)
             {
                 switch (property)
                 {
                     case ScalarProperty scalar:
-                        FormatScalarProperty(sb, scalar, childIndent, attributeIndent);
+                        FormatScalarProperty(sb, scalar, propertyName, childIndent, attributeIndent);
                         break;
 
                     case SubjectObjectProperty { IsCollapsed: false } obj:
@@ -120,11 +120,11 @@ internal static class McpTextFormatter
                         break;
 
                     case SubjectCollectionProperty { IsCollapsed: true } collapsed:
-                        FormatCollapsedProperty(sb, collapsed.Name, collapsed.Count, collapsed.ItemType, childIndent);
+                        FormatCollapsedProperty(sb, propertyName, collapsed.Count, collapsed.ItemType, childIndent);
                         break;
 
                     case SubjectDictionaryProperty { IsCollapsed: true } collapsed:
-                        FormatCollapsedProperty(sb, collapsed.Name, collapsed.Count, collapsed.ItemType, childIndent);
+                        FormatCollapsedProperty(sb, propertyName, collapsed.Count, collapsed.ItemType, childIndent);
                         break;
 
                     case SubjectObjectProperty { IsCollapsed: true }:
@@ -152,10 +152,10 @@ internal static class McpTextFormatter
     }
 
     private static void FormatScalarProperty(
-        StringBuilder sb, ScalarProperty property, string indent, string attributeIndent)
+        StringBuilder sb, ScalarProperty property, string name, string indent, string attributeIndent)
     {
         sb.Append(indent);
-        sb.Append(property.Name);
+        sb.Append(name);
         sb.Append(": ");
         sb.Append(FormatValue(property.Value));
         sb.Append(" | ");
