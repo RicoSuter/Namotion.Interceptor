@@ -26,7 +26,7 @@ public partial class HueMotionDevice : HueDevice,
     internal LightLevelResource? LightLevelResource { get; set; }
 
     [Derived]
-    public new string? IconName => "DirectionsRun";
+    public override string? IconName => "DirectionsRun";
 
     [Derived]
     [State]
