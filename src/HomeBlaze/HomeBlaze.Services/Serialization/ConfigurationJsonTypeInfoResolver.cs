@@ -11,8 +11,8 @@ namespace HomeBlaze.Services.Serialization;
 
 /// <summary>
 /// JSON type info resolver that:
-/// - Sets up polymorphism for IConfigurableSubject with $type discriminator
-/// - Filters properties to only [Configuration] for IConfigurableSubject types
+/// - Sets up polymorphism for IConfigurable with $type discriminator
+/// - Filters properties to only [Configuration] for IConfigurable types
 /// - Allows all properties for plain value objects
 /// </summary>
 public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
@@ -28,8 +28,8 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
     {
         var typeInfo = base.GetTypeInfo(type, options);
 
-        // Set up polymorphism on IConfigurableSubject and IInterceptorSubject base types
-        if (type == typeof(IConfigurableSubject) || type == typeof(IInterceptorSubject))
+        // Set up polymorphism on IConfigurable and IInterceptorSubject base types
+        if (type == typeof(IConfigurable) || type == typeof(IInterceptorSubject))
         {
             typeInfo.PolymorphismOptions = new JsonPolymorphismOptions
             {
@@ -38,9 +38,9 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
                 UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization
             };
 
-            // Register all IConfigurableSubject implementations from TypeProvider
+            // Register all IConfigurable implementations from TypeProvider
             foreach (var derivedType in _typeProvider.Types
-                .Where(t => typeof(IConfigurableSubject).IsAssignableFrom(t)
+                .Where(t => typeof(IConfigurable).IsAssignableFrom(t)
                             && t is { IsAbstract: false, IsInterface: false }))
             {
                 typeInfo.PolymorphismOptions.DerivedTypes.Add(

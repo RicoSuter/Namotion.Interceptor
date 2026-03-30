@@ -274,7 +274,7 @@ Interface for subjects that provide a display title. Used by the UI to show a hu
 
 Interface for subjects that provide a display icon. Used by the UI to show an icon next to the subject name.
 
-### IConfigurableSubject
+### IConfigurable
 
 Interface for subjects that react to configuration changes. Called after `[Configuration]` properties are updated (e.g., after deserialization or editing).
 

@@ -14,7 +14,7 @@ namespace HomeBlaze.Samples;
 [Category("Samples")]
 [Description("Simulated motor with speed control and temperature monitoring")]
 [InterceptorSubject]
-public partial class Motor : BackgroundService, IConfigurableSubject, ITemperatureSensor, ITitleProvider, IIconProvider
+public partial class Motor : BackgroundService, IConfigurable, ITemperatureSensor, ITitleProvider, IIconProvider
 {
     // Configuration (persisted to JSON)
 
@@ -149,7 +149,7 @@ public partial class Motor : BackgroundService, IConfigurableSubject, ITemperatu
     }
 
     /// <summary>
-    /// IConfigurableSubject implementation - called after configuration properties have been updated.
+    /// IConfigurable implementation - called after configuration properties have been updated.
     /// </summary>
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
