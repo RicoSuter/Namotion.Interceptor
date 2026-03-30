@@ -59,7 +59,7 @@ public class NavigationItemResolver
                     {
                         Subject = child,
                         Title = child.GetNavigationTitle(key),
-                        Icon = child.GetIconName(),
+                        Icon = child.GetNavigationIconName(),
                         Path = path,
                         IsPage = isPage,
                         IsFolder = isFolder,
