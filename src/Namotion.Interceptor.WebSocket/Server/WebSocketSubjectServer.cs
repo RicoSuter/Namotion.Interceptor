@@ -92,13 +92,17 @@ public sealed class WebSocketSubjectServer : BackgroundService, ISubjectConnecto
                 // rebuilt, matching real crash behavior (like MQTT restarts its broker).
                 _app = BuildWebApplication(linkedToken, out var listenUrl);
 
-                _logger.LogInformation("WebSocket server starting on {Url}{Path}", listenUrl, _configuration.Path);
-                await _app.StartAsync(stoppingToken).ConfigureAwait(false);
-
+                // Create ChangeQueueProcessor BEFORE starting Kestrel so its subscription
+                // captures all mutations from this point. Otherwise there is a race window
+                // where clients connect and receive a Welcome, but mutations between the
+                // Welcome snapshot and a late subscription start are permanently lost.
                 using var changeQueueProcessor = _handler.CreateChangeQueueProcessor(_logger);
 
                 var processorTask = changeQueueProcessor.ProcessAsync(linkedToken);
                 var heartbeatTask = _handler.RunHeartbeatLoopAsync(linkedToken);
+
+                _logger.LogInformation("WebSocket server starting on {Url}{Path}", listenUrl, _configuration.Path);
+                await _app.StartAsync(stoppingToken).ConfigureAwait(false);
 
                 try
                 {

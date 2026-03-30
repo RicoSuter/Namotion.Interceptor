@@ -1,5 +1,4 @@
 using Namotion.Interceptor.Connectors.Updates.Internal;
-using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Connectors.Updates;
 
@@ -19,7 +18,7 @@ public static class SubjectUpdateExtensions
         this IInterceptorSubject subject,
         SubjectUpdate update,
         ISubjectFactory? subjectFactory,
-        Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
+        Action<PropertyReference, SubjectPropertyUpdate>? transformValueBeforeApply = null)
     {
         SubjectUpdateApplier.ApplyUpdate(
             subject,

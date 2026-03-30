@@ -1,28 +1,21 @@
 ﻿{
-  Root: 1,
+  Root: SubjectId_1,
   Subjects: {
-    1: {
+    SubjectId_1: {
       Children: {
         Kind: Collection,
         Timestamp: DateTimeOffset_1,
-        Operations: [
+        Items: [
           {
-            Action: Move,
-            Index: 0,
-            FromIndex: 2
+            Id: SubjectId_2
           },
           {
-            Action: Move,
-            Index: 1,
-            FromIndex: 0
+            Id: SubjectId_3
           },
           {
-            Action: Move,
-            Index: 2,
-            FromIndex: 1
+            Id: SubjectId_4
           }
-        ],
-        Count: 3
+        ]
       }
     }
   }

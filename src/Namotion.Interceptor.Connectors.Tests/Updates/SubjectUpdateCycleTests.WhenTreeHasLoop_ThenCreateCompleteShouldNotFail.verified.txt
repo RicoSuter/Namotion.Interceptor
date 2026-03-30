@@ -1,16 +1,7 @@
 ﻿{
-  Root: 1,
+  Root: SubjectId_1,
   Subjects: {
-    1: {
-      children: {
-        Kind: Collection,
-        Count: 0
-      },
-      father: {
-        Kind: Object,
-        Timestamp: {Scrubbed},
-        Id: 2
-      },
+    SubjectId_1: {
       firstName: {
         Kind: Value,
         Value: Child,
@@ -28,30 +19,29 @@
           }
         }
       },
+      lastName: {
+        Kind: Value
+      },
       fullName: {
         Kind: Value,
         Value: Child 
       },
-      lastName: {
-        Kind: Value
+      father: {
+        Kind: Object,
+        Timestamp: {Scrubbed},
+        Id: SubjectId_2
       },
       mother: {
         Kind: Object
       },
+      children: {
+        Kind: Collection
+      },
       relationships: {
-        Kind: Value
+        Kind: Dictionary
       }
     },
-    2: {
-      children: {
-        Kind: Collection,
-        Count: 0
-      },
-      father: {
-        Kind: Object,
-        Timestamp: {Scrubbed},
-        Id: 1
-      },
+    SubjectId_2: {
       firstName: {
         Kind: Value,
         Value: Father,
@@ -68,18 +58,26 @@
           }
         }
       },
+      lastName: {
+        Kind: Value
+      },
       fullName: {
         Kind: Value,
         Value: Father 
       },
-      lastName: {
-        Kind: Value
+      father: {
+        Kind: Object,
+        Timestamp: {Scrubbed},
+        Id: SubjectId_1
       },
       mother: {
         Kind: Object
       },
+      children: {
+        Kind: Collection
+      },
       relationships: {
-        Kind: Value
+        Kind: Dictionary
       }
     }
   }

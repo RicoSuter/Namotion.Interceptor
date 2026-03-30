@@ -7,6 +7,12 @@ namespace Namotion.Interceptor.Registry;
 
 public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
 {
+    [ThreadStatic]
+    private static int _suppressRemovalCount;
+
+    [ThreadStatic]
+    private static HashSet<IInterceptorSubject>? _deferredDetaches;
+
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
     private readonly Dictionary<string, IInterceptorSubject> _subjectIdToSubject = new();
     
@@ -93,6 +99,65 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
         }
     }
 
+    /// <summary>
+    /// Suppresses subject removal from the registry during the returned scope.
+    /// While suppressed, context-detach cleanup (removal from _knownSubjects,
+    /// _subjectIdToSubject, and parent/child cleanup) is deferred. On dispose,
+    /// only subjects that are genuinely orphaned (no parents) are removed.
+    /// PropertyReferenceRemoved/Added always run immediately.
+    /// </summary>
+    public IDisposable SuppressRemoval()
+    {
+        _suppressRemovalCount++;
+        _deferredDetaches ??= [];
+        return new RemovalSuppressionScope(this);
+    }
+
+    private void ResumeRemoval()
+    {
+        lock (_knownSubjects)
+        {
+            _suppressRemovalCount--;
+            if (_suppressRemovalCount == 0 && _deferredDetaches is { Count: > 0 })
+            {
+                foreach (var subject in _deferredDetaches)
+                {
+                    if (_knownSubjects.TryGetValue(subject, out var registered) &&
+                        registered.Parents.Length == 0)
+                    {
+                        // Genuinely orphaned — execute deferred context-detach cleanup
+                        foreach (var property in registered.Properties)
+                        {
+                            if (!property.CanContainSubjects)
+                                continue;
+
+                            foreach (var child in property.Children)
+                            {
+                                var childRegistered = _knownSubjects.GetValueOrDefault(child.Subject);
+                                childRegistered?.RemoveParentsByProperty(property);
+                            }
+
+                            property.ClearChildren();
+                        }
+
+                        _knownSubjects.Remove(subject);
+
+                        if (_subjectIdToSubject.Count > 0)
+                        {
+                            var subjectId = subject.TryGetSubjectId();
+                            if (subjectId is not null)
+                            {
+                                _subjectIdToSubject.Remove(subjectId);
+                            }
+                        }
+                    }
+                }
+
+                _deferredDetaches.Clear();
+            }
+        }
+    }
+
     /// <inheritdoc />
     void ILifecycleHandler.HandleLifecycleChange(SubjectLifecycleChange change)
     {
@@ -166,31 +231,42 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                     
                     if (change.IsContextDetach)
                     {
-                        // Remove stale parent references from children and clear
-                        // children lists before this subject leaves _knownSubjects.
-                        foreach (var property in registeredSubject.Properties)
+                        if (_suppressRemovalCount > 0)
                         {
-                            if (!property.CanContainSubjects)
-                                continue;
-
-                            foreach (var child in property.Children)
+                            // Defer removal — subject stays in both maps and
+                            // parent/child cleanup is skipped until scope dispose.
+                            _deferredDetaches ??= [];
+                            _deferredDetaches.Add(change.Subject);
+                        }
+                        else
+                        {
+                            // Immediate removal (existing behavior)
+                            // Remove stale parent references from children and clear
+                            // children lists before this subject leaves _knownSubjects.
+                            foreach (var property in registeredSubject.Properties)
                             {
-                                var childRegistered = _knownSubjects.GetValueOrDefault(child.Subject);
-                                childRegistered?.RemoveParentsByProperty(property);
+                                if (!property.CanContainSubjects)
+                                    continue;
+
+                                foreach (var child in property.Children)
+                                {
+                                    var childRegistered = _knownSubjects.GetValueOrDefault(child.Subject);
+                                    childRegistered?.RemoveParentsByProperty(property);
+                                }
+
+                                property.ClearChildren();
                             }
 
-                            property.ClearChildren();
-                        }
+                            _knownSubjects.Remove(change.Subject);
 
-                        _knownSubjects.Remove(change.Subject);
-
-                        // Clean up subject ID reverse index
-                        if (_subjectIdToSubject.Count > 0)
-                        {
-                            var subjectId = change.Subject.TryGetSubjectId();
-                            if (subjectId is not null)
+                            // Clean up subject ID reverse index
+                            if (_subjectIdToSubject.Count > 0)
                             {
-                                _subjectIdToSubject.Remove(subjectId);
+                                var subjectId = change.Subject.TryGetSubjectId();
+                                if (subjectId is not null)
+                                {
+                                    _subjectIdToSubject.Remove(subjectId);
+                                }
                             }
                         }
                     }
@@ -248,5 +324,18 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     private RegisteredSubjectProperty? TryGetRegisteredProperty(PropertyReference property)
     {
         return TryGetRegisteredSubject(property.Subject)?.TryGetProperty(property.Name);
+    }
+
+    private sealed class RemovalSuppressionScope(SubjectRegistry registry) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                registry.ResumeRemoval();
+            }
+        }
     }
 }

@@ -1,22 +1,11 @@
 ﻿{
-  Root: 1,
+  Root: SubjectId_1,
   Subjects: {
-    1: {
-      Child: {
-        Kind: Object
-      },
-      Items: {
-        Kind: Collection,
-        Count: 0
-      },
-      Lookup: {
-        Kind: Value,
-        Timestamp: DateTimeOffset_1
-      },
+    SubjectId_1: {
       Name: {
         Kind: Value,
         Value: Root,
-        Timestamp: DateTimeOffset_2,
+        Timestamp: DateTimeOffset_1,
         Attributes: {
           Status: {
             Kind: Value,
@@ -24,11 +13,21 @@
           }
         }
       },
+      Self: {
+        Kind: Object
+      },
       Parent: {
         Kind: Object
       },
-      Self: {
+      Child: {
         Kind: Object
+      },
+      Items: {
+        Kind: Collection,
+        Timestamp: DateTimeOffset_2
+      },
+      Lookup: {
+        Kind: Dictionary
       }
     }
   }
