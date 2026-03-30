@@ -677,41 +677,6 @@ public partial class Widget : IConfigurable
 }
 ```
 
-**With IInterceptorSubjectContext** (for subjects that need the interceptor context alongside DI services):
-
-```csharp
-[InterceptorSubject]
-public partial class HueBridge : BackgroundService, IConfigurable
-{
-    private readonly IHttpClientFactory _httpClientFactory;
-    private readonly ILogger<HueBridge> _logger;
-
-    [Configuration]
-    public partial string? BridgeId { get; set; }
-
-    [Configuration(IsSecret = true)]
-    public partial string? AppKey { get; set; }
-
-    public HueBridge(
-        IHttpClientFactory httpClientFactory,
-        ILogger<HueBridge> logger,
-        IInterceptorSubjectContext context)
-    {
-        ((IInterceptorSubject)this).Context.AddFallbackContext(context);
-
-        _httpClientFactory = httpClientFactory;
-        _logger = logger;
-
-        BridgeId = null;
-        AppKey = null;
-    }
-}
-```
-
-When you define a constructor with parameters, the source generator detects the user-defined constructor and does not generate additional ones. The user constructor is responsible for calling `Context.AddFallbackContext(context)` to wire up the interceptor context. All constructor parameters are resolved from DI via `ActivatorUtilities.CreateInstance`.
-
-When registered via `AddHostedSubject<T>`, the hosting infrastructure detects whether the subject type has a constructor accepting `IInterceptorSubjectContext` and passes it automatically.
-
 ### Available Injectable Services
 
 | Service | Purpose |
