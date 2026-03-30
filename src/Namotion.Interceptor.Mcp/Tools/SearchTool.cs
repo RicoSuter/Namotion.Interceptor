@@ -33,7 +33,8 @@ internal class SearchTool
             includeInterfaces = new { type = "boolean", description = "Include $interfaces in subject nodes (default: false)" },
             maxSubjects = new { type = "integer", description = "Maximum subjects to return (default: server limit)" },
             excludeTypes = new { type = "array", items = new { type = "string" }, description = "Exclude subjects matching these type/interface names" },
-            path = new { type = "string", description = "Scope search to a subtree path prefix" }
+            path = new { type = "string", description = "Scope search to a subtree path prefix" },
+            query = new { type = "string", description = "Filter by case-insensitive substring match on path and all string enrichments (e.g. $title, $icon)" }
         }
     });
 
@@ -44,6 +45,7 @@ internal class SearchTool
                       "Default text format is optimized for scanning results. " +
                       "Use format=json when you need exact property values or structured data for processing. " +
                       "Use list_types to discover interface names first, then pass to types parameter. " +
+                      "Use query to filter by name or title without loading all subjects. " +
                       "Returns flat list of matching subjects with paths.",
         InputSchema = Schema,
         Handler = HandleSearchAsync
@@ -83,6 +85,7 @@ internal class SearchTool
         }
 
         var pathPrefix = input.TryGetProperty("path", out var pathPrefixElement) ? pathPrefixElement.GetString() : null;
+        var query = input.TryGetProperty("query", out var queryElement) ? queryElement.GetString() : null;
 
         var subjects = new Dictionary<string, SubjectNode>();
         var truncated = false;
@@ -109,6 +112,11 @@ internal class SearchTool
 
             if (!string.IsNullOrEmpty(pathPrefix) &&
                 !path.StartsWith(pathPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrEmpty(query) && !MatchesQuery(registered, path, query))
             {
                 continue;
             }
@@ -140,6 +148,28 @@ internal class SearchTool
         }
 
         return Task.FromResult<object?>(McpTextFormatter.FormatSearchResult(searchResult));
+    }
+
+    private bool MatchesQuery(RegisteredSubject subject, string path, string query)
+    {
+        if (path.Contains(query, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        foreach (var enricher in _configuration.SubjectEnrichers)
+        {
+            foreach (var kvp in enricher.GetSubjectEnrichments(subject))
+            {
+                if (kvp.Value is string stringValue &&
+                    stringValue.Contains(query, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private static bool ShouldFilterOutByType(RegisteredSubject subject, string[] typeFilter)
