@@ -45,7 +45,7 @@ public class NavigationItemResolver
                     continue;
 
                 var key = childInfo.Index?.ToString() ?? prop.Name;
-                var path = _pathResolver.GetPath(child, PathFormat.Slash);
+                var path = _pathResolver.GetPath(child, PathStyle.Canonical);
                 if (path == null)
                     continue;
 

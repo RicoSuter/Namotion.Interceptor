@@ -221,7 +221,7 @@ position: 1
 Dynamic value binding in markdown using `{{ path }}` syntax. Updates automatically when the source property changes.
 
 ```markdown
-Speed: {{ motor.CurrentSpeed }} RPM
+Speed: {{ motor/CurrentSpeed }} RPM
 ```
 
 ### Embedded Subject
@@ -243,21 +243,24 @@ A subject defined inline within a markdown page using fenced code blocks.
 
 ### Path Syntax
 
-Paths reference subjects and properties in the object graph:
+Paths reference subjects and properties in the object graph using slash notation:
 
 | Prefix | Description | Example |
 |--------|-------------|---------|
-| `Root.` | Absolute from root | `Root.Demo.Conveyor` |
-| `this.` | Relative to current | `this.Child.Name` |
-| `../` | Parent navigation | `../Sibling.Temperature` |
+| `/` | Absolute from root | `/Demo/Conveyor` |
+| `./` | Relative to current | `./Child/Name` |
+| `../` | Parent navigation | `../Sibling/Temperature` |
+| *(none)* | Relative (implicit) | `Demo/Conveyor` |
 
-### Simplified Syntax
+### Canonical Notation
 
-For `[InlinePaths]` dictionaries, use dot notation: `Root.Demo.Conveyor`
+For collections with `[InlinePaths]`, child keys are inlined as path segments: `/Demo/Conveyor`
 
-### Bracket Notation
+This is the canonical form of `/Children[Demo]/Children[Conveyor]`, where brackets are used for collection indices.
 
-Use brackets when keys contain dots (like file extensions): `Root.Demo[Setup.md]`
+### Brackets for Collection Indices
+
+Use brackets for non-inlined collections: `/Devices[0]/Temperature`. With `[InlinePaths]`, keys are direct segments: `/Demo/Setup.md`
 
 ---
 

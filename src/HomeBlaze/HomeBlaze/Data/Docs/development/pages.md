@@ -52,8 +52,8 @@ position: 1
 Embed live values from your subject graph using the `{{ path }}` syntax:
 
 ```markdown
-Temperature: {{ mymotor.Temperature }}
-Speed: {{ mymotor.CurrentSpeed }} RPM
+Temperature: {{ mymotor/Temperature }}
+Speed: {{ mymotor/CurrentSpeed }} RPM
 ```
 
 ### Expression Paths
@@ -62,10 +62,10 @@ Expressions resolve relative to the current page's embedded subjects first, then
 
 | Path | Resolution |
 |------|------------|
-| `mymotor.Speed` | Inline subject named `mymotor` embedded in current page |
-| `Root.Demo.Conveyor.CurrentSpeed` | Absolute path from root |
+| `mymotor/Speed` | Inline subject named `mymotor` embedded in current page |
+| `/Demo/Conveyor/CurrentSpeed` | Absolute path from root |
 
-See [Configuration Guide - Path Syntax](../administration/configuration.md#path-syntax) for full path documentation including `this.`, `../`, brackets for keys with dots, and more.
+See [Configuration Guide - Path Syntax](../administration/configuration.md#path-syntax) for full path documentation including `./`, `../`, brackets for collection indices, and more.
 
 ### Expression Features
 
@@ -118,7 +118,7 @@ Here's my motor:
 }
 ```
 
-The motor's current speed is {{ motor1.CurrentSpeed }} RPM.
+The motor's current speed is {{ motor1/CurrentSpeed }} RPM.
 ~~~
 
 ---
@@ -171,7 +171,7 @@ position: 0
 }
 ```
 
-Current speed: **{{ conveyor.CurrentSpeed }}** RPM
+Current speed: **{{ conveyor/CurrentSpeed }}** RPM
 
 ### Cooling Fan
 
@@ -184,7 +184,7 @@ Current speed: **{{ conveyor.CurrentSpeed }}** RPM
 }
 ```
 
-Temperature: **{{ cooler.Temperature }}** C
+Temperature: **{{ cooler/Temperature }}** C
 
 ---
 

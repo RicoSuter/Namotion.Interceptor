@@ -95,7 +95,7 @@
             @if (children.Length == 1)
             {
                 @* Single child - no expansion panel *@
-                <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Style="padding-top: 0; padding-bottom: 0">
+                <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Class="pt-4" Style="padding-top: 0; padding-bottom: 0">
                     @{
                         var child = children[0];
                         var isSelected = child.Subject == SelectedChild;
@@ -169,7 +169,7 @@
                 <ChildContent>
                     <div class="mb-4">
                         <small style="word-break: break-all;">
-                            <p class="my-1"><strong>ID:</strong> @GetObjectPath()</p>
+                            <p class="my-1"><strong>Path:</strong> @GetPath()</p>
                             <p class="my-1"><strong>Type:</strong> @Subject.GetType().FullName</p>
                         </small>
                     </div>
@@ -199,7 +199,7 @@
     public bool CanClose { get; set; }
 
     [Parameter]
-    public string? ObjectPath { get; set; }
+    public string? Path { get; set; }
 
     [Parameter]
     public EventCallback<PropertyClickEventArgs> OnPropertyClick { get; set; }
@@ -244,9 +244,9 @@
         return SubjectIconExtensions.ResolveMudBlazorColor(subject.GetIconColor());
     }
 
-    private string GetObjectPath()
+    private string GetPath()
     {
-        return ObjectPath ?? "Root";
+        return Path ?? "/";
     }
 
     private IEnumerable<RegisteredSubjectProperty> GetPrimitiveProperties()

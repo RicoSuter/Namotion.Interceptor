@@ -7,36 +7,50 @@ namespace HomeBlaze.Services.Tests;
 /// </summary>
 public class SubjectPathResolverGetPathTests : SubjectPathResolverTestBase
 {
+    #region Canonical paths
+
     [Fact]
-    public void GetPath_RootSubject_ReturnsNull()
+    public void GetPath_RootSubject_ReturnsSlash()
     {
-        // Arrange - A subject with no parents is orphaned/detached - it has no path from anywhere
+        // Arrange
         var root = new TestContainer(Context) { Name = "Root" };
+        RootManager.Root = root;
 
         // Act
-        var path = Resolver.GetPath(root);
+        var path = Resolver.GetPath(root, PathStyle.Canonical);
 
-        // Assert - Even though we call it "root", from the path resolver's perspective,
-        // if it has no parents, it's unreachable and has no path
+        // Assert
+        Assert.Equal("/", path);
+    }
+
+    [Fact]
+    public void GetPath_DetachedSubject_ReturnsNull()
+    {
+        // Arrange
+        var detached = new TestContainer(Context) { Name = "Detached" };
+        var root = new TestContainer(Context) { Name = "Root" };
+        RootManager.Root = root;
+
+        // Act
+        var path = Resolver.GetPath(detached, PathStyle.Canonical);
+
+        // Assert
         Assert.Null(path);
     }
 
     [Fact]
-    public void GetPath_DirectChild_ReturnsPropertyName()
+    public void GetPath_DirectChild_ReturnsSlashPropertyName()
     {
         // Arrange
         var child = new TestContainer(Context) { Name = "Child" };
-        var root = new TestContainer(Context)
-        {
-            Name = "Root",
-            Child = child
-        };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        RootManager.Root = root;
 
         // Act
-        var path = Resolver.GetPath(child);
+        var path = Resolver.GetPath(child, PathStyle.Canonical);
 
         // Assert
-        Assert.Equal("Child", path);
+        Assert.Equal("/Child", path);
     }
 
     [Fact]
@@ -44,40 +58,15 @@ public class SubjectPathResolverGetPathTests : SubjectPathResolverTestBase
     {
         // Arrange
         var grandchild = new TestContainer(Context) { Name = "Grandchild" };
-        var child = new TestContainer(Context)
-        {
-            Name = "Child",
-            Child = grandchild
-        };
-        var root = new TestContainer(Context)
-        {
-            Name = "Root",
-            Child = child
-        };
+        var child = new TestContainer(Context) { Name = "Child", Child = grandchild };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        RootManager.Root = root;
 
         // Act
-        var path = Resolver.GetPath(grandchild);
-
-        // Assert - Default format is now bracket notation (Child.Child)
-        Assert.Equal("Child.Child", path);
-    }
-
-    // NOTE: Dictionary-based path tests are skipped because the interceptor framework
-    // doesn't automatically track lifecycle changes when dictionary items are added via indexer.
-    // Dictionary modifications need explicit lifecycle management or observable collections.
-    // However, ResolveSubject() still works fine with dictionaries (see ResolveSubject tests).
-
-    [Fact]
-    public void GetPath_DetachedSubject_ReturnsNull()
-    {
-        // Arrange
-        var detached = new TestContainer(Context) { Name = "Detached" };
-
-        // Act
-        var path = Resolver.GetPath(detached);
+        var path = Resolver.GetPath(grandchild, PathStyle.Canonical);
 
         // Assert
-        Assert.Null(path);
+        Assert.Equal("/Child/Child", path);
     }
 
     [Fact]
@@ -85,19 +74,16 @@ public class SubjectPathResolverGetPathTests : SubjectPathResolverTestBase
     {
         // Arrange
         var child = new TestContainer(Context) { Name = "Child" };
-        var root = new TestContainer(Context)
-        {
-            Name = "Root",
-            Child = child
-        };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        RootManager.Root = root;
 
         // Verify initial path
-        var initialPath = Resolver.GetPath(child);
-        Assert.Equal("Child", initialPath);
+        var initialPath = Resolver.GetPath(child, PathStyle.Canonical);
+        Assert.Equal("/Child", initialPath);
 
         // Act - detach
         root.Child = null;
-        var pathAfterDetach = Resolver.GetPath(child);
+        var pathAfterDetach = Resolver.GetPath(child, PathStyle.Canonical);
 
         // Assert
         Assert.Null(pathAfterDetach);
@@ -109,102 +95,89 @@ public class SubjectPathResolverGetPathTests : SubjectPathResolverTestBase
         // Arrange
         var child1 = new TestContainer(Context) { Name = "Child1" };
         var child2 = new TestContainer(Context) { Name = "Child2" };
-        var root = new TestContainer(Context)
-        {
-            Name = "Root",
-            Child = child1
-        };
+        var root = new TestContainer(Context) { Name = "Root", Child = child1 };
+        RootManager.Root = root;
 
         // Verify initial path
-        var initialPath = Resolver.GetPath(child1);
-        Assert.Equal("Child", initialPath);
+        var initialPath = Resolver.GetPath(child1, PathStyle.Canonical);
+        Assert.Equal("/Child", initialPath);
 
-        // Act - move child1 to child2, and child2 to root.Child
+        // Act - move child1 under child2, and child2 to root.Child
         child2.Child = child1;
         root.Child = child2;
-        var newPath = Resolver.GetPath(child1);
+        var newPath = Resolver.GetPath(child1, PathStyle.Canonical);
 
         // Assert
-        Assert.Equal("Child.Child", newPath);
+        Assert.Equal("/Child/Child", newPath);
     }
 
     [Fact]
-    public void GetPath_CyclicReference_DoesNotInfiniteLoop()
+    public void GetPath_CyclicReference_DoesNotHang()
     {
         // Arrange
         var node1 = new TestContainer(Context) { Name = "Node1" };
         var node2 = new TestContainer(Context) { Name = "Node2" };
         var root = new TestContainer(Context) { Name = "Root", Child = node1 };
+        RootManager.Root = root;
         node1.Child = node2;
         node2.Child = node1; // Create cycle
 
         // Act - should not hang
-        var path = Resolver.GetPath(node2);
+        var path = Resolver.GetPath(node2, PathStyle.Canonical);
 
-        // Assert - should still return path from root (bracket notation)
-        Assert.Equal("Child.Child", path);
+        // Assert - should still return path from root
+        Assert.Equal("/Child/Child", path);
     }
 
     [Fact]
-    public void GetPath_SelfReference_DoesNotInfiniteLoop()
+    public void GetPath_SelfReference_DoesNotHang()
     {
         // Arrange
         var node = new TestContainer(Context) { Name = "Node" };
         var root = new TestContainer(Context) { Name = "Root", Child = node };
+        RootManager.Root = root;
         node.Child = node; // Self reference
 
         // Act - should not hang
-        var path = Resolver.GetPath(node);
+        var path = Resolver.GetPath(node, PathStyle.Canonical);
 
         // Assert
-        Assert.Equal("Child", path);
+        Assert.Equal("/Child", path);
     }
 
-    // NOTE: Multiple parents test skipped - see dictionary limitation note above
-
     [Fact]
-    public void GetPaths_DetachedSubject_ReturnsEmptyList()
+    public void GetPaths_DetachedSubject_ReturnsEmpty()
     {
         // Arrange
         var detached = new TestContainer(Context) { Name = "Detached" };
-
-        // Act
-        var paths = Resolver.GetPaths(detached);
-
-        // Assert
-        Assert.Empty(paths);
-    }
-
-    [Fact]
-    public void GetPaths_RootSubject_ReturnsEmptyList()
-    {
-        // Arrange - A subject with no parents has no paths from anywhere
         var root = new TestContainer(Context) { Name = "Root" };
+        RootManager.Root = root;
 
         // Act
-        var paths = Resolver.GetPaths(root);
+        var paths = Resolver.GetPaths(detached, PathStyle.Canonical);
 
         // Assert
         Assert.Empty(paths);
     }
 
     [Fact]
-    public void GetPath_WithInlinePathsAttribute_ReturnsPathWithoutPropertyName()
+    public void GetPath_InlinePaths_ReturnsPathWithoutPropertyName()
     {
         // Arrange
         var notes = new TestContainerWithChildren(Context) { Name = "Notes" };
         var root = new TestContainerWithChildren(Context) { Name = "Root" };
         root.Children = new Dictionary<string, TestContainerWithChildren> { ["Notes"] = notes };
+        RootManager.Root = root;
 
         // Act
-        var path = Resolver.GetPath(notes);
+        var path = Resolver.GetPath(notes, PathStyle.Canonical);
 
-        // Assert - Should be "Notes" not "Children[Notes]"
-        Assert.Equal("Notes", path);
+        // Assert - Should be "/Notes" not "/Children[Notes]"
+        Assert.Equal("/Notes", path);
     }
 
     [Fact]
-    public void GetPath_WithInlinePathsAttribute_ReturnsNestedPathWithoutPropertyNames()
+    public void GetPath_InlinePaths_Nested_ReturnsFullPath()
     {
         // Arrange
         var page = new TestContainerWithChildren(Context) { Name = "Page" };
@@ -212,48 +185,102 @@ public class SubjectPathResolverGetPathTests : SubjectPathResolverTestBase
         folder.Children = new Dictionary<string, TestContainerWithChildren> { ["Page"] = page };
         var root = new TestContainerWithChildren(Context) { Name = "Root" };
         root.Children = new Dictionary<string, TestContainerWithChildren> { ["Folder"] = folder };
+        RootManager.Root = root;
 
         // Act
-        var path = Resolver.GetPath(page);
+        var path = Resolver.GetPath(page, PathStyle.Canonical);
 
-        // Assert - Should be "Folder.Page" not "Children[Folder].Children[Page]"
-        Assert.Equal("Folder.Page", path);
+        // Assert - Should be "/Folder/Page" not "/Children[Folder]/Children[Page]"
+        Assert.Equal("/Folder/Page", path);
     }
 
     [Fact]
-    public void GetPath_WithInlinePathsAttribute_SlashFormat_ReturnsSimplifiedPath()
+    public void GetPath_InlinePaths_KeyWithDot_ReturnsPathWithDot()
+    {
+        // Arrange
+        var setupMd = new TestContainerWithChildren(Context) { Name = "Setup.md" };
+        var root = new TestContainerWithChildren(Context) { Name = "Root" };
+        root.Children = new Dictionary<string, TestContainerWithChildren> { ["Setup.md"] = setupMd };
+        RootManager.Root = root;
+
+        // Act
+        var path = Resolver.GetPath(setupMd, PathStyle.Canonical);
+
+        // Assert - Dots are fine in keys with slash-based paths (no brackets needed)
+        Assert.Equal("/Setup.md", path);
+    }
+
+    [Fact]
+    public void GetPath_PropertyTakesPrecedenceOverInlinePathsKey()
+    {
+        // Arrange - "Child" exists as both property name and dictionary key
+        var childProperty = new TestContainerWithChildren(Context) { Name = "Via Property" };
+        var childInDict = new TestContainerWithChildren(Context) { Name = "Via Dictionary" };
+        var root = new TestContainerWithChildren(Context) { Name = "Root" };
+        root.Child = childProperty;
+        root.Children = new Dictionary<string, TestContainerWithChildren> { ["Child"] = childInDict };
+        RootManager.Root = root;
+
+        // Act - Get path for the property-based child
+        var pathForProperty = Resolver.GetPath(childProperty, PathStyle.Canonical);
+
+        // Assert - Property path is /Child
+        Assert.Equal("/Child", pathForProperty);
+
+        // Resolving /Child should give the property, not the dictionary entry
+        var resolved = Resolver.ResolveSubject("/Child", PathStyle.Canonical);
+        Assert.Same(childProperty, resolved);
+    }
+
+    #endregion
+
+    #region Route paths
+
+    [Fact]
+    public void GetPath_Route_SimplePath_SameAsCanonical()
+    {
+        // Arrange
+        var child = new TestContainer(Context) { Name = "Child" };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        RootManager.Root = root;
+
+        // Act
+        var path = Resolver.GetPath(child, PathStyle.Route);
+
+        // Assert - simple paths are identical across styles
+        Assert.Equal("/Child", path);
+    }
+
+    [Fact]
+    public void GetPath_Route_InlinePaths_SameAsCanonical()
     {
         // Arrange
         var notes = new TestContainerWithChildren(Context) { Name = "Notes" };
         var root = new TestContainerWithChildren(Context) { Name = "Root" };
         root.Children = new Dictionary<string, TestContainerWithChildren> { ["Notes"] = notes };
+        RootManager.Root = root;
 
         // Act
-        var path = Resolver.GetPath(notes, PathFormat.Slash);
+        var path = Resolver.GetPath(notes, PathStyle.Route);
 
-        // Assert - Should be "Notes" not "Children/Notes"
-        Assert.Equal("Notes", path);
+        // Assert - InlinePaths are the same for both styles
+        Assert.Equal("/Notes", path);
     }
 
-    [Fact]
-    public void GetPath_ChildKeyMatchesPropertyName_ReturnsSimplifiedPath_ResolvesToProperty()
+    #endregion
+
+    #region CanonicalToRoute conversion
+
+    [Theory]
+    [InlineData("/Child", "/Child")]
+    [InlineData("/Items[0]/Name", "/Items/0/Name")]
+    [InlineData("/Children[Notes]/Child", "/Children/Notes/Child")]
+    [InlineData("/", "/")]
+    public void CanonicalToRoute_ConvertsCorrectly(string canonical, string expected)
     {
-        // Arrange - "Child" exists as both property name and dictionary key
-        // This test documents the asymmetry when using a dictionary key that matches a property name
-        var childProperty = new TestContainerWithChildren(Context) { Name = "Via Property" };
-        var root = new TestContainerWithChildren(Context) { Name = "Root" };
-        root.Child = childProperty;
-
-        // Act - Get path for the property-based child
-        var pathForProperty = Resolver.GetPath(childProperty);
-
-        // Assert - When a child key matches a property name, property takes precedence during resolution
-        // This documents that property names should be preferred in path resolution
-        Assert.NotNull(pathForProperty);
-        Assert.Equal("Child", pathForProperty);
-
-        // When resolving "Child", it resolves to the property, not a hypothetical dictionary entry
-        var resolved = Resolver.ResolveSubject(pathForProperty, PathFormat.Bracket, root);
-        Assert.Same(childProperty, resolved); // Property wins - documented behavior
+        var route = SubjectPathResolver.CanonicalToRoute(canonical);
+        Assert.Equal(expected, route);
     }
+
+    #endregion
 }
