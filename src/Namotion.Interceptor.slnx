@@ -54,6 +54,7 @@
     <Project Path="Namotion.Devices.Gpio.HomeBlaze/Namotion.Devices.Gpio.HomeBlaze.csproj" />
     <Project Path="Namotion.Devices.Gpio.Tests/Namotion.Devices.Gpio.Tests.csproj" />
     <Project Path="Namotion.Devices.Gpio/Namotion.Devices.Gpio.csproj" />
+    <Project Path="Namotion.Devices.Philips.Hue/Namotion.Devices.Philips.Hue.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/Tests/">
     <Project Path="HomeBlaze/HomeBlaze.AI.Tests/HomeBlaze.AI.Tests.csproj" />
