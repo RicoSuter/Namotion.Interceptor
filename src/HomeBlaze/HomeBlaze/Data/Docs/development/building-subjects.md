@@ -62,6 +62,21 @@ public partial class Motor
 - User-configurable values
 - Connection strings, intervals, thresholds
 
+### Secret Configuration
+
+For sensitive values like API keys and passwords, use `IsSecret = true`:
+
+```csharp
+[Configuration(IsSecret = true)]
+public partial string? AppKey { get; set; }
+```
+
+Secret configuration properties:
+- Are **persisted** to JSON like regular configuration
+- Are **hidden** in the browser property panel
+- Show as **masked password fields** in the edit dialog (empty by default, only overwritten when the user enters a new value)
+- **Cannot** be combined with `[State]` — the app will throw at startup to prevent accidental exposure
+
 ## State Properties
 
 Properties marked with `[State]` are displayed in the UI property panel:
@@ -578,6 +593,7 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 | Attribute | Purpose | Persisted | Displayed |
 |-----------|---------|-----------|-----------|
 | `[Configuration]` | User-editable settings | Yes | No (unless also `[State]`) |
+| `[Configuration(IsSecret = true)]` | Sensitive settings (API keys, passwords) | Yes | Never (masked in editor) |
 | `[State]` | Live values for display | No | Yes |
 | `[Configuration] + [State]` | Editable and displayed | Yes | Yes |
 | `[Derived]` | Computed from other properties | No | Only if also `[State]` |

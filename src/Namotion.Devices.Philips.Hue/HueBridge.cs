@@ -43,7 +43,7 @@ public partial class HueBridge : BackgroundService,
     [Configuration]
     public partial string? BridgeId { get; set; }
 
-    [Configuration]
+    [Configuration(IsSecret = true)]
     public partial string? AppKey { get; set; }
 
     [Configuration]
