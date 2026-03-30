@@ -15,13 +15,13 @@ public partial class HueButtonDevice : HueDevice,
     internal DevicePower? DevicePowerResource { get; set; }
 
     [Derived]
-    public new string? IconName =>
+    public override string? IconName =>
         Buttons.Any(button => button.ButtonState != HomeBlaze.Abstractions.Inputs.ButtonState.None)
             ? "RadioButtonChecked"
             : "RadioButtonUnchecked";
 
     [Derived]
-    public new string? IconColor => IsConnected ? "Default" : "Error";
+    public override string? IconColor => IsConnected ? "Default" : "Error";
 
     [Derived]
     [State]

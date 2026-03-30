@@ -13,7 +13,14 @@
 <TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
     @if (Subject != null)
     {
-        @if (ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit))
+        @if (IsCreating && ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Setup))
+        {
+            <SubjectComponent Subject="@Subject"
+                              Type="SubjectComponentType.Setup"
+                              AdditionalParameters="@(new Dictionary<string, object?> { ["IsCreating"] = IsCreating })"
+                              @bind-ComponentInstance="_subjectComponent" />
+        }
+        else if (ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit))
         {
             <SubjectComponent Subject="@Subject"
                               Type="SubjectComponentType.Edit"

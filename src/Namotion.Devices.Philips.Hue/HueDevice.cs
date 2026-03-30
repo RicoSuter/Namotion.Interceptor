@@ -33,13 +33,13 @@ public partial class HueDevice :
     public partial DateTimeOffset? LastUpdated { get; set; }
 
     [Derived]
-    public string? Title => Device?.Metadata?.Name ?? "n/a";
+    public virtual string? Title => Device?.Metadata?.Name ?? "n/a";
 
     [Derived]
-    public string? IconName => "QuestionMark";
+    public virtual string? IconName => "QuestionMark";
 
     [Derived]
-    public string? IconColor => IsConnected ? "Default" : "Error";
+    public virtual string? IconColor => IsConnected ? "Default" : "Error";
 
     [Derived]
     public bool IsConnected =>

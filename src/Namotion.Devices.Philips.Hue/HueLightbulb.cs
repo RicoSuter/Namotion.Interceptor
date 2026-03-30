@@ -180,7 +180,7 @@ public partial class HueLightbulb : HueDevice,
         null;
 
     [Derived]
-    public new string? Title => $"{base.Title} " +
+    public override string? Title => $"{base.Title} " +
         $"({string.Join(", ", new string?[]
         {
             Color != null ? "Color" : null,
@@ -191,10 +191,10 @@ public partial class HueLightbulb : HueDevice,
         }.Where(element => element != null))})";
 
     [Derived]
-    public new string? IconName => "Lightbulb";
+    public override string? IconName => "Lightbulb";
 
     [Derived]
-    public new string? IconColor =>
+    public override string? IconColor =>
         IsConnected == false ? "Error" :
         IsOn == true ? "Warning" : "Default";
 
