@@ -256,7 +256,8 @@
             return [];
 
         return _registeredSubject.Properties
-            .Where(p => p.GetStateMetadata() != null && !p.CanContainSubjects)
+            .Where(p => p.GetStateMetadata() != null && !p.CanContainSubjects
+                     && p.GetConfigurationMetadata()?.IsSecret != true)
             .OrderBy(p => p.GetDisplayPosition());
     }
 
