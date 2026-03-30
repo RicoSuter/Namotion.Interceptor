@@ -606,7 +606,7 @@ Core platform interfaces and attributes:
 | Lifecycle | `IConfigurable`, `IMonitoredService`, `IServerSubject` |
 | Messaging | `IEvent`, `ICommand`, `IMessageBus`, `INotificationPublisher` |
 | Security | `IAuthenticatedSubject` |
-| Networking | `IConnectionState`, `IConnectedSubject` |
+| Networking | `IConnectionState` |
 | Devices | Switches, lighting, covers, locks, energy, media, input devices |
 | Sensors | Temperature, humidity, presence, light, door, rain, soil, power, camera |
 
