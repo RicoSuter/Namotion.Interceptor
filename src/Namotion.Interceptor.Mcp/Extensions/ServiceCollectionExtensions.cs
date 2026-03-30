@@ -13,6 +13,7 @@ public static class ServiceCollectionExtensions
 {
     internal static readonly JsonSerializerOptions SerializerOptions = new()
     {
+        WriteIndented = true,
         Converters = { new JsonStringEnumConverter() }
     };
 
@@ -69,9 +70,12 @@ public static class ServiceCollectionExtensions
                     ? JsonSerializer.SerializeToElement(request.Params.Arguments)
                     : JsonSerializer.SerializeToElement(new { });
                 var result = await tool.Handler(input, cancellationToken);
+                var text = result is string stringResult
+                    ? stringResult
+                    : JsonSerializer.Serialize(result, SerializerOptions);
                 return new CallToolResult
                 {
-                    Content = [new TextContentBlock { Text = JsonSerializer.Serialize(result, SerializerOptions) }]
+                    Content = [new TextContentBlock { Text = text }]
                 };
             }
             catch (Exception exception)

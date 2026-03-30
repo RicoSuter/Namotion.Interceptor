@@ -5,7 +5,6 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
-using Xunit;
 
 namespace Namotion.Interceptor.Mcp.Tests.Tools;
 
@@ -14,29 +13,21 @@ public class BrowseToolTests
     [Fact]
     public async Task Browse_returns_subject_tree_with_children()
     {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
+        var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
 
         var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
         room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
 
-        var config = new McpServerConfiguration
-        {
-            PathProvider = DefaultPathProvider.Instance
-        };
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
         var factory = new McpToolFactory(room, config);
-        var tools = factory.CreateTools();
-        var browseTool = tools.First(t => t.Name == "browse");
+        var browseTool = factory.CreateTools().First(t => t.Name == "browse");
 
-        // Act
-        var input = JsonSerializer.SerializeToElement(new { depth = 1, includeProperties = true });
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 1, includeProperties = true });
         var result = await browseTool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Assert
         Assert.True(json.TryGetProperty("result", out _));
         Assert.True(json.GetProperty("subjectCount").GetInt32() > 0);
     }
@@ -44,79 +35,68 @@ public class BrowseToolTests
     [Fact]
     public async Task Browse_depth_zero_returns_no_children()
     {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
+        var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
 
         var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
         room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
 
-        var config = new McpServerConfiguration
-        {
-            PathProvider = DefaultPathProvider.Instance
-        };
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
         var factory = new McpToolFactory(room, config);
-        var tools = factory.CreateTools();
-        var browseTool = tools.First(t => t.Name == "browse");
+        var browseTool = factory.CreateTools().First(t => t.Name == "browse");
 
-        // Act
-        var input = JsonSerializer.SerializeToElement(new { depth = 0, includeProperties = true });
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 0, includeProperties = true });
         var result = await browseTool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Assert - depth=0 means subject properties only, no child subjects expanded
         Assert.Equal(0, json.GetProperty("subjectCount").GetInt32());
     }
 
     [Fact]
     public async Task Browse_includeProperties_controls_property_values()
     {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
+        var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
 
         var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
 
-        var config = new McpServerConfiguration
-        {
-            PathProvider = DefaultPathProvider.Instance
-        };
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
         var factory = new McpToolFactory(room, config);
         var browseTool = factory.CreateTools().First(t => t.Name == "browse");
 
-        // Act - without properties
-        var inputWithout = JsonSerializer.SerializeToElement(new { depth = 0, includeProperties = false });
+        // Without properties
+        var inputWithout = JsonSerializer.SerializeToElement(new { format = "json", depth = 0, includeProperties = false });
         var resultWithout = await browseTool.Handler(inputWithout, CancellationToken.None);
         var jsonWithout = JsonSerializer.SerializeToElement(resultWithout);
 
-        // Act - with properties
-        var inputWith = JsonSerializer.SerializeToElement(new { depth = 0, includeProperties = true });
+        // With properties
+        var inputWith = JsonSerializer.SerializeToElement(new { format = "json", depth = 0, includeProperties = true });
         var resultWith = await browseTool.Handler(inputWith, CancellationToken.None);
         var jsonWith = JsonSerializer.SerializeToElement(resultWith);
 
-        // Assert - without properties, subjects tree should not contain property values
-        var subjectsWithout = jsonWithout.GetProperty("result");
-        var subjectsWith = jsonWith.GetProperty("result");
+        // Without properties, result should not have properties array with scalar values
+        var resultWithoutProps = jsonWithout.GetProperty("result");
+        var hasScalarsWithout = resultWithoutProps.TryGetProperty("properties", out var propsWithout) &&
+            propsWithout.EnumerateArray().Any(p => p.GetProperty("kind").GetString() == "value");
+        Assert.False(hasScalarsWithout);
 
-        // With properties enabled, Name and Temperature should appear
-        Assert.True(subjectsWith.TryGetProperty("Name", out _));
-        Assert.True(subjectsWith.TryGetProperty("Temperature", out _));
-
-        // Without properties, Name and Temperature should not appear
-        Assert.False(subjectsWithout.TryGetProperty("Name", out _));
-        Assert.False(subjectsWithout.TryGetProperty("Temperature", out _));
+        // With properties, should have Name and Temperature as scalar properties
+        var resultWithProps = jsonWith.GetProperty("result");
+        var propsArray = resultWithProps.GetProperty("properties");
+        var propNames = propsArray.EnumerateArray()
+            .Where(p => p.GetProperty("kind").GetString() == "value")
+            .Select(p => p.GetProperty("name").GetString())
+            .ToList();
+        Assert.Contains("Name", propNames);
+        Assert.Contains("Temperature", propNames);
     }
 
     [Fact]
     public async Task Browse_subject_enrichers_are_called()
     {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
+        var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
 
@@ -132,26 +112,25 @@ public class BrowseToolTests
         var factory = new McpToolFactory(room, config);
         var browseTool = factory.CreateTools().First(t => t.Name == "browse");
 
-        // Act
-        var input = JsonSerializer.SerializeToElement(new { depth = 1, includeProperties = false });
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 1, includeProperties = false });
         var result = await browseTool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Assert - enricher should have been called for the Device child subject
+        // Enricher should have been called
         Assert.True(enricher.EnrichedSubjects.Count > 0);
 
-        // The Device node should contain the $test field from the enricher
-        var subjects = json.GetProperty("result");
-        var deviceNode = subjects.GetProperty("Device");
+        // Find the Device child in the properties array
+        var properties = json.GetProperty("result").GetProperty("properties");
+        var deviceProp = properties.EnumerateArray()
+            .First(p => p.GetProperty("kind").GetString() == "object" && p.GetProperty("name").GetString() == "Device");
+        var deviceNode = deviceProp.GetProperty("child");
         Assert.Equal("enriched", deviceNode.GetProperty("$test").GetString());
     }
 
     [Fact]
     public async Task Browse_truncates_when_max_subjects_exceeded()
     {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
+        var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
 
@@ -161,26 +140,22 @@ public class BrowseToolTests
         var config = new McpServerConfiguration
         {
             PathProvider = DefaultPathProvider.Instance,
-            MaxSubjectsPerResponse = 0  // Force truncation immediately
+            MaxSubjectsPerResponse = 0
         };
         var factory = new McpToolFactory(room, config);
         var browseTool = factory.CreateTools().First(t => t.Name == "browse");
 
-        // Act
-        var input = JsonSerializer.SerializeToElement(new { depth = 1, includeProperties = true });
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 1, includeProperties = true });
         var result = await browseTool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Assert
         Assert.True(json.GetProperty("truncated").GetBoolean());
     }
 
     [Fact]
     public async Task Browse_property_values_include_type_and_isWritable()
     {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
+        var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
 
@@ -194,14 +169,13 @@ public class BrowseToolTests
         var factory = new McpToolFactory(room, config);
         var browseTool = factory.CreateTools().First(t => t.Name == "browse");
 
-        // Act
-        var input = JsonSerializer.SerializeToElement(new { depth = 0, includeProperties = true });
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 0, includeProperties = true });
         var result = await browseTool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Assert
-        var subjects = json.GetProperty("result");
-        var temperature = subjects.GetProperty("Temperature");
+        var properties = json.GetProperty("result").GetProperty("properties");
+        var temperature = properties.EnumerateArray()
+            .First(p => p.GetProperty("name").GetString() == "Temperature");
         Assert.Equal("number", temperature.GetProperty("type").GetString());
         Assert.True(temperature.GetProperty("isWritable").GetBoolean());
     }
@@ -209,9 +183,7 @@ public class BrowseToolTests
     [Fact]
     public async Task Browse_property_values_omit_isWritable_when_read_only()
     {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
+        var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
 
@@ -225,22 +197,20 @@ public class BrowseToolTests
         var factory = new McpToolFactory(room, config);
         var browseTool = factory.CreateTools().First(t => t.Name == "browse");
 
-        // Act
-        var input = JsonSerializer.SerializeToElement(new { depth = 0, includeProperties = true });
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 0, includeProperties = true });
         var result = await browseTool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Assert
-        var subjects = json.GetProperty("result");
-        var temperature = subjects.GetProperty("Temperature");
+        var properties = json.GetProperty("result").GetProperty("properties");
+        var temperature = properties.EnumerateArray()
+            .First(p => p.GetProperty("name").GetString() == "Temperature");
         Assert.Equal("number", temperature.GetProperty("type").GetString());
-        Assert.False(temperature.TryGetProperty("isWritable", out _));
+        Assert.False(temperature.GetProperty("isWritable").GetBoolean());
     }
 
     [Fact]
     public async Task Browse_maxSubjects_limits_response_count()
     {
-        // Arrange
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
@@ -251,24 +221,17 @@ public class BrowseToolTests
         var container = new TestContainer(context) { Name = "Root" };
         container.Children = new Dictionary<string, TestContainer>
         {
-            ["A"] = childA,
-            ["B"] = childB,
-            ["C"] = childC
+            ["A"] = childA, ["B"] = childB, ["C"] = childC
         };
 
-        var config = new McpServerConfiguration
-        {
-            PathProvider = DefaultPathProvider.Instance
-        };
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
         var factory = new McpToolFactory(container, config);
         var browseTool = factory.CreateTools().First(t => t.Name == "browse");
 
-        // Act — request only 1 subject
-        var input = JsonSerializer.SerializeToElement(new { depth = 1, maxSubjects = 1 });
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 1, maxSubjects = 1 });
         var result = await browseTool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Assert
         Assert.Equal(1, json.GetProperty("subjectCount").GetInt32());
         Assert.True(json.GetProperty("truncated").GetBoolean());
     }
@@ -276,7 +239,6 @@ public class BrowseToolTests
     [Fact]
     public async Task Browse_excludes_methods_and_interfaces_by_default()
     {
-        // Arrange
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
@@ -293,23 +255,26 @@ public class BrowseToolTests
         var factory = new McpToolFactory(room, config);
         var browseTool = factory.CreateTools().First(t => t.Name == "browse");
 
-        // Act — no includeMethods/includeInterfaces flags
-        var input = JsonSerializer.SerializeToElement(new { depth = 1 });
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 1 });
         var result = await browseTool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Assert — $methods and $interfaces should be stripped
-        var device = json.GetProperty("result").GetProperty("Device");
-        Assert.False(device.TryGetProperty("$methods", out _));
-        Assert.False(device.TryGetProperty("$interfaces", out _));
-        // $title should still be present (not filtered)
+        // Find Device child node in properties array
+        var properties = json.GetProperty("result").GetProperty("properties");
+        var deviceProp = properties.EnumerateArray()
+            .First(p => p.GetProperty("kind").GetString() == "object" && p.GetProperty("name").GetString() == "Device");
+        var device = deviceProp.GetProperty("child");
+
+        // Methods and interfaces should NOT be present
+        Assert.False(device.TryGetProperty("methods", out _));
+        Assert.False(device.TryGetProperty("interfaces", out _));
+        // $title should be present
         Assert.True(device.TryGetProperty("$title", out _));
     }
 
     [Fact]
     public async Task Browse_includes_methods_and_interfaces_when_requested()
     {
-        // Arrange
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
@@ -326,32 +291,23 @@ public class BrowseToolTests
         var factory = new McpToolFactory(room, config);
         var browseTool = factory.CreateTools().First(t => t.Name == "browse");
 
-        // Act
-        var input = JsonSerializer.SerializeToElement(new { depth = 1, includeMethods = true, includeInterfaces = true });
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 1, includeMethods = true, includeInterfaces = true });
         var result = await browseTool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Assert
-        var device = json.GetProperty("result").GetProperty("Device");
-        Assert.True(device.TryGetProperty("$methods", out _));
-        Assert.True(device.TryGetProperty("$interfaces", out _));
-    }
+        // Find Device child node
+        var properties = json.GetProperty("result").GetProperty("properties");
+        var deviceProp = properties.EnumerateArray()
+            .First(p => p.GetProperty("kind").GetString() == "object" && p.GetProperty("name").GetString() == "Device");
+        var device = deviceProp.GetProperty("child");
 
-    private class TestSubjectEnricher : IMcpSubjectEnricher
-    {
-        public List<RegisteredSubject> EnrichedSubjects { get; } = [];
-
-        public IDictionary<string, object?> GetSubjectEnrichments(RegisteredSubject subject)
-        {
-            EnrichedSubjects.Add(subject);
-            return new Dictionary<string, object?> { ["$test"] = "enriched" };
-        }
+        Assert.True(device.TryGetProperty("methods", out _));
+        Assert.True(device.TryGetProperty("interfaces", out _));
     }
 
     [Fact]
     public async Task Browse_excludeTypes_filters_out_matching_subjects()
     {
-        // Arrange
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
@@ -359,31 +315,34 @@ public class BrowseToolTests
         var room = new TestRoom(context) { Name = "Room", Temperature = 21.5m };
         room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
 
-        var config = new McpServerConfiguration
-        {
-            PathProvider = DefaultPathProvider.Instance
-        };
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
         var factory = new McpToolFactory(room, config);
         var browseTool = factory.CreateTools().First(t => t.Name == "browse");
 
-        // Act — exclude TestDevice
         var input = JsonSerializer.SerializeToElement(new
         {
+            format = "json",
             depth = 1,
             excludeTypes = new[] { "TestDevice" }
         });
         var result = await browseTool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Assert — Device should not appear
-        var subjects = json.GetProperty("result");
-        Assert.False(subjects.TryGetProperty("Device", out _));
+        // Device should NOT appear in properties
+        var resultNode = json.GetProperty("result");
+        if (resultNode.TryGetProperty("properties", out var properties))
+        {
+            var hasDevice = properties.EnumerateArray()
+                .Any(p => p.TryGetProperty("name", out var n) && n.GetString() == "Device" &&
+                          p.GetProperty("kind").GetString() == "object" &&
+                          p.TryGetProperty("child", out var c) && c.ValueKind != JsonValueKind.Null);
+            Assert.False(hasDevice);
+        }
     }
 
     [Fact]
     public async Task Browse_depth_boundary_shows_itemType_for_homogeneous_collection()
     {
-        // Arrange
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
@@ -395,22 +354,55 @@ public class BrowseToolTests
             ["B"] = new TestContainer(context) { Name = "B" }
         };
 
-        var config = new McpServerConfiguration
-        {
-            PathProvider = DefaultPathProvider.Instance
-        };
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
         var factory = new McpToolFactory(container, config);
         var browseTool = factory.CreateTools().First(t => t.Name == "browse");
 
-        // Act — depth 0, so Children hits the boundary
-        var input = JsonSerializer.SerializeToElement(new { depth = 0 });
+        var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 0 });
         var result = await browseTool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Assert
-        var children = json.GetProperty("result").GetProperty("Children");
-        Assert.Equal(2, children.GetProperty("$count").GetInt32());
-        Assert.Equal("TestContainer", children.GetProperty("$itemType").GetString());
+        // Children should be a collapsed dictionary property
+        var properties = json.GetProperty("result").GetProperty("properties");
+        var children = properties.EnumerateArray()
+            .First(p => p.GetProperty("name").GetString() == "Children");
+        Assert.Equal("dictionary", children.GetProperty("kind").GetString());
+        Assert.True(children.GetProperty("isCollapsed").GetBoolean());
+        Assert.Equal(2, children.GetProperty("count").GetInt32());
+        Assert.Equal("TestContainer", children.GetProperty("itemType").GetString());
+    }
+
+    [Fact]
+    public async Task Browse_default_format_returns_text()
+    {
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+
+        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
+
+        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
+        var factory = new McpToolFactory(room, config);
+        var browseTool = factory.CreateTools().First(t => t.Name == "browse");
+
+        var input = JsonSerializer.SerializeToElement(new { depth = 0 });
+        var result = await browseTool.Handler(input, CancellationToken.None);
+
+        Assert.IsType<string>(result);
+        var text = (string)result!;
+        Assert.StartsWith("# path [Type]", text);
+        Assert.Contains("[0 subjects]", text);
+    }
+
+    private class TestSubjectEnricher : IMcpSubjectEnricher
+    {
+        public List<RegisteredSubject> EnrichedSubjects { get; } = [];
+
+        public IDictionary<string, object?> GetSubjectEnrichments(RegisteredSubject subject)
+        {
+            EnrichedSubjects.Add(subject);
+            return new Dictionary<string, object?> { ["$test"] = "enriched" };
+        }
     }
 
     private class MethodsAndInterfacesEnricher : IMcpSubjectEnricher
