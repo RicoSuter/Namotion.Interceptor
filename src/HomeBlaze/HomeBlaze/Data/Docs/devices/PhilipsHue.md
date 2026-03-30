@@ -30,8 +30,6 @@ The Philips Hue integration connects to a Hue Bridge on the local network and ex
 }
 ```
 
-Place this file in the `Data/Devices/` folder (e.g., `Hue.json`).
-
 ## Setup
 
 ### Bridge Discovery
@@ -79,15 +77,15 @@ Each Hue light is exposed as a `HueLightbulb` subject implementing `ILightbulb`,
 
 **Power consumption** is estimated per model when the light is on. Standby power is 0.5W when connected but off:
 
-| Model | Power (W) | Lumen | Socket |
-|-------|-----------|-------|--------|
-| LWA001 | 9 | 806 | E26/E27 |
-| LCA008 | 13.5 | 1600 | E26/E27 |
-| LCT015 | 9.5 | 808 | E26/E27 |
-| LCT003 | 6.5 | 300 | GU10 |
-| LCL001 | 25 | 1600 | n/a (strip) |
-| LST002 | 20 | 1600 | n/a (strip) |
-| LTG002 | 5 | 350 | GU10 |
+| Model  | Power (W) | Lumen | Socket      |
+|--------|-----------|-------|-------------|
+| LWA001 | 9         | 806   | E26/E27     |
+| LCA008 | 13.5      | 1600  | E26/E27     |
+| LCT015 | 9.5       | 808   | E26/E27     |
+| LCT003 | 6.5       | 300   | GU10        |
+| LCL001 | 25        | 1600  | n/a (strip) |
+| LST002 | 20        | 1600  | n/a (strip) |
+| LTG002 | 5         | 350   | GU10        |
 
 See the full model table in the `HueLightbulb` source code for all supported models.
 
@@ -97,12 +95,12 @@ Rooms and zones are exposed as `HueGroup` subjects implementing `ILightbulb`, `I
 
 **Grouped controls:**
 
-| Operation | Behavior |
-|-----------|----------|
-| On/Off | Sent to the grouped light resource (all lights at once) |
-| Brightness | Sent to the grouped light resource |
-| Color | Delegated to each individual light in the group |
-| Color Temperature | Delegated to each individual light in the group |
+| Operation         | Behavior                                                |
+|-------------------|---------------------------------------------------------|
+| On/Off            | Sent to the grouped light resource (all lights at once) |
+| Brightness        | Sent to the grouped light resource                      |
+| Color             | Delegated to each individual light in the group         |
+| Color Temperature | Delegated to each individual light in the group         |
 
 **Aggregation logic:**
 
@@ -116,12 +114,12 @@ Lights referenced by rooms and zones are the same `HueLightbulb` instances owned
 
 Motion sensors are exposed as `HueMotionDevice` subjects implementing `IPresenceSensor`, `ITemperatureSensor`, `ILightSensor`, and `IBatteryState`.
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `IsPresent` | bool? | Whether motion is currently detected |
-| `Temperature` | decimal? | Ambient temperature in degrees Celsius (null if sensor reports invalid) |
-| `Illuminance` | decimal? | Light level in lux (null if sensor disabled) |
-| `BatteryLevel` | decimal? | Battery level as 0-1 fraction |
+| Property       | Type     | Description                                                             |
+|----------------|----------|-------------------------------------------------------------------------|
+| `IsPresent`    | bool?    | Whether motion is currently detected                                    |
+| `Temperature`  | decimal? | Ambient temperature in degrees Celsius (null if sensor reports invalid) |
+| `Illuminance`  | decimal? | Light level in lux (null if sensor disabled)                            |
+| `BatteryLevel` | decimal? | Battery level as 0-1 fraction                                           |
 
 ### Button Devices (`HueButtonDevice`)
 
@@ -131,12 +129,12 @@ Each `HueButton` implements `IButtonDevice` and `IObservable<ButtonEvent>` for r
 
 **Button state mapping:**
 
-| Hue Event | ButtonState |
-|-----------|-------------|
-| `initial_press` | `Down` |
-| `repeat` | `Repeat` |
-| `short_release` | `Release` |
-| `long_release` | `LongRelease` |
+| Hue Event       | ButtonState   |
+|-----------------|---------------|
+| `initial_press` | `Down`        |
+| `repeat`        | `Repeat`      |
+| `short_release` | `Release`     |
+| `long_release`  | `LongRelease` |
 
 **Duplicate prevention:** Button state changes are only emitted when the `ButtonChangeDate` from the Hue API changes and the new state differs from the previous state. Repeat events are deduplicated so consecutive `Repeat` states don't fire redundant events. After release events (`Release`, `LongRelease`), the state automatically resets to `None`.
 
@@ -169,13 +167,13 @@ The bridge runs in a reconnect loop inside `ExecuteAsync`:
 
 ### Failure Modes and Recovery
 
-| Failure | Behavior |
-|---------|----------|
-| Missing configuration | Enters error state with message "Bridge not configured. Set BridgeId and AppKey." Waits for config change |
-| Bridge not found on network | Retries discovery every `RetryInterval` (default 30s) |
-| Event stream disconnect | Connection teardown triggers reconnect loop |
-| API errors | Logged as warning, connection retried after `RetryInterval` |
-| Host shutdown | Graceful stop via `CancellationToken`, status set to Stopped |
+| Failure                     | Behavior                                                                                                  |
+|-----------------------------|-----------------------------------------------------------------------------------------------------------|
+| Missing configuration       | Enters error state with message "Bridge not configured. Set BridgeId and AppKey." Waits for config change |
+| Bridge not found on network | Retries discovery every `RetryInterval` (default 30s)                                                     |
+| Event stream disconnect     | Connection teardown triggers reconnect loop                                                               |
+| API errors                  | Logged as warning, connection retried after `RetryInterval`                                               |
+| Host shutdown               | Graceful stop via `CancellationToken`, status set to Stopped                                              |
 
 ## Troubleshooting
 
