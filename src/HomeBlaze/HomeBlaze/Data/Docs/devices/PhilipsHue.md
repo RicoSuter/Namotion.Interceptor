@@ -23,8 +23,8 @@ The Philips Hue integration connects to a Hue Bridge on the local network and ex
 ```json
 {
   "$type": "Namotion.Devices.Philips.Hue.HueBridge",
-  "bridgeId": "001788fffe20b654",
-  "appKey": "OVd4qOYmMEmQsTcqiikZL5M9kMdx5z00Mnom2wut",
+  "bridgeId": "MY_BRIDGE_ID",
+  "appKey": "MY_APP_KEY",
   "pollingInterval": "00:00:00.250",
   "retryInterval": "00:00:30"
 }
