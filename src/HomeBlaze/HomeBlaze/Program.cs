@@ -10,6 +10,8 @@ using HomeBlaze.Storage.Blazor;
 using HomeBlaze.Storage.Blazor.Files;
 using Namotion.Devices.Gpio;
 using Namotion.Devices.Gpio.HomeBlaze;
+using Namotion.Devices.Philips.Hue;
+using Namotion.Devices.Philips.Hue.HomeBlaze;
 using Toolbelt.Blazor.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -45,7 +47,9 @@ typeProvider
     .AddAssembly(typeof(OpcUaServer).Assembly)                 // HomeBlaze.Servers.OpcUa
     .AddAssembly(typeof(OpcUaServerEditComponent).Assembly)    // HomeBlaze.Servers.OpcUa.Blazor
     .AddAssembly(typeof(GpioSubject).Assembly)
-    .AddAssembly(typeof(GpioSubjectEditComponent).Assembly);
+    .AddAssembly(typeof(GpioSubjectEditComponent).Assembly)
+    .AddAssembly(typeof(HueBridge).Assembly)
+    .AddAssembly(typeof(HueBridgeSetupComponent).Assembly);
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
