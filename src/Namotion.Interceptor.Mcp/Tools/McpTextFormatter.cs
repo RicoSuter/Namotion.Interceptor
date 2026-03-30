@@ -12,7 +12,7 @@ internal static class McpTextFormatter
     private static readonly string[] Indents = Enumerable.Range(0, 12).Select(i => new string(' ', i * 2)).ToArray();
 
     private const string Legend =
-        "# path [Type] \"title\" $key=value | prop: value | type | @attr: value | Collection/ (Nx Type)\n" +
+        "# path [Type] $key=value | prop: value | type | @attr: value | Collection/ (Nx Type)\n" +
         "# Use get_property for exact values or browse with format=json for structured data.";
 
     private const int MaxStringValueLength = 100;
@@ -63,11 +63,6 @@ internal static class McpTextFormatter
         if (node.Type is not null)
         {
             sb.Append($" [{node.Type}]");
-        }
-
-        if (node.Title is not null)
-        {
-            sb.Append($" \"{node.Title}\"");
         }
 
         if (node.Enrichments is not null)

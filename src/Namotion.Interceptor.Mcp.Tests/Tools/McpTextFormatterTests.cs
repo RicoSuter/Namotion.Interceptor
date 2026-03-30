@@ -15,8 +15,7 @@ public class McpTextFormatterTests
             {
                 Path = "/",
                 Type = "MyApp.Root",
-                Title = "Root",
-                Enrichments = new Dictionary<string, object?> { ["$icon"] = "Storage" },
+                Enrichments = new Dictionary<string, object?> { ["$title"] = "Root", ["$icon"] = "Storage" },
                 Properties = new Dictionary<string, SubjectNodeProperty>
                 {
                     ["Device"] = new SubjectObjectProperty(
@@ -24,7 +23,7 @@ public class McpTextFormatterTests
                         {
                             Path = "/Device",
                             Type = "MyApp.Device",
-                            Title = "Light"
+                            Enrichments = new Dictionary<string, object?> { ["$title"] = "Light" }
                         }),
                     ["Sensors"] = new SubjectCollectionProperty(IsCollapsed: true, Count: 3, ItemType: "Sensor")
                 }
@@ -209,7 +208,7 @@ public class McpTextFormatterTests
                 {
                     Path = "/Demo/Motor1",
                     Type = "MyApp.Motor",
-                    Title = "Motor 1",
+                    Enrichments = new Dictionary<string, object?> { ["$title"] = "Motor 1" },
                     Properties = new Dictionary<string, SubjectNodeProperty>
                     {
                         ["Speed"] = new ScalarProperty(1500, "integer", IsWritable: true),
@@ -220,7 +219,7 @@ public class McpTextFormatterTests
                 {
                     Path = "/Demo/Motor2",
                     Type = "MyApp.Motor",
-                    Title = "Motor 2",
+                    Enrichments = new Dictionary<string, object?> { ["$title"] = "Motor 2" },
                     Properties = new Dictionary<string, SubjectNodeProperty>
                     {
                         ["Speed"] = new ScalarProperty(2400, "integer", IsWritable: true),
@@ -243,8 +242,8 @@ public class McpTextFormatterTests
         {
             Results = new Dictionary<string, SubjectNode>
             {
-                ["/Demo/Motor1"] = new() { Path = "/Demo/Motor1", Type = "MyApp.Motor", Title = "Motor 1" },
-                ["/Demo/Motor2"] = new() { Path = "/Demo/Motor2", Type = "MyApp.Motor", Title = "Motor 2" }
+                ["/Demo/Motor1"] = new() { Path = "/Demo/Motor1", Type = "MyApp.Motor", Enrichments = new Dictionary<string, object?> { ["$title"] = "Motor 1" } },
+                ["/Demo/Motor2"] = new() { Path = "/Demo/Motor2", Type = "MyApp.Motor", Enrichments = new Dictionary<string, object?> { ["$title"] = "Motor 2" } }
             },
             SubjectCount = 2,
             Truncated = true

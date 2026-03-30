@@ -23,6 +23,7 @@ internal static class McpToolHelper
 
         if (requestExcludeTypes is not null && requestExcludeTypes.Length > 0)
         {
+            var interfaces = subjectType.GetInterfaces();
             foreach (var name in requestExcludeTypes)
             {
                 if (subjectType.FullName == name || subjectType.Name == name)
@@ -30,7 +31,7 @@ internal static class McpToolHelper
                     return true;
                 }
 
-                if (subjectType.GetInterfaces().Any(i => i.FullName == name || i.Name == name))
+                if (interfaces.Any(i => i.FullName == name || i.Name == name))
                 {
                     return true;
                 }
@@ -67,12 +68,6 @@ internal static class McpToolHelper
         if (enrichments.Remove("$type", out var typeOverride) && typeOverride is string typeStr)
         {
             type = typeStr;
-        }
-
-        string? title = null;
-        if (enrichments.Remove("$title", out var titleObj) && titleObj is string titleStr)
-        {
-            title = titleStr;
         }
 
         string[]? methods = null;
@@ -116,7 +111,6 @@ internal static class McpToolHelper
         {
             Path = path,
             Type = type,
-            Title = title,
             Enrichments = enrichments.Count > 0 ? enrichments : null,
             Methods = methods,
             Interfaces = interfaces,
@@ -124,7 +118,7 @@ internal static class McpToolHelper
         };
     }
 
-    private static string? TryGetSubjectPath(
+    internal static string? TryGetSubjectPath(
         RegisteredSubject subject,
         PathProviderBase pathProvider,
         IInterceptorSubject rootSubject,

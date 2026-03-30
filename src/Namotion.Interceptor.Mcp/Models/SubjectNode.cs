@@ -15,16 +15,12 @@ public class SubjectNode
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Type { get; init; }
 
-    [JsonPropertyName("$title")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? Title { get; init; }
-
     /// <summary>
-    /// Additional enrichments (e.g., $icon, $customField).
+    /// Additional enrichments (e.g., $title, $icon, $customField).
     /// Merged as top-level JSON properties via JsonExtensionData.
     /// </summary>
     [JsonExtensionData]
-    public Dictionary<string, object?>? Enrichments { get; set; }
+    public Dictionary<string, object?>? Enrichments { get; init; }
 
     [JsonPropertyName("methods")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
