@@ -67,11 +67,14 @@ internal class ListTypesTool
         {
             if (typeInfo.IsInterface)
             {
-                return (object)new
+                return new
                 {
                     name = typeInfo.Name,
                     description = typeInfo.Description,
                     isInterface = true,
+                    
+                    // TODO: Properties and methods are currently dangerous, should only include state properties and query/operation methods (need a way to filter here) - maybe add to McpTypeInfo?
+                    // TODO: Also parameters should only include HomeBlaze required parameters (also add to McpTypeInfo? so provider can control what is included?
                     properties = typeInfo.Type.GetProperties()
                         .Select(property => new
                         {
