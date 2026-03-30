@@ -16,7 +16,7 @@
         <ProjectReference Include="..\..\Namotion.Interceptor.Blazor\Namotion.Interceptor.Blazor.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Tracking\Namotion.Interceptor.Tracking.csproj" />
-        <PackageReference Include="MudBlazor" Version="8.*" />
+        <PackageReference Include="MudBlazor" Version="9.2.*" />
         <PackageReference Include="Markdig" Version="0.*" />
     </ItemGroup>
 
