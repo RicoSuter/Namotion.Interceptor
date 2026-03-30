@@ -675,7 +675,7 @@ Use paths to reference subjects in the object graph. See [Configuration Guide - 
 | `/` (absolute) | `/Demo/Conveyor` |
 | `./` (relative) | `./Child/Property` |
 | `../` (parent) | `../Sibling/Property` |
-| Brackets | `/Demo/Children[Setup.md]` (for collection indices) |
+| Brackets | `/Devices[0]` (for non-inlined collection indices) |
 
 Use `SubjectPathResolver.ResolveSubject()` to resolve paths in code:
 

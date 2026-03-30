@@ -260,7 +260,7 @@ This is the canonical form of `/Children[Demo]/Children[Conveyor]`, where bracke
 
 ### Brackets for Collection Indices
 
-Use brackets when accessing collection entries explicitly: `/Demo/Children[Setup.md]`
+Use brackets for non-inlined collections: `/Devices[0]/Temperature`. With `[InlinePaths]`, keys are direct segments: `/Demo/Setup.md`
 
 ---
 
