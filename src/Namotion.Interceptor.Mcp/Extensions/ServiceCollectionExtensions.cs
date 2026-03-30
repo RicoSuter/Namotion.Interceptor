@@ -11,11 +11,18 @@ namespace Namotion.Interceptor.Mcp.Extensions;
 /// </summary>
 public static class ServiceCollectionExtensions
 {
-    internal static readonly JsonSerializerOptions SerializerOptions = new()
+    private static readonly JsonSerializerOptions SerializerOptions = CreateSerializerOptions();
+
+    private static JsonSerializerOptions CreateSerializerOptions()
     {
-        WriteIndented = true,
-        Converters = { new JsonStringEnumConverter() }
-    };
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            Converters = { new JsonStringEnumConverter() }
+        };
+        options.MakeReadOnly();
+        return options;
+    }
 
     /// <summary>
     /// Registers subject registry tools with the MCP server builder.
@@ -70,9 +77,7 @@ public static class ServiceCollectionExtensions
                     ? JsonSerializer.SerializeToElement(request.Params.Arguments)
                     : JsonSerializer.SerializeToElement(new { });
                 var result = await tool.Handler(input, cancellationToken);
-                var text = result is string stringResult
-                    ? stringResult
-                    : JsonSerializer.Serialize(result, SerializerOptions);
+                var text = result as string ?? JsonSerializer.Serialize(result, SerializerOptions);
                 return new CallToolResult
                 {
                     Content = [new TextContentBlock { Text = text }]
@@ -89,21 +94,6 @@ public static class ServiceCollectionExtensions
         });
 
         return builder;
-    }
-
-    /// <summary>
-    /// Registers subject registry tools with the MCP server builder.
-    /// </summary>
-    /// <param name="builder">The MCP server builder from <c>AddMcpServer()</c>.</param>
-    /// <param name="rootSubject">The root interceptor subject to expose via MCP.</param>
-    /// <param name="configuration">The server configuration controlling tool behavior.</param>
-    /// <returns>The builder for further chaining.</returns>
-    public static IMcpServerBuilder WithSubjectRegistryTools(
-        this IMcpServerBuilder builder,
-        IInterceptorSubject rootSubject,
-        McpServerConfiguration configuration)
-    {
-        return builder.WithSubjectRegistryTools(_ => rootSubject, _ => configuration);
     }
 
     /// <summary>

@@ -1,29 +1,33 @@
 using Namotion.Interceptor.Mcp.Implementations;
-using Xunit;
 
 namespace Namotion.Interceptor.Mcp.Tests;
 
 public class SubjectAbstractionsAssemblyTypeProviderTests
 {
     [Fact]
-    public void GetTypes_returns_interfaces_from_marked_assemblies()
+    public void WhenMarkedAssemblyScanned_ThenReturnsInterfaceTypes()
     {
+        // Arrange
         var provider = new SubjectAbstractionsAssemblyTypeProvider();
+
+        // Act
         var types = provider.GetTypes().ToList();
 
-        // The test assembly is marked with [SubjectAbstractionsAssembly]
-        // and defines ITestSensor below — it should appear in results
+        // Assert
         Assert.Contains(types, t => t.Name == typeof(ITestSensor).FullName);
         Assert.All(types, t => Assert.True(t.IsInterface));
     }
 
     [Fact]
-    public void GetTypes_excludes_non_interface_types()
+    public void WhenMarkedAssemblyScanned_ThenExcludesNonInterfaceTypes()
     {
+        // Arrange
         var provider = new SubjectAbstractionsAssemblyTypeProvider();
+
+        // Act
         var types = provider.GetTypes().ToList();
 
-        // Concrete classes should not appear
+        // Assert
         Assert.DoesNotContain(types, t => t.Name == typeof(SubjectAbstractionsAssemblyTypeProviderTests).FullName);
     }
 }

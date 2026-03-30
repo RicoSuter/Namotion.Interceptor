@@ -2,14 +2,13 @@ using System.Text.Json;
 using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry.Paths;
-using Xunit;
 
 namespace Namotion.Interceptor.Mcp.Tests.Tools;
 
 public class ListTypesToolTests
 {
     [Fact]
-    public async Task ListTypes_interface_includes_properties()
+    public async Task WhenListingInterfaceType_ThenIncludesProperties()
     {
         // Arrange
         var typeProvider = new TestTypeProvider(
@@ -36,9 +35,9 @@ public class ListTypesToolTests
     }
 
     [Fact]
-    public async Task ListTypes_concrete_includes_known_interfaces()
+    public async Task WhenListingConcreteType_ThenIncludesKnownInterfaces()
     {
-        // Arrange — register both the interface and the concrete type
+        // Arrange
         var typeProvider = new TestTypeProvider(
             new McpTypeInfo("ITestInterface", "Test", IsInterface: true, Type: typeof(ITestInterface)),
             new McpTypeInfo("TestMotor", "Test motor", IsInterface: false, Type: typeof(TestMotor)));
@@ -56,7 +55,7 @@ public class ListTypesToolTests
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Assert — concrete type lists known interfaces, not properties
+        // Assert
         var concreteType = json.GetProperty("types").EnumerateArray()
             .First(t => t.GetProperty("name").GetString() == "TestMotor");
         Assert.True(concreteType.TryGetProperty("interfaces", out var interfaces));
@@ -79,7 +78,7 @@ public class ListTypesToolTests
     }
 
     [Fact]
-    public async Task ListTypes_kind_filters_to_interfaces_only()
+    public async Task WhenKindIsInterfaces_ThenFiltersToInterfacesOnly()
     {
         // Arrange
         var typeProvider = new TestTypeProvider(
@@ -106,7 +105,7 @@ public class ListTypesToolTests
     }
 
     [Fact]
-    public async Task ListTypes_kind_filters_to_concrete_only()
+    public async Task WhenKindIsConcrete_ThenFiltersToConcreteOnly()
     {
         // Arrange
         var typeProvider = new TestTypeProvider(
@@ -133,7 +132,7 @@ public class ListTypesToolTests
     }
 
     [Fact]
-    public async Task ListTypes_kind_all_returns_everything()
+    public async Task WhenKindIsAll_ThenReturnsEverything()
     {
         // Arrange
         var typeProvider = new TestTypeProvider(
@@ -159,7 +158,7 @@ public class ListTypesToolTests
     }
 
     [Fact]
-    public async Task ListTypes_type_search_filters_by_name()
+    public async Task WhenTypeSearchByName_ThenFiltersByName()
     {
         // Arrange
         var typeProvider = new TestTypeProvider(
@@ -174,19 +173,19 @@ public class ListTypesToolTests
         var factory = new McpToolFactory(() => null!, config);
         var tool = factory.CreateTools().First(t => t.Name == "list_types");
 
-        // Act — search for "Motor"
+        // Act
         var input = JsonSerializer.SerializeToElement(new { type = "Motor" });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Assert — only TestMotor should match
+        // Assert
         var types = json.GetProperty("types");
         Assert.Single(types.EnumerateArray().ToArray());
         Assert.Equal("TestMotor", types.EnumerateArray().First().GetProperty("name").GetString());
     }
 
     [Fact]
-    public async Task ListTypes_type_search_is_case_insensitive()
+    public async Task WhenTypeSearchByName_ThenIsCaseInsensitive()
     {
         // Arrange
         var typeProvider = new TestTypeProvider(
@@ -201,19 +200,19 @@ public class ListTypesToolTests
         var factory = new McpToolFactory(() => null!, config);
         var tool = factory.CreateTools().First(t => t.Name == "list_types");
 
-        // Act — search for "motor" (lowercase)
+        // Act
         var input = JsonSerializer.SerializeToElement(new { type = "motor" });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Assert — should match TestMotor despite case difference
+        // Assert
         var types = json.GetProperty("types");
         Assert.Single(types.EnumerateArray().ToArray());
         Assert.Equal("TestMotor", types.EnumerateArray().First().GetProperty("name").GetString());
     }
 
     [Fact]
-    public async Task ListTypes_kind_and_type_combined()
+    public async Task WhenKindAndTypeCombined_ThenBothFiltersApply()
     {
         // Arrange
         var typeProvider = new TestTypeProvider(
@@ -229,21 +228,21 @@ public class ListTypesToolTests
         var factory = new McpToolFactory(() => null!, config);
         var tool = factory.CreateTools().First(t => t.Name == "list_types");
 
-        // Act — search for "Motor" among interfaces only
+        // Act
         var input = JsonSerializer.SerializeToElement(new { kind = "interfaces", type = "Motor" });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Assert — only the IMotorInterface should match (interface + contains "Motor")
+        // Assert
         var types = json.GetProperty("types");
         Assert.Single(types.EnumerateArray().ToArray());
         Assert.Equal("IMotorInterface", types.EnumerateArray().First().GetProperty("name").GetString());
     }
 
     [Fact]
-    public async Task ListTypes_kind_concrete_still_lists_all_known_interfaces()
+    public async Task WhenKindIsConcrete_ThenStillListsAllKnownInterfaces()
     {
-        // Arrange — both interface and concrete are registered
+        // Arrange
         var typeProvider = new TestTypeProvider(
             new McpTypeInfo("ITestInterface", "Test", IsInterface: true, Type: typeof(ITestInterface)),
             new McpTypeInfo("TestMotor", "Motor", IsInterface: false, Type: typeof(TestMotor)));
@@ -256,12 +255,12 @@ public class ListTypesToolTests
         var factory = new McpToolFactory(() => null!, config);
         var tool = factory.CreateTools().First(t => t.Name == "list_types");
 
-        // Act — filter to concrete only
+        // Act
         var input = JsonSerializer.SerializeToElement(new { kind = "concrete" });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Assert — TestMotor should still reference ITestInterface even though interfaces are filtered out
+        // Assert
         var concreteType = json.GetProperty("types").EnumerateArray().First();
         Assert.True(concreteType.TryGetProperty("interfaces", out var interfaces));
         var interfaceNames = interfaces.EnumerateArray().Select(i => i.GetString()).ToArray();

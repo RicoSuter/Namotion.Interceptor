@@ -6,8 +6,9 @@ namespace Namotion.Interceptor.Mcp.Tests.Tools;
 public class McpTextFormatterTests
 {
     [Fact]
-    public Task Browse_basic_tree()
+    public Task WhenBrowsingBasicTree_ThenFormatsCorrectly()
     {
+        // Arrange
         var result = new BrowseResult
         {
             Result = new SubjectNode
@@ -31,12 +32,14 @@ public class McpTextFormatterTests
             SubjectCount = 2
         };
 
+        // Act & Assert
         return Verifier.Verify(McpTextFormatter.FormatBrowseResult(result));
     }
 
     [Fact]
-    public Task Browse_with_properties_and_attributes()
+    public Task WhenBrowsingWithPropertiesAndAttributes_ThenFormatsCorrectly()
     {
+        // Arrange
         var result = new BrowseResult
         {
             Result = new SubjectNode
@@ -58,12 +61,14 @@ public class McpTextFormatterTests
             SubjectCount = 1
         };
 
+        // Act & Assert
         return Verifier.Verify(McpTextFormatter.FormatBrowseResult(result));
     }
 
     [Fact]
-    public Task Browse_with_methods_and_interfaces()
+    public Task WhenBrowsingWithMethodsAndInterfaces_ThenFormatsCorrectly()
     {
+        // Arrange
         var result = new BrowseResult
         {
             Result = new SubjectNode
@@ -76,12 +81,14 @@ public class McpTextFormatterTests
             SubjectCount = 1
         };
 
+        // Act & Assert
         return Verifier.Verify(McpTextFormatter.FormatBrowseResult(result));
     }
 
     [Fact]
-    public Task Browse_null_and_empty_and_long_values()
+    public Task WhenBrowsingNullEmptyAndLongValues_ThenFormatsCorrectly()
     {
+        // Arrange
         var result = new BrowseResult
         {
             Result = new SubjectNode
@@ -98,12 +105,14 @@ public class McpTextFormatterTests
             SubjectCount = 1
         };
 
+        // Act & Assert
         return Verifier.Verify(McpTextFormatter.FormatBrowseResult(result));
     }
 
     [Fact]
-    public Task Browse_collection_and_dictionary_children()
+    public Task WhenBrowsingCollectionAndDictionaryChildren_ThenFormatsCorrectly()
     {
+        // Arrange
         var result = new BrowseResult
         {
             Result = new SubjectNode
@@ -127,12 +136,14 @@ public class McpTextFormatterTests
             SubjectCount = 5
         };
 
+        // Act & Assert
         return Verifier.Verify(McpTextFormatter.FormatBrowseResult(result));
     }
 
     [Fact]
-    public Task Browse_collapsed_without_item_type()
+    public Task WhenBrowsingCollapsedWithoutItemType_ThenFormatsCorrectly()
     {
+        // Arrange
         var result = new BrowseResult
         {
             Result = new SubjectNode
@@ -147,12 +158,14 @@ public class McpTextFormatterTests
             SubjectCount = 1
         };
 
+        // Act & Assert
         return Verifier.Verify(McpTextFormatter.FormatBrowseResult(result));
     }
 
     [Fact]
-    public Task Browse_truncated_footer()
+    public Task WhenResultTruncated_ThenFooterIndicatesTruncation()
     {
+        // Arrange
         var result = new BrowseResult
         {
             Result = new SubjectNode { Path = "/", Type = "MyApp.Root" },
@@ -160,6 +173,7 @@ public class McpTextFormatterTests
             Truncated = true
         };
 
+        // Act & Assert
         return Verifier.Verify(McpTextFormatter.FormatBrowseResult(result));
     }
 
@@ -167,21 +181,26 @@ public class McpTextFormatterTests
     [InlineData(0, "[0 subjects]")]
     [InlineData(1, "[1 subject]")]
     [InlineData(2, "[2 subjects]")]
-    public void Footer_singular_plural(int count, string expected)
+    public void WhenFooterRendered_ThenSingularPluralIsCorrect(int count, string expected)
     {
+        // Arrange
         var result = new BrowseResult
         {
             Result = new SubjectNode { Path = "/", Type = "R" },
             SubjectCount = count
         };
 
+        // Act
         var text = McpTextFormatter.FormatBrowseResult(result);
+
+        // Assert
         Assert.Contains(expected, text);
     }
 
     [Fact]
-    public Task Search_flat_list_with_properties()
+    public Task WhenSearchingWithProperties_ThenFormatsFlatList()
     {
+        // Arrange
         var result = new SearchResult
         {
             Results = new Dictionary<string, SubjectNode>
@@ -212,12 +231,14 @@ public class McpTextFormatterTests
             SubjectCount = 2
         };
 
+        // Act & Assert
         return Verifier.Verify(McpTextFormatter.FormatSearchResult(result));
     }
 
     [Fact]
-    public Task Search_minimal_no_properties()
+    public Task WhenSearchingWithoutProperties_ThenFormatsMinimalList()
     {
+        // Arrange
         var result = new SearchResult
         {
             Results = new Dictionary<string, SubjectNode>
@@ -229,6 +250,7 @@ public class McpTextFormatterTests
             Truncated = true
         };
 
+        // Act & Assert
         return Verifier.Verify(McpTextFormatter.FormatSearchResult(result));
     }
 }

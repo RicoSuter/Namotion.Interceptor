@@ -114,3 +114,8 @@ The library has specialized support for:
 ## Coding Style
 
 - **Avoid abbreviations** in variable and parameter names unless the name is very long. Use descriptive names (e.g., `attribute` not `attr`).
+
+## Test Conventions
+
+- **Naming**: `When<Condition>_Then<ExpectedBehavior>` (e.g., `WhenDepthIsZero_ThenReturnsNoChildren`)
+- **Structure**: Explicit `// Arrange`, `// Act`, `// Assert` comments separating each phase (use `// Act & Assert` for exception tests)

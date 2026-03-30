@@ -1,5 +1,4 @@
 using Namotion.Interceptor.Mcp.Tools;
-using Xunit;
 
 namespace Namotion.Interceptor.Mcp.Tests.Tools;
 
@@ -22,25 +21,25 @@ public class JsonSchemaTypeMapperTests
     [InlineData(typeof(DateTimeOffset), "string")]
     [InlineData(typeof(Guid), "string")]
     [InlineData(typeof(object), "object")]
-    public void ToJsonSchemaType_maps_clr_types_correctly(Type clrType, string expected)
+    public void WhenMappingClrType_ThenReturnsCorrectJsonSchemaType(Type clrType, string expected)
     {
         Assert.Equal(expected, JsonSchemaTypeMapper.ToJsonSchemaType(clrType));
     }
 
     [Fact]
-    public void ToJsonSchemaType_returns_string_for_enum_types()
+    public void WhenEnumType_ThenReturnsString()
     {
         Assert.Equal("string", JsonSchemaTypeMapper.ToJsonSchemaType(typeof(DayOfWeek)));
     }
 
     [Fact]
-    public void ToJsonSchemaType_returns_null_for_null_type()
+    public void WhenNullType_ThenReturnsNull()
     {
         Assert.Null(JsonSchemaTypeMapper.ToJsonSchemaType(null));
     }
 
     [Fact]
-    public void ToJsonSchemaType_returns_object_for_unknown_class()
+    public void WhenUnknownClassType_ThenReturnsObject()
     {
         Assert.Equal("object", JsonSchemaTypeMapper.ToJsonSchemaType(typeof(JsonSchemaTypeMapperTests)));
     }
