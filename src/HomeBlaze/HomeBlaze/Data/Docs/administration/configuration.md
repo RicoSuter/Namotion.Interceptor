@@ -96,10 +96,10 @@ Data/
 │   ├── motor1.json      → /demo/motor1
 │   └── motor2.json      → /demo/motor2
 └── docs/
-    └── guide.md         → /docs/Children[guide.md]
+    └── guide.md         → /docs/guide.md
 ```
 
-Note: Collection entries (like files) use brackets for the index: `/docs/Children[guide.md]`.
+Note: Folders use `[InlinePaths]`, so children are path segments directly (no `Children[...]` brackets).
 
 ---
 
@@ -166,11 +166,17 @@ This is the canonical (route) form of `/Children[Demo]/Children[Conveyor]/Proper
 
 ### Brackets for Collection Indices
 
-Use brackets when accessing collection entries explicitly:
+Use brackets when accessing non-inlined collection entries explicitly:
 
 ```
-/Demo/Children[Setup.md]
-/Docs/Children[Pages.md]/Title
+/Devices[0]/Temperature
+```
+
+With `[InlinePaths]` dictionaries (like folder children), keys become direct segments — no brackets needed:
+
+```
+/Demo/Setup.md
+/Docs/Pages.md/Title
 ```
 
 ### Examples
@@ -179,7 +185,7 @@ Use brackets when accessing collection entries explicitly:
 |------|-------------|
 | `/Demo/Conveyor` | Absolute path to a motor |
 | `/Demo/Conveyor/CurrentSpeed` | Property on that motor |
-| `/Demo/Children[Setup.md]` | File in a collection (brackets for index) |
+| `/Demo/Setup.md` | File in an `[InlinePaths]` folder |
 | `./Child/Name` | Property on current subject's child |
 | `../Temperature` | Go up one level, access Temperature |
 | `motor/Speed` | Inline subject named "motor" (in markdown) |
