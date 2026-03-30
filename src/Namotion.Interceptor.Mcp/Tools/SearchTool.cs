@@ -26,7 +26,6 @@ internal class SearchTool
         properties = new
         {
             format = new { type = "string", @enum = new[] { "text", "json" }, description = "Output format: 'text' (default) for LLM-readable overview, 'json' for exact structured data" },
-            text = new { type = "string", description = "Search text (matches against title and path, case-insensitive)" },
             types = new { type = "array", items = new { type = "string" }, description = "Filter by type/interface names" },
             includeProperties = new { type = "boolean", description = "Include property values (default: false)" },
             includeAttributes = new { type = "boolean", description = "Include registry attributes on properties (default: false)" },
@@ -41,7 +40,7 @@ internal class SearchTool
     public McpToolInfo CreateTool() => new()
     {
         Name = "search",
-        Description = "Search subjects by text and/or type/interface names. " +
+        Description = "Search subjects by type/interface names. " +
                       "Default text format is optimized for scanning results. " +
                       "Use format=json when you need exact property values or structured data for processing. " +
                       "Use list_types to discover interface names first, then pass to types parameter. " +
@@ -62,7 +61,6 @@ internal class SearchTool
         }
 
         var format = input.TryGetProperty("format", out var formatElement) ? formatElement.GetString() : "text";
-        var text = input.TryGetProperty("text", out var textElement) ? textElement.GetString() : null;
         var includeProperties = input.TryGetProperty("includeProperties", out var propsElement) && propsElement.GetBoolean();
         var includeAttributes = input.TryGetProperty("includeAttributes", out var attrsElement) && attrsElement.GetBoolean();
         var includeMethods = input.TryGetProperty("includeMethods", out var methodsElement) && methodsElement.GetBoolean();
@@ -102,31 +100,17 @@ internal class SearchTool
                 continue;
             }
 
-            var node = McpToolHelper.BuildSubjectNodeDto(
-                registered, pathProvider, rootSubject, _configuration,
-                includeProperties, includeAttributes, includeMethods, includeInterfaces);
-
-            if (node.Path is null)
+            // Compute path cheaply before building full DTO
+            var path = McpToolHelper.TryGetSubjectPath(registered, pathProvider, rootSubject, _configuration.PathPrefix);
+            if (path is null)
             {
                 continue;
             }
 
             if (!string.IsNullOrEmpty(pathPrefix) &&
-                !node.Path.StartsWith(pathPrefix, StringComparison.OrdinalIgnoreCase))
+                !path.StartsWith(pathPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 continue;
-            }
-
-            // Text filter — match against path and title
-            if (!string.IsNullOrEmpty(text))
-            {
-                var matchesPath = node.Path.Contains(text, StringComparison.OrdinalIgnoreCase);
-                var matchesTitle = node.Title?.Contains(text, StringComparison.OrdinalIgnoreCase) == true;
-
-                if (!matchesPath && !matchesTitle)
-                {
-                    continue;
-                }
             }
 
             if (subjects.Count >= maxSubjects)
@@ -135,7 +119,12 @@ internal class SearchTool
                 break;
             }
 
-            subjects[node.Path] = node;
+            // Build full DTO only for subjects that pass all filters
+            var node = McpToolHelper.BuildSubjectNodeDto(
+                registered, pathProvider, rootSubject, _configuration,
+                includeProperties, includeAttributes, includeMethods, includeInterfaces);
+
+            subjects[path] = node;
         }
 
         var searchResult = new SearchResult

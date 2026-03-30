@@ -1,7 +1,7 @@
-﻿# path [Type] "title" $key=value | prop: value | type | @attr: value | Collection/ (Nx Type)
+﻿# path [Type] $key=value | prop: value | type | @attr: value | Collection/ (Nx Type)
 # Use get_property for exact values or browse with format=json for structured data.
 
-/ [MyApp.Root] "Root" $icon=Storage
-  /Device [MyApp.Device] "Light"
+/ [MyApp.Root] $title=Root $icon=Storage
+  /Device [MyApp.Device] $title=Light
   Sensors/ (3x Sensor)
 [2 subjects]

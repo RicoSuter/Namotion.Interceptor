@@ -35,59 +35,6 @@ public class SearchToolTests
     }
 
     [Fact]
-    public async Task WhenSearchByText_ThenMatchesEnricherTitle()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
-
-        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
-        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
-
-        var enricher = new TitleEnricher();
-        var config = new McpServerConfiguration
-        {
-            PathProvider = DefaultPathProvider.Instance,
-            SubjectEnrichers = { enricher }
-        };
-        var factory = new McpToolFactory(room, config);
-        var tool = factory.CreateTools().First(t => t.Name == "search");
-
-        // Act
-        var input = JsonSerializer.SerializeToElement(new { format = "json", text = "light" });
-        var result = await tool.Handler(input, CancellationToken.None);
-        var json = JsonSerializer.SerializeToElement(result);
-
-        // Assert
-        Assert.True(json.GetProperty("subjectCount").GetInt32() >= 1);
-    }
-
-    [Fact]
-    public async Task WhenSearchByText_ThenMatchesPath()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext.Create()
-            .WithFullPropertyTracking()
-            .WithRegistry();
-
-        var room = new TestRoom(context) { Name = "Living Room", Temperature = 21.5m };
-        room.Device = new TestDevice(context) { DeviceName = "Light", IsOn = true };
-
-        var config = new McpServerConfiguration { PathProvider = DefaultPathProvider.Instance };
-        var factory = new McpToolFactory(room, config);
-        var tool = factory.CreateTools().First(t => t.Name == "search");
-
-        // Act
-        var input = JsonSerializer.SerializeToElement(new { format = "json", text = "Device" });
-        var result = await tool.Handler(input, CancellationToken.None);
-        var json = JsonSerializer.SerializeToElement(result);
-
-        // Assert
-        Assert.True(json.GetProperty("subjectCount").GetInt32() >= 1);
-    }
-
-    [Fact]
     public async Task WhenIncludeProperties_ThenReturnsPropertyValues()
     {
         // Arrange
@@ -402,19 +349,6 @@ public class SearchToolTests
         // Assert
         var paths = json.GetProperty("results").EnumerateObject().Select(p => p.Name).ToList();
         Assert.All(paths, p => Assert.StartsWith("/Children[GroupA]", p));
-    }
-
-    private class TitleEnricher : IMcpSubjectEnricher
-    {
-        public IDictionary<string, object?> GetSubjectEnrichments(RegisteredSubject subject)
-        {
-            var metadata = new Dictionary<string, object?>();
-            if (subject.Subject is TestDevice device)
-            {
-                metadata["$title"] = device.DeviceName;
-            }
-            return metadata;
-        }
     }
 
     private class MethodsAndInterfacesEnricher : IMcpSubjectEnricher
