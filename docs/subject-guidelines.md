@@ -397,10 +397,8 @@ public partial class HueBridge
 {
     public HueBridge(
         IHttpClientFactory httpClientFactory,
-        ILogger<HueBridge> logger,
-        IInterceptorSubjectContext context)
+        ILogger<HueBridge> logger)
     {
-        ((IInterceptorSubject)this).Context.AddFallbackContext(context);
         _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
@@ -408,8 +406,6 @@ public partial class HueBridge
 ```
 
 ### How It Works
-
-1. **Source generator detection**: When a user-defined constructor exists, the generator does not emit a parameterless or context-only constructor. The user constructor is responsible for calling `Context.AddFallbackContext(context)` to wire up the interceptor context.
 
 2. **ActivatorUtilities resolution**: When the subject is instantiated via DI (e.g., through `AddHostedSubject`), `ActivatorUtilities.CreateInstance` resolves all constructor parameters from the service provider. Services like `IHttpClientFactory`, `ILogger<T>`, and any other registered services are injected automatically.
 

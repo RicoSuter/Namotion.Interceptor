@@ -147,13 +147,11 @@ internal static class TestHelpers
         services.AddHttpClient();
         services.AddSingleton<ILoggerFactory, NullLoggerFactory>();
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
-        var serviceProvider = services.BuildServiceProvider();
 
-        var context = InterceptorSubjectContext.Create();
-        var httpClientFactory = serviceProvider.GetRequiredService<IHttpClientFactory>();
+        var serviceProvider = services.BuildServiceProvider();
         var logger = serviceProvider.GetRequiredService<ILogger<HueBridge>>();
 
-        var bridge = new HueBridge(httpClientFactory, logger, context);
+        var bridge = new HueBridge(logger);
         bridge.BridgeId = "test-bridge-id";
         return bridge;
     }
