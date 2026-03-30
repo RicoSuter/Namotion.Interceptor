@@ -9,6 +9,8 @@ namespace Namotion.Interceptor.Mcp.Tools;
 /// </summary>
 internal static class McpTextFormatter
 {
+    private static readonly string[] Indents = Enumerable.Range(0, 12).Select(i => new string(' ', i * 2)).ToArray();
+
     private const string Legend =
         "# path [Type] \"title\" $key=value | prop: value | type | @attr: value | Collection/ (Nx Type)\n" +
         "# Use get_property for exact values or browse with format=json for structured data.";
@@ -49,7 +51,7 @@ internal static class McpTextFormatter
 
     private static void FormatSubjectNode(StringBuilder sb, SubjectNode node, int indent)
     {
-        var indentStr = new string(' ', indent * 2);
+        var indentStr = indent < Indents.Length ? Indents[indent] : new string(' ', indent * 2);
 
         // Subject line: path [Type] "title" $enrichments
         sb.Append(indentStr);
@@ -202,15 +204,31 @@ internal static class McpTextFormatter
 
     private static string FormatValue(object? value)
     {
-        if (value is null) return "null";
-        if (value is string s)
+        switch (value)
         {
-            if (s.Length == 0) return "\"\"";
-            return s.Length > MaxStringValueLength ? s[..MaxStringValueLength] + "..." : s;
+            case null:
+                return "null";
+            case JsonElement je:
+                return FormatJsonElement(je);
+            case string { Length: 0 }:
+                return "\"\"";
+            case string s:
+                return s.Length > MaxStringValueLength ? s[..MaxStringValueLength] + "..." : s;
+            case bool b:
+                return b ? "true" : "false";
+            default:
+                return value.ToString() ?? "null";
         }
-        if (value is bool b) return b ? "true" : "false";
-        return value.ToString() ?? "null";
     }
+
+    private static string FormatJsonElement(JsonElement element) => element.ValueKind switch
+    {
+        JsonValueKind.Null => "null",
+        JsonValueKind.True => "true",
+        JsonValueKind.False => "false",
+        JsonValueKind.String => FormatValue(element.GetString()),
+        _ => element.GetRawText()
+    };
 
     private static string FormatAttributeValue(object? value)
     {

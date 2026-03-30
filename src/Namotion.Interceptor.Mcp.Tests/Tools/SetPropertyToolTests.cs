@@ -3,14 +3,13 @@ using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
-using Xunit;
 
 namespace Namotion.Interceptor.Mcp.Tests.Tools;
 
 public class SetPropertyToolTests
 {
     [Fact]
-    public async Task SetProperty_updates_value_and_returns_success()
+    public async Task WhenSettingProperty_ThenUpdatesValueAndReturnsSuccess()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -39,7 +38,7 @@ public class SetPropertyToolTests
     }
 
     [Fact]
-    public async Task SetProperty_blocked_when_read_only()
+    public async Task WhenReadOnly_ThenSetIsBlocked()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()
@@ -67,7 +66,7 @@ public class SetPropertyToolTests
     }
 
     [Fact]
-    public async Task SetProperty_returns_error_for_invalid_path()
+    public async Task WhenInvalidPath_ThenReturnsError()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create()

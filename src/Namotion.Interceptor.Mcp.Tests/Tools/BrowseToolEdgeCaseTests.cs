@@ -13,6 +13,7 @@ public class BrowseToolEdgeCaseTests
     [Fact]
     public async Task WhenInvalidStartPath_ThenReturnsError()
     {
+        // Arrange
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
@@ -23,16 +24,19 @@ public class BrowseToolEdgeCaseTests
         var factory = new McpToolFactory(room, config);
         var tool = factory.CreateTools().First(t => t.Name == "browse");
 
+        // Act
         var input = JsonSerializer.SerializeToElement(new { format = "json", path = "NonExistent.Path" });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
+        // Assert
         Assert.True(json.TryGetProperty("error", out _));
     }
 
     [Fact]
     public async Task WhenDepthZeroWithChildren_ThenShowsCollapsedInsteadOfExpanding()
     {
+        // Arrange
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
@@ -44,11 +48,12 @@ public class BrowseToolEdgeCaseTests
         var factory = new McpToolFactory(room, config);
         var tool = factory.CreateTools().First(t => t.Name == "browse");
 
+        // Act
         var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 0, includeProperties = true });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Device at depth 0 should be collapsed
+        // Assert
         var properties = json.GetProperty("result").GetProperty("properties");
         var deviceProp = properties.GetProperty("Device");
         Assert.Equal("object", deviceProp.GetProperty("kind").GetString());
@@ -58,6 +63,7 @@ public class BrowseToolEdgeCaseTests
     [Fact]
     public async Task WhenEnricherThrows_ThenExceptionPropagates()
     {
+        // Arrange
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
@@ -73,6 +79,7 @@ public class BrowseToolEdgeCaseTests
         var factory = new McpToolFactory(room, config);
         var tool = factory.CreateTools().First(t => t.Name == "browse");
 
+        // Act & Assert
         var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 1 });
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => tool.Handler(input, CancellationToken.None));
@@ -81,6 +88,7 @@ public class BrowseToolEdgeCaseTests
     [Fact]
     public async Task WhenEmptyDictionary_ThenChildrenAreNotIncluded()
     {
+        // Arrange
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
@@ -91,11 +99,12 @@ public class BrowseToolEdgeCaseTests
         var factory = new McpToolFactory(container, config);
         var tool = factory.CreateTools().First(t => t.Name == "browse");
 
+        // Act
         var input = JsonSerializer.SerializeToElement(new { format = "json", depth = 1, includeProperties = true });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Empty dictionary should not appear as a property
+        // Assert
         var resultNode = json.GetProperty("result");
         if (resultNode.TryGetProperty("properties", out var props))
         {
@@ -106,6 +115,7 @@ public class BrowseToolEdgeCaseTests
     [Fact]
     public async Task WhenBrowsingSubpath_ThenReturnsSubjectAtPath()
     {
+        // Arrange
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry();
@@ -117,11 +127,12 @@ public class BrowseToolEdgeCaseTests
         var factory = new McpToolFactory(room, config);
         var tool = factory.CreateTools().First(t => t.Name == "browse");
 
+        // Act
         var input = JsonSerializer.SerializeToElement(new { format = "json", path = "Device", depth = 0, includeProperties = true });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
-        // Device's scalar properties should include DeviceName
+        // Assert
         var properties = json.GetProperty("result").GetProperty("properties");
         var deviceName = properties.GetProperty("DeviceName");
         Assert.Equal("Light", deviceName.GetProperty("value").GetString());
