@@ -11,14 +11,12 @@ namespace Namotion.Interceptor.Mcp.Models;
 [JsonDerivedType(typeof(SubjectObjectProperty), "object")]
 [JsonDerivedType(typeof(SubjectCollectionProperty), "collection")]
 [JsonDerivedType(typeof(SubjectDictionaryProperty), "dictionary")]
-public abstract record SubjectNodeProperty(
-    [property: JsonPropertyName("name")] string Name);
+public abstract record SubjectNodeProperty;
 
 /// <summary>
 /// A scalar property with a value (string, number, boolean, etc.).
 /// </summary>
 public record ScalarProperty(
-    string Name,
     [property: JsonPropertyName("value")] object? Value,
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("isWritable")]
@@ -27,24 +25,22 @@ public record ScalarProperty(
     [property: JsonPropertyName("attributes")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     List<PropertyAttribute>? Attributes = null
-) : SubjectNodeProperty(Name);
+) : SubjectNodeProperty;
 
 /// <summary>
 /// A property referencing a single subject.
 /// </summary>
 public record SubjectObjectProperty(
-    string Name,
     [property: JsonPropertyName("child")] SubjectNode? Child,
     [property: JsonPropertyName("isCollapsed")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     bool IsCollapsed = false
-) : SubjectNodeProperty(Name);
+) : SubjectNodeProperty;
 
 /// <summary>
 /// A property containing an ordered collection of subjects.
 /// </summary>
 public record SubjectCollectionProperty(
-    string Name,
     [property: JsonPropertyName("children")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     List<SubjectNode>? Children = null,
@@ -57,13 +53,12 @@ public record SubjectCollectionProperty(
     [property: JsonPropertyName("isCollapsed")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     bool IsCollapsed = false
-) : SubjectNodeProperty(Name);
+) : SubjectNodeProperty;
 
 /// <summary>
 /// A property containing a keyed dictionary of subjects.
 /// </summary>
 public record SubjectDictionaryProperty(
-    string Name,
     [property: JsonPropertyName("children")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     Dictionary<string, SubjectNode>? Children = null,
@@ -76,7 +71,7 @@ public record SubjectDictionaryProperty(
     [property: JsonPropertyName("isCollapsed")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     bool IsCollapsed = false
-) : SubjectNodeProperty(Name);
+) : SubjectNodeProperty;
 
 /// <summary>
 /// An attribute attached to a scalar property.

@@ -112,22 +112,21 @@ Browse the subject tree starting at a path. Use `text` format (default) for over
     "$path": "Demo",
     "$type": "MyApp.VirtualFolder",
     "$title": "Demo",
-    "properties": [
-      {
+    "properties": {
+      "Children": {
         "kind": "dictionary",
-        "name": "Children",
         "children": {
           "MyDevice": {
             "$path": "Demo/MyDevice",
             "$type": "MyApp.Device",
-            "properties": [
-              { "kind": "value", "name": "Temperature", "value": 23.5, "type": "number" },
-              { "kind": "collection", "name": "Sensors", "count": 3, "itemType": "Sensor", "isCollapsed": true }
-            ]
+            "properties": {
+              "Temperature": { "kind": "value", "value": 23.5, "type": "number" },
+              "Sensors": { "kind": "collection", "count": 3, "itemType": "Sensor", "isCollapsed": true }
+            }
           }
         }
       }
-    ]
+    }
   },
   "subjectCount": 1,
   "truncated": false
@@ -171,9 +170,9 @@ Search across all subjects. Use `text` format (default) for overview, `json` for
       "$path": "Demo/MyDevice",
       "$type": "MyApp.Device",
       "$title": "My Device",
-      "properties": [
-        { "kind": "value", "name": "Temperature", "value": 23.5, "type": "number" }
-      ]
+      "properties": {
+        "Temperature": { "kind": "value", "value": 23.5, "type": "number" }
+      }
     }
   },
   "subjectCount": 1,

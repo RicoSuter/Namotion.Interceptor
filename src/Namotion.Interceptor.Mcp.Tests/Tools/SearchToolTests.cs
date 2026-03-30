@@ -107,10 +107,9 @@ public class SearchToolTests
 
         // Find the device subject in results
         var firstSubject = json.GetProperty("results").EnumerateObject().First().Value;
-        // Properties are now in a "properties" array with kind discriminator
+        // Properties are keyed by name
         var properties = firstSubject.GetProperty("properties");
-        var deviceNameProp = properties.EnumerateArray()
-            .First(p => p.GetProperty("name").GetString() == "DeviceName");
+        var deviceNameProp = properties.GetProperty("DeviceName");
         Assert.Equal("Light", deviceNameProp.GetProperty("value").GetString());
     }
 

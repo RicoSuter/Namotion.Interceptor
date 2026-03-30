@@ -35,11 +35,11 @@ public class SubjectNode
     public string[]? Interfaces { get; init; }
 
     /// <summary>
-    /// Subject properties (scalar values, child subjects, collections).
+    /// Subject properties keyed by property name (scalar values, child subjects, collections).
     /// Uses set (not init) because BrowseTool adds subject-containing properties
     /// in a second pass after initial construction via McpToolHelper.BuildSubjectNodeDto.
     /// </summary>
     [JsonPropertyName("properties")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public List<SubjectNodeProperty>? Properties { get; set; }
+    public Dictionary<string, SubjectNodeProperty>? Properties { get; set; }
 }

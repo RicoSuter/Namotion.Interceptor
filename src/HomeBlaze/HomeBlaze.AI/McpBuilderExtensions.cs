@@ -1,3 +1,4 @@
+using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.AI.Mcp;
 using HomeBlaze.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -34,10 +35,15 @@ public static class McpBuilderExtensions
                     new SubjectTypeRegistryTypeProvider(typeRegistry)
                 };
 
+                var excludeTypes = typeRegistry.RegisteredTypes
+                    .Where(type => type.GetCustomAttributes(typeof(ExcludeFromBrowsingAttribute), true).Length > 0)
+                    .ToArray();
+
                 return new McpServerConfiguration
                 {
                     PathProvider = pathProvider,
                     PathPrefix = "/",
+                    ExcludeTypes = excludeTypes,
                     SubjectEnrichers = { new HomeBlazeMcpSubjectEnricher(typeProviders, isReadOnly) },
                     TypeProviders = typeProviders,
                     ToolProviders =

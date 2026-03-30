@@ -9,45 +9,31 @@ namespace Namotion.Interceptor.Mcp.Tools;
 /// </summary>
 internal static class McpToolHelper
 {
-    internal static string? TryGetSubjectPath(
-        RegisteredSubject subject,
-        PathProviderBase pathProvider,
-        IInterceptorSubject rootSubject,
-        string pathPrefix = "")
+    internal static bool ShouldExcludeByType(RegisteredSubject subject, Type[] excludeTypes, string[]? requestExcludeTypes)
     {
-        if (subject.Subject == rootSubject)
-        {
-            return pathPrefix.Length > 0 ? pathPrefix : null;
-        }
-
-        if (subject.Parents.Length > 0)
-        {
-            var parent = subject.Parents[0];
-            var path = parent.Property.TryGetPath(pathProvider, rootSubject, parent.Index);
-            return path is not null ? $"{pathPrefix}{path}" : null;
-        }
-
-        return null;
-    }
-
-    internal static bool ShouldExcludeByType(RegisteredSubject subject, string[]? excludeTypes)
-    {
-        if (excludeTypes is null || excludeTypes.Length == 0)
-        {
-            return false;
-        }
-
         var subjectType = subject.Subject.GetType();
-        foreach (var exclude in excludeTypes)
+
+        foreach (var excludedType in excludeTypes)
         {
-            if (subjectType.FullName == exclude || subjectType.Name == exclude)
+            if (excludedType.IsAssignableFrom(subjectType))
             {
                 return true;
             }
+        }
 
-            if (subjectType.GetInterfaces().Any(i => i.FullName == exclude || i.Name == exclude))
+        if (requestExcludeTypes is not null && requestExcludeTypes.Length > 0)
+        {
+            foreach (var name in requestExcludeTypes)
             {
-                return true;
+                if (subjectType.FullName == name || subjectType.Name == name)
+                {
+                    return true;
+                }
+
+                if (subjectType.GetInterfaces().Any(i => i.FullName == name || i.Name == name))
+                {
+                    return true;
+                }
             }
         }
 
@@ -110,10 +96,10 @@ internal static class McpToolHelper
         }
 
         // Build scalar properties
-        List<SubjectNodeProperty>? properties = null;
+        Dictionary<string, SubjectNodeProperty>? properties = null;
         if (includeProperties)
         {
-            properties = [];
+            properties = new Dictionary<string, SubjectNodeProperty>();
             foreach (var property in subject.Properties)
             {
                 if (property.IsAttribute || !pathProvider.IsPropertyIncluded(property) || property.CanContainSubjects)
@@ -122,7 +108,7 @@ internal static class McpToolHelper
                 }
 
                 var segment = pathProvider.TryGetPropertySegment(property) ?? property.BrowseName;
-                properties.Add(BuildScalarPropertyDto(property, segment, includeAttributes, configuration.IsReadOnly));
+                properties[segment] = BuildScalarPropertyDto(property, includeAttributes, configuration.IsReadOnly);
             }
         }
 
@@ -138,8 +124,29 @@ internal static class McpToolHelper
         };
     }
 
-    internal static ScalarProperty BuildScalarPropertyDto(
-        RegisteredSubjectProperty property, string name, bool includeAttributes, bool isReadOnly)
+    private static string? TryGetSubjectPath(
+        RegisteredSubject subject,
+        PathProviderBase pathProvider,
+        IInterceptorSubject rootSubject,
+        string pathPrefix = "")
+    {
+        if (subject.Subject == rootSubject)
+        {
+            return pathPrefix.Length > 0 ? pathPrefix : null;
+        }
+
+        if (subject.Parents.Length > 0)
+        {
+            var parent = subject.Parents[0];
+            var path = parent.Property.TryGetPath(pathProvider, rootSubject, parent.Index);
+            return path is not null ? $"{pathPrefix}{path}" : null;
+        }
+
+        return null;
+    }
+
+    private static ScalarProperty BuildScalarPropertyDto(
+        RegisteredSubjectProperty property, bool includeAttributes, bool isReadOnly)
     {
         List<PropertyAttribute>? attributes = null;
         if (includeAttributes)
@@ -157,7 +164,6 @@ internal static class McpToolHelper
         }
 
         return new ScalarProperty(
-            name,
             property.GetValue(),
             JsonSchemaTypeMapper.ToJsonSchemaType(property.Type) ?? "object",
             IsWritable: !isReadOnly && property.HasSetter,

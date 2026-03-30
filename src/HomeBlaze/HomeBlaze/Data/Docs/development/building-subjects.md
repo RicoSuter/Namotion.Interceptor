@@ -728,6 +728,29 @@ For subject path configuration properties, use the `SubjectPathField` component 
 
 ---
 
+### Excluding Subjects from Browsing
+
+Internal implementation subjects that should not appear in the UI browser panel or MCP tools can be marked with the `[ExcludeFromBrowsing]` attribute:
+
+```csharp
+using HomeBlaze.Abstractions.Attributes;
+
+[InterceptorSubject]
+[ExcludeFromBrowsing]
+public partial class HtmlSegment
+{
+    // Internal implementation detail, not user-facing
+}
+```
+
+This hides the subject from:
+- The Blazor browser/panel tree view
+- MCP `browse` and `search` tool results
+
+Use this for internal subjects that are part of a parent subject's implementation but have no meaning to end users or AI agents (e.g., parsed HTML segments, render expressions).
+
+---
+
 ## Building Subject Components
 
 Subject components are Blazor components that visualize or edit subjects. There are three types:
