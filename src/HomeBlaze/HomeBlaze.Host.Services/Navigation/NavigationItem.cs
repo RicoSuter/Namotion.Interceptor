@@ -56,5 +56,5 @@ public class NavigationItem
     /// <summary>
     /// Gets the full page URL for navigation.
     /// </summary>
-    public string PageUrl => $"pages/{Path}";
+    public string PageUrl => $"pages{Path}";
 }

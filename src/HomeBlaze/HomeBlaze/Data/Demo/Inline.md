@@ -23,9 +23,9 @@ Motor:
 
 ## Live Expression
 
-Temperature: {{ mymotor.Temperature }}
+Temperature: {{ mymotor/Temperature }}
 
-Speed: {{ mymotor.CurrentSpeed }}
+Speed: {{ mymotor/CurrentSpeed }}
 
 ## Widget Reference
 
@@ -34,7 +34,7 @@ Reference an existing subject's widget by path instead of embedding it inline:
 ```subject(conveyorRef)
 {
   "$type": "HomeBlaze.Components.Widget",
-  "path": "Root.Demo.Conveyor"
+  "path": "/Demo/Conveyor"
 }
 ```
 

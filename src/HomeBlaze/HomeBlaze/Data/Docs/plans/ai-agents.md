@@ -156,12 +156,12 @@ public partial class LlmAgent : LlmAgentBase
 
 ```
 Data/
-├── config/
-│   ├── claude-provider.json
-│   └── openai-provider.json
-├── agents/
-│   ├── temp-monitor.json
-│   └── energy-reporter.json
+├── Providers/
+│   ├── ClaudeProvider.json
+│   └── OpenAiProvider.json
+├── Agents/
+│   ├── TempMonitor.json
+│   └── EnergyReporter.json
 ```
 
 **Provider config:**
@@ -178,9 +178,9 @@ Data/
 {
     "$type": "HomeBlaze.AI.LlmAgent",
     "name": "Temperature Monitor",
-    "providerPath": "Root.config[claude-provider.json]",
+    "providerPath": "/Providers/ClaudeProvider",
     "instructions": "You monitor temperature sensors. Alert via notification if any reading exceeds 80°C. Include the sensor path and current value in the alert.",
-    "watchPaths": ["Root.sensors"],
+    "watchPaths": ["/Sensors"],
     "pollInterval": "00:05:00"
 }
 ```
