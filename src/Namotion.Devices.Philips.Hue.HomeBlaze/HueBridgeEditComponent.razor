@@ -40,9 +40,9 @@
             @(BridgeSubject?.IsConnected == true ? "Connected" : "Disconnected")
         </MudChip>
     </MudStack>
-    <MudText Class="mt-1">Lights: @(BridgeSubject?.Lights?.Length ?? 0)</MudText>
-    <MudText>Rooms: @(BridgeSubject?.Rooms?.Length ?? 0)</MudText>
-    <MudText>Zones: @(BridgeSubject?.Zones?.Length ?? 0)</MudText>
+    <MudText Class="mt-1">Lights: @(BridgeSubject?.Lights?.Count ?? 0)</MudText>
+    <MudText>Rooms: @(BridgeSubject?.Rooms?.Count ?? 0)</MudText>
+    <MudText>Zones: @(BridgeSubject?.Zones?.Count ?? 0)</MudText>
 </MudForm>
 
 @code {

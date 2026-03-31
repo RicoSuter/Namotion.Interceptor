@@ -47,6 +47,8 @@ public partial class HueBridge : BackgroundService,
     private LocatedBridge? _bridge;
     private LocalHueApi? _client;
 
+    internal HueDevice[] Devices { get; set; }
+
     [Configuration]
     public partial string? BridgeId { get; set; }
 
@@ -63,24 +65,22 @@ public partial class HueBridge : BackgroundService,
     public partial bool IsConnected { get; set; }
 
     [State]
-    public partial HueGroup[] Rooms { get; set; }
+    public partial Dictionary<string, HueGroup> Rooms { get; set; }
 
     [State]
-    public partial HueGroup[] Zones { get; set; }
-    
-    [State]
-    public partial HueLightbulb[] Lights { get; set; }
+    public partial Dictionary<string, HueGroup> Zones { get; set; }
 
     [State]
-    public partial HueButtonDevice[] ButtonDevices { get; set; }
+    public partial Dictionary<string, HueLightbulb> Lights { get; set; }
 
     [State]
-    public partial HueMotionDevice[] MotionSensors { get; set; }
-
-    internal HueDevice[] Devices { get; set; }
+    public partial Dictionary<string, HueButtonDevice> ButtonDevices { get; set; }
 
     [State]
-    public partial HueDevice[] OtherDevices { get; set; }
+    public partial Dictionary<string, HueMotionDevice> MotionSensors { get; set; }
+
+    [State]
+    public partial Dictionary<string, HueDevice> OtherDevices { get; set; }
 
     [State]
     public partial DateTimeOffset? LastUpdated { get; set; }
@@ -111,7 +111,7 @@ public partial class HueBridge : BackgroundService,
     [Derived]
     [State(Unit = StateUnit.Watt)]
     public decimal? TotalPower =>
-        IsConnected ? Power + Lights.Sum(light => light.Power ?? 0m) : null;
+        IsConnected ? Power + Lights.Values.Sum(light => light.Power ?? 0m) : null;
 
     public HueBridge(ILogger<HueBridge> logger)
     {
@@ -120,13 +120,13 @@ public partial class HueBridge : BackgroundService,
         PollingInterval = TimeSpan.FromMilliseconds(500);
         RetryInterval = TimeSpan.FromSeconds(30);
 
-        Lights = [];
-        MotionSensors = [];
-        ButtonDevices = [];
-        Rooms = [];
-        Zones = [];
+        Lights = new();
+        MotionSensors = new();
+        ButtonDevices = new();
+        Rooms = new();
+        Zones = new();
         Devices = [];
-        OtherDevices = [];
+        OtherDevices = new();
     }
 
     /// <summary>
@@ -391,29 +391,29 @@ public partial class HueBridge : BackgroundService,
 
         Devices = allDevices;
 
-        var newLights = allDevices.OfType<HueLightbulb>().ToArray();
-        if (!ArrayEquals(Lights, newLights))
+        var newLights = allDevices.OfType<HueLightbulb>().ToDictionary(d => d.ResourceId.ToString());
+        if (!DictionaryEquals(Lights, newLights))
             Lights = newLights;
 
-        var newMotionSensors = allDevices.OfType<HueMotionDevice>().ToArray();
-        if (!ArrayEquals(MotionSensors, newMotionSensors))
+        var newMotionSensors = allDevices.OfType<HueMotionDevice>().ToDictionary(d => d.ResourceId.ToString());
+        if (!DictionaryEquals(MotionSensors, newMotionSensors))
             MotionSensors = newMotionSensors;
 
-        var newButtonDevices = allDevices.OfType<HueButtonDevice>().ToArray();
-        if (!ArrayEquals(ButtonDevices, newButtonDevices))
+        var newButtonDevices = allDevices.OfType<HueButtonDevice>().ToDictionary(d => d.ResourceId.ToString());
+        if (!DictionaryEquals(ButtonDevices, newButtonDevices))
             ButtonDevices = newButtonDevices;
 
         var newOtherDevices = allDevices
-            .Except(newLights)
-            .Except(newMotionSensors)
-            .Except(newButtonDevices)
-            .ToArray();
+            .Except(newLights.Values)
+            .Except(newMotionSensors.Values)
+            .Except(newButtonDevices.Values)
+            .ToDictionary(d => d.ResourceId.ToString());
 
-        if (!ArrayEquals(OtherDevices, newOtherDevices))
+        if (!DictionaryEquals(OtherDevices, newOtherDevices))
             OtherDevices = newOtherDevices;
 
         // Rooms
-        var existingRooms = Rooms;
+        var existingRooms = Rooms.Values;
         var newRooms = rooms.Data
             .Select(room =>
             {
@@ -432,14 +432,13 @@ public partial class HueBridge : BackgroundService,
 
                 return new HueGroup(room, groupedLight, roomLights, this);
             })
-            .OrderBy(room => room.Title)
-            .ToArray();
+            .ToDictionary(room => room.ResourceId.ToString());
 
-        if (!ArrayEquals(Rooms, newRooms))
+        if (!DictionaryEquals(Rooms, newRooms))
             Rooms = newRooms;
 
         // Zones
-        var existingZones = Zones;
+        var existingZones = Zones.Values;
         var newZones = zones.Data
             .Select(zone =>
             {
@@ -458,10 +457,9 @@ public partial class HueBridge : BackgroundService,
 
                 return new HueGroup(zone, groupedLight, zoneLights, this);
             })
-            .OrderBy(zone => zone.Title)
-            .ToArray();
+            .ToDictionary(zone => zone.ResourceId.ToString());
 
-        if (!ArrayEquals(Zones, newZones))
+        if (!DictionaryEquals(Zones, newZones))
             Zones = newZones;
 
         LastUpdated = DateTimeOffset.Now;
@@ -501,11 +499,11 @@ public partial class HueBridge : BackgroundService,
                 }
                 else if (data.Type == "grouped_light")
                 {
-                    var group = Rooms
-                        .Union(Zones)
+                    var group = Rooms.Values
+                        .Union(Zones.Values)
                         .SingleOrDefault(existingGroup => existingGroup.GroupedLight?.Id == data.Id);
 
-                    if (group is not null && group.GroupedLight is not null)
+                    if (group?.GroupedLight != null)
                     {
                         group.GroupedLight = Merge(group.GroupedLight, data);
                         group.LastUpdated = DateTimeOffset.Now;
@@ -613,14 +611,14 @@ public partial class HueBridge : BackgroundService,
         }
     }
 
-    private static bool ArrayEquals<T>(T[] existing, T[] updated) where T : class
+    private static bool DictionaryEquals<T>(Dictionary<string, T> existing, Dictionary<string, T> updated) where T : class
     {
-        if (existing.Length != updated.Length)
+        if (existing.Count != updated.Count)
             return false;
 
-        for (var i = 0; i < existing.Length; i++)
+        foreach (var (key, value) in existing)
         {
-            if (!ReferenceEquals(existing[i], updated[i]))
+            if (!updated.TryGetValue(key, out var updatedValue) || !ReferenceEquals(value, updatedValue))
                 return false;
         }
 

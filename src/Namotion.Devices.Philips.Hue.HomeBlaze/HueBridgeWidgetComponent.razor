@@ -20,7 +20,7 @@
         <MudStack Row="true" Spacing="4">
             <MudStack>
                 <MudText Typo="Typo.caption">Lights</MudText>
-                <MudText Typo="Typo.h5">@(BridgeSubject?.Lights?.Length ?? 0)</MudText>
+                <MudText Typo="Typo.h5">@(BridgeSubject?.Lights?.Count ?? 0)</MudText>
             </MudStack>
 
             <MudStack>
@@ -30,12 +30,12 @@
 
             <MudStack>
                 <MudText Typo="Typo.caption">Rooms</MudText>
-                <MudText Typo="Typo.h5">@(BridgeSubject?.Rooms?.Length ?? 0)</MudText>
+                <MudText Typo="Typo.h5">@(BridgeSubject?.Rooms?.Count ?? 0)</MudText>
             </MudStack>
 
             <MudStack>
                 <MudText Typo="Typo.caption">Zones</MudText>
-                <MudText Typo="Typo.h5">@(BridgeSubject?.Zones?.Length ?? 0)</MudText>
+                <MudText Typo="Typo.h5">@(BridgeSubject?.Zones?.Count ?? 0)</MudText>
             </MudStack>
         </MudStack>
 
@@ -59,6 +59,6 @@
     private HueBridge? BridgeSubject => Subject as HueBridge;
 
     private int SensorCount =>
-        (BridgeSubject?.MotionSensors?.Length ?? 0) +
-        (BridgeSubject?.ButtonDevices?.Length ?? 0);
+        (BridgeSubject?.MotionSensors?.Count ?? 0) +
+        (BridgeSubject?.ButtonDevices?.Count ?? 0);
 }
