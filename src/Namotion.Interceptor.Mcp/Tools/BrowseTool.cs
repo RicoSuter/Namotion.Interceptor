@@ -43,11 +43,10 @@ internal class BrowseTool
         {
             Name = "browse",
             Description = "Browse the subject tree at a path with configurable depth. " +
-                          "Default text format is optimized for overview and navigation. " +
-                          "Use format=json when you need exact property values or structured data for processing. " +
-                          "Use depth=0 with includeProperties=true to see all properties of a subject. " +
-                          "Paths: '/' separators, brackets for indices (Pins[0]). " +
-                          "To find subjects by type, use search with types instead.",
+                          "Use depth=0 with includeProperties=true to inspect a single subject's properties. " +
+                          "Paths use '/' separators and brackets for indices (e.g. /Devices/Pins[0]). " +
+                          "To find subjects by capability, use list_types then search with types instead. " +
+                          "Use format=json for structured data, text (default) for overview.",
             InputSchema = Schema,
             Handler = HandleBrowseAsync
         };

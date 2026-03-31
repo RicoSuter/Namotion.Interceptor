@@ -20,7 +20,7 @@ namespace HomeBlaze.Servers.OpcUa;
 [Category("Servers")]
 [Description("Exposes subjects via OPC UA protocol")]
 [InterceptorSubject]
-public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITitleProvider, IIconProvider, IServerSubject
+public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvider, IIconProvider, IServerSubject
 {
     private readonly RootManager _rootManager;
     private readonly SubjectPathResolver _pathResolver;

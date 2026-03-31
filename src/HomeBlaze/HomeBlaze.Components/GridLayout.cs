@@ -11,7 +11,7 @@ namespace HomeBlaze.Components;
 [Category("Layouts")]
 [Description("Grid layout with configurable rows and columns")]
 [InterceptorSubject]
-public partial class GridLayout : IConfigurableSubject, ITitleProvider
+public partial class GridLayout : IConfigurable, ITitleProvider
 {
     /// <summary>
     /// Number of rows in the grid.

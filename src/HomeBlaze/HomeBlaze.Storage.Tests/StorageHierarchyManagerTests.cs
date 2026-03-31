@@ -33,17 +33,17 @@ public class StorageHierarchyManagerTests
     }
 
     /// <summary>
-    /// Creates a mock IInterceptorSubject that also implements IConfigurableSubject.
+    /// Creates a mock IInterceptorSubject that also implements IConfigurable.
     /// </summary>
     private static IInterceptorSubject CreateConfigurableSubject()
     {
         var mock = new Mock<IInterceptorSubject>();
-        mock.As<IConfigurableSubject>();
+        mock.As<IConfigurable>();
         return mock.Object;
     }
 
     /// <summary>
-    /// Creates a mock IInterceptorSubject that does NOT implement IConfigurableSubject.
+    /// Creates a mock IInterceptorSubject that does NOT implement IConfigurable.
     /// </summary>
     private static IInterceptorSubject CreateNonConfigurableSubject()
     {

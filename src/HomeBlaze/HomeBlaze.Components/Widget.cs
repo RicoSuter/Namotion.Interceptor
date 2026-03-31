@@ -14,7 +14,7 @@ namespace HomeBlaze.Components;
 [Category("Components")]
 [Description("References another subject by path and renders its widget")]
 [InterceptorSubject]
-public partial class Widget : ITitleProvider, IConfigurableSubject
+public partial class Widget : ITitleProvider, IConfigurable
 {
     private readonly SubjectPathResolver _pathResolver;
 

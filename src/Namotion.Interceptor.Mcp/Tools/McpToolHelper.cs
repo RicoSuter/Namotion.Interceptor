@@ -160,9 +160,13 @@ internal static class McpToolHelper
         return new ScalarProperty(
             property.GetValue(),
             JsonSchemaTypeMapper.ToJsonSchemaType(property.Type) ?? "object",
-            IsWritable: !isReadOnly && property.HasSetter,
+            IsWritable: !isReadOnly && property.HasSetter && HasPublicSetter(property),
             Attributes: attributes);
     }
+
+    // TODO: Clean up when HasSetter in registry respects access modifiers (see #102)
+    internal static bool HasPublicSetter(RegisteredSubjectProperty property) =>
+        property.Reference.Metadata.PropertyInfo?.SetMethod?.IsPublic != false;
 
     private static string[]? ToStringArray(object? value)
     {

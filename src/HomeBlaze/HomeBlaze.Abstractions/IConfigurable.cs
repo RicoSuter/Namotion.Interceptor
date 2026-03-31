@@ -8,7 +8,7 @@ namespace HomeBlaze.Abstractions;
 /// </summary>
 [SubjectAbstraction]
 [Description("Subject with persistable configuration properties.")]
-public interface IConfigurableSubject
+public interface IConfigurable
 {
     /// <summary>
     /// Called after configuration properties have been updated.

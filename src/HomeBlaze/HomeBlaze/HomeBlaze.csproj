@@ -10,6 +10,8 @@
         <Watch Remove="Data/**/*" />
         <ProjectReference Include="..\..\Namotion.Devices.Gpio.HomeBlaze\Namotion.Devices.Gpio.HomeBlaze.csproj" />
         <ProjectReference Include="..\..\Namotion.Devices.Gpio\Namotion.Devices.Gpio.csproj" />
+        <ProjectReference Include="..\..\Namotion.Devices.Philips.Hue\Namotion.Devices.Philips.Hue.csproj" />
+        <ProjectReference Include="..\..\Namotion.Devices.Philips.Hue.HomeBlaze\Namotion.Devices.Philips.Hue.HomeBlaze.csproj" />
         <ProjectReference Include="..\HomeBlaze.AI\HomeBlaze.AI.csproj" />
         <ProjectReference Include="..\HomeBlaze.Host\HomeBlaze.Host.csproj" />
         <ProjectReference Include="..\HomeBlaze.Samples\HomeBlaze.Samples.csproj" />
@@ -17,7 +19,7 @@
         <ProjectReference Include="..\HomeBlaze.Servers.OpcUa.Blazor\HomeBlaze.Servers.OpcUa.Blazor.csproj" />
         <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
         <PackageReference Include="BlazorMonaco" Version="3.4.0" />
-        <PackageReference Include="CodeBeam.MudBlazor.Extensions" Version="8.3.0" />
+        <PackageReference Include="CodeBeam.MudBlazor.Extensions" Version="9.0.3" />
         <PackageReference Include="ModelContextProtocol.AspNetCore" Version="1.2.0" />
     </ItemGroup>
 

@@ -20,7 +20,7 @@ namespace HomeBlaze.Storage;
 [InterceptorSubject]
 public partial class FluentStorageContainer :
     BackgroundService,
-    IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurableSubject
+    IStorageContainer, IConfigurationWriter, ITitleProvider, IIconProvider, IConfigurable
 {
     private IBlobStorage? _client;
 
@@ -112,7 +112,7 @@ public partial class FluentStorageContainer :
     }
 
     /// <summary>
-    /// IConfigurableSubject implementation - called after configuration properties are updated.
+    /// IConfigurable implementation - called after configuration properties are updated.
     /// </summary>
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
@@ -282,7 +282,7 @@ public partial class FluentStorageContainer :
                 _logger?.LogWarning(ex, "Failed to notify file of change: {Path}", relativePath);
             }
         }
-        else if (existingSubject is IConfigurableSubject)
+        else if (existingSubject is IConfigurable)
         {
             await _jsonSyncHelper!.TryRefreshAsync(existingSubject, relativePath, fullPath, CancellationToken.None);
         }
