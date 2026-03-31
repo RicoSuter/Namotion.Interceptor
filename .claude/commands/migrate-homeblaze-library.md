@@ -99,21 +99,43 @@ For each v1 pattern, assess the best v2 approach:
 
 For all external NuGet packages used by the v1 library, check for the latest versions. Migrate to latest.
 
-### Step 7: Identify missing features
+### Step 7: Query live devices (if available)
+
+Ask the user for IP addresses or connection details for real devices, query their read-only status endpoints to discover data the v1 code doesn't use. Many device APIs return significantly more data than v1 implemented. Compare the actual API response fields against v1's property list to find gaps.
+
+**Rules:**
+- Only read-only/GET endpoints -- never execute write operations on live devices
+- Only when the user explicitly provides connection details
+- Compare multiple device variants if available (different models expose different components)
+
+### Step 8: Identify missing features
 
 Check the device's external API/SDK documentation or capabilities for features that v1 didn't implement but v2 could. Propose additions for user approval.
 
-### Step 8: Present migration plan
+### Step 9: Check for generic interface opportunities
+
+Before creating device-specific state properties, check whether a measurement or capability could apply to other devices too. Look at what other v1 device libraries expose -- if 2+ devices share a measurement, it likely deserves a generic interface in `HomeBlaze.Abstractions`.
+
+Examples of generic interfaces that emerged from migrations:
+- `IElectricalVoltageSensor`, `IElectricalCurrentSensor`, `IElectricalFrequencySensor` -- shared by energy meters, EV chargers, solar inverters
+- `ISoftwareState` (SoftwareVersion, AvailableSoftwareUpdate) -- shared by any device that reports firmware/software versions
+
+**Naming conventions:**
+- Follow existing pattern: `I{Concept}Sensor` for sensor interfaces, `I{Concept}State` for status interfaces
+- Use `Electrical` prefix for electrical measurements to avoid ambiguity (e.g., `ElectricalCurrent` not `Current`)
+- Keep property names consistent with the interface name
+
+### Step 10: Present migration plan
 
 Following the brainstorming pattern, present the plan in incremental sections (200-300 words each), validating each with the user:
 
 1. **Project name** -- propose `Namotion.Devices.*` name, user confirms
 2. **Interface mapping** -- v1 capabilities to v2 interfaces, proposed new interfaces
-3. **Subject hierarchy** -- which classes, inheritance, child collections
+3. **Subject hierarchy** -- which classes, inheritance, child collections (arrays for index-based identity, dictionaries for external IDs)
 4. **Property design** -- configuration vs state vs derived, internal setters
 5. **Polling/connectivity** -- how background work is structured
 6. **External API changes** -- latest NuGet versions, API differences
-7. **New features** -- capabilities beyond v1 parity
+7. **New features** -- capabilities beyond v1 parity (discovered from live device queries and API docs)
 8. **UI components** -- which Blazor components to create (Widget, Edit, Setup), what fields/displays each contains, referencing existing v2 `.HomeBlaze` projects as patterns
 9. **V1 feature checklist** -- complete list of v1 features with confirmation each is covered
 
@@ -132,7 +154,10 @@ These are critical conventions the implementation MUST follow:
 - **Performance** -- avoid allocations in hot paths, parallelize independent API calls.
 - **No regressions from v1** -- every v1 capability must be present in v2.
 - **No UI code in the device project** -- subject libraries must be headless-capable.
-- **Use System.Text.Json** -- migrate any Newtonsoft.Json usage to `System.Text.Json`. Use `[JsonPropertyName]` attributes on DTOs.
+- **Use System.Text.Json** -- migrate any Newtonsoft.Json usage to `System.Text.Json`. Use `[JsonPropertyName]` attributes on DTOs only (not on subject properties).
+- **Consider separate DTOs from subjects** -- don't put `[JsonPropertyName]` on subject properties. Deserialize into internal DTOs, then map to subject properties explicitly. This keeps subjects clean and avoids mixing serialization concerns into the domain model.
+- **Consider hybrid JSON parsing** -- for APIs with dynamic keys (e.g., `"switch:0"`, `"cover:1"`), parse the top level with `JsonElement.EnumerateObject()` and deserialize per-component into typed DTOs.
+- **Child collections: arrays vs dictionaries** -- use arrays when index is the identity (relay 0, pin 3, phase A). Use `Dictionary<string, T>` when identity comes from external system (API IDs, serial numbers). See v2 docs for details.
 - **Inject and use `ILogger<T>`** -- constructor-inject `ILogger<T>` for logging errors, warnings, and key lifecycle events. Don't silently swallow exceptions.
 
 ### Deliverables
