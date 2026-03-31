@@ -6,6 +6,7 @@
 @inject IDialogService DialogService
 @inject SubjectComponentRegistry ComponentRegistry
 @inject DeveloperModeService DeveloperMode
+@inject SubjectPathResolver PathResolver
 @inject IServiceProvider ServiceProvider
 
 <TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
@@ -170,7 +171,7 @@
                 <ChildContent>
                     <div class="mb-4">
                         <small style="word-break: break-all;">
-                            <p class="my-1"><strong>Path:</strong> @GetPath()</p>
+                            <p class="my-1"><strong>ID:</strong> @GetPath()</p>
                             <p class="my-1"><strong>Type:</strong> @Subject.GetType().FullName</p>
                         </small>
                     </div>
@@ -247,6 +248,11 @@
 
     private string GetPath()
     {
+        if (Subject != null)
+        {
+            return PathResolver.GetPath(Subject, PathStyle.Canonical) ?? Path ?? "/";
+        }
+
         return Path ?? "/";
     }
 
