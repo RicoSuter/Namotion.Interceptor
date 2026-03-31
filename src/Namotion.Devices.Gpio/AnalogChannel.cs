@@ -20,7 +20,7 @@ public enum AdcSource
 /// Represents an analog input channel from an ADC.
 /// </summary>
 [InterceptorSubject]
-public partial class AnalogChannel : IHostedSubject, ITitleProvider, IIconProvider
+public partial class AnalogChannel : IMonitoredService, ITitleProvider, IIconProvider
 {
     /// <summary>
     /// The ADC hardware source.

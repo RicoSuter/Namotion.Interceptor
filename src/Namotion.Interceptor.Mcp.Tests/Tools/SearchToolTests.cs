@@ -26,7 +26,7 @@ public class SearchToolTests
         var tool = factory.CreateTools().First(t => t.Name == "search");
 
         // Act
-        var input = JsonSerializer.SerializeToElement(new { format = "json", types = new[] { "TestDevice" } });
+        var input = JsonSerializer.SerializeToElement(new { format = "json", types = new[] { typeof(TestDevice).FullName } });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
@@ -57,7 +57,7 @@ public class SearchToolTests
         var input = JsonSerializer.SerializeToElement(new
         {
             format = "json",
-            types = new[] { "TestDevice" },
+            types = new[] { typeof(TestDevice).FullName },
             includeProperties = true
         });
         var result = await tool.Handler(input, CancellationToken.None);
@@ -90,7 +90,7 @@ public class SearchToolTests
         var tool = factory.CreateTools().First(t => t.Name == "search");
 
         // Act
-        var input = JsonSerializer.SerializeToElement(new { format = "json", types = new[] { "TestDevice" } });
+        var input = JsonSerializer.SerializeToElement(new { format = "json", types = new[] { typeof(TestDevice).FullName } });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
@@ -120,7 +120,7 @@ public class SearchToolTests
         var tool = factory.CreateTools().First(t => t.Name == "search");
 
         // Act
-        var input = JsonSerializer.SerializeToElement(new { format = "json", types = new[] { "TestContainer" }, maxSubjects = 1 });
+        var input = JsonSerializer.SerializeToElement(new { format = "json", types = new[] { typeof(TestContainer).FullName }, maxSubjects = 1 });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
@@ -150,7 +150,7 @@ public class SearchToolTests
         var tool = factory.CreateTools().First(t => t.Name == "search");
 
         // Act
-        var input = JsonSerializer.SerializeToElement(new { format = "json", types = new[] { "TestDevice" } });
+        var input = JsonSerializer.SerializeToElement(new { format = "json", types = new[] { typeof(TestDevice).FullName } });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
@@ -185,7 +185,7 @@ public class SearchToolTests
         var input = JsonSerializer.SerializeToElement(new
         {
             format = "json",
-            types = new[] { "TestDevice" },
+            types = new[] { typeof(TestDevice).FullName },
             includeMethods = true,
             includeInterfaces = true
         });
@@ -217,8 +217,8 @@ public class SearchToolTests
         var inputWithExclude = JsonSerializer.SerializeToElement(new
         {
             format = "json",
-            types = new[] { "TestDevice" },
-            excludeTypes = new[] { "TestDevice" }
+            types = new[] { typeof(TestDevice).FullName },
+            excludeTypes = new[] { typeof(TestDevice).FullName }
         });
         var resultWithExclude = await tool.Handler(inputWithExclude, CancellationToken.None);
         var jsonWithExclude = JsonSerializer.SerializeToElement(resultWithExclude);
@@ -227,7 +227,7 @@ public class SearchToolTests
         var inputWithoutExclude = JsonSerializer.SerializeToElement(new
         {
             format = "json",
-            types = new[] { "TestDevice" }
+            types = new[] { typeof(TestDevice).FullName }
         });
         var resultWithoutExclude = await tool.Handler(inputWithoutExclude, CancellationToken.None);
         var jsonWithoutExclude = JsonSerializer.SerializeToElement(resultWithoutExclude);
@@ -261,7 +261,7 @@ public class SearchToolTests
         {
             format = "json",
             path = "Children[GroupA]",
-            types = new[] { "TestContainer" }
+            types = new[] { typeof(TestContainer).FullName }
         });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
@@ -287,7 +287,7 @@ public class SearchToolTests
         var tool = factory.CreateTools().First(t => t.Name == "search");
 
         // Act
-        var input = JsonSerializer.SerializeToElement(new { types = new[] { "TestDevice" } });
+        var input = JsonSerializer.SerializeToElement(new { types = new[] { typeof(TestDevice).FullName } });
         var result = await tool.Handler(input, CancellationToken.None);
 
         // Assert
@@ -312,7 +312,7 @@ public class SearchToolTests
         var tool = factory.CreateTools().First(t => t.Name == "search");
 
         // Act
-        var input = JsonSerializer.SerializeToElement(new { format = "json", types = new[] { "TestDevice" } });
+        var input = JsonSerializer.SerializeToElement(new { format = "json", types = new[] { typeof(TestDevice).FullName } });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 
@@ -342,7 +342,7 @@ public class SearchToolTests
         var tool = factory.CreateTools().First(t => t.Name == "search");
 
         // Act
-        var input = JsonSerializer.SerializeToElement(new { format = "json", path = "/Children[GroupA]", types = new[] { "TestContainer" } });
+        var input = JsonSerializer.SerializeToElement(new { format = "json", path = "/Children[GroupA]", types = new[] { typeof(TestContainer).FullName } });
         var result = await tool.Handler(input, CancellationToken.None);
         var json = JsonSerializer.SerializeToElement(result);
 

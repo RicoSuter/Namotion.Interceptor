@@ -145,7 +145,7 @@ public class RegistryAttributeMigrationIntegrationTests
 }
 
 [InterceptorSubject]
-public partial class FullIntegrationSubject : IConfigurableSubject
+public partial class FullIntegrationSubject : IConfigurable
 {
     [State(Title ="Temp", Unit = StateUnit.DegreeCelsius)]
     public partial decimal Temperature { get; set; }

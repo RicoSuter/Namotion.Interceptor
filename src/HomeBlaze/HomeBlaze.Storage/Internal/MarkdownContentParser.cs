@@ -268,7 +268,7 @@ public sealed partial class MarkdownContentParser
                     {
                         // Same key + same type: update and apply config
                         _serializer.UpdateConfiguration(existing, subj.Json);
-                        if (existing is IConfigurableSubject configurable)
+                        if (existing is IConfigurable configurable)
                         {
                             await configurable.ApplyConfigurationAsync(cancellationToken);
                         }
@@ -280,7 +280,7 @@ public sealed partial class MarkdownContentParser
                         var newSubject = _serializer.Deserialize(subj.Json);
                         if (newSubject != null)
                         {
-                            // All IConfigurableSubject implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
+                            // All IConfigurable implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
                             newChildren[subj.Name] = (IInterceptorSubject)newSubject;
                         }
                     }

@@ -26,7 +26,7 @@ internal sealed class StorageHierarchyManager
     {
         var fileName = Path.GetFileName(fullPath);
         
-        if (subject is IConfigurableSubject &&
+        if (subject is IConfigurable &&
             Path.GetExtension(fullPath).Equals(FileExtensions.Json, StringComparison.OrdinalIgnoreCase))
         {
             return Path.GetFileNameWithoutExtension(fullPath);

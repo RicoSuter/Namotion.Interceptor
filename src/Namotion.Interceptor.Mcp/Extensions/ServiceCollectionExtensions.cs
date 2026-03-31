@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Protocol;
 using Namotion.Interceptor.Mcp.Tools;
 
@@ -20,7 +21,7 @@ public static class ServiceCollectionExtensions
             WriteIndented = true,
             Converters = { new JsonStringEnumConverter() }
         };
-        options.MakeReadOnly();
+        options.MakeReadOnly(populateMissingResolver: true);
         return options;
     }
 
@@ -46,33 +47,42 @@ public static class ServiceCollectionExtensions
 
         builder.WithListToolsHandler((request, cancellationToken) =>
         {
-            var tools = CreateFactory(request.Services!).CreateTools();
-            return new ValueTask<ListToolsResult>(new ListToolsResult
+            try
             {
-                Tools = tools.Select(tool => new Tool
+                var tools = CreateFactory(request.Services!).CreateTools();
+                return new ValueTask<ListToolsResult>(new ListToolsResult
                 {
-                    Name = tool.Name,
-                    Description = tool.Description,
-                    InputSchema = tool.InputSchema
-                }).ToList()
-            });
+                    Tools = tools.Select(tool => new Tool
+                    {
+                        Name = tool.Name,
+                        Description = tool.Description,
+                        InputSchema = tool.InputSchema
+                    }).ToList()
+                });
+            }
+            catch (Exception exception)
+            {
+                var logger = request.Services?.GetService<ILogger<McpToolFactory>>();
+                logger?.LogWarning(exception, "MCP ListTools failed.");
+                throw;
+            }
         });
 
         builder.WithCallToolHandler(async (request, cancellationToken) =>
         {
-            var tools = CreateFactory(request.Services!).CreateTools();
-            var tool = tools.FirstOrDefault(t => t.Name == request.Params.Name);
-            if (tool is null)
-            {
-                return new CallToolResult
-                {
-                    IsError = true,
-                    Content = [new TextContentBlock { Text = $"Unknown tool: {request.Params.Name}" }]
-                };
-            }
-
             try
             {
+                var tools = CreateFactory(request.Services!).CreateTools();
+                var tool = tools.FirstOrDefault(t => t.Name == request.Params.Name);
+                if (tool is null)
+                {
+                    return new CallToolResult
+                    {
+                        IsError = true,
+                        Content = [new TextContentBlock { Text = $"Unknown tool: {request.Params.Name}" }]
+                    };
+                }
+
                 var input = request.Params.Arguments is not null
                     ? JsonSerializer.SerializeToElement(request.Params.Arguments)
                     : JsonSerializer.SerializeToElement(new { });
@@ -85,6 +95,9 @@ public static class ServiceCollectionExtensions
             }
             catch (Exception exception)
             {
+                var logger = request.Services?.GetService<ILogger<McpToolFactory>>();
+                logger?.LogWarning(exception, "MCP tool '{ToolName}' failed.", request.Params.Name);
+
                 return new CallToolResult
                 {
                     IsError = true,

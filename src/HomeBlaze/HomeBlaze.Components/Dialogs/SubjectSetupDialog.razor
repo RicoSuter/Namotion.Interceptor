@@ -142,7 +142,7 @@
     private Dictionary<string, List<Type>> GetGroupedTypes()
     {
         return _groupedTypes ??= TypeRegistry.RegisteredTypes
-            .Where(t => typeof(IConfigurableSubject).IsAssignableFrom(t))
+            .Where(t => typeof(IConfigurable).IsAssignableFrom(t))
             .GroupBy(t => t.GetCustomAttribute<System.ComponentModel.CategoryAttribute>()?.Category ?? "Uncategorized")
             .ToDictionary(g => g.Key, g => g.ToList());
     }

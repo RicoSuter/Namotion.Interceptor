@@ -28,7 +28,8 @@ internal class SetPropertyTool
     public McpToolInfo CreateTool() => new()
     {
         Name = "set_property",
-        Description = "Write a property value by path (e.g., Folder/Device/TargetSpeed). Blocked when server is read-only.",
+        Description = "Write a property value by its full path (e.g. /Devices/Motor/TargetSpeed). " +
+                      "Only writable properties can be set. Blocked when server is read-only.",
         InputSchema = Schema,
         Handler = HandleSetPropertyAsync
     };
@@ -63,7 +64,7 @@ internal class SetPropertyTool
             });
         }
 
-        if (!property.HasSetter)
+        if (!property.HasSetter || !McpToolHelper.HasPublicSetter(property))
         {
             return Task.FromResult<object?>(new { error = $"Property is not writable: {path}" });
         }

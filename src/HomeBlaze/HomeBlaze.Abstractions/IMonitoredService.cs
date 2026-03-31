@@ -8,7 +8,7 @@ namespace HomeBlaze.Abstractions;
 /// </summary>
 [SubjectAbstraction]
 [Description("Subject with lifecycle status tracking (running, stopped, error).")]
-public interface IHostedSubject
+public interface IMonitoredService
 {
     /// <summary>
     /// Current lifecycle status.

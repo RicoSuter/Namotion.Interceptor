@@ -296,7 +296,7 @@ public class ConfigurationJsonTypeInfoResolverTests
         var subject = new TestSubject(context) { ConfigProperty = "test" };
 
         // Act
-        var json = JsonSerializer.Serialize<IConfigurableSubject>(subject, _options);
+        var json = JsonSerializer.Serialize<IConfigurable>(subject, _options);
 
         // Assert
         Assert.Contains("$type", json);
@@ -311,7 +311,7 @@ public class ConfigurationJsonTypeInfoResolverTests
         var json = """{"$type":"HomeBlaze.Services.Tests.Serialization.TestSubject","configProperty":"deserialized"}""";
 
         // Act
-        var result = JsonSerializer.Deserialize<IConfigurableSubject>(json, _options);
+        var result = JsonSerializer.Deserialize<IConfigurable>(json, _options);
 
         // Assert
         Assert.NotNull(result);
@@ -328,7 +328,7 @@ public class ConfigurationJsonTypeInfoResolverTests
         var parent = new ParentWithChildSubject(context) { Name = "parent", Child = child };
 
         // Act
-        var json = JsonSerializer.Serialize<IConfigurableSubject>(parent, _options);
+        var json = JsonSerializer.Serialize<IConfigurable>(parent, _options);
 
         // Assert
         Assert.Contains("$type", json);
@@ -354,7 +354,7 @@ public class ConfigurationJsonTypeInfoResolverTests
         """;
 
         // Act
-        var result = JsonSerializer.Deserialize<IConfigurableSubject>(json, _options);
+        var result = JsonSerializer.Deserialize<IConfigurable>(json, _options);
 
         // Assert
         Assert.NotNull(result);
@@ -373,7 +373,7 @@ public class ConfigurationJsonTypeInfoResolverTests
 
         // Act & Assert
         Assert.Throws<JsonException>(() =>
-            JsonSerializer.Deserialize<IConfigurableSubject>(json, _options));
+            JsonSerializer.Deserialize<IConfigurable>(json, _options));
     }
 
     [Fact]
@@ -410,7 +410,7 @@ public class ConfigurationJsonTypeInfoResolverTests
         var level1 = new Level1Subject(context) { Level1Config = "L1", Child = level2 };
 
         // Act
-        var json = JsonSerializer.Serialize<IConfigurableSubject>(level1, _options);
+        var json = JsonSerializer.Serialize<IConfigurable>(level1, _options);
 
         // Assert
         Assert.Contains("$type", json);
