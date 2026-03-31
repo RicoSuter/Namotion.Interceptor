@@ -165,6 +165,35 @@ public partial class Motor
 - Can combine with `[State]` to display in UI
 - Automatically recalculates when `TargetSpeed` or `CurrentSpeed` changes
 
+## Child Subject Collections
+
+When a subject owns child subjects (e.g., a bridge owns lights), the collection property type determines how paths are built. Since paths are used as persistent identifiers throughout HomeBlaze (automation rules, dashboards, configuration references), path stability is critical.
+
+**Use `Dictionary<string, T>` when child identity comes from an external system:**
+
+```csharp
+[State]
+public partial Dictionary<string, HueLightbulb> Lights { get; set; }
+// Path: /Devices/Hue/Lights[a1b2c3d4-...] — stable across restarts
+```
+
+**Use arrays when the index itself is the stable identity:**
+
+```csharp
+[State]
+public partial GpioPin[] Pins { get; set; }
+// Path: /Devices/Gpio/Pins[0] — pin 0 is always pin 0
+```
+
+**Rule of thumb:** If reordering or re-discovery could change which item is at index N, use a dictionary with a stable key (e.g., hardware ID, API resource ID). If the index has inherent meaning (hardware pin numbers, fixed slots), arrays are fine.
+
+**Dictionary keys must be:**
+- Stable across restarts and reconnections
+- Unique within the collection
+- Deterministic (same device always produces the same key)
+
+Good key sources: API resource IDs (GUIDs), hardware serial numbers, MAC addresses. Bad key sources: user-assignable names, discovery order, timestamps.
+
 ## Display Interfaces
 
 Implement these interfaces for UI integration:

@@ -12,7 +12,11 @@ public class HueBridgeTotalPowerTests
         bridge.IsConnected = true;
         var light1 = TestHelpers.CreateLightbulb("LWA001", isOn: true, brightness: 100.0); // 9W
         var light2 = TestHelpers.CreateLightbulb("LCT001", isOn: true, brightness: 100.0); // 8.5W
-        bridge.Lights = [light1, light2];
+        bridge.Lights = new Dictionary<string, HueLightbulb>
+        {
+            [Guid.NewGuid().ToString()] = light1,
+            [Guid.NewGuid().ToString()] = light2,
+        };
 
         // Act
         var totalPower = bridge.TotalPower;
@@ -27,7 +31,7 @@ public class HueBridgeTotalPowerTests
         // Arrange
         var bridge = TestHelpers.CreateTestBridge();
         bridge.IsConnected = true;
-        bridge.Lights = [];
+        bridge.Lights = new();
 
         // Act
         var totalPower = bridge.TotalPower;
@@ -44,7 +48,11 @@ public class HueBridgeTotalPowerTests
         bridge.IsConnected = true;
         var knownLight = TestHelpers.CreateLightbulb("LWA001", isOn: true, brightness: 100.0); // 9W
         var unknownLight = TestHelpers.CreateLightbulb("UNKNOWN", isOn: true, brightness: 100.0); // null power
-        bridge.Lights = [knownLight, unknownLight];
+        bridge.Lights = new Dictionary<string, HueLightbulb>
+        {
+            [Guid.NewGuid().ToString()] = knownLight,
+            [Guid.NewGuid().ToString()] = unknownLight,
+        };
 
         // Act
         var totalPower = bridge.TotalPower;
@@ -59,7 +67,10 @@ public class HueBridgeTotalPowerTests
         // Arrange
         var bridge = TestHelpers.CreateTestBridge();
         bridge.IsConnected = false;
-        bridge.Lights = [TestHelpers.CreateLightbulb("LWA001", isOn: true, brightness: 100.0)];
+        bridge.Lights = new Dictionary<string, HueLightbulb>
+        {
+            [Guid.NewGuid().ToString()] = TestHelpers.CreateLightbulb("LWA001", isOn: true, brightness: 100.0),
+        };
 
         // Act
         var totalPower = bridge.TotalPower;
