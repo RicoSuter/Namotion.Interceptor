@@ -43,7 +43,7 @@ internal class SearchTool
         Name = "search",
         Description = "Find subjects by type/interface names or by enrichments (e.g. title, path). " +
                       "IMPORTANT: query only matches path and enrichment values (e.g. $title, $icon) — NOT types, interfaces, capabilities, or property names. " +
-                      "To find subjects by capability (e.g. battery, light, temperature), call list_types first to get the interface name, then pass it to types. " +
+                      "To find subjects by capability, call list_types first to get the interface name, then pass it to types. " +
                       "Use format=json for structured data, text (default) for overview.",
         InputSchema = Schema,
         Handler = HandleSearchAsync
