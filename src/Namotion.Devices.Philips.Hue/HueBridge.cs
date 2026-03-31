@@ -45,6 +45,7 @@ public partial class HueBridge : BackgroundService,
     private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
 
     private LocatedBridge? _bridge;
+    private HttpClient? _httpClient;
     private LocalHueApi? _client;
 
     internal HueDevice[] Devices { get; set; }
@@ -144,7 +145,13 @@ public partial class HueBridge : BackgroundService,
             throw new InvalidOperationException("Bridge is not configured or not discovered.");
         }
 
-        _client = new LocalHueApi(_bridge.IpAddress, AppKey);
+        _httpClient ??= new HttpClient(new HttpClientHandler
+        {
+            ServerCertificateCustomValidationCallback =
+                HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
+        });
+
+        _client = new LocalHueApi(_bridge.IpAddress, AppKey, _httpClient);
         return _client;
     }
 
@@ -631,6 +638,7 @@ public partial class HueBridge : BackgroundService,
         StatusMessage = null;
         IsConnected = false;
         _client = null;
+        _httpClient?.Dispose();
         _configChangedSignal.Dispose();
         base.Dispose();
     }
