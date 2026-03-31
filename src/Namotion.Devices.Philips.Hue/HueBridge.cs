@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
@@ -12,7 +13,6 @@ using HueApi.Models.Responses;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
-using Newtonsoft.Json.Linq;
 
 namespace Namotion.Devices.Philips.Hue;
 
@@ -37,6 +37,7 @@ public partial class HueBridge : BackgroundService,
     private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
 
     private LocatedBridge? _bridge;
+    private HttpClient? _httpClient;
 
     [Configuration]
     public partial string? BridgeId { get; set; }
@@ -68,8 +69,10 @@ public partial class HueBridge : BackgroundService,
     [State]
     public partial HueMotionDevice[] MotionSensors { get; set; }
 
+    internal HueDevice[] Devices { get; set; }
+
     [State]
-    public partial HueDevice[] Devices { get; set; }
+    public partial HueDevice[] OtherDevices { get; set; }
 
     [State]
     public partial DateTimeOffset? LastUpdated { get; set; }
@@ -110,6 +113,7 @@ public partial class HueBridge : BackgroundService,
         Rooms = [];
         Zones = [];
         Devices = [];
+        OtherDevices = [];
     }
 
     /// <summary>
@@ -122,13 +126,13 @@ public partial class HueBridge : BackgroundService,
             throw new InvalidOperationException("Bridge is not configured or not discovered.");
         }
 
-        var handler = new HttpClientHandler
+        _httpClient ??= new HttpClient(new HttpClientHandler
         {
             ServerCertificateCustomValidationCallback =
                 HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-        };
-        var httpClient = new HttpClient(handler);
-        return new LocalHueApi(_bridge.IpAddress, AppKey, httpClient);
+        });
+
+        return new LocalHueApi(_bridge.IpAddress, AppKey, _httpClient);
     }
 
     /// <inheritdoc />
@@ -147,7 +151,6 @@ public partial class HueBridge : BackgroundService,
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            HttpClient? httpClient = null;
             LocalHueApi? client = null;
 
             try
@@ -193,14 +196,7 @@ public partial class HueBridge : BackgroundService,
 
                 _bridge = bridge;
 
-                // Create client with HTTPS cert acceptance
-                var handler = new HttpClientHandler
-                {
-                    ServerCertificateCustomValidationCallback =
-                        HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-                };
-                httpClient = new HttpClient(handler);
-                client = new LocalHueApi(bridge.IpAddress, AppKey, httpClient);
+                client = CreateClient();
 
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
@@ -245,8 +241,6 @@ public partial class HueBridge : BackgroundService,
                 {
                     client.StopEventStream();
                 }
-
-                httpClient?.Dispose();
             }
         }
 
@@ -367,18 +361,32 @@ public partial class HueBridge : BackgroundService,
             .OrderBy(device => device.Title)
             .ToArray();
 
-        Lights = allDevices.OfType<HueLightbulb>().ToArray();
-        MotionSensors = allDevices.OfType<HueMotionDevice>().ToArray();
-        ButtonDevices = allDevices.OfType<HueButtonDevice>().ToArray();
-        Devices = allDevices
-            .Except(Lights)
-            .Except(MotionSensors)
-            .Except(ButtonDevices)
+        Devices = allDevices;
+
+        var newLights = allDevices.OfType<HueLightbulb>().ToArray();
+        if (!ArrayEquals(Lights, newLights))
+            Lights = newLights;
+
+        var newMotionSensors = allDevices.OfType<HueMotionDevice>().ToArray();
+        if (!ArrayEquals(MotionSensors, newMotionSensors))
+            MotionSensors = newMotionSensors;
+
+        var newButtonDevices = allDevices.OfType<HueButtonDevice>().ToArray();
+        if (!ArrayEquals(ButtonDevices, newButtonDevices))
+            ButtonDevices = newButtonDevices;
+
+        var newOtherDevices = allDevices
+            .Except(newLights)
+            .Except(newMotionSensors)
+            .Except(newButtonDevices)
             .ToArray();
+
+        if (!ArrayEquals(OtherDevices, newOtherDevices))
+            OtherDevices = newOtherDevices;
 
         // Rooms
         var existingRooms = Rooms;
-        Rooms = rooms.Data
+        var newRooms = rooms.Data
             .Select(room =>
             {
                 var roomServices = room.Services?.Select(service => service.Rid).ToArray() ?? [];
@@ -399,9 +407,12 @@ public partial class HueBridge : BackgroundService,
             .OrderBy(room => room.Title)
             .ToArray();
 
+        if (!ArrayEquals(Rooms, newRooms))
+            Rooms = newRooms;
+
         // Zones
         var existingZones = Zones;
-        Zones = zones.Data
+        var newZones = zones.Data
             .Select(zone =>
             {
                 var zoneServices = zone.Services?.Select(service => service.Rid).ToArray() ?? [];
@@ -421,6 +432,9 @@ public partial class HueBridge : BackgroundService,
             })
             .OrderBy(zone => zone.Title)
             .ToArray();
+
+        if (!ArrayEquals(Zones, newZones))
+            Zones = newZones;
 
         LastUpdated = DateTimeOffset.Now;
     }
@@ -531,17 +545,47 @@ public partial class HueBridge : BackgroundService,
         }
     }
 
-    private static T Merge<T>(T currentResource, EventStreamData newPartialResource)
+    internal static T Merge<T>(T currentResource, EventStreamData newPartialResource)
     {
-        var currentJson = JObject.Parse(JsonSerializer.Serialize(currentResource));
-        var partialJson = JObject.Parse(JsonSerializer.Serialize(newPartialResource));
+        var currentNode = JsonNode.Parse(JsonSerializer.Serialize(currentResource))!.AsObject();
+        var partialNode = JsonNode.Parse(JsonSerializer.Serialize(newPartialResource))!.AsObject();
 
-        currentJson.Merge(partialJson, new JsonMergeSettings
+        MergeObjects(currentNode, partialNode);
+
+        return JsonSerializer.Deserialize<T>(currentNode.ToJsonString())!;
+    }
+
+    private static void MergeObjects(JsonObject target, JsonObject patch)
+    {
+        foreach (var (key, value) in patch)
         {
-            MergeArrayHandling = MergeArrayHandling.Union
-        });
+            if (value is null)
+                continue;
 
-        return JsonSerializer.Deserialize<T>(currentJson.ToString())!;
+            if (value is JsonObject patchChild
+                && target[key] is JsonObject targetChild)
+            {
+                MergeObjects(targetChild, patchChild);
+            }
+            else
+            {
+                target[key] = value.DeepClone();
+            }
+        }
+    }
+
+    internal static bool ArrayEquals<T>(T[] existing, T[] updated) where T : class
+    {
+        if (existing.Length != updated.Length)
+            return false;
+
+        for (var i = 0; i < existing.Length; i++)
+        {
+            if (!ReferenceEquals(existing[i], updated[i]))
+                return false;
+        }
+
+        return true;
     }
 
     public override void Dispose()
@@ -549,6 +593,7 @@ public partial class HueBridge : BackgroundService,
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
         IsConnected = false;
+        _httpClient?.Dispose();
         base.Dispose();
     }
 }

@@ -15,10 +15,8 @@
   <ItemGroup>
     <PackageReference Include="HueApi" Version="3.1.2" />
     <PackageReference Include="HueApi.ColorConverters" Version="3.1.0" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.*" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="9.*" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.*" />
-    <PackageReference Include="Microsoft.Extensions.Http" Version="9.*" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.*" />
     <PackageReference Include="System.Reactive" Version="6.*" />
   </ItemGroup>
