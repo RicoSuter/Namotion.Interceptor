@@ -1,3 +1,4 @@
+using HomeBlaze.AI;
 using HomeBlaze.Components;
 using HomeBlaze.Host;
 using HomeBlaze.Samples;
@@ -9,6 +10,10 @@ using HomeBlaze.Storage.Blazor;
 using HomeBlaze.Storage.Blazor.Files;
 using Namotion.Devices.Gpio;
 using Namotion.Devices.Gpio.HomeBlaze;
+using Namotion.Devices.MyStrom;
+using Namotion.Devices.MyStrom.HomeBlaze;
+using Namotion.Devices.Philips.Hue;
+using Namotion.Devices.Philips.Hue.HomeBlaze;
 using Toolbelt.Blazor.Extensions.DependencyInjection;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -19,8 +24,20 @@ builder.Services.AddHomeBlazeHost();
 builder.Services.AddHomeBlazeStorage();
 builder.Services.AddHotKeys2();
 
+// Optionally add the MCP subject server (default: false, enabled in Development)
+if (builder.Configuration.GetValue<bool>("UseMcpServer"))
+{
+    builder.Services.AddMcpServer()
+        .WithHttpTransport(options => options.Stateless = true)
+        .WithHomeBlazeMcpTools();
+}
+
 // Add services to the container.
-builder.Services.AddRazorComponents()
+builder.Services
+    .AddHttpClient();
+
+builder.Services
+    .AddRazorComponents()
     .AddInteractiveServerComponents();
 
 var app = builder.Build();
@@ -36,7 +53,11 @@ typeProvider
     .AddAssembly(typeof(OpcUaServer).Assembly)                 // HomeBlaze.Servers.OpcUa
     .AddAssembly(typeof(OpcUaServerEditComponent).Assembly)    // HomeBlaze.Servers.OpcUa.Blazor
     .AddAssembly(typeof(GpioSubject).Assembly)
-    .AddAssembly(typeof(GpioSubjectEditComponent).Assembly);
+    .AddAssembly(typeof(GpioSubjectEditComponent).Assembly)
+    .AddAssembly(typeof(HueBridge).Assembly)
+    .AddAssembly(typeof(HueBridgeSetupComponent).Assembly)
+    .AddAssembly(typeof(MyStromSwitch).Assembly)
+    .AddAssembly(typeof(MyStromSwitchWidget).Assembly);
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
@@ -47,6 +68,12 @@ if (!app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 app.UseAntiforgery();
+
+// Map MCP server endpoint if enabled
+if (builder.Configuration.GetValue<bool>("UseMcpServer"))
+{
+    app.MapMcp("/mcp");
+}
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()

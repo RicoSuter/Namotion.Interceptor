@@ -1,6 +1,6 @@
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
-using HomeBlaze.Storage.Abstractions.Attributes;
 using Namotion.Interceptor.Registry.Abstractions;
 
 namespace HomeBlaze.Host.Services.Display;
@@ -27,10 +27,10 @@ public static class StateUnitExtensions
         }
 
         // Apply unit formatting if specified
-        var stateAttribute = property.GetStateAttribute();
-        if (stateAttribute != null && stateAttribute.Unit != StateUnit.Default)
+        var stateMetadata = property.GetStateMetadata();
+        if (stateMetadata != null && stateMetadata.Unit != StateUnit.Default)
         {
-            return FormatWithUnit(value, stateAttribute.Unit);
+            return FormatWithUnit(value, stateMetadata.Unit);
         }
 
         // Default formatting for common types

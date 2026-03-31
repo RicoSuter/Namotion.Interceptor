@@ -11,7 +11,7 @@ namespace HomeBlaze.Components;
 [Category("Layouts")]
 [Description("Free-form canvas layout with draggable widgets")]
 [InterceptorSubject]
-public partial class CanvasLayout : IConfigurableSubject, ITitleProvider
+public partial class CanvasLayout : IConfigurable, ITitleProvider
 {
     /// <summary>
     /// Optional minimum height in pixels. Defaults to 400.

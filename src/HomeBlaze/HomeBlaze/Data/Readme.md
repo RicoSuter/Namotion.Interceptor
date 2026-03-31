@@ -137,9 +137,9 @@ Paths use familiar C# syntax:
 
 | Path | Description |
 |------|-------------|
-| `Root` | The root storage container |
-| `Root.Children[motor]` | A motor subject (JSON without extension) |
-| `Root.Children[Demo].Children[Conveyor]` | Conveyor motor in Demo folder |
+| `/` | The root storage container |
+| `/motor` | A motor subject (JSON without extension) |
+| `/Demo/Conveyor` | Conveyor motor in Demo folder |
 
 ---
 

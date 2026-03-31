@@ -19,7 +19,7 @@
         <ProjectReference Include="..\..\Namotion.Interceptor\Namotion.Interceptor.csproj" />
         <PackageReference Include="Excubo.Blazor.Diagrams" Version="4.1.*" />
         <PackageReference Include="Markdig" Version="0.*" />
-        <PackageReference Include="MudBlazor" Version="8.*" />
+        <PackageReference Include="MudBlazor" Version="9.2.*" />
         <PackageReference Include="YamlDotNet" Version="16.*" />
     </ItemGroup>
 

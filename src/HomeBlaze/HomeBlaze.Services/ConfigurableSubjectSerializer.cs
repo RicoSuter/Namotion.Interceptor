@@ -6,11 +6,12 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Services.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Services;
 
 /// <summary>
-/// Serializes and deserializes IConfigurableSubject instances to/from JSON.
+/// Serializes and deserializes IConfigurable instances to/from JSON.
 /// Uses "$type" discriminator for polymorphic serialization via System.Text.Json.
 /// Only serializes properties marked with [Configuration].
 /// Uses ActivatorUtilities for DI-aware construction during deserialization.
@@ -36,25 +37,25 @@ public class ConfigurableSubjectSerializer
     }
 
     /// <summary>
-    /// Serializes an IConfigurableSubject to JSON with $type discriminator.
+    /// Serializes an IConfigurable to JSON with $type discriminator.
     /// </summary>
     public string Serialize(IInterceptorSubject subject)
     {
-        if (subject is not IConfigurableSubject configurableSubject)
+        if (subject is not IConfigurable configurableSubject)
         {
             throw new ArgumentException(
-                $"Subject must implement IConfigurableSubject. Type: {subject.GetType().FullName}",
+                $"Subject must implement IConfigurable. Type: {subject.GetType().FullName}",
                 nameof(subject));
         }
 
-        return JsonSerializer.Serialize(configurableSubject, typeof(IConfigurableSubject), _options);
+        return JsonSerializer.Serialize(configurableSubject, typeof(IConfigurable), _options);
     }
 
     /// <summary>
-    /// Deserializes JSON to an IConfigurableSubject using $type discriminator.
+    /// Deserializes JSON to an IConfigurable using $type discriminator.
     /// Uses ActivatorUtilities for DI-aware construction.
     /// </summary>
-    public IConfigurableSubject? Deserialize(string json)
+    public IConfigurable? Deserialize(string json)
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
@@ -79,7 +80,7 @@ public class ConfigurableSubjectSerializer
         }
 
         // Create instance using ActivatorUtilities for DI-aware construction
-        var subject = ActivatorUtilities.CreateInstance(_serviceProvider, type) as IConfigurableSubject;
+        var subject = ActivatorUtilities.CreateInstance(_serviceProvider, type) as IConfigurable;
         if (subject == null)
         {
             return null;
@@ -92,21 +93,44 @@ public class ConfigurableSubjectSerializer
     }
 
     /// <summary>
-    /// Populates [Configuration] properties on a newly created subject using reflection.
-    /// Used during deserialization before subject is registered in a context.
+    /// Populates [Configuration] properties on a newly created subject.
+    /// Uses registry attribute lookup when available, falls back to reflection.
     /// </summary>
-    private void PopulateConfigurationProperties(IConfigurableSubject subject, Type type, JsonElement root)
+    private void PopulateConfigurationProperties(IConfigurable subject, Type type, JsonElement root)
     {
+        if (subject is IInterceptorSubject interceptorSubject)
+        {
+            var registered = interceptorSubject.TryGetRegisteredSubject();
+            if (registered != null)
+            {
+                foreach (var property in registered.Properties)
+                {
+                    if (property.TryGetAttribute(KnownAttributes.Configuration) == null)
+                        continue;
+
+                    var jsonName = JsonNamingPolicy.CamelCase.ConvertName(property.Name);
+                    if (root.TryGetProperty(jsonName, out var jsonValue))
+                    {
+                        try
+                        {
+                            var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.Type, _options);
+                            property.SetValue(value);
+                        }
+                        catch (JsonException)
+                        {
+                            // Skip properties that can't be deserialized
+                        }
+                    }
+                }
+                return;
+            }
+        }
+
+        // Fallback to reflection for subjects without registry context
         foreach (var property in type.GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
-            // Check if property has [Configuration] attribute
-            // Use GetCustomAttributes for better compatibility with partial properties
             var hasConfigAttribute = property.GetCustomAttributes(typeof(ConfigurationAttribute), true).Length > 0;
-            if (!hasConfigAttribute)
-                continue;
-
-            // Skip read-only properties
-            if (!property.CanWrite)
+            if (!hasConfigAttribute || !property.CanWrite)
                 continue;
 
             var jsonName = JsonNamingPolicy.CamelCase.ConvertName(property.Name);
@@ -117,7 +141,7 @@ public class ConfigurableSubjectSerializer
                     var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.PropertyType, _options);
                     property.SetValue(subject, value);
                 }
-                catch
+                catch (JsonException)
                 {
                     // Skip properties that can't be deserialized
                 }
@@ -146,7 +170,7 @@ public class ConfigurableSubjectSerializer
                     var value = JsonSerializer.Deserialize(jsonValue.GetRawText(), property.Type, _options);
                     property.SetValue(value);
                 }
-                catch
+                catch (JsonException)
                 {
                     // Skip properties that can't be deserialized
                 }

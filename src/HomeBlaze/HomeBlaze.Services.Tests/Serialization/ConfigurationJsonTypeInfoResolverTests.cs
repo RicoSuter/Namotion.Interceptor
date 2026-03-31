@@ -1,8 +1,11 @@
 using System.Text.Json;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Services.Lifecycle;
 using HomeBlaze.Services.Serialization;
 using Namotion.Interceptor;
-using Xunit;
+using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
+using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services.Tests.Serialization;
 
@@ -216,6 +219,71 @@ public class ConfigurationJsonTypeInfoResolverTests
         Assert.DoesNotContain("stateTwo", json);
     }
 
+    [Fact]
+    public void Serialize_SubjectWithRegistry_UsesRegistryForFiltering()
+    {
+        // Arrange — subject has registry so ShouldSerialize can check registry attributes
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry()
+            .WithLifecycle()
+            .WithService<ILifecycleHandler>(
+                () => new PropertyAttributeInitializer(),
+                handler => handler is PropertyAttributeInitializer);
+        var subject = new TestSubject(context)
+        {
+            ConfigProperty = "saved",
+            StateProperty = "not-saved"
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(subject, subject.GetType(), _options);
+
+        // Assert
+        Assert.Contains("configProperty", json);
+        Assert.Contains("saved", json);
+        Assert.DoesNotContain("stateProperty", json);
+        Assert.DoesNotContain("not-saved", json);
+    }
+
+    [Fact]
+    public void Serialize_ValueObject_UsesReflectionFallback()
+    {
+        // Arrange — value objects are not IInterceptorSubject, so ShouldSerialize
+        // falls back to reflection-based [Configuration] attribute detection
+        var valueObject = new TestValueObject
+        {
+            PropertyOne = "one",
+            PropertyTwo = "two"
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(valueObject, _options);
+
+        // Assert
+        Assert.Contains("propertyOne", json);
+        Assert.Contains("propertyTwo", json);
+    }
+
+    [Fact]
+    public void Serialize_SubjectWithoutRegistry_UsesReflectionFallback()
+    {
+        // Arrange — subject created with no registry, so TryGetRegisteredSubject returns null
+        var context = InterceptorSubjectContext.Create();
+        var subject = new TestSubject(context)
+        {
+            ConfigProperty = "config-via-reflection",
+            StateProperty = "state-via-reflection"
+        };
+
+        // Act
+        var json = JsonSerializer.Serialize(subject, subject.GetType(), _options);
+
+        // Assert — reflection fallback correctly filters to [Configuration] only
+        Assert.Contains("configProperty", json);
+        Assert.DoesNotContain("stateProperty", json);
+    }
+
     #endregion
 
     #region Polymorphism Tests
@@ -228,7 +296,7 @@ public class ConfigurationJsonTypeInfoResolverTests
         var subject = new TestSubject(context) { ConfigProperty = "test" };
 
         // Act
-        var json = JsonSerializer.Serialize<IConfigurableSubject>(subject, _options);
+        var json = JsonSerializer.Serialize<IConfigurable>(subject, _options);
 
         // Assert
         Assert.Contains("$type", json);
@@ -243,7 +311,7 @@ public class ConfigurationJsonTypeInfoResolverTests
         var json = """{"$type":"HomeBlaze.Services.Tests.Serialization.TestSubject","configProperty":"deserialized"}""";
 
         // Act
-        var result = JsonSerializer.Deserialize<IConfigurableSubject>(json, _options);
+        var result = JsonSerializer.Deserialize<IConfigurable>(json, _options);
 
         // Assert
         Assert.NotNull(result);
@@ -260,7 +328,7 @@ public class ConfigurationJsonTypeInfoResolverTests
         var parent = new ParentWithChildSubject(context) { Name = "parent", Child = child };
 
         // Act
-        var json = JsonSerializer.Serialize<IConfigurableSubject>(parent, _options);
+        var json = JsonSerializer.Serialize<IConfigurable>(parent, _options);
 
         // Assert
         Assert.Contains("$type", json);
@@ -286,7 +354,7 @@ public class ConfigurationJsonTypeInfoResolverTests
         """;
 
         // Act
-        var result = JsonSerializer.Deserialize<IConfigurableSubject>(json, _options);
+        var result = JsonSerializer.Deserialize<IConfigurable>(json, _options);
 
         // Assert
         Assert.NotNull(result);
@@ -305,7 +373,7 @@ public class ConfigurationJsonTypeInfoResolverTests
 
         // Act & Assert
         Assert.Throws<JsonException>(() =>
-            JsonSerializer.Deserialize<IConfigurableSubject>(json, _options));
+            JsonSerializer.Deserialize<IConfigurable>(json, _options));
     }
 
     [Fact]
@@ -342,7 +410,7 @@ public class ConfigurationJsonTypeInfoResolverTests
         var level1 = new Level1Subject(context) { Level1Config = "L1", Child = level2 };
 
         // Act
-        var json = JsonSerializer.Serialize<IConfigurableSubject>(level1, _options);
+        var json = JsonSerializer.Serialize<IConfigurable>(level1, _options);
 
         // Assert
         Assert.Contains("$type", json);

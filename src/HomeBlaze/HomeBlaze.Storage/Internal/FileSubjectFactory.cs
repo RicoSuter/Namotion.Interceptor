@@ -87,7 +87,7 @@ internal sealed class FileSubjectFactory
             var subject = _serializer.Deserialize(json);
             if (subject != null)
             {
-                // All IConfigurableSubject implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
+                // All IConfigurable implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
                 return (IInterceptorSubject)subject;
             }
         }

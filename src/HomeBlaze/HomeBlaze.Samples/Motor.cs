@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using HomeBlaze.Abstractions.Sensors;
 using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry.Attributes;
@@ -13,7 +14,7 @@ namespace HomeBlaze.Samples;
 [Category("Samples")]
 [Description("Simulated motor with speed control and temperature monitoring")]
 [InterceptorSubject]
-public partial class Motor : BackgroundService, IConfigurableSubject, ITitleProvider, IIconProvider
+public partial class Motor : BackgroundService, IConfigurable, ITemperatureSensor, ITitleProvider, IIconProvider
 {
     // Configuration (persisted to JSON)
 
@@ -66,7 +67,7 @@ public partial class Motor : BackgroundService, IConfigurableSubject, ITitleProv
     /// Current temperature in Celsius.
     /// </summary>
     [State(Position = 4, Unit = StateUnit.DegreeCelsius)]
-    public partial double Temperature { get; set; }
+    public partial decimal? Temperature { get; set; }
 
     /// <summary>
     /// Current operational status.
@@ -125,7 +126,7 @@ public partial class Motor : BackgroundService, IConfigurableSubject, ITitleProv
                 var baseTemp = 25.0;
                 var speedFactor = CurrentSpeed / 1000.0 * 20.0; // Higher speed = more heat
                 var noise = (Random.Shared.NextDouble() - 0.5) * 2.0; // ±1°C noise
-                Temperature = baseTemp + speedFactor + noise;
+                Temperature = (decimal)(baseTemp + speedFactor + noise);
 
                 await Task.Delay(SimulationInterval, stoppingToken);
             }
@@ -144,11 +145,11 @@ public partial class Motor : BackgroundService, IConfigurableSubject, ITitleProv
         }
 
         Status = MotorStatus.Stopped;
-        Temperature = 25.0;
+        Temperature = 25m;
     }
 
     /// <summary>
-    /// IConfigurableSubject implementation - called after configuration properties have been updated.
+    /// IConfigurable implementation - called after configuration properties have been updated.
     /// </summary>
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
     {
@@ -191,7 +192,7 @@ public partial class Motor : BackgroundService, IConfigurableSubject, ITitleProv
             Status = Status,
             CurrentSpeed = CurrentSpeed,
             TargetSpeed = TargetSpeed,
-            Temperature = Temperature,
+            Temperature = Temperature ?? 0,
             IsAtTarget = IsAtTargetSpeed,
             SpeedDelta = SpeedDelta
         };
@@ -220,7 +221,7 @@ public class MotorDiagnostics
     public MotorStatus Status { get; set; }
     public int CurrentSpeed { get; set; }
     public int TargetSpeed { get; set; }
-    public double Temperature { get; set; }
+    public decimal Temperature { get; set; }
     public bool IsAtTarget { get; set; }
     public int SpeedDelta { get; set; }
 }

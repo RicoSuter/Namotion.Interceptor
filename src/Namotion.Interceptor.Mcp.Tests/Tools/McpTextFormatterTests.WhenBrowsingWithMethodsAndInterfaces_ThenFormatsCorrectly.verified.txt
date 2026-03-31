@@ -1,0 +1,7 @@
+﻿# path [Type] $key=value | prop: value | type | @attr: value | Collection/ (Nx Type)
+# Use get_property for exact values or browse with format=json for structured data.
+
+/Device [MyApp.Device]
+  methods: Start() Stop() Reset()
+  interfaces: IMotor, IDevice
+[1 subject]

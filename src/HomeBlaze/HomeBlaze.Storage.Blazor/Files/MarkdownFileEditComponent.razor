@@ -209,7 +209,7 @@ else
         await File.OnFileChangedAsync(CancellationToken.None);
 
         // Apply configuration if needed
-        if (subject is IConfigurableSubject configurable)
+        if (subject is IConfigurable configurable)
         {
             await configurable.ApplyConfigurationAsync(CancellationToken.None);
         }

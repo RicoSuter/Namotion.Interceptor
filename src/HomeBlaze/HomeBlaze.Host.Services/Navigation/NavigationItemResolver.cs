@@ -45,7 +45,7 @@ public class NavigationItemResolver
                     continue;
 
                 var key = childInfo.Index?.ToString() ?? prop.Name;
-                var path = _pathResolver.GetPath(child, PathFormat.Slash);
+                var path = _pathResolver.GetPath(child, PathStyle.Canonical);
                 if (path == null)
                     continue;
 
@@ -59,7 +59,7 @@ public class NavigationItemResolver
                     {
                         Subject = child,
                         Title = child.GetNavigationTitle(key),
-                        Icon = child.GetIconName(),
+                        Icon = child.GetNavigationIconName(),
                         Path = path,
                         IsPage = isPage,
                         IsFolder = isFolder,
