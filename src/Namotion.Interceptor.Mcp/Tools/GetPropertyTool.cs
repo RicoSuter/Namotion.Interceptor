@@ -28,7 +28,7 @@ internal class GetPropertyTool
     public McpToolInfo CreateTool() => new()
     {
         Name = "get_property",
-        Description = "Read a single property value by its full path (e.g. Devices/Sensor/Temperature). " +
+        Description = "Read a single property value by its full path (e.g. /Devices/Sensor/Temperature). " +
                       "Returns the value, type, and any attributes. Use browse or search to discover paths first.",
         InputSchema = Schema,
         Handler = HandleGetPropertyAsync

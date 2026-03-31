@@ -27,7 +27,7 @@ internal class ListTypesTool
     public McpToolInfo CreateTool() => new()
     {
         Name = "list_types",
-        Description = "REQUIRED first step before searching by capability: discover interface/type names by keyword (e.g. type='battery' → IBatteryState). " +
+        Description = "REQUIRED first step before searching by capability: discover interface/type names by keyword. " +
                       "search's query parameter only matches names/titles — it cannot filter by capability. " +
                       "Call this first, then pass the returned type names to search's types parameter (full names with namespace preferred). " +
                       "Filter with kind ('interfaces'/'concrete').",
