@@ -148,7 +148,7 @@ Devices that don't match any recognized type (not a light, motion sensor, or but
 
 ### Event Stream (SSE)
 
-The Hue Bridge publishes real-time updates via Server-Sent Events (SSE). The `HueBridge` subscribes to this event stream and applies incremental updates to device subjects using JSON merge. Supported event types include `light`, `button`, `grouped_light`, `motion`, `temperature`, `light_level`, and `device_power`.
+The Hue Bridge publishes real-time updates via Server-Sent Events (SSE). The `HueBridge` subscribes to this event stream and applies incremental updates to device subjects using JSON merge. Supported event types include `light`, `button`, `grouped_light`, `motion`, `temperature`, `light_level`, `device_power`, and `zigbee_connectivity`.
 
 ### Polling Cycle
 
@@ -174,6 +174,12 @@ The bridge runs in a reconnect loop inside `ExecuteAsync`:
 | Event stream disconnect     | Connection teardown triggers reconnect loop                                                               |
 | API errors                  | Logged as warning, connection retried after `RetryInterval`                                               |
 | Host shutdown               | Graceful stop via `CancellationToken`, status set to Stopped                                              |
+
+## Known Limitations
+
+- **Scenes** are not yet exposed. The Hue API supports activating scenes per room/zone, but this is not currently integrated.
+- **Entertainment API** (streaming for light sync) is not supported.
+- **Power aggregation** on rooms/zones is not available. Individual light power is estimated but not summed at the group level.
 
 ## Troubleshooting
 

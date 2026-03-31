@@ -23,7 +23,7 @@ public partial class HueDevice :
 {
     internal Device Device { get; private set; }
 
-    internal ZigbeeConnectivity? ZigbeeConnectivity { get; private set; }
+    internal ZigbeeConnectivity? ZigbeeConnectivity { get; set; }
 
     public HueBridge Bridge { get; }
 
