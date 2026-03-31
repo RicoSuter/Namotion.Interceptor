@@ -33,11 +33,18 @@ public partial class HueBridge : BackgroundService,
     IIconProvider,
     ILastUpdatedProvider
 {
+    /// <summary>
+    /// Delay in milliseconds after setting brightness on an off light.
+    /// The Hue bridge requires turning a light on before changing brightness.
+    /// This delay gives the bridge time to process the change before turning the light off again,
+    /// so the brightness is remembered for the next time the light is turned on.
+    /// </summary>
+    internal const int SetBrightnessWhileOffDelayMs = 3000;
+
     private readonly ILogger<HueBridge> _logger;
     private readonly SemaphoreSlim _configChangedSignal = new(0, 1);
 
     private LocatedBridge? _bridge;
-    private HttpClient? _httpClient;
     private LocalHueApi? _client;
 
     [Configuration]
@@ -101,6 +108,11 @@ public partial class HueBridge : BackgroundService,
     [Derived]
     public decimal? EnergyConsumed => null;
 
+    [Derived]
+    [State(Unit = StateUnit.Watt)]
+    public decimal? TotalPower =>
+        IsConnected ? Power + Lights.Sum(light => light.Power ?? 0m) : null;
+
     public HueBridge(ILogger<HueBridge> logger)
     {
         _logger = logger;
@@ -132,13 +144,7 @@ public partial class HueBridge : BackgroundService,
             throw new InvalidOperationException("Bridge is not configured or not discovered.");
         }
 
-        _httpClient ??= new HttpClient(new HttpClientHandler
-        {
-            ServerCertificateCustomValidationCallback =
-                HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-        });
-
-        _client = new LocalHueApi(_bridge.IpAddress, AppKey, _httpClient);
+        _client = new LocalHueApi(_bridge.IpAddress, AppKey);
         return _client;
     }
 
@@ -280,11 +286,11 @@ public partial class HueBridge : BackgroundService,
 
     private async Task PollDevicesAsync(LocalHueApi client, CancellationToken cancellationToken)
     {
-        var zigbeeConnectivitiesTask = client.GetZigbeeConnectivityAsync();
-        var devicePowersTask = client.GetDevicePowersAsync();
-        var devicesTask = client.GetDevicesAsync();
-        var roomsTask = client.GetRoomsAsync();
-        var zonesTask = client.GetZonesAsync();
+        var zigbeeConnectivitiesTask = client.ZigbeeConnectivity.GetAllAsync();
+        var devicePowersTask = client.DevicePower.GetAllAsync();
+        var devicesTask = client.Device.GetAllAsync();
+        var roomsTask = client.Room.GetAllAsync();
+        var zonesTask = client.Zone.GetAllAsync();
         var lightsTask = client.Light.GetAllAsync();
         var buttonsTask = client.Button.GetAllAsync();
         var motionsTask = client.Motion.GetAllAsync();
@@ -627,7 +633,6 @@ public partial class HueBridge : BackgroundService,
         StatusMessage = null;
         IsConnected = false;
         _client = null;
-        _httpClient?.Dispose();
         _configChangedSignal.Dispose();
         base.Dispose();
     }

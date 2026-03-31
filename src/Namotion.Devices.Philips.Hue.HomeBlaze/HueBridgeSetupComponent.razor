@@ -87,7 +87,7 @@ else
     public event Action<bool>? IsValidChanged;
     public event Action<bool>? IsDirtyChanged;
 
-    protected override async void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         try
         {

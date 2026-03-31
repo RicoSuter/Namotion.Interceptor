@@ -1,5 +1,4 @@
 using HomeBlaze.Abstractions.Attributes;
-using HomeBlaze.Abstractions.Devices;
 using HomeBlaze.Abstractions.Devices.Light;
 using HomeBlaze.Abstractions.Sensors;
 using HueApi.ColorConverters;
@@ -21,11 +20,6 @@ public partial class HueLightbulb : HueDevice,
     IColorTemperatureState, IColorTemperatureController,
     IPowerSensor
 {
-    /// <summary>
-    /// Delay after setting brightness on an off light to allow the bridge to process the change before turning off again.
-    /// </summary>
-    private const int SetBrightnessWhileOffDelayMs = 3000;
-
     internal Light LightResource { get; set; }
 
     /// <summary>
@@ -223,7 +217,7 @@ public partial class HueLightbulb : HueDevice,
             .TurnOn();
 
         var client = Bridge.GetOrCreateClient();
-        var response = await client.UpdateLightAsync(LightResource.Id, command);
+        var response = await client.Light.UpdateAsync(LightResource.Id, command);
         if (!response.Errors.Any())
         {
             LightResource.On.IsOn = true;
@@ -238,7 +232,7 @@ public partial class HueLightbulb : HueDevice,
             .TurnOff();
 
         var client = Bridge.GetOrCreateClient();
-        var response = await client.UpdateLightAsync(LightResource.Id, command);
+        var response = await client.Light.UpdateAsync(LightResource.Id, command);
         if (!response.Errors.Any())
         {
             LightResource.On.IsOn = false;
@@ -262,7 +256,7 @@ public partial class HueLightbulb : HueDevice,
             .SetBrightness((double)(brightness * 100m));
 
         var client = Bridge.GetOrCreateClient();
-        var response = await client.UpdateLightAsync(LightResource.Id, command);
+        var response = await client.Light.UpdateAsync(LightResource.Id, command);
         if (!response.Errors.Any() && LightResource.Dimming is not null)
         {
             LightResource.Dimming.Brightness = (double)(brightness * 100m);
@@ -271,7 +265,7 @@ public partial class HueLightbulb : HueDevice,
 
         if (turnOffAfterChange)
         {
-            await Task.Delay(SetBrightnessWhileOffDelayMs, cancellationToken);
+            await Task.Delay(HueBridge.SetBrightnessWhileOffDelayMs, cancellationToken);
             await TurnOffAsync(cancellationToken);
         }
     }
@@ -284,7 +278,7 @@ public partial class HueLightbulb : HueDevice,
             .SetColor(rgbColor, ModelId ?? "LCT001");
 
         var client = Bridge.GetOrCreateClient();
-        var response = await client.UpdateLightAsync(LightResource.Id, command);
+        var response = await client.Light.UpdateAsync(LightResource.Id, command);
         if (!response.Errors.Any())
         {
             LightResource.Color = rgbColor.ToColor();
@@ -311,7 +305,7 @@ public partial class HueLightbulb : HueDevice,
             };
 
             var client = Bridge.GetOrCreateClient();
-            var response = await client.UpdateLightAsync(LightResource.Id, command);
+            var response = await client.Light.UpdateAsync(LightResource.Id, command);
             if (!response.Errors.Any() && LightResource.ColorTemperature is not null)
             {
                 LightResource.ColorTemperature.Mirek = newColorTemperature;
