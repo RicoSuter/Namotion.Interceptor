@@ -10,6 +10,8 @@ using HomeBlaze.Storage.Blazor;
 using HomeBlaze.Storage.Blazor.Files;
 using Namotion.Devices.Gpio;
 using Namotion.Devices.Gpio.HomeBlaze;
+using Namotion.Devices.MyStrom;
+using Namotion.Devices.MyStrom.HomeBlaze;
 using Namotion.Devices.Philips.Hue;
 using Namotion.Devices.Philips.Hue.HomeBlaze;
 using Toolbelt.Blazor.Extensions.DependencyInjection;
@@ -53,7 +55,9 @@ typeProvider
     .AddAssembly(typeof(GpioSubject).Assembly)
     .AddAssembly(typeof(GpioSubjectEditComponent).Assembly)
     .AddAssembly(typeof(HueBridge).Assembly)
-    .AddAssembly(typeof(HueBridgeSetupComponent).Assembly);
+    .AddAssembly(typeof(HueBridgeSetupComponent).Assembly)
+    .AddAssembly(typeof(MyStromSwitch).Assembly)
+    .AddAssembly(typeof(MyStromSwitchWidget).Assembly);
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
