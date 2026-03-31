@@ -368,7 +368,16 @@
                 return;
             }
 
-            Value = _selectedItem.Path;
+            // Use shortest canonical path when a subject is selected
+            if (_selectedItem.Subject != null)
+            {
+                Value = PathResolver.GetPath(_selectedItem.Subject, PathStyle.Canonical) ?? _selectedItem.Path;
+            }
+            else
+            {
+                Value = _selectedItem.Path;
+            }
+
             await ValueChanged.InvokeAsync(Value);
             UpdatePreview();
         }

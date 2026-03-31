@@ -63,34 +63,34 @@ public partial class HueBridge : BackgroundService,
     public partial TimeSpan RetryInterval { get; set; }
 
     [State]
-    public partial bool IsConnected { get; set; }
+    public partial bool IsConnected { get; internal set; }
 
     [State]
-    public partial Dictionary<string, HueGroup> Rooms { get; set; }
+    public partial Dictionary<string, HueGroup> Rooms { get; internal set; }
 
     [State]
-    public partial Dictionary<string, HueGroup> Zones { get; set; }
+    public partial Dictionary<string, HueGroup> Zones { get; internal set; }
 
     [State]
-    public partial Dictionary<string, HueLightbulb> Lights { get; set; }
+    public partial Dictionary<string, HueLightbulb> Lights { get; internal set; }
 
     [State]
-    public partial Dictionary<string, HueButtonDevice> ButtonDevices { get; set; }
+    public partial Dictionary<string, HueButtonDevice> ButtonDevices { get; internal set; }
 
     [State]
-    public partial Dictionary<string, HueMotionDevice> MotionSensors { get; set; }
+    public partial Dictionary<string, HueMotionDevice> MotionSensors { get; internal set; }
 
     [State]
-    public partial Dictionary<string, HueDevice> OtherDevices { get; set; }
+    public partial Dictionary<string, HueDevice> OtherDevices { get; internal set; }
 
     [State]
-    public partial DateTimeOffset? LastUpdated { get; set; }
+    public partial DateTimeOffset? LastUpdated { get; internal set; }
 
     [State]
-    public partial ServiceStatus Status { get; set; }
+    public partial ServiceStatus Status { get; internal set; }
 
     [State]
-    public partial string? StatusMessage { get; set; }
+    public partial string? StatusMessage { get; internal set; }
 
     [Derived]
     public string? Title => "Hue Bridge (" + (_bridge?.IpAddress ?? "?") + ")";
