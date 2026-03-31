@@ -41,10 +41,10 @@ public partial class HueButton :
         ButtonResource?.Button?.ButtonReport?.Updated;
 
     [State]
-    public partial ButtonState? ButtonState { get; set; }
+    public partial ButtonState? ButtonState { get; internal set; }
 
     [State]
-    public partial DateTimeOffset? LastUpdated { get; set; }
+    public partial DateTimeOffset? LastUpdated { get; internal set; }
 
     [Derived]
     public string? Title => _name;

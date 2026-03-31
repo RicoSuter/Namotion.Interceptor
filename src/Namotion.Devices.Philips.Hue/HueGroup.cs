@@ -31,10 +31,10 @@ public partial class HueGroup :
     public Guid ResourceId => Group.Id;
 
     [State]
-    public partial DateTimeOffset? LastUpdated { get; set; }
+    public partial DateTimeOffset? LastUpdated { get; internal set; }
 
     [State]
-    public partial HueLightbulb[] Lights { get; set; }
+    public partial Dictionary<string, HueLightbulb> Lights { get; internal set; }
 
     [Derived]
     public string? Title => Group?.Metadata?.Name ?? "n/a";
@@ -51,25 +51,25 @@ public partial class HueGroup :
 
     [Derived]
     [State]
-    public decimal? Lumen => Lights?.Sum(light => light.Lumen);
+    public decimal? Lumen => Lights.Values.Sum(light => light.Lumen);
 
     [Derived]
     [State]
     public string? Color =>
-        Lights?
+        Lights.Values
             .GroupBy(light => light.Color)
             .OrderBy(group => group.Count())
-            .FirstOrDefault(group => group.Count() == Lights.Length)?
+            .FirstOrDefault(group => group.Count() == Lights.Count)?
             .FirstOrDefault()?
             .Color;
 
     [Derived]
     [State]
     public decimal? ColorTemperature =>
-        Lights?
+        Lights.Values
             .GroupBy(light => light.Color)
             .OrderBy(group => group.Count())
-            .FirstOrDefault(group => group.Count() == Lights.Length)?
+            .FirstOrDefault(group => group.Count() == Lights.Count)?
             .FirstOrDefault()?
             .ColorTemperature;
 
@@ -77,10 +77,10 @@ public partial class HueGroup :
     [State]
     public decimal? Brightness =>
         (decimal?)GroupedLight?.Dimming?.Brightness / 100m ??
-        Lights?
+        Lights.Values
             .GroupBy(light => light.Color)
             .OrderBy(group => group.Count())
-            .FirstOrDefault(group => group.Count() == Lights.Length)?
+            .FirstOrDefault(group => group.Count() == Lights.Count)?
             .FirstOrDefault()?
             .Brightness;
 
@@ -89,7 +89,7 @@ public partial class HueGroup :
         Bridge = bridge;
         Group = group;
         GroupedLight = groupedLight;
-        Lights = lights;
+        Lights = lights.ToDictionary(l => l.ResourceId.ToString());
         LastUpdated = DateTimeOffset.Now;
     }
 
@@ -97,7 +97,7 @@ public partial class HueGroup :
     {
         Group = group;
         GroupedLight = groupedLight;
-        Lights = lights;
+        Lights = lights.ToDictionary(l => l.ResourceId.ToString());
         LastUpdated = DateTimeOffset.Now;
         return this;
     }
@@ -174,7 +174,7 @@ public partial class HueGroup :
     [Operation]
     public async Task SetColorAsync(string color, CancellationToken cancellationToken)
     {
-        foreach (var light in Lights)
+        foreach (var light in Lights.Values)
         {
             await light.SetColorAsync(color, cancellationToken);
         }
@@ -183,7 +183,7 @@ public partial class HueGroup :
     [Operation]
     public async Task SetColorTemperatureAsync(decimal colorTemperature, CancellationToken cancellationToken)
     {
-        foreach (var light in Lights)
+        foreach (var light in Lights.Values)
         {
             await light.SetColorTemperatureAsync(colorTemperature, cancellationToken);
         }

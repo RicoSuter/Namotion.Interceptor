@@ -30,7 +30,7 @@ public partial class HueDevice :
     public Guid ResourceId => Device.Id;
 
     [State]
-    public partial DateTimeOffset? LastUpdated { get; set; }
+    public partial DateTimeOffset? LastUpdated { get; internal set; }
 
     [Derived]
     public virtual string? Title => Device?.Metadata?.Name ?? "n/a";
