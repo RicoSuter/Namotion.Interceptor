@@ -111,7 +111,7 @@ public partial class HueGroup :
             var command = new UpdateGroupedLight()
                 .TurnOn();
 
-            var client = Bridge.CreateClient();
+            var client = Bridge.GetOrCreateClient();
             var response = await client.UpdateGroupedLightAsync(GroupedLight.Id, command);
             if (!response.Errors.Any())
             {
@@ -129,7 +129,7 @@ public partial class HueGroup :
             var command = new UpdateGroupedLight()
                 .TurnOff();
 
-            var client = Bridge.CreateClient();
+            var client = Bridge.GetOrCreateClient();
             var response = await client.UpdateGroupedLightAsync(GroupedLight.Id, command);
             if (!response.Errors.Any())
             {
@@ -156,7 +156,7 @@ public partial class HueGroup :
                 .TurnOn()
                 .SetBrightness((double)(brightness * 100m));
 
-            var client = Bridge.CreateClient();
+            var client = Bridge.GetOrCreateClient();
             var response = await client.UpdateGroupedLightAsync(GroupedLight.Id, command);
             if (!response.Errors.Any() && GroupedLight.Dimming is not null)
             {

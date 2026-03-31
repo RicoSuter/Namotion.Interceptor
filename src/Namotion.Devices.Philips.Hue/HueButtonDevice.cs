@@ -10,7 +10,8 @@ namespace Namotion.Devices.Philips.Hue;
 /// </summary>
 [InterceptorSubject]
 public partial class HueButtonDevice : HueDevice,
-    IBatteryState
+    IBatteryState,
+    IDisposable
 {
     internal DevicePower? DevicePowerResource { get; set; }
 
@@ -52,13 +53,33 @@ public partial class HueButtonDevice : HueDevice,
         Update(device, zigbeeConnectivity);
         DevicePowerResource = devicePower;
 
-        Buttons = buttons
-            .Select((button, index) => Buttons
+        var oldButtons = Buttons;
+        var newButtons = buttons
+            .Select((button, index) => oldButtons
                 .SingleOrDefault(existingButton => existingButton.ResourceId == button.Id)?
-                    .Update(button, Buttons.Length == 0)
-                ?? new HueButton("Button " + (index + 1), button, this, Buttons.Length == 0))
+                    .Update(button, oldButtons.Length == 0)
+                ?? new HueButton("Button " + (index + 1), button, this, oldButtons.Length == 0))
             .ToArray();
 
+        // Dispose buttons that are no longer present
+        foreach (var oldButton in oldButtons)
+        {
+            if (!newButtons.Contains(oldButton))
+            {
+                oldButton.Dispose();
+            }
+        }
+
+        Buttons = newButtons;
+
         return this;
+    }
+
+    public void Dispose()
+    {
+        foreach (var button in Buttons)
+        {
+            button.Dispose();
+        }
     }
 }

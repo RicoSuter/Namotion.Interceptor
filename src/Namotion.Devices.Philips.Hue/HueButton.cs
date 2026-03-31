@@ -60,7 +60,7 @@ public partial class HueButton :
         get
         {
             var lastEvent = ButtonResource?.Button?.ButtonReport?.Event;
-            if (lastEvent != null && lastEvent.HasValue)
+            if (lastEvent is not null)
             {
                 var eventType = lastEvent.Value;
                 return GetButtonState(eventType);

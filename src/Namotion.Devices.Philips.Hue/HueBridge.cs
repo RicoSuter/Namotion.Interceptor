@@ -38,6 +38,7 @@ public partial class HueBridge : BackgroundService,
 
     private LocatedBridge? _bridge;
     private HttpClient? _httpClient;
+    private LocalHueApi? _client;
 
     [Configuration]
     public partial string? BridgeId { get; set; }
@@ -117,10 +118,15 @@ public partial class HueBridge : BackgroundService,
     }
 
     /// <summary>
-    /// Creates a new authenticated Hue API client.
+    /// Gets or creates the cached authenticated Hue API client.
     /// </summary>
-    public LocalHueApi CreateClient()
+    internal LocalHueApi GetOrCreateClient()
     {
+        if (_client is not null)
+        {
+            return _client;
+        }
+
         if (AppKey == null || _bridge == null)
         {
             throw new InvalidOperationException("Bridge is not configured or not discovered.");
@@ -132,7 +138,8 @@ public partial class HueBridge : BackgroundService,
                 HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
         });
 
-        return new LocalHueApi(_bridge.IpAddress, AppKey, _httpClient);
+        _client = new LocalHueApi(_bridge.IpAddress, AppKey, _httpClient);
+        return _client;
     }
 
     /// <inheritdoc />
@@ -196,7 +203,7 @@ public partial class HueBridge : BackgroundService,
 
                 _bridge = bridge;
 
-                client = CreateClient();
+                client = GetOrCreateClient();
 
                 using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
 
@@ -236,6 +243,7 @@ public partial class HueBridge : BackgroundService,
             finally
             {
                 IsConnected = false;
+                _client = null;
 
                 if (client is not null)
                 {
@@ -272,19 +280,33 @@ public partial class HueBridge : BackgroundService,
 
     private async Task PollDevicesAsync(LocalHueApi client, CancellationToken cancellationToken)
     {
-        var zigbeeConnectivities = await client.GetZigbeeConnectivityAsync();
-        var devicePowers = await client.GetDevicePowersAsync();
+        var zigbeeConnectivitiesTask = client.GetZigbeeConnectivityAsync();
+        var devicePowersTask = client.GetDevicePowersAsync();
+        var devicesTask = client.GetDevicesAsync();
+        var roomsTask = client.GetRoomsAsync();
+        var zonesTask = client.GetZonesAsync();
+        var lightsTask = client.Light.GetAllAsync();
+        var buttonsTask = client.Button.GetAllAsync();
+        var motionsTask = client.Motion.GetAllAsync();
+        var groupedLightsTask = client.GroupedLight.GetAllAsync();
+        var temperaturesTask = client.Temperature.GetAllAsync();
+        var lightLevelsTask = client.LightLevel.GetAllAsync();
 
-        var devices = await client.GetDevicesAsync();
-        var rooms = await client.GetRoomsAsync();
-        var zones = await client.GetZonesAsync();
+        await Task.WhenAll(
+            zigbeeConnectivitiesTask, devicePowersTask, devicesTask, roomsTask, zonesTask,
+            lightsTask, buttonsTask, motionsTask, groupedLightsTask, temperaturesTask, lightLevelsTask);
 
-        var lights = await client.Light.GetAllAsync();
-        var buttons = await client.Button.GetAllAsync();
-        var motions = await client.Motion.GetAllAsync();
-        var groupedLights = await client.GroupedLight.GetAllAsync();
-        var temperatures = await client.Temperature.GetAllAsync();
-        var lightLevels = await client.LightLevel.GetAllAsync();
+        var zigbeeConnectivities = zigbeeConnectivitiesTask.Result;
+        var devicePowers = devicePowersTask.Result;
+        var devices = devicesTask.Result;
+        var rooms = roomsTask.Result;
+        var zones = zonesTask.Result;
+        var lights = lightsTask.Result;
+        var buttons = buttonsTask.Result;
+        var motions = motionsTask.Result;
+        var groupedLights = groupedLightsTask.Result;
+        var temperatures = temperaturesTask.Result;
+        var lightLevels = lightLevelsTask.Result;
 
         var existingDevices = Devices;
 
@@ -541,11 +563,22 @@ public partial class HueBridge : BackgroundService,
                         buttonDevice.LastUpdated = DateTimeOffset.Now;
                     }
                 }
+                else if (data.Type == "zigbee_connectivity")
+                {
+                    var device = Devices
+                        .SingleOrDefault(device => device.ZigbeeConnectivity?.Id == data.Id);
+
+                    if (device is not null)
+                    {
+                        device.ZigbeeConnectivity = Merge(device.ZigbeeConnectivity, data);
+                        device.LastUpdated = DateTimeOffset.Now;
+                    }
+                }
             }
         }
     }
 
-    internal static T Merge<T>(T currentResource, EventStreamData newPartialResource)
+    private static T Merge<T>(T currentResource, EventStreamData newPartialResource)
     {
         var currentNode = JsonNode.Parse(JsonSerializer.Serialize(currentResource))!.AsObject();
         var partialNode = JsonNode.Parse(JsonSerializer.Serialize(newPartialResource))!.AsObject();
@@ -574,7 +607,7 @@ public partial class HueBridge : BackgroundService,
         }
     }
 
-    internal static bool ArrayEquals<T>(T[] existing, T[] updated) where T : class
+    private static bool ArrayEquals<T>(T[] existing, T[] updated) where T : class
     {
         if (existing.Length != updated.Length)
             return false;
@@ -593,7 +626,9 @@ public partial class HueBridge : BackgroundService,
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
         IsConnected = false;
+        _client = null;
         _httpClient?.Dispose();
+        _configChangedSignal.Dispose();
         base.Dispose();
     }
 }
