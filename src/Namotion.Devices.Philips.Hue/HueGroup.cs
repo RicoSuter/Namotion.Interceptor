@@ -1,7 +1,6 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
-using HomeBlaze.Abstractions.Devices;
 using HomeBlaze.Abstractions.Devices.Light;
 using HueApi.Models;
 using HueApi.Models.Requests;
@@ -112,7 +111,7 @@ public partial class HueGroup :
                 .TurnOn();
 
             var client = Bridge.GetOrCreateClient();
-            var response = await client.UpdateGroupedLightAsync(GroupedLight.Id, command);
+            var response = await client.GroupedLight.UpdateAsync(GroupedLight.Id, command);
             if (!response.Errors.Any())
             {
                 GroupedLight.On.IsOn = true;
@@ -130,7 +129,7 @@ public partial class HueGroup :
                 .TurnOff();
 
             var client = Bridge.GetOrCreateClient();
-            var response = await client.UpdateGroupedLightAsync(GroupedLight.Id, command);
+            var response = await client.GroupedLight.UpdateAsync(GroupedLight.Id, command);
             if (!response.Errors.Any())
             {
                 GroupedLight.On.IsOn = false;
@@ -157,7 +156,7 @@ public partial class HueGroup :
                 .SetBrightness((double)(brightness * 100m));
 
             var client = Bridge.GetOrCreateClient();
-            var response = await client.UpdateGroupedLightAsync(GroupedLight.Id, command);
+            var response = await client.GroupedLight.UpdateAsync(GroupedLight.Id, command);
             if (!response.Errors.Any() && GroupedLight.Dimming is not null)
             {
                 GroupedLight.Dimming.Brightness = (double)(brightness * 100m);
@@ -166,7 +165,7 @@ public partial class HueGroup :
 
             if (turnOffAfterChange)
             {
-                await Task.Delay(3000, cancellationToken);
+                await Task.Delay(HueBridge.SetBrightnessWhileOffDelayMs, cancellationToken);
                 await TurnOffAsync(cancellationToken);
             }
         }

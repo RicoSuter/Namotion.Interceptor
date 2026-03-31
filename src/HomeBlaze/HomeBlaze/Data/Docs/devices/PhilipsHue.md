@@ -77,6 +77,8 @@ Each Hue light is exposed as a `HueLightbulb` subject implementing `ILightbulb`,
 
 **Power consumption** is estimated per model when the light is on. Standby power is 0.5W when connected but off:
 
+> **Note:** Power values represent the full rated wattage of each model. Actual power consumption varies with brightness level, but per-model dimming curves are not documented by Philips, so the estimate does not scale with brightness.
+
 | Model  | Power (W) | Lumen | Socket      |
 |--------|-----------|-------|-------------|
 | LWA001 | 9         | 806   | E26/E27     |
@@ -179,7 +181,7 @@ The bridge runs in a reconnect loop inside `ExecuteAsync`:
 
 - **Scenes** are not yet exposed. The Hue API supports activating scenes per room/zone, but this is not currently integrated.
 - **Entertainment API** (streaming for light sync) is not supported.
-- **Power aggregation** on rooms/zones is not available. Individual light power is estimated but not summed at the group level.
+- **Power aggregation** on rooms/zones is not available. The bridge exposes a `TotalPower` property that sums all child device power, but individual group-level aggregation is not provided.
 
 ## Troubleshooting
 
