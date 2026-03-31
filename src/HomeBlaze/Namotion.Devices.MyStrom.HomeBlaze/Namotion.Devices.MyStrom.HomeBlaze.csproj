@@ -12,8 +12,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Namotion.Devices.Gpio\Namotion.Devices.Gpio.csproj" />
-    <ProjectReference Include="..\HomeBlaze\HomeBlaze.Components.Abstractions\HomeBlaze.Components.Abstractions.csproj" />
+    <ProjectReference Include="..\Namotion.Devices.MyStrom\Namotion.Devices.MyStrom.csproj" />
+    <ProjectReference Include="..\HomeBlaze.Components.Abstractions\HomeBlaze.Components.Abstractions.csproj" />
   </ItemGroup>
 
 </Project>

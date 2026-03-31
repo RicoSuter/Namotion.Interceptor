@@ -8,13 +8,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="HueApi" Version="3.1.2" />
     <PackageReference Include="MudBlazor" Version="9.2.*" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Namotion.Devices.Philips.Hue\Namotion.Devices.Philips.Hue.csproj" />
-    <ProjectReference Include="..\HomeBlaze\HomeBlaze.Components.Abstractions\HomeBlaze.Components.Abstractions.csproj" />
+    <ProjectReference Include="..\Namotion.Devices.Gpio\Namotion.Devices.Gpio.csproj" />
+    <ProjectReference Include="..\HomeBlaze.Components.Abstractions\HomeBlaze.Components.Abstractions.csproj" />
   </ItemGroup>
 
 </Project>

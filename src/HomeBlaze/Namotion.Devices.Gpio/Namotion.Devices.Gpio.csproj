@@ -19,11 +19,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
-    <ProjectReference Include="..\Namotion.Interceptor\Namotion.Interceptor.csproj" />
-    <ProjectReference Include="..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="..\Namotion.Interceptor.Hosting\Namotion.Interceptor.Hosting.csproj" />
-    <ProjectReference Include="..\HomeBlaze\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
+    <ProjectReference Include="..\..\Namotion.Interceptor.Registry\Namotion.Interceptor.Registry.csproj" />
+    <ProjectReference Include="..\..\Namotion.Interceptor\Namotion.Interceptor.csproj" />
+    <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\Namotion.Interceptor.Hosting\Namotion.Interceptor.Hosting.csproj" />
+    <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
   </ItemGroup>
 
 </Project>
