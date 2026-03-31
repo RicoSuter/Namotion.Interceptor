@@ -144,7 +144,6 @@ internal static class TestHelpers
     internal static HueBridge CreateTestBridge()
     {
         var services = new ServiceCollection();
-        services.AddHttpClient();
         services.AddSingleton<ILoggerFactory, NullLoggerFactory>();
         services.AddSingleton(typeof(ILogger<>), typeof(NullLogger<>));
 
