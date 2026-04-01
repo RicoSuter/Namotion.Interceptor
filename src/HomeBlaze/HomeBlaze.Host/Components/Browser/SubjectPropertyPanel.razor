@@ -125,7 +125,7 @@
             }
             else if (children.Length >= 1)
             {
-                <MudExpansionPanel Gutters="false" Dense="true" Expanded="true" Class="px-4">
+                <MudExpansionPanel Gutters="false" Dense="true" Expanded="true" HeaderClass="px-4">
                     <TitleContent>
                         @GetPropertyDisplayName(property)
                         <MudChip T="string" Size="Size.Small" Color="Color.Dark">@children.Length</MudChip>
@@ -151,7 +151,7 @@
                                     <span style="word-break: break-word;">@GetSubjectDisplayName(child)</span>
                                     @if (childCount > 0)
                                     {
-                                        <MudChip T="string" Size="Size.Small" Color="Color.Dark">@childCount</MudChip>
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4">@childCount</MudChip>
                                     }
                                 </MudListItem>
                                 <MudDivider />

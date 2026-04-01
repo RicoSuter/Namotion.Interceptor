@@ -299,10 +299,8 @@ public partial class MyStromSwitch : BackgroundService,
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken = default)
     {
-        if (_configChangedSignal.CurrentCount == 0)
-        {
-            _configChangedSignal.Release();
-        }
+        try { _configChangedSignal.Release(); }
+        catch (SemaphoreFullException) { }
 
         return Task.CompletedTask;
     }
