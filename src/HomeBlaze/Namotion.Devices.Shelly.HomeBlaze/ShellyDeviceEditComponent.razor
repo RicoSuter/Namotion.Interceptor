@@ -1,0 +1,154 @@
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(ShellyDevice))]
+@implements ISubjectEditComponent
+
+<MudForm>
+    <MudTextField @bind-Value="_name"
+                  Label="Name"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged" />
+
+    <MudTextField @bind-Value="_hostAddress"
+                  Label="Host Address (IP or hostname)"
+                  Required="true"
+                  RequiredError="Host address is required"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged"
+                  Class="mt-4" />
+
+    <MudTextField @bind-Value="_password"
+                  Label="Password (optional)"
+                  InputType="InputType.Password"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged"
+                  Class="mt-4" />
+
+    <MudNumericField @bind-Value="_pollingIntervalSeconds"
+                     Label="Polling Interval (seconds)"
+                     Min="1"
+                     Max="300"
+                     Class="mt-4" />
+
+    <MudNumericField @bind-Value="_retryIntervalSeconds"
+                     Label="Retry Interval (seconds)"
+                     Min="5"
+                     Max="600"
+                     Class="mt-4" />
+
+    @if (!IsCreating)
+    {
+        <MudDivider Class="my-4" />
+
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Current State</MudText>
+        <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+            <MudText>Connection:</MudText>
+            <MudChip T="string"
+                     Size="Size.Small"
+                     Color="@(DeviceSubject?.IsConnected == true ? Color.Success : Color.Error)"
+                     Variant="Variant.Filled">
+                @(DeviceSubject?.IsConnected == true ? "Connected" : "Disconnected")
+            </MudChip>
+        </MudStack>
+        @if (DeviceSubject?.SoftwareVersion != null)
+        {
+            <MudText Class="mt-1">Firmware: @DeviceSubject.SoftwareVersion</MudText>
+        }
+        @if (DeviceSubject?.AvailableSoftwareUpdate != null)
+        {
+            <MudAlert Severity="Severity.Info" Class="mt-2">
+                Update available: @DeviceSubject.AvailableSoftwareUpdate
+            </MudAlert>
+        }
+        @if (DeviceSubject?.MacAddress != null)
+        {
+            <MudText>MAC: @DeviceSubject.MacAddress</MudText>
+        }
+        @if (DeviceSubject?.Model != null)
+        {
+            <MudText>Model: @DeviceSubject.Model</MudText>
+        }
+        @if (DeviceSubject?.SignalStrength != null)
+        {
+            <MudText>WiFi Signal: @DeviceSubject.SignalStrength dBm</MudText>
+        }
+    }
+</MudForm>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private ShellyDevice? DeviceSubject => Subject as ShellyDevice;
+
+    private string _name = string.Empty;
+    private string? _hostAddress;
+    private string? _password;
+    private int _pollingIntervalSeconds = 15;
+    private int _retryIntervalSeconds = 30;
+
+    private string _originalName = string.Empty;
+    private string? _originalHostAddress;
+    private string? _originalPassword;
+    private int _originalPollingIntervalSeconds = 15;
+    private int _originalRetryIntervalSeconds = 30;
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(_hostAddress);
+    public bool IsDirty => _name != _originalName ||
+                           _hostAddress != _originalHostAddress ||
+                           _password != _originalPassword ||
+                           _pollingIntervalSeconds != _originalPollingIntervalSeconds ||
+                           _retryIntervalSeconds != _originalRetryIntervalSeconds;
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        if (DeviceSubject != null)
+        {
+            _name = DeviceSubject.Name;
+            _hostAddress = DeviceSubject.HostAddress;
+            _password = DeviceSubject.Password;
+            _pollingIntervalSeconds = (int)DeviceSubject.PollingInterval.TotalSeconds;
+            _retryIntervalSeconds = (int)DeviceSubject.RetryInterval.TotalSeconds;
+
+            _originalName = _name;
+            _originalHostAddress = _hostAddress;
+            _originalPassword = _password;
+            _originalPollingIntervalSeconds = _pollingIntervalSeconds;
+            _originalRetryIntervalSeconds = _retryIntervalSeconds;
+        }
+    }
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (DeviceSubject != null && IsValid)
+        {
+            DeviceSubject.Name = _name;
+            DeviceSubject.HostAddress = _hostAddress;
+            DeviceSubject.Password = _password;
+            DeviceSubject.PollingInterval = TimeSpan.FromSeconds(_pollingIntervalSeconds);
+            DeviceSubject.RetryInterval = TimeSpan.FromSeconds(_retryIntervalSeconds);
+
+            _originalName = _name;
+            _originalHostAddress = _hostAddress;
+            _originalPassword = _password;
+            _originalPollingIntervalSeconds = _pollingIntervalSeconds;
+            _originalRetryIntervalSeconds = _retryIntervalSeconds;
+
+            IsDirtyChanged?.Invoke(false);
+        }
+
+        return Task.CompletedTask;
+    }
+}

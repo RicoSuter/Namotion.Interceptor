@@ -176,6 +176,13 @@ public partial class FluentStorageContainer :
 
         foreach (var blob in blobs.Where(b => !b.IsFolder))
         {
+            // Filter out hidden files/folders (e.g. .DS_Store, .idea)
+            var fileName = Path.GetFileName(blob.FullPath);
+            if (fileName.StartsWith('.') || blob.FullPath.Contains("/."))
+            {
+                continue;
+            }
+
             cancellationToken.ThrowIfCancellationRequested();
 
             try

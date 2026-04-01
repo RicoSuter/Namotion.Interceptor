@@ -36,8 +36,8 @@ public interface IRollerShutterState : IPositionState
     bool? IsFullyOpen => Position.HasValue ? Position.Value == 0m : null;
 
     /// <summary>
-    /// Whether the shutter is fully closed (position = 100).
+    /// Whether the shutter is fully closed (position = 1).
     /// </summary>
     [State]
-    bool? IsFullyClosed => Position.HasValue ? Position.Value == 100m : null;
+    bool? IsFullyClosed => Position.HasValue ? Position.Value == 1m : null;
 }
