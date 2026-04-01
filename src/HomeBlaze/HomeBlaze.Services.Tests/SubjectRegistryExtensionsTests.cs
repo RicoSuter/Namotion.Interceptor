@@ -95,7 +95,7 @@ public class SubjectRegistryExtensionsTests
     }
 
     [Fact]
-    public void GetDisplayName_ReturnsCamelCaseSplit_WhenNoStateName()
+    public void GetDisplayName_ReturnsPropertyName_WhenNoStateName()
     {
         // Arrange
         var context = CreateContext();
@@ -104,7 +104,7 @@ public class SubjectRegistryExtensionsTests
         var property = registered.TryGetProperty(nameof(ExtensionsTestSubject.SimpleState))!;
 
         // Act & Assert
-        Assert.Equal("Simple State", property.GetDisplayName());
+        Assert.Equal("SimpleState", property.GetDisplayName());
     }
 
     [Fact]

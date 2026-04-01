@@ -296,7 +296,7 @@ public partial class ShellyDevice : BackgroundService,
 
         ParseStatusComponents(statusJson);
 
-        // Fetch EMData if energy meter is present
+        // Fetch EMData separately — Shelly.GetStatus may not include emdata:N on all devices
         if (EnergyMeter != null)
         {
             using var emDataResponse = await client.GetAsync($"http://{HostAddress}/rpc/EMData.GetStatus?id=0", cancellationToken);

@@ -90,16 +90,16 @@ internal sealed class ShellyWebSocketClient : IDisposable
 
             if (messageBuffer.Length > 0)
             {
-                HandleMessage(messageBuffer.GetBuffer().AsSpan(0, (int)messageBuffer.Length));
+                HandleMessage(messageBuffer.GetBuffer().AsMemory(0, (int)messageBuffer.Length));
             }
         }
     }
 
-    private void HandleMessage(ReadOnlySpan<byte> utf8Json)
+    private void HandleMessage(ReadOnlyMemory<byte> utf8Json)
     {
         try
         {
-            using var document = JsonDocument.Parse(utf8Json.ToArray());
+            using var document = JsonDocument.Parse(utf8Json);
             var root = document.RootElement;
 
             if (root.TryGetProperty("method", out var method) &&
