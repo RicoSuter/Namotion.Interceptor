@@ -58,6 +58,46 @@ var update = SubjectUpdate.CreatePartialUpdateFromChanges(rootSubject, changes, 
 var json = JsonSerializer.Serialize(update);
 ```
 
+### Filtering with Processors
+
+`ISubjectUpdateProcessor` controls which properties and attributes appear in updates. The `IsIncluded` method is called for each property **and each attribute** during update creation:
+
+```csharp
+public class MyProcessor : ISubjectUpdateProcessor
+{
+    public bool IsIncluded(RegisteredSubjectProperty property)
+    {
+        // Filter properties and attributes from the update
+        return !property.ReflectionAttributes.OfType<MyIgnoreAttribute>().Any();
+    }
+}
+```
+
+Note: Dynamically added attributes (via `AddAttribute`) also expose their provided `Attribute[]` through `ReflectionAttributes`, so the same filtering logic works for both regular properties and dynamic attributes.
+
+### Two-Layer Filtering for Connectors
+
+Connectors that use `ChangeQueueProcessor` for real-time updates have two filtering layers:
+
+1. **`ChangeQueueProcessor.propertyFilter`**: Pre-filters which property changes enter the queue. This prevents unnecessary buffering and partial update creation for properties that will never be sent.
+
+2. **`ISubjectUpdateProcessor.IsIncluded`**: Filters properties and attributes during update creation (both `CreateCompleteUpdate` and `CreatePartialUpdateFromChanges`).
+
+Both layers should apply the same filtering logic. The `propertyFilter` is an optimization for the change path; `IsIncluded` is the authoritative filter that also covers complete updates (initial sync), where no `ChangeQueueProcessor` is involved.
+
+Connectors with an `IPathProvider` can delegate to `pathProvider.IsPropertyIncluded` in both layers to keep filtering consistent:
+
+```csharp
+// In ISubjectUpdateProcessor
+public bool IsIncluded(RegisteredSubjectProperty property)
+    => pathProvider.IsPropertyIncluded(property);
+
+// In ChangeQueueProcessor setup
+propertyFilter: propertyReference =>
+    propertyReference.TryGetRegisteredProperty() is { } property &&
+    pathProvider.IsPropertyIncluded(property)
+```
+
 ## Applying Updates
 
 ### Server-Side (C#)
@@ -337,10 +377,10 @@ Note: In partial updates, `Kind=Collection/Dictionary` entries with no operation
 
 ## Limitations
 
-- **No "clear collection" operation** — clearing N items emits N individual Remove operations.
+- **No "clear collection" operation**: clearing N items emits N individual Remove operations.
 - **Non-subject collections** (`List<int>`, `Dictionary<string, string>`) use value-replacement semantics (full replacement, no granular diffing). Only `IInterceptorSubject` collections support structural diffs.
 - **Conflict resolution** is last-applied-wins by message arrival order with eventual consistency via reconnection.
-- **Dictionary keys** are normalized to strings during transport; non-string keys (int, enum) must be convertible via `Convert.ChangeType` or `Enum.Parse`.
+- **Dictionary keys** are normalized to strings during transport. Non-string keys (int, enum) must be convertible via `Convert.ChangeType` or `Enum.Parse`.
 
 ## Attributes
 
