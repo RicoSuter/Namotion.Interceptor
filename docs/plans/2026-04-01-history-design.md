@@ -584,47 +584,6 @@ Snapshot series over a time range.
 
 All three resolve moves transparently when `followMoves` is true.
 
-## Future: Time-Series Database Sink
+## Future Sink Backends
 
-For deployments beyond SQLite's scale (~5,000 subjects, ~1,000 changes/sec), a dedicated time-series database is needed.
-
-### Candidates
-
-| | QuestDB | TimescaleDB | ClickHouse | VictoriaMetrics |
-|---|---|---|---|---|
-| **License** | Apache 2.0 | Core: Apache 2.0, extras: TSL | Apache 2.0 | Apache 2.0 |
-| **Query** | SQL (PG wire) | SQL (PostgreSQL) | SQL | MetricsQL (not SQL) |
-| **.NET client** | Npgsql | Npgsql | ClickHouse.Client | HTTP API |
-| **Docker** | Single container | Single container | Single container | Single container |
-| **Resource usage** | Low | Medium (PostgreSQL) | Medium-high | Very low |
-| **Best at** | Fast ingestion, IoT | General time-series | Analytics on huge datasets | Metrics at scale |
-| **Maturity** | Growing | Very mature | Very mature | Mature |
-| **Embedding in product** | No restrictions | Allowed (TSL only restricts offering it as a managed DB service) | No restrictions | No restrictions |
-
-### Licensing Notes
-
-- **QuestDB** (Apache 2.0): Fully open source, no restrictions. Can be embedded, redistributed, sold as part of a product.
-- **TimescaleDB** (TSL for advanced features): Free to self-host and embed in products. The only restriction is offering TimescaleDB itself as a standalone managed database service (competing with Timescale Cloud). Building and selling a box with TimescaleDB storing data internally is explicitly allowed.
-- **InfluxDB**: Not recommended. v3 is proprietary/cloud-only, v2 has restrictive license, Flux query language deprecated. Risky long-term investment.
-
-### Recommendation
-
-**QuestDB or TimescaleDB** — both use the PostgreSQL wire protocol, so the sink implementation can share most code via Npgsql. A single `HomeBlaze.History.PostgreSql` project could potentially support both backends with minimal configuration differences.
-
-| Project | Backend |
-|---|---|
-| `HomeBlaze.History.PostgreSql` | TimescaleDB or QuestDB (shared Npgsql implementation) |
-
-TimescaleDB is the recommended default — mature, PostgreSQL ecosystem, continuous aggregates and compression built in. QuestDB is a lighter alternative for resource-constrained deployments. Both are supported by the same sink via Npgsql; the user picks their backend by choosing which Docker container to run. TimescaleDB-specific features (e.g., `time_bucket()`, continuous aggregates) can be optionally detected and used when available.
-
-## What This Replaces
-
-The planned `IHistoryStore` from `Data/Docs/architecture/design/history.md` is superseded by this design. Key differences:
-- Sink discovery via lifecycle events instead of DI registration
-- Sinks are subjects (configurable via JSON) instead of BackgroundServices
-- Two-stage buffering with per-sink flush intervals
-- Separate raw and aggregated query APIs
-- Snapshot reconstruction for full graph time-travel
-- Move tracking with path chain resolution for query-time stitching
-- In-memory sink for testing and fast recent lookups
-- Structural property changes recorded as lightweight path references
+See the architecture doc (`src/HomeBlaze/HomeBlaze/Data/Docs/architecture/design/history.md`) for the full comparison of future sink backends (TimescaleDB, QuestDB), ruled-out options (InfluxDB), and scale tiers.
