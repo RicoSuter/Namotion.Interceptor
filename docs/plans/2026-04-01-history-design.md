@@ -227,6 +227,7 @@ interface IHistoryReader
     DateTimeOffset? OldestRecord { get; }
     bool SupportsNativeAggregation { get; }
 
+    Task<DateTimeOffset?> GetLatestSnapshotTimeAsync();
     Task<IReadOnlyList<HistoryRecord>> QueryAsync(HistoryQuery query);
     Task<IReadOnlyList<AggregatedRecord>> QueryAggregatedAsync(HistoryQuery query);
     Task<HistorySnapshot> GetSnapshotAsync(string path, DateTimeOffset time);
@@ -252,23 +253,28 @@ public abstract partial class HistorySinkBase : IHistorySink
     public partial TimeSpan FlushInterval { get; set; }  // default 10s
 
     [Configuration]
-    public partial TimeSpan SnapshotInterval { get; set; }
+    public partial TimeSpan SnapshotInterval { get; set; }  // default 1 day
 
     [Configuration]
-    public partial int RetentionDays { get; set; }
+    public partial int RetentionDays { get; set; }  // default 365
 
     [Configuration]
     public partial int Priority { get; set; }  // default 100
 
     // Not [State] — plain properties to avoid self-recording feedback loop
-    public DateTimeOffset? LastSnapshotTime { get; set; }
     public long RecordsWritten { get; set; }
     public string? Status { get; set; }
+
+    // IHistoryReader properties
+    public abstract DateTimeOffset? OldestRecord { get; }
+    public abstract bool SupportsNativeAggregation { get; }
+    int IHistoryReader.Priority => Priority;
 
     // Abstract — each sink implements storage
     public abstract Task WriteBatchAsync(ReadOnlyMemory<ResolvedHistoryRecord> records);
     public abstract Task WriteSnapshotAsync(HistorySnapshot snapshot);
     public abstract Task WriteMovesAsync(ReadOnlyMemory<MoveRecord> moves);
+    public abstract Task<DateTimeOffset?> GetLatestSnapshotTimeAsync();
     public abstract Task<IReadOnlyList<HistoryRecord>> QueryAsync(HistoryQuery query);
     public abstract Task<IReadOnlyList<AggregatedRecord>> QueryAggregatedAsync(HistoryQuery query);
     public abstract Task<HistorySnapshot> GetSnapshotAsync(string path, DateTimeOffset time);
@@ -312,8 +318,7 @@ record HistoryQuery(
     DateTimeOffset From,
     DateTimeOffset To,
     TimeSpan? BucketSize = null,
-    AggregationType? Aggregation = null,
-    bool FollowMoves = false);
+    AggregationType? Aggregation = null);
 
 enum AggregationType
 {
@@ -339,7 +344,7 @@ The `HistoryService` detects path changes at runtime:
 
 ### Read Side (Implemented)
 
-When `FollowMoves = true` on a `HistoryQuery`:
+All queries automatically follow moves. When the sink receives a query for `/Factory/Motor`:
 
 1. **Resolve path chain** from move records — follow backwards: `/Factory/Motor` ← `/Devices/Motor` ← `/OldPath/Motor`. Use a visited set to prevent cycles.
 2. **Time-scope each path** — each path in the chain is valid for a specific time range (from move-in to move-out).
@@ -352,9 +357,7 @@ When `FollowMoves = true` on a `HistoryQuery`:
 /Factory/Motor:    [2026-03-15 ... now]
 ```
 
-Same expansion applies to `GetSnapshotAsync` — resolve aliases when reconstructing.
-
-`FollowMoves` defaults to `false`. Callers opt in explicitly.
+Same expansion applies to `GetSnapshotAsync` — resolve aliases when reconstructing. The cost of following moves is one extra query to the moves table — if there are no moves (the common case), it returns empty immediately.
 
 ## Snapshot Reconstruction
 
@@ -514,7 +517,7 @@ Connection pooling: one open connection per active partition (typically 1-2). Co
 public override Task<IReadOnlyList<HistoryRecord>> QueryAsync(
     HistoryQuery query)
 {
-    // 1. If FollowMoves: resolve path chain from moves DB
+    // 1. Resolve path chain from moves DB (always — no-op if no moves exist)
     // 2. Determine which partition DBs cover the time range
     // 3. Query each, UNION results (scoped by path time ranges if following moves)
     // 4. Return raw records
@@ -532,7 +535,16 @@ SELECT
     MIN(numeric_value) AS minimum,
     MAX(numeric_value) AS maximum,
     SUM(numeric_value) AS sum,
-    COUNT(*) AS count
+    COUNT(*) AS count,
+    -- First/Last require subqueries or window functions
+    (SELECT numeric_value FROM history h2
+     WHERE h2.subject_path = @path AND h2.property_name = @property
+       AND h2.timestamp >= bucket_start AND h2.timestamp < bucket_start + @bucketTicks
+     ORDER BY h2.timestamp ASC LIMIT 1) AS first_value,
+    (SELECT numeric_value FROM history h2
+     WHERE h2.subject_path = @path AND h2.property_name = @property
+       AND h2.timestamp >= bucket_start AND h2.timestamp < bucket_start + @bucketTicks
+     ORDER BY h2.timestamp DESC LIMIT 1) AS last_value
 FROM history
 WHERE subject_path = @path
   AND property_name = @property
@@ -564,7 +576,7 @@ For cross-partition queries, aggregate per partition in SQL, then merge:
 
 Query raw or aggregated property values over a time range.
 
-- **Input:** `subjectPath`, `propertyNames[]`, `from`, `to`, `bucketSize?`, `aggregation?`, `followMoves?`
+- **Input:** `subjectPath`, `propertyNames[]`, `from`, `to`, `bucketSize?`, `aggregation?`
 - **Output (raw):** `{ "records": { "Temperature": [{"t":"...","v":42.5}, ...] } }`
 - **Output (aggregated):** `{ "buckets": { "Temperature": [{"from":"...","to":"...","average":42.5,"minimum":40.0,...}] } }`
 
@@ -582,7 +594,20 @@ Snapshot series over a time range.
 - **Input:** `path`, `from`, `to`, `interval`
 - **Output:** `{ "snapshots": [{ "time":"...", "subjects": {...} }, ...] }`
 
-All three resolve moves transparently when `followMoves` is true.
+All three automatically follow moves — path renames are resolved transparently.
+
+### Result Limits
+
+MCP tools enforce per-request limits to prevent expensive queries from overwhelming the system (internal code is unconstrained):
+
+| Tool | Limit |
+|------|-------|
+| `get_property_history` (raw) | Max 10,000 records |
+| `get_property_history` (aggregated) | Max 1,000 buckets |
+| `get_snapshot` | Single snapshot — no limit needed |
+| `get_snapshots` | Max 100 snapshots per request |
+
+When a limit is hit, the response includes a truncation indicator so the AI agent can narrow its query.
 
 ## Future Sink Backends
 

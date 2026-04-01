@@ -113,7 +113,9 @@ The `ChangeQueueProcessor` collapses rapid property changes. If a property chang
 
 Each sink has its own `FlushInterval` (a `[Configuration]` property). The `HistoryService` maintains a cursor per sink into the shared buffer. On each sink's flush tick, the buffer is sliced from that sink's cursor to the end and written. The buffer prefix is trimmed once all cursors have advanced past it.
 
-Memory is bounded: the buffer only holds records between the fastest and slowest sink's last flush.
+Memory is bounded: the buffer only holds records between the fastest and slowest sink's last flush. All buffer and cursor access is synchronized via a lock — the CQP write handler appends under lock, and per-sink flush reads slice under the same lock.
+
+If a sink is offline or permanently failing, its cursor never advances and the buffer grows. The `HistoryService` caps the buffer at a configurable maximum size — when exceeded, the oldest records are dropped and the lagging sink's cursor is advanced, accepting data loss for that sink rather than unbounded memory growth.
 
 ## Property Filtering
 
@@ -195,11 +197,15 @@ graph LR
 
 The query is expanded: each path in the chain is queried for its valid time range, then results are merged chronologically. This applies to raw queries, aggregated queries, and snapshot reconstruction.
 
-`FollowMoves` defaults to `false` — callers opt in explicitly.
+All queries automatically follow moves — the cost is one extra query to the moves table per request. If there are no moves (the common case), it returns empty immediately and has no effect.
 
 ## Aggregation
 
 The history system supports seven aggregation types: **Average**, **Minimum**, **Maximum**, **Sum**, **Count**, **First**, **Last**.
+
+`QueryAggregatedAsync` takes an `AggregationType` parameter — only the requested aggregation is computed (others are null in `AggregatedRecord`). This optimizes SQL queries, especially for First/Last which require subqueries.
+
+Non-numeric records (strings, complex objects) are silently skipped for numeric aggregations (Average, Minimum, Maximum, Sum). Count, First, and Last work on any value type.
 
 ### Separate Query API
 
@@ -254,6 +260,12 @@ Key design choices:
 
 Snapshot frequency is configurable per sink via `SnapshotInterval`. Daily snapshots mean worst case ~24 hours of log replay.
 
+### Snapshot Scheduling
+
+The `HistoryService` schedules snapshots per sink. On sink attach, it calls `GetLatestSnapshotTimeAsync()` on the sink to determine when the last snapshot was taken (queried from the sink's storage). This avoids creating redundant snapshots after app restarts. After writing a snapshot, the cached time is updated directly. On each tick: `now - cachedSnapshotTime >= sink.SnapshotInterval` triggers snapshot creation.
+
+A per-sink boolean flag prevents overlapping snapshot creation — if a snapshot is still being written when the next tick fires, it is skipped.
+
 ## Sink Implementations
 
 ### InMemoryHistorySink
@@ -306,11 +318,24 @@ Three history tools are exposed via MCP for AI agent access:
 
 | Tool | Purpose | Key Parameters |
 |------|---------|----------------|
-| `get_property_history` | Raw or aggregated property values over time | `path`, `properties[]`, `from`, `to`, `bucketSize?`, `aggregation?`, `followMoves?` |
+| `get_property_history` | Raw or aggregated property values over time | `path`, `properties[]`, `from`, `to`, `bucketSize?`, `aggregation?` |
 | `get_snapshot` | Reconstruct graph state at a point in time | `path`, `time` |
 | `get_snapshots` | Snapshot series over a time range | `path`, `from`, `to`, `interval` |
 
 Tools are implemented in `HomeBlaze.AI` using `IMcpToolProvider`. They resolve the best available `IHistoryReader` from the `HistoryService` (by priority and capability) and delegate queries. The tools depend only on `HomeBlaze.History.Abstractions` — no coupling to specific sink implementations.
+
+### Result Limits
+
+MCP tools enforce per-request limits to prevent expensive queries from overwhelming the system. These are API-level guards — internal code (snapshot scheduling, export) is unconstrained.
+
+| Tool | Limit |
+|------|-------|
+| `get_property_history` (raw) | Max 10,000 records |
+| `get_property_history` (aggregated) | Max 1,000 buckets |
+| `get_snapshot` | Single snapshot — no limit needed |
+| `get_snapshots` | Max 100 snapshots per request |
+
+When a limit is hit, the response includes a truncation indicator so the AI agent can narrow its query.
 
 ## Query Routing
 
@@ -325,7 +350,7 @@ graph TD
     B -->|No| E[Lowest priority sink<br/>+ in-memory aggregation fallback]
 ```
 
-Lower priority number = higher preference. Priority is configurable per sink.
+Lower priority number = higher preference. Priority is configurable per sink. When no sink covers the requested time range, an empty result is returned.
 
 ## Configuration
 
@@ -390,7 +415,7 @@ Satellites can install history sinks independently for local history, which is u
 | Structural property recording | Lightweight path references | Enables graph reconstruction between snapshots without bloating storage |
 | Value serialization | JSON-encoded for all types | Lossless round-tripping including booleans, nulls, and strings |
 | Snapshot search direction | Backwards from target time | O(1) in common case (1-2 partition reads) vs O(N) scanning forward |
-| `FollowMoves` default | `false` | Explicit opt-in. Move tracking adds query complexity and most queries don't need it |
+| Move following | Always on | One extra moves-table query per request. No-op when no moves exist. Simplifies API — no parameter needed |
 
 ## Backpressure and Overload
 
