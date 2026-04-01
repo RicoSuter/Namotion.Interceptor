@@ -62,6 +62,21 @@ public partial class Motor
 - User-configurable values
 - Connection strings, intervals, thresholds
 
+### Secret Configuration
+
+For sensitive values like API keys and passwords, use `IsSecret = true`:
+
+```csharp
+[Configuration(IsSecret = true)]
+public partial string? AppKey { get; set; }
+```
+
+Secret configuration properties:
+- Are **persisted** to JSON like regular configuration
+- Are **hidden** in the browser property panel
+- Show as **masked password fields** in the edit dialog (empty by default, only overwritten when the user enters a new value)
+- **Cannot** be combined with `[State]` — the app will throw at startup to prevent accidental exposure
+
 ## State Properties
 
 Properties marked with `[State]` are displayed in the UI property panel:
@@ -150,6 +165,35 @@ public partial class Motor
 - Can combine with `[State]` to display in UI
 - Automatically recalculates when `TargetSpeed` or `CurrentSpeed` changes
 
+## Child Subject Collections
+
+When a subject owns child subjects (e.g., a bridge owns lights), the collection property type determines how paths are built. Since paths are used as persistent identifiers throughout HomeBlaze (automation rules, dashboards, configuration references), path stability is critical.
+
+**Use `Dictionary<string, T>` when child identity comes from an external system:**
+
+```csharp
+[State]
+public partial Dictionary<string, HueLightbulb> Lights { get; set; }
+// Path: /Devices/Hue/Lights[a1b2c3d4-...] — stable across restarts
+```
+
+**Use arrays when the index itself is the stable identity:**
+
+```csharp
+[State]
+public partial GpioPin[] Pins { get; set; }
+// Path: /Devices/Gpio/Pins[0] — pin 0 is always pin 0
+```
+
+**Rule of thumb:** If reordering or re-discovery could change which item is at index N, use a dictionary with a stable key (e.g., hardware ID, API resource ID). If the index has inherent meaning (hardware pin numbers, fixed slots), arrays are fine.
+
+**Dictionary keys must be:**
+- Stable across restarts and reconnections
+- Unique within the collection
+- Deterministic (same device always produces the same key)
+
+Good key sources: API resource IDs (GUIDs), hardware serial numbers, MAC addresses. Bad key sources: user-assignable names, discovery order, timestamps.
+
 ## Display Interfaces
 
 Implement these interfaces for UI integration:
@@ -179,10 +223,10 @@ public partial class Motor : IIconProvider
 
 ## Configuration Lifecycle
 
-Implement `IConfigurableSubject` to react when configuration changes:
+Implement `IConfigurable` to react when configuration changes:
 
 ```csharp
-public partial class Motor : IConfigurableSubject
+public partial class Motor : IConfigurable
 {
     [Configuration]
     public partial string ConnectionString { get; set; }
@@ -382,7 +426,7 @@ using Namotion.Interceptor.Registry.Attributes;
 namespace HomeBlaze.Samples;
 
 [InterceptorSubject]
-public partial class Motor : BackgroundService, IConfigurableSubject, ITitleProvider, IIconProvider
+public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, IIconProvider
 {
     // Configuration (persisted to JSON)
 
@@ -578,6 +622,7 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 | Attribute | Purpose | Persisted | Displayed |
 |-----------|---------|-----------|-----------|
 | `[Configuration]` | User-editable settings | Yes | No (unless also `[State]`) |
+| `[Configuration(IsSecret = true)]` | Sensitive settings (API keys, passwords) | Yes | Never (masked in editor) |
 | `[State]` | Live values for display | No | Yes |
 | `[Configuration] + [State]` | Editable and displayed | Yes | Yes |
 | `[Derived]` | Computed from other properties | No | Only if also `[State]` |
@@ -587,7 +632,12 @@ Only `[Configuration]` properties are persisted. The `$type` field enables polym
 |-----------|---------|
 | `ITitleProvider` | Display name in navigation |
 | `IIconProvider` | Icon in navigation/browser |
-| `IConfigurableSubject` | React to configuration changes |
+| `IConfigurable` | React to configuration changes |
+| `IMonitoredService` | Background service with status monitoring |
+| `IConnectionState` | Connection state tracking (IsConnected) |
+| `IHubDevice` | Hub/bridge that manages child devices |
+| `IUnknownDevice` | Generic/unrecognized device |
+| `IVirtualSubject` | Virtual/computed subject (e.g., rooms, zones) |
 
 ---
 
@@ -603,10 +653,10 @@ Core platform interfaces and attributes:
 |------|----------|
 | Attributes | `[Configuration]`, `[State]`, `[Operation]`, `[Query]`, `StateUnit` |
 | Display | `ITitleProvider`, `IIconProvider` |
-| Lifecycle | `IConfigurableSubject`, `IHostedSubject`, `IServerSubject` |
+| Lifecycle | `IConfigurable`, `IMonitoredService`, `IServerSubject` |
 | Messaging | `IEvent`, `ICommand`, `IMessageBus`, `INotificationPublisher` |
 | Security | `IAuthenticatedSubject` |
-| Networking | `IConnectionState`, `IConnectedSubject` |
+| Networking | `IConnectionState` |
 | Devices | Switches, lighting, covers, locks, energy, media, input devices |
 | Sensors | Temperature, humidity, presence, light, door, rain, soil, power, camera |
 
@@ -628,11 +678,13 @@ See [Project Structure](../architecture/project-structure.md) for the full depen
 
 ### Constructor Injection
 
-Subjects can inject services via constructor. The system uses `ActivatorUtilities.CreateInstance` to resolve dependencies from the DI container:
+Subjects can inject services via constructor. The system uses `ActivatorUtilities.CreateInstance` to resolve dependencies from the DI container.
+
+**Basic pattern** (HomeBlaze services only):
 
 ```csharp
 [InterceptorSubject]
-public partial class Widget : IConfigurableSubject
+public partial class Widget : IConfigurable
 {
     private readonly SubjectPathResolver _pathResolver;
     private readonly RootManager _rootManager;
@@ -662,7 +714,9 @@ public partial class Widget : IConfigurableSubject
 | `RootManager` | Access root subject |
 | `SubjectTypeRegistry` | Resolve types by name |
 | `ConfigurableSubjectSerializer` | Serialize/deserialize subjects |
+| `IHttpClientFactory` | HTTP client management |
 | `ILogger<T>` | Logging |
+| `IInterceptorSubjectContext` | Interceptor context for property tracking |
 
 ### Referencing Other Subjects
 
@@ -672,12 +726,12 @@ Use paths to reference subjects in the object graph. See [Configuration Guide - 
 
 | Prefix | Example |
 |--------|---------|
-| `Root.` | `Root.Demo.Conveyor` |
-| `this.` | `this.Child.Property` |
-| `../` | `../Sibling.Property` |
-| Brackets | `Root.Demo[Setup.md]` (for keys with dots) |
+| `/` (absolute) | `/Demo/Conveyor` |
+| `./` (relative) | `./Child/Property` |
+| `../` (parent) | `../Sibling/Property` |
+| Brackets | `/Devices[0]` (for non-inlined collection indices) |
 
-Use `SubjectPathResolver.ResolveFromRelativePath()` to resolve paths in code:
+Use `SubjectPathResolver.ResolveSubject()` to resolve paths in code:
 
 ```csharp
 [Derived]
@@ -688,8 +742,8 @@ private IInterceptorSubject? ResolveSubject()
     if (string.IsNullOrEmpty(Path))
         return null;
 
-    // ResolveFromRelativePath handles Root., this., ../, and relative paths
-    return _pathResolver.ResolveFromRelativePath(Path);
+    // ResolveSubject handles /, ./, ../, and relative paths
+    return _pathResolver.ResolveSubject(Path, PathStyle.Canonical);
 }
 ```
 
@@ -703,7 +757,7 @@ For subject path configuration properties, use the `SubjectPathField` component 
 <SubjectPathField @bind-Value="_path"
                   @bind-Value:after="OnFieldChanged"
                   Label="Subject Path"
-                  Placeholder="e.g., Root or Root.Demo.Conveyor"
+                  Placeholder="e.g., / or /Demo/Conveyor"
                   Class="mt-4" />
 ```
 
@@ -725,6 +779,29 @@ For subject path configuration properties, use the `SubjectPathField` component 
 | `Variant` | `Variant` | `Variant.Outlined` | MudBlazor input variant |
 | `LocalSubjects` | `IDictionary<string, IInterceptorSubject>?` | `null` | Additional local subjects to show in picker |
 | `Class` | `string?` | `null` | CSS class for styling |
+
+---
+
+### Excluding Subjects from Browsing
+
+Internal implementation subjects that should not appear in the UI browser panel or MCP tools can be marked with the `[ExcludeFromBrowsing]` attribute:
+
+```csharp
+using HomeBlaze.Abstractions.Attributes;
+
+[InterceptorSubject]
+[ExcludeFromBrowsing]
+public partial class HtmlSegment
+{
+    // Internal implementation detail, not user-facing
+}
+```
+
+This hides the subject from:
+- The Blazor browser/panel tree view
+- MCP `browse` and `search` tool results
+
+Use this for internal subjects that are part of a parent subject's implementation but have no meaning to end users or AI agents (e.g., parsed HTML segments, render expressions).
 
 ---
 

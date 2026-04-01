@@ -14,13 +14,13 @@ namespace HomeBlaze.Components;
 [Category("Components")]
 [Description("References another subject by path and renders its widget")]
 [InterceptorSubject]
-public partial class Widget : ITitleProvider, IConfigurableSubject
+public partial class Widget : ITitleProvider, IConfigurable
 {
     private readonly SubjectPathResolver _pathResolver;
 
     /// <summary>
     /// Path to the subject to render.
-    /// Supports "Root.folder.file.json" (with [InlinePaths] attribute) for absolute paths from root.
+    /// Supports "/folder/file.json" (with [InlinePaths] attribute) for absolute paths from root.
     /// </summary>
     [Configuration]
     public partial string Path { get; set; }
@@ -51,7 +51,7 @@ public partial class Widget : ITitleProvider, IConfigurableSubject
 
         try
         {
-            return _pathResolver.ResolveFromRelativePath(Path);
+            return _pathResolver.ResolveSubject(Path, PathStyle.Canonical);
         }
         catch
         {

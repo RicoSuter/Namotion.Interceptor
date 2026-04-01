@@ -1,0 +1,149 @@
+@using HueApi
+@using HueApi.BridgeLocator
+
+@attribute [SubjectComponent(SubjectComponentType.Setup, typeof(HueBridge))]
+@implements ISubjectEditComponent
+
+@if (_bridges == null)
+{
+    <MudStack AlignItems="AlignItems.Center" Class="my-4">
+        <MudProgressCircular Color="Color.Primary" Indeterminate="true" />
+        <MudText>Searching for Philips Hue Bridges...</MudText>
+    </MudStack>
+}
+else if (_bridges.Count == 0)
+{
+    <MudAlert Severity="Severity.Warning" Class="my-4">
+        No Philips Hue Bridges found on the network.
+    </MudAlert>
+}
+else
+{
+    <MudStack Spacing="3">
+        <MudText Typo="Typo.body1">
+            Press the <strong>Link</strong> button on your Bridge, then select it below:
+        </MudText>
+
+        <MudList T="LocatedBridge" @bind-SelectedValue="_selectedBridge" SelectionMode="SelectionMode.SingleSelection">
+            @foreach (var bridge in _bridges)
+            {
+                <MudListItem T="LocatedBridge" Value="bridge">
+                    <MudStack Row="true" AlignItems="AlignItems.Center" Spacing="2">
+                        <MudIcon Icon="@Icons.Material.Filled.Hub" />
+                        <MudText>@bridge.BridgeId</MudText>
+                        <MudText Typo="Typo.caption" Class="mud-text-secondary">(@bridge.IpAddress)</MudText>
+                    </MudStack>
+                </MudListItem>
+            }
+        </MudList>
+
+        @if (_selectedBridge != null && !_registered)
+        {
+            <MudButton Variant="Variant.Filled"
+                       Color="Color.Primary"
+                       OnClick="RegisterAsync"
+                       Disabled="_registering">
+                @if (_registering)
+                {
+                    <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+                }
+                Register
+            </MudButton>
+        }
+
+        @if (_errorMessage != null)
+        {
+            <MudAlert Severity="Severity.Error">@_errorMessage</MudAlert>
+        }
+
+        @if (_registered)
+        {
+            <MudAlert Severity="Severity.Success">
+                Successfully registered with bridge @_selectedBridge?.BridgeId
+            </MudAlert>
+        }
+    </MudStack>
+}
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private HueBridge? BridgeSubject => Subject as HueBridge;
+
+    private List<LocatedBridge>? _bridges;
+    private LocatedBridge? _selectedBridge;
+    private string? _appKey;
+    private bool _registering;
+    private bool _registered;
+    private string? _errorMessage;
+
+    public bool IsValid => _registered;
+    public bool IsDirty => _registered;
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _bridges = await HueBridgeDiscovery.FastDiscoveryWithNetworkScanFallbackAsync(
+                TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30));
+        }
+        catch
+        {
+            _bridges = new List<LocatedBridge>();
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RegisterAsync()
+    {
+        if (_selectedBridge == null) return;
+
+        _registering = true;
+        _errorMessage = null;
+
+        try
+        {
+            var result = await LocalHueApi.RegisterAsync(
+                _selectedBridge.IpAddress, "HomeBlaze", "Local", true);
+
+            if (result?.Username != null)
+            {
+                _appKey = result.Username;
+                _registered = true;
+                IsValidChanged?.Invoke(true);
+                IsDirtyChanged?.Invoke(true);
+            }
+            else
+            {
+                _errorMessage = "Registration failed. Make sure you pressed the Link button on the bridge.";
+            }
+        }
+        catch (Exception exception)
+        {
+            _errorMessage = $"Registration failed: {exception.Message}";
+        }
+        finally
+        {
+            _registering = false;
+        }
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (BridgeSubject != null && _selectedBridge != null && _appKey != null)
+        {
+            BridgeSubject.BridgeId = _selectedBridge.BridgeId;
+            BridgeSubject.AppKey = _appKey;
+        }
+
+        return Task.CompletedTask;
+    }
+}

@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Devices.Energy;
@@ -5,6 +7,8 @@ namespace HomeBlaze.Abstractions.Devices.Energy;
 /// <summary>
 /// State interface for energy chargers.
 /// </summary>
+[SubjectAbstraction]
+[Description("Reports whether a charger is plugged in and actively charging.")]
 public interface IEnergyChargerState
 {
     /// <summary>

@@ -78,7 +78,7 @@ FluentStorageContainer.ScanAsync()
      -> Creates instance via InterceptorSubjectContext
      -> Deserializes [Configuration] properties from JSON
   -> Subject attached as child of folder
-  -> IConfigurableSubject.ApplyConfigurationAsync() called
+  -> IConfigurable.ApplyConfigurationAsync() called
 ```
 
 ## Operation Invocation

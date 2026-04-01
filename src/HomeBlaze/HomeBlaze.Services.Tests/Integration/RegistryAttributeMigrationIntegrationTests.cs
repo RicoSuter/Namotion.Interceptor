@@ -39,7 +39,7 @@ public class RegistryAttributeMigrationIntegrationTests
         var tempProperty = registered.TryGetProperty(nameof(FullIntegrationSubject.Temperature))!;
         var stateMetadata = tempProperty.GetStateMetadata();
         Assert.NotNull(stateMetadata);
-        Assert.Equal("Temp", stateMetadata.Name);
+        Assert.Equal("Temp", stateMetadata.Title);
         Assert.Equal(StateUnit.DegreeCelsius, stateMetadata.Unit);
 
         // Assert — Configuration properties
@@ -100,7 +100,7 @@ public class RegistryAttributeMigrationIntegrationTests
         // Act
         var valueProperty = registered.TryGetProperty(nameof(DynamicIntegrationSubject.Value))!;
         valueProperty.AddAttribute(KnownAttributes.State, typeof(StateMetadata),
-            _ => new StateMetadata { Name = "Dynamic Temp", Unit = StateUnit.DegreeCelsius },
+            _ => new StateMetadata { Title = "Dynamic Temp", Unit = StateUnit.DegreeCelsius },
             null);
 
         var configProp = registered.TryGetProperty(nameof(DynamicIntegrationSubject.Setting))!;
@@ -145,9 +145,9 @@ public class RegistryAttributeMigrationIntegrationTests
 }
 
 [InterceptorSubject]
-public partial class FullIntegrationSubject : IConfigurableSubject
+public partial class FullIntegrationSubject : IConfigurable
 {
-    [State(Name = "Temp", Unit = StateUnit.DegreeCelsius)]
+    [State(Title ="Temp", Unit = StateUnit.DegreeCelsius)]
     public partial decimal Temperature { get; set; }
 
     [Configuration]

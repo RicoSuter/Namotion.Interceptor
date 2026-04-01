@@ -30,8 +30,10 @@
     <Project Path="Namotion.Interceptor.AspNetCore/Namotion.Interceptor.AspNetCore.csproj" />
     <Project Path="Namotion.Interceptor.Blazor/Namotion.Interceptor.Blazor.csproj" />
     <Project Path="Namotion.Interceptor.GraphQL/Namotion.Interceptor.GraphQL.csproj" />
+    <Project Path="Namotion.Interceptor.Mcp/Namotion.Interceptor.Mcp.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/">
+    <Project Path="HomeBlaze/HomeBlaze.AI/HomeBlaze.AI.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Components/HomeBlaze.Components.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Host.Services/HomeBlaze.Host.Services.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Host/HomeBlaze.Host.csproj" />
@@ -49,11 +51,18 @@
     <Project Path="HomeBlaze/HomeBlaze.Storage.Abstractions/HomeBlaze.Storage.Abstractions.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/Devices/">
-    <Project Path="Namotion.Devices.Gpio.HomeBlaze/Namotion.Devices.Gpio.HomeBlaze.csproj" />
-    <Project Path="Namotion.Devices.Gpio.Tests/Namotion.Devices.Gpio.Tests.csproj" />
-    <Project Path="Namotion.Devices.Gpio/Namotion.Devices.Gpio.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Gpio.HomeBlaze/Namotion.Devices.Gpio.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Gpio.Tests/Namotion.Devices.Gpio.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Gpio/Namotion.Devices.Gpio.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Philips.Hue/Namotion.Devices.Philips.Hue.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Philips.Hue.Tests/Namotion.Devices.Philips.Hue.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Philips.Hue.HomeBlaze/Namotion.Devices.Philips.Hue.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.MyStrom/Namotion.Devices.MyStrom.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.MyStrom.Tests/Namotion.Devices.MyStrom.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.MyStrom.HomeBlaze/Namotion.Devices.MyStrom.HomeBlaze.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/Tests/">
+    <Project Path="HomeBlaze/HomeBlaze.AI.Tests/HomeBlaze.AI.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.E2E.Tests/HomeBlaze.E2E.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Host.Services.Tests/HomeBlaze.Host.Services.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Services.Tests/HomeBlaze.Services.Tests.csproj" />
@@ -75,6 +84,7 @@
     <Project Path="Namotion.Interceptor.OpcUa.Tests/Namotion.Interceptor.OpcUa.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Registry.Tests/Namotion.Interceptor.Registry.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Connectors.Tests/Namotion.Interceptor.Connectors.Tests.csproj" />
+    <Project Path="Namotion.Interceptor.Mcp.Tests/Namotion.Interceptor.Mcp.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Tests/Namotion.Interceptor.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Validation.Tests/Namotion.Interceptor.Validation.Tests.csproj" />

@@ -9,7 +9,8 @@ status: Planned
 **Status: Planned**
 
 **Prerequisites:**
-- [MCP Server](../../../../../docs/plans/mcp-server.md) — core tool implementations reused by built-in agents as `AIFunction` objects
+- [MCP Server](../../../../../docs/plans/mcp-server.md) — core `Namotion.Interceptor.Mcp` package
+- [HomeBlaze MCP Extensions](mcp-extensions.md) — HomeBlaze-specific tools, enrichers, type/path providers
 
 ## Problem
 
@@ -20,7 +21,7 @@ HomeBlaze exposes the knowledge graph to external AI agents via MCP, but has no 
 | Package | Contents |
 |---|---|
 | `HomeBlaze.AI.Abstractions` | `ILlmProvider`, `ILlmAgent` interfaces |
-| `HomeBlaze.AI` | Provider subjects, `LlmAgentBase`, `LlmAgent`, HomeBlaze-specific MCP tools (`list_methods`, `invoke_method`), MCP metadata/path providers (`HomeBlazeMcpMetadataProvider`, `StateAttributePathProvider`) |
+| `HomeBlaze.AI` | Provider subjects, `LlmAgentBase`, `LlmAgent`, [MCP extensions](mcp-extensions.md) |
 
 ### Dependency Flow
 
@@ -155,12 +156,12 @@ public partial class LlmAgent : LlmAgentBase
 
 ```
 Data/
-├── config/
-│   ├── claude-provider.json
-│   └── openai-provider.json
-├── agents/
-│   ├── temp-monitor.json
-│   └── energy-reporter.json
+├── Providers/
+│   ├── ClaudeProvider.json
+│   └── OpenAiProvider.json
+├── Agents/
+│   ├── TempMonitor.json
+│   └── EnergyReporter.json
 ```
 
 **Provider config:**
@@ -177,9 +178,9 @@ Data/
 {
     "$type": "HomeBlaze.AI.LlmAgent",
     "name": "Temperature Monitor",
-    "providerPath": "Root.config[claude-provider.json]",
+    "providerPath": "/Providers/ClaudeProvider",
     "instructions": "You monitor temperature sensors. Alert via notification if any reading exceeds 80°C. Include the sensor path and current value in the alert.",
-    "watchPaths": ["Root.sensors"],
+    "watchPaths": ["/Sensors"],
     "pollInterval": "00:05:00"
 }
 ```
@@ -202,72 +203,26 @@ When an agent runs (timer or property change trigger):
 6. Store result in LastAnalysis, update Status, LastRunTime, RunCount
 ```
 
-### Pre-fetching Watched State
+### Tool Access
 
-The agent calls `query(path, depth=2, includeProperties=true)` for each watch path before invoking the LLM. This provides immediate context without requiring the LLM to make round-trips for basic state inspection. The LLM can still call tools to explore further.
+Built-in agents reuse `McpToolInfo` handlers (from core MCP + [HomeBlaze MCP extensions](mcp-extensions.md)) wrapped as `AIFunction` objects — direct in-process calls, no MCP protocol overhead.
 
-### Concurrency — Queue One
-
-A `_rerunRequested` flag handles concurrent triggers. If a trigger fires while the agent is already running, the flag is set. On completion, if the flag is set, clear it and run again with fresh state. No unbounded queue, no wasted LLM calls from cancellation, re-run always sees the latest state.
-
-### Error Handling
-
-On failure (LLM API down, rate limited, timeout), set `Status` to error message, log, and wait for the next trigger. No retry — the poll loop provides implicit retry.
-
-## HomeBlaze-Specific MCP Tools
-
-`HomeBlaze.AI` provides two additional MCP tools on top of the 4 core tools from `Namotion.Interceptor.Mcp`. These are HomeBlaze-specific because method discovery uses `"operation"` and `"query"` registry attributes — a HomeBlaze convention, not a core interceptor concept.
-
-| Tool | Parameters | Description |
-|------|------------|-------------|
-| `list_methods` | `path` | List methods on a subject |
-| `invoke_method` | `path`, `method`, `arguments?` | Call a method |
-
-**list_methods:**
-```json
-// Request
-{ "path": "/home/thermostat" }
-
-// Response
-{
-  "methods": [
-    {
-      "name": "SetTarget",
-      "kind": "operation",
-      "parameters": [{ "name": "temperature", "type": "decimal" }]
-    },
-    {
-      "name": "TurnOff",
-      "kind": "operation",
-      "parameters": []
-    }
-  ]
-}
-```
-
-**invoke_method:**
-```json
-// Request
-{ "path": "/home/thermostat", "method": "SetTarget", "arguments": { "temperature": 23 } }
-
-// Response
-{ "success": true }
-```
-
-## Tool Access — Safe by Default (Stage 1)
-
-Built-in agents reuse tool implementations as `AIFunction` objects (direct in-process calls, no MCP protocol overhead). Stage 1 restricts write access:
+Stage 1 restricts write access:
 
 | Tool | Available | Scope |
 |---|---|---|
 | `query` | Yes | Browse the graph |
 | `get_property` | Yes | Read any value |
 | `set_property` | **No** | Deferred until authorization |
-| `list_types` | Yes | Discover capabilities |
+| `list_types` | Yes | Discover capabilities and concrete types |
 | `list_methods` | Yes | Notification channels only |
 | `invoke_method` | **Restricted** | Only on `INotificationChannel` subjects |
 
-## Notification Integration
+### Pre-fetching Watched State
+
+The agent calls `query(path, depth=2, includeProperties=true)` for each watch path before invoking the LLM. This provides immediate context without requiring the LLM to make round-trips for basic state inspection. The LLM can still call tools to explore further.
+
+### Notification Integration
 
 The agent's only action channel (stage 1) is sending notifications via `INotificationChannel`. The `invoke_method` tool is restricted to methods on subjects implementing `INotificationChannel`:
 
@@ -282,55 +237,13 @@ bool IsMethodAllowed(string path, string method)
 
 This lets agents send alerts (email, push, webhook) without being able to modify the knowledge graph.
 
-## HomeBlaze MCP Metadata Providers
+### Concurrency — Queue One
 
-`HomeBlaze.AI` contains the HomeBlaze-specific MCP extension point implementations (referenced by the [MCP Server plan](../../../../../docs/plans/mcp-server.md)).
+A `_rerunRequested` flag handles concurrent triggers. If a trigger fires while the agent is already running, the flag is set. On completion, if the flag is set, clear it and run again with fresh state. No unbounded queue, no wasted LLM calls from cancellation, re-run always sees the latest state.
 
-**`StateAttributePathProvider`** — determines which properties are exposed via MCP. Reads the `"state"` registry attribute so all `[State]` properties are automatically visible without extra annotations:
+### Error Handling
 
-```csharp
-public class StateAttributePathProvider : IPathProvider
-{
-    public bool IsPropertyIncluded(RegisteredSubjectProperty property)
-        => property.TryGetAttribute(KnownAttributes.State) != null;
-
-    public string? TryGetPropertySegment(RegisteredSubjectProperty property)
-    {
-        var metadata = property.TryGetAttribute(KnownAttributes.State)?.GetValue() as StateMetadata;
-        return metadata?.Name ?? property.Name;
-    }
-}
-```
-
-**`HomeBlazeMcpMetadataProvider`** — enriches MCP responses with title, icon, units, and method discovery. All metadata reads go through registry attributes, ensuring it works identically for concrete and dynamic proxy subjects:
-
-```csharp
-public class HomeBlazeMcpMetadataProvider : IMcpMetadataProvider
-{
-    public void EnrichSubjectMetadata(RegisteredSubject subject, McpSubjectMetadata metadata)
-    {
-        if (subject.Subject is ITitleProvider titleProvider)
-            metadata.Title = titleProvider.Title;
-        if (subject.Subject is IIconProvider iconProvider)
-            metadata.Icon = iconProvider.IconName;
-    }
-
-    public void EnrichPropertyMetadata(RegisteredSubjectProperty property, McpPropertyMetadata metadata)
-    {
-        var stateMetadata = property.TryGetAttribute(KnownAttributes.State)?.GetValue() as StateMetadata;
-        if (stateMetadata is not null)
-        {
-            metadata.Unit = stateMetadata.Unit?.ToString();
-            metadata.Position = stateMetadata.Position;
-        }
-    }
-
-    public IEnumerable<McpMethodInfo> GetMethods(RegisteredSubject subject)
-    {
-        // Reads "operation" and "query" registry attributes from method properties
-    }
-}
-```
+On failure (LLM API down, rate limited, timeout), set `Status` to error message, log, and wait for the next trigger. No retry — the poll loop provides implicit retry.
 
 ## Evolution Path
 
@@ -349,20 +262,19 @@ public class HomeBlazeMcpMetadataProvider : IMcpMetadataProvider
 | Provider interface | `ILlmProvider` with `CreateChatClient()` only (no `Model`) | Consumer doesn't care which model — that's a provider config detail |
 | Provider as subject | Referenced by path | Centralized credentials, multiple agents share one provider |
 | Base class from day one | `LlmAgentBase` for specialized agents, `LlmAgent` for config-driven | Developers can subclass immediately, no waiting for later stages |
-| Tool reuse | Plain methods wrapped as both MCP tools and `AIFunction` | One implementation, two delivery modes |
+| Tool reuse | Transport-agnostic `McpToolInfo` (metadata + plain function), wrapped as `AIFunction` by agent | One implementation, any delivery mode. See [MCP Server](../../../../../docs/plans/mcp-server.md) |
 | Safe by default | Read-only + notify, write access gated on authorization | Prevents accidental graph modification |
 | Pre-fetched context | Watch paths queried before LLM call | Reduces round-trips and API cost |
 | Per-run agent | Fresh `ChatClientAgent` per run, no session persistence | Simpler, cheaper, no conversation drift |
 | Concurrency | Queue-one (`_rerunRequested` flag) | No triggers silently lost, no unbounded queue, re-run sees fresh state |
 | Error handling | Log, set Status, wait for next trigger | Poll loop provides implicit retry |
-| Method tools | `list_methods` + `invoke_method` in `HomeBlaze.AI` | Methods are a HomeBlaze convention, not core interceptor |
 
 ## Dependencies
 
 - `Microsoft.Agents.AI`: MAF `ChatClientAgent`, `AgentResponse`
 - `Microsoft.Extensions.AI`: `IChatClient`, `AIFunction`, `AIFunctionFactory`
 - `Anthropic` SDK (official): `IChatClient` implementation for Claude
-- `Namotion.Interceptor.Mcp`: core tool implementations reused as `AIFunction`
+- `Namotion.Interceptor.Mcp`: `McpToolInfo` handlers wrapped as `AIFunction` for built-in agents
 - `HomeBlaze.Abstractions`: `INotificationChannel`, `ITitleProvider`
 - `HomeBlaze.Services`: `SubjectPathResolver` for provider/watch path resolution
 - Graph-level authorization: gating write access per agent

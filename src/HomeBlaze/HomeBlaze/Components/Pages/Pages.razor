@@ -156,7 +156,7 @@
         if (string.IsNullOrEmpty(path) || Root is null)
             return;
 
-        var subject = PathResolver.ResolveSubject(path, PathFormat.Slash);
+        var subject = PathResolver.ResolveSubject(path, PathStyle.Route);
         if (subject != null)
         {
             if (subject is ITitleProvider titleProvider)

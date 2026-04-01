@@ -22,13 +22,17 @@ public class PropertyAttributeInitializer : ILifecycleHandler
 
         foreach (var property in registeredSubject.Properties)
         {
+            var hasState = false;
+            ConfigurationAttribute? configurationAttribute = null;
+
             foreach (var reflectionAttribute in property.ReflectionAttributes)
             {
                 if (reflectionAttribute is StateAttribute stateAttribute)
                 {
+                    hasState = true;
                     var metadata = new StateMetadata
                     {
-                        Name = stateAttribute.Name,
+                        Title = stateAttribute.Title,
                         Unit = stateAttribute.Unit,
                         Position = stateAttribute.Position,
                         IsCumulative = stateAttribute.IsCumulative,
@@ -38,12 +42,24 @@ public class PropertyAttributeInitializer : ILifecycleHandler
                     property.AddAttribute(KnownAttributes.State, typeof(StateMetadata),
                         _ => metadata, null);
                 }
-                else if (reflectionAttribute is ConfigurationAttribute)
+                else if (reflectionAttribute is ConfigurationAttribute configAttribute)
                 {
-                    var metadata = new ConfigurationMetadata();
+                    configurationAttribute = configAttribute;
+                    var metadata = new ConfigurationMetadata
+                    {
+                        IsSecret = configAttribute.IsSecret
+                    };
                     property.AddAttribute(KnownAttributes.Configuration, typeof(ConfigurationMetadata),
                         _ => metadata, null);
                 }
+            }
+
+            if (hasState && configurationAttribute is { IsSecret: true })
+            {
+                throw new InvalidOperationException(
+                    $"Property '{property.Name}' on '{registeredSubject.Subject.GetType().Name}' " +
+                    $"has both [State] and [Configuration(IsSecret = true)]. " +
+                    $"Secret configuration properties must not be exposed as state.");
             }
         }
     }
