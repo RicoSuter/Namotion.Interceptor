@@ -28,8 +28,10 @@ public struct PropertyReference : IEquatable<PropertyReference>
             }
 
             _metadata = Subject.Properties
-                .TryGetValue(Name, out var metadata) ? metadata : 
-                throw new InvalidOperationException("No metadata found.");
+                .TryGetValue(Name, out var metadata) ? metadata :
+                throw new InvalidOperationException(
+                    $"No metadata found for property '{Name}' on {Subject.GetType().Name}. " +
+                    $"Available properties ({Subject.Properties.Count}): [{string.Join(", ", Subject.Properties.Keys)}]");
 
             return _metadata!.Value;
         }
