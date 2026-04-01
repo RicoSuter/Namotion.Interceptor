@@ -372,6 +372,9 @@ internal static class SubjectUpdateFactory
             if (!attribute.HasGetter)
                 continue;
 
+            if (!IsPropertyIncluded(attribute, builder.Processors))
+                continue;
+
             attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
 
             // Reuse the same property update logic for attributes
