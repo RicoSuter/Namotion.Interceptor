@@ -12,6 +12,8 @@ using Namotion.Devices.Gpio;
 using Namotion.Devices.Gpio.HomeBlaze;
 using Namotion.Devices.MyStrom;
 using Namotion.Devices.MyStrom.HomeBlaze;
+using Namotion.Devices.Shelly;
+using Namotion.Devices.Shelly.HomeBlaze;
 using Namotion.Devices.Philips.Hue;
 using Namotion.Devices.Philips.Hue.HomeBlaze;
 using Toolbelt.Blazor.Extensions.DependencyInjection;
@@ -29,7 +31,7 @@ if (builder.Configuration.GetValue<bool>("UseMcpServer"))
 {
     builder.Services.AddMcpServer()
         .WithHttpTransport(options => options.Stateless = true)
-        .WithHomeBlazeMcpTools();
+        .WithHomeBlazeMcpTools(isReadOnly: true);
 }
 
 // Add services to the container.
@@ -57,7 +59,9 @@ typeProvider
     .AddAssembly(typeof(HueBridge).Assembly)
     .AddAssembly(typeof(HueBridgeSetupComponent).Assembly)
     .AddAssembly(typeof(MyStromSwitch).Assembly)
-    .AddAssembly(typeof(MyStromSwitchWidget).Assembly);
+    .AddAssembly(typeof(MyStromSwitchWidget).Assembly)
+    .AddAssembly(typeof(ShellyDevice).Assembly)
+    .AddAssembly(typeof(ShellyDeviceWidget).Assembly);
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())

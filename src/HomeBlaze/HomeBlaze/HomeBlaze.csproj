@@ -12,6 +12,8 @@
         <ProjectReference Include="..\Namotion.Devices.Gpio\Namotion.Devices.Gpio.csproj" />
         <ProjectReference Include="..\Namotion.Devices.MyStrom\Namotion.Devices.MyStrom.csproj" />
         <ProjectReference Include="..\Namotion.Devices.MyStrom.HomeBlaze\Namotion.Devices.MyStrom.HomeBlaze.csproj" />
+        <ProjectReference Include="..\Namotion.Devices.Shelly\Namotion.Devices.Shelly.csproj" />
+        <ProjectReference Include="..\Namotion.Devices.Shelly.HomeBlaze\Namotion.Devices.Shelly.HomeBlaze.csproj" />
         <ProjectReference Include="..\Namotion.Devices.Philips.Hue\Namotion.Devices.Philips.Hue.csproj" />
         <ProjectReference Include="..\Namotion.Devices.Philips.Hue.HomeBlaze\Namotion.Devices.Philips.Hue.HomeBlaze.csproj" />
         <ProjectReference Include="..\HomeBlaze.AI\HomeBlaze.AI.csproj" />

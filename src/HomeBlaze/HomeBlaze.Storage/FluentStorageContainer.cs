@@ -176,6 +176,12 @@ public partial class FluentStorageContainer :
 
         foreach (var blob in blobs.Where(b => !b.IsFolder))
         {
+            // Filter out hidden files (e.g. .DS_Store)
+            if (blob.TryGetProperty("Attributes", out var attributes, string.Empty) && attributes.Equals("H"))
+            {
+                continue;
+            }
+
             cancellationToken.ThrowIfCancellationRequested();
 
             try
