@@ -160,8 +160,7 @@ public record HistoryQuery(
     DateTimeOffset From,
     DateTimeOffset To,
     TimeSpan? BucketSize = null,
-    AggregationType? Aggregation = null,
-    bool FollowMoves = false);
+    AggregationType? Aggregation = null);
 ```
 
 ```csharp
@@ -263,6 +262,7 @@ public interface IHistoryReader
     DateTimeOffset? OldestRecord { get; }
     bool SupportsNativeAggregation { get; }
 
+    Task<DateTimeOffset?> GetLatestSnapshotTimeAsync();
     Task<IReadOnlyList<HistoryRecord>> QueryAsync(HistoryQuery query);
     Task<IReadOnlyList<AggregatedRecord>> QueryAggregatedAsync(HistoryQuery query);
     Task<HistorySnapshot> GetSnapshotAsync(string path, DateTimeOffset time);
@@ -334,7 +334,7 @@ Expected: Build succeeded
 </Project>
 ```
 
-**Step 2:** Create HistorySinkBase. Note: `RecordsWritten`, `Status`, `LastSnapshotTime` are plain properties (not `[State]`) to avoid self-recording feedback loop:
+**Step 2:** Create HistorySinkBase. Note: `RecordsWritten`, `Status` are plain properties (not `[State]`) to avoid self-recording feedback loop. `LastSnapshotTime` is replaced by `GetLatestSnapshotTimeAsync()` which queries the sink's storage:
 
 ```csharp
 // src/HomeBlaze/HomeBlaze.History/HistorySinkBase.cs
@@ -347,19 +347,18 @@ namespace HomeBlaze.History;
 public abstract partial class HistorySinkBase : IHistorySink
 {
     [Configuration]
-    public partial TimeSpan FlushInterval { get; set; }
+    public partial TimeSpan FlushInterval { get; set; }  // default 10s
 
     [Configuration]
-    public partial TimeSpan SnapshotInterval { get; set; }
+    public partial TimeSpan SnapshotInterval { get; set; }  // default 1 day
 
     [Configuration]
-    public partial int RetentionDays { get; set; }
+    public partial int RetentionDays { get; set; }  // default 365
 
     [Configuration]
-    public partial int Priority { get; set; }
+    public partial int Priority { get; set; }  // default 100
 
     // Plain properties — NOT [State] to avoid self-recording feedback loop
-    public DateTimeOffset? LastSnapshotTime { get; set; }
     public long RecordsWritten { get; set; }
     public string? Status { get; set; }
 
@@ -371,6 +370,7 @@ public abstract partial class HistorySinkBase : IHistorySink
     public abstract Task WriteBatchAsync(ReadOnlyMemory<ResolvedHistoryRecord> records);
     public abstract Task WriteSnapshotAsync(HistorySnapshot snapshot);
     public abstract Task WriteMovesAsync(ReadOnlyMemory<MoveRecord> moves);
+    public abstract Task<DateTimeOffset?> GetLatestSnapshotTimeAsync();
     public abstract Task<IReadOnlyList<HistoryRecord>> QueryAsync(HistoryQuery query);
     public abstract Task<IReadOnlyList<AggregatedRecord>> QueryAggregatedAsync(HistoryQuery query);
     public abstract Task<HistorySnapshot> GetSnapshotAsync(string path, DateTimeOffset time);
@@ -436,7 +436,7 @@ public partial class InMemoryHistorySink : HistorySinkBase
         lock (_lock)
         {
             _snapshots.Add(snapshot);
-            LastSnapshotTime = snapshot.Timestamp;
+            // No LastSnapshotTime field — GetLatestSnapshotTimeAsync reads from _snapshots
         }
         return Task.CompletedTask;
     }
@@ -451,15 +451,25 @@ public partial class InMemoryHistorySink : HistorySinkBase
         return Task.CompletedTask;
     }
 
+    public override Task<DateTimeOffset?> GetLatestSnapshotTimeAsync()
+    {
+        lock (_lock)
+        {
+            var latest = _snapshots.Count > 0
+                ? _snapshots[^1].Timestamp
+                : (DateTimeOffset?)null;
+            return Task.FromResult(latest);
+        }
+    }
+
     // --- Read Side ---
 
     public override Task<IReadOnlyList<HistoryRecord>> QueryAsync(HistoryQuery query)
     {
         lock (_lock)
         {
-            var paths = query.FollowMoves
-                ? ResolvePathChain(query.SubjectPath, query.From, query.To)
-                : [(query.SubjectPath, query.From, query.To)];
+            // Always follow moves — transparent path chain resolution
+            var paths = ResolvePathChain(query.SubjectPath, query.From, query.To);
 
             var results = new List<HistoryRecord>();
             foreach (var (path, from, to) in paths)
@@ -487,9 +497,8 @@ public partial class InMemoryHistorySink : HistorySinkBase
             if (query.BucketSize is null || query.Aggregation is null)
                 return Task.FromResult<IReadOnlyList<AggregatedRecord>>(Array.Empty<AggregatedRecord>());
 
-            var paths = query.FollowMoves
-                ? ResolvePathChain(query.SubjectPath, query.From, query.To)
-                : [(query.SubjectPath, query.From, query.To)];
+            // Always follow moves — transparent path chain resolution
+            var paths = ResolvePathChain(query.SubjectPath, query.From, query.To);
 
             var bucketTicks = query.BucketSize.Value.Ticks;
             var allRows = new List<(long timestamp, string propertyName, double value)>();
@@ -1141,14 +1150,13 @@ Expected: Build succeeded
 - `WhenPartialSnapshotRequested_ThenFiltersByPath`
 
 **Step 3:** Write move tracking tests covering:
-- `WhenFollowMovesTrue_ThenQueriesOldPath`
+- `WhenSubjectMoved_ThenQueryReturnsHistoryFromOldPath`
 - `WhenMoveChain_ThenFollowsFullChain`
-- `WhenFollowMovesFalse_ThenOnlyQueriesExactPath`
 - `WhenMoveWithTimeRange_ThenScopesEachPathCorrectly`
 - `WhenCyclicMoves_ThenDoesNotInfiniteLoop`
 - `WhenSnapshotWithMoves_ThenResolvesAliases`
 - `WhenAggregationWithMoves_ThenMergesAcrossRename`
-- `WhenNoMoves_ThenFollowMovesBehavesLikeExactPath`
+- `WhenNoMovesExist_ThenQueryReturnsExactPathOnly`
 
 **Step 4:** Write HistoryService tests covering:
 - `WhenSinkAttachedToGraph_ThenServiceDiscoversSink`
@@ -1237,8 +1245,9 @@ CREATE INDEX ix_moves_to ON moves (to_path, timestamp);
 - `WriteBatchAsync` — group by partition, batch INSERT per transaction
 - `WriteMovesAsync` — write to moves DB
 - `QueryAsync` — query across partitions, follow moves via path chain resolution
-- `QueryAggregatedAsync` — SQL GROUP BY per partition, merge cross-partition buckets
+- `QueryAggregatedAsync` — SQL GROUP BY per partition, merge cross-partition buckets (including First/Last via subqueries)
 - `WriteSnapshotAsync` — gzip + store in partition's snapshots table
+- `GetLatestSnapshotTimeAsync` — `SELECT MAX(timestamp) FROM snapshots` across recent partitions
 - `GetSnapshotAsync` — scan partitions backwards for nearest snapshot, replay changes
 - `GetSnapshotsAsync` — iterate calling GetSnapshotAsync at intervals
 
@@ -1299,7 +1308,7 @@ Snapshot tests:
 - `WhenSnapshotSearchScansBackward_ThenStopsAtFirstFound`
 
 Move tests:
-- `WhenFollowMovesTrue_ThenQueriesOldPath`
+- `WhenSubjectMoved_ThenQueryReturnsHistoryFromOldPath`
 - `WhenMoveChainInSqlite_ThenFollowsFullChain`
 
 Partition tests:
@@ -1326,7 +1335,7 @@ Commit.
 
 **Step 1:** Add snapshot creation method that walks all registered subjects via registry, reads current `[State]` property values, builds `HistorySnapshot`, calls `sink.WriteSnapshotAsync()`.
 
-**Step 2:** Add snapshot scheduling to the flush loop. Check each sink's `SnapshotInterval` against `LastSnapshotTime`. On tick: create snapshot from live graph, write to sink.
+**Step 2:** Add snapshot scheduling to the flush loop. On sink attach, call `sink.GetLatestSnapshotTimeAsync()` and cache the result. On each tick: check `now - cachedSnapshotTime >= sink.SnapshotInterval`. After writing a snapshot, update the cached time directly (no re-query needed).
 
 **Step 3:** Add retention housekeeping — delegate to sinks (SQLite deletes old partition files, in-memory evicts by time).
 
