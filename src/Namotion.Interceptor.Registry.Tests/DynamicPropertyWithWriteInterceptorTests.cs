@@ -67,10 +67,9 @@ public class DynamicPropertyWithWriteInterceptorTests
     }
 
     [Fact]
-    public void WhenAddPropertyTriggersAddAttribute_ThenRecursiveAddPropertySucceeds()
+    public void WhenAddPropertyThenAddAttribute_ThenBothPropertiesAreRegistered()
     {
-        // Arrange — AddAttribute internally calls Parent.AddProperty,
-        // so AddProperty is re-entered on the same thread.
+        // Arrange — AddAttribute internally calls Parent.AddProperty.
         var context = InterceptorSubjectContext
             .Create()
             .WithFullPropertyTracking()
