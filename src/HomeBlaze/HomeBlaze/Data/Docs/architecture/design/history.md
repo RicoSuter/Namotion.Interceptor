@@ -410,7 +410,7 @@ Queue depth and error counts are exposed via sink `Status` properties so operato
 | Backpressure the change pipeline | Would block the hot path — property writes, connector sync, and UI updates would stall because a history sink is slow |
 | Per-sink CQP (each sink subscribes independently) | Duplicates deduplication work. Prevents shared move tracking and snapshot scheduling. Central orchestrator is simpler |
 
-## Follow-Up Items
+## Follow-Up Items [Planned]
 
 ### Retention Policies
 - Per-property or per-type retention (currently global per sink)
