@@ -66,8 +66,8 @@ Unknown component types (e.g. `light:0`, `dimmer:0`) are silently ignored. These
 | Property | Unit | Description |
 |----------|------|-------------|
 | `MeasuredPower` | Watt | Total active power (sum of phases) |
-| `MeasuredEnergyConsumed` | WattHour | Total energy consumed (from `emdata:N`) |
-| `TotalReturnedEnergy` | WattHour | Total energy returned (from `emdata:N`) |
+| `MeasuredEnergyConsumed` | WattHour | Total energy consumed |
+| `TotalReturnedEnergy` | WattHour | Total energy returned |
 | `Phases[3]` | - | Per-phase voltage, current, frequency, power, power factor |
 
 Note: The energy meter does not have its own temperature. On devices like the Pro 3EM, temperature is reported as a separate `temperature:0` component.
@@ -112,7 +112,7 @@ Note: The energy meter does not have its own temperature. On devices like the Pr
 ## Troubleshooting
 
 - **"Only Gen2+ Shelly devices are supported"**: The device is Gen1. Gen1 devices use a different REST API and are not compatible with this integration.
-- **Connection timeout**: Verify the IP address and that the device is on the same network.
+- **Connection timeout** (10 seconds): Verify the IP address and that the device is on the same network.
 - **Authentication errors**: Set the Password configuration property if the device has authentication enabled.
 
 ## Implementation Details
@@ -126,8 +126,7 @@ Key endpoints used:
 | Endpoint | Purpose |
 |----------|---------|
 | `GET /shelly` | Device info (name, model, MAC, generation, firmware) |
-| `GET /rpc/Shelly.GetStatus` | Full status of all components in a single call |
-| `GET /rpc/EMData.GetStatus?id=0` | Energy meter cumulative totals (only if `em:N` present) |
+| `GET /rpc/Shelly.GetStatus` | Full status of all components (including energy meter totals) |
 | `GET /rpc/Switch.Set?id={N}&on=true\|false` | Switch control |
 | `GET /rpc/Cover.Open\|Close\|Stop?id={N}` | Cover control |
 | `GET /rpc/Cover.GoToPosition?id={N}&pos={0-100}` | Cover position control |
@@ -160,10 +159,6 @@ Unknown component types are silently ignored, making this forward-compatible wit
 WebSocket `NotifyStatus` messages contain only changed fields for a component. To prevent nulling out existing values (e.g. voltage disappearing temporarily during a cover movement), partial updates only overwrite properties that are present (non-null) in the message. Full poll responses overwrite all properties unconditionally.
 
 Similarly, if a `NotifyStatus` only mentions one component type (e.g. `cover:0`), other component types (switches, inputs, etc.) are left untouched.
-
-### Position Mapping
-
-The Shelly API uses `current_pos` where 0 = fully closed and 100 = fully open. HomeBlaze uses a 0..1 decimal scale where 0 = fully open and 1 = fully closed. The mapping is: `Position = (100 - current_pos) / 100`.
 
 ### Configuration Changes
 
