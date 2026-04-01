@@ -152,7 +152,9 @@ public partial class ShellyDevice : BackgroundService,
 
     internal HttpClient CreateHttpClient()
     {
-        return _httpClientFactory.CreateClient();
+        var client = _httpClientFactory.CreateClient();
+        client.Timeout = TimeSpan.FromSeconds(10);
+        return client;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -295,20 +297,6 @@ public partial class ShellyDevice : BackgroundService,
         var statusJson = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
 
         ParseStatusComponents(statusJson);
-
-        // Fetch EMData separately — Shelly.GetStatus may not include emdata:N on all devices
-        if (EnergyMeter != null)
-        {
-            using var emDataResponse = await client.GetAsync($"http://{HostAddress}/rpc/EMData.GetStatus?id=0", cancellationToken);
-            if (emDataResponse.IsSuccessStatusCode)
-            {
-                var emDataStatus = await emDataResponse.Content.ReadFromJsonAsync<ShellyEmDataStatus>(cancellationToken);
-                if (emDataStatus != null)
-                {
-                    EnergyMeter.UpdateFromDataStatus(emDataStatus);
-                }
-            }
-        }
 
         IsConnected = true;
     }
