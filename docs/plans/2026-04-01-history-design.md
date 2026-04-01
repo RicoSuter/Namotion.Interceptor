@@ -10,18 +10,18 @@ HomeBlaze tracks every property change in real-time but has no way to look back.
 - Low-powered devices: sequential I/O only, minimize random writes
 - Many changes over very long time (months/years)
 - Any value type (numbers, strings, booleans, complex objects)
-- Subjects identified by path (no stable IDs)
-- Must support multiple sink implementations (file, SQLite, InfluxDB)
+- Subjects identified by path (no stable IDs — subject IDs are in-memory only, regenerated on restart)
+- Must support multiple simultaneous sink implementations (in-memory, SQLite, PostgreSQL)
 
 ## Architecture
 
 ```
 HistoryService (DI-registered BackgroundService)
 ├── Discovers sinks via lifecycle attach/detach events
-├── Maintains local HashSet<IHistorySink> (no scanning)
-├── Subscribes to CQP for property changes
-├── Buffers changes in memory (flush every 10s or max count)
-├── On flush: batch-write to all current sinks in parallel
+├── Maintains per-sink cursors into shared buffer
+├── Subscribes to CQP for property changes (dedup stage)
+├── CQP write handler appends to shared buffer
+├── Per-sink flush timers drain buffer via cursors
 ├── Move tracking (detects path changes in buffer)
 ├── Snapshot scheduling per sink
 ├── Default aggregation over raw values (sinks can override)
@@ -34,8 +34,9 @@ Sinks are InterceptorSubjects, configured via JSON files like any other HomeBlaz
 
 ```json
 {
-  "$type": "SqliteHistorySink",
+  "$type": "HomeBlaze.History.Sqlite.SqliteHistorySink",
   "DatabasePath": "./history",
+  "FlushInterval": "00:00:10",
   "SnapshotInterval": "1.00:00:00",
   "PartitionInterval": "Weekly",
   "RetentionDays": 365,
@@ -47,16 +48,20 @@ Sinks are InterceptorSubjects, configured via JSON files like any other HomeBlaz
 
 ### Multiple Sinks
 
-Multiple sinks run simultaneously (e.g., file sink for local history + InfluxDB for central). Each sink is independent — a failing sink doesn't block others.
+Multiple sinks run simultaneously (e.g., in-memory for fast recent queries + SQLite for long-term). Each sink is independent — a failing sink doesn't block others.
 
 For reads, `HistoryService` picks the best reader:
 - Aggregation query → lowest priority reader with `SupportsNativeAggregation` covering the time range
 - Raw query → lowest priority reader covering the time range
 - Fallback → next reader in priority order
 
+### Self-Recording Prevention
+
+`HistoryService` filters out `IHistorySink` subjects from recording via type check in the CQP property filter. Without this, sink bookkeeping properties (`RecordsWritten`, `Status`) would create a feedback loop — every flush would record its own stats.
+
 ## Path Format
 
-All paths in the history system use **canonical paths** from `SubjectPathResolver.GetPath(subject, PathStyle.Canonical)`. Examples:
+All paths in the history system use **canonical paths** from `ISubjectPathResolver.GetPath(subject, PathStyle.Canonical)`. Examples:
 
 - `/` — root
 - `/Demo/Conveyor` — direct child
@@ -64,57 +69,79 @@ All paths in the history system use **canonical paths** from `SubjectPathResolve
 
 Canonical paths are used in `HistoryRecord`, `MoveRecord`, `HistorySnapshot`, and all query APIs. Individual sinks are responsible for encoding paths into their storage format (e.g., the file sink sanitizes bracket characters for filesystem compatibility).
 
+### ISubjectPathResolver
+
+`HistoryService` depends on `ISubjectPathResolver` (extracted interface) rather than the concrete `SubjectPathResolver`. This enables:
+- Clean DI registration
+- Mock path resolvers in unit tests (tests set exact paths, no `RootManager` needed)
+- Integration tests in `HomeBlaze.E2E.Tests` use the real resolver
+
 ## Property Filtering
 
-The `HistoryService` creates its own `ChangeQueueProcessor` with a `StateAttributePathProvider` — the same path provider used by MCP tools and connectors. This filters to:
+The `HistoryService` creates its own `ChangeQueueProcessor` with a property filter that includes:
 
 - `[State]` properties — runtime values that change over time (temperature, speed, status)
-- Structural properties (`CanContainSubjects`) — for graph reconstruction
+- Excludes `IHistorySink` subjects — prevents self-recording feedback loop
 
 `[Configuration]` properties are excluded — they are already persisted to JSON files by HomeBlaze's storage system.
+
+### Structural Property Recording
+
+Properties with `[State]` AND `CanContainSubjects` (dictionaries, collections of subjects) are recorded as **lightweight path references**, not full serialized content:
+
+- Direct subject reference → canonical path string (or null)
+- Dictionary → JSON array of keys
+- Collection → JSON array of subject paths
+
+This enables graph structure reconstruction between snapshots without bloating the history database with serialized object graphs.
 
 ## Integration
 
 - `HistoryService` is registered in DI as a `BackgroundService` via `builder.Services.AddHistoryService()`
-- It receives `IInterceptorSubjectContext` via DI
+- It receives `IInterceptorSubjectContext` and `ISubjectPathResolver` via DI
+- Deduplication interval configured via `IConfiguration` (appsettings.json)
 - Creates its own `ChangeQueueProcessor` (does not share with connectors)
 - Sinks are discovered as subjects via lifecycle attach/detach events (loaded from JSON config by FluentStorage)
+- Unsubscribes from lifecycle events in `Dispose()`
 
-## Write Path (Hot Path — Zero Allocation)
+## Two-Stage Buffering
 
-### Internal Buffer
+History uses two distinct buffering stages:
 
-```csharp
-struct HistoryEntry
+### Stage 1: CQP Deduplication
+
+The `ChangeQueueProcessor` deduplicates rapid property changes. If a property changes 10 times within the dedup interval, only one change is recorded (oldest old value + newest new value). Interval configured globally via appsettings.json:
+
+```json
 {
-    public int SubjectPathKey;     // interned string key
-    public int PropertyNameKey;    // interned string key
-    public long TimestampTicks;
-    public HistoryValueType ValueType;
-    public double NumericValue;    // inline for numbers (90% case)
-    public int RawValueOffset;     // offset into shared byte buffer
-    public int RawValueLength;     // for complex/string values
-}
-
-enum HistoryValueType : byte
-{
-    Null, Double, Boolean, String, Complex
+  "History": {
+    "DeduplicationInterval": "00:00:01"
+  }
 }
 ```
 
-- `HistoryEntry` is a struct — no heap allocation per change
-- Subject paths and property names interned to int keys — no string allocation per change
-- Numeric values stored inline as `double` — no JSON serialization on the hot path
-- Complex values serialized to a shared pooled byte buffer
+The CQP write handler appends deduped changes to a shared in-memory buffer.
 
-### Flush Cycle
+### Stage 2: Per-Sink Flush
 
-1. CQP delivers change → append `HistoryEntry` to pre-allocated ring buffer (one lock, no I/O)
-2. Timer fires (10s) or buffer hits max count → signal flush
-3. Swap buffer under lock (minimal lock time — pointer swap only)
-4. Resolve int keys to strings
-5. Fan out `WriteBatchAsync` to all sinks in parallel
-6. Flush pending moves
+Each sink has its own `FlushInterval` (`[Configuration]` property on `HistorySinkBase`, default 10s). The `HistoryService` manages per-sink cursors into the shared buffer:
+
+```csharp
+private readonly List<ResolvedHistoryRecord> _buffer = new();
+private readonly Dictionary<IHistorySink, int> _sinkCursors = new();
+```
+
+On each sink's flush tick:
+1. Slice `_buffer[myCursor..end]`
+2. Call `sink.WriteBatchAsync()` with the slice
+3. Advance cursor
+4. Trim buffer prefix when ALL cursors have passed it
+
+Sink lifecycle:
+- `SubjectAttached` → add cursor at current buffer end
+- `SubjectDetaching` → remove cursor (may allow buffer trimming)
+
+Memory is bounded: buffer only holds records between the fastest and slowest sink.
 
 ### Exception Handling
 
@@ -124,14 +151,49 @@ Per-sink try/catch on every flush — failing sink gets `Status = "Error"`, logg
 
 | State | Holds subject ref? | Cleanup |
 |---|---|---|
-| `_buffer` (HistoryEntry[]) | No (int keys only) | Swapped on flush |
+| `_buffer` (shared) | No (resolved records with string paths) | Trimmed when all cursors advance |
 | `_lastKnownPaths` | Yes | Removed on lifecycle detach |
-| `_pathKeys` / `_pathStrings` | No (strings only) | Grows monotonically, bounded by graph size |
-| `_sinks` | Yes (IHistorySink) | Removed on lifecycle detach |
+| `_sinkCursors` | Yes (IHistorySink) | Removed on lifecycle detach |
+
+## Value Serialization
+
+All values are stored as JSON for clean round-tripping:
+
+| .NET Type | HistoryValueType | Storage | Read Back |
+|---|---|---|---|
+| `null` | Null | — | `JsonSerializer.SerializeToElement<object?>(null)` → `JsonValueKind.Null` |
+| `double`, `float`, `int`, `long`, `decimal` | Double | `numeric_value` column | `JsonSerializer.SerializeToElement(reader.GetDouble())` |
+| `bool` | Boolean | `numeric_value` (1.0/0.0) | `JsonSerializer.SerializeToElement(reader.GetDouble() != 0.0)` → `true`/`false` |
+| `string` | String | `raw_value` (JSON-encoded) | `JsonSerializer.Deserialize<JsonElement>(reader.GetString())` |
+| everything else | Complex | `raw_value` (JSON-serialized) | `JsonSerializer.Deserialize<JsonElement>(reader.GetString())` |
+| `IInterceptorSubject` | String | `raw_value` (canonical path) | Path string |
+| `IDictionary` (subjects) | Complex | `raw_value` (JSON array of keys) | Key array |
+| `ICollection` (subjects) | Complex | `raw_value` (JSON array of paths) | Path array |
+
+Key design choices:
+- Strings stored JSON-encoded (`"Running"` with quotes) for clean `JsonDocument` round-trip
+- `JsonSerializer.Deserialize<JsonElement>()` used instead of `JsonDocument.Parse()` to avoid `IDisposable` memory leaks
+- Booleans round-trip as `true`/`false`, not `1.0`/`0.0`
+- Null values produce `JsonValueKind.Null`, not `JsonValueKind.Undefined`
 
 ## Read Path
 
 Reads are user-initiated, infrequent queries. No allocation-free requirements — simple return types.
+
+### Typed Deserialization
+
+`HistoryRecord.Value` is a `JsonElement` (dynamic). Extension methods in `HomeBlaze.History` provide typed access:
+
+```csharp
+// Caller knows type at compile time
+record.DeserializeValue<double>();
+
+// Caller has type at runtime
+record.DeserializeValue(typeof(double));
+
+// Resolve type from live subject via registry
+record.DeserializeValue(subject);
+```
 
 ## Interfaces
 
@@ -166,6 +228,7 @@ interface IHistoryReader
     bool SupportsNativeAggregation { get; }
 
     Task<IReadOnlyList<HistoryRecord>> QueryAsync(HistoryQuery query);
+    Task<IReadOnlyList<AggregatedRecord>> QueryAggregatedAsync(HistoryQuery query);
     Task<HistorySnapshot> GetSnapshotAsync(string path, DateTimeOffset time);
     IAsyncEnumerable<HistorySnapshot> GetSnapshotsAsync(
         string path, DateTimeOffset from, DateTimeOffset to,
@@ -186,6 +249,9 @@ interface IHistorySink : IHistoryWriter, IHistoryReader { }
 public abstract partial class HistorySinkBase : IHistorySink
 {
     [Configuration]
+    public partial TimeSpan FlushInterval { get; set; }  // default 10s
+
+    [Configuration]
     public partial TimeSpan SnapshotInterval { get; set; }
 
     [Configuration]
@@ -194,20 +260,17 @@ public abstract partial class HistorySinkBase : IHistorySink
     [Configuration]
     public partial int Priority { get; set; }  // default 100
 
-    [State]
-    public partial DateTimeOffset? LastSnapshotTime { get; set; }
-
-    [State]
-    public partial long RecordsWritten { get; set; }
-
-    [State]
-    public partial string Status { get; set; }
+    // Not [State] — plain properties to avoid self-recording feedback loop
+    public DateTimeOffset? LastSnapshotTime { get; set; }
+    public long RecordsWritten { get; set; }
+    public string? Status { get; set; }
 
     // Abstract — each sink implements storage
     public abstract Task WriteBatchAsync(ReadOnlyMemory<ResolvedHistoryRecord> records);
     public abstract Task WriteSnapshotAsync(HistorySnapshot snapshot);
     public abstract Task WriteMovesAsync(ReadOnlyMemory<MoveRecord> moves);
     public abstract Task<IReadOnlyList<HistoryRecord>> QueryAsync(HistoryQuery query);
+    public abstract Task<IReadOnlyList<AggregatedRecord>> QueryAggregatedAsync(HistoryQuery query);
     public abstract Task<HistorySnapshot> GetSnapshotAsync(string path, DateTimeOffset time);
     public abstract IAsyncEnumerable<HistorySnapshot> GetSnapshotsAsync(
         string path, DateTimeOffset from, DateTimeOffset to, TimeSpan interval);
@@ -239,7 +302,7 @@ record HistorySubjectSnapshot(
 record AggregatedRecord(
     DateTimeOffset BucketStart,
     DateTimeOffset BucketEnd,
-    double? Avg, double? Min, double? Max,
+    double? Average, double? Minimum, double? Maximum,
     double? Sum, long Count,
     JsonElement? First, JsonElement? Last);
 
@@ -250,11 +313,11 @@ record HistoryQuery(
     DateTimeOffset To,
     TimeSpan? BucketSize = null,
     AggregationType? Aggregation = null,
-    bool FollowMoves = true);
+    bool FollowMoves = false);
 
 enum AggregationType
 {
-    Avg, Min, Max, Sum, Count, First, Last
+    Average, Minimum, Maximum, Sum, Count, First, Last
 }
 ```
 
@@ -262,31 +325,42 @@ enum AggregationType
 
 Subjects are identified by path (no stable IDs). When a subject moves in the graph, history must remain continuous.
 
-### Current Behavior (v1)
+### Write Side (Implemented)
 
-History is recorded by canonical path. If a subject's path changes (rename, reorganization), history under the old path becomes orphaned. New history records under the new path. No continuity across the rename.
+The `HistoryService` detects path changes at runtime:
 
-This works well for the common case: device paths are deterministic from configuration (e.g., `/Devices/HueBridge/Light1` is always the same after restart). Devices reconnecting after app restart produce the same paths — history is continuous without any move tracking.
+1. Maintain `Dictionary<IInterceptorSubject, string> _lastKnownPaths` — object reference identity is stable while the app is running
+2. On each CQP write handler call, compare current path to last known for each subject
+3. Path changed → emit `MoveRecord(timestamp, fromPath, toPath)`, update dictionary
+4. Fan out `WriteMovesAsync` to all sinks
+5. Lifecycle detach → remove from `_lastKnownPaths`
 
-### Planned Follow-Up: Move Operations
+**Limitation:** Move tracking depends on in-memory object identity. Moves across app restarts cannot be detected (subject IDs are regenerated on restart). In practice this is rarely a problem since moves are manual actions that happen while the app is running.
 
-A proper move operation would:
+### Read Side (Implemented)
 
-1. Detect path changes at runtime via `Dictionary<IInterceptorSubject, string>` (object reference identity is stable while the app is running)
-2. Emit `MoveRecord` to all sinks
-3. Sinks rename their storage (file sink: rename directory, e.g., `subjects/Demo/Motor/` → `subjects/Factory/Motor/`)
-4. Record the move for backward query resolution (`FollowMoves` in `HistoryQuery`)
-5. Keep the subject alive — no detach/re-attach, no data loss
+When `FollowMoves = true` on a `HistoryQuery`:
 
-**Limitation:** Move tracking depends on in-memory object identity. Moves across app restarts cannot be detected (no stable IDs). In practice this is rarely a problem since moves are manual actions that happen while the app is running.
+1. **Resolve path chain** from move records — follow backwards: `/Factory/Motor` ← `/Devices/Motor` ← `/OldPath/Motor`. Use a visited set to prevent cycles.
+2. **Time-scope each path** — each path in the chain is valid for a specific time range (from move-in to move-out).
+3. **Expand query** — instead of querying one path, query each path for its valid time range.
+4. **Merge results** chronologically.
 
-Until move operations are implemented, `MoveRecord`, `WriteMovesAsync`, and `FollowMoves` are defined in the interfaces but not active.
+```
+/OldPath/Motor:    [2026-01-01 ... 2026-03-01]
+/Devices/Motor:    [2026-03-01 ... 2026-03-15]
+/Factory/Motor:    [2026-03-15 ... now]
+```
+
+Same expansion applies to `GetSnapshotAsync` — resolve aliases when reconstructing.
+
+`FollowMoves` defaults to `false`. Callers opt in explicitly.
 
 ## Snapshot Reconstruction
 
 To reconstruct the graph at time T:
 
-1. Find the newest periodic snapshot before T
+1. Find the newest periodic snapshot before T (scan partitions **backwards** from T, stop at first found — typically 1-2 partition reads)
 2. Replay only the logs between that snapshot and T
 3. Apply last-before-T value for each property
 
@@ -315,36 +389,61 @@ HomeBlaze.History.Sqlite            ← sink implementation
 | Project | Contents |
 |---|---|
 | `HomeBlaze.History.Abstractions` | `IHistoryWriter`, `IHistoryReader`, `IHistorySink`, all records/enums |
-| `HomeBlaze.History` | `HistoryService`, `HistorySinkBase`, DI extensions |
+| `HomeBlaze.History` | `HistoryService`, `HistorySinkBase`, `InMemoryHistorySink`, `ISubjectPathResolver`, DI extensions, `HistoryRecordExtensions` |
 | `HomeBlaze.History.Sqlite` | `SqliteHistorySink` |
-| `HomeBlaze.History.Tests` | HistoryService tests |
-| `HomeBlaze.History.Sqlite.Tests` | SQLite sink tests |
+| `HomeBlaze.History.Tests` | HistoryService tests + InMemoryHistorySink tests (move tracking, aggregation, snapshots, edge cases) |
+| `HomeBlaze.History.Sqlite.Tests` | SQLite-specific tests (partitioning, schema, retention) |
 | `HomeBlaze.AI` (existing) | MCP tools (`get_property_history`, `get_snapshot`, `get_snapshots`) — depends only on Abstractions |
 
+Note: `StateAttributePathProvider` is moved from `HomeBlaze.AI.Mcp` to `HomeBlaze.Services` — it's a general-purpose path provider used by both history and MCP tools.
+
 Later:
-| `HomeBlaze.History.TimescaleDb` | TimescaleDB sink for industrial scale |
+| `HomeBlaze.History.PostgreSql` | TimescaleDB / QuestDB sink for industrial scale |
 
 ### Scale Tiers
 
 | Sink | Subjects | Changes/sec | Dependency |
 |---|---|---|---|
+| InMemory | ~5,000 | Unlimited | None (testing + fast recent lookups) |
 | SQLite | ~5,000 | ~1,000 | Embedded, no server |
 | TimescaleDB (planned) | 50K+ | 10K+ | External PostgreSQL server |
 
-A file-based sink can be added later via `IHistorySink` if human-readable logs are needed.
+## In-Memory Sink
+
+Provides two purposes:
+
+1. **Testing** — deterministic unit tests for all edge cases (cross-partition queries, aggregation merging, snapshot reconstruction, move tracking, structural recording) without file system dependencies.
+2. **Fast recent lookups** — last N minutes in memory for instant MCP tool queries.
+
+```csharp
+[InterceptorSubject]
+public partial class InMemoryHistorySink : HistorySinkBase
+{
+    private readonly List<ResolvedHistoryRecord> _records = new();
+    private readonly List<MoveRecord> _moves = new();
+    private readonly List<HistorySnapshot> _snapshots = new();
+
+    [Configuration]
+    public partial TimeSpan MaxRetention { get; set; }  // default 10 minutes
+}
+```
+
+Time-based eviction on each write. No partitioning complexity — just store, query, and evict.
+
+Default `FlushInterval` of 1s for near-real-time availability.
 
 ## SQLite Sink Implementation
 
 ### Database Partitioning
 
-One SQLite database file per configurable time interval:
+One SQLite database file per configurable time interval, plus a separate small DB for move records:
 
 ```
 history/
   history-2026-W14.db       # week 14 (history + snapshots tables)
   history-2026-W13.db       # week 13
   history-2026-W12.db       # week 12
-  history-moves.db          # single small DB for move records (planned follow-up)
+  history-moves.db          # single small DB for move records
 ```
 
 ```csharp
@@ -368,8 +467,8 @@ CREATE TABLE history (
     PRIMARY KEY (subject_path, property_name, timestamp)
 ) WITHOUT ROWID;
 
--- Query index: property history over time range
-CREATE INDEX ix_history_time ON history (subject_path, property_name, timestamp);
+-- No secondary index needed — PRIMARY KEY on WITHOUT ROWID table IS the clustered B-tree.
+-- Queries on (subject_path, property_name, timestamp) are a single range scan.
 
 -- Periodic graph snapshots (gzipped JSON blobs)
 CREATE TABLE snapshots (
@@ -379,18 +478,28 @@ CREATE TABLE snapshots (
 );
 ```
 
-`WITHOUT ROWID` with the clustered primary key means property history queries are a single index range scan — no secondary lookup.
+Move records in separate DB:
 
-Snapshots are stored as gzipped JSON blobs — always read whole and decompressed, never partially queried. This keeps snapshot storage compact over long retention periods.
+```sql
+-- history-moves.db
+CREATE TABLE moves (
+    timestamp INTEGER NOT NULL,
+    from_path TEXT NOT NULL,
+    to_path TEXT NOT NULL,
+    PRIMARY KEY (timestamp, from_path)
+) WITHOUT ROWID;
+
+CREATE INDEX ix_moves_to ON moves (to_path, timestamp);
+```
 
 ### Write Path
 
 ```csharp
-public override async Task WriteBatchAsync(
+public override Task WriteBatchAsync(
     ReadOnlyMemory<ResolvedHistoryRecord> records)
 {
     // 1. Group records by partition (date → DB file)
-    // 2. Per partition: single transaction, batch INSERT
+    // 2. Per partition: single transaction, batch INSERT OR REPLACE
     //    SQLite WAL mode handles concurrent reads during write
     // 3. Numeric fast path: set numeric_value, leave raw_value null
     //    Complex values: serialize to raw_value JSON
@@ -402,28 +511,27 @@ Connection pooling: one open connection per active partition (typically 1-2). Co
 ### Read Path
 
 ```csharp
-public override async Task<IReadOnlyList<HistoryRecord>> QueryAsync(
+public override Task<IReadOnlyList<HistoryRecord>> QueryAsync(
     HistoryQuery query)
 {
-    // 1. Determine which partition DBs cover the time range
-    // 2. Query each, UNION results
-    // 3. If aggregation requested and SupportsNativeAggregation:
-    //    Use SQL AVG/MIN/MAX/SUM/COUNT with GROUP BY time bucket
+    // 1. If FollowMoves: resolve path chain from moves DB
+    // 2. Determine which partition DBs cover the time range
+    // 3. Query each, UNION results (scoped by path time ranges if following moves)
+    // 4. Return raw records
 }
-
-public override bool SupportsNativeAggregation => true;  // SQL does this natively
 ```
 
 ### Native Aggregation
 
-SQLite handles aggregation directly — no need for `HistoryService` fallback:
+SQLite handles aggregation directly via SQL — no in-memory row loading:
 
 ```sql
 SELECT
     (timestamp / @bucketTicks) * @bucketTicks AS bucket_start,
-    AVG(numeric_value) AS avg,
-    MIN(numeric_value) AS min_val,
-    MAX(numeric_value) AS max_val,
+    AVG(numeric_value) AS average,
+    MIN(numeric_value) AS minimum,
+    MAX(numeric_value) AS maximum,
+    SUM(numeric_value) AS sum,
     COUNT(*) AS count
 FROM history
 WHERE subject_path = @path
@@ -432,6 +540,17 @@ WHERE subject_path = @path
 GROUP BY bucket_start
 ORDER BY bucket_start;
 ```
+
+For cross-partition queries, aggregate per partition in SQL, then merge:
+- Average: weighted by count (`(sum1 + sum2) / (count1 + count2)`)
+- Minimum: min of minimums
+- Maximum: max of maximums
+- Sum: sum of sums
+- Count: sum of counts
+- First: earliest by timestamp
+- Last: latest by timestamp
+
+`SupportsNativeAggregation => true` because all aggregations run in SQL.
 
 ### Housekeeping
 
@@ -447,7 +566,7 @@ Query raw or aggregated property values over a time range.
 
 - **Input:** `subjectPath`, `propertyNames[]`, `from`, `to`, `bucketSize?`, `aggregation?`, `followMoves?`
 - **Output (raw):** `{ "records": { "Temperature": [{"t":"...","v":42.5}, ...] } }`
-- **Output (aggregated):** `{ "buckets": { "Temperature": [{"from":"...","to":"...","avg":42.5,...}] } }`
+- **Output (aggregated):** `{ "buckets": { "Temperature": [{"from":"...","to":"...","average":42.5,"minimum":40.0,...}] } }`
 
 ### get_snapshot
 
@@ -463,7 +582,7 @@ Snapshot series over a time range.
 - **Input:** `path`, `from`, `to`, `interval`
 - **Output:** `{ "snapshots": [{ "time":"...", "subjects": {...} }, ...] }`
 
-All three resolve moves transparently when `followMoves` is true (default).
+All three resolve moves transparently when `followMoves` is true.
 
 ## Future: Time-Series Database Sink
 
@@ -503,6 +622,9 @@ TimescaleDB is the recommended default — mature, PostgreSQL ecosystem, continu
 The planned `IHistoryStore` from `Data/Docs/architecture/design/history.md` is superseded by this design. Key differences:
 - Sink discovery via lifecycle events instead of DI registration
 - Sinks are subjects (configurable via JSON) instead of BackgroundServices
-- Allocation-free write path with batched flushes
+- Two-stage buffering with per-sink flush intervals
+- Separate raw and aggregated query APIs
 - Snapshot reconstruction for full graph time-travel
-- Move tracking for path-based identity continuity
+- Move tracking with path chain resolution for query-time stitching
+- In-memory sink for testing and fast recent lookups
+- Structural property changes recorded as lightweight path references
