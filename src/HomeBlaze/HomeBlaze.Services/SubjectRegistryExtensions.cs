@@ -69,13 +69,22 @@ public static partial class SubjectRegistryExtensions
     }
 
     /// <summary>
+    /// Gets the <see cref="ConfigurationMetadata"/> for a property, or null if not present.
+    /// Uses registry attribute lookup instead of reflection.
+    /// </summary>
+    public static ConfigurationMetadata? GetConfigurationMetadata(this RegisteredSubjectProperty property)
+    {
+        return property.TryGetAttribute(KnownAttributes.Configuration)?.GetValue() as ConfigurationMetadata;
+    }
+
+    /// <summary>
     /// Gets the display name for a property (from StateMetadata or camelCase split).
     /// </summary>
     public static string GetDisplayName(this RegisteredSubjectProperty property)
     {
         var metadata = property.GetStateMetadata();
-        if (!string.IsNullOrEmpty(metadata?.Name))
-            return metadata.Name;
+        if (!string.IsNullOrEmpty(metadata?.Title))
+            return metadata.Title;
 
         return SplitCamelCase(property.Name);
     }

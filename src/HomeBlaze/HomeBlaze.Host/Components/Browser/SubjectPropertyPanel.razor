@@ -1,3 +1,4 @@
+@using HomeBlaze.Abstractions.Attributes
 @using HomeBlaze.Abstractions.Metadata
 @using HomeBlaze.Host.Components.Dialogs
 @using HomeBlaze.Storage.Abstractions
@@ -5,6 +6,7 @@
 @inject IDialogService DialogService
 @inject SubjectComponentRegistry ComponentRegistry
 @inject DeveloperModeService DeveloperMode
+@inject SubjectPathResolver PathResolver
 @inject IServiceProvider ServiceProvider
 
 <TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
@@ -37,7 +39,7 @@
                            Size="Size.Small"
                            Class="mr-2" />
         }
-        @if (Subject is IStorageFile or IConfigurableSubject)
+        @if (Subject is IStorageFile or IConfigurable)
         {
             <MudIconButton OnClick="@(() => OnDelete.InvokeAsync())"
                            Icon="@Icons.Material.Filled.Delete"
@@ -91,11 +93,11 @@
         @* Child Collections *@
         @foreach (var property in GetChildProperties())
         {
-            var children = property.Children;
-            @if (children.Length == 1)
+            var children = GetVisibleChildren(property);
+            @if (children.Length == 1 && property.IsSubjectReference)
             {
                 @* Single child - no expansion panel *@
-                <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Style="padding-top: 0; padding-bottom: 0">
+                <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Class="pt-4" Style="padding-top: 0; padding-bottom: 0">
                     @{
                         var child = children[0];
                         var isSelected = child.Subject == SelectedChild;
@@ -121,7 +123,7 @@
                     <MudDivider />
                 </MudList>
             }
-            else if (children.Length > 1)
+            else if (children.Length >= 1)
             {
                 <MudExpansionPanel Gutters="false" Dense="true" Expanded="true" Class="px-4">
                     <TitleContent>
@@ -169,7 +171,7 @@
                 <ChildContent>
                     <div class="mb-4">
                         <small style="word-break: break-all;">
-                            <p class="my-1"><strong>ID:</strong> @GetObjectPath()</p>
+                            <p class="my-1"><strong>ID:</strong> @GetPath()</p>
                             <p class="my-1"><strong>Type:</strong> @Subject.GetType().FullName</p>
                         </small>
                     </div>
@@ -199,7 +201,7 @@
     public bool CanClose { get; set; }
 
     [Parameter]
-    public string? ObjectPath { get; set; }
+    public string? Path { get; set; }
 
     [Parameter]
     public EventCallback<PropertyClickEventArgs> OnPropertyClick { get; set; }
@@ -244,9 +246,14 @@
         return SubjectIconExtensions.ResolveMudBlazorColor(subject.GetIconColor());
     }
 
-    private string GetObjectPath()
+    private string GetPath()
     {
-        return ObjectPath ?? "Root";
+        if (Subject != null)
+        {
+            return PathResolver.GetPath(Subject, PathStyle.Canonical) ?? Path ?? "/";
+        }
+
+        return Path ?? "/";
     }
 
     private IEnumerable<RegisteredSubjectProperty> GetPrimitiveProperties()
@@ -255,7 +262,8 @@
             return [];
 
         return _registeredSubject.Properties
-            .Where(p => p.GetStateMetadata() != null && !CanContainSubjects(p))
+            .Where(p => p.GetStateMetadata() != null && !p.CanContainSubjects
+                     && p.GetConfigurationMetadata()?.IsSecret != true)
             .OrderBy(p => p.GetDisplayPosition());
     }
 
@@ -265,8 +273,15 @@
             return [];
 
         return _registeredSubject.Properties
-            .Where(p => !p.IsAttribute && CanContainSubjects(p))
+            .Where(p => p is { IsAttribute: false, CanContainSubjects: true })
             .OrderBy(p => p.GetDisplayPosition());
+    }
+
+    private static SubjectPropertyChild[] GetVisibleChildren(RegisteredSubjectProperty property)
+    {
+        return property.Children
+            .Where(child => !Attribute.IsDefined(child.Subject.GetType(), typeof(ExcludeFromBrowsingAttribute), true))
+            .ToArray();
     }
 
     private void TogglePropertyExpanded(string propertyName)
@@ -319,11 +334,6 @@
         return property.GetDisplayName();
     }
 
-    private bool CanContainSubjects(RegisteredSubjectProperty property)
-    {
-        return property.CanContainSubjects;
-    }
-
     private string GetSubjectDisplayName(SubjectPropertyChild child)
     {
         var subject = child.Subject;
@@ -340,7 +350,7 @@
         if (registered == null) return 0;
 
         return registered.Properties
-            .Where(p => !p.IsAttribute && CanContainSubjects(p))
+            .Where(p => p is { IsAttribute: false, CanContainSubjects: true })
             .Sum(p => p.Children.Length);
     }
 

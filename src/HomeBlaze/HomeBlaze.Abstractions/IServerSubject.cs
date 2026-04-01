@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions;
@@ -5,7 +6,9 @@ namespace HomeBlaze.Abstractions;
 /// <summary>
 /// Interface for subjects that act as servers (OPC UA, MQTT, etc.).
 /// </summary>
-public interface IServerSubject : IHostedSubject
+[SubjectAbstraction]
+[Description("Subject that acts as a server with URL and port.")]
+public interface IServerSubject : IMonitoredService
 {
     /// <summary>
     /// The server URL (e.g., "opc.tcp://localhost:4840/").

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Networking;
@@ -5,6 +6,8 @@ namespace HomeBlaze.Abstractions.Networking;
 /// <summary>
 /// Interface for network adapters.
 /// </summary>
+[SubjectAbstraction]
+[Description("Network adapter with IP, MAC, subnet, gateway, and signal strength.")]
 public interface INetworkAdapter
 {
     /// <summary>

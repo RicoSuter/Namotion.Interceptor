@@ -36,6 +36,7 @@ Setup, deployment, and runtime configuration for operators and administrators.
 
 - [Installation](administration/installation.md) — Getting started
 - [Configuration](administration/configuration.md) — Storage, paths, and subject configuration
+- [Markdown Pages](administration/pages.md) — Interactive pages with embedded subjects
 - [Monitoring](administration/monitoring.md) — Health checks and observability
 - [Troubleshooting](administration/troubleshooting.md) — Diagnostics and common issues
 - [Upgrading](administration/upgrading.md) — Version upgrades and migration
@@ -46,7 +47,6 @@ Guides for building custom subjects, plugins, and UI components.
 
 - [Building Subjects](development/building-subjects.md) — Creating custom subject types
 - [Configurable Subjects](development/configurable-subject.md) — Subject serialization and persistence
-- [Markdown Pages](development/pages.md) — Interactive pages with embedded subjects
 - [Notifications](development/notifications.md) — Notification channel interface
 
 ### [Devices](devices/gpio.md)

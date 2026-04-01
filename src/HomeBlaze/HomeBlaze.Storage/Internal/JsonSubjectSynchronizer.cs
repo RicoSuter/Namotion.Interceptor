@@ -7,7 +7,7 @@ using Namotion.Interceptor;
 namespace HomeBlaze.Storage.Internal;
 
 /// <summary>
-/// Handles synchronization of JSON-backed IConfigurableSubject instances with storage.
+/// Handles synchronization of JSON-backed IConfigurable instances with storage.
 /// Manages hash/size comparison, retry logic, and deserialization.
 /// </summary>
 internal sealed class JsonSubjectSynchronizer
@@ -30,16 +30,16 @@ internal sealed class JsonSubjectSynchronizer
     }
 
     /// <summary>
-    /// Attempts to refresh an IConfigurableSubject from storage if the content has changed.
+    /// Attempts to refresh an IConfigurable from storage if the content has changed.
     /// </summary>
-    /// <returns>True if refresh was attempted (even if skipped due to no change), false if subject is not IConfigurableSubject.</returns>
+    /// <returns>True if refresh was attempted (even if skipped due to no change), false if subject is not IConfigurable.</returns>
     public async Task<bool> TryRefreshAsync(
         IInterceptorSubject subject,
         string relativePath,
         string fullPath,
         CancellationToken cancellationToken)
     {
-        if (subject is not IConfigurableSubject)
+        if (subject is not IConfigurable)
             return false;
 
         // Size check
@@ -93,7 +93,7 @@ internal sealed class JsonSubjectSynchronizer
             var json = await _client.ReadTextAsync(relativePath, cancellationToken: cancellationToken);
             _serializer.UpdateConfiguration(subject, json);
 
-            if (subject is IConfigurableSubject configurable)
+            if (subject is IConfigurable configurable)
             {
                 await configurable.ApplyConfigurationAsync(cancellationToken);
             }

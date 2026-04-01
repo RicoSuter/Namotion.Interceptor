@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Sensors;
@@ -5,6 +6,8 @@ namespace HomeBlaze.Abstractions.Sensors;
 /// <summary>
 /// Interface for power consumption sensors.
 /// </summary>
+[SubjectAbstraction]
+[Description("Reports power consumption in watts and total energy in watt-hours.")]
 public interface IPowerSensor
 {
     /// <summary>

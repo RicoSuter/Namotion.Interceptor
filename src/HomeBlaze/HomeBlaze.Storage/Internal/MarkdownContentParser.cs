@@ -19,8 +19,8 @@ namespace HomeBlaze.Storage.Internal;
 public sealed partial class MarkdownContentParser
 {
     // Constants for key prefixes
-    private const string HtmlKeyPrefix = "_html_";
-    private const string ExpressionKeyPrefix = "_expr_";
+    private const string HtmlKeyPrefix = "Html_";
+    private const string ExpressionKeyPrefix = "Expression_";
     private const string SubjectMarkerPrefix = "<!--SUBJECT:";
     private const string SubjectMarkerSuffix = "-->";
 
@@ -268,7 +268,7 @@ public sealed partial class MarkdownContentParser
                     {
                         // Same key + same type: update and apply config
                         _serializer.UpdateConfiguration(existing, subj.Json);
-                        if (existing is IConfigurableSubject configurable)
+                        if (existing is IConfigurable configurable)
                         {
                             await configurable.ApplyConfigurationAsync(cancellationToken);
                         }
@@ -280,7 +280,7 @@ public sealed partial class MarkdownContentParser
                         var newSubject = _serializer.Deserialize(subj.Json);
                         if (newSubject != null)
                         {
-                            // All IConfigurableSubject implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
+                            // All IConfigurable implementations are also IInterceptorSubject (via [InterceptorSubject] attribute)
                             newChildren[subj.Name] = (IInterceptorSubject)newSubject;
                         }
                     }
@@ -302,7 +302,7 @@ public sealed partial class MarkdownContentParser
             var bytesWritten = Encoding.UTF8.GetBytes(content, buffer);
             Span<byte> hashBuffer = stackalloc byte[32];
             SHA256.HashData(buffer.AsSpan(0, bytesWritten), hashBuffer);
-            return Convert.ToHexStringLower(hashBuffer.Slice(0, 8));
+            return Convert.ToHexStringLower(hashBuffer[..8]);
         }
         finally
         {

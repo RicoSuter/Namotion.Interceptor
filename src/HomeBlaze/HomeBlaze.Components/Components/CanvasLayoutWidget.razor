@@ -206,7 +206,7 @@
     {
         if (Canvas == null) return;
 
-        var confirmed = await DialogService.ShowMessageBox(
+        var confirmed = await DialogService.ShowMessageBoxAsync(
             "Delete Node",
             "Are you sure you want to delete this node?",
             yesText: "Delete",

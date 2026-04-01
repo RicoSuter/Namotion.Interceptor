@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Sensors;
@@ -5,6 +6,8 @@ namespace HomeBlaze.Abstractions.Sensors;
 /// <summary>
 /// Interface for light/illuminance sensors.
 /// </summary>
+[SubjectAbstraction]
+[Description("Reports illuminance level in lux.")]
 public interface ILightSensor
 {
     /// <summary>

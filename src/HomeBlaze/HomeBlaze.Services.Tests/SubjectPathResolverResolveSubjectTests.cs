@@ -7,228 +7,365 @@ namespace HomeBlaze.Services.Tests;
 /// </summary>
 public class SubjectPathResolverResolveSubjectTests : SubjectPathResolverTestBase
 {
+    #region Absolute paths
+
     [Fact]
-    public void ResolveSubject_EmptyPath_ReturnsRoot()
+    public void ResolveSubject_Slash_ReturnsRoot()
     {
         // Arrange
         var root = new TestContainer(Context) { Name = "Root" };
+        RootManager.Root = root;
 
         // Act
-        var result = Resolver.ResolveSubject("", PathFormat.Slash, root);
+        var result = Resolver.ResolveSubject("/", PathStyle.Canonical);
 
         // Assert
         Assert.Same(root, result);
     }
 
     [Fact]
-    public void ResolveSubject_NullPath_ReturnsRoot()
-    {
-        // Arrange
-        var root = new TestContainer(Context) { Name = "Root" };
-
-        // Act
-        var result = Resolver.ResolveSubject(null!, PathFormat.Slash, root);
-
-        // Assert
-        Assert.Same(root, result);
-    }
-
-    [Fact]
-    public void ResolveSubject_ValidPath_ReturnsSubject()
+    public void ResolveSubject_AbsoluteChild_ReturnsChild()
     {
         // Arrange
         var child = new TestContainer(Context) { Name = "Child" };
-        var root = new TestContainer(Context)
-        {
-            Name = "Root",
-            Child = child
-        };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        RootManager.Root = root;
 
         // Act
-        var result = Resolver.ResolveSubject("Child", PathFormat.Slash, root);
+        var result = Resolver.ResolveSubject("/Child", PathStyle.Canonical);
 
         // Assert
         Assert.Same(child, result);
     }
 
     [Fact]
-    public void ResolveSubject_InvalidPath_ReturnsNull()
+    public void ResolveSubject_AbsoluteNonExistent_ReturnsNull()
     {
         // Arrange
         var root = new TestContainer(Context) { Name = "Root" };
+        RootManager.Root = root;
 
         // Act
-        var result = Resolver.ResolveSubject("NonExistent", PathFormat.Slash, root);
+        var result = Resolver.ResolveSubject("/NonExistent", PathStyle.Canonical);
 
         // Assert
         Assert.Null(result);
     }
 
     [Fact]
-    public void ResolveSubject_DictionaryPath_ReturnsSubject()
+    public void ResolveSubject_AbsolutePath_IgnoresRelativeTo()
+    {
+        // Arrange
+        var child = new TestContainer(Context) { Name = "Child" };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        RootManager.Root = root;
+
+        var unrelated = new TestContainer(Context) { Name = "Unrelated" };
+
+        // Act - absolute path should ignore relativeTo
+        var result = Resolver.ResolveSubject("/Child", PathStyle.Canonical, unrelated);
+
+        // Assert
+        Assert.Same(child, result);
+    }
+
+    #endregion
+
+    #region Empty/null paths
+
+    [Fact]
+    public void ResolveSubject_EmptyPath_ReturnsRelativeTo()
+    {
+        // Arrange
+        var child = new TestContainer(Context) { Name = "Child" };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        RootManager.Root = root;
+
+        // Act
+        var result = Resolver.ResolveSubject("", PathStyle.Canonical, child);
+
+        // Assert
+        Assert.Same(child, result);
+    }
+
+    [Fact]
+    public void ResolveSubject_NullPath_ReturnsRelativeTo()
+    {
+        // Arrange
+        var child = new TestContainer(Context) { Name = "Child" };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        RootManager.Root = root;
+
+        // Act
+        var result = Resolver.ResolveSubject(null!, PathStyle.Canonical, child);
+
+        // Assert
+        Assert.Same(child, result);
+    }
+
+    [Fact]
+    public void ResolveSubject_EmptyPath_NoRelativeTo_ReturnsRoot()
+    {
+        // Arrange
+        var root = new TestContainer(Context) { Name = "Root" };
+        RootManager.Root = root;
+
+        // Act
+        var result = Resolver.ResolveSubject("", PathStyle.Canonical);
+
+        // Assert
+        Assert.Same(root, result);
+    }
+
+    #endregion
+
+    #region No-prefix (implicit relative)
+
+    [Fact]
+    public void ResolveSubject_NoPrefix_ResolvesRelativeToRelativeTo()
+    {
+        // Arrange
+        var grandchild = new TestContainer(Context) { Name = "Grandchild" };
+        var child = new TestContainer(Context) { Name = "Child", Child = grandchild };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        RootManager.Root = root;
+
+        // Act - "Child" relative to child resolves grandchild
+        var result = Resolver.ResolveSubject("Child", PathStyle.Canonical, child);
+
+        // Assert
+        Assert.Same(grandchild, result);
+    }
+
+    [Fact]
+    public void ResolveSubject_NoPrefix_NoRelativeTo_ResolvesFromRoot()
+    {
+        // Arrange
+        var child = new TestContainer(Context) { Name = "Child" };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        RootManager.Root = root;
+
+        // Act - no relativeTo falls back to root
+        var result = Resolver.ResolveSubject("Child", PathStyle.Canonical);
+
+        // Assert
+        Assert.Same(child, result);
+    }
+
+    #endregion
+
+    #region Explicit relative (./)
+
+    [Fact]
+    public void ResolveSubject_DotSlashChild_ResolvesRelative()
+    {
+        // Arrange
+        var grandchild = new TestContainer(Context) { Name = "Grandchild" };
+        var child = new TestContainer(Context) { Name = "Child", Child = grandchild };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        RootManager.Root = root;
+
+        // Act
+        var result = Resolver.ResolveSubject("./Child", PathStyle.Canonical, child);
+
+        // Assert
+        Assert.Same(grandchild, result);
+    }
+
+    [Fact]
+    public void ResolveSubject_DotSlashAlone_ReturnsSelf()
+    {
+        // Arrange
+        var child = new TestContainer(Context) { Name = "Child" };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        RootManager.Root = root;
+
+        // Act - "./" alone returns relativeTo itself
+        var result = Resolver.ResolveSubject("./", PathStyle.Canonical, child);
+
+        // Assert
+        Assert.Same(child, result);
+    }
+
+    [Fact]
+    public void ResolveSubject_DotSlashAlone_NoRelativeTo_FallsBackToRoot()
+    {
+        // Arrange
+        var root = new TestContainer(Context) { Name = "Root" };
+        RootManager.Root = root;
+
+        // Act - "./" with no relativeTo falls back to root
+        var result = Resolver.ResolveSubject("./", PathStyle.Canonical);
+
+        // Assert
+        Assert.Same(root, result);
+    }
+
+    #endregion
+
+    #region Parent navigation (../)
+
+    [Fact]
+    public void ResolveSubject_DotDotSlash_ReturnsParent()
+    {
+        // Arrange
+        var child = new TestContainer(Context) { Name = "Child" };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        RootManager.Root = root;
+
+        // Act
+        var result = Resolver.ResolveSubject("../", PathStyle.Canonical, child);
+
+        // Assert
+        Assert.Same(root, result);
+    }
+
+    [Fact]
+    public void ResolveSubject_DoubleDotDotSlash_ReturnsGrandparent()
+    {
+        // Arrange
+        var grandchild = new TestContainer(Context) { Name = "Grandchild" };
+        var child = new TestContainer(Context) { Name = "Child", Child = grandchild };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        RootManager.Root = root;
+
+        // Act - "../../" from grandchild should resolve to root
+        var result = Resolver.ResolveSubject("../../", PathStyle.Canonical, grandchild);
+
+        // Assert
+        Assert.Same(root, result);
+    }
+
+    [Fact]
+    public void ResolveSubject_DotDotSlashThenResolve_NavigatesUpThenDown()
+    {
+        // Arrange
+        var grandchild = new TestContainer(Context) { Name = "Grandchild" };
+        var child = new TestContainer(Context) { Name = "Child", Child = grandchild };
+        var root = new TestContainer(Context) { Name = "Root", Child = child };
+        RootManager.Root = root;
+
+        // Act - from grandchild, go up twice and access Child property of root
+        var result = Resolver.ResolveSubject("../../Child", PathStyle.Canonical, grandchild);
+
+        // Assert
+        Assert.Same(child, result);
+    }
+
+    [Fact]
+    public void ResolveSubject_DotDotSlash_NoParent_ReturnsNull()
+    {
+        // Arrange
+        var detached = new TestContainer(Context) { Name = "Detached" };
+
+        // Act - "../" from subject with no parent
+        var result = Resolver.ResolveSubject("../", PathStyle.Canonical, detached);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void ResolveSubject_DotDotSlash_NoRelativeTo_ReturnsNull()
+    {
+        // Act
+        var result = Resolver.ResolveSubject("../", PathStyle.Canonical);
+
+        // Assert
+        Assert.Null(result);
+    }
+
+    #endregion
+
+    #region Dictionary paths (Canonical and Route)
+
+    [Fact]
+    public void ResolveSubject_CanonicalDictionaryPath_ResolvesBracketNotation()
     {
         // Arrange
         var notes = new TestContainer(Context) { Name = "Notes" };
         var root = new TestContainer(Context) { Name = "Root" };
         root.Children["Notes"] = notes;
+        RootManager.Root = root;
 
         // Act
-        var result = Resolver.ResolveSubject("Children/Notes", PathFormat.Slash, root);
+        var result = Resolver.ResolveSubject("/Children[Notes]", PathStyle.Canonical);
 
         // Assert
         Assert.Same(notes, result);
     }
 
     [Fact]
-    public void ResolveSubject_NestedPath_ReturnsDeepChild()
+    public void ResolveSubject_RouteDictionaryPath_ResolvesSlashNotation()
+    {
+        // Arrange
+        var notes = new TestContainer(Context) { Name = "Notes" };
+        var root = new TestContainer(Context) { Name = "Root" };
+        root.Children["Notes"] = notes;
+        RootManager.Root = root;
+
+        // Act
+        var result = Resolver.ResolveSubject("/Children/Notes", PathStyle.Route);
+
+        // Assert
+        Assert.Same(notes, result);
+    }
+
+    [Fact]
+    public void ResolveSubject_CanonicalNestedDictionary_ResolvesDeepPath()
     {
         // Arrange
         var deepChild = new TestContainer(Context) { Name = "DeepChild" };
         var notes = new TestContainer(Context) { Name = "Notes", Child = deepChild };
         var root = new TestContainer(Context) { Name = "Root" };
         root.Children["Notes"] = notes;
+        RootManager.Root = root;
 
         // Act
-        var result = Resolver.ResolveSubject("Children/Notes/Child", PathFormat.Slash, root);
+        var result = Resolver.ResolveSubject("/Children[Notes]/Child", PathStyle.Canonical);
 
         // Assert
         Assert.Same(deepChild, result);
     }
 
     [Fact]
-    public void ResolveSubject_UrlEncodedPath_DecodesSegments()
+    public void ResolveSubject_UrlEncoded_DecodesSegments()
     {
         // Arrange
         var file = new TestContainer(Context) { Name = "My File.md" };
         var root = new TestContainer(Context) { Name = "Root" };
         root.Children["My File.md"] = file;
+        RootManager.Root = root;
 
         // Act
-        var result = Resolver.ResolveSubject("Children/My%20File.md", PathFormat.Slash, root);
+        var result = Resolver.ResolveSubject("/Children[My%20File.md]", PathStyle.Canonical);
 
         // Assert
         Assert.Same(file, result);
     }
 
-    [Fact]
-    public void ResolveSubject_WithRootAlone_ReturnsRootSubject()
-    {
-        // Arrange
-        var child = new TestContainer(Context) { Name = "Child" };
-        var root = new TestContainer(Context)
-        {
-            Name = "Root",
-            Child = child
-        };
+    #endregion
 
-        RootManager.Root = root;
-
-        // Act - "Root" should return the root subject
-        var result = Resolver.ResolveSubject("Root");
-
-        // Assert
-        Assert.Same(root, result);
-    }
+    #region InlinePaths resolution
 
     [Fact]
-    public void ResolveSubject_WithRootDotPrefix_ResolvesFromRoot()
-    {
-        // Arrange
-        var child = new TestContainer(Context) { Name = "Child" };
-        var root = new TestContainer(Context)
-        {
-            Name = "Root",
-            Child = child
-        };
-
-        RootManager.Root = root;
-
-        // Act - "Root.Child" should resolve to the child
-        var result = Resolver.ResolveSubject("Root.Child");
-
-        // Assert
-        Assert.Same(child, result);
-    }
-
-    [Fact]
-    public void ResolveSubject_WithRootDotPrefix_CaseSensitive_LowercaseDoesNotMatch()
-    {
-        // Arrange
-        var child = new TestContainer(Context) { Name = "Child" };
-        var root = new TestContainer(Context)
-        {
-            Name = "Root",
-            Child = child
-        };
-
-        RootManager.Root = root;
-
-        // Act - "root" (lowercase) should not match, returns null
-        var result = Resolver.ResolveSubject("root");
-
-        // Assert
-        Assert.Null(result);
-    }
-
-    [Fact]
-    public void ResolveSubject_WithRootDotPrefix_CaseSensitive_LowercasePrefixDoesNotMatch()
-    {
-        // Arrange
-        var child = new TestContainer(Context) { Name = "Child" };
-        var root = new TestContainer(Context)
-        {
-            Name = "Root",
-            Child = child
-        };
-
-        RootManager.Root = root;
-
-        // Act - "root.Child" (lowercase) should not match
-        var result = Resolver.ResolveSubject("root.Child");
-
-        // Assert
-        Assert.Null(result);
-    }
-
-    [Fact]
-    public void ResolveSubject_WithThisRootPropertyPath_ResolvesCorrectly()
-    {
-        // Arrange - if a subject has a property/child named "Root",
-        // the user can access it via "this.Root" to disambiguate
-        // (though TestContainer doesn't have a "Root" property, this tests the pattern)
-        var child = new TestContainer(Context) { Name = "Child" };
-        var root = new TestContainer(Context)
-        {
-            Name = "Root",
-            Child = child
-        };
-
-        RootManager.Root = root;
-
-        // Act - resolve child relative to root, accessing Child property
-        var result = Resolver.ResolveSubject("Child", root: root);
-
-        // Assert
-        Assert.Same(child, result);
-    }
-
-    [Fact]
-    public void ResolveSubject_WithInlinePathsAttribute_ResolvesWithoutPropertyName()
+    public void ResolveSubject_InlinePaths_ResolvesWithoutPropertyName()
     {
         // Arrange
         var notes = new TestContainerWithChildren(Context) { Name = "Notes" };
         var root = new TestContainerWithChildren(Context) { Name = "Root" };
         root.Children["Notes"] = notes;
+        RootManager.Root = root;
 
-        // Act - "Notes" should resolve via [InlinePaths] property without "Children/" prefix
-        var result = Resolver.ResolveSubject("Notes", PathFormat.Slash, root);
+        // Act - "/Notes" should resolve via [InlinePaths] without needing "Children/" prefix
+        var result = Resolver.ResolveSubject("/Notes", PathStyle.Canonical);
 
         // Assert
         Assert.Same(notes, result);
     }
 
     [Fact]
-    public void ResolveSubject_WithInlinePathsAttribute_ResolvesNestedPath()
+    public void ResolveSubject_InlinePaths_Nested_ResolvesDeepPath()
     {
         // Arrange
         var page = new TestContainerWithChildren(Context) { Name = "Page" };
@@ -236,43 +373,33 @@ public class SubjectPathResolverResolveSubjectTests : SubjectPathResolverTestBas
         folder.Children["Page"] = page;
         var root = new TestContainerWithChildren(Context) { Name = "Root" };
         root.Children["Folder"] = folder;
+        RootManager.Root = root;
 
-        // Act - "Folder/Page" should resolve through nested [InlinePaths]
-        var result = Resolver.ResolveSubject("Folder/Page", PathFormat.Slash, root);
+        // Act - "/Folder/Page" should resolve through nested [InlinePaths]
+        var result = Resolver.ResolveSubject("/Folder/Page", PathStyle.Canonical);
 
         // Assert
         Assert.Same(page, result);
     }
 
     [Fact]
-    public void ResolveSubject_WithInlinePathsAttribute_PropertyTakesPrecedenceOverChildKey()
+    public void ResolveSubject_InlinePaths_PropertyTakesPrecedenceOverKey()
     {
         // Arrange
         var childProperty = new TestContainerWithChildren(Context) { Name = "ChildProperty" };
-        var childInDictionary = new TestContainerWithChildren(Context) { Name = "ChildInDictionary" };
+        var childInDict = new TestContainerWithChildren(Context) { Name = "ChildInDictionary" };
         var root = new TestContainerWithChildren(Context) { Name = "Root" };
         root.Child = childProperty;
-        root.Children["Child"] = childInDictionary; // Same name as property
+        root.Children["Child"] = childInDict; // Same name as the Child property
 
-        // Act - "Child" should resolve to the property, not the dictionary entry
-        var result = Resolver.ResolveSubject("Child", PathFormat.Slash, root);
+        RootManager.Root = root;
+
+        // Act - "/Child" should resolve to the property, not the dictionary entry
+        var result = Resolver.ResolveSubject("/Child", PathStyle.Canonical);
 
         // Assert - Property takes precedence
         Assert.Same(childProperty, result);
     }
 
-    [Fact]
-    public void ResolveSubject_WithInlinePathsAttribute_ExplicitBracketSyntaxStillWorks()
-    {
-        // Arrange
-        var notes = new TestContainerWithChildren(Context) { Name = "Notes" };
-        var root = new TestContainerWithChildren(Context) { Name = "Root" };
-        root.Children["Notes"] = notes;
-
-        // Act - Explicit "Children[Notes]" should still work
-        var result = Resolver.ResolveSubject("Children[Notes]", PathFormat.Bracket, root);
-
-        // Assert
-        Assert.Same(notes, result);
-    }
+    #endregion
 }

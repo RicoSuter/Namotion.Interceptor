@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Inputs;
@@ -5,6 +6,8 @@ namespace HomeBlaze.Abstractions.Inputs;
 /// <summary>
 /// Interface for devices with selectable activities.
 /// </summary>
+[SubjectAbstraction]
+[Description("Device with selectable activities (e.g., TV input, scene).")]
 public interface IActivityDevice
 {
     /// <summary>
