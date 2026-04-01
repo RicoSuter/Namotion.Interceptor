@@ -1,5 +1,3 @@
-using System.Collections.Concurrent;
-using System.Text.RegularExpressions;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Metadata;
 using Namotion.Interceptor;
@@ -12,11 +10,8 @@ namespace HomeBlaze.Services;
 /// HomeBlaze-specific extension methods for the interceptor registry.
 /// Uses registry attribute queries instead of .NET reflection for better performance.
 /// </summary>
-public static partial class SubjectRegistryExtensions
+public static class SubjectRegistryExtensions
 {
-    private static readonly ConcurrentDictionary<string, string>
-        CamelCaseCache = new();
-
     /// <summary>
     /// Gets all properties marked with [Configuration] attribute.
     /// </summary>
@@ -83,10 +78,11 @@ public static partial class SubjectRegistryExtensions
     public static string GetDisplayName(this RegisteredSubjectProperty property)
     {
         var metadata = property.GetStateMetadata();
+
         if (!string.IsNullOrEmpty(metadata?.Title))
             return metadata.Title;
 
-        return SplitCamelCase(property.Name);
+        return property.Name;
     }
 
     /// <summary>
@@ -112,13 +108,5 @@ public static partial class SubjectRegistryExtensions
                 return true;
         }
         return false;
-    }
-
-    [GeneratedRegex("([a-z])([A-Z])")]
-    private static partial Regex CamelCaseRegex();
-
-    private static string SplitCamelCase(string input)
-    {
-        return CamelCaseCache.GetOrAdd(input, s => CamelCaseRegex().Replace(s, "$1 $2"));
     }
 }

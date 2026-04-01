@@ -20,7 +20,7 @@ public static class McpBuilderExtensions
     /// </summary>
     public static IMcpServerBuilder WithHomeBlazeMcpTools(
         this IMcpServerBuilder builder,
-        bool isReadOnly = false)
+        bool isReadOnly = true)
     {
         return builder.WithSubjectRegistryTools(
             sp => sp.GetRequiredService<RootManager>().Root!,
