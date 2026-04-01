@@ -35,8 +35,11 @@ public class DynamicSubject : IInterceptorSubject
 
     public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
     {
-        _properties = _properties
-            .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
-            .ToFrozenDictionary();
+        lock (((IInterceptorSubject)this).SyncRoot)
+        {
+            _properties = _properties
+                .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+                .ToFrozenDictionary();
+        }
     }
 }

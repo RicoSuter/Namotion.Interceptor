@@ -152,9 +152,12 @@ internal static class SubjectCodeGenerator
 
                     void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
                     {
-                        _properties = (_properties ?? DefaultProperties)
-                            .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
-                            .ToFrozenDictionary();
+                        lock (((IInterceptorSubject)this).SyncRoot)
+                        {
+                            _properties = (_properties ?? DefaultProperties)
+                                .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+                                .ToFrozenDictionary();
+                        }
                     }
 
 
