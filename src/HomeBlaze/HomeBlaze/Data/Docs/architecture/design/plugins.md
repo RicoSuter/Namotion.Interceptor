@@ -6,100 +6,171 @@ status: Implemented
 
 # Plugin System Design
 
-## Overview
-
 Everything in HomeBlaze is a subject, and a plugin is simply a NuGet package that provides subject types. Connectors, agents, document stores, device subjects, UI components, and business logic are all delivered as plugins.
 
-## What a Plugin Provides [Implemented]
+## What a Plugin Provides
 
 One or more `[InterceptorSubject]` classes. That is the only contract.
 
-| Role | Example |
-|------|---------|
-| Device connector | An OPC UA client subject with `[SourcePath]` properties |
-| Protocol server | An MQTT or OPC UA server subject exposing the graph |
-| AI agent | A `BackgroundService` subject with LLM integration |
-| Document store | A storage subject managing files |
-| Dashboard | A subject with `[SubjectEditor(typeof(...))]` for custom Blazor UI |
-| Business logic | A subject with `[Operation]` methods and `[Derived]` properties |
-| Domain model | A domain-specific subject (Press, Motor, Thermostat) |
+| Role             | Example                                                            |
+|------------------|--------------------------------------------------------------------|
+| Device connector | An OPC UA client subject with `[SourcePath]` properties            |
+| Protocol server  | An MQTT or OPC UA server subject exposing the graph                |
+| AI agent         | A `BackgroundService` subject with LLM integration                 |
+| Document store   | A storage subject managing files                                   |
+| Dashboard        | A subject with `[SubjectEditor(typeof(...))]` for custom Blazor UI |
+| Business logic   | A subject with `[Operation]` methods and `[Derived]` properties    |
+| Domain model     | A domain-specific subject (Press, Motor, Thermostat)               |
 
-## UI Association [Implemented]
+Plugins can also include Blazor UI components (widgets, editors, setup forms) associated with their subjects via `[SubjectComponent]` attributes.
 
-Plugins can associate custom Blazor UI components with their subjects:
+## Plugin Loading Modes
 
-```csharp
-[InterceptorSubject]
-[SubjectEditor(typeof(PressEditor))]
-public partial class Press
-{
-    public partial decimal Temperature { get; set; }
-    public partial decimal Speed { get; set; }
-}
-```
+### Build-time (compiled in)
 
-## Plugin Loading
+Core plugins are standard NuGet `<PackageReference>` entries. Their assemblies are part of the host application and loaded into the default `AssemblyLoadContext`.
 
-### Build-time (compiled in) [Implemented]
+### Runtime (dynamic)
 
-Core plugins are standard NuGet package references:
+Additional plugins are resolved and loaded at startup using the standalone `Namotion.NuGet.Plugins` library. This library is general-purpose with no HomeBlaze dependency. See its [README](../../../../Namotion.NuGet.Plugins/README.md) for full API documentation, usage examples, and configuration reference.
 
-```xml
-<ItemGroup>
-  <PackageReference Include="Namotion.Interceptor.Mqtt" Version="..." />
-  <PackageReference Include="Namotion.Interceptor.OpcUa" Version="..." />
-  <PackageReference Include="HomeBlaze.Philips.Hue" Version="..." />
-</ItemGroup>
-```
+The runtime loader handles:
+- Transitive dependency resolution via NuGet API
+- Dependency classification (host vs plugin-private)
+- Semantic version compatibility validation
+- Per-plugin-group `AssemblyLoadContext` isolation
+- Local `.nupkg` file loading
 
-### Runtime (dynamic) [Planned]
+## HomeBlaze-Specific Architecture
 
-Additional plugins specified in configuration as NuGet packages, resolved and loaded at startup:
+### Configuration (`Data/Plugins.json`)
+
+Plugin configuration lives in `Data/Plugins.json` relative to the application directory. The path can be overridden via the `PluginConfigPath` setting in `appsettings.json`.
+
+Because `Plugins.json` is also a subject configuration file, it includes a `$type` discriminator so the subject system can deserialize it as a `PluginManager`:
 
 ```json
 {
-  "Plugins": {
-    "Feeds": [
-      "https://api.nuget.org/v3/index.json",
-      "https://my-company.pkgs.visualstudio.com/nuget/v3/index.json"
-    ],
-    "Packages": [
-      { "id": "HomeBlaze.Zigbee", "version": "1.2.0" },
-      { "id": "MyCompany.PlantFloor", "version": "3.0.1" }
-    ]
-  }
+  "$type": "HomeBlaze.Plugins.PluginManager",
+  "feeds": [
+    { "name": "nuget.org", "url": "https://api.nuget.org/v3/index.json" }
+  ],
+  "hostPackages": [
+    "HomeBlaze.*.Abstractions",
+    "Namotion.Devices.*.Abstractions"
+  ],
+  "plugins": [
+    { "packageName": "Namotion.Devices.Gpio.HomeBlaze", "version": "0.1.0" },
+    { "packageName": "MyLocalPlugin", "path": "plugins/MyLocalPlugin.1.0.0.nupkg" }
+  ]
 }
 ```
 
-On startup: resolve packages from feeds, download to local cache, load assemblies, scan for `[InterceptorSubject]` types, register with subject type registry, and make available for instantiation.
+| Field | Purpose |
+|-------|---------|
+| `$type` | Subject type discriminator for `PluginManager` |
+| `feeds` | NuGet package sources, tried in order |
+| `hostPackages` | Glob patterns for shared contract assemblies loaded into the default context |
+| `plugins` | Plugin packages to load (by name/version from feeds, or local `.nupkg` path) |
 
-### Bootstrap Ordering [Planned]
+### Subject Model
 
-Plugin loading must happen before configuration is loaded, because configuration references subject types from plugins. The bootstrap sequence is:
+The plugin system uses two subjects in the `HomeBlaze.Plugins` namespace:
 
-1. Plugin resolution and assembly loading (core DI service, not a subject)
-2. Subject type registration from all loaded assemblies
-3. Configuration loaded, subjects instantiated from config
-4. Connectors activate, state flows
+**PluginManager** -- owns plugin configuration and runtime state. Implements `IConfigurable` so it can be deserialized from `Plugins.json` via the `$type` discriminator. Its `[Configuration]` properties (`Plugins`, `Feeds`, `HostPackages`) are persisted. Its `[State]` property `LoadedPlugins` is a `Dictionary<string, PluginInfo>` keyed by package name, populated at startup from `PluginLoaderService`.
 
-The plugin loading mechanism itself needs its own detailed design — it is a core DI service rather than a subject, as it must bootstrap before the subject infrastructure is available.
+**PluginInfo** (in `HomeBlaze.Plugins.Models`) -- represents a loaded plugin. Has `[State]` properties (`Name`, `Version`, `AssemblyCount`, `Status`), a `[Derived]` title, and an `[Operation]` to remove the plugin. Holds a reference to its parent `PluginManager`.
 
-## Same Binary, Different Config [Implemented]
+DTOs (`PluginConfigEntry`, `PluginFeedEntry`) also live in the `Models` namespace.
 
-The HomeBlaze binary ships with all core plugins compiled in. Each deployment's configuration determines which additional packages to load, which subjects to instantiate, which connectors to activate, whether the UI is enabled, and the node's role in the topology.
+### Assembly Isolation
+
+Each plugin package and its private dependencies are loaded into a dedicated `AssemblyLoadContext`. Assemblies classified as "host" (from the host's `deps.json` or matching `hostPackages` patterns) are loaded into the default context so that types are shared between host and all plugins.
+
+```mermaid
+graph TD
+    subgraph "Default AssemblyLoadContext"
+        HOST["Host assemblies<br/>(HomeBlaze, Namotion.Interceptor, ...)"]
+        ABS["Host packages from patterns<br/>(HomeBlaze.*.Abstractions,<br/>Namotion.Devices.*.Abstractions)"]
+    end
+
+    subgraph "Plugin Group: Gpio.HomeBlaze"
+        GPIO["Namotion.Devices.Gpio.HomeBlaze"]
+        GPIOLIB["Namotion.Devices.Gpio<br/>(private dependency)"]
+    end
+
+    subgraph "Plugin Group: Hue.HomeBlaze"
+        HUE["Namotion.Devices.Hue.HomeBlaze"]
+        HUELIB["Namotion.Devices.Hue<br/>(private dependency)"]
+    end
+
+    GPIO -->|"fallback"| HOST
+    GPIO -->|"fallback"| ABS
+    HUE -->|"fallback"| HOST
+    HUE -->|"fallback"| ABS
+    GPIOLIB --> GPIO
+    HUELIB --> HUE
+```
+
+This model ensures that when a plugin implements a host-defined interface (e.g., `ITemperatureSensor`), the type identity is shared. Plugin-private dependencies are fully isolated -- different plugins can use different versions of the same library without conflict.
+
+### Bootstrap Sequence
+
+Plugin loading happens before the subject system starts, because configuration deserialization references subject types from plugins.
+
+```mermaid
+sequenceDiagram
+    participant App as HomeBlaze Startup
+    participant DI as DI Container
+    participant PLS as PluginLoaderService
+    participant TP as TypeProvider
+    participant RM as RootManager
+
+    App->>DI: Build service provider<br/>(TypeProvider, SubjectTypeRegistry as singletons)
+    Note over App: Early-read Data/Plugins.json<br/>from data directory
+    App->>PLS: Load plugins from Data/Plugins.json
+    PLS->>PLS: NuGetPluginLoader.LoadPluginsAsync()
+    PLS-->>PLS: Resolve, classify, validate, download, load
+    App->>TP: TypeProvider.AddAssembly(PluginManager assembly)
+    loop For each loaded plugin group
+        PLS->>TP: TypeProvider.AddAssembly(assembly)
+    end
+    Note over TP: Subject types from plugins<br/>now discoverable
+    App->>RM: Start RootManager
+    RM->>RM: Deserialize root.json and Plugins.json<br/>using SubjectTypeRegistry<br/>(includes plugin types)
+    RM->>RM: Instantiate subjects from config<br/>(PluginManager reads results from PluginLoaderService)
+    Note over RM: Connectors activate, state flows
+```
+
+The key ordering constraints:
+1. **Build DI** -- `TypeProvider`, `SubjectTypeRegistry`, and `PluginLoaderService` are registered as singletons
+2. **Load plugins** -- `PluginLoaderService` resolves, downloads, and loads plugins after `app.Build()` but before hosted services start
+3. **Register types** -- Plugin assemblies are fed to `TypeProvider` so `SubjectTypeRegistry` discovers their `[InterceptorSubject]` types
+4. **Deserialize config** -- `RootManager` deserializes `root.json` and `Plugins.json` using the now-complete type registry. `PluginManager` reads already-loaded results from `PluginLoaderService`
+
+### PluginLoaderService
+
+`PluginLoaderService` is a core DI service (not a subject) that bridges `Namotion.NuGet.Plugins` and HomeBlaze. It reads `Data/Plugins.json` via `PluginConfiguration.LoadFrom()`, initializes `HostDependencyResolver.FromDepsJson()` to detect host assemblies, passes `hostPackages` patterns from the JSON config to the loader, and exposes the `NuGetPluginLoader` instance so `PluginManager` can read loaded plugin state at deserialization time.
+
+### Sample Plugin
+
+`HomeBlaze.SamplePlugin` is a reference implementation demonstrating how to build a plugin package. It is a single Razor SDK project that produces a `.nupkg` on build via `GeneratePackageOnBuild`. The sample includes a device subject, a widget component, and an edit component with dirty tracking and validation events. The default `Data/Plugins.json` loads it from a local `.nupkg` path.
+
+### Plugin Updates
+
+Plugins support unload and reload but not hot-reload. In practice, HomeBlaze restarts to pick up plugin changes. The update cycle is: unload the plugin group, update the version in `Plugins.json`, reload via `LoadPluginsAsync`.
 
 ## Key Decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Plugin contract | Subject types only | Everything is a subject. No separate plugin interfaces for connectors, agents, UI |
+| Plugin contract | Subject types only | Everything is a subject -- no separate plugin interfaces |
 | Distribution | NuGet packages | Standard .NET ecosystem, versioning, feeds |
 | Loading modes | Build-time + runtime | Core compiled in, extensibility via dynamic loading |
-| Bootstrap | Core DI service, not a subject | Must load before subject infrastructure is available |
-
-## Open Questions
-
-- Runtime plugin loader detailed design (NuGet resolution, assembly loading, error handling)
-- Plugin update mechanism (hot reload vs. restart required)
-- Plugin dependency resolution (what if two plugins need different versions of a shared dependency)
-- **Assembly isolation strategy** — Loading all plugins into the default `AssemblyLoadContext` is simplest but means two plugins with conflicting transitive dependencies (e.g., different versions of the same library) crash the host. Using isolated `AssemblyLoadContext` per plugin solves conflicts but introduces type identity problems: if plugin A and plugin B each load their own copy of `HomeBlaze.Abstractions`, their interfaces are incompatible types — casting fails, registry can't discover them. The standard workaround is loading shared abstractions in the default context while isolating plugin-specific dependencies, but this requires a well-defined boundary of "shared" packages and still doesn't cover all conflict scenarios. This is a fundamental design decision for the runtime loader
+| Bootstrap | DI service + subject | `PluginLoaderService` loads before subjects; `PluginManager` reflects state after deserialization |
+| Configuration | `Data/Plugins.json` with `$type` | Subject config file co-located with other data files |
+| Assembly isolation | Per-plugin-group `AssemblyLoadContext` | Isolates plugins while sharing host types via default context |
+| Dependency resolution | Eager transitive with validation | Full dependency tree resolved before loading, semver validated |
+| Version conflicts | Fail-fast for host conflicts | Inconsistent default context is unsafe; plugin failures are isolated |
+| Runtime loader | `Namotion.NuGet.Plugins` (standalone) | General-purpose, no HomeBlaze dependency |
+| Plugin updates | Restart (no hot-reload) | Simplifies lifecycle |

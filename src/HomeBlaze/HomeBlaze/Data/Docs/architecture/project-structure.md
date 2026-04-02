@@ -65,6 +65,8 @@ Storage.Abs.   Components.Abs.   Abstractions
 | `HomeBlaze.Components` | Microsoft.NET.Sdk.Razor | Shared UI components (no MudBlazor) |
 | `HomeBlaze.Storage.Blazor` | Microsoft.NET.Sdk.Razor | Storage UI (Monaco editor, icons) |
 | `HomeBlaze.Host` | Microsoft.NET.Sdk.Razor | Blazor application host (MudBlazor) |
+| `HomeBlaze.Plugins` | Microsoft.NET.Sdk | Runtime NuGet plugin loading integration |
+| `HomeBlaze.SamplePlugin` | Microsoft.NET.Sdk.Razor | Sample plugin package (produces .nupkg on build) |
 | `HomeBlaze` | Microsoft.NET.Sdk.Web | Minimal host (Program.cs only) |
 
 ## Test Projects
@@ -237,6 +239,37 @@ Storage.Abs.   Components.Abs.   Abstractions
 
 ---
 
+### HomeBlaze.Plugins
+
+**Purpose**: Runtime NuGet plugin loading integration.
+
+**Features**:
+- **PluginManager**: `[InterceptorSubject]` owning plugin configuration (`Plugins`, `Feeds`, `HostPackages`) and runtime state (`LoadedPlugins`)
+- **PluginLoaderService**: Core DI service wrapping `NuGetPluginLoader`, reads `Data/Plugins.json` at startup
+- **PluginInfo**: `[InterceptorSubject]` representing each loaded plugin with `[Derived] Title` and `[Operation] RemovePlugin`
+- **Models**: `PluginConfigEntry`, `PluginFeedEntry` DTOs in `HomeBlaze.Plugins.Models` namespace
+
+**Dependencies**: `Namotion.Interceptor`, `Namotion.NuGet.Plugins`, `HomeBlaze.Abstractions`
+
+**Use when**: Adding runtime NuGet plugin support to a HomeBlaze application.
+
+---
+
+### HomeBlaze.SamplePlugin
+
+**Purpose**: Reference implementation for a plugin package.
+
+**Features**:
+- **SampleDevice**: `[InterceptorSubject]` with `[Configuration]` and `[State]` properties
+- **Blazor UI**: Widget and edit components (`SampleDeviceWidget.razor`, `SampleDeviceEditComponent.razor`)
+- **Packaged**: Produces `HomeBlaze.SamplePlugin.1.0.0.nupkg` on build
+
+**Dependencies**: `HomeBlaze.Abstractions`, `HomeBlaze.Components.Abstractions`, `MudBlazor`
+
+**Use when**: As a template for building new plugin packages.
+
+---
+
 ### HomeBlaze (Host)
 
 **Purpose**: Minimal web host composing all modules.
@@ -263,6 +296,9 @@ services.AddHomeBlazeHostServices();
 
 // HomeBlaze.Host - Full Blazor host (also calls AddHomeBlazeHostServices)
 services.AddHomeBlazeHost();
+
+// HomeBlaze.Plugins - Runtime NuGet plugin loading
+services.AddHomeBlazePlugins(pluginConfigPath);
 ```
 
 | Method | Services |
@@ -270,6 +306,7 @@ services.AddHomeBlazeHost();
 | `AddHomeBlazeServices()` | `TypeProvider`, `SubjectTypeRegistry`, `ConfigurableSubjectSerializer`, `SubjectPathResolver`, `RootManager` |
 | `AddHomeBlazeHostServices()` | `SubjectComponentRegistry`, `NavigationItemResolver`, `DeveloperModeService` |
 | `AddHomeBlazeHost()` | MudBlazor services + all above |
+| `AddHomeBlazePlugins(path)` | `PluginLoaderService` (reads `Data/Plugins.json`, loads NuGet plugins at startup) |
 
 ---
 

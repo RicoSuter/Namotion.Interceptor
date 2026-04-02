@@ -37,6 +37,7 @@
     <Project Path="HomeBlaze/HomeBlaze.Components/HomeBlaze.Components.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Host.Services/HomeBlaze.Host.Services.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Host/HomeBlaze.Host.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Plugins/HomeBlaze.Plugins.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Samples/HomeBlaze.Samples.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Servers.OpcUa/HomeBlaze.Servers.OpcUa.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Servers.OpcUa.Blazor/HomeBlaze.Servers.OpcUa.Blazor.csproj" />
@@ -64,6 +65,13 @@
     <Project Path="HomeBlaze/Namotion.Devices.Shelly.Tests/Namotion.Devices.Shelly.Tests.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Shelly.HomeBlaze/Namotion.Devices.Shelly.HomeBlaze.csproj" />
   </Folder>
+  <Folder Name="/HomeBlaze/NuGet/">
+    <Project Path="HomeBlaze/Namotion.NuGet.Plugins.Tests/Namotion.NuGet.Plugins.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.NuGet.Plugins/Namotion.NuGet.Plugins.csproj" />
+  </Folder>
+  <Folder Name="/HomeBlaze/Plugins/">
+    <Project Path="HomeBlaze/HomeBlaze.SamplePlugin/HomeBlaze.SamplePlugin.csproj" />
+  </Folder>
   <Folder Name="/HomeBlaze/Tests/">
     <Project Path="HomeBlaze/HomeBlaze.AI.Tests/HomeBlaze.AI.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.E2E.Tests/HomeBlaze.E2E.Tests.csproj" />
@@ -71,6 +79,7 @@
     <Project Path="HomeBlaze/HomeBlaze.Services.Tests/HomeBlaze.Services.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Blazor.Tests/HomeBlaze.Storage.Blazor.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Tests/HomeBlaze.Storage.Tests.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Plugins.Tests/HomeBlaze.Plugins.Tests.csproj" />
   </Folder>
   <Folder Name="/Samples/">
     <Project Path="Namotion.Interceptor.ConnectorTester/Namotion.Interceptor.ConnectorTester.csproj" />

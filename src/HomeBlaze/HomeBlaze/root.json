@@ -2,5 +2,6 @@
   "$type": "HomeBlaze.Storage.FluentStorageContainer",
   "storageType": "disk",
   "connectionString": "./Data",
+  "connectionString2": "/Users/ricosuter/HomeBlaze",
   "enableFileWatching": true
 }

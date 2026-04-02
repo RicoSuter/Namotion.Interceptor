@@ -1,0 +1,12 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SampleDevice))]
+@implements ISubjectComponent
+
+<MudText Typo="Typo.body1">@Device?.Name</MudText>
+<MudText Typo="Typo.body2">Temperature: @Device?.Temperature °C</MudText>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private SampleDevice? Device => Subject as SampleDevice;
+}
