@@ -1,0 +1,49 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(SampleDevice))]
+@implements ISubjectEditComponent
+
+<MudTextField Value="_name" ValueChanged="OnNameChanged" Label="Name" T="string" />
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(_name);
+    public bool IsDirty => _name != _originalName;
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    private SampleDevice? Device => Subject as SampleDevice;
+    private string _name = "";
+    private string _originalName = "";
+
+    protected override void OnInitialized()
+    {
+        if (Device != null)
+        {
+            _name = Device.Name;
+            _originalName = Device.Name;
+        }
+    }
+
+    private void OnNameChanged(string value)
+    {
+        var wasValid = IsValid;
+        var wasDirty = IsDirty;
+        _name = value;
+        if (IsValid != wasValid) IsValidChanged?.Invoke(IsValid);
+        if (IsDirty != wasDirty) IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Device != null)
+        {
+            Device.Name = _name;
+        }
+        _originalName = _name;
+        return Task.CompletedTask;
+    }
+}

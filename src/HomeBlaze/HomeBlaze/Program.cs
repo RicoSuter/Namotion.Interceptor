@@ -4,6 +4,7 @@ using HomeBlaze.Host;
 using HomeBlaze.Samples;
 using HomeBlaze.Servers.OpcUa;
 using HomeBlaze.Servers.OpcUa.Blazor;
+using HomeBlaze.Plugins;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Blazor;
@@ -24,6 +25,10 @@ var builder = WebApplication.CreateBuilder(args);
 // This registers the singleton IInterceptorSubjectContext with HostedServiceHandler
 builder.Services.AddHomeBlazeHost();
 builder.Services.AddHomeBlazeStorage();
+
+var pluginConfigPath = builder.Configuration.GetValue<string>("PluginConfigPath")
+    ?? Path.Combine(AppContext.BaseDirectory, "Data", "Plugins.json");
+builder.Services.AddHomeBlazePlugins(pluginConfigPath);
 builder.Services.AddHotKeys2();
 
 // Optionally add the MCP subject server (default: false, enabled in Development)
@@ -62,6 +67,23 @@ typeProvider
     .AddAssembly(typeof(MyStromSwitchWidget).Assembly)
     .AddAssembly(typeof(ShellyDevice).Assembly)
     .AddAssembly(typeof(ShellyDeviceWidget).Assembly);
+
+// Register HomeBlaze.Plugins subject types
+typeProvider.AddAssembly(typeof(PluginManager).Assembly);
+
+// Load runtime plugins
+var pluginLoaderService = app.Services.GetRequiredService<PluginLoaderService>();
+var pluginResult = await pluginLoaderService.LoadPluginsAsync(CancellationToken.None);
+if (pluginResult != null)
+{
+    foreach (var group in pluginResult.LoadedPlugins)
+    {
+        foreach (var assembly in group.Assemblies)
+        {
+            typeProvider.AddAssembly(assembly);
+        }
+    }
+}
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
