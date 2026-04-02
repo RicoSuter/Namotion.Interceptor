@@ -292,10 +292,19 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             // Atomically clear IsRecalculating. If a write set RecalculationNeeded
             // in the gap between the outer loop's return-check and this finally,
             // we must re-trigger so the derived property reflects the latest state.
+            // RecalculationNeeded is cleared before the re-trigger to prevent unbounded
+            // recursion when the getter consistently throws: without clearing, the flag
+            // persists (Phase 3 never runs to clear it), causing each re-trigger's
+            // finally to re-trigger again indefinitely.
             bool needsRetrigger;
             lock (data)
             {
                 needsRetrigger = data is { RecalculationNeeded: true, IsAttached: true };
+                if (needsRetrigger)
+                {
+                    data.RecalculationNeeded = false;
+                }
+
                 data.IsRecalculating = false;
             }
 

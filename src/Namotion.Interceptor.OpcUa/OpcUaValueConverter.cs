@@ -15,6 +15,11 @@ public class OpcUaValueConverter
             return null;
         }
 
+        if (nodeValue is Uuid uuid)
+        {
+            return (Guid)uuid;
+        }
+
         var propertyType = property.Type;
         var targetType = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
         if (targetType == typeof(decimal))
@@ -53,6 +58,11 @@ public class OpcUaValueConverter
     {
         var propertyType = property.Type;
         var type = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
+        if (type == typeof(Guid))
+        {
+            return propertyValue is Guid guid ? (Uuid)guid : (Uuid)Guid.Empty;
+        }
+
         if (type == typeof(decimal))
         {
             return propertyValue is decimal dv ? (double)dv : propertyValue;
