@@ -167,14 +167,14 @@ public class OpcUaDataTypesTests : SharedServerTestBase
             timeout: TimeSpan.FromSeconds(90),
             message: $"Server should receive client's nullable Guid update. Expected: {testGuid}, Actual: {serverArea.NullableGuidValue}");
 
-        // Act - set back to null
+        // Act - set back to null (OPC UA maps null to Guid.Empty since Guid is a value type)
         clientArea.NullableGuidValue = null;
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
-            () => serverArea.NullableGuidValue == null,
+            () => serverArea.NullableGuidValue == Guid.Empty,
             timeout: TimeSpan.FromSeconds(90),
-            message: $"Server should receive client's null Guid update. Actual: {serverArea.NullableGuidValue}");
+            message: $"Server should receive client's null→Empty Guid update. Actual: {serverArea.NullableGuidValue}");
 
         Logger.Log("Nullable Guid client→server sync verified");
     }
