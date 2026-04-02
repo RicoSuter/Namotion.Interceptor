@@ -303,9 +303,13 @@ RecalculateDerivedProperty(FullName, timestamp)
   finally:
     // Clear IsRecalculating. If a write set RecalculationNeeded in the gap
     // between the outer loop's return and this finally, re-trigger to avoid
-    // losing the signal.
+    // losing the signal. RecalculationNeeded is cleared before the re-trigger
+    // to prevent unbounded recursion when the getter throws (Phase 3 never
+    // runs to clear it, so the flag would persist across every re-trigger).
     lock(data)
       needsRetrigger = data.RecalculationNeeded && data.IsAttached
+      if needsRetrigger:
+        data.RecalculationNeeded = false
       data.IsRecalculating = false
     if needsRetrigger:
       RecalculateDerivedProperty(FullName, timestamp)  // re-enter safely
