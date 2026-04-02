@@ -1,6 +1,5 @@
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Testing;
-using Namotion.Interceptor.Tracking.Transactions;
 using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
@@ -131,5 +130,52 @@ public class OpcUaDataTypesTests : SharedServerTestBase
         Logger.Log("ByteArray client→server sync verified");
     }
 
-    // Note: Guid type test removed - OPC UA Guid mapping needs further investigation
+    [Fact]
+    public async Task GuidType_ClientToServer_ShouldSync()
+    {
+        // Arrange
+        var serverArea = ServerFixture.ServerRoot.DataTypes;
+        var clientArea = Client!.Root!.DataTypes;
+
+        // Act
+        var testGuid = Guid.NewGuid();
+        clientArea.GuidValue = testGuid;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverArea.GuidValue == testGuid,
+            timeout: TimeSpan.FromSeconds(90),
+            message: $"Server should receive client's Guid update. Expected: {testGuid}, Actual: {serverArea.GuidValue}");
+
+        Logger.Log("Guid client→server sync verified");
+    }
+
+    [Fact]
+    public async Task NullableGuidType_ClientToServer_ShouldSync()
+    {
+        // Arrange
+        var serverArea = ServerFixture.ServerRoot.DataTypes;
+        var clientArea = Client!.Root!.DataTypes;
+
+        // Act - set a value
+        var testGuid = Guid.NewGuid();
+        clientArea.NullableGuidValue = testGuid;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverArea.NullableGuidValue == testGuid,
+            timeout: TimeSpan.FromSeconds(90),
+            message: $"Server should receive client's nullable Guid update. Expected: {testGuid}, Actual: {serverArea.NullableGuidValue}");
+
+        // Act - set back to null
+        clientArea.NullableGuidValue = null;
+
+        // Assert
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverArea.NullableGuidValue == null,
+            timeout: TimeSpan.FromSeconds(90),
+            message: $"Server should receive client's null Guid update. Actual: {serverArea.NullableGuidValue}");
+
+        Logger.Log("Nullable Guid client→server sync verified");
+    }
 }

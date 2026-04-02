@@ -70,6 +70,39 @@ When a tire is replaced, the old tire's `Pressure` is removed from `AveragePress
 
 ## Data Flow
 
+The following trace shows the lifecycle of a derived property (`FullName`) depending on source properties (`FirstName`, `LastName`). Steps 2 (Read) and 4 (Recalculation) are embedded within Attach and Write respectively.
+
+```mermaid
+sequenceDiagram
+    participant App as Application
+    participant FN as FirstName
+    participant LN as LastName
+    participant Full as FullName (derived)
+    participant Sub as Subscribers
+
+    Note over App,Sub: Attach — evaluate getter, build dependency graph
+    App->>Full: AttachProperty(FullName)
+    Full->>FN: reads FirstName (recorded as dependency)
+    Full->>LN: reads LastName (recorded as dependency)
+    Note over FN: UsedBy += [FullName]
+    Note over LN: UsedBy += [FullName]
+    Note over Full: LastKnownValue = initial value
+
+    Note over App,Sub: Write — cascade via UsedByProperties
+    App->>FN: FirstName = "Jane"
+    FN->>Full: lookup UsedBy → RecalculateDerivedProperty
+    Full->>FN: evaluate getter (reads FirstName)
+    Full->>LN: evaluate getter (reads LastName)
+    Note over Full: commit new LastKnownValue
+    Full->>Sub: notify(oldValue, newValue)
+
+    Note over App,Sub: Detach — clean up both directions
+    App->>Full: DetachProperty(FullName)
+    Note over FN: UsedBy -= [FullName]
+    Note over LN: UsedBy -= [FullName]
+    Note over Full: clear RequiredProperties, LastKnownValue
+```
+
 ### 1. Attach (initialization)
 
 When a subject is created with a context, `LifecycleInterceptor` fires `AttachProperty` for each property. For derived properties, `DerivedPropertyChangeHandler.AttachProperty` runs:
@@ -154,6 +187,68 @@ The `_writeGeneration` increment uses `Interlocked.Increment` (full fence) so th
 **Derived properties with setters** (created via `AddDerivedProperty<T>(name, getValue, setValue)`) have both a getter and a setter. The setter modifies internal state as a side effect, but the actual property value is always determined by the getter. When the setter is called, `WriteProperty` detects `HasRequiredProperties && SetValue != null` and triggers recalculation to re-evaluate the getter and fire a change notification with the correct computed value.
 
 ### 4. Recalculation
+
+#### Execution traces
+
+The following sequence diagrams illustrate the concrete execution flow of `RecalculateDerivedProperty`. The single-threaded trace shows the straight-line happy path where all concurrency guards are inert. The concurrent trace shows how `IsRecalculating` serializes notification delivery to prevent stale out-of-order notifications.
+
+**Single-threaded recalculation** — all concurrency guards are no-ops:
+
+```mermaid
+sequenceDiagram
+    participant W as WriteProperty
+    participant D as lock(data)
+    participant G as Getter
+    participant S as Subscribers
+
+    W->>D: Phase 1: IsRecalculating = true
+    Note over D: oldValue = "A B"
+    W->>G: Phase 2: evaluate FullName
+    G-->>W: "Jane B"
+    W->>D: Phase 3: commit LastKnownValue
+    Note over D: RecalculationNeeded? No → commit
+    W->>S: Phase 4: notify("Jane B", old: "A B")
+    Note over S: PropertyChanged fires
+    W->>D: RecalculationNeeded? No → return
+    W->>D: finally: IsRecalculating = false
+```
+
+**Concurrent write during notification** — the scenario that `IsRecalculating` serialization prevents:
+
+```mermaid
+sequenceDiagram
+    participant A as Thread A (FirstName)
+    participant D as lock(data)
+    participant G as Getter
+    participant S as Subscribers
+    participant B as Thread B (LastName)
+
+    A->>D: Phase 1: IsRecalculating = true
+    Note over D: oldValue = "A B"
+    A->>G: Phase 2: evaluate FullName
+    G-->>A: "Jane B"
+    A->>D: Phase 3: commit "Jane B"
+    A->>S: Phase 4: notify("Jane B")
+    Note over A,S: IsRecalculating still true
+
+    B->>D: Phase 1: IsRecalculating? Yes!
+    Note over D: RecalculationNeeded = true
+    B-->>B: bail (return)
+
+    S-->>A: notification complete
+    A->>D: RecalculationNeeded? Yes → clear, continue loop
+    Note over D: oldValue = "Jane B"
+    A->>G: Phase 2: re-evaluate FullName
+    G-->>A: "Jane Smith"
+    A->>D: Phase 3: commit "Jane Smith"
+    A->>S: Phase 4: notify("Jane Smith", old: "Jane B")
+    A->>D: RecalculationNeeded? No → return
+    A->>D: finally: IsRecalculating = false
+```
+
+Without the `IsRecalculating` serialization (the pre-fix behavior), Thread B could have entered `RecalculateDerivedProperty` during Thread A's notification delivery, completed a full recalculation with the newer value, and delivered its notification first. Thread A would then resume and deliver its stale notification second — violating the invariant that the last notification reflects the final computed value.
+
+#### Algorithm
 
 `RecalculateDerivedProperty` evaluates the getter **outside** `lock(data)` to prevent deadlock with `lock(_attachedSubjects)` in `LifecycleInterceptor` when getters have side effects (e.g., writing to subject-typed properties). `IsRecalculating` serializes concurrent recalculations; `RecalculationNeeded` catches state changes that occur during the unlocked evaluation window.
 
@@ -351,6 +446,45 @@ Derived properties with setters (added via `AddDerivedProperty<T>(name, getValue
 
 ### Deadlock prevention: unlocked getter evaluation
 
+The following diagrams illustrate the ABBA deadlock that would occur if `RecalculateDerivedProperty` held `lock(data)` during getter evaluation, and how the actual design prevents it. Inversion 2 (notifications) follows the same pattern — `NotifyDerivedPropertyChanged` fires `SetPropertyValueWithInterception` which can acquire `lock(_attachedSubjects)` through the interceptor chain.
+
+**Hypothetical deadlock** (if getter ran inside `lock(data)`):
+
+```mermaid
+sequenceDiagram
+    participant A as Thread A
+    participant DL as lock(data)
+    participant AL as lock(_attachedSubjects)
+    participant B as Thread B
+
+    A->>DL: RecalculateDerivedProperty: lock(data)
+    B->>AL: holder.Person = null: lock(_attachedSubjects)
+    A-xAL: getter writes Companion → needs lock(_attachedSubjects)
+    B-xDL: DetachProperty(Greeting) → needs lock(data)
+    Note over A,B: Both threads wait for each other — deadlock
+```
+
+**Actual behavior** (getter and notification run outside `lock(data)`):
+
+```mermaid
+sequenceDiagram
+    participant A as Thread A
+    participant DL as lock(data)
+    participant AL as lock(_attachedSubjects)
+    participant B as Thread B
+
+    A->>DL: Phase 1: lock — IsRecalculating=true, unlock
+    Note over A: Phase 2: evaluate getter (no lock held)
+    A->>AL: getter writes Companion → lock/unlock
+    B->>AL: holder.Person=null → lock(_attachedSubjects)
+    B->>DL: DetachProperty → lock(data)
+    Note over DL: RecalculationNeeded=true, IsAttached=false
+    B-->>DL: unlock
+    B-->>AL: unlock
+    A->>DL: Phase 3: lock — sees !IsAttached → return
+    Note over A,B: No deadlock — lock(data) never held during getter or notification
+```
+
 `RecalculateDerivedProperty` evaluates the getter **outside** `lock(data)` and fires notifications after releasing `lock(data)`. This prevents two lock ordering inversions between `lock(data)` and `lock(_attachedSubjects)` in `LifecycleInterceptor`:
 
 **Inversion 1 — Getter side effects**: A derived property getter may write to a subject-typed property as a side effect (e.g., lazy initialization, derived-with-setter patterns). This triggers `LifecycleInterceptor.WriteProperty` → `lock(_attachedSubjects)`. If the getter ran inside `lock(data)`, the ordering would be `lock(data)` → `lock(_attachedSubjects)`. Meanwhile, a concurrent `LifecycleInterceptor` operation holds `lock(_attachedSubjects)` → `AttachProperty`/`DetachProperty` → `lock(data)`. Deadlock.
@@ -397,6 +531,52 @@ Both `AttachProperty` and `RecalculateDerivedProperty` use a generation-based de
 In the common case (stable dependencies or single-threaded construction), the generation is unchanged and the loop is skipped — zero extra getter evaluations. The stabilization loop only runs when a concurrent write is actually detected.
 
 ### Concurrent detach and recalculation
+
+The following diagrams show the two race conditions and how lock serialization on `DerivedPropertyData` ensures correctness regardless of thread scheduling.
+
+**Race 1 — Zombie used-by resurrection**: `WriteProperty` snapshots `UsedByProperties` and calls `RecalculateDerivedProperty` for each dependent. A concurrent `DetachProperty` on the derived property D serializes via `lock(D.data)`:
+
+```mermaid
+sequenceDiagram
+    participant W as Writer Thread
+    participant DD as lock(D.data)
+    participant Det as Detach Thread
+
+    W->>W: WriteProperty(X): snapshot X.UsedBy → [D]
+
+    alt Detach completes before Phase 1
+        Det->>DD: lock — IsAttached=false, clear deps/UsedBy, unlock
+        W->>DD: RecalculateDerivedProperty(D) Phase 1: lock
+        Note over DD: IsAttached=false → return
+        Note over W,Det: Bails at Phase 1 — no zombie
+    else Recalculation enters Phase 1 first
+        W->>DD: Phase 1: lock — IsRecalculating=true, unlock
+        W->>W: Phase 2: evaluate getter (no lock)
+        Det->>DD: lock — RecalculationNeeded=true, IsAttached=false, unlock
+        W->>DD: Phase 3: lock — !IsAttached → return
+        Note over W,Det: Bails at Phase 3 — no zombie
+    end
+```
+
+**Race 2 — Missed used-by in snapshot**: `DetachProperty` on source X snapshots `X.UsedByProperties`. A concurrent `UpdateDependencies` adding derived D to `X.UsedByProperties` serializes via `lock(X.data)`:
+
+```mermaid
+sequenceDiagram
+    participant Det as DetachProperty(X)
+    participant XD as lock(X.data)
+    participant Upd as UpdateDependencies(D→X)
+
+    alt DetachProperty wins lock
+        Det->>XD: lock — IsAttached=false, snapshot UsedBy, clear, unlock
+        Upd->>XD: lock — IsAttached=false → skip Add, unlock
+        Note over Det,Upd: D not added — ReconcileSkippedDependencies filters it
+    else UpdateDependencies wins lock
+        Upd->>XD: lock — IsAttached=true → Add D to UsedBy, unlock
+        Det->>XD: lock — IsAttached=false, snapshot (includes D), clear, unlock
+        Det->>Det: Case 2 cleanup: RemoveRequiredProperty(X) from D
+        Note over Det,Upd: D in snapshot — cleaned up normally
+    end
+```
 
 Two race conditions must be handled when `DetachProperty` runs concurrently with `RecalculateDerivedProperty` / `UpdateDependencies`:
 
