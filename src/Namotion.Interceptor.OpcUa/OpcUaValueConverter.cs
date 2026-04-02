@@ -60,7 +60,7 @@ public class OpcUaValueConverter
         var type = Nullable.GetUnderlyingType(propertyType) ?? propertyType;
         if (type == typeof(Guid))
         {
-            return propertyValue is Guid guid ? (Uuid)guid : propertyValue;
+            return propertyValue is Guid guid ? (Uuid)guid : (Uuid)Guid.Empty;
         }
 
         if (type == typeof(decimal))
