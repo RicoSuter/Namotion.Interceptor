@@ -19,8 +19,7 @@ public class PluginConfigurationTests
           ],
           "plugins": [
             { "packageName": "Plugin.One", "version": "1.0.0" },
-            { "packageName": "Plugin.Two", "version": "2.0.0" },
-            { "packageName": "Plugin.Local", "path": "plugins/Local.1.0.0.nupkg" }
+            { "packageName": "Plugin.Two", "version": "2.0.0" }
           ]
         }
         """;
@@ -40,9 +39,9 @@ public class PluginConfigurationTests
         Assert.Equal("secret123", config.Feeds[1].ApiKey);
         Assert.Equal(2, config.HostPackages.Count);
         Assert.Equal("MyCompany.*.Abstractions", config.HostPackages[0]);
-        Assert.Equal(3, config.Plugins.Count);
+        Assert.Equal(2, config.Plugins.Count);
         Assert.Equal("Plugin.One", config.Plugins[0].PackageName);
-        Assert.Equal("plugins/Local.1.0.0.nupkg", config.Plugins[2].Path);
+        Assert.Equal("Plugin.Two", config.Plugins[1].PackageName);
     }
 
     [Fact]
@@ -104,7 +103,7 @@ public class PluginConfigurationTests
             var config = PluginConfiguration.LoadFrom(path);
 
             // Assert
-            Assert.Equal(3, config.Plugins.Count);
+            Assert.Equal(2, config.Plugins.Count);
         }
         finally
         {

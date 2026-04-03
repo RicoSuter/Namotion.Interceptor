@@ -1,0 +1,56 @@
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SampleDevice))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.Sensors" Class="mr-2" />
+            <MudText Typo="Typo.h6">@(Device?.Name ?? "Sample Device")</MudText>
+        </MudStack>
+
+        <MudDivider />
+
+        @if (Device?.IsLowBattery == true)
+        {
+            <MudAlert Severity="Severity.Warning" Dense="true" Class="mb-2">
+                Low battery warning
+            </MudAlert>
+        }
+
+        <MudStack Row="true" Spacing="4">
+            <MudStack>
+                <MudText Typo="Typo.caption">Temperature</MudText>
+                <MudText Typo="Typo.h5">@(Device?.Temperature.ToString("F1") ?? "\u2014") °C</MudText>
+            </MudStack>
+
+            <MudStack>
+                <MudText Typo="Typo.caption">Humidity</MudText>
+                <MudText Typo="Typo.h5">@(Device?.Humidity.ToString("F1") ?? "\u2014") %</MudText>
+            </MudStack>
+
+            <MudStack>
+                <MudText Typo="Typo.caption">Pressure</MudText>
+                <MudText Typo="Typo.h5">@(Device?.Pressure.ToString("F1") ?? "\u2014") hPa</MudText>
+            </MudStack>
+        </MudStack>
+
+        <MudStack Row="true" Spacing="4">
+            <MudStack>
+                <MudText Typo="Typo.caption">Heat Index</MudText>
+                <MudText Typo="Typo.h5">@(Device?.HeatIndex.ToString("F1") ?? "\u2014") °C</MudText>
+            </MudStack>
+
+            <MudStack>
+                <MudText Typo="Typo.caption">Battery</MudText>
+                <MudText Typo="Typo.h5">@(Device?.BatteryLevel.ToString("F1") ?? "\u2014") %</MudText>
+            </MudStack>
+        </MudStack>
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private SampleDevice? Device => Subject as SampleDevice;
+}

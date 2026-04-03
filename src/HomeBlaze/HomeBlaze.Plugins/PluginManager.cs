@@ -27,7 +27,14 @@ public partial class PluginManager : IConfigurable, ITitleProvider
                     {
                         Name = group.PackageName,
                         Version = group.PackageVersion,
-                        AssemblyCount = group.Assemblies.Count,
+                        Assemblies = group.Assemblies
+                            .Select(a =>
+                            {
+                                var name = a.GetName();
+                                var version = name.Version?.ToString(3) ?? "?";
+                                return $"{name.Name} v{version}";
+                            })
+                            .ToArray(),
                         Status = "Loaded"
                     });
         }

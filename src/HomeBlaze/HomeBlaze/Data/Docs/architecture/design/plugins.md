@@ -39,7 +39,7 @@ The runtime loader handles:
 - Dependency classification (host vs plugin-private)
 - Semantic version compatibility validation
 - Per-plugin-group `AssemblyLoadContext` isolation
-- Local `.nupkg` file loading
+- Local folder feeds (NuGet SDK resolves from directory paths natively)
 
 ## HomeBlaze-Specific Architecture
 
@@ -53,6 +53,7 @@ Because `Plugins.json` is also a subject configuration file, it includes a `$typ
 {
   "$type": "HomeBlaze.Plugins.PluginManager",
   "feeds": [
+    { "name": "local", "url": "Plugins" },
     { "name": "nuget.org", "url": "https://api.nuget.org/v3/index.json" }
   ],
   "hostPackages": [
@@ -60,18 +61,19 @@ Because `Plugins.json` is also a subject configuration file, it includes a `$typ
     "Namotion.Devices.*.Abstractions"
   ],
   "plugins": [
-    { "packageName": "Namotion.Devices.Gpio.HomeBlaze", "version": "0.1.0" },
-    { "packageName": "MyLocalPlugin", "path": "plugins/MyLocalPlugin.1.0.0.nupkg" }
+    { "packageName": "HomeBlaze.SamplePlugin.HomeBlaze", "version": "1.0.0" }
   ]
 }
 ```
 
+Feeds can be remote NuGet V3 service index URLs or local folder paths. In the example above, the `"local"` feed points to a `Plugins` directory relative to the application, where `.nupkg` files are placed at build time. The NuGet SDK resolves packages from local directories natively.
+
 | Field | Purpose |
 |-------|---------|
 | `$type` | Subject type discriminator for `PluginManager` |
-| `feeds` | NuGet package sources, tried in order |
+| `feeds` | NuGet package sources (remote URLs or local folder paths), tried in order |
 | `hostPackages` | Glob patterns for shared contract assemblies loaded into the default context |
-| `plugins` | Plugin packages to load (by name/version from feeds, or local `.nupkg` path) |
+| `plugins` | Plugin packages to load by name and optional version from the configured feeds |
 
 ### Subject Model
 
@@ -94,22 +96,24 @@ graph TD
         ABS["Host packages from patterns<br/>(HomeBlaze.*.Abstractions,<br/>Namotion.Devices.*.Abstractions)"]
     end
 
+    subgraph "Plugin Group: SamplePlugin.HomeBlaze"
+        SAMPLEUI["HomeBlaze.SamplePlugin.HomeBlaze<br/>(Blazor UI)"]
+        SAMPLE["HomeBlaze.SamplePlugin<br/>(headless, private dependency)"]
+        BOGUS["Bogus<br/>(private dependency)"]
+    end
+
     subgraph "Plugin Group: Gpio.HomeBlaze"
         GPIO["Namotion.Devices.Gpio.HomeBlaze"]
         GPIOLIB["Namotion.Devices.Gpio<br/>(private dependency)"]
     end
 
-    subgraph "Plugin Group: Hue.HomeBlaze"
-        HUE["Namotion.Devices.Hue.HomeBlaze"]
-        HUELIB["Namotion.Devices.Hue<br/>(private dependency)"]
-    end
-
+    SAMPLEUI -->|"fallback"| HOST
+    SAMPLEUI -->|"fallback"| ABS
+    SAMPLE --> SAMPLEUI
+    BOGUS --> SAMPLE
     GPIO -->|"fallback"| HOST
     GPIO -->|"fallback"| ABS
-    HUE -->|"fallback"| HOST
-    HUE -->|"fallback"| ABS
     GPIOLIB --> GPIO
-    HUELIB --> HUE
 ```
 
 This model ensures that when a plugin implements a host-defined interface (e.g., `ITemperatureSensor`), the type identity is shared. Plugin-private dependencies are fully isolated -- different plugins can use different versions of the same library without conflict.
@@ -150,11 +154,16 @@ The key ordering constraints:
 
 ### PluginLoaderService
 
-`PluginLoaderService` is a core DI service (not a subject) that bridges `Namotion.NuGet.Plugins` and HomeBlaze. It reads `Data/Plugins.json` via `PluginConfiguration.LoadFrom()`, initializes `HostDependencyResolver.FromDepsJson()` to detect host assemblies, passes `hostPackages` patterns from the JSON config to the loader, and exposes the `NuGetPluginLoader` instance so `PluginManager` can read loaded plugin state at deserialization time.
+`PluginLoaderService` is a core DI service (not a subject) that bridges `Namotion.NuGet.Plugins` and HomeBlaze. It reads `Data/Plugins.json` via `PluginConfiguration.LoadFrom()`, initializes `HostDependencyResolver.FromDepsJson()` (which uses `DependencyContext.Default` to detect host assemblies including both NuGet packages and project references), passes `hostPackages` patterns from the JSON config to the loader, and exposes the `NuGetPluginLoader` instance so `PluginManager` can read loaded plugin state at deserialization time.
 
 ### Sample Plugin
 
-`HomeBlaze.SamplePlugin` is a reference implementation demonstrating how to build a plugin package. It is a single Razor SDK project that produces a `.nupkg` on build via `GeneratePackageOnBuild`. The sample includes a device subject, a widget component, and an edit component with dirty tracking and validation events. The default `Data/Plugins.json` loads it from a local `.nupkg` path.
+The sample plugin is split into two packages following the recommended headless/UI separation pattern:
+
+- **`HomeBlaze.SamplePlugin`** -- a headless library containing a device subject that generates fake sensor data (temperature, humidity, pressure, battery level) using the Bogus library. This package has no Blazor or UI dependencies.
+- **`HomeBlaze.SamplePlugin.HomeBlaze`** -- a Razor SDK project containing Blazor UI components (widget and edit components) for the sample device. It references `HomeBlaze.SamplePlugin` as a dependency.
+
+Both projects produce `.nupkg` files on build via `GeneratePackageOnBuild`. Listing `HomeBlaze.SamplePlugin.HomeBlaze` in `Plugins.json` transitively pulls in the base `HomeBlaze.SamplePlugin` package. The default `Data/Plugins.json` loads the plugin from a local folder feed pointing to the `Plugins` directory.
 
 ### Plugin Updates
 

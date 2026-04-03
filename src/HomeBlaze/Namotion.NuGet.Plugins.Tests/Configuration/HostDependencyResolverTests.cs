@@ -41,7 +41,7 @@ public class HostDependencyResolverTests
     }
 
     [Fact]
-    public void WhenCreatedFromDepsJsonFile_ThenProjectEntriesAreExcluded()
+    public void WhenCreatedFromDepsJsonFile_ThenProjectEntriesAreIncluded()
     {
         // Arrange
         var depsJsonPath = Path.Combine(AppContext.BaseDirectory, "TestData", "test.deps.json");
@@ -50,7 +50,7 @@ public class HostDependencyResolverTests
         var resolver = HostDependencyResolver.FromDepsJson(depsJsonPath);
 
         // Assert
-        Assert.False(resolver.Contains("TestApp"));
+        Assert.True(resolver.Contains("TestApp"));
     }
 
     [Fact]

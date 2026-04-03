@@ -1,6 +1,7 @@
 {
   "$type": "HomeBlaze.Plugins.PluginManager",
   "feeds": [
+    { "name": "local", "url": "Plugins" },
     { "name": "nuget.org", "url": "https://api.nuget.org/v3/index.json" }
   ],
   "hostPackages": [
@@ -8,6 +9,6 @@
     "Namotion.Devices.*.Abstractions"
   ],
   "plugins": [
-    { "packageName": "HomeBlaze.SamplePlugin", "path": "Plugins/HomeBlaze.SamplePlugin.1.0.0.nupkg" }
+    { "packageName": "HomeBlaze.SamplePlugin.HomeBlaze", "version": "1.0.0" }
   ]
 }

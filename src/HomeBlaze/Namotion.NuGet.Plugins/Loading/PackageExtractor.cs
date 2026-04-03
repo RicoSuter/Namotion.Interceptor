@@ -92,15 +92,6 @@ internal class PackageExtractor
         return Directory.Exists(packagePath) ? packagePath : null;
     }
 
-    /// <summary>
-    /// Reads the package version from a .nupkg file using NuGet SDK.
-    /// </summary>
-    public static string? GetVersionFromPackage(string nupkgPath)
-    {
-        using var reader = new global::NuGet.Packaging.PackageArchiveReader(nupkgPath);
-        return reader.NuspecReader.GetVersion().ToNormalizedString();
-    }
-
     private string ExtractToCache(string packageName, string packageVersion, Stream stream)
     {
         var packagePath = Path.Combine(_cacheDirectory, packageName, packageVersion);

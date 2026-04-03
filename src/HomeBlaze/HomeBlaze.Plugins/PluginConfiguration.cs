@@ -34,7 +34,7 @@ public class PluginConfiguration
 
     [JsonIgnore]
     public IReadOnlyList<NuGetPluginRequest> Plugins =>
-        PluginEntries.Select(p => new NuGetPluginRequest(p.PackageName, p.Version, p.Path)).ToList();
+        PluginEntries.Select(p => new NuGetPluginRequest(p.PackageName, p.Version)).ToList();
 
     public static PluginConfiguration LoadFrom(string jsonPath)
     {
@@ -77,8 +77,5 @@ public class PluginConfiguration
 
         [JsonPropertyName("version")]
         public string? Version { get; set; }
-
-        [JsonPropertyName("path")]
-        public string? Path { get; set; }
     }
 }
