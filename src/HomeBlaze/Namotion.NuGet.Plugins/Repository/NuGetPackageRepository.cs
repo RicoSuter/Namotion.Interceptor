@@ -50,17 +50,32 @@ public class NuGetPackageRepository : INuGetPackageRepository
 
                 var metadataResource = await sourceRepository.GetResourceAsync<global::NuGet.Protocol.Core.Types.PackageMetadataResource>(cancellationToken);
 
-                global::NuGet.Packaging.Core.PackageIdentity identity;
+                global::NuGet.Versioning.NuGetVersion resolvedVersion;
                 if (!string.IsNullOrEmpty(packageVersion))
                 {
-                    identity = new global::NuGet.Packaging.Core.PackageIdentity(
-                        packageName,
-                        new global::NuGet.Versioning.NuGetVersion(packageVersion));
+                    resolvedVersion = new global::NuGet.Versioning.NuGetVersion(packageVersion);
                 }
                 else
                 {
-                    identity = new global::NuGet.Packaging.Core.PackageIdentity(packageName, null);
+                    // Resolve latest version first to avoid NuGet SDK SingleOrDefault issue
+                    using var listCacheContext = new global::NuGet.Protocol.Core.Types.SourceCacheContext();
+                    var versions = await metadataResource.GetMetadataAsync(
+                        packageName, includePrerelease: false, includeUnlisted: false,
+                        listCacheContext, global::NuGet.Common.NullLogger.Instance, cancellationToken);
+
+                    var latest = versions?
+                        .OrderByDescending(m => m.Identity.Version)
+                        .FirstOrDefault();
+
+                    if (latest == null)
+                    {
+                        throw new PackageNotFoundException(packageName, packageVersion);
+                    }
+
+                    resolvedVersion = latest.Identity.Version;
                 }
+
+                var identity = new global::NuGet.Packaging.Core.PackageIdentity(packageName, resolvedVersion);
 
                 using var metadataCacheContext = new global::NuGet.Protocol.Core.Types.SourceCacheContext();
                 var metadata = await metadataResource.GetMetadataAsync(
