@@ -71,6 +71,7 @@
   </Folder>
   <Folder Name="/HomeBlaze/Plugins/">
     <Project Path="HomeBlaze/HomeBlaze.SamplePlugin/HomeBlaze.SamplePlugin.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.SamplePlugin.HomeBlaze/HomeBlaze.SamplePlugin.HomeBlaze.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/Tests/">
     <Project Path="HomeBlaze/HomeBlaze.AI.Tests/HomeBlaze.AI.Tests.csproj" />

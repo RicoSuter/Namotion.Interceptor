@@ -15,11 +15,11 @@ public partial class PluginInfo : ITitleProvider
         Name = "";
         Version = "";
         Status = "";
-        AssemblyCount = 0;
+        Assemblies = [];
     }
     
     [Derived]
-    public string? Title => Name + " v" + Version;
+    public string Title => Name + " v" + Version;
 
     [State]
     public partial string Name { get; internal set; }
@@ -28,7 +28,7 @@ public partial class PluginInfo : ITitleProvider
     public partial string Version { get; internal set; }
 
     [State]
-    public partial int AssemblyCount { get; internal set; }
+    public partial string[] Assemblies { get; internal set; }
 
     [State]
     public partial string Status { get; internal set; }

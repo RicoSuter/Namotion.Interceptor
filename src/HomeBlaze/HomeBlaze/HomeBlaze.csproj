@@ -22,6 +22,10 @@
         <ProjectReference Include="..\HomeBlaze.Servers.OpcUa\HomeBlaze.Servers.OpcUa.csproj" />
         <ProjectReference Include="..\HomeBlaze.Servers.OpcUa.Blazor\HomeBlaze.Servers.OpcUa.Blazor.csproj" />
         <ProjectReference Include="..\HomeBlaze.Plugins\HomeBlaze.Plugins.csproj" />
+        <ProjectReference Include="..\HomeBlaze.SamplePlugin.HomeBlaze\HomeBlaze.SamplePlugin.HomeBlaze.csproj">
+            <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+            <Private>false</Private>
+        </ProjectReference>
         <ProjectReference Include="..\..\Namotion.Interceptor.Generator\Namotion.Interceptor.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
         <PackageReference Include="BlazorMonaco" Version="3.4.0" />
         <PackageReference Include="CodeBeam.MudBlazor.Extensions" Version="9.0.3" />

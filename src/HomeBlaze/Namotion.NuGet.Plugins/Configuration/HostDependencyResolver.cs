@@ -1,5 +1,5 @@
 using System.Reflection;
-using System.Text.Json;
+using Microsoft.Extensions.DependencyModel;
 
 namespace Namotion.NuGet.Plugins.Configuration;
 
@@ -32,82 +32,40 @@ public class HostDependencyResolver
         _dependencies.TryGetValue(packageName, out var version) ? version : null;
 
     /// <summary>
-    /// Parses the running application's {app}.deps.json file.
-    /// Falls back to searching the base directory when the entry assembly's deps.json is not found
-    /// (e.g. when running inside a test host).
+    /// Builds the dependency map from the running application's dependency context.
+    /// Includes both NuGet packages and project references.
     /// </summary>
     public static HostDependencyResolver FromDepsJson()
     {
-        var entryAssembly = Assembly.GetEntryAssembly()
-            ?? throw new InvalidOperationException("No entry assembly found.");
+        var context = DependencyContext.Default
+            ?? throw new InvalidOperationException(
+                "DependencyContext not available. Use FromAssemblies() for AOT or single-file apps.");
 
-        var depsJsonPath = Path.ChangeExtension(entryAssembly.Location, ".deps.json");
-        if (File.Exists(depsJsonPath))
-        {
-            return FromDepsJson(depsJsonPath);
-        }
-
-        // Fallback: search in AppContext.BaseDirectory for any deps.json file
-        // (handles test runners where entry assembly is testhost)
-        var baseDirectory = AppContext.BaseDirectory;
-        var depsFiles = Directory.GetFiles(baseDirectory, "*.deps.json");
-        if (depsFiles.Length > 0)
-        {
-            // Merge all deps.json files found
-            var merged = new Dictionary<string, global::NuGet.Versioning.NuGetVersion>(StringComparer.OrdinalIgnoreCase);
-            foreach (var depsFile in depsFiles)
-            {
-                var resolver = FromDepsJson(depsFile);
-                foreach (var dependency in resolver.Dependencies)
-                {
-                    merged[dependency.Key] = dependency.Value;
-                }
-            }
-
-            return new HostDependencyResolver(merged);
-        }
-
-        throw new FileNotFoundException(
-            $"deps.json not found at '{depsJsonPath}' or in '{baseDirectory}'. Use FromAssemblies() for AOT or single-file apps.",
-            depsJsonPath);
+        return FromDependencyContext(context);
     }
 
     /// <summary>
-    /// Parses a specific deps.json file.
+    /// Builds the dependency map from a specific assembly's dependency context.
+    /// </summary>
+    public static HostDependencyResolver FromDepsJson(Assembly assembly)
+    {
+        var context = DependencyContext.Load(assembly)
+            ?? throw new InvalidOperationException(
+                $"DependencyContext not available for assembly '{assembly.GetName().Name}'.");
+
+        return FromDependencyContext(context);
+    }
+
+    /// <summary>
+    /// Builds the dependency map from a deps.json file at the specified path.
+    /// Includes both NuGet packages and project references.
     /// </summary>
     public static HostDependencyResolver FromDepsJson(string depsJsonPath)
     {
-        var json = File.ReadAllText(depsJsonPath);
-        var document = JsonDocument.Parse(json);
-        var dependencies = new Dictionary<string, global::NuGet.Versioning.NuGetVersion>(StringComparer.OrdinalIgnoreCase);
-
-        if (document.RootElement.TryGetProperty("libraries", out var libraries))
-        {
-            foreach (var library in libraries.EnumerateObject())
-            {
-                // Skip project references (type: "project")
-                if (library.Value.TryGetProperty("type", out var typeElement) &&
-                    typeElement.GetString() == "project")
-                {
-                    continue;
-                }
-
-                // Library key format: "PackageName/Version"
-                var slashIndex = library.Name.IndexOf('/');
-                if (slashIndex > 0 && slashIndex < library.Name.Length - 1)
-                {
-                    var packageName = library.Name[..slashIndex];
-                    var versionString = library.Name[(slashIndex + 1)..];
-
-                    if (global::NuGet.Versioning.NuGetVersion.TryParse(versionString, out var version))
-                    {
-                        dependencies[packageName] = version;
-                    }
-                }
-            }
-        }
-
-        return new HostDependencyResolver(dependencies);
+        var reader = new DependencyContextJsonReader();
+        using var stream = File.OpenRead(depsJsonPath);
+        var context = reader.Read(stream);
+        return FromDependencyContext(context);
     }
 
     /// <summary>
@@ -141,6 +99,20 @@ public class HostDependencyResolver
         {
             dependencies[name] = new global::NuGet.Versioning.NuGetVersion(
                 version.Major, version.Minor, version.Build >= 0 ? version.Build : 0);
+        }
+
+        return new HostDependencyResolver(dependencies);
+    }
+
+    private static HostDependencyResolver FromDependencyContext(DependencyContext context)
+    {
+        var dependencies = new Dictionary<string, global::NuGet.Versioning.NuGetVersion>(StringComparer.OrdinalIgnoreCase);
+        foreach (var library in context.RuntimeLibraries)
+        {
+            if (global::NuGet.Versioning.NuGetVersion.TryParse(library.Version, out var version))
+            {
+                dependencies[library.Name] = version;
+            }
         }
 
         return new HostDependencyResolver(dependencies);

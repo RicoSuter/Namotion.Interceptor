@@ -8,4 +8,11 @@ alignment: Left
 
 # Devices
 
-Tbd.
+Sample plugin widget:
+
+```subject(widget)
+{
+  "$type": "HomeBlaze.Components.Widget",
+  "path": "/Devices/SampleDevice"
+}
+```

@@ -11,7 +11,7 @@ A standalone .NET library for loading NuGet packages as plugins at runtime. It p
 - Semantic version compatibility validation
 - Glob-based host package pattern matching
 - Support for multiple NuGet feeds with authentication
-- Local `.nupkg` file loading
+- Local folder feeds (NuGet SDK resolves from directory paths natively)
 - Graceful partial failure (one plugin failing does not block others)
 - Type discovery across loaded plugins
 
@@ -94,7 +94,7 @@ flowchart TD
     D --> E["Phase 5: Load Host Packages"]
     E --> F["Phase 6: Load Plugin Groups"]
 
-    A -.- A1["Recursively resolve transitive\ndependency trees via NuGet API"]
+    A -.- A1["Recursively resolve transitive\ndependency trees via NuGet API\n(skips known host dependencies)"]
     B -.- B1["Categorize each dependency\nas host or plugin-private"]
     C -.- C1["Validate semver compatibility\nfor host-classified dependencies"]
     D -.- D1["Download packages not\nalready in local cache"]
@@ -122,7 +122,7 @@ The host dependency map tells the loader which packages and versions the host ap
 
 ### FromDepsJson (recommended)
 
-Parses the running application's `{app}.deps.json` file, which contains all NuGet package references with exact versions. This is the most complete and accurate method.
+Uses `Microsoft.Extensions.DependencyModel` to read the running application's dependency context, which contains all NuGet packages and project references with exact versions. This is the most complete and accurate method.
 
 ```csharp
 var options = new NuGetPluginLoaderOptions
@@ -131,9 +131,19 @@ var options = new NuGetPluginLoaderOptions
 };
 ```
 
-The method automatically detects the deps.json location from the entry assembly. If the entry assembly's file is not found (e.g., inside a test host), it falls back to searching `AppContext.BaseDirectory` for any `*.deps.json` files and merges them.
+The parameterless overload uses `DependencyContext.Default`, which is populated automatically by the runtime from the application's `{app}.deps.json` file. Both NuGet packages and project references are included in the host dependency map.
 
-> **Note:** `deps.json` is not available for AOT-compiled or single-file published applications. Use one of the `FromAssemblies` overloads in those cases.
+There are also overloads for specific scenarios:
+
+```csharp
+// From a specific assembly's dependency context
+HostDependencyResolver.FromDepsJson(typeof(MyApp).Assembly);
+
+// From a deps.json file path (uses DependencyContextJsonReader)
+HostDependencyResolver.FromDepsJson("/path/to/app.deps.json");
+```
+
+> **Note:** `DependencyContext.Default` is not available for AOT-compiled or single-file published applications. Use one of the `FromAssemblies` overloads in those cases.
 
 ### FromAssemblies (loaded assemblies)
 
@@ -187,14 +197,35 @@ var options = new NuGetPluginLoaderOptions
 
 ## Dependency Classification
 
+Dependencies are classified at two stages: during resolution (Phase 1) and during assembly loading (Phase 6).
+
+### Resolution-time classification
+
+During transitive dependency resolution, the resolver skips dependencies that are already known to be provided by the host. This prevents unnecessary NuGet API calls and avoids downloading packages that won't be used:
+
+| Condition | Action |
+|---|---|
+| Package exists in `HostDependencyResolver` (from `DependencyContext`) | Skipped -- not resolved, not downloaded |
+| Package name matches a `HostPackagePatterns` glob | Skipped -- not resolved, not downloaded |
+
+This means the resolved dependency tree only contains the plugin itself and its genuinely private dependencies.
+
+### Post-resolution classification
+
 Every dependency in the resolved tree is classified into one of three categories. The classifier checks these rules in order and uses the first match:
 
 | Priority | Category | Condition | Where loaded |
 |---|---|---|---|
 | 1 | **Plugin** | Package is one of the configured plugin requests | Plugin's isolated `AssemblyLoadContext` |
-| 2 | **Host** | Package exists in the host's `deps.json` (via `HostDependencyResolver`) | Default `AssemblyLoadContext` (already present) |
+| 2 | **Host** | Package exists in `HostDependencyResolver` | Default `AssemblyLoadContext` (already present) |
 | 3 | **Host** | Package name matches a `HostPackagePatterns` glob | Default `AssemblyLoadContext` (downloaded and loaded) |
 | 4 | **Plugin-private** | None of the above | Plugin's isolated `AssemblyLoadContext` |
+
+### Load-time framework assembly detection
+
+During Phase 6, before loading each assembly into the plugin's isolated context, the loader checks whether the assembly is already available in the default `AssemblyLoadContext` (e.g., shared framework assemblies like `Microsoft.AspNetCore.Components` or `System.Text.Json`). If it is, the assembly is treated as a host assembly and the plugin context falls back to the default context for it. This ensures type identity is preserved for framework types without requiring explicit configuration.
+
+### Additional host packages
 
 The distinction between priority 2 and 3 matters at runtime:
 
@@ -231,7 +262,7 @@ flowchart TB
 
 Each plugin group gets a collectible `AssemblyLoadContext` that overrides `Load()` with a three-step fallback:
 
-1. If the assembly name is classified as host, return `null` -- this falls back to the default context, ensuring shared type identity.
+1. If the assembly name is classified as host (including framework assemblies detected at load time), return `null` -- this falls back to the default context, ensuring shared type identity.
 2. If the assembly name matches a private dependency with a known file path, load it from the package cache.
 3. Otherwise, return `null` to let the default resolution handle it.
 
@@ -241,8 +272,9 @@ The loader also registers a `Resolving` handler on `AssemblyLoadContext.Default`
 
 Loaded into the default `AssemblyLoadContext`. This category includes:
 
-- **deps.json host packages** -- assemblies already present in the host process. Not downloaded, only version-validated.
-- **Additional host packages** -- packages matching `HostPackagePatterns` that are not in deps.json. Downloaded from NuGet and loaded into the default context on demand via the `Resolving` hook.
+- **DependencyContext host packages** -- assemblies already present in the host process (NuGet packages and project references from the host's `DependencyContext`). Not downloaded, only version-validated. Their transitive dependencies are skipped during resolution.
+- **Additional host packages** -- packages matching `HostPackagePatterns` that are not in the host's `DependencyContext`. Downloaded from NuGet and loaded into the default context on demand via the `Resolving` hook. Their transitive dependencies are also skipped during resolution.
+- **Framework assemblies** -- assemblies from the .NET shared framework (e.g., `Microsoft.AspNetCore.Components`, `System.Text.Json`) that are already loaded in the default context. These are detected automatically at load time without explicit configuration.
 
 Host assemblies are shared across the host application and all plugin groups. This ensures that when a plugin implements a host-defined interface (e.g., `ISensorDevice`), the type identity is the same across all contexts.
 
@@ -345,28 +377,20 @@ foreach (var group in loader.LoadedPlugins)
 
 `GetTypes<T>()` returns concrete (non-abstract, non-interface) types assignable to `T`. The type `T` must come from a host assembly so that the type identity matches across the host and plugin contexts.
 
-## Local File-Based Plugins
-
-You can load plugins from local `.nupkg` files by specifying the `Path` property on `NuGetPluginRequest`:
-
-```csharp
-var result = await loader.LoadPluginsAsync(
-[
-    new NuGetPluginRequest("MyLocalPlugin", Path: "plugins/MyLocalPlugin.1.0.0.nupkg"),
-], CancellationToken.None);
-```
-
-File-based plugins are extracted and loaded directly without NuGet feed resolution. Note that transitive dependency resolution is not performed for file-based plugins -- only the assemblies inside the `.nupkg` are loaded.
-
 ## Custom Feeds with Authentication
 
 Configure multiple NuGet feeds with optional API key authentication. Feeds are tried in order; the first feed that has the requested package wins. Downloads are retried up to 5 times with exponential backoff on transient HTTP errors.
+
+Feeds can be remote NuGet V3 service index URLs or local folder paths. The NuGet SDK resolves packages from local directories natively, so a folder containing `.nupkg` files works as a feed without any special handling.
 
 ```csharp
 var options = new NuGetPluginLoaderOptions
 {
     Feeds =
     [
+        // Local folder feed (packages resolved from directory)
+        new NuGetFeed("local", "/path/to/plugins"),
+
         // Public feed (default)
         NuGetFeed.NuGetOrg,
 
@@ -426,13 +450,11 @@ The main entry point. Implements `IDisposable`.
 ```csharp
 public record NuGetPluginRequest(
     string PackageName,
-    string? Version = null,
-    string? Path = null);
+    string? Version = null);
 ```
 
 - `PackageName` -- the NuGet package ID.
-- `Version` -- the desired version (optional; resolves to latest if null). Used for feed-based plugins.
-- `Path` -- path to a local `.nupkg` file (optional). When set, the plugin is loaded from disk instead of a feed.
+- `Version` -- the desired version (optional; resolves to latest if null).
 
 ### NuGetPluginLoadResult (`Namotion.NuGet.Plugins`)
 
@@ -457,10 +479,13 @@ Represents one loaded plugin and its private dependencies. Implements `IDisposab
 
 ### HostDependencyResolver (`Namotion.NuGet.Plugins.Configuration`)
 
+Uses `Microsoft.Extensions.DependencyModel` to read dependency information. Both NuGet packages and project references are included in the host dependency map.
+
 | Member | Description |
 |---|---|
-| `FromDepsJson()` | Parses the host's `deps.json` (recommended). |
-| `FromDepsJson(path)` | Parses a specific `deps.json` file. |
+| `FromDepsJson()` | Uses `DependencyContext.Default` to read the running application's dependencies (recommended). |
+| `FromDepsJson(assembly)` | Uses `DependencyContext.Load(assembly)` to read a specific assembly's dependencies. |
+| `FromDepsJson(path)` | Reads a deps.json file at the specified path using `DependencyContextJsonReader`. |
 | `FromAssemblies(assemblies)` | Builds from loaded `Assembly` objects. |
 | `FromAssemblies(tuples)` | Builds from explicit `(string Name, Version Version)` tuples. |
 | `Dependencies` | All known host packages and their versions. |
@@ -474,5 +499,5 @@ Represents one loaded plugin and its private dependencies. Implements `IDisposab
 | `NuGetFeed(name, url, apiKey?)` | Constructor. |
 | `NuGetFeed.NuGetOrg` | Pre-configured feed for `https://api.nuget.org/v3/index.json`. |
 | `Name` | Display name. |
-| `Url` | NuGet V3 service index URL. |
+| `Url` | NuGet V3 service index URL or local folder path. |
 | `ApiKey` | Optional authentication token. |

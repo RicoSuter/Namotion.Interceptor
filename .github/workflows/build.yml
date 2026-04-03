@@ -28,6 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       homeblaze: ${{ github.event_name != 'pull_request' || steps.filter.outputs.homeblaze == 'true' }}
+      nugetplugins: ${{ github.event_name != 'pull_request' || steps.filter.outputs.nugetplugins == 'true' }}
       opcua: ${{ github.event_name != 'pull_request' || steps.filter.outputs.opcua == 'true' }}
       websocket: ${{ github.event_name != 'pull_request' || steps.filter.outputs.websocket == 'true' }}
       mqtt: ${{ github.event_name != 'pull_request' || steps.filter.outputs.mqtt == 'true' }}
@@ -41,6 +42,13 @@ jobs:
           filters: |
             homeblaze:
               - 'src/HomeBlaze/**'
+            nugetplugins:
+              - 'src/HomeBlaze/Namotion.NuGet.Plugins/**'
+              - 'src/HomeBlaze/Namotion.NuGet.Plugins.Tests/**'
+              - 'src/HomeBlaze/HomeBlaze.SamplePlugin/**'
+              - 'src/HomeBlaze/HomeBlaze.SamplePlugin.HomeBlaze/**'
+              - 'src/HomeBlaze/HomeBlaze.Plugins/**'
+              - 'src/HomeBlaze/HomeBlaze.Plugins.Tests/**'
             opcua:
               - 'src/Namotion.Interceptor.OpcUa*/**'
               - 'src/HomeBlaze/*OpcUa*/**'
@@ -134,6 +142,43 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cobertura-coverage-homeblaze-integration
+          path: '**/TestResults/**/coverage.cobertura.xml'
+          if-no-files-found: warn
+
+  test-nugetplugins-integration:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.nugetplugins == 'true'
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build
+        run: dotnet build src/Namotion.Interceptor.slnx --configuration Release
+
+      - name: Run NuGet plugins integration tests
+        run: |
+          dotnet test src/HomeBlaze/Namotion.NuGet.Plugins.Tests `
+            --configuration Release `
+            --no-build `
+            --results-directory ./TestResults `
+            --collect:"XPlat Code Coverage" `
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+
+      - name: Upload NuGet plugins integration test coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-coverage-nugetplugins-integration
           path: '**/TestResults/**/coverage.cobertura.xml'
           if-no-files-found: warn
 
@@ -285,7 +330,7 @@ jobs:
     timeout-minutes: 15
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
-    needs: [ validate, test, test-homeblaze-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration ]
+    needs: [ validate, test, test-homeblaze-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration ]
     steps:
       - uses: actions/download-artifact@v4
         with:

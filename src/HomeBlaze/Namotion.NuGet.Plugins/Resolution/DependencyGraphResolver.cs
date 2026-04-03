@@ -12,17 +12,27 @@ public class DependencyGraphResolver
 {
     private readonly IDependencyInfoProvider _provider;
     private readonly ILogger _logger;
+    private readonly HostDependencyResolver? _hostDependencies;
+    private readonly IReadOnlyList<string> _hostPackagePatterns;
 
-    internal DependencyGraphResolver(IDependencyInfoProvider provider, ILogger? logger = null)
+    internal DependencyGraphResolver(
+        IDependencyInfoProvider provider,
+        HostDependencyResolver? hostDependencies = null,
+        IReadOnlyList<string>? hostPackagePatterns = null,
+        ILogger? logger = null)
     {
         _provider = provider;
         _logger = logger ?? NullLogger.Instance;
+        _hostDependencies = hostDependencies;
+        _hostPackagePatterns = hostPackagePatterns ?? [];
     }
 
     public DependencyGraphResolver(
         IReadOnlyList<NuGetFeed> feeds,
+        HostDependencyResolver? hostDependencies = null,
+        IReadOnlyList<string>? hostPackagePatterns = null,
         ILogger? logger = null)
-        : this(new NuGetDependencyInfoProvider(feeds, logger), logger)
+        : this(new NuGetDependencyInfoProvider(feeds, logger), hostDependencies, hostPackagePatterns, logger)
     {
     }
 
@@ -82,6 +92,20 @@ public class DependencyGraphResolver
             // Cycle detection
             if (visited.ContainsKey(dependencyId))
                 continue;
+
+            // Skip dependencies already provided by the host
+            if (_hostDependencies != null && _hostDependencies.Contains(dependencyId))
+            {
+                _logger.LogDebug("Skipping host dependency {PackageId} during resolution.", dependencyId);
+                continue;
+            }
+
+            // Skip dependencies matching host package patterns (they'll be loaded as additional host packages)
+            if (_hostPackagePatterns.Count > 0 && PackageNameMatcher.IsMatchAny(dependencyId, _hostPackagePatterns))
+            {
+                _logger.LogDebug("Skipping host-pattern-matched dependency {PackageId} during resolution.", dependencyId);
+                continue;
+            }
 
             var resolvedVersion = await _provider.ResolveVersionAsync(
                 dependencyId, versionRange, cancellationToken);

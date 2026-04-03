@@ -94,27 +94,15 @@ public class NuGetPluginLoader : IDisposable
         // Phase 1 & 2: Resolve and classify each plugin's dependencies
         var pluginGraphs = new List<(NuGetPluginRequest Request, Dictionary<string, NuGetVersion> FlatDependencies, Dictionary<string, DependencyClassification> Classifications)>();
 
-        var graphResolver = new DependencyGraphResolver(_options.Feeds, _logger);
+        var graphResolver = new DependencyGraphResolver(
+            _options.Feeds, hostResolver, _options.HostPackagePatterns, _logger);
 
         foreach (var request in pluginList)
         {
             try
             {
-                DependencyNode graph;
-                if (request.Path != null)
-                {
-                    // File-based plugin: extract version from .nupkg if not specified
-                    var version = request.Version
-                        ?? PackageExtractor.GetVersionFromPackage(request.Path)
-                        ?? "0.0.0";
-                    graph = new DependencyNode(request.PackageName,
-                        NuGetVersion.Parse(version));
-                }
-                else
-                {
-                    graph = await graphResolver.ResolveAsync(
-                        request.PackageName, request.Version, cancellationToken);
-                }
+                var graph = await graphResolver.ResolveAsync(
+                    request.PackageName, request.Version, cancellationToken);
 
                 var flatDependencies = graphResolver.FlattenDependencies(graph);
                 var classifications = classifier.ClassifyAll(flatDependencies);
@@ -141,7 +129,7 @@ public class NuGetPluginLoader : IDisposable
         }
 
         // Phase 3b: Validate additional host package version compatibility across plugins
-        var additionalHostRequirements = new Dictionary<string, List<(string PluginName, global::NuGet.Versioning.VersionRange Range)>>(StringComparer.OrdinalIgnoreCase);
+        var additionalHostRequirements = new Dictionary<string, List<(string PluginName, VersionRange Range)>>(StringComparer.OrdinalIgnoreCase);
         foreach (var (request, flatDependencies, classifications) in pluginGraphs)
         {
             foreach (var (packageName, version) in flatDependencies)
@@ -155,7 +143,7 @@ public class NuGetPluginLoader : IDisposable
                     }
 
                     additionalHostRequirements[packageName].Add(
-                        (request.PackageName, new global::NuGet.Versioning.VersionRange(version)));
+                        (request.PackageName, new VersionRange(version)));
                 }
             }
         }
@@ -195,20 +183,12 @@ public class NuGetPluginLoader : IDisposable
                         continue; // Already cached
                     }
 
-                    if (request.Path != null && packageName == request.PackageName)
+                    var (_, stream) = await _repository.DownloadPackageAsync(
+                        packageName, versionString, cancellationToken);
+                   
+                    await using (stream)
                     {
-                        // Load from file
-                        using var fileStream = File.OpenRead(request.Path);
-                        _extractor.ExtractAndGetAssemblyPaths(packageName, versionString, fileStream);
-                    }
-                    else
-                    {
-                        var (_, stream) = await _repository.DownloadPackageAsync(
-                            packageName, versionString, cancellationToken);
-                        using (stream)
-                        {
-                            _extractor.ExtractAndGetAssemblyPaths(packageName, versionString, stream);
-                        }
+                        _extractor.ExtractAndGetAssemblyPaths(packageName, versionString, stream);
                     }
                 }
             }
@@ -230,7 +210,7 @@ public class NuGetPluginLoader : IDisposable
         }
 
         // Phase 5: Load additional host packages into default context
-        foreach (var (request, flatDependencies, classifications) in pluginGraphs)
+        foreach (var (_, flatDependencies, classifications) in pluginGraphs)
         {
             foreach (var (packageName, version) in flatDependencies)
             {
@@ -293,13 +273,26 @@ public class NuGetPluginLoader : IDisposable
                         foreach (var path in paths)
                         {
                             var assemblyName = Path.GetFileNameWithoutExtension(path);
-                            privateAssemblyPaths[assemblyName] = path;
+                            if (IsAssemblyInDefaultContext(assemblyName))
+                            {
+                                // Already available in default context (e.g., framework assembly)
+                                hostAssemblyNames.Add(assemblyName);
+                                _logger.LogDebug("Assembly '{Assembly}' from plugin '{Plugin}' already in default context, treating as host.",
+                                    assemblyName, request.PackageName);
+                            }
+                            else
+                            {
+                                privateAssemblyPaths[assemblyName] = path;
+                            }
                         }
                     }
                 }
 
                 var loadContext = new PluginAssemblyLoadContext(
                     request.PackageName, hostAssemblyNames, privateAssemblyPaths);
+
+                _logger.LogDebug("Plugin '{Plugin}': {HostCount} host assemblies, {PrivateCount} private assemblies.",
+                    request.PackageName, hostAssemblyNames.Count, privateAssemblyPaths.Count);
 
                 var assemblies = new List<Assembly>();
                 foreach (var (assemblyName, path) in privateAssemblyPaths)
@@ -308,6 +301,8 @@ public class NuGetPluginLoader : IDisposable
                     {
                         var assembly = loadContext.LoadFromAssemblyPath(path);
                         assemblies.Add(assembly);
+                        _logger.LogDebug("Plugin '{Plugin}': Loaded assembly '{Assembly}' from '{Path}'.",
+                            request.PackageName, assemblyName, path);
                     }
                     catch (Exception exception)
                     {
@@ -357,6 +352,19 @@ public class NuGetPluginLoader : IDisposable
                 _loadedPlugins.Remove(group);
                 return true;
             }
+            return false;
+        }
+    }
+
+    private static bool IsAssemblyInDefaultContext(string assemblyName)
+    {
+        try
+        {
+            AssemblyLoadContext.Default.LoadFromAssemblyName(new AssemblyName(assemblyName));
+            return true;
+        }
+        catch
+        {
             return false;
         }
     }
