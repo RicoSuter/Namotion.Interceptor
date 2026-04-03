@@ -5,7 +5,7 @@ using Namotion.Interceptor.Attributes;
 namespace HomeBlaze.Plugins.Models;
 
 [InterceptorSubject]
-public partial class PluginInfo : ITitleProvider
+public partial class PluginInfo : ITitleProvider, IIconProvider, IMonitoredService
 {
     private readonly PluginManager _manager;
 
@@ -14,12 +14,21 @@ public partial class PluginInfo : ITitleProvider
         _manager = manager;
         Name = "";
         Version = "";
-        Status = "";
+        Status = ServiceStatus.Stopped;
+        StatusMessage = null;
         Assemblies = [];
     }
-    
+
     [Derived]
-    public string Title => Name + " v" + Version;
+    public string Title => string.IsNullOrEmpty(Version) ? Name : $"{Name} v{Version}";
+
+    [Derived]
+    public string? IconName => Status == ServiceStatus.Error ? "ErrorOutline" : "Extension";
+
+    [Derived]
+    public string? IconColor =>
+        Status == ServiceStatus.Running ? "Success" :
+        Status == ServiceStatus.Error ? "Error" : "Default";
 
     [State]
     public partial string Name { get; internal set; }
@@ -31,7 +40,10 @@ public partial class PluginInfo : ITitleProvider
     public partial string[] Assemblies { get; internal set; }
 
     [State]
-    public partial string Status { get; internal set; }
+    public partial ServiceStatus Status { get; internal set; }
+
+    [State]
+    public partial string? StatusMessage { get; internal set; }
 
     [Operation(Title = "Remove Plugin", RequiresConfirmation = true)]
     public void RemovePlugin(string packageName)

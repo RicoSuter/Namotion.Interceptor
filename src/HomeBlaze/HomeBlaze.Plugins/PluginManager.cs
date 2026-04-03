@@ -6,9 +6,15 @@ using Namotion.Interceptor.Attributes;
 namespace HomeBlaze.Plugins;
 
 [InterceptorSubject]
-public partial class PluginManager : IConfigurable, ITitleProvider
+public partial class PluginManager : IConfigurable, ITitleProvider, IIconProvider
 {
     public string? Title => "Plugins";
+
+    public string? IconName => "Extension";
+
+    [Derived]
+    public string? IconColor =>
+        LoadedPlugins.Values.Any(p => p.Status == ServiceStatus.Error) ? "Warning" : "Success";
 
     public PluginManager(PluginLoaderService pluginLoaderService)
     {
@@ -18,25 +24,42 @@ public partial class PluginManager : IConfigurable, ITitleProvider
         LoadedPlugins = new Dictionary<string, PluginInfo>();
 
         // Read already-loaded results from service
-        if (pluginLoaderService.Loader != null)
+        var result = pluginLoaderService.LoadResult;
+        if (result != null)
         {
-            LoadedPlugins = pluginLoaderService.Loader.LoadedPlugins
-                .ToDictionary(
-                    group => group.PackageName,
-                    group => new PluginInfo(this)
-                    {
-                        Name = group.PackageName,
-                        Version = group.PackageVersion,
-                        Assemblies = group.Assemblies
-                            .Select(a =>
-                            {
-                                var name = a.GetName();
-                                var version = name.Version?.ToString(3) ?? "?";
-                                return $"{name.Name} v{version}";
-                            })
-                            .ToArray(),
-                        Status = "Loaded"
-                    });
+            var plugins = new Dictionary<string, PluginInfo>();
+
+            foreach (var group in result.LoadedPlugins)
+            {
+                plugins[group.PackageName] = new PluginInfo(this)
+                {
+                    Name = group.PackageName,
+                    Version = group.PackageVersion,
+                    Assemblies = group.Assemblies
+                        .Select(a =>
+                        {
+                            var name = a.GetName();
+                            var version = name.Version?.ToString(3) ?? "?";
+                            return $"{name.Name} v{version}";
+                        })
+                        .ToArray(),
+                    Status = ServiceStatus.Running
+                };
+            }
+
+            foreach (var failure in result.Failures)
+            {
+                plugins[failure.PackageName] = new PluginInfo(this)
+                {
+                    Name = failure.PackageName,
+                    Version = "",
+                    Assemblies = [],
+                    Status = ServiceStatus.Error,
+                    StatusMessage = failure.Reason
+                };
+            }
+
+            LoadedPlugins = plugins;
         }
     }
 
