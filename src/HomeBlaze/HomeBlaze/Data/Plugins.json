@@ -9,6 +9,7 @@
     "Namotion.Devices.*.Abstractions"
   ],
   "plugins": [
-    { "packageName": "HomeBlaze.SamplePlugin.HomeBlaze", "version": "1.0.0" }
+    { "packageName": "HomeBlaze.SamplePlugin.HomeBlaze", "version": "1.0.0" },
+    { "packageName": "HomeBlaze.NonExistent.Plugin", "version": "1.0.0" }
   ]
 }

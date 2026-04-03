@@ -30,6 +30,8 @@ public class PluginLoaderService : IDisposable
 
     public NuGetPluginLoader? Loader => _loader;
 
+    public NuGetPluginLoadResult? LoadResult { get; private set; }
+
     public async Task<NuGetPluginLoadResult?> LoadPluginsAsync(CancellationToken cancellationToken)
     {
         if (_loader == null || _config == null)
@@ -40,6 +42,7 @@ public class PluginLoaderService : IDisposable
 
         _logger.LogInformation("Loading {Count} plugins...", _config.Plugins.Count);
         var result = await _loader.LoadPluginsAsync(_config.Plugins, cancellationToken);
+        LoadResult = result;
 
         if (result.Failures.Count > 0)
         {
