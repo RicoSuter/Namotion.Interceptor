@@ -50,7 +50,7 @@ public class PackageExtractorTests : IDisposable
     public void WhenPackageHasMultipleFrameworks_ThenPrefersHighestCompatible()
     {
         // Arrange
-        var stream = CreateTestNupkgMultiTfm("TestPkg", "1.0.0", ["net8.0", "net9.0"]);
+        var stream = CreateTestNupkg("TestPkg", "1.0.0", "net8.0", "net9.0");
 
         // Act
         var paths = _extractor.ExtractAndGetAssemblyPaths("TestPkg", "1.0.0", stream);
@@ -64,7 +64,7 @@ public class PackageExtractorTests : IDisposable
     public void WhenPackageHasNoLibFolder_ThenReturnsEmpty()
     {
         // Arrange
-        var stream = CreateEmptyNupkg("TestPkg", "1.0.0");
+        var stream = CreateTestNupkg("TestPkg", "1.0.0");
 
         // Act
         var paths = _extractor.ExtractAndGetAssemblyPaths("TestPkg", "1.0.0", stream);
@@ -97,34 +97,7 @@ public class PackageExtractorTests : IDisposable
         }
     }
 
-    private static MemoryStream CreateTestNupkg(string name, string version, string tfm)
-    {
-        var memoryStream = new MemoryStream();
-        using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
-        {
-            // Add a nuspec
-            var nuspecEntry = archive.CreateEntry($"{name}.nuspec");
-            using (var writer = new StreamWriter(nuspecEntry.Open()))
-            {
-                writer.Write($"""
-                    <?xml version="1.0"?>
-                    <package><metadata><id>{name}</id><version>{version}</version></metadata></package>
-                    """);
-            }
-
-            // Add a fake DLL in the right TFM folder
-            var dllEntry = archive.CreateEntry($"lib/{tfm}/{name}.dll");
-            using (var writer = new StreamWriter(dllEntry.Open()))
-            {
-                writer.Write("fake dll content");
-            }
-        }
-
-        memoryStream.Position = 0;
-        return memoryStream;
-    }
-
-    private static MemoryStream CreateTestNupkgMultiTfm(string name, string version, string[] tfms)
+    private static MemoryStream CreateTestNupkg(string name, string version, params string[] tfms)
     {
         var memoryStream = new MemoryStream();
         using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
@@ -144,23 +117,6 @@ public class PackageExtractorTests : IDisposable
                 using var writer = new StreamWriter(dllEntry.Open());
                 writer.Write("fake dll content");
             }
-        }
-
-        memoryStream.Position = 0;
-        return memoryStream;
-    }
-
-    private static MemoryStream CreateEmptyNupkg(string name, string version)
-    {
-        var memoryStream = new MemoryStream();
-        using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
-        {
-            var nuspecEntry = archive.CreateEntry($"{name}.nuspec");
-            using var writer = new StreamWriter(nuspecEntry.Open());
-            writer.Write($"""
-                <?xml version="1.0"?>
-                <package><metadata><id>{name}</id><version>{version}</version></metadata></package>
-                """);
         }
 
         memoryStream.Position = 0;

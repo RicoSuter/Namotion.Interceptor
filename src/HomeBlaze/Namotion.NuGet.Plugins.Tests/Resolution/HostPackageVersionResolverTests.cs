@@ -67,7 +67,7 @@ public class HostPackageVersionResolverTests
         // Assert
         Assert.False(result.Success);
         Assert.Single(result.Conflicts);
-        Assert.Equal("SharedLib", result.Conflicts[0].AssemblyName);
+        Assert.Equal("SharedLib", result.Conflicts[0].PackageName);
     }
 
     [Fact]
@@ -95,5 +95,114 @@ public class HostPackageVersionResolverTests
         Assert.False(result.Success);
         Assert.Single(result.Conflicts); // Only LibB conflicts
         Assert.True(result.ResolvedRanges.ContainsKey("LibA")); // LibA resolved fine
+    }
+
+    [Fact]
+    public void WhenTwoPluginsHaveCompatibleRanges_ThenResolvesSuccessfully()
+    {
+        // Arrange
+        var requirements = new Dictionary<string, List<(string PluginName, VersionRange Range)>>
+        {
+            ["SharedLib"] =
+            [
+                ("PluginA", VersionRange.Parse("[1.0.0, 2.0.0)")),
+                ("PluginB", VersionRange.Parse("[1.2.0, 2.0.0)"))
+            ]
+        };
+
+        // Act
+        var result = HostPackageVersionResolver.ResolveVersions(requirements);
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Empty(result.Conflicts);
+    }
+
+    [Fact]
+    public void WhenTwoPluginsHaveIncompatibleRanges_ThenReturnsConflict()
+    {
+        // Arrange
+        var requirements = new Dictionary<string, List<(string PluginName, VersionRange Range)>>
+        {
+            ["SharedLib"] =
+            [
+                ("PluginA", VersionRange.Parse("[2.0.0, 3.0.0)")),
+                ("PluginB", VersionRange.Parse("[1.0.0, 2.0.0)"))
+            ]
+        };
+
+        // Act
+        var result = HostPackageVersionResolver.ResolveVersions(requirements);
+
+        // Assert
+        Assert.False(result.Success);
+        Assert.Single(result.Conflicts);
+        Assert.Equal("SharedLib", result.Conflicts[0].PackageName);
+    }
+
+    [Fact]
+    public void WhenThreePluginsAndThirdConflicts_ThenReportsConflict()
+    {
+        // Arrange
+        var requirements = new Dictionary<string, List<(string PluginName, VersionRange Range)>>
+        {
+            ["SharedLib"] =
+            [
+                ("PluginA", VersionRange.Parse("[1.0.0, 2.0.0)")),
+                ("PluginB", VersionRange.Parse("[1.5.0, 2.0.0)")),
+                ("PluginC", VersionRange.Parse("[3.0.0, 4.0.0)"))
+            ]
+        };
+
+        // Act
+        var result = HostPackageVersionResolver.ResolveVersions(requirements);
+
+        // Assert
+        Assert.False(result.Success);
+        Assert.Single(result.Conflicts);
+    }
+
+    [Fact]
+    public void WhenSinglePluginRequiresPackage_ThenNoConflict()
+    {
+        // Arrange
+        var requirements = new Dictionary<string, List<(string PluginName, VersionRange Range)>>
+        {
+            ["SharedLib"] = [("PluginA", VersionRange.Parse("[1.0.0, )"))]
+        };
+
+        // Act
+        var result = HostPackageVersionResolver.ResolveVersions(requirements);
+
+        // Assert
+        Assert.True(result.Success);
+        Assert.Empty(result.Conflicts);
+    }
+
+    [Fact]
+    public void WhenMultiplePackagesWithMixedResults_ThenReportsOnlyConflicting()
+    {
+        // Arrange
+        var requirements = new Dictionary<string, List<(string PluginName, VersionRange Range)>>
+        {
+            ["Compatible"] =
+            [
+                ("PluginA", VersionRange.Parse("[1.0.0, 2.0.0)")),
+                ("PluginB", VersionRange.Parse("[1.0.0, 2.0.0)"))
+            ],
+            ["Conflicting"] =
+            [
+                ("PluginA", VersionRange.Parse("[1.0.0, 2.0.0)")),
+                ("PluginB", VersionRange.Parse("[3.0.0, 4.0.0)"))
+            ]
+        };
+
+        // Act
+        var result = HostPackageVersionResolver.ResolveVersions(requirements);
+
+        // Assert
+        Assert.False(result.Success);
+        Assert.Single(result.Conflicts);
+        Assert.Equal("Conflicting", result.Conflicts[0].PackageName);
     }
 }

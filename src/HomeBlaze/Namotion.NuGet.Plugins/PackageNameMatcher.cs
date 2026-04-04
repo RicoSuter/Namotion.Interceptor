@@ -7,7 +7,7 @@ using System.Text.RegularExpressions;
 namespace Namotion.NuGet.Plugins;
 
 /// <summary>
-/// Matches package names against glob patterns where * matches any characters within a single dot-separated segment.
+/// Matches package names against glob patterns where * matches one or more characters (including dots), consistent with NuGet package source mapping conventions.
 /// </summary>
 public static class PackageNameMatcher
 {
@@ -15,13 +15,13 @@ public static class PackageNameMatcher
 
     /// <summary>
     /// Checks if a package name matches a glob pattern.
-    /// The pattern uses * to match any characters within a single dot-separated segment.
+    /// The pattern uses * to match one or more characters (including dots), consistent with NuGet package source mapping conventions.
     /// </summary>
     public static bool IsMatch(string packageName, string pattern)
     {
         var regex = RegexCache.GetOrAdd(pattern, p =>
         {
-            var regexPattern = "^" + Regex.Escape(p).Replace("\\*", "[^.]+") + "$";
+            var regexPattern = "^" + Regex.Escape(p).Replace("\\*", ".+") + "$";
             return new Regex(regexPattern, RegexOptions.IgnoreCase | RegexOptions.Compiled);
         });
         return regex.IsMatch(packageName);

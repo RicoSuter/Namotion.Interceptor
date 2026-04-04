@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
+using HomeBlaze.Plugins.Models;
 using Namotion.NuGet.Plugins;
 using Namotion.NuGet.Plugins.Configuration;
 
@@ -19,7 +20,7 @@ public class PluginConfiguration
     };
 
     [JsonPropertyName("feeds")]
-    public IReadOnlyList<FeedEntry> Feeds { get; set; } = [];
+    public IReadOnlyList<PluginFeedEntry> Feeds { get; set; } = [];
 
     [JsonPropertyName("hostPackages")]
     public IReadOnlyList<string> HostPackages { get; set; } = [];
@@ -59,26 +60,5 @@ public class PluginConfiguration
                 : null,
             HostDependencies = hostDependencies,
         };
-    }
-
-    public class FeedEntry
-    {
-        [JsonPropertyName("name")]
-        public string Name { get; set; } = "";
-
-        [JsonPropertyName("url")]
-        public string Url { get; set; } = "";
-
-        [JsonPropertyName("apiKey")]
-        public string? ApiKey { get; set; }
-    }
-
-    public class PluginEntry
-    {
-        [JsonPropertyName("packageName")]
-        public string PackageName { get; set; } = "";
-
-        [JsonPropertyName("version")]
-        public string? Version { get; set; }
     }
 }

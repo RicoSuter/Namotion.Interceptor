@@ -10,6 +10,7 @@ public class PackageNameMatcherTests
     [InlineData("MyCompany.*.Abstractions", "Microsoft.Extensions.Logging.Abstractions", false)]
     [InlineData("MyCompany.*.Abstractions", "MyCompany.Abstractions", false)]
     [InlineData("MyCompany.*.Abstractions", "MyCompany.Devices.Abstractions.Extra", false)]
+    [InlineData("MyCompany.*.Abstractions", "MyCompany.Devices.Philips.Hue.Abstractions", true)]
     public void WhenPatternHasWildcard_ThenMatchesCorrectly(string pattern, string packageName, bool expected)
     {
         // Act
@@ -36,7 +37,7 @@ public class PackageNameMatcherTests
     [InlineData("*.Abstractions", "MyCompany.Abstractions", true)]
     [InlineData("*.Abstractions", "Abstractions", false)]
     [InlineData("MyCompany.*", "MyCompany.Anything", true)]
-    [InlineData("MyCompany.*", "MyCompany.Deeply.Nested", false)]
+    [InlineData("MyCompany.*", "MyCompany.Deeply.Nested", true)]
     public void WhenWildcardAtEdge_ThenMatchesCorrectly(string pattern, string packageName, bool expected)
     {
         // Act

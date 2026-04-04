@@ -21,8 +21,14 @@ public class NuGetPluginVersionConflictException : Exception
 
     private static string FormatMessage(IReadOnlyList<NuGetPluginConflict> conflicts)
     {
-        var lines = conflicts.Select(c =>
-            $"  - {c.AssemblyName}: requires {c.RequiredVersion}, available {c.AvailableVersion} (requested by {c.RequestedBy})");
+        var lines = conflicts.Select(c => c switch
+        {
+            NuGetPluginHostConflict host =>
+                $"  - {host.PackageName}: plugin '{host.PluginName}' requires {host.RequiredVersion}, host has {host.HostVersion}",
+            NuGetPluginRangeConflict range =>
+                $"  - {range.PackageName}: incompatible ranges from {string.Join(", ", range.PluginRanges.Select(r => $"'{r.PluginName}' ({r.VersionRange})"))}",
+            _ => $"  - {c.PackageName}: unknown conflict"
+        });
         return $"Plugin version conflicts detected:\n{string.Join("\n", lines)}";
     }
 }

@@ -10,22 +10,18 @@ namespace HomeBlaze.Plugins;
 /// </summary>
 public class PluginLoader : IDisposable
 {
-    private readonly NuGetPluginLoader? _loader;
+    private NuGetPluginLoader? _loader;
     private readonly PluginConfiguration? _config;
+    private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<PluginLoader> _logger;
 
     public PluginLoader(
-        string? pluginConfigPath,
+        PluginConfiguration? config,
         ILoggerFactory loggerFactory)
     {
+        _config = config;
+        _loggerFactory = loggerFactory;
         _logger = loggerFactory.CreateLogger<PluginLoader>();
-
-        if (pluginConfigPath != null && File.Exists(pluginConfigPath))
-        {
-            _config = PluginConfiguration.LoadFrom(pluginConfigPath);
-            var options = _config.ToLoaderOptions(HostDependencyResolver.FromDepsJson());
-            _loader = new NuGetPluginLoader(options, loggerFactory.CreateLogger<NuGetPluginLoader>());
-        }
     }
 
     public NuGetPluginLoader? Loader => _loader;
@@ -34,11 +30,14 @@ public class PluginLoader : IDisposable
 
     public async Task<NuGetPluginLoadResult?> LoadPluginsAsync(CancellationToken cancellationToken)
     {
-        if (_loader == null || _config == null)
+        if (_config == null)
         {
             _logger.LogInformation("No plugin configuration found. Skipping plugin loading.");
             return null;
         }
+
+        var options = _config.ToLoaderOptions(HostDependencyResolver.FromDepsJson());
+        _loader = new NuGetPluginLoader(options, _loggerFactory.CreateLogger<NuGetPluginLoader>());
 
         _logger.LogInformation("Loading {Count} plugins...", _config.PluginReferences.Count);
         var result = await _loader.LoadPluginsAsync(_config.PluginReferences, cancellationToken);

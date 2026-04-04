@@ -38,7 +38,7 @@ public class NuGetPluginLoader : IDisposable
         _extractor = new PackageExtractor(cacheDirectory);
 
         var repositories = options.Feeds
-            .Select(feed => (INuGetPackageRepository)new NuGetPackageRepository(feed, _logger))
+            .Select(feed => (INuGetPackageRepository)new NuGetPackageRepository(feed, options.IncludePrerelease, _logger))
             .ToList();
         _repository = new CompositeNuGetPackageRepository(repositories);
 
@@ -83,6 +83,8 @@ public class NuGetPluginLoader : IDisposable
         IEnumerable<NuGetPluginReference> plugins,
         CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
         var pluginList = plugins.ToList();
         var failures = new List<NuGetPluginFailure>();
 
@@ -93,12 +95,14 @@ public class NuGetPluginLoader : IDisposable
             pluginList.Select(plugin => plugin.PackageName));
 
         var graphResolver = new DependencyGraphResolver(
-            _options.Feeds, hostResolver, _options.IsHostPackage, _logger);
+            _options.Feeds, hostResolver, _options.IsHostPackage, _options.IncludePrerelease, _logger);
 
         var pluginGraphs = await ResolvePluginGraphsAsync(
             pluginList, classifier, graphResolver, failures, cancellationToken);
 
-        ValidateHostCompatibility(pluginGraphs, hostResolver);
+        var hostFailures = ValidateHostCompatibility(pluginGraphs, hostResolver);
+        failures.AddRange(hostFailures);
+        pluginGraphs.RemoveAll(graph => hostFailures.Any(failure => failure.PackageName == graph.Request.PackageName));
 
         await DownloadPackagesAsync(pluginGraphs, failures, hostResolver, cancellationToken);
 
@@ -140,7 +144,7 @@ public class NuGetPluginLoader : IDisposable
             {
                 _logger.LogError(exception, "Failed to resolve dependencies for plugin '{Plugin}'.", request.PackageName);
                 failures.Add(new NuGetPluginFailure(request.PackageName,
-                    $"Dependency resolution failed: {exception.Message}", exception: exception));
+                    $"Dependency resolution failed: {exception.Message}", Exception: exception));
             }
         }
 
@@ -149,13 +153,16 @@ public class NuGetPluginLoader : IDisposable
 
     /// <summary>
     /// Validates that host dependencies are version-compatible across all plugins.
-    /// Throws <see cref="NuGetPluginVersionConflictException"/> if conflicts are found.
+    /// Returns a list of failures for plugins that have host version conflicts,
+    /// rather than aborting all plugins.
     /// </summary>
-    private static void ValidateHostCompatibility(
+    private static List<NuGetPluginFailure> ValidateHostCompatibility(
         List<ResolvedPluginGraph> pluginGraphs,
         HostDependencyResolver hostResolver)
     {
-        var allHostConflicts = new List<NuGetPluginConflict>();
+        var failures = new List<NuGetPluginFailure>();
+
+        // Check each plugin's host dependencies against the host's deps.json versions
         foreach (var entry in pluginGraphs)
         {
             var hostDependencies = entry.FlatDependencies
@@ -163,17 +170,28 @@ public class NuGetPluginLoader : IDisposable
                 .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
 
             var conflicts = VersionCompatibility.FindConflicts(hostDependencies, hostResolver, entry.Request.PackageName);
-            allHostConflicts.AddRange(conflicts);
+            if (conflicts.Count > 0)
+            {
+                failures.Add(new NuGetPluginFailure(
+                    entry.Request.PackageName,
+                    $"Host version conflicts: {string.Join(", ", conflicts.Select(conflict => $"{conflict.PackageName} requires {conflict.RequiredVersion} but host has {conflict.HostVersion}"))}",
+                    Conflicts: conflicts));
+            }
         }
 
         // Validate external host package version compatibility across plugins
         var additionalHostRequirements = new Dictionary<string, List<(string PluginName, VersionRange Range)>>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in pluginGraphs)
         {
+            // Skip plugins already failed above
+            if (failures.Any(failure => failure.PackageName == entry.Request.PackageName))
+            {
+                continue;
+            }
+
             foreach (var (packageName, version) in entry.FlatDependencies)
             {
-                if (entry.Classifications[packageName] == DependencyClassification.Host &&
-                    !hostResolver.Contains(packageName))
+                if (IsExternalHostPackage(packageName, entry.Classifications, hostResolver))
                 {
                     if (!additionalHostRequirements.ContainsKey(packageName))
                     {
@@ -191,14 +209,40 @@ public class NuGetPluginLoader : IDisposable
             var hostVersionResult = HostPackageVersionResolver.ResolveVersions(additionalHostRequirements);
             if (!hostVersionResult.Success)
             {
-                allHostConflicts.AddRange(hostVersionResult.Conflicts);
+                // Determine which plugins contributed to each conflict and fail them
+                var conflictingPluginNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var conflict in hostVersionResult.Conflicts)
+                {
+                    // Find all plugins that require this conflicting package
+                    foreach (var (pluginName, _) in conflict.PluginRanges)
+                    {
+                        conflictingPluginNames.Add(pluginName);
+                    }
+                }
+
+                foreach (var pluginName in conflictingPluginNames)
+                {
+                    // Only add if not already failed
+                    if (!failures.Any(failure => failure.PackageName.Equals(pluginName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        var pluginConflicts = hostVersionResult.Conflicts
+                            .Where(conflict =>
+                                conflict.PluginRanges.Any(range => range.PluginName.Equals(pluginName, StringComparison.OrdinalIgnoreCase)))
+                            .ToList();
+
+                        var conflictDescriptions = pluginConflicts.Select(conflict =>
+                            $"{conflict.PackageName}: incompatible ranges from {string.Join(", ", conflict.PluginRanges.Select(r => $"'{r.PluginName}' ({r.VersionRange})"))}");
+
+                        failures.Add(new NuGetPluginFailure(
+                            pluginName,
+                            $"Cross-plugin host version conflicts: {string.Join("; ", conflictDescriptions)}",
+                            Conflicts: pluginConflicts));
+                    }
+                }
             }
         }
 
-        if (allHostConflicts.Count > 0)
-        {
-            throw new NuGetPluginVersionConflictException(allHostConflicts);
-        }
+        return failures;
     }
 
     /// <summary>
@@ -239,18 +283,9 @@ public class NuGetPluginLoader : IDisposable
             }
             catch (Exception exception)
             {
-                var isHostPackageFailure = entry.FlatDependencies.Any(kvp =>
-                    entry.Classifications[kvp.Key] == DependencyClassification.Host &&
-                    !hostResolver.Contains(kvp.Key));
-
-                if (isHostPackageFailure)
-                {
-                    throw; // Host package failures fail everything
-                }
-
                 _logger.LogError(exception, "Failed to download packages for plugin '{Plugin}'.", entry.Request.PackageName);
                 failures.Add(new NuGetPluginFailure(entry.Request.PackageName,
-                    $"Download failed: {exception.Message}", exception: exception));
+                    $"Download failed: {exception.Message}", Exception: exception));
             }
         }
     }
@@ -335,8 +370,7 @@ public class NuGetPluginLoader : IDisposable
         {
             foreach (var (packageName, version) in entry.FlatDependencies)
             {
-                if (entry.Classifications[packageName] == DependencyClassification.Host &&
-                    !hostResolver.Contains(packageName))
+                if (IsExternalHostPackage(packageName, entry.Classifications, hostResolver))
                 {
                     var versionString = version.ToNormalizedString();
                     var paths = _extractor.GetAssemblyPaths(
@@ -488,7 +522,7 @@ public class NuGetPluginLoader : IDisposable
             {
                 _logger.LogError(exception, "Failed to load plugin '{Plugin}'.", entry.Request.PackageName);
                 failures.Add(new NuGetPluginFailure(entry.Request.PackageName,
-                    $"Assembly load failed: {exception.Message}", exception: exception));
+                    $"Assembly load failed: {exception.Message}", Exception: exception));
             }
         }
 
@@ -513,6 +547,16 @@ public class NuGetPluginLoader : IDisposable
             }
             return false;
         }
+    }
+
+    private static bool IsExternalHostPackage(
+        string packageName,
+        Dictionary<string, DependencyClassification> classifications,
+        HostDependencyResolver hostResolver)
+    {
+        return classifications.TryGetValue(packageName, out var classification)
+            && classification == DependencyClassification.Host
+            && !hostResolver.Contains(packageName);
     }
 
     private static bool IsAssemblyInDefaultContext(string assemblyName)
