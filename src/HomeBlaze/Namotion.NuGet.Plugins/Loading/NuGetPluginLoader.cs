@@ -140,7 +140,7 @@ public class NuGetPluginLoader : IDisposable
                 var classifications = classifier.ClassifyAll(flatDependencies);
                 pluginGraphs.Add(new ResolvedPluginGraph(request, flatDependencies, classifications));
             }
-            catch (Exception exception)
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 _logger.LogError(exception, "Failed to resolve dependencies for plugin '{Plugin}'.", request.PackageName);
                 failures.Add(new NuGetPluginFailure(request.PackageName,
@@ -281,7 +281,7 @@ public class NuGetPluginLoader : IDisposable
                     _extractor.ExtractAndGetAssemblyPaths(packageName, versionString, download.Stream);
                 }
             }
-            catch (Exception exception)
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 _logger.LogError(exception, "Failed to download packages for plugin '{Plugin}'.", entry.Request.PackageName);
                 failures.Add(new NuGetPluginFailure(entry.Request.PackageName,
@@ -518,7 +518,7 @@ public class NuGetPluginLoader : IDisposable
                 _logger.LogInformation("Plugin '{Plugin}' v{Version} loaded with {Count} assemblies.",
                     entry.Request.PackageName, pluginVersion, assemblies.Count);
             }
-            catch (Exception exception)
+            catch (Exception exception) when (exception is not OperationCanceledException)
             {
                 _logger.LogError(exception, "Failed to load plugin '{Plugin}'.", entry.Request.PackageName);
                 failures.Add(new NuGetPluginFailure(entry.Request.PackageName,

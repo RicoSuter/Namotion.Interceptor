@@ -69,7 +69,7 @@ Feeds can be remote NuGet V3 service index URLs or local folder paths. In the ex
 |-------|---------|
 | `$type` | Subject type discriminator for `PluginManager` |
 | `feeds` | NuGet package sources (remote URLs or local folder paths), tried in order |
-| `HostPackages` | Manual override patterns for shared contract assemblies loaded into the default context (typically empty when using automatic discovery) |
+| `hostPackages` | Manual override patterns for shared contract assemblies loaded into the default context (typically empty when using automatic discovery) |
 | `plugins` | Plugin packages to load by name and optional version from the configured feeds |
 
 ### Subject Model

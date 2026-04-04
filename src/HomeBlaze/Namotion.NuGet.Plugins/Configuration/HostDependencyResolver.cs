@@ -1,5 +1,6 @@
 using System.Reflection;
 using Microsoft.Extensions.DependencyModel;
+using NuGet.Versioning;
 
 namespace Namotion.NuGet.Plugins.Configuration;
 
@@ -8,9 +9,9 @@ namespace Namotion.NuGet.Plugins.Configuration;
 /// </summary>
 public class HostDependencyResolver
 {
-    private readonly Dictionary<string, global::NuGet.Versioning.NuGetVersion> _dependencies;
+    private readonly Dictionary<string, NuGetVersion> _dependencies;
 
-    internal HostDependencyResolver(Dictionary<string, global::NuGet.Versioning.NuGetVersion> dependencies)
+    internal HostDependencyResolver(Dictionary<string, NuGetVersion> dependencies)
     {
         _dependencies = dependencies;
     }
@@ -18,7 +19,7 @@ public class HostDependencyResolver
     /// <summary>
     /// All known host dependencies (package name -> NuGet version).
     /// </summary>
-    public IReadOnlyDictionary<string, global::NuGet.Versioning.NuGetVersion> Dependencies => _dependencies;
+    public IReadOnlyDictionary<string, NuGetVersion> Dependencies => _dependencies;
 
     /// <summary>
     /// Whether the host has this package.
@@ -28,7 +29,7 @@ public class HostDependencyResolver
     /// <summary>
     /// Gets the host's version of a package, or null if not present.
     /// </summary>
-    public global::NuGet.Versioning.NuGetVersion? GetVersion(string packageName) =>
+    public NuGetVersion? GetVersion(string packageName) =>
         _dependencies.TryGetValue(packageName, out var version) ? version : null;
 
     /// <summary>
@@ -73,13 +74,13 @@ public class HostDependencyResolver
     /// </summary>
     public static HostDependencyResolver FromAssemblies(IEnumerable<Assembly> assemblies)
     {
-        var dependencies = new Dictionary<string, global::NuGet.Versioning.NuGetVersion>(StringComparer.OrdinalIgnoreCase);
+        var dependencies = new Dictionary<string, NuGetVersion>(StringComparer.OrdinalIgnoreCase);
         foreach (var assembly in assemblies)
         {
             var name = assembly.GetName();
             if (name.Name != null && name.Version != null)
             {
-                dependencies[name.Name] = new global::NuGet.Versioning.NuGetVersion(
+                dependencies[name.Name] = new NuGetVersion(
                     name.Version.Major,
                     name.Version.Minor,
                     name.Version.Build >= 0 ? name.Version.Build : 0);
@@ -94,10 +95,10 @@ public class HostDependencyResolver
     /// </summary>
     public static HostDependencyResolver FromAssemblies(params (string Name, Version Version)[] assemblies)
     {
-        var dependencies = new Dictionary<string, global::NuGet.Versioning.NuGetVersion>(StringComparer.OrdinalIgnoreCase);
+        var dependencies = new Dictionary<string, NuGetVersion>(StringComparer.OrdinalIgnoreCase);
         foreach (var (name, version) in assemblies)
         {
-            dependencies[name] = new global::NuGet.Versioning.NuGetVersion(
+            dependencies[name] = new NuGetVersion(
                 version.Major, version.Minor, version.Build >= 0 ? version.Build : 0);
         }
 
@@ -106,10 +107,10 @@ public class HostDependencyResolver
 
     private static HostDependencyResolver FromDependencyContext(DependencyContext context)
     {
-        var dependencies = new Dictionary<string, global::NuGet.Versioning.NuGetVersion>(StringComparer.OrdinalIgnoreCase);
+        var dependencies = new Dictionary<string, NuGetVersion>(StringComparer.OrdinalIgnoreCase);
         foreach (var library in context.RuntimeLibraries)
         {
-            if (global::NuGet.Versioning.NuGetVersion.TryParse(library.Version, out var version))
+            if (NuGetVersion.TryParse(library.Version, out var version))
             {
                 dependencies[library.Name] = version;
             }

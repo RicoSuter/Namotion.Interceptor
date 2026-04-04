@@ -168,12 +168,12 @@ jobs:
 
       - name: Run NuGet plugins integration tests
         run: |
-          dotnet test src/HomeBlaze/Namotion.NuGet.Plugins.Tests `
-            --configuration Release `
-            --no-build `
-            --filter "Category=Integration" `
-            --results-directory ./TestResults `
-            --collect:"XPlat Code Coverage" `
+          dotnet test src/HomeBlaze/Namotion.NuGet.Plugins.Tests \
+            --configuration Release \
+            --no-build \
+            --filter "Category=Integration" \
+            --results-directory ./TestResults \
+            --collect:"XPlat Code Coverage" \
             -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
 
       - name: Upload NuGet plugins integration test coverage
