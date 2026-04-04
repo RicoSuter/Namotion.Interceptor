@@ -47,8 +47,14 @@ public class NuGetPlugin : IDisposable
     /// <summary>
     /// Gets the assemblies loaded for this plugin.
     /// </summary>
-    public IReadOnlyList<Assembly> Assemblies =>
-        _assemblies ?? throw new ObjectDisposedException(nameof(NuGetPlugin));
+    public IReadOnlyList<Assembly> Assemblies
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _assemblies!;
+        }
+    }
 
     /// <summary>
     /// Gets the package metadata extracted from the nuspec.

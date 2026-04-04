@@ -146,17 +146,6 @@ public class HostSharedDiscoveryIntegrationTests : IDisposable
 
     private NuGetPluginLoaderOptions CreateOptions(string pluginsFolder)
     {
-        // Build a HostDependencyResolver that only contains packages whose major version
-        // matches the runtime, avoiding conflicts between the test host dependencies
-        // and plugin transitive dependencies (e.g. Microsoft.Extensions.* 9.x vs 10.x).
-        var runtimeMajor = Environment.Version.Major;
-        var fullResolver = HostDependencyResolver.FromDepsJson();
-        var filteredDependencies = fullResolver.Dependencies
-            .Where(dependency => dependency.Value.Major == runtimeMajor)
-            .Select(dependency => (dependency.Key, new Version(dependency.Value.Major, dependency.Value.Minor, dependency.Value.Patch)))
-            .ToArray();
-        var hostDependencies = HostDependencyResolver.FromAssemblies(filteredDependencies);
-
         return new NuGetPluginLoaderOptions
         {
             Feeds =
@@ -165,34 +154,9 @@ public class HostSharedDiscoveryIntegrationTests : IDisposable
                 NuGetFeed.NuGetOrg,
             ],
             CacheDirectory = _cacheDir,
-            HostDependencies = hostDependencies,
-            IsHostPackage = null,
+            HostDependencies = HostDependencyResolver.FromDepsJson(),
         };
     }
 
-    private static string FindPluginsFolder()
-    {
-        var directory = Path.GetDirectoryName(typeof(HostSharedDiscoveryIntegrationTests).Assembly.Location)!;
-        while (directory != null)
-        {
-            var pluginsPath = Path.Combine(directory, "HomeBlaze", "Plugins");
-            if (Directory.Exists(pluginsPath) &&
-                File.Exists(Path.Combine(pluginsPath, "MyCompany.SamplePlugin1.HomeBlaze.1.0.0.nupkg")))
-            {
-                return pluginsPath;
-            }
-
-            pluginsPath = Path.Combine(directory, "Plugins");
-            if (Directory.Exists(pluginsPath) &&
-                Path.GetFileName(directory) == "HomeBlaze" &&
-                File.Exists(Path.Combine(pluginsPath, "MyCompany.SamplePlugin1.HomeBlaze.1.0.0.nupkg")))
-            {
-                return pluginsPath;
-            }
-
-            directory = Path.GetDirectoryName(directory);
-        }
-
-        throw new InvalidOperationException("Could not find Plugins folder. Build the solution first.");
-    }
+    private static string FindPluginsFolder() => IntegrationTestHelper.FindPluginsFolder();
 }

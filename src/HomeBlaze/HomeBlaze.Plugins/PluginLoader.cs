@@ -14,6 +14,7 @@ public class PluginLoader : IDisposable
     private readonly PluginConfiguration? _config;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<PluginLoader> _logger;
+    private bool _disposed;
 
     public PluginLoader(
         PluginConfiguration? config,
@@ -30,6 +31,8 @@ public class PluginLoader : IDisposable
 
     public async Task<NuGetPluginLoadResult?> LoadPluginsAsync(CancellationToken cancellationToken)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+
         if (_config == null)
         {
             _logger.LogInformation("No plugin configuration found. Skipping plugin loading.");
@@ -60,6 +63,8 @@ public class PluginLoader : IDisposable
 
     public void Dispose()
     {
+        _disposed = true;
         _loader?.Dispose();
+        _loader = null;
     }
 }

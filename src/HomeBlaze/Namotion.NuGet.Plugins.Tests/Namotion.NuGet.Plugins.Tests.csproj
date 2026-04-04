@@ -22,6 +22,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Namotion.NuGet.Plugins\Namotion.NuGet.Plugins.csproj" />
+    <ProjectReference Include="..\HomeBlaze.Abstractions\HomeBlaze.Abstractions.csproj" />
+    <ProjectReference Include="..\HomeBlaze.Components.Abstractions\HomeBlaze.Components.Abstractions.csproj" />
     <ProjectReference Include="..\MyCompany.SamplePlugin1.HomeBlaze\MyCompany.SamplePlugin1.HomeBlaze.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <Private>false</Private>
