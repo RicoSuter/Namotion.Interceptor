@@ -45,6 +45,12 @@ public class CompositeNuGetPackageRepository : INuGetPackageRepository
             var results = await repository.SearchPackagesAsync(searchTerm, skip, take, cancellationToken);
             allResults.AddRange(results);
         }
-        return allResults;
+
+        return allResults
+            .GroupBy(p => p.PackageName, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.OrderByDescending(p =>
+                global::NuGet.Versioning.NuGetVersion.TryParse(p.PackageVersion, out var version)
+                    ? version
+                    : new global::NuGet.Versioning.NuGetVersion(0, 0, 0)).First());
     }
 }

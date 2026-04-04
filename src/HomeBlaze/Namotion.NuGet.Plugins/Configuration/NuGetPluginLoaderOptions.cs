@@ -25,4 +25,9 @@ public class NuGetPluginLoaderOptions
     /// Gets or sets the directory for caching extracted packages. If null, a temporary directory is used.
     /// </summary>
     public string? CacheDirectory { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether pre-release package versions should be considered. Defaults to false.
+    /// </summary>
+    public bool IncludePrerelease { get; set; }
 }

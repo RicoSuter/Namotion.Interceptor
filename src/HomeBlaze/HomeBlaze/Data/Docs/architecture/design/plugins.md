@@ -106,11 +106,11 @@ graph TD
 
     SAMPLEUI -->|"fallback"| HOST
     SAMPLEUI -->|"fallback"| ABS
-    SAMPLE --> SAMPLEUI
-    BOGUS --> SAMPLE
+    SAMPLEUI --> SAMPLE
+    SAMPLE --> BOGUS
     SAMPLE2UI -->|"fallback"| HOST
     SAMPLE2UI -->|"fallback"| ABS
-    SAMPLE2 --> SAMPLE2UI
+    SAMPLE2UI --> SAMPLE2
 ```
 
 This model ensures that when a plugin implements a host-defined interface (e.g., `ITemperatureSensor`), the type identity is shared. Plugin-private dependencies are fully isolated -- different plugins can use different versions of the same library without conflict.

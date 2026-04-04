@@ -24,21 +24,18 @@ internal class PluginAssemblyLoadContext : AssemblyLoadContext
 
     protected override Assembly? Load(AssemblyName assemblyName)
     {
-        // Host assembly: return null to fall back to default context
-        if (assemblyName.Name != null && _hostAssemblyNames.Contains(assemblyName.Name))
-        {
+        if (assemblyName.Name is null)
             return null;
-        }
+
+        // Host assembly: return null to fall back to default context
+        if (_hostAssemblyNames.Contains(assemblyName.Name))
+            return null;
 
         // Private assembly: load from disk
-        if (assemblyName.Name != null &&
-            _privateAssemblyPaths.TryGetValue(assemblyName.Name, out var path) &&
-            File.Exists(path))
-        {
+        if (_privateAssemblyPaths.TryGetValue(assemblyName.Name, out var path) && File.Exists(path))
             return LoadFromAssemblyPath(path);
-        }
 
-        // Not found: fall back to default
+        // Not found in this context: returning null falls back to default ALC per .NET design
         return null;
     }
 }

@@ -128,6 +128,8 @@ Transitive dependencies are resolved recursively using the NuGet V3 API. For eac
 | `HostDependencies` | `HostDependencyResolver?` | `null` | Host dependency map for version validation |
 | `CacheDirectory` | `string?` | `null` | Local directory for downloaded packages (auto-generated temp dir if null) |
 
+The `CacheDirectory` option controls where extracted packages are stored. When omitted, a temporary directory with a unique name is created per loader instance -- packages are re-downloaded on every application restart. Set `CacheDirectory` to a stable path (e.g., `Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyApp", "plugins")`) to cache packages across restarts.
+
 ## Host Dependency Resolution
 
 The host dependency map tells the loader which packages and versions the host application already provides. This is used for two purposes:
@@ -203,12 +205,12 @@ var options = new NuGetPluginLoaderOptions
 };
 ```
 
-The `PackageNameMatcher` utility class provides glob-based matching where `*` matches any characters within a single dot-separated segment:
+The `PackageNameMatcher` utility class provides glob-based matching where `*` matches one or more characters including dots, consistent with NuGet package source mapping conventions:
 
 | Pattern | Matches | Does not match |
 |---|---|---|
-| `MyCompany.*.Abstractions` | `MyCompany.Devices.Abstractions` | `Microsoft.Extensions.Logging.Abstractions` |
-| `MyCompany.*` | `MyCompany.Core`, `MyCompany.Devices` | `OtherCompany.Core` |
+| `MyCompany.*.Abstractions` | `MyCompany.Devices.Abstractions`, `MyCompany.Devices.Philips.Abstractions` | `Microsoft.Extensions.Logging.Abstractions` |
+| `MyCompany.*` | `MyCompany.Core`, `MyCompany.Devices`, `MyCompany.Devices.Philips.Hue` | `OtherCompany.Core` |
 | `Exact.Package` | `Exact.Package` | `Exact.Package.Extra` |
 
 You can also use any custom logic:
@@ -358,9 +360,9 @@ During Phase 7, before loading each assembly into the plugin's isolated context,
 
 The distinction between priority 2, 3, and 4 matters at runtime:
 
-- **deps.json host packages** (priority 2) are already loaded in the host process. The loader skips downloading them entirely and only validates version compatibility.
-- **Predicate-matched host packages** (priority 3) are *not* in the host process. The loader downloads them from NuGet, extracts them, and loads their assemblies into the default `AssemblyLoadContext` via a `Resolving` event hook. This makes them available to both the host and all plugins. These are called "external host packages".
-- **Discovered host-shared packages** (priority 4) behave identically to predicate-matched packages at load time. The only difference is how they were discovered (via assembly attribute or plugin.json rather than the `IsHostPackage` predicate).
+- **deps.json host packages** (priority 2) are already loaded in the host process. The loader skips downloading them entirely and only validates version compatibility. Their transitive dependencies are skipped during resolution since they are already satisfied by the host.
+- **Predicate-matched host packages** (priority 3) are *not* in the host process. The loader fully resolves their entire transitive dependency tree, classifies all transitive dependencies as Host, downloads them from NuGet, extracts them, and loads their assemblies into the default `AssemblyLoadContext` via a `Resolving` event hook. This makes them available to both the host and all plugins. These are called "external host packages".
+- **Discovered host-shared packages** (priority 4) behave identically to predicate-matched packages at load time -- their transitive trees are also fully resolved and classified as Host. The only difference is how they were discovered (via assembly attribute or plugin.json rather than the `IsHostPackage` predicate).
 
 When multiple plugins depend on the same external host package, the loader computes the common subset of all their version ranges using `VersionRange.CommonSubSet()`. If a common range exists, the highest available version within that range is used. If no common subset exists (e.g., Plugin A needs `>= 2.0.0` and Plugin B needs `< 2.0.0`), this is a version conflict that fails all plugins.
 
@@ -437,6 +439,8 @@ Version validation applies only to **deps.json host packages** (priority 2 in th
 
 **External host packages** (priority 3 and 4) are not version-validated against the host since they don't exist in the host yet. Instead, when multiple plugins require the same external host package, the loader computes the common subset of all their version ranges and resolves the highest available version within that range. If no common subset exists, this is a conflict error.
 
+> **Why these rules are stricter than NuGet defaults:** The version compatibility rules are intentionally stricter than NuGet's range-based semantics. A plugin built against `Microsoft.Extensions.Logging 9.1.0` may use APIs introduced in 9.1 that are not present in 9.0. The conservative "major must match, plugin minor <= host minor" rule prevents subtle runtime failures from API surface differences within the same major version.
+
 ## Failure Handling
 
 The loader distinguishes between two levels of failure:
@@ -471,8 +475,17 @@ foreach (var failure in result.Failures)
     {
         foreach (var conflict in failure.Conflicts)
         {
-            logger.LogWarning("  Conflict: {Assembly} requires {Required} but host has {Available} (requested by {RequestedBy})",
-                conflict.AssemblyName, conflict.RequiredVersion, conflict.AvailableVersion, conflict.RequestedBy);
+            switch (conflict)
+            {
+                case NuGetPluginHostConflict host:
+                    logger.LogWarning("  Host conflict: {Package} requires {Required} but host has {HostVersion} (plugin {Plugin})",
+                        host.PackageName, host.RequiredVersion, host.HostVersion, host.PluginName);
+                    break;
+                case NuGetPluginRangeConflict range:
+                    logger.LogWarning("  Range conflict: {Package} has incompatible ranges from {Plugins}",
+                        range.PackageName, string.Join(", ", range.PluginRanges.Select(r => $"'{r.PluginName}' ({r.VersionRange})")));
+                    break;
+            }
         }
     }
 }
@@ -509,7 +522,16 @@ foreach (var plugin in loader.LoadedPlugins)
 
 ## Custom Feeds with Authentication
 
-Configure multiple NuGet feeds with optional API key authentication. Feeds are tried in order; the first feed that has the requested package wins. Downloads are retried up to 5 times with exponential backoff on transient HTTP errors.
+Configure multiple NuGet feeds with optional API key authentication. Downloads are retried up to 5 times with exponential backoff on transient HTTP errors.
+
+### Feed Resolution Order
+
+Feeds are tried in the order they are listed. When searching for a package:
+- If a feed **has the package**: it is used immediately; subsequent feeds are not tried.
+- If a feed **does not have the package** (not found): the next feed is tried.
+- If a feed **fails** (network error, authentication error): the error propagates immediately. Subsequent feeds are **not** tried as a fallback.
+
+This means feed order implies trust priority. An internal feed listed before nuget.org ensures internal packages are always resolved from the trusted source. If that feed is unreachable, loading fails rather than silently falling back to a public feed -- preventing dependency confusion attacks.
 
 Feeds can be remote NuGet V3 service index URLs or local folder paths. The NuGet SDK resolves packages from local directories natively, so a folder containing `.nupkg` files works as a feed without any special handling.
 
@@ -551,6 +573,16 @@ This disposes the plugin's `AssemblyLoadContext` (which is collectible), allowin
 
 Disposing the `NuGetPluginLoader` itself unloads all plugins and removes the default context resolving hook.
 
+### Reload Behavior
+
+**What can be reloaded without restart:**
+- Plugin-private (Isolated) assemblies live in collectible `AssemblyLoadContext` instances and are fully unloadable. Reloading plugins with different private dependencies works without process restart.
+
+**What requires a process restart:**
+- External host assemblies (loaded into the default `AssemblyLoadContext` via `IsHostPackage`, assembly attributes, or plugin.json) cannot be unloaded. They accumulate across reload cycles. If a new plugin set requires a different version of an external host package, a process restart is needed.
+
+**Host assemblies from deps.json** are already loaded before the plugin system starts and are not affected by plugin lifecycle.
+
 ## Limitations
 
 - **No native library support** -- the `runtimes/` folder inside NuGet packages is ignored; plugins with native dependencies (e.g., `libgit2sharp`) will not work.
@@ -558,6 +590,24 @@ Disposing the `NuGetPluginLoader` itself unloads all plugins and removes the def
 - **No deps.json for AOT or single-file** -- AOT-compiled and single-file published applications do not generate `deps.json`. Use `HostDependencyResolver.FromAssemblies()` instead.
 - **No plugin-to-plugin direct dependencies** -- plugins cannot reference types from other plugins. Use `IsHostPackage` to share contracts via host-loaded packages, or use assembly attributes / plugin.json for automatic discovery.
 - **No plugin signing or trust verification** -- packages are loaded without signature validation.
+- **Host assemblies are permanent** -- external host packages loaded into the default `AssemblyLoadContext` cannot be unloaded by the .NET runtime. They accumulate across plugin reload cycles; a process restart clears them.
+- **`FromAssemblies()` version accuracy** -- the `HostDependencyResolver.FromAssemblies()` fallback uses assembly versions (e.g., `9.0.0.0`) which may diverge from NuGet package versions (e.g., `9.0.5`). Prefer `FromDepsJson()` when available.
+- **Framework reference assemblies** -- framework assemblies (e.g., `System.Text.Json` from the shared runtime) are not listed in `deps.json` as NuGet packages. They are handled at load time via the default `AssemblyLoadContext` and do not participate in version conflict detection.
+
+## Thread Safety
+
+- `LoadPluginsAsync` is not thread-safe and must not be called concurrently on the same loader instance.
+- Package extraction (`PackageExtractor`) is not thread-safe for the same cache directory.
+- `GetTypes<T>()` and `LoadedPlugins` are safe to call from any thread after loading completes.
+
+## Future Enhancements
+
+The following features are not yet implemented but may be added in future versions:
+
+- **Package signature verification** -- validate NuGet package signatures to ensure packages haven't been tampered with.
+- **Additional authentication schemes** -- support for bearer tokens and other credential types beyond API keys.
+- **Concurrent plugin loading** -- parallel resolution and download of independent plugins.
+- **Package extraction cancellation** -- `CancellationToken` support during package extraction.
 
 ## API Reference
 

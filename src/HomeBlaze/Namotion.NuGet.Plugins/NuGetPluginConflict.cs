@@ -1,42 +1,22 @@
 namespace Namotion.NuGet.Plugins;
 
 /// <summary>
-/// Describes a version conflict between a plugin's dependency and the host or another plugin.
+/// Base type for plugin version conflicts.
 /// </summary>
-public class NuGetPluginConflict
-{
-    /// <summary>
-    /// Initializes a new instance of the <see cref="NuGetPluginConflict"/> class.
-    /// </summary>
-    public NuGetPluginConflict(
-        string assemblyName,
-        string requiredVersion,
-        string availableVersion,
-        string requestedBy)
-    {
-        AssemblyName = assemblyName;
-        RequiredVersion = requiredVersion;
-        AvailableVersion = availableVersion;
-        RequestedBy = requestedBy;
-    }
+public abstract record NuGetPluginConflict(string PackageName);
 
-    /// <summary>
-    /// Gets the name of the conflicting assembly/package.
-    /// </summary>
-    public string AssemblyName { get; }
+/// <summary>
+/// A conflict between a plugin's dependency version and the host's loaded version.
+/// </summary>
+public record NuGetPluginHostConflict(
+    string PackageName,
+    string RequiredVersion,
+    string HostVersion,
+    string PluginName) : NuGetPluginConflict(PackageName);
 
-    /// <summary>
-    /// Gets the version required by the plugin.
-    /// </summary>
-    public string RequiredVersion { get; }
-
-    /// <summary>
-    /// Gets the version available in the host or from another plugin.
-    /// </summary>
-    public string AvailableVersion { get; }
-
-    /// <summary>
-    /// Gets the name of the plugin(s) that requested this dependency.
-    /// </summary>
-    public string RequestedBy { get; }
-}
+/// <summary>
+/// A conflict where multiple plugins require incompatible version ranges for a shared package.
+/// </summary>
+public record NuGetPluginRangeConflict(
+    string PackageName,
+    IReadOnlyList<(string PluginName, string VersionRange)> PluginRanges) : NuGetPluginConflict(PackageName);

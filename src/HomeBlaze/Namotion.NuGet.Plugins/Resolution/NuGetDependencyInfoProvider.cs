@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using NuGet.Configuration;
 using NuGet.Frameworks;
 using NuGet.Packaging.Core;
 using NuGet.Protocol.Core.Types;
@@ -13,15 +12,20 @@ namespace Namotion.NuGet.Plugins.Resolution;
 internal class NuGetDependencyInfoProvider : IDependencyInfoProvider
 {
     private readonly IReadOnlyList<NuGetFeed> _feeds;
+    private readonly Dictionary<string, global::NuGet.Protocol.Core.Types.SourceRepository> _repositories;
     private readonly NuGetFramework _targetFramework;
+    private readonly bool _includePrerelease;
     private readonly ILogger _logger;
 
     public NuGetDependencyInfoProvider(
         IReadOnlyList<NuGetFeed> feeds,
+        bool includePrerelease = false,
         ILogger? logger = null)
     {
         _feeds = feeds;
+        _repositories = feeds.ToDictionary(f => f.Url, f => f.CreateSourceRepository());
         _targetFramework = NuGetFramework.Parse($"net{Environment.Version.Major}.{Environment.Version.Minor}");
+        _includePrerelease = includePrerelease;
         _logger = logger ?? NullLogger.Instance;
     }
 
@@ -32,7 +36,7 @@ internal class NuGetDependencyInfoProvider : IDependencyInfoProvider
         {
             try
             {
-                var sourceRepository = CreateSourceRepository(feed);
+                var sourceRepository = _repositories[feed.Url];
                 var dependencyInfoResource = await sourceRepository.GetResourceAsync<DependencyInfoResource>(cancellationToken);
                 using var dependencyCacheContext = new SourceCacheContext();
                 var dependencyInfo = await dependencyInfoResource.ResolvePackage(
@@ -47,9 +51,9 @@ internal class NuGetDependencyInfoProvider : IDependencyInfoProvider
                         .ToList();
                 }
             }
-            catch (Exception exception)
+            catch (Exception exception) when (exception is not HttpRequestException and not FatalProtocolException)
             {
-                _logger.LogDebug(exception, "Failed to get deps from {Feed} for {Package}.", feed.Name, packageName);
+                _logger.LogDebug(exception, "Package not found on {Feed} for {Package}.", feed.Name, packageName);
             }
         }
         return [];
@@ -62,11 +66,11 @@ internal class NuGetDependencyInfoProvider : IDependencyInfoProvider
         {
             try
             {
-                var sourceRepository = CreateSourceRepository(feed);
+                var sourceRepository = _repositories[feed.Url];
                 var metadataResource = await sourceRepository.GetResourceAsync<PackageMetadataResource>(cancellationToken);
                 using var metadataCacheContext = new SourceCacheContext();
                 var packages = await metadataResource.GetMetadataAsync(
-                    packageName, includePrerelease: false, includeUnlisted: false,
+                    packageName, includePrerelease: _includePrerelease, includeUnlisted: false,
                     metadataCacheContext, global::NuGet.Common.NullLogger.Instance, cancellationToken);
 
                 var best = packages
@@ -76,24 +80,11 @@ internal class NuGetDependencyInfoProvider : IDependencyInfoProvider
 
                 if (best != null) return best.Identity.Version;
             }
-            catch (Exception exception)
+            catch (Exception exception) when (exception is not HttpRequestException and not FatalProtocolException)
             {
-                _logger.LogDebug(exception, "Failed to resolve version from {Feed} for {Package}.", feed.Name, packageName);
+                _logger.LogDebug(exception, "Package not found on {Feed} for {Package}.", feed.Name, packageName);
             }
         }
         return null;
-    }
-
-    private static SourceRepository CreateSourceRepository(NuGetFeed feed)
-    {
-        var packageSource = new PackageSource(feed.Url);
-        if (feed.ApiKey != null)
-        {
-            packageSource.Credentials = new PackageSourceCredential(
-                feed.Url, "apikey", feed.ApiKey, isPasswordClearText: true, validAuthenticationTypesText: null);
-        }
-        var providers = new List<Lazy<INuGetResourceProvider>>();
-        providers.AddRange(global::NuGet.Protocol.Core.Types.Repository.Provider.GetCoreV3());
-        return new SourceRepository(packageSource, providers);
     }
 }

@@ -30,19 +30,19 @@ public static class VersionCompatibility
     /// Finds all version conflicts between plugin dependencies and host dependencies.
     /// Only checks dependencies that exist in the host (non-host deps are not conflicts).
     /// </summary>
-    public static IReadOnlyList<NuGetPluginConflict> FindConflicts(
+    public static IReadOnlyList<NuGetPluginHostConflict> FindConflicts(
         IReadOnlyDictionary<string, global::NuGet.Versioning.NuGetVersion> pluginDependencies,
         HostDependencyResolver hostResolver,
         string pluginName)
     {
-        var conflicts = new List<NuGetPluginConflict>();
+        var conflicts = new List<NuGetPluginHostConflict>();
 
         foreach (var (packageName, requiredVersion) in pluginDependencies)
         {
             var hostVersion = hostResolver.GetVersion(packageName);
             if (hostVersion != null && !IsCompatible(requiredVersion, hostVersion))
             {
-                conflicts.Add(new NuGetPluginConflict(
+                conflicts.Add(new NuGetPluginHostConflict(
                     packageName,
                     requiredVersion.ToNormalizedString(),
                     hostVersion.ToNormalizedString(),

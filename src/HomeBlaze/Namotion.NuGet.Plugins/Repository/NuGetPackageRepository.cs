@@ -11,16 +11,21 @@ namespace Namotion.NuGet.Plugins.Repository;
 public class NuGetPackageRepository : INuGetPackageRepository
 {
     private readonly NuGetFeed _feed;
+    private readonly global::NuGet.Protocol.Core.Types.SourceRepository _sourceRepository;
+    private readonly bool _includePrerelease;
     private readonly ILogger _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="NuGetPackageRepository"/> class.
     /// </summary>
     /// <param name="feed">The NuGet feed to use for package operations.</param>
+    /// <param name="includePrerelease">Whether to include pre-release package versions.</param>
     /// <param name="logger">An optional logger for diagnostic output.</param>
-    public NuGetPackageRepository(NuGetFeed feed, ILogger? logger = null)
+    public NuGetPackageRepository(NuGetFeed feed, bool includePrerelease = false, ILogger? logger = null)
     {
         _feed = feed ?? throw new ArgumentNullException(nameof(feed));
+        _sourceRepository = feed.CreateSourceRepository();
+        _includePrerelease = includePrerelease;
         _logger = logger ?? NullLogger.Instance;
     }
 
@@ -28,12 +33,12 @@ public class NuGetPackageRepository : INuGetPackageRepository
     public async Task<IEnumerable<NuGetPackage>> SearchPackagesAsync(
         string searchTerm, int skip, int take, CancellationToken cancellationToken)
     {
-        var sourceRepository = CreateSourceRepository();
+        var sourceRepository = _sourceRepository;
         var resource = await sourceRepository.GetResourceAsync<global::NuGet.Protocol.Core.Types.PackageSearchResource>(cancellationToken);
 
         var results = await resource.SearchAsync(
             searchTerm,
-            new global::NuGet.Protocol.Core.Types.SearchFilter(includePrerelease: false) { IncludeDelisted = false },
+            new global::NuGet.Protocol.Core.Types.SearchFilter(includePrerelease: _includePrerelease) { IncludeDelisted = false },
             skip, take, global::NuGet.Common.NullLogger.Instance, cancellationToken);
 
         return results.Select(metadata => new NuGetPackage(
@@ -53,7 +58,7 @@ public class NuGetPackageRepository : INuGetPackageRepository
         {
             try
             {
-                var sourceRepository = CreateSourceRepository();
+                var sourceRepository = _sourceRepository;
 
                 var metadataResource = await sourceRepository.GetResourceAsync<global::NuGet.Protocol.Core.Types.PackageMetadataResource>(cancellationToken);
 
@@ -67,7 +72,7 @@ public class NuGetPackageRepository : INuGetPackageRepository
                     // Resolve latest version first to avoid NuGet SDK SingleOrDefault issue
                     using var listCacheContext = new global::NuGet.Protocol.Core.Types.SourceCacheContext();
                     var versions = await metadataResource.GetMetadataAsync(
-                        packageName, includePrerelease: false, includeUnlisted: false,
+                        packageName, includePrerelease: _includePrerelease, includeUnlisted: false,
                         listCacheContext, global::NuGet.Common.NullLogger.Instance, cancellationToken);
 
                     var latest = versions?
@@ -112,7 +117,7 @@ public class NuGetPackageRepository : INuGetPackageRepository
                     metadata.Description,
                     metadata.Authors);
 
-                return new NuGetPackageDownload(packageInfo, downloadResult.PackageStream);
+                return new NuGetPackageDownload(packageInfo, downloadResult.PackageStream, downloadResult);
             }
             catch (Exception exception) when (
                 attempt < maxRetries &&
@@ -124,19 +129,5 @@ public class NuGetPackageRepository : INuGetPackageRepository
                 await Task.Delay(delay, cancellationToken);
             }
         }
-    }
-
-    private global::NuGet.Protocol.Core.Types.SourceRepository CreateSourceRepository()
-    {
-        var packageSource = new global::NuGet.Configuration.PackageSource(_feed.Url);
-        if (_feed.ApiKey != null)
-        {
-            packageSource.Credentials = new global::NuGet.Configuration.PackageSourceCredential(
-                _feed.Url, "apikey", _feed.ApiKey, isPasswordClearText: true, validAuthenticationTypesText: null);
-        }
-
-        var providers = new List<Lazy<global::NuGet.Protocol.Core.Types.INuGetResourceProvider>>();
-        providers.AddRange(global::NuGet.Protocol.Core.Types.Repository.Provider.GetCoreV3());
-        return new global::NuGet.Protocol.Core.Types.SourceRepository(packageSource, providers);
     }
 }

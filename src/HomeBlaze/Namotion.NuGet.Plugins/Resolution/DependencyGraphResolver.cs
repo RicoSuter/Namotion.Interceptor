@@ -33,13 +33,15 @@ public class DependencyGraphResolver
     /// <param name="feeds">The NuGet feeds to query for package metadata.</param>
     /// <param name="hostDependencies">Optional host dependency resolver for skipping already-provided packages.</param>
     /// <param name="isHostPackage">Optional predicate that determines whether a package should be treated as host-provided.</param>
+    /// <param name="includePrerelease">Whether to include pre-release package versions when resolving dependencies.</param>
     /// <param name="logger">An optional logger for diagnostic output.</param>
     public DependencyGraphResolver(
         IReadOnlyList<NuGetFeed> feeds,
         HostDependencyResolver? hostDependencies = null,
         Func<string, bool>? isHostPackage = null,
+        bool includePrerelease = false,
         ILogger? logger = null)
-        : this(new NuGetDependencyInfoProvider(feeds, logger), hostDependencies, isHostPackage, logger)
+        : this(new NuGetDependencyInfoProvider(feeds, includePrerelease, logger), hostDependencies, isHostPackage, logger)
     {
     }
 
@@ -103,9 +105,24 @@ public class DependencyGraphResolver
 
         foreach (var (dependencyId, versionRange) in dependencies)
         {
-            // Cycle detection
-            if (visited.ContainsKey(dependencyId))
+            if (visited.TryGetValue(dependencyId, out var existingVersion))
+            {
+                // Already visited -- check if existing version satisfies the new range
+                if (versionRange.Satisfies(existingVersion))
+                    continue;
+
+                // Existing version doesn't satisfy the new range -- re-resolve for the higher version
+                var upgradedVersion = await _provider.ResolveVersionAsync(
+                    dependencyId, versionRange, cancellationToken);
+                if (upgradedVersion != null && upgradedVersion > existingVersion)
+                {
+                    visited[dependencyId] = upgradedVersion;
+                    var upgradedNode = new DependencyNode(dependencyId, upgradedVersion);
+                    node.Dependencies.Add(upgradedNode);
+                    await ResolveRecursiveAsync(upgradedNode, visited, cancellationToken);
+                }
                 continue;
+            }
 
             // Skip dependencies already provided by the host
             if (_hostDependencies != null && _hostDependencies.Contains(dependencyId))
@@ -114,20 +131,11 @@ public class DependencyGraphResolver
                 continue;
             }
 
-            // Skip dependencies matching host package predicate (they'll be loaded as external host packages)
-            if (_isHostPackage?.Invoke(dependencyId) == true)
-            {
-                _logger.LogDebug("Skipping host-pattern-matched dependency {PackageId} during resolution.", dependencyId);
-                continue;
-            }
-
             var resolvedVersion = await _provider.ResolveVersionAsync(
                 dependencyId, versionRange, cancellationToken);
             if (resolvedVersion == null)
             {
-                _logger.LogWarning("Could not resolve dependency {PackageId} {VersionRange}.",
-                    dependencyId, versionRange);
-                continue;
+                throw new PackageNotFoundException(dependencyId, versionRange.ToNormalizedString());
             }
 
             var dependencyNode = new DependencyNode(dependencyId, resolvedVersion);

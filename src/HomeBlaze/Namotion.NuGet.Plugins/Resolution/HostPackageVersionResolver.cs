@@ -8,13 +8,13 @@ internal static class HostPackageVersionResolver
     public record VersionResolutionResult(
         bool Success,
         Dictionary<string, global::NuGet.Versioning.VersionRange> ResolvedRanges,
-        IReadOnlyList<NuGetPluginConflict> Conflicts);
+        IReadOnlyList<NuGetPluginRangeConflict> Conflicts);
 
     public static VersionResolutionResult ResolveVersions(
         Dictionary<string, List<(string PluginName, global::NuGet.Versioning.VersionRange Range)>> requirements)
     {
         var resolvedRanges = new Dictionary<string, global::NuGet.Versioning.VersionRange>(StringComparer.OrdinalIgnoreCase);
-        var conflicts = new List<NuGetPluginConflict>();
+        var conflicts = new List<NuGetPluginRangeConflict>();
 
         foreach (var (packageName, pluginRanges) in requirements)
         {
@@ -36,14 +36,12 @@ internal static class HostPackageVersionResolver
                     (common.HasLowerBound && common.HasUpperBound && common.MinVersion > common.MaxVersion))
                 {
                     allCompatible = false;
-                    var requestedBy = string.Join(", ",
-                        pluginRanges.Select(range => $"{range.PluginName} ({range.Range})"));
 
-                    conflicts.Add(new NuGetPluginConflict(
+                    conflicts.Add(new NuGetPluginRangeConflict(
                         packageName,
-                        pluginRanges[i].Range.ToNormalizedString(),
-                        combined.ToNormalizedString(),
-                        requestedBy));
+                        pluginRanges
+                            .Select(range => (range.PluginName, range.Range.ToNormalizedString()))
+                            .ToList()));
 
                     break;
                 }

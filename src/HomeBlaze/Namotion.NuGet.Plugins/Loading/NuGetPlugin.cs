@@ -11,6 +11,8 @@ namespace Namotion.NuGet.Plugins.Loading;
 public class NuGetPlugin : IDisposable
 {
     private readonly AssemblyLoadContext? _loadContext;
+    private IReadOnlyList<Assembly>? _assemblies;
+    private bool _disposed;
 
     internal NuGetPlugin(
         string packageName,
@@ -24,7 +26,7 @@ public class NuGetPlugin : IDisposable
     {
         PackageName = packageName;
         PackageVersion = packageVersion;
-        Assemblies = assemblies;
+        _assemblies = assemblies;
         Metadata = metadata ?? new NuGetPackageMetadata();
         Nuspec = nuspec;
         PluginManifest = pluginManifest;
@@ -45,7 +47,8 @@ public class NuGetPlugin : IDisposable
     /// <summary>
     /// Gets the assemblies loaded for this plugin.
     /// </summary>
-    public IReadOnlyList<Assembly> Assemblies { get; }
+    public IReadOnlyList<Assembly> Assemblies =>
+        _assemblies ?? throw new ObjectDisposedException(nameof(NuGetPlugin));
 
     /// <summary>
     /// Gets the package metadata extracted from the nuspec.
@@ -72,6 +75,7 @@ public class NuGetPlugin : IDisposable
     /// </summary>
     public IEnumerable<Type> GetTypes<T>()
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         return GetTypes(type => typeof(T).IsAssignableFrom(type) && !type.IsAbstract && !type.IsInterface);
     }
 
@@ -80,6 +84,7 @@ public class NuGetPlugin : IDisposable
     /// </summary>
     public IEnumerable<Type> GetTypes(Func<Type, bool> predicate)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         return Assemblies
             .SelectMany(assembly =>
             {
@@ -92,9 +97,14 @@ public class NuGetPlugin : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        if (_loadContext?.IsCollectible == true)
+        if (!_disposed)
         {
-            _loadContext.Unload();
+            _disposed = true;
+            _assemblies = null;
+            if (_loadContext?.IsCollectible == true)
+            {
+                _loadContext.Unload();
+            }
         }
     }
 }
