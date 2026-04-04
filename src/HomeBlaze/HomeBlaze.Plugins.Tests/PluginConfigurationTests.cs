@@ -57,7 +57,9 @@ public class PluginConfigurationTests
 
         // Assert
         Assert.Equal(2, options.Feeds.Count);
-        Assert.Equal(2, options.HostPackages.Count);
+        Assert.NotNull(options.IsHostPackage);
+        Assert.True(options.IsHostPackage!("MyCompany.Devices.Abstractions"));
+        Assert.False(options.IsHostPackage!("Unrelated.Package"));
         Assert.Same(hostDependencies, options.HostDependencies);
     }
 

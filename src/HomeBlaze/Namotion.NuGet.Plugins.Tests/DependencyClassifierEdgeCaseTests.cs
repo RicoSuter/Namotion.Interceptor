@@ -1,10 +1,7 @@
-using global::NuGet.Versioning;
+using NuGet.Versioning;
 using Xunit;
 
 using Namotion.NuGet.Plugins.Configuration;
-using Namotion.NuGet.Plugins.Loading;
-using Namotion.NuGet.Plugins.Repository;
-using Namotion.NuGet.Plugins.Resolution;
 
 namespace Namotion.NuGet.Plugins.Tests;
 
@@ -16,7 +13,7 @@ public class DependencyClassifierEdgeCaseTests
         // Arrange
         var hostResolver = HostDependencyResolver.FromAssemblies(
             ("Microsoft.Extensions.Logging", new Version(9, 0, 0)));
-        var classifier = new DependencyClassifier(hostResolver, [], ["Plugin"]);
+        var classifier = new DependencyClassifier(hostResolver, null, ["Plugin"]);
 
         // Act -- different casing
         var result = classifier.Classify("microsoft.extensions.logging");
@@ -31,7 +28,9 @@ public class DependencyClassifierEdgeCaseTests
         // Arrange
         var hostResolver = HostDependencyResolver.FromAssemblies();
         var classifier = new DependencyClassifier(
-            hostResolver, ["mycompany.*.abstractions"], ["Plugin"]);
+            hostResolver,
+            name => PackageNameMatcher.IsMatchAny(name, ["mycompany.*.abstractions"]),
+            ["Plugin"]);
 
         // Act
         var result = classifier.Classify("MyCompany.Devices.Abstractions");
@@ -45,7 +44,7 @@ public class DependencyClassifierEdgeCaseTests
     {
         // Arrange
         var hostResolver = HostDependencyResolver.FromAssemblies();
-        var classifier = new DependencyClassifier(hostResolver, [], ["MyPlugin"]);
+        var classifier = new DependencyClassifier(hostResolver, null, ["MyPlugin"]);
 
         // Act
         var pluginResult = classifier.Classify("MyPlugin");
@@ -61,7 +60,7 @@ public class DependencyClassifierEdgeCaseTests
     {
         // Arrange
         var classifier = new DependencyClassifier(
-            HostDependencyResolver.FromAssemblies(), [], []);
+            HostDependencyResolver.FromAssemblies(), null, []);
 
         // Act
         var result = classifier.ClassifyAll(new Dictionary<string, NuGetVersion>());

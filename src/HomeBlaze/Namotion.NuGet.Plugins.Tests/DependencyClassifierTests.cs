@@ -1,10 +1,7 @@
-using global::NuGet.Versioning;
+using NuGet.Versioning;
 using Xunit;
 
 using Namotion.NuGet.Plugins.Configuration;
-using Namotion.NuGet.Plugins.Loading;
-using Namotion.NuGet.Plugins.Repository;
-using Namotion.NuGet.Plugins.Resolution;
 
 namespace Namotion.NuGet.Plugins.Tests;
 
@@ -16,7 +13,7 @@ public class DependencyClassifierTests
         // Arrange
         var hostResolver = HostDependencyResolver.FromAssemblies(
             ("Microsoft.Extensions.Logging", new Version(9, 0, 0)));
-        var classifier = new DependencyClassifier(hostResolver, [], ["PluginA"]);
+        var classifier = new DependencyClassifier(hostResolver, null, ["PluginA"]);
 
         // Act
         var classification = classifier.Classify("Microsoft.Extensions.Logging");
@@ -30,7 +27,10 @@ public class DependencyClassifierTests
     {
         // Arrange
         var hostResolver = HostDependencyResolver.FromAssemblies();
-        var classifier = new DependencyClassifier(hostResolver, ["MyCompany.*.Abstractions"], ["PluginA"]);
+        var classifier = new DependencyClassifier(
+            hostResolver,
+            name => PackageNameMatcher.IsMatchAny(name, ["MyCompany.*.Abstractions"]),
+            ["PluginA"]);
 
         // Act
         var classification = classifier.Classify("MyCompany.Devices.Abstractions");
@@ -44,7 +44,7 @@ public class DependencyClassifierTests
     {
         // Arrange
         var hostResolver = HostDependencyResolver.FromAssemblies();
-        var classifier = new DependencyClassifier(hostResolver, [], ["MyCompany.Device1.HomeBlaze"]);
+        var classifier = new DependencyClassifier(hostResolver, null, ["MyCompany.Device1.HomeBlaze"]);
 
         // Act
         var classification = classifier.Classify("MyCompany.Device1.HomeBlaze");
@@ -58,7 +58,7 @@ public class DependencyClassifierTests
     {
         // Arrange
         var hostResolver = HostDependencyResolver.FromAssemblies();
-        var classifier = new DependencyClassifier(hostResolver, [], ["PluginA"]);
+        var classifier = new DependencyClassifier(hostResolver, null, ["PluginA"]);
 
         // Act
         var classification = classifier.Classify("Newtonsoft.Json");
@@ -72,7 +72,10 @@ public class DependencyClassifierTests
     {
         // Arrange -- plugin name also matches a host pattern
         var hostResolver = HostDependencyResolver.FromAssemblies();
-        var classifier = new DependencyClassifier(hostResolver, ["MyCompany.*"], ["MyCompany.Device1"]);
+        var classifier = new DependencyClassifier(
+            hostResolver,
+            name => PackageNameMatcher.IsMatchAny(name, ["MyCompany.*"]),
+            ["MyCompany.Device1"]);
 
         // Act
         var classification = classifier.Classify("MyCompany.Device1");
@@ -88,7 +91,7 @@ public class DependencyClassifierTests
         var hostResolver = HostDependencyResolver.FromAssemblies(
             ("HostLib", new Version(1, 0, 0)));
         var discoveredHostShared = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "MyCompany.Abstractions" };
-        var classifier = new DependencyClassifier(hostResolver, [], ["PluginA"], discoveredHostShared);
+        var classifier = new DependencyClassifier(hostResolver, null, ["PluginA"], discoveredHostShared);
 
         // Act
         var result = classifier.Classify("MyCompany.Abstractions");
@@ -105,7 +108,7 @@ public class DependencyClassifierTests
             ("Microsoft.Extensions.Logging", new Version(9, 0, 0)));
         var classifier = new DependencyClassifier(
             hostResolver,
-            ["MyCompany.*.Abstractions"],
+            name => PackageNameMatcher.IsMatchAny(name, ["MyCompany.*.Abstractions"]),
             ["MyCompany.Device1.HomeBlaze"]);
 
         var dependencies = new Dictionary<string, NuGetVersion>

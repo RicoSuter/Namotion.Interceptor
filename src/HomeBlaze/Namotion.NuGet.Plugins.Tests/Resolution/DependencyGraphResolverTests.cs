@@ -1,9 +1,5 @@
-using global::NuGet.Versioning;
+using NuGet.Versioning;
 using Xunit;
-
-using Namotion.NuGet.Plugins.Configuration;
-using Namotion.NuGet.Plugins.Loading;
-using Namotion.NuGet.Plugins.Repository;
 using Namotion.NuGet.Plugins.Resolution;
 
 namespace Namotion.NuGet.Plugins.Tests.Resolution;
@@ -34,7 +30,7 @@ public class DependencyGraphResolverTests
         // Arrange
         var resolver = CreateResolver(new Dictionary<string, (string Name, string Version, (string Id, string VersionRange)[] Deps)>
         {
-            ["PackageA/1.0.0"] = ("PackageA", "1.0.0", new[] { ("LibB", "[1.0.0, )") }),
+            ["PackageA/1.0.0"] = ("PackageA", "1.0.0", [("LibB", "[1.0.0, )")]),
             ["LibB/1.2.0"] = ("LibB", "1.2.0", Array.Empty<(string, string)>())
         });
 

@@ -1,9 +1,5 @@
-using System;
-using System.IO;
 using System.Reflection;
 using System.Runtime.Loader;
-using System.Threading;
-using System.Threading.Tasks;
 using Xunit;
 
 using Namotion.NuGet.Plugins.Configuration;
@@ -170,7 +166,7 @@ public class HostSharedDiscoveryIntegrationTests : IDisposable
             ],
             CacheDirectory = _cacheDir,
             HostDependencies = hostDependencies,
-            HostPackages = [],
+            IsHostPackage = null,
         };
     }
 

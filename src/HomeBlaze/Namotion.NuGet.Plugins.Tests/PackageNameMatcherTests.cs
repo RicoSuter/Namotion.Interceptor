@@ -1,10 +1,5 @@
 using Xunit;
 
-using Namotion.NuGet.Plugins.Configuration;
-using Namotion.NuGet.Plugins.Loading;
-using Namotion.NuGet.Plugins.Repository;
-using Namotion.NuGet.Plugins.Resolution;
-
 namespace Namotion.NuGet.Plugins.Tests;
 
 public class PackageNameMatcherTests

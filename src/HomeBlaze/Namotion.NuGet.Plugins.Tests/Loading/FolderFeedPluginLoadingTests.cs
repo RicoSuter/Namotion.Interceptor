@@ -91,7 +91,7 @@ public class FolderFeedPluginLoadingTests : IDisposable
             ],
             CacheDirectory = _cacheDir,
             HostDependencies = hostDependencies,
-            HostPackages = ["HomeBlaze.*.Abstractions"],
+            IsHostPackage = name => PackageNameMatcher.IsMatchAny(name, ["HomeBlaze.*.Abstractions"]),
         };
     }
 

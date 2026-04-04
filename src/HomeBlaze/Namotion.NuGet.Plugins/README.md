@@ -10,7 +10,7 @@ A standalone .NET library for loading NuGet packages as plugins at runtime. It p
 - Automatic host dependency detection from `deps.json`
 - Automatic host-shared package discovery via assembly attributes and plugin.json
 - Semantic version compatibility validation
-- Glob-based host package pattern matching
+- Predicate-based host package matching
 - Support for multiple NuGet feeds with authentication
 - Local folder feeds (NuGet SDK resolves from directory paths natively)
 - Graceful partial failure (one plugin failing does not block others)
@@ -30,7 +30,7 @@ The library is structured around a seven-phase load pipeline that processes plug
 2. **Classify** -- categorize each dependency as host (shared), plugin (top-level), or plugin-private (isolated)
 3. **Validate** -- check semantic version compatibility for host-classified dependencies
 4. **Download** -- fetch packages not already in the local cache
-5. **Discover host-shared packages** -- scan downloaded packages for host-shared declarations via assembly attributes, plugin.json manifests, and `HostPackages` patterns
+5. **Discover host-shared packages** -- scan downloaded packages for host-shared declarations via assembly attributes, plugin.json manifests, and the `IsHostPackage` predicate
 6. **Load Host Packages** -- load external host packages into the default `AssemblyLoadContext`
 7. **Load Plugins** -- create an isolated `AssemblyLoadContext` per plugin and load assemblies
 
@@ -58,7 +58,7 @@ var options = new NuGetPluginLoaderOptions
 {
     Feeds = [NuGetFeed.NuGetOrg],
     HostDependencies = HostDependencyResolver.FromDepsJson(),
-    HostPackages = ["MyCompany.*.Abstractions"],
+    IsHostPackage = name => PackageNameMatcher.IsMatchAny(name, ["MyCompany.*.Abstractions"]),
 };
 
 using var loader = new NuGetPluginLoader(options);
@@ -110,7 +110,7 @@ flowchart TD
     B -.- B1["Categorize each dependency\nas host or plugin-private"]
     C -.- C1["Validate semver compatibility\nfor host-classified dependencies"]
     D -.- D1["Download packages not\nalready in local cache"]
-    D2 -.- D2a["Scan assembly attributes,\nplugin.json, and HostPackages\npatterns for host-shared packages"]
+    D2 -.- D2a["Scan assembly attributes,\nplugin.json, and IsHostPackage\npredicate for host-shared packages"]
     E -.- E1["Load external host packages\ninto the default AssemblyLoadContext"]
     F -.- F1["Create isolated AssemblyLoadContext\nper plugin, load assemblies"]
 ```
@@ -122,7 +122,7 @@ flowchart TD
 | Property | Type | Default | Description |
 |---|---|---|---|
 | `Feeds` | `IReadOnlyList<NuGetFeed>` | `[NuGetFeed.NuGetOrg]` | NuGet package sources to search, in priority order |
-| `HostPackages` | `IReadOnlyList<string>` | `[]` | Glob patterns for packages that should be loaded as host assemblies |
+| `IsHostPackage` | `Func<string, bool>?` | `null` | Predicate that determines whether a package should be loaded as a host assembly |
 | `HostDependencies` | `HostDependencyResolver?` | `null` | Host dependency map for version validation |
 | `CacheDirectory` | `string?` | `null` | Local directory for downloaded packages (auto-generated temp dir if null) |
 
@@ -183,11 +183,25 @@ var options = new NuGetPluginLoaderOptions
 };
 ```
 
-## Host Package Patterns
+## Host Package Predicate
 
-Host package patterns determine which plugin dependencies should be treated as host assemblies rather than loaded into isolated plugin contexts. This is essential for sharing types and interfaces between the host and plugins.
+The `IsHostPackage` predicate determines which plugin dependencies should be treated as host assemblies rather than loaded into isolated plugin contexts. This is essential for sharing types and interfaces between the host and plugins.
 
-Patterns use `*` to match any characters within a single dot-separated segment:
+Packages for which the predicate returns `true` are downloaded from the configured feeds and loaded into the default `AssemblyLoadContext`, making them available to both the host and all plugins.
+
+```csharp
+var options = new NuGetPluginLoaderOptions
+{
+    // Use PackageNameMatcher for glob-based matching
+    IsHostPackage = name => PackageNameMatcher.IsMatchAny(name,
+    [
+        "MyCompany.*.Abstractions",  // Shared interface packages
+        "Shared.Contracts",          // Exact match
+    ]),
+};
+```
+
+The `PackageNameMatcher` utility class provides glob-based matching where `*` matches any characters within a single dot-separated segment:
 
 | Pattern | Matches | Does not match |
 |---|---|---|
@@ -195,16 +209,12 @@ Patterns use `*` to match any characters within a single dot-separated segment:
 | `MyCompany.*` | `MyCompany.Core`, `MyCompany.Devices` | `OtherCompany.Core` |
 | `Exact.Package` | `Exact.Package` | `Exact.Package.Extra` |
 
-Packages matching these patterns are downloaded from the configured feeds and loaded into the default `AssemblyLoadContext`, making them available to both the host and all plugins.
+You can also use any custom logic:
 
 ```csharp
 var options = new NuGetPluginLoaderOptions
 {
-    HostPackages =
-    [
-        "MyCompany.*.Abstractions",  // Shared interface packages
-        "Shared.Contracts",          // Exact match
-    ],
+    IsHostPackage = name => name.StartsWith("MyCompany.") && name.EndsWith(".Abstractions"),
 };
 ```
 
@@ -216,7 +226,7 @@ In addition to manual `HostPackages` patterns, the loader automatically discover
 |---|---|---|
 | Contract/abstractions author | Assembly attribute | You own the shared library and want it always treated as host |
 | Plugin author | `plugin.json` manifest | You depend on a third-party contract you don't own |
-| Host author | `HostPackages` in loader options | Manual fallback / escape hatch |
+| Host author | `IsHostPackage` predicate in loader options | Manual fallback / escape hatch |
 
 ### Assembly attribute
 
@@ -247,9 +257,9 @@ And includes it in the nupkg via the csproj:
 
 The loader reads `plugin.json` from the root of the extracted nupkg. This is useful when the plugin depends on a third-party contract package that does not have the `HostShared` assembly attribute.
 
-### HostPackages patterns (manual fallback)
+### IsHostPackage predicate (manual fallback)
 
-The existing `HostPackages` option on `NuGetPluginLoaderOptions` continues to work as a manual override. See [Host Package Patterns](#host-package-patterns) for details.
+The `IsHostPackage` option on `NuGetPluginLoaderOptions` works as a manual override. See [Host Package Predicate](#host-package-predicate) for details.
 
 ### Discovery flow
 
@@ -260,7 +270,7 @@ For each plugin:
   a. Read plugin.json from extracted nupkg -> collect hostDependencies
 For each dependency in the resolved tree:
   b. Read DLL via System.Reflection.Metadata -> check for HostShared attribute
-  c. Check against HostPackages (manual config)
+  c. Check against IsHostPackage predicate (manual config)
 Union of (a) + (b) + (c) -> classify as host
 ```
 
@@ -322,7 +332,7 @@ During transitive dependency resolution, the resolver skips dependencies that ar
 | Condition | Action |
 |---|---|
 | Package exists in `HostDependencyResolver` (from `DependencyContext`) | Skipped -- not resolved, not downloaded |
-| Package name matches a `HostPackages` glob | Skipped -- not resolved, not downloaded |
+| `IsHostPackage` predicate returns `true` | Skipped -- not resolved, not downloaded |
 
 This means the resolved dependency tree only contains the plugin itself and its genuinely private dependencies.
 
@@ -334,7 +344,7 @@ Every dependency in the resolved tree is classified into one of three categories
 |---|---|---|---|
 | 1 | **Plugin** | Package is one of the configured plugin requests | Plugin's isolated `AssemblyLoadContext` |
 | 2 | **Host** | Package exists in `HostDependencyResolver` | Default `AssemblyLoadContext` (already present) |
-| 3 | **Host** | Package name matches a `HostPackages` glob | Default `AssemblyLoadContext` (downloaded and loaded) |
+| 3 | **Host** | `IsHostPackage` predicate returns `true` | Default `AssemblyLoadContext` (downloaded and loaded) |
 | 4 | **Host** | Package discovered as host-shared (assembly attribute or plugin.json) | Default `AssemblyLoadContext` (downloaded and loaded) |
 | 5 | **Plugin-private** | None of the above | Plugin's isolated `AssemblyLoadContext` |
 
@@ -347,8 +357,8 @@ During Phase 7, before loading each assembly into the plugin's isolated context,
 The distinction between priority 2, 3, and 4 matters at runtime:
 
 - **deps.json host packages** (priority 2) are already loaded in the host process. The loader skips downloading them entirely and only validates version compatibility.
-- **Pattern-matched host packages** (priority 3) are *not* in the host process. The loader downloads them from NuGet, extracts them, and loads their assemblies into the default `AssemblyLoadContext` via a `Resolving` event hook. This makes them available to both the host and all plugins. These are called "external host packages".
-- **Discovered host-shared packages** (priority 4) behave identically to pattern-matched packages at load time. The only difference is how they were discovered (via assembly attribute or plugin.json rather than glob patterns).
+- **Predicate-matched host packages** (priority 3) are *not* in the host process. The loader downloads them from NuGet, extracts them, and loads their assemblies into the default `AssemblyLoadContext` via a `Resolving` event hook. This makes them available to both the host and all plugins. These are called "external host packages".
+- **Discovered host-shared packages** (priority 4) behave identically to predicate-matched packages at load time. The only difference is how they were discovered (via assembly attribute or plugin.json rather than the `IsHostPackage` predicate).
 
 When multiple plugins depend on the same external host package, the loader computes the common subset of all their version ranges using `VersionRange.CommonSubSet()`. If a common range exists, the highest available version within that range is used. If no common subset exists (e.g., Plugin A needs `>= 2.0.0` and Plugin B needs `< 2.0.0`), this is a version conflict that fails all plugins.
 
@@ -361,7 +371,7 @@ flowchart TB
     subgraph DefaultALC["Default AssemblyLoadContext"]
         HostApp["Host Application"]
         HostDeps["Host Dependencies\n(from deps.json)"]
-        ExternalHost["External Host Packages\n(from HostPackages / discovery)"]
+        ExternalHost["External Host Packages\n(from IsHostPackage / discovery)"]
     end
 
     subgraph ALC_A["AssemblyLoadContext: Plugin A"]
@@ -384,14 +394,14 @@ Each plugin gets a collectible `AssemblyLoadContext` that overrides `Load()` wit
 2. If the assembly name matches a private dependency with a known file path, load it from the package cache.
 3. Otherwise, return `null` to let the default resolution handle it.
 
-The loader also registers a `Resolving` handler on `AssemblyLoadContext.Default` to resolve external host packages (pattern-matched or discovered packages that are not in the host's deps.json but need to be shared across all contexts).
+The loader also registers a `Resolving` handler on `AssemblyLoadContext.Default` to resolve external host packages (predicate-matched or discovered packages that are not in the host's deps.json but need to be shared across all contexts).
 
 ### Host assemblies
 
 Loaded into the default `AssemblyLoadContext`. This category includes:
 
 - **DependencyContext host packages** -- assemblies already present in the host process (NuGet packages and project references from the host's `DependencyContext`). Not downloaded, only version-validated. Their transitive dependencies are skipped during resolution.
-- **External host packages** -- packages matching `HostPackages` patterns or discovered as host-shared via assembly attributes and plugin.json. Downloaded from NuGet and loaded into the default context on demand via the `Resolving` hook. Their transitive dependencies are also skipped during resolution.
+- **External host packages** -- packages matching the `IsHostPackage` predicate or discovered as host-shared via assembly attributes and plugin.json. Downloaded from NuGet and loaded into the default context on demand via the `Resolving` hook. Their transitive dependencies are also skipped during resolution.
 - **Framework assemblies** -- assemblies from the .NET shared framework (e.g., `Microsoft.AspNetCore.Components`, `System.Text.Json`) that are already loaded in the default context. These are detected automatically at load time without explicit configuration.
 
 Host assemblies are shared across the host application and all plugins. This ensures that when a plugin implements a host-defined interface (e.g., `ISensorDevice`), the type identity is the same across all contexts.
@@ -544,7 +554,7 @@ Disposing the `NuGetPluginLoader` itself unloads all plugins and removes the def
 - **No native library support** -- the `runtimes/` folder inside NuGet packages is ignored; plugins with native dependencies (e.g., `libgit2sharp`) will not work.
 - **No hot-reload** -- changing a plugin requires unloading and reloading; there is no in-place update mechanism.
 - **No deps.json for AOT or single-file** -- AOT-compiled and single-file published applications do not generate `deps.json`. Use `HostDependencyResolver.FromAssemblies()` instead.
-- **No plugin-to-plugin direct dependencies** -- plugins cannot reference types from other plugins. Use `HostPackages` to share contracts via host-loaded packages, or use assembly attributes / plugin.json for automatic discovery.
+- **No plugin-to-plugin direct dependencies** -- plugins cannot reference types from other plugins. Use `IsHostPackage` to share contracts via host-loaded packages, or use assembly attributes / plugin.json for automatic discovery.
 - **No plugin signing or trust verification** -- packages are loaded without signature validation.
 
 ## API Reference
@@ -647,7 +657,7 @@ public enum DependencyClassification
 | Property | Type | Default | Description |
 |---|---|---|---|
 | `Feeds` | `IReadOnlyList<NuGetFeed>` | `[NuGetFeed.NuGetOrg]` | NuGet package sources to search, in priority order |
-| `HostPackages` | `IReadOnlyList<string>` | `[]` | Glob patterns for packages that should be loaded as host assemblies |
+| `IsHostPackage` | `Func<string, bool>?` | `null` | Predicate that determines whether a package should be loaded as a host assembly |
 | `HostDependencies` | `HostDependencyResolver?` | `null` | Host dependency map for version validation |
 | `CacheDirectory` | `string?` | `null` | Local directory for downloaded packages (auto-generated temp dir if null) |
 

@@ -11,9 +11,10 @@ public class NuGetPluginLoaderOptions
     public IReadOnlyList<NuGetFeed> Feeds { get; set; } = [NuGetFeed.NuGetOrg];
 
     /// <summary>
-    /// Gets or sets glob patterns for packages that should be loaded into the host (default) assembly context.
+    /// Gets or sets an optional predicate that determines whether a package should be loaded into the host (default) assembly context.
+    /// When null, no additional packages are treated as host packages (automatic discovery via plugin.json and assembly attributes still applies).
     /// </summary>
-    public IReadOnlyList<string> HostPackages { get; set; } = [];
+    public Func<string, bool>? IsHostPackage { get; set; }
 
     /// <summary>
     /// Gets or sets the host dependency resolver for version validation against the host application.
