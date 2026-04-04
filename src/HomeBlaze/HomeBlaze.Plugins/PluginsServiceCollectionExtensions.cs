@@ -8,7 +8,7 @@ public static class PluginsServiceCollectionExtensions
     public static IServiceCollection AddHomeBlazePlugins(this IServiceCollection services, string? pluginConfigPath = null)
     {
         services.AddSingleton(serviceProvider =>
-            new PluginLoaderService(
+            new PluginLoader(
                 pluginConfigPath,
                 serviceProvider.GetRequiredService<ILoggerFactory>()));
 

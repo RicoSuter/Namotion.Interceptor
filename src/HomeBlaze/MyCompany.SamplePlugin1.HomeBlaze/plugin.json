@@ -1,4 +1,4 @@
 {
-  "schema": 1,
+  "schemaVersion": 1,
   "hostDependencies": ["MyCompany.Abstractions"]
 }

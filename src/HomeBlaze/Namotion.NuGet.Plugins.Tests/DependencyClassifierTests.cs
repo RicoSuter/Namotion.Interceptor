@@ -50,7 +50,7 @@ public class DependencyClassifierTests
         var classification = classifier.Classify("MyCompany.Device1.HomeBlaze");
 
         // Assert
-        Assert.Equal(DependencyClassification.Plugin, classification);
+        Assert.Equal(DependencyClassification.Entry, classification);
     }
 
     [Fact]
@@ -64,7 +64,7 @@ public class DependencyClassifierTests
         var classification = classifier.Classify("Newtonsoft.Json");
 
         // Assert
-        Assert.Equal(DependencyClassification.PluginPrivate, classification);
+        Assert.Equal(DependencyClassification.Isolated, classification);
     }
 
     [Fact]
@@ -81,7 +81,7 @@ public class DependencyClassifierTests
         var classification = classifier.Classify("MyCompany.Device1");
 
         // Assert -- configured plugin always wins
-        Assert.Equal(DependencyClassification.Plugin, classification);
+        Assert.Equal(DependencyClassification.Entry, classification);
     }
 
     [Fact]
@@ -124,10 +124,10 @@ public class DependencyClassifierTests
         var result = classifier.ClassifyAll(dependencies);
 
         // Assert
-        Assert.Equal(DependencyClassification.Plugin, result["MyCompany.Device1.HomeBlaze"]);
-        Assert.Equal(DependencyClassification.PluginPrivate, result["MyCompany.Device1"]);
+        Assert.Equal(DependencyClassification.Entry, result["MyCompany.Device1.HomeBlaze"]);
+        Assert.Equal(DependencyClassification.Isolated, result["MyCompany.Device1"]);
         Assert.Equal(DependencyClassification.Host, result["MyCompany.Shared.Abstractions"]);
         Assert.Equal(DependencyClassification.Host, result["Microsoft.Extensions.Logging"]);
-        Assert.Equal(DependencyClassification.PluginPrivate, result["Newtonsoft.Json"]);
+        Assert.Equal(DependencyClassification.Isolated, result["Newtonsoft.Json"]);
     }
 }

@@ -8,17 +8,17 @@ namespace HomeBlaze.Plugins;
 /// <summary>
 /// Core bootstrap service that loads NuGet plugins before the subject system starts.
 /// </summary>
-public class PluginLoaderService : IDisposable
+public class PluginLoader : IDisposable
 {
     private readonly NuGetPluginLoader? _loader;
     private readonly PluginConfiguration? _config;
-    private readonly ILogger<PluginLoaderService> _logger;
+    private readonly ILogger<PluginLoader> _logger;
 
-    public PluginLoaderService(
+    public PluginLoader(
         string? pluginConfigPath,
         ILoggerFactory loggerFactory)
     {
-        _logger = loggerFactory.CreateLogger<PluginLoaderService>();
+        _logger = loggerFactory.CreateLogger<PluginLoader>();
 
         if (pluginConfigPath != null && File.Exists(pluginConfigPath))
         {
@@ -40,8 +40,8 @@ public class PluginLoaderService : IDisposable
             return null;
         }
 
-        _logger.LogInformation("Loading {Count} plugins...", _config.Plugins.Count);
-        var result = await _loader.LoadPluginsAsync(_config.Plugins, cancellationToken);
+        _logger.LogInformation("Loading {Count} plugins...", _config.PluginReferences.Count);
+        var result = await _loader.LoadPluginsAsync(_config.PluginReferences, cancellationToken);
         LoadResult = result;
 
         if (result.Failures.Count > 0)

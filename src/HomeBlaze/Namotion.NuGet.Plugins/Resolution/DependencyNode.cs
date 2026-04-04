@@ -5,7 +5,7 @@ namespace Namotion.NuGet.Plugins.Resolution;
 /// <summary>
 /// A node in the resolved dependency graph, representing a package and its transitive dependencies.
 /// </summary>
-public class DependencyNode
+internal class DependencyNode
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="DependencyNode"/> class.

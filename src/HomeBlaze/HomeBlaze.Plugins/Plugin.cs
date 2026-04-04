@@ -2,14 +2,14 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Namotion.Interceptor.Attributes;
 
-namespace HomeBlaze.Plugins.Models;
+namespace HomeBlaze.Plugins;
 
 [InterceptorSubject]
-public partial class PluginInfo : ITitleProvider, IIconProvider, IMonitoredService
+public partial class Plugin : ITitleProvider, IIconProvider, IMonitoredService
 {
     private readonly PluginManager _manager;
 
-    public PluginInfo(PluginManager manager)
+    public Plugin(PluginManager manager)
     {
         _manager = manager;
         Name = "";

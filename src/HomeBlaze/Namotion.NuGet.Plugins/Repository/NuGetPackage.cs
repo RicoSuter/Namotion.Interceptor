@@ -3,12 +3,12 @@ namespace Namotion.NuGet.Plugins.Repository;
 /// <summary>
 /// Metadata for a NuGet package returned from a repository search or download.
 /// </summary>
-public class NuGetPackageInfo
+public class NuGetPackage
 {
     /// <summary>
-    /// Initializes a new instance of the <see cref="NuGetPackageInfo"/> class.
+    /// Initializes a new instance of the <see cref="NuGetPackage"/> class.
     /// </summary>
-    public NuGetPackageInfo(
+    public NuGetPackage(
         string packageName,
         string packageVersion,
         string? title = null,

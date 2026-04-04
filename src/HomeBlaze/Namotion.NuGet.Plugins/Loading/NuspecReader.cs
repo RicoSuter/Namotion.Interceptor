@@ -1,12 +1,11 @@
 using System.Xml.Linq;
-using NuGet.Packaging;
 
 namespace Namotion.NuGet.Plugins.Loading;
 
 /// <summary>
 /// Reads nuspec files from extracted NuGet package directories.
 /// </summary>
-internal static class NuspecHelper
+internal static class NuspecReader
 {
     /// <summary>
     /// Reads the nuspec from the given extracted package directory.
@@ -25,7 +24,7 @@ internal static class NuspecHelper
         NuGetPackageMetadata metadata;
         using (var stream = new MemoryStream(bytes))
         {
-            var nuspecReader = new NuspecReader(stream);
+            var nuspecReader = new global::NuGet.Packaging.NuspecReader(stream);
 
             var tags = nuspecReader.GetTags()?
                 .Split([' '], StringSplitOptions.RemoveEmptyEntries)

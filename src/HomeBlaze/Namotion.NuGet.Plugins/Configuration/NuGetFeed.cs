@@ -14,7 +14,7 @@ public class NuGetFeed
     /// Initializes a new instance of the <see cref="NuGetFeed"/> class.
     /// </summary>
     /// <param name="name">A display name for the feed.</param>
-    /// <param name="url">The NuGet V3 service index URL.</param>
+    /// <param name="url">The NuGet V3 service index URL or local folder path.</param>
     /// <param name="apiKey">An optional API key for authenticated feeds.</param>
     public NuGetFeed(string name, string url, string? apiKey = null)
     {
@@ -29,7 +29,7 @@ public class NuGetFeed
     public string Name { get; }
 
     /// <summary>
-    /// Gets the NuGet V3 service index URL.
+    /// Gets the NuGet V3 service index URL or local folder path.
     /// </summary>
     public string Url { get; }
 

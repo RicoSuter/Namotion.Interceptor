@@ -76,11 +76,11 @@ Feeds can be remote NuGet V3 service index URLs or local folder paths. In the ex
 
 The plugin system uses two subjects in the `HomeBlaze.Plugins` namespace:
 
-**PluginManager** -- owns plugin configuration and runtime state. Implements `IConfigurable` so it can be deserialized from `Plugins.json` via the `$type` discriminator. Its `[Configuration]` properties (`Plugins`, `Feeds`, `HostPackages`) are persisted. Its `[State]` property `LoadedPlugins` is a `Dictionary<string, PluginInfo>` keyed by package name, populated at startup from `PluginLoaderService`.
+**PluginManager** -- owns plugin configuration and runtime state. Implements `IConfigurable` so it can be deserialized from `Plugins.json` via the `$type` discriminator. Its `[Configuration]` properties (`Plugins`, `Feeds`, `HostPackages`) are persisted. Its `[State]` property `LoadedPlugins` is a `Dictionary<string, Plugin>` keyed by package name, populated at startup from `PluginLoader`.
 
-**PluginInfo** (in `HomeBlaze.Plugins.Models`) -- represents a loaded plugin. Has `[State]` properties (`Name`, `Version`, `Description`, `Authors`, `IconUrl`, `Tags`, `Assemblies` (string[]), `HostDependencies`, `PrivateDependencies`, `Status`, `StatusMessage`), `[Derived]` properties (`Title`, `IconName`, `IconColor`), and a parameterless `[Operation] RemovePlugin()` that uses `this.Name`. Holds a reference to its parent `PluginManager`.
+**Plugin** (in `HomeBlaze.Plugins.Models`) -- represents a loaded plugin. Has `[State]` properties (`Name`, `Version`, `Description`, `Authors`, `IconUrl`, `Tags`, `Assemblies` (string[]), `HostDependencies`, `PrivateDependencies`, `Status`, `StatusMessage`), `[Derived]` properties (`Title`, `IconName`, `IconColor`), and a parameterless `[Operation] RemovePlugin()` that uses `this.Name`. Holds a reference to its parent `PluginManager`.
 
-DTOs (`PluginConfigEntry`, `PluginFeedEntry`) also live in the `Models` namespace.
+DTOs (`PluginEntry`, `PluginFeedEntry`) also live in the `Models` namespace.
 
 ### Assembly Isolation
 
@@ -123,7 +123,7 @@ Plugin loading happens before the subject system starts, because configuration d
 sequenceDiagram
     participant App as HomeBlaze Startup
     participant DI as DI Container
-    participant PLS as PluginLoaderService
+    participant PLS as PluginLoader
     participant TP as TypeProvider
     participant RM as RootManager
 
@@ -139,19 +139,19 @@ sequenceDiagram
     Note over TP: Subject types from plugins<br/>now discoverable
     App->>RM: Start RootManager
     RM->>RM: Deserialize root.json and Plugins.json<br/>using SubjectTypeRegistry<br/>(includes plugin types)
-    RM->>RM: Instantiate subjects from config<br/>(PluginManager reads results from PluginLoaderService)
+    RM->>RM: Instantiate subjects from config<br/>(PluginManager reads results from PluginLoader)
     Note over RM: Connectors activate, state flows
 ```
 
 The key ordering constraints:
-1. **Build DI** -- `TypeProvider`, `SubjectTypeRegistry`, and `PluginLoaderService` are registered as singletons
-2. **Load plugins** -- `PluginLoaderService` resolves, downloads, and loads plugins after `app.Build()` but before hosted services start
+1. **Build DI** -- `TypeProvider`, `SubjectTypeRegistry`, and `PluginLoader` are registered as singletons
+2. **Load plugins** -- `PluginLoader` resolves, downloads, and loads plugins after `app.Build()` but before hosted services start
 3. **Register types** -- Plugin assemblies are fed to `TypeProvider` so `SubjectTypeRegistry` discovers their `[InterceptorSubject]` types
-4. **Deserialize config** -- `RootManager` deserializes `root.json` and `Plugins.json` using the now-complete type registry. `PluginManager` reads already-loaded results from `PluginLoaderService`
+4. **Deserialize config** -- `RootManager` deserializes `root.json` and `Plugins.json` using the now-complete type registry. `PluginManager` reads already-loaded results from `PluginLoader`
 
-### PluginLoaderService
+### PluginLoader
 
-`PluginLoaderService` is a core DI service (not a subject) that bridges `Namotion.NuGet.Plugins` and HomeBlaze. It reads `Data/Plugins.json` via `PluginConfiguration.LoadFrom()`, initializes `HostDependencyResolver.FromDepsJson()` (which uses `DependencyContext.Default` to detect host assemblies including both NuGet packages and project references), passes `hostPackages` patterns from the JSON config to the loader, and exposes the `NuGetPluginLoader` instance so `PluginManager` can read loaded plugin state at deserialization time.
+`PluginLoader` is a core DI service (not a subject) that bridges `Namotion.NuGet.Plugins` and HomeBlaze. It reads `Data/Plugins.json` via `PluginConfiguration.LoadFrom()`, initializes `HostDependencyResolver.FromDepsJson()` (which uses `DependencyContext.Default` to detect host assemblies including both NuGet packages and project references), passes `hostPackages` patterns from the JSON config to the loader, and exposes the `NuGetPluginLoader` instance so `PluginManager` can read loaded plugin state at deserialization time.
 
 ### Sample Plugins
 
@@ -179,6 +179,8 @@ Plugin dependencies that need to be shared across plugins (e.g., contract/abstra
 
 These three sources are additive -- a package is host-shared if any source declares it so. See the [Namotion.NuGet.Plugins README](../../../../../Namotion.NuGet.Plugins/README.md) for full details on each mechanism.
 
+> **Note:** UI libraries like MudBlazor are automatically detected as host dependencies when the host application references them (they appear in the host's `deps.json`). If a plugin requires an incompatible major version (e.g., MudBlazor v8 when the host uses v9), the version validation will flag this as a conflict during Phase 3.
+
 ## Key Decisions
 
 | Decision | Choice | Rationale |
@@ -186,7 +188,7 @@ These three sources are additive -- a package is host-shared if any source decla
 | Plugin contract | Subject types only | Everything is a subject -- no separate plugin interfaces |
 | Distribution | NuGet packages | Standard .NET ecosystem, versioning, feeds |
 | Loading modes | Build-time + runtime | Core compiled in, extensibility via dynamic loading |
-| Bootstrap | DI service + subject | `PluginLoaderService` loads before subjects; `PluginManager` reflects state after deserialization |
+| Bootstrap | DI service + subject | `PluginLoader` loads before subjects; `PluginManager` reflects state after deserialization |
 | Configuration | `Data/Plugins.json` with `$type` | Subject config file co-located with other data files |
 | Assembly isolation | Per-plugin-group `AssemblyLoadContext` | Isolates plugins while sharing host types via default context |
 | Dependency resolution | Eager transitive with validation | Full dependency tree resolved before loading, semver validated |

@@ -13,18 +13,18 @@ public enum DependencyClassification
     Host,
 
     /// <summary>
-    /// A top-level plugin package loaded into its own assembly context.
+    /// The entry-point plugin package loaded into its own assembly context.
     /// </summary>
-    Plugin,
+    Entry,
 
     /// <summary>
     /// A transitive dependency loaded into the owning plugin's isolated assembly context.
     /// </summary>
-    PluginPrivate
+    Isolated
 }
 
 /// <summary>
-/// Classifies dependencies as host, plugin (top-level), or plugin-private based on
+/// Classifies dependencies as host, entry (top-level), or isolated based on
 /// host dependency information, a host package predicate, discovered host-shared packages,
 /// and the configured plugin list.
 /// </summary>
@@ -54,14 +54,14 @@ public class DependencyClassifier
 
     /// <summary>
     /// Classifies a single dependency. Priority: configured plugin, then host deps.json,
-    /// then host patterns, then discovered host-shared, then plugin-private.
+    /// then host patterns, then discovered host-shared, then isolated.
     /// </summary>
     public DependencyClassification Classify(string packageName)
     {
         // 1. Configured plugin always wins
         if (_configuredPlugins.Contains(packageName))
         {
-            return DependencyClassification.Plugin;
+            return DependencyClassification.Entry;
         }
 
         // 2. In host deps (from deps.json)
@@ -82,8 +82,8 @@ public class DependencyClassifier
             return DependencyClassification.Host;
         }
 
-        // 5. Everything else is plugin-private
-        return DependencyClassification.PluginPrivate;
+        // 5. Everything else is isolated
+        return DependencyClassification.Isolated;
     }
 
     /// <summary>

@@ -29,16 +29,13 @@ public class NuGetPackageRepositoryTests
         var repository = new NuGetPackageRepository(NuGetFeed.NuGetOrg);
 
         // Act
-        var (package, stream) = await repository.DownloadPackageAsync(
+        await using var download = await repository.DownloadPackageAsync(
             "Newtonsoft.Json", "13.0.3", CancellationToken.None);
 
-        await using (stream)
-        {
-            // Assert
-            Assert.Equal("Newtonsoft.Json", package.PackageName);
-            Assert.Equal("13.0.3", package.PackageVersion);
-            Assert.True(stream.Length > 0);
-        }
+        // Assert
+        Assert.Equal("Newtonsoft.Json", download.Package.PackageName);
+        Assert.Equal("13.0.3", download.Package.PackageVersion);
+        Assert.True(download.Stream.Length > 0);
     }
 
     [Fact]
@@ -60,14 +57,11 @@ public class NuGetPackageRepositoryTests
         var repository = new NuGetPackageRepository(NuGetFeed.NuGetOrg);
 
         // Act
-        var (package, stream) = await repository.DownloadPackageAsync(
+        await using var download = await repository.DownloadPackageAsync(
             "Newtonsoft.Json", null, CancellationToken.None);
 
-        await using (stream)
-        {
-            // Assert
-            Assert.Equal("Newtonsoft.Json", package.PackageName);
-            Assert.NotNull(package.PackageVersion);
-        }
+        // Assert
+        Assert.Equal("Newtonsoft.Json", download.Package.PackageName);
+        Assert.NotNull(download.Package.PackageVersion);
     }
 }

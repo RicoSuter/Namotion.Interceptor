@@ -20,7 +20,7 @@ public class NuGetPlugin : IDisposable
         NuGetPackageMetadata? metadata = null,
         XDocument? nuspec = null,
         JsonElement? pluginManifest = null,
-        IReadOnlyList<NuGetPluginDependencyInfo>? dependencies = null)
+        IReadOnlyList<NuGetPluginDependency>? dependencies = null)
     {
         PackageName = packageName;
         PackageVersion = packageVersion;
@@ -65,7 +65,7 @@ public class NuGetPlugin : IDisposable
     /// <summary>
     /// Gets the classified dependencies for this plugin.
     /// </summary>
-    public IReadOnlyList<NuGetPluginDependencyInfo> Dependencies { get; }
+    public IReadOnlyList<NuGetPluginDependency> Dependencies { get; }
 
     /// <summary>
     /// Gets all non-abstract, non-interface types assignable to <typeparamref name="T"/> from the plugin's assemblies.

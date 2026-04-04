@@ -10,7 +10,7 @@ public class PluginManifestReaderTests
     {
         // Arrange
         var directory = CreateExtractedPackageWithPluginJson("""
-            { "schema": 1, "hostDependencies": ["MyCompany.Abstractions"] }
+            { "schemaVersion": 1, "hostDependencies": ["MyCompany.Abstractions"] }
             """);
 
         // Act
@@ -18,7 +18,7 @@ public class PluginManifestReaderTests
 
         // Assert
         Assert.NotNull(manifest);
-        Assert.Equal(1, manifest.Value.GetProperty("schema").GetInt32());
+        Assert.Equal(1, manifest.Value.GetProperty("schemaVersion").GetInt32());
     }
 
     [Fact]
@@ -43,7 +43,7 @@ public class PluginManifestReaderTests
     {
         // Arrange
         var directory = CreateExtractedPackageWithPluginJson("""
-            { "schema": 1, "hostDependencies": ["Pkg.A", "Pkg.B"] }
+            { "schemaVersion": 1, "hostDependencies": ["Pkg.A", "Pkg.B"] }
             """);
 
         // Act
@@ -59,7 +59,7 @@ public class PluginManifestReaderTests
     {
         // Arrange
         var directory = CreateExtractedPackageWithPluginJson("""
-            { "schema": 1, "customField": "value" }
+            { "schemaVersion": 1, "customField": "value" }
             """);
 
         // Act

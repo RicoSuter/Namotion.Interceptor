@@ -17,7 +17,7 @@ public class CompositeNuGetPackageRepository : INuGetPackageRepository
     }
 
     /// <inheritdoc />
-    public async Task<(NuGetPackageInfo Package, Stream Stream)> DownloadPackageAsync(
+    public async Task<NuGetPackageDownload> DownloadPackageAsync(
         string packageName, string? packageVersion, CancellationToken cancellationToken)
     {
         foreach (var repository in _repositories)
@@ -36,10 +36,10 @@ public class CompositeNuGetPackageRepository : INuGetPackageRepository
     }
 
     /// <inheritdoc />
-    public async Task<IEnumerable<NuGetPackageInfo>> SearchPackagesAsync(
+    public async Task<IEnumerable<NuGetPackage>> SearchPackagesAsync(
         string searchTerm, int skip, int take, CancellationToken cancellationToken)
     {
-        var allResults = new List<NuGetPackageInfo>();
+        var allResults = new List<NuGetPackage>();
         foreach (var repository in _repositories)
         {
             var results = await repository.SearchPackagesAsync(searchTerm, skip, take, cancellationToken);

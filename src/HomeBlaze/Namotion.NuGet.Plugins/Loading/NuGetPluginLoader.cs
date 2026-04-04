@@ -85,7 +85,6 @@ public class NuGetPluginLoader : IDisposable
     {
         var pluginList = plugins.ToList();
         var failures = new List<NuGetPluginFailure>();
-        var loadedPlugins = new List<NuGetPlugin>();
 
         var hostResolver = _options.HostDependencies ?? new HostDependencyResolver([]);
         var classifier = new DependencyClassifier(
@@ -93,11 +92,38 @@ public class NuGetPluginLoader : IDisposable
             _options.IsHostPackage,
             pluginList.Select(plugin => plugin.PackageName));
 
-        // Phase 1 & 2: Resolve and classify each plugin's dependencies
-        var pluginGraphs = new List<(NuGetPluginReference Request, Dictionary<string, NuGetVersion> FlatDependencies, Dictionary<string, DependencyClassification> Classifications)>();
-
         var graphResolver = new DependencyGraphResolver(
             _options.Feeds, hostResolver, _options.IsHostPackage, _logger);
+
+        var pluginGraphs = await ResolvePluginGraphsAsync(
+            pluginList, classifier, graphResolver, failures, cancellationToken);
+
+        ValidateHostCompatibility(pluginGraphs, hostResolver);
+
+        await DownloadPackagesAsync(pluginGraphs, failures, hostResolver, cancellationToken);
+
+        var pluginManifests = DiscoverHostSharedPackages(
+            pluginGraphs, failures, pluginList, hostResolver);
+
+        LoadHostPackages(pluginGraphs, hostResolver);
+
+        var loadedPlugins = LoadPluginAssemblies(
+            pluginGraphs, failures, pluginManifests, hostResolver);
+
+        return new NuGetPluginLoadResult(loadedPlugins, failures);
+    }
+
+    /// <summary>
+    /// Resolves each plugin's full dependency graph and classifies every dependency.
+    /// </summary>
+    private async Task<List<ResolvedPluginGraph>> ResolvePluginGraphsAsync(
+        List<NuGetPluginReference> pluginList,
+        DependencyClassifier classifier,
+        DependencyGraphResolver graphResolver,
+        List<NuGetPluginFailure> failures,
+        CancellationToken cancellationToken)
+    {
+        var pluginGraphs = new List<ResolvedPluginGraph>();
 
         foreach (var request in pluginList)
         {
@@ -108,7 +134,7 @@ public class NuGetPluginLoader : IDisposable
 
                 var flatDependencies = graphResolver.FlattenDependencies(graph);
                 var classifications = classifier.ClassifyAll(flatDependencies);
-                pluginGraphs.Add((request, flatDependencies, classifications));
+                pluginGraphs.Add(new ResolvedPluginGraph(request, flatDependencies, classifications));
             }
             catch (Exception exception)
             {
@@ -118,25 +144,35 @@ public class NuGetPluginLoader : IDisposable
             }
         }
 
-        // Phase 3: Validate host dependency compatibility
+        return pluginGraphs;
+    }
+
+    /// <summary>
+    /// Validates that host dependencies are version-compatible across all plugins.
+    /// Throws <see cref="NuGetPluginVersionConflictException"/> if conflicts are found.
+    /// </summary>
+    private static void ValidateHostCompatibility(
+        List<ResolvedPluginGraph> pluginGraphs,
+        HostDependencyResolver hostResolver)
+    {
         var allHostConflicts = new List<NuGetPluginConflict>();
-        foreach (var (request, flatDependencies, classifications) in pluginGraphs)
+        foreach (var entry in pluginGraphs)
         {
-            var hostDependencies = flatDependencies
-                .Where(kvp => classifications.TryGetValue(kvp.Key, out var classification) && classification == DependencyClassification.Host)
+            var hostDependencies = entry.FlatDependencies
+                .Where(kvp => entry.Classifications.TryGetValue(kvp.Key, out var classification) && classification == DependencyClassification.Host)
                 .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
 
-            var conflicts = VersionCompatibility.FindConflicts(hostDependencies, hostResolver, request.PackageName);
+            var conflicts = VersionCompatibility.FindConflicts(hostDependencies, hostResolver, entry.Request.PackageName);
             allHostConflicts.AddRange(conflicts);
         }
 
-        // Phase 3b: Validate external host package version compatibility across plugins
+        // Validate external host package version compatibility across plugins
         var additionalHostRequirements = new Dictionary<string, List<(string PluginName, VersionRange Range)>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (request, flatDependencies, classifications) in pluginGraphs)
+        foreach (var entry in pluginGraphs)
         {
-            foreach (var (packageName, version) in flatDependencies)
+            foreach (var (packageName, version) in entry.FlatDependencies)
             {
-                if (classifications[packageName] == DependencyClassification.Host &&
+                if (entry.Classifications[packageName] == DependencyClassification.Host &&
                     !hostResolver.Contains(packageName))
                 {
                     if (!additionalHostRequirements.ContainsKey(packageName))
@@ -145,7 +181,7 @@ public class NuGetPluginLoader : IDisposable
                     }
 
                     additionalHostRequirements[packageName].Add(
-                        (request.PackageName, new VersionRange(version)));
+                        (entry.Request.PackageName, new VersionRange(version)));
                 }
             }
         }
@@ -163,15 +199,25 @@ public class NuGetPluginLoader : IDisposable
         {
             throw new NuGetPluginVersionConflictException(allHostConflicts);
         }
+    }
 
-        // Phase 4: Download packages
-        foreach (var (request, flatDependencies, classifications) in pluginGraphs)
+    /// <summary>
+    /// Downloads all required packages that are not already cached. Host packages already
+    /// present in the host resolver are skipped.
+    /// </summary>
+    private async Task DownloadPackagesAsync(
+        List<ResolvedPluginGraph> pluginGraphs,
+        List<NuGetPluginFailure> failures,
+        HostDependencyResolver hostResolver,
+        CancellationToken cancellationToken)
+    {
+        foreach (var entry in pluginGraphs)
         {
             try
             {
-                foreach (var (packageName, version) in flatDependencies)
+                foreach (var (packageName, version) in entry.FlatDependencies)
                 {
-                    var classification = classifications[packageName];
+                    var classification = entry.Classifications[packageName];
                     if (classification == DependencyClassification.Host &&
                         hostResolver.Contains(packageName))
                     {
@@ -185,19 +231,16 @@ public class NuGetPluginLoader : IDisposable
                         continue; // Already cached
                     }
 
-                    var (_, stream) = await _repository.DownloadPackageAsync(
+                    await using var download = await _repository.DownloadPackageAsync(
                         packageName, versionString, cancellationToken);
-                   
-                    await using (stream)
-                    {
-                        _extractor.ExtractAndGetAssemblyPaths(packageName, versionString, stream);
-                    }
+
+                    _extractor.ExtractAndGetAssemblyPaths(packageName, versionString, download.Stream);
                 }
             }
             catch (Exception exception)
             {
-                var isHostPackageFailure = flatDependencies.Any(kvp =>
-                    classifications[kvp.Key] == DependencyClassification.Host &&
+                var isHostPackageFailure = entry.FlatDependencies.Any(kvp =>
+                    entry.Classifications[kvp.Key] == DependencyClassification.Host &&
                     !hostResolver.Contains(kvp.Key));
 
                 if (isHostPackageFailure)
@@ -205,30 +248,40 @@ public class NuGetPluginLoader : IDisposable
                     throw; // Host package failures fail everything
                 }
 
-                _logger.LogError(exception, "Failed to download packages for plugin '{Plugin}'.", request.PackageName);
-                failures.Add(new NuGetPluginFailure(request.PackageName,
+                _logger.LogError(exception, "Failed to download packages for plugin '{Plugin}'.", entry.Request.PackageName);
+                failures.Add(new NuGetPluginFailure(entry.Request.PackageName,
                     $"Download failed: {exception.Message}", exception: exception));
             }
         }
+    }
 
-        // Phase 4b: Discover host-shared packages from plugin.json and assembly attributes
+    /// <summary>
+    /// Discovers host-shared packages from plugin manifests (plugin.json) and assembly attributes,
+    /// then re-classifies dependencies accordingly. Returns the collected plugin manifests.
+    /// </summary>
+    private Dictionary<string, JsonElement?> DiscoverHostSharedPackages(
+        List<ResolvedPluginGraph> pluginGraphs,
+        List<NuGetPluginFailure> failures,
+        List<NuGetPluginReference> pluginList,
+        HostDependencyResolver hostResolver)
+    {
         var discoveredHostShared = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var pluginManifests = new Dictionary<string, JsonElement?>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var (request, flatDependencies, _) in pluginGraphs)
+        foreach (var entry in pluginGraphs)
         {
-            if (failures.Any(failure => failure.PackageName == request.PackageName))
+            if (failures.Any(failure => failure.PackageName == entry.Request.PackageName))
             {
                 continue;
             }
 
             // Read plugin.json from the plugin's own extracted package
-            var pluginVersionString = flatDependencies[request.PackageName].ToNormalizedString();
-            var pluginPath = _extractor.GetCachedPackagePath(request.PackageName, pluginVersionString);
+            var pluginVersionString = entry.FlatDependencies[entry.Request.PackageName].ToNormalizedString();
+            var pluginPath = _extractor.GetCachedPackagePath(entry.Request.PackageName, pluginVersionString);
             if (pluginPath != null)
             {
                 var manifest = PluginManifestReader.Read(pluginPath);
-                pluginManifests[request.PackageName] = manifest;
+                pluginManifests[entry.Request.PackageName] = manifest;
 
                 foreach (var hostDep in PluginManifestReader.GetHostDependencies(manifest))
                 {
@@ -237,9 +290,9 @@ public class NuGetPluginLoader : IDisposable
             }
 
             // Scan dependency DLLs for HostShared attribute
-            foreach (var (packageName, version) in flatDependencies)
+            foreach (var (packageName, version) in entry.FlatDependencies)
             {
-                if (packageName == request.PackageName)
+                if (packageName == entry.Request.PackageName)
                 {
                     continue;
                 }
@@ -261,18 +314,28 @@ public class NuGetPluginLoader : IDisposable
 
             for (var i = 0; i < pluginGraphs.Count; i++)
             {
-                var (request, flatDeps, _) = pluginGraphs[i];
-                var newClassifications = updatedClassifier.ClassifyAll(flatDeps);
-                pluginGraphs[i] = (request, flatDeps, newClassifications);
+                var entry = pluginGraphs[i];
+                var newClassifications = updatedClassifier.ClassifyAll(entry.FlatDependencies);
+                pluginGraphs[i] = entry with { Classifications = newClassifications };
             }
         }
 
-        // Phase 5: Load external host packages into default context
-        foreach (var (_, flatDependencies, classifications) in pluginGraphs)
+        return pluginManifests;
+    }
+
+    /// <summary>
+    /// Loads external host packages (not already in the host resolver) into the default
+    /// assembly load context so they are available to all plugins.
+    /// </summary>
+    private void LoadHostPackages(
+        List<ResolvedPluginGraph> pluginGraphs,
+        HostDependencyResolver hostResolver)
+    {
+        foreach (var entry in pluginGraphs)
         {
-            foreach (var (packageName, version) in flatDependencies)
+            foreach (var (packageName, version) in entry.FlatDependencies)
             {
-                if (classifications[packageName] == DependencyClassification.Host &&
+                if (entry.Classifications[packageName] == DependencyClassification.Host &&
                     !hostResolver.Contains(packageName))
                 {
                     var versionString = version.ToNormalizedString();
@@ -287,11 +350,23 @@ public class NuGetPluginLoader : IDisposable
                 }
             }
         }
+    }
 
-        // Phase 6: Load plugins
-        foreach (var (request, flatDependencies, classifications) in pluginGraphs)
+    /// <summary>
+    /// Creates isolated assembly load contexts and loads plugin assemblies into them.
+    /// Returns the list of successfully loaded plugins.
+    /// </summary>
+    private List<NuGetPlugin> LoadPluginAssemblies(
+        List<ResolvedPluginGraph> pluginGraphs,
+        List<NuGetPluginFailure> failures,
+        Dictionary<string, JsonElement?> pluginManifests,
+        HostDependencyResolver hostResolver)
+    {
+        var loadedPlugins = new List<NuGetPlugin>();
+
+        foreach (var entry in pluginGraphs)
         {
-            if (failures.Any(failure => failure.PackageName == request.PackageName))
+            if (failures.Any(failure => failure.PackageName == entry.Request.PackageName))
             {
                 continue; // Skip failed plugins
             }
@@ -301,9 +376,9 @@ public class NuGetPluginLoader : IDisposable
                 var hostAssemblyNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                 var privateAssemblyPaths = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-                foreach (var (packageName, version) in flatDependencies)
+                foreach (var (packageName, version) in entry.FlatDependencies)
                 {
-                    var classification = classifications[packageName];
+                    var classification = entry.Classifications[packageName];
                     var versionString = version.ToNormalizedString();
                     var cachedPath = _extractor.GetCachedPackagePath(packageName, versionString);
 
@@ -336,7 +411,7 @@ public class NuGetPluginLoader : IDisposable
                                 // Already available in default context (e.g., framework assembly)
                                 hostAssemblyNames.Add(assemblyName);
                                 _logger.LogDebug("Assembly '{Assembly}' from plugin '{Plugin}' already in default context, treating as host.",
-                                    assemblyName, request.PackageName);
+                                    assemblyName, entry.Request.PackageName);
                             }
                             else
                             {
@@ -347,10 +422,10 @@ public class NuGetPluginLoader : IDisposable
                 }
 
                 var loadContext = new PluginAssemblyLoadContext(
-                    request.PackageName, hostAssemblyNames, privateAssemblyPaths);
+                    entry.Request.PackageName, hostAssemblyNames, privateAssemblyPaths);
 
                 _logger.LogDebug("Plugin '{Plugin}': {HostCount} host assemblies, {PrivateCount} private assemblies.",
-                    request.PackageName, hostAssemblyNames.Count, privateAssemblyPaths.Count);
+                    entry.Request.PackageName, hostAssemblyNames.Count, privateAssemblyPaths.Count);
 
                 var assemblies = new List<Assembly>();
                 foreach (var (assemblyName, path) in privateAssemblyPaths)
@@ -360,45 +435,45 @@ public class NuGetPluginLoader : IDisposable
                         var assembly = loadContext.LoadFromAssemblyPath(path);
                         assemblies.Add(assembly);
                         _logger.LogDebug("Plugin '{Plugin}': Loaded assembly '{Assembly}' from '{Path}'.",
-                            request.PackageName, assemblyName, path);
+                            entry.Request.PackageName, assemblyName, path);
                     }
                     catch (Exception exception)
                     {
                         _logger.LogWarning(exception, "Failed to load assembly '{Assembly}' for plugin '{Plugin}'.",
-                            assemblyName, request.PackageName);
+                            assemblyName, entry.Request.PackageName);
                     }
                 }
 
-                var pluginVersion = flatDependencies.TryGetValue(request.PackageName, out var resolvedVersion)
+                var pluginVersion = entry.FlatDependencies.TryGetValue(entry.Request.PackageName, out var resolvedVersion)
                     ? resolvedVersion.ToNormalizedString()
-                    : request.Version ?? "0.0.0";
+                    : entry.Request.Version ?? "0.0.0";
 
                 // Read nuspec and manifest
-                var pluginCachedPath = _extractor.GetCachedPackagePath(request.PackageName, pluginVersion);
+                var pluginCachedPath = _extractor.GetCachedPackagePath(entry.Request.PackageName, pluginVersion);
                 NuGetPackageMetadata metadata = new();
                 XDocument? nuspec = null;
                 JsonElement? manifest = null;
-                IReadOnlyList<NuGetPluginDependencyInfo> dependencyInfos = [];
+                IReadOnlyList<NuGetPluginDependency> dependencyInfos = [];
 
                 if (pluginCachedPath != null)
                 {
-                    var (nuspecMetadata, nuspecDoc) = NuspecHelper.ReadFromExtractedPackage(pluginCachedPath);
+                    var (nuspecMetadata, nuspecDoc) = NuspecReader.ReadFromExtractedPackage(pluginCachedPath);
                     metadata = nuspecMetadata;
                     nuspec = nuspecDoc;
-                    pluginManifests.TryGetValue(request.PackageName, out manifest);
+                    pluginManifests.TryGetValue(entry.Request.PackageName, out manifest);
 
-                    dependencyInfos = flatDependencies
-                        .Select(kvp => new NuGetPluginDependencyInfo
+                    dependencyInfos = entry.FlatDependencies
+                        .Select(kvp => new NuGetPluginDependency
                         {
                             PackageName = kvp.Key,
                             Version = kvp.Value.ToNormalizedString(),
-                            Classification = classifications[kvp.Key],
+                            Classification = entry.Classifications[kvp.Key],
                         })
                         .ToList();
                 }
 
                 var loadedPlugin = new NuGetPlugin(
-                    request.PackageName, pluginVersion, assemblies, loadContext,
+                    entry.Request.PackageName, pluginVersion, assemblies, loadContext,
                     metadata, nuspec, manifest, dependencyInfos);
                 loadedPlugins.Add(loadedPlugin);
                 lock (_lock)
@@ -407,17 +482,17 @@ public class NuGetPluginLoader : IDisposable
                 }
 
                 _logger.LogInformation("Plugin '{Plugin}' v{Version} loaded with {Count} assemblies.",
-                    request.PackageName, pluginVersion, assemblies.Count);
+                    entry.Request.PackageName, pluginVersion, assemblies.Count);
             }
             catch (Exception exception)
             {
-                _logger.LogError(exception, "Failed to load plugin '{Plugin}'.", request.PackageName);
-                failures.Add(new NuGetPluginFailure(request.PackageName,
+                _logger.LogError(exception, "Failed to load plugin '{Plugin}'.", entry.Request.PackageName);
+                failures.Add(new NuGetPluginFailure(entry.Request.PackageName,
                     $"Assembly load failed: {exception.Message}", exception: exception));
             }
         }
 
-        return new NuGetPluginLoadResult(loadedPlugins, failures);
+        return loadedPlugins;
     }
 
     /// <summary>
@@ -473,4 +548,12 @@ public class NuGetPluginLoader : IDisposable
             }
         }
     }
+
+    /// <summary>
+    /// Holds the resolved dependency graph and classifications for a single plugin request.
+    /// </summary>
+    private record ResolvedPluginGraph(
+        NuGetPluginReference Request,
+        Dictionary<string, NuGetVersion> FlatDependencies,
+        Dictionary<string, DependencyClassification> Classifications);
 }

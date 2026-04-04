@@ -25,7 +25,7 @@ public class NuGetPackageRepository : INuGetPackageRepository
     }
 
     /// <inheritdoc />
-    public async Task<IEnumerable<NuGetPackageInfo>> SearchPackagesAsync(
+    public async Task<IEnumerable<NuGetPackage>> SearchPackagesAsync(
         string searchTerm, int skip, int take, CancellationToken cancellationToken)
     {
         var sourceRepository = CreateSourceRepository();
@@ -36,7 +36,7 @@ public class NuGetPackageRepository : INuGetPackageRepository
             new global::NuGet.Protocol.Core.Types.SearchFilter(includePrerelease: false) { IncludeDelisted = false },
             skip, take, global::NuGet.Common.NullLogger.Instance, cancellationToken);
 
-        return results.Select(metadata => new NuGetPackageInfo(
+        return results.Select(metadata => new NuGetPackage(
             metadata.Identity.Id,
             metadata.Identity.Version.ToNormalizedString(),
             metadata.Title,
@@ -45,7 +45,7 @@ public class NuGetPackageRepository : INuGetPackageRepository
     }
 
     /// <inheritdoc />
-    public async Task<(NuGetPackageInfo Package, Stream Stream)> DownloadPackageAsync(
+    public async Task<NuGetPackageDownload> DownloadPackageAsync(
         string packageName, string? packageVersion, CancellationToken cancellationToken)
     {
         const int maxRetries = 5;
@@ -105,14 +105,14 @@ public class NuGetPackageRepository : INuGetPackageRepository
                     throw new HttpRequestException($"Package stream is empty for '{packageName}'. Retry.");
                 }
 
-                var packageInfo = new NuGetPackageInfo(
+                var packageInfo = new NuGetPackage(
                     metadata.Identity.Id,
                     metadata.Identity.Version.ToNormalizedString(),
                     metadata.Title,
                     metadata.Description,
                     metadata.Authors);
 
-                return (packageInfo, downloadResult.PackageStream);
+                return new NuGetPackageDownload(packageInfo, downloadResult.PackageStream);
             }
             catch (Exception exception) when (
                 attempt < maxRetries &&

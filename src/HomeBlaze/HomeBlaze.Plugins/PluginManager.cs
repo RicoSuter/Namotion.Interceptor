@@ -17,22 +17,22 @@ public partial class PluginManager : IConfigurable, ITitleProvider, IIconProvide
     public string? IconColor =>
         LoadedPlugins.Values.Any(p => p.Status == ServiceStatus.Error) ? "Warning" : "Success";
 
-    public PluginManager(PluginLoaderService pluginLoaderService)
+    public PluginManager(PluginLoader pluginLoader)
     {
         Plugins = [];
         Feeds = [];
         HostPackages = [];
-        LoadedPlugins = new Dictionary<string, PluginInfo>();
+        LoadedPlugins = new Dictionary<string, Plugin>();
 
         // Read already-loaded results from service
-        var result = pluginLoaderService.LoadResult;
+        var result = pluginLoader.LoadResult;
         if (result != null)
         {
-            var plugins = new Dictionary<string, PluginInfo>();
+            var plugins = new Dictionary<string, Plugin>();
 
             foreach (var plugin in result.LoadedPlugins)
             {
-                plugins[plugin.PackageName] = new PluginInfo(this)
+                plugins[plugin.PackageName] = new Plugin(this)
                 {
                     Name = plugin.PackageName,
                     Version = plugin.PackageVersion,
@@ -45,7 +45,7 @@ public partial class PluginManager : IConfigurable, ITitleProvider, IIconProvide
                         .Select(d => $"{d.PackageName} v{d.Version}")
                         .ToArray(),
                     PrivateDependencies = plugin.Dependencies
-                        .Where(d => d.Classification == DependencyClassification.PluginPrivate)
+                        .Where(d => d.Classification == DependencyClassification.Isolated)
                         .Select(d => $"{d.PackageName} v{d.Version}")
                         .ToArray(),
                     Assemblies = plugin.Assemblies
@@ -62,7 +62,7 @@ public partial class PluginManager : IConfigurable, ITitleProvider, IIconProvide
 
             foreach (var failure in result.Failures)
             {
-                plugins[failure.PackageName] = new PluginInfo(this)
+                plugins[failure.PackageName] = new Plugin(this)
                 {
                     Name = failure.PackageName,
                     Version = "",
@@ -86,7 +86,7 @@ public partial class PluginManager : IConfigurable, ITitleProvider, IIconProvide
     public partial string[] HostPackages { get; set; }
 
     [State]
-    public partial Dictionary<string, PluginInfo> LoadedPlugins { get; internal set; }
+    public partial Dictionary<string, Plugin> LoadedPlugins { get; internal set; }
 
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
