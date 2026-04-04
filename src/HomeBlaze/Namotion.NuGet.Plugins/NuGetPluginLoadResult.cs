@@ -3,7 +3,7 @@ using Namotion.NuGet.Plugins.Loading;
 namespace Namotion.NuGet.Plugins;
 
 /// <summary>
-/// Result of a plugin loading operation, containing loaded plugin groups and any failures.
+/// Result of a plugin loading operation, containing loaded plugins and any failures.
 /// </summary>
 public class NuGetPluginLoadResult
 {
@@ -11,7 +11,7 @@ public class NuGetPluginLoadResult
     /// Initializes a new instance of the <see cref="NuGetPluginLoadResult"/> class.
     /// </summary>
     public NuGetPluginLoadResult(
-        IReadOnlyList<NuGetPluginGroup> loadedPlugins,
+        IReadOnlyList<NuGetPlugin> loadedPlugins,
         IReadOnlyList<NuGetPluginFailure> failures)
     {
         LoadedPlugins = loadedPlugins;
@@ -24,9 +24,9 @@ public class NuGetPluginLoadResult
     public bool Success => Failures.Count == 0;
 
     /// <summary>
-    /// Gets the successfully loaded plugin groups.
+    /// Gets the successfully loaded plugins.
     /// </summary>
-    public IReadOnlyList<NuGetPluginGroup> LoadedPlugins { get; }
+    public IReadOnlyList<NuGetPlugin> LoadedPlugins { get; }
 
     /// <summary>
     /// Gets the list of plugin loading failures.

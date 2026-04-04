@@ -8,11 +8,18 @@ alignment: Left
 
 # Devices
 
-Sample plugin widget:
+Sample plugin widgets:
 
-```subject(widget)
+```subject(widget1)
 {
   "$type": "HomeBlaze.Components.Widget",
-  "path": "/Devices/SampleDevice"
+  "path": "/Devices/SampleDevice1"
+}
+```
+
+```subject(widget2)
+{
+  "$type": "HomeBlaze.Components.Widget",
+  "path": "/Devices/SampleDevice2"
 }
 ```

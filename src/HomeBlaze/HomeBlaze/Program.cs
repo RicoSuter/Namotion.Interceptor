@@ -76,9 +76,9 @@ var pluginLoaderService = app.Services.GetRequiredService<PluginLoaderService>()
 var pluginResult = await pluginLoaderService.LoadPluginsAsync(CancellationToken.None);
 if (pluginResult != null)
 {
-    foreach (var group in pluginResult.LoadedPlugins)
+    foreach (var plugin in pluginResult.LoadedPlugins)
     {
-        foreach (var assembly in group.Assemblies)
+        foreach (var assembly in plugin.Assemblies)
         {
             typeProvider.AddAssembly(assembly);
         }

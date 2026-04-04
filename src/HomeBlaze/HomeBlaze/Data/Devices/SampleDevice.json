@@ -1,5 +1,0 @@
-{
-  "$type": "HomeBlaze.SamplePlugin.SampleDevice",
-  "name": "Sample Device",
-  "pollingIntervalMs": 2000
-}

@@ -1,0 +1,66 @@
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(SampleDevice1))]
+@implements ISubjectEditComponent
+
+<MudTextField Value="_name" ValueChanged="OnNameChanged" Label="Name" T="string" />
+<MudNumericField Value="_pollingIntervalMs" ValueChanged="OnPollingIntervalChanged" Label="Polling Interval (ms)" T="int" Min="500" Max="60000" />
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(_name) && _pollingIntervalMs >= 500;
+    public bool IsDirty => _name != _originalName || _pollingIntervalMs != _originalPollingIntervalMs;
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    private SampleDevice1? Device => Subject as SampleDevice1;
+
+    private string _name = "";
+    private string _originalName = "";
+    private int _pollingIntervalMs = 2000;
+    private int _originalPollingIntervalMs = 2000;
+
+    protected override void OnInitialized()
+    {
+        if (Device != null)
+        {
+            _name = Device.Name;
+            _originalName = Device.Name;
+            _pollingIntervalMs = Device.PollingIntervalMs;
+            _originalPollingIntervalMs = Device.PollingIntervalMs;
+        }
+    }
+
+    private void OnNameChanged(string value)
+    {
+        var wasValid = IsValid;
+        var wasDirty = IsDirty;
+        _name = value;
+        if (IsValid != wasValid) IsValidChanged?.Invoke(IsValid);
+        if (IsDirty != wasDirty) IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    private void OnPollingIntervalChanged(int value)
+    {
+        var wasValid = IsValid;
+        var wasDirty = IsDirty;
+        _pollingIntervalMs = value;
+        if (IsValid != wasValid) IsValidChanged?.Invoke(IsValid);
+        if (IsDirty != wasDirty) IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Device != null)
+        {
+            Device.Name = _name;
+            Device.PollingIntervalMs = _pollingIntervalMs;
+        }
+        _originalName = _name;
+        _originalPollingIntervalMs = _pollingIntervalMs;
+        return Task.CompletedTask;
+    }
+}

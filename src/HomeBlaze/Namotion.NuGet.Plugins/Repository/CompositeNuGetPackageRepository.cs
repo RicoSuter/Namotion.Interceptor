@@ -7,11 +7,16 @@ public class CompositeNuGetPackageRepository : INuGetPackageRepository
 {
     private readonly IReadOnlyList<INuGetPackageRepository> _repositories;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="CompositeNuGetPackageRepository"/> class.
+    /// </summary>
+    /// <param name="repositories">The ordered list of repositories to try.</param>
     public CompositeNuGetPackageRepository(IReadOnlyList<INuGetPackageRepository> repositories)
     {
         _repositories = repositories ?? throw new ArgumentNullException(nameof(repositories));
     }
 
+    /// <inheritdoc />
     public async Task<(NuGetPackageInfo Package, Stream Stream)> DownloadPackageAsync(
         string packageName, string? packageVersion, CancellationToken cancellationToken)
     {
@@ -30,6 +35,7 @@ public class CompositeNuGetPackageRepository : INuGetPackageRepository
         throw new PackageNotFoundException(packageName, packageVersion);
     }
 
+    /// <inheritdoc />
     public async Task<IEnumerable<NuGetPackageInfo>> SearchPackagesAsync(
         string searchTerm, int skip, int take, CancellationToken cancellationToken)
     {

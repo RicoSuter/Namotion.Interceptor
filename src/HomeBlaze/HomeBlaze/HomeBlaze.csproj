@@ -22,7 +22,11 @@
         <ProjectReference Include="..\HomeBlaze.Servers.OpcUa\HomeBlaze.Servers.OpcUa.csproj" />
         <ProjectReference Include="..\HomeBlaze.Servers.OpcUa.Blazor\HomeBlaze.Servers.OpcUa.Blazor.csproj" />
         <ProjectReference Include="..\HomeBlaze.Plugins\HomeBlaze.Plugins.csproj" />
-        <ProjectReference Include="..\HomeBlaze.SamplePlugin.HomeBlaze\HomeBlaze.SamplePlugin.HomeBlaze.csproj">
+        <ProjectReference Include="..\MyCompany.SamplePlugin1.HomeBlaze\MyCompany.SamplePlugin1.HomeBlaze.csproj">
+            <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+            <Private>false</Private>
+        </ProjectReference>
+        <ProjectReference Include="..\MyCompany.SamplePlugin2.HomeBlaze\MyCompany.SamplePlugin2.HomeBlaze.csproj">
             <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
             <Private>false</Private>
         </ProjectReference>

@@ -26,18 +26,18 @@ public class FolderFeedPluginLoadingTests : IDisposable
 
         // Act
         var result = await loader.LoadPluginsAsync(
-            [new NuGetPluginRequest("HomeBlaze.SamplePlugin.HomeBlaze", "1.0.0")],
+            [new NuGetPluginReference("MyCompany.SamplePlugin1.HomeBlaze", "1.0.0")],
             CancellationToken.None);
 
         // Assert
         Assert.True(result.Success, string.Join(", ", result.Failures.Select(failure => failure.Reason)));
         Assert.Single(result.LoadedPlugins);
 
-        var group = result.LoadedPlugins[0];
-        Assert.True(group.Assemblies.Count >= 2, $"Expected at least 2 assemblies but got {group.Assemblies.Count}: [{string.Join(", ", group.Assemblies.Select(assembly => assembly.GetName().Name))}]");
-        Assert.Contains(group.Assemblies, assembly => assembly.GetName().Name == "HomeBlaze.SamplePlugin");
-        Assert.Contains(group.Assemblies, assembly => assembly.GetName().Name == "HomeBlaze.SamplePlugin.HomeBlaze");
-        Assert.Contains(group.Assemblies, assembly => assembly.GetName().Name == "Bogus");
+        var plugin = result.LoadedPlugins[0];
+        Assert.True(plugin.Assemblies.Count >= 2, $"Expected at least 2 assemblies but got {plugin.Assemblies.Count}: [{string.Join(", ", plugin.Assemblies.Select(assembly => assembly.GetName().Name))}]");
+        Assert.Contains(plugin.Assemblies, assembly => assembly.GetName().Name == "MyCompany.SamplePlugin1");
+        Assert.Contains(plugin.Assemblies, assembly => assembly.GetName().Name == "MyCompany.SamplePlugin1.HomeBlaze");
+        Assert.Contains(plugin.Assemblies, assembly => assembly.GetName().Name == "Bogus");
     }
 
     [Fact]
@@ -50,15 +50,15 @@ public class FolderFeedPluginLoadingTests : IDisposable
         using var loader = new NuGetPluginLoader(options);
 
         await loader.LoadPluginsAsync(
-            [new NuGetPluginRequest("HomeBlaze.SamplePlugin.HomeBlaze", "1.0.0")],
+            [new NuGetPluginReference("MyCompany.SamplePlugin1.HomeBlaze", "1.0.0")],
             CancellationToken.None);
 
         // Act
-        var sampleDeviceTypes = loader.GetTypes(type => type.Name == "SampleDevice").ToList();
+        var sampleDeviceTypes = loader.GetTypes(type => type.Name == "SampleDevice1").ToList();
 
         // Assert
         Assert.Single(sampleDeviceTypes);
-        Assert.Equal("HomeBlaze.SamplePlugin", sampleDeviceTypes[0].Namespace);
+        Assert.Equal("MyCompany.SamplePlugin1", sampleDeviceTypes[0].Namespace);
     }
 
     public void Dispose()
@@ -91,7 +91,7 @@ public class FolderFeedPluginLoadingTests : IDisposable
             ],
             CacheDirectory = _cacheDir,
             HostDependencies = hostDependencies,
-            HostPackagePatterns = ["HomeBlaze.*.Abstractions"],
+            HostPackages = ["HomeBlaze.*.Abstractions"],
         };
     }
 
@@ -102,7 +102,7 @@ public class FolderFeedPluginLoadingTests : IDisposable
         {
             var pluginsPath = Path.Combine(directory, "HomeBlaze", "Plugins");
             if (Directory.Exists(pluginsPath) &&
-                File.Exists(Path.Combine(pluginsPath, "HomeBlaze.SamplePlugin.1.0.0.nupkg")))
+                File.Exists(Path.Combine(pluginsPath, "MyCompany.SamplePlugin1.1.0.0.nupkg")))
             {
                 return pluginsPath;
             }
@@ -110,7 +110,7 @@ public class FolderFeedPluginLoadingTests : IDisposable
             pluginsPath = Path.Combine(directory, "Plugins");
             if (Directory.Exists(pluginsPath) &&
                 Path.GetFileName(directory) == "HomeBlaze" &&
-                File.Exists(Path.Combine(pluginsPath, "HomeBlaze.SamplePlugin.1.0.0.nupkg")))
+                File.Exists(Path.Combine(pluginsPath, "MyCompany.SamplePlugin1.1.0.0.nupkg")))
             {
                 return pluginsPath;
             }

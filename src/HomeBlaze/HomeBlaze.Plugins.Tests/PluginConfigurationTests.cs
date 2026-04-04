@@ -57,7 +57,7 @@ public class PluginConfigurationTests
 
         // Assert
         Assert.Equal(2, options.Feeds.Count);
-        Assert.Equal(2, options.HostPackagePatterns.Count);
+        Assert.Equal(2, options.HostPackages.Count);
         Assert.Same(hostDependencies, options.HostDependencies);
     }
 

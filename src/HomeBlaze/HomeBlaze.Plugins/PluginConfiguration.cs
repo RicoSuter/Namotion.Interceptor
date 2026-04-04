@@ -33,8 +33,8 @@ public class PluginConfiguration
             : [NuGetFeed.NuGetOrg];
 
     [JsonIgnore]
-    public IReadOnlyList<NuGetPluginRequest> Plugins =>
-        PluginEntries.Select(p => new NuGetPluginRequest(p.PackageName, p.Version)).ToList();
+    public IReadOnlyList<NuGetPluginReference> Plugins =>
+        PluginEntries.Select(p => new NuGetPluginReference(p.PackageName, p.Version)).ToList();
 
     public static PluginConfiguration LoadFrom(string jsonPath)
     {
@@ -53,7 +53,7 @@ public class PluginConfiguration
         return new NuGetPluginLoaderOptions
         {
             Feeds = Feeds,
-            HostPackagePatterns = HostPackages,
+            HostPackages = HostPackages,
             HostDependencies = hostDependencies,
         };
     }
