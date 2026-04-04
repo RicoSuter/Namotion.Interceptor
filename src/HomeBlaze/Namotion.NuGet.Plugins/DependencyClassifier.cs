@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
 using Namotion.NuGet.Plugins.Configuration;
 
 namespace Namotion.NuGet.Plugins;
@@ -28,13 +25,13 @@ public enum DependencyClassification
 
 /// <summary>
 /// Classifies dependencies as host, plugin (top-level), or plugin-private based on
-/// host dependency information, glob patterns, discovered host-shared packages,
+/// host dependency information, a host package predicate, discovered host-shared packages,
 /// and the configured plugin list.
 /// </summary>
 public class DependencyClassifier
 {
     private readonly HostDependencyResolver _hostResolver;
-    private readonly IReadOnlyList<string> _hostPackages;
+    private readonly Func<string, bool>? _isHostPackage;
     private readonly HashSet<string> _configuredPlugins;
     private readonly HashSet<string> _discoveredHostShared;
 
@@ -43,12 +40,12 @@ public class DependencyClassifier
     /// </summary>
     public DependencyClassifier(
         HostDependencyResolver hostResolver,
-        IReadOnlyList<string> hostPackages,
+        Func<string, bool>? isHostPackage,
         IEnumerable<string> configuredPluginNames,
         ISet<string>? discoveredHostShared = null)
     {
         _hostResolver = hostResolver;
-        _hostPackages = hostPackages;
+        _isHostPackage = isHostPackage;
         _configuredPlugins = new HashSet<string>(configuredPluginNames, StringComparer.OrdinalIgnoreCase);
         _discoveredHostShared = discoveredHostShared != null
             ? new HashSet<string>(discoveredHostShared, StringComparer.OrdinalIgnoreCase)
@@ -73,8 +70,8 @@ public class DependencyClassifier
             return DependencyClassification.Host;
         }
 
-        // 3. Matches a host package pattern
-        if (PackageNameMatcher.IsMatchAny(packageName, _hostPackages))
+        // 3. Matches the host package predicate
+        if (_isHostPackage?.Invoke(packageName) == true)
         {
             return DependencyClassification.Host;
         }

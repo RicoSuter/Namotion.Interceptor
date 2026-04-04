@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
+using Namotion.NuGet.Plugins;
 using Namotion.NuGet.Plugins.Configuration;
 
 namespace HomeBlaze.Plugins;
@@ -53,7 +54,9 @@ public class PluginConfiguration
         return new NuGetPluginLoaderOptions
         {
             Feeds = Feeds,
-            HostPackages = HostPackages,
+            IsHostPackage = HostPackages.Count > 0
+                ? name => PackageNameMatcher.IsMatchAny(name, HostPackages)
+                : null,
             HostDependencies = hostDependencies,
         };
     }

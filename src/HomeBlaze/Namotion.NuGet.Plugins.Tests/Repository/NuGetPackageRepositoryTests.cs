@@ -1,9 +1,7 @@
 using Xunit;
 
 using Namotion.NuGet.Plugins.Configuration;
-using Namotion.NuGet.Plugins.Loading;
 using Namotion.NuGet.Plugins.Repository;
-using Namotion.NuGet.Plugins.Resolution;
 
 namespace Namotion.NuGet.Plugins.Tests.Repository;
 
@@ -33,7 +31,8 @@ public class NuGetPackageRepositoryTests
         // Act
         var (package, stream) = await repository.DownloadPackageAsync(
             "Newtonsoft.Json", "13.0.3", CancellationToken.None);
-        using (stream)
+
+        await using (stream)
         {
             // Assert
             Assert.Equal("Newtonsoft.Json", package.PackageName);
@@ -63,7 +62,8 @@ public class NuGetPackageRepositoryTests
         // Act
         var (package, stream) = await repository.DownloadPackageAsync(
             "Newtonsoft.Json", null, CancellationToken.None);
-        using (stream)
+
+        await using (stream)
         {
             // Assert
             Assert.Equal("Newtonsoft.Json", package.PackageName);

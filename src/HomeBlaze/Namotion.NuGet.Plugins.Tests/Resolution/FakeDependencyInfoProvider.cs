@@ -1,9 +1,4 @@
-using global::NuGet.Versioning;
-using Namotion.NuGet.Plugins;
-
-using Namotion.NuGet.Plugins.Configuration;
-using Namotion.NuGet.Plugins.Loading;
-using Namotion.NuGet.Plugins.Repository;
+using NuGet.Versioning;
 using Namotion.NuGet.Plugins.Resolution;
 
 namespace Namotion.NuGet.Plugins.Tests.Resolution;
@@ -38,7 +33,7 @@ internal class FakeDependencyInfoProvider : IDependencyInfoProvider
         var best = _packages.Values
             .Where(package => package.Name.Equals(packageName, StringComparison.OrdinalIgnoreCase))
             .Select(package => NuGetVersion.Parse(package.Version))
-            .Where(version => range.Satisfies(version))
+            .Where(range.Satisfies)
             .OrderByDescending(version => version)
             .FirstOrDefault();
         return Task.FromResult(best);

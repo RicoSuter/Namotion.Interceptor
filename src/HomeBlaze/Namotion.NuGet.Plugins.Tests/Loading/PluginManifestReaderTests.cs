@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Namotion.NuGet.Plugins.Loading;
 using Xunit;
 

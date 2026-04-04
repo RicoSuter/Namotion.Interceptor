@@ -1,13 +1,7 @@
-using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
 using System.Reflection;
 using System.Runtime.Loader;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -96,14 +90,14 @@ public class NuGetPluginLoader : IDisposable
         var hostResolver = _options.HostDependencies ?? new HostDependencyResolver([]);
         var classifier = new DependencyClassifier(
             hostResolver,
-            _options.HostPackages,
+            _options.IsHostPackage,
             pluginList.Select(plugin => plugin.PackageName));
 
         // Phase 1 & 2: Resolve and classify each plugin's dependencies
         var pluginGraphs = new List<(NuGetPluginReference Request, Dictionary<string, NuGetVersion> FlatDependencies, Dictionary<string, DependencyClassification> Classifications)>();
 
         var graphResolver = new DependencyGraphResolver(
-            _options.Feeds, hostResolver, _options.HostPackages, _logger);
+            _options.Feeds, hostResolver, _options.IsHostPackage, _logger);
 
         foreach (var request in pluginList)
         {
@@ -262,7 +256,7 @@ public class NuGetPluginLoader : IDisposable
         if (discoveredHostShared.Count > 0)
         {
             var updatedClassifier = new DependencyClassifier(
-                hostResolver, _options.HostPackages,
+                hostResolver, _options.IsHostPackage,
                 pluginList.Select(plugin => plugin.PackageName), discoveredHostShared);
 
             for (var i = 0; i < pluginGraphs.Count; i++)

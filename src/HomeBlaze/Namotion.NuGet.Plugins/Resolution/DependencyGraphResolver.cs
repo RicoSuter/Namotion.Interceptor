@@ -13,18 +13,18 @@ public class DependencyGraphResolver
     private readonly IDependencyInfoProvider _provider;
     private readonly ILogger _logger;
     private readonly HostDependencyResolver? _hostDependencies;
-    private readonly IReadOnlyList<string> _hostPackages;
+    private readonly Func<string, bool>? _isHostPackage;
 
     internal DependencyGraphResolver(
         IDependencyInfoProvider provider,
         HostDependencyResolver? hostDependencies = null,
-        IReadOnlyList<string>? hostPackages = null,
+        Func<string, bool>? isHostPackage = null,
         ILogger? logger = null)
     {
         _provider = provider;
         _logger = logger ?? NullLogger.Instance;
         _hostDependencies = hostDependencies;
-        _hostPackages = hostPackages ?? [];
+        _isHostPackage = isHostPackage;
     }
 
     /// <summary>
@@ -32,14 +32,14 @@ public class DependencyGraphResolver
     /// </summary>
     /// <param name="feeds">The NuGet feeds to query for package metadata.</param>
     /// <param name="hostDependencies">Optional host dependency resolver for skipping already-provided packages.</param>
-    /// <param name="hostPackages">Optional glob patterns for packages treated as host-provided.</param>
+    /// <param name="isHostPackage">Optional predicate that determines whether a package should be treated as host-provided.</param>
     /// <param name="logger">An optional logger for diagnostic output.</param>
     public DependencyGraphResolver(
         IReadOnlyList<NuGetFeed> feeds,
         HostDependencyResolver? hostDependencies = null,
-        IReadOnlyList<string>? hostPackages = null,
+        Func<string, bool>? isHostPackage = null,
         ILogger? logger = null)
-        : this(new NuGetDependencyInfoProvider(feeds, logger), hostDependencies, hostPackages, logger)
+        : this(new NuGetDependencyInfoProvider(feeds, logger), hostDependencies, isHostPackage, logger)
     {
     }
 
@@ -114,8 +114,8 @@ public class DependencyGraphResolver
                 continue;
             }
 
-            // Skip dependencies matching host packages (they'll be loaded as external host packages)
-            if (_hostPackages.Count > 0 && PackageNameMatcher.IsMatchAny(dependencyId, _hostPackages))
+            // Skip dependencies matching host package predicate (they'll be loaded as external host packages)
+            if (_isHostPackage?.Invoke(dependencyId) == true)
             {
                 _logger.LogDebug("Skipping host-pattern-matched dependency {PackageId} during resolution.", dependencyId);
                 continue;
