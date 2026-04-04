@@ -19,23 +19,23 @@ public class PluginConfiguration
     };
 
     [JsonPropertyName("feeds")]
-    public IReadOnlyList<FeedEntry> FeedEntries { get; set; } = [];
+    public IReadOnlyList<FeedEntry> Feeds { get; set; } = [];
 
     [JsonPropertyName("hostPackages")]
     public IReadOnlyList<string> HostPackages { get; set; } = [];
 
     [JsonPropertyName("plugins")]
-    public IReadOnlyList<PluginEntry> PluginEntries { get; set; } = [];
+    public IReadOnlyList<PluginEntry> Plugins { get; set; } = [];
 
     [JsonIgnore]
-    public IReadOnlyList<NuGetFeed> Feeds =>
-        FeedEntries.Count > 0
-            ? FeedEntries.Select(f => new NuGetFeed(f.Name, f.Url, f.ApiKey)).ToList()
+    public IReadOnlyList<NuGetFeed> NuGetFeeds =>
+        Feeds.Count > 0
+            ? Feeds.Select(f => new NuGetFeed(f.Name, f.Url, f.ApiKey)).ToList()
             : [NuGetFeed.NuGetOrg];
 
     [JsonIgnore]
-    public IReadOnlyList<NuGetPluginReference> Plugins =>
-        PluginEntries.Select(p => new NuGetPluginReference(p.PackageName, p.Version)).ToList();
+    public IReadOnlyList<NuGetPluginReference> PluginReferences =>
+        Plugins.Select(p => new NuGetPluginReference(p.PackageName, p.Version)).ToList();
 
     public static PluginConfiguration LoadFrom(string jsonPath)
     {
@@ -53,7 +53,7 @@ public class PluginConfiguration
     {
         return new NuGetPluginLoaderOptions
         {
-            Feeds = Feeds,
+            Feeds = NuGetFeeds,
             IsHostPackage = HostPackages.Count > 0
                 ? name => PackageNameMatcher.IsMatchAny(name, HostPackages)
                 : null,

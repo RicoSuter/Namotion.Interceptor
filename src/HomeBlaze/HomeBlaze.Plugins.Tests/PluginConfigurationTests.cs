@@ -74,8 +74,8 @@ public class PluginConfigurationTests
         var config = PluginConfiguration.LoadFrom(stream);
 
         // Assert
-        Assert.Single(config.Feeds);
-        Assert.Equal("nuget.org", config.Feeds[0].Name);
+        Assert.Single(config.NuGetFeeds);
+        Assert.Equal("nuget.org", config.NuGetFeeds[0].Name);
     }
 
     [Fact]

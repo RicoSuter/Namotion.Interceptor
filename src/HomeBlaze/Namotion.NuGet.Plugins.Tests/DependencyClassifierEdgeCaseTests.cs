@@ -51,8 +51,8 @@ public class DependencyClassifierEdgeCaseTests
         var depResult = classifier.Classify("SomeDep");
 
         // Assert
-        Assert.Equal(DependencyClassification.Plugin, pluginResult);
-        Assert.Equal(DependencyClassification.PluginPrivate, depResult);
+        Assert.Equal(DependencyClassification.Entry, pluginResult);
+        Assert.Equal(DependencyClassification.Isolated, depResult);
     }
 
     [Fact]

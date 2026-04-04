@@ -72,8 +72,8 @@ typeProvider
 typeProvider.AddAssembly(typeof(PluginManager).Assembly);
 
 // Load runtime plugins
-var pluginLoaderService = app.Services.GetRequiredService<PluginLoaderService>();
-var pluginResult = await pluginLoaderService.LoadPluginsAsync(CancellationToken.None);
+var pluginLoader = app.Services.GetRequiredService<PluginLoader>();
+var pluginResult = await pluginLoader.LoadPluginsAsync(CancellationToken.None);
 if (pluginResult != null)
 {
     foreach (var plugin in pluginResult.LoadedPlugins)

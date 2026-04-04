@@ -7,16 +7,9 @@ namespace Namotion.NuGet.Plugins.Loading;
 /// </summary>
 internal class PackageExtractor
 {
-    private static readonly global::NuGet.Frameworks.NuGetFramework[] TargetFrameworkPriority =
-    [
-        global::NuGet.Frameworks.NuGetFramework.Parse("net10.0"),
-        global::NuGet.Frameworks.NuGetFramework.Parse("net9.0"),
-        global::NuGet.Frameworks.NuGetFramework.Parse("net8.0"),
-        global::NuGet.Frameworks.NuGetFramework.Parse("net7.0"),
-        global::NuGet.Frameworks.NuGetFramework.Parse("net6.0"),
-        global::NuGet.Frameworks.NuGetFramework.Parse("netstandard2.1"),
-        global::NuGet.Frameworks.NuGetFramework.Parse("netstandard2.0"),
-    ];
+    private static readonly global::NuGet.Frameworks.NuGetFramework CurrentFramework =
+        global::NuGet.Frameworks.NuGetFramework.Parse(
+            $"net{Environment.Version.Major}.{Environment.Version.Minor}");
 
     private readonly string _cacheDirectory;
 
@@ -46,38 +39,23 @@ internal class PackageExtractor
             return [];
         }
 
-        var reducer = new global::NuGet.Frameworks.FrameworkReducer();
-        var availableFolders = Directory.GetDirectories(libPath)
-            .Select(directory => new
-            {
-                Path = directory,
-                Framework = global::NuGet.Frameworks.NuGetFramework.Parse(Path.GetFileName(directory))
-            })
+        var availableFrameworks = Directory.GetDirectories(libPath)
+            .Select(directory => (
+                Path: directory,
+                Framework: global::NuGet.Frameworks.NuGetFramework.Parse(
+                    Path.GetFileName(directory))))
             .ToList();
 
-        // Try each framework in priority order
-        foreach (var targetFramework in TargetFrameworkPriority)
-        {
-            var match = availableFolders
-                .FirstOrDefault(folder => folder.Framework.Equals(targetFramework));
-
-            if (match != null)
-            {
-                return Directory.GetFiles(match.Path, "*.dll");
-            }
-        }
-
-        // Fall back to framework reducer for compatibility matching
-        var availableFrameworks = availableFolders.Select(folder => folder.Framework).ToList();
+        var reducer = new global::NuGet.Frameworks.FrameworkReducer();
         var nearest = reducer.GetNearest(
-            global::NuGet.Frameworks.NuGetFramework.Parse(
-                $"net{Environment.Version.Major}.{Environment.Version.Minor}"),
-            availableFrameworks);
+            CurrentFramework,
+            availableFrameworks.Select(entry => entry.Framework));
 
         if (nearest != null)
         {
-            var nearestFolder = availableFolders.First(folder => folder.Framework.Equals(nearest));
-            return Directory.GetFiles(nearestFolder.Path, "*.dll");
+            var matchingFolder = availableFrameworks.First(
+                entry => entry.Framework.Equals(nearest));
+            return Directory.GetFiles(matchingFolder.Path, "*.dll");
         }
 
         return [];

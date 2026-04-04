@@ -8,7 +8,12 @@ namespace MyCompany.Abstractions;
 [SubjectAbstraction]
 public interface IMyDevice
 {
+    [State]
     string DeviceName { get; }
+
+    [State]
     string DeviceType { get; }
+
+    [State]
     double? CurrentValue { get; }
 }

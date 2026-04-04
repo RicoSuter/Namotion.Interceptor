@@ -3,7 +3,7 @@ using Xunit;
 
 namespace Namotion.NuGet.Plugins.Tests.Loading;
 
-public class NuspecHelperTests
+public class NuspecReaderTests
 {
     [Fact]
     public void WhenNuspecExists_ThenReturnsMetadataAndXDocument()
@@ -29,7 +29,7 @@ public class NuspecHelperTests
         try
         {
             // Act
-            var (metadata, nuspec) = NuspecHelper.ReadFromExtractedPackage(directory);
+            var (metadata, nuspec) = NuspecReader.ReadFromExtractedPackage(directory);
 
             // Assert
             Assert.NotNull(metadata);
@@ -62,7 +62,7 @@ public class NuspecHelperTests
         try
         {
             // Act
-            var (metadata, nuspec) = NuspecHelper.ReadFromExtractedPackage(directory);
+            var (metadata, nuspec) = NuspecReader.ReadFromExtractedPackage(directory);
 
             // Assert
             Assert.Equal("", metadata.Title);

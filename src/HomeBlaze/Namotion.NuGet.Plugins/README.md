@@ -27,7 +27,7 @@ dotnet add package Namotion.NuGet.Plugins
 The library is structured around a seven-phase load pipeline that processes plugin requests into isolated, running assemblies:
 
 1. **Resolve** -- recursively resolve each plugin's full transitive dependency tree via the NuGet API
-2. **Classify** -- categorize each dependency as host (shared), plugin (top-level), or plugin-private (isolated)
+2. **Classify** -- categorize each dependency as host (shared), entry (top-level), or isolated (private)
 3. **Validate** -- check semantic version compatibility for host-classified dependencies
 4. **Download** -- fetch packages not already in the local cache
 5. **Discover host-shared packages** -- scan downloaded packages for host-shared declarations via assembly attributes, plugin.json manifests, and the `IsHostPackage` predicate
@@ -42,10 +42,10 @@ The library is organized into sub-namespaces by responsibility:
 
 | Namespace | Contents |
 |---|---|
-| `Namotion.NuGet.Plugins` | Root types: `NuGetPluginLoadResult`, `NuGetPluginFailure`, `NuGetPluginConflict`, `NuGetPackageMetadata`, `NuGetPluginDependencyInfo`, `NuGetPluginVersionConflictException`, `PackageNotFoundException`, `DependencyClassification`, `DependencyClassifier`, `PackageNameMatcher`, `VersionCompatibility` |
+| `Namotion.NuGet.Plugins` | Root types: `NuGetPluginLoadResult`, `NuGetPluginFailure`, `NuGetPluginConflict`, `NuGetPackageMetadata`, `NuGetPluginDependency`, `NuGetPluginVersionConflictException`, `PackageNotFoundException`, `DependencyClassification`, `DependencyClassifier`, `PackageNameMatcher`, `VersionCompatibility` |
 | `Namotion.NuGet.Plugins.Configuration` | Options, configuration, and feed types: `NuGetPluginLoaderOptions`, `HostDependencyResolver`, `NuGetFeed`, `NuGetPluginReference` |
 | `Namotion.NuGet.Plugins.Loading` | Loader and plugin types: `NuGetPluginLoader`, `NuGetPlugin` |
-| `Namotion.NuGet.Plugins.Repository` | NuGet feed access: `INuGetPackageRepository`, `NuGetPackageRepository`, `CompositeNuGetPackageRepository`, `NuGetPackageInfo` |
+| `Namotion.NuGet.Plugins.Repository` | NuGet feed access: `INuGetPackageRepository`, `NuGetPackageRepository`, `CompositeNuGetPackageRepository`, `NuGetPackage`, `NuGetPackageDownload` |
 | `Namotion.NuGet.Plugins.Resolution` | Dependency graph resolution: `DependencyGraphResolver`, `DependencyNode`, `IDependencyInfoProvider`, `NuGetDependencyInfoProvider`, `HostPackageVersionResolver` |
 
 ## Quick Start
@@ -107,13 +107,15 @@ flowchart TD
     E --> F["Phase 7: Load Plugins"]
 
     A -.- A1["Recursively resolve transitive\ndependency trees via NuGet API\n(skips known host dependencies)"]
-    B -.- B1["Categorize each dependency\nas host or plugin-private"]
+    B -.- B1["Categorize each dependency\nas host, entry, or isolated"]
     C -.- C1["Validate semver compatibility\nfor host-classified dependencies"]
     D -.- D1["Download packages not\nalready in local cache"]
     D2 -.- D2a["Scan assembly attributes,\nplugin.json, and IsHostPackage\npredicate for host-shared packages"]
     E -.- E1["Load external host packages\ninto the default AssemblyLoadContext"]
     F -.- F1["Create isolated AssemblyLoadContext\nper plugin, load assemblies"]
 ```
+
+Transitive dependencies are resolved recursively using the NuGet V3 API. For each package, the loader reads its dependency groups, selects the group matching the host's target framework, and resolves each dependency to the highest version satisfying the declared version range. When multiple packages require the same transitive dependency, the highest resolved version is used.
 
 ## Configuration
 
@@ -220,7 +222,7 @@ var options = new NuGetPluginLoaderOptions
 
 ## Host-Shared Package Discovery
 
-In addition to manual `HostPackages` patterns, the loader automatically discovers packages that should be shared between the host and plugins. Three mechanisms exist, each suited to a different actor:
+In addition to the `IsHostPackage` predicate, the loader automatically discovers packages that should be shared between the host and plugins. Three mechanisms exist, each suited to a different actor:
 
 | Actor | Mechanism | When to use |
 |---|---|---|
@@ -244,7 +246,7 @@ The plugin author creates a `plugin.json` file in their project listing packages
 
 ```json
 {
-  "schema": 1,
+  "schemaVersion": 1,
   "hostDependencies": ["ThirdParty.Contracts"]
 }
 ```
@@ -286,7 +288,7 @@ The loader owns two fields:
 
 | Field | Type | Purpose |
 |---|---|---|
-| `schema` | `int` | Format version for forward compatibility (currently `1`) |
+| `schemaVersion` | `int` | Format version for forward compatibility (currently `1`) |
 | `hostDependencies` | `string[]` | Package names to classify as host-shared |
 
 Everything else in the JSON file is consumer-defined and opaque to the loader. The full parsed JSON is exposed via `NuGetPlugin.PluginManifest` as `JsonElement?`, so consumers can read their own custom fields without any coupling to the loader.
@@ -295,7 +297,7 @@ Everything else in the JSON file is consumer-defined and opaque to the loader. T
 
 ```json
 {
-  "schema": 1,
+  "schemaVersion": 1,
   "hostDependencies": ["MyCompany.Abstractions"],
   "minimumHostVersion": "3.0.0",
   "diRegistrations": ["MyCompany.Device1.SensorService"]
@@ -342,11 +344,11 @@ Every dependency in the resolved tree is classified into one of three categories
 
 | Priority | Category | Condition | Where loaded |
 |---|---|---|---|
-| 1 | **Plugin** | Package is one of the configured plugin requests | Plugin's isolated `AssemblyLoadContext` |
+| 1 | **Entry** | Package is one of the configured plugin requests | Plugin's isolated `AssemblyLoadContext` |
 | 2 | **Host** | Package exists in `HostDependencyResolver` | Default `AssemblyLoadContext` (already present) |
 | 3 | **Host** | `IsHostPackage` predicate returns `true` | Default `AssemblyLoadContext` (downloaded and loaded) |
 | 4 | **Host** | Package discovered as host-shared (assembly attribute or plugin.json) | Default `AssemblyLoadContext` (downloaded and loaded) |
-| 5 | **Plugin-private** | None of the above | Plugin's isolated `AssemblyLoadContext` |
+| 5 | **Isolated** | None of the above | Plugin's isolated `AssemblyLoadContext` |
 
 ### Load-time framework assembly detection
 
@@ -603,7 +605,7 @@ Represents one loaded plugin and its private dependencies. Implements `IDisposab
 | `Metadata` | Package metadata extracted from the nuspec (`NuGetPackageMetadata`). |
 | `Nuspec` | The raw nuspec as an `XDocument?`, for fields not covered by `Metadata`. |
 | `PluginManifest` | The parsed `plugin.json` as a `JsonElement?`, or null if absent. |
-| `Dependencies` | Classified dependencies for this plugin (`IReadOnlyList<NuGetPluginDependencyInfo>`). |
+| `Dependencies` | Classified dependencies for this plugin (`IReadOnlyList<NuGetPluginDependency>`). |
 | `Assemblies` | All assemblies loaded in this plugin's context. |
 | `GetTypes<T>()` | Finds concrete types assignable to `T` within this plugin. |
 | `GetTypes(predicate)` | Finds types matching a predicate within this plugin. |
@@ -628,12 +630,12 @@ public record NuGetPackageMetadata
 
 For fields not covered by `NuGetPackageMetadata`, use `NuGetPlugin.Nuspec` which provides the full nuspec as an `XDocument`.
 
-### NuGetPluginDependencyInfo (`Namotion.NuGet.Plugins`)
+### NuGetPluginDependency (`Namotion.NuGet.Plugins`)
 
 Surfaces the dependency classification that the loader computes internally.
 
 ```csharp
-public record NuGetPluginDependencyInfo
+public record NuGetPluginDependency
 {
     public required string PackageName { get; init; }
     public required string Version { get; init; }
@@ -646,9 +648,9 @@ public record NuGetPluginDependencyInfo
 ```csharp
 public enum DependencyClassification
 {
-    Host,           // Loaded into the default (host) assembly context
-    Plugin,         // A top-level plugin package in its own assembly context
-    PluginPrivate   // A transitive dependency in the plugin's isolated context
+    Host,       // Loaded into the default (host) assembly context
+    Entry,      // A top-level plugin package in its own assembly context
+    Isolated    // A transitive dependency in the plugin's isolated context
 }
 ```
 

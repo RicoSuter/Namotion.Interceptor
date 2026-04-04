@@ -50,7 +50,7 @@ public class DependencyGraphResolver
     /// <param name="version">The specific version to resolve, or null for latest.</param>
     /// <param name="cancellationToken">A cancellation token.</param>
     /// <returns>The root node of the resolved dependency tree.</returns>
-    public async Task<DependencyNode> ResolveAsync(
+    internal async Task<DependencyNode> ResolveAsync(
         string packageName, string? version, CancellationToken cancellationToken)
     {
         var visited = new Dictionary<string, NuGetVersion>(StringComparer.OrdinalIgnoreCase);
@@ -73,7 +73,7 @@ public class DependencyGraphResolver
     /// <summary>
     /// Flattens the dependency tree into a dictionary of package name -> highest resolved version.
     /// </summary>
-    public Dictionary<string, NuGetVersion> FlattenDependencies(DependencyNode root)
+    internal Dictionary<string, NuGetVersion> FlattenDependencies(DependencyNode root)
     {
         var result = new Dictionary<string, NuGetVersion>(StringComparer.OrdinalIgnoreCase);
         FlattenRecursive(root, result);

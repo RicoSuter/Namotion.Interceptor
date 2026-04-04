@@ -128,12 +128,12 @@ public class HostSharedDiscoveryIntegrationTests : IDisposable
         var bogusDependency = plugin.Dependencies.FirstOrDefault(
             dependency => dependency.PackageName.Equals("Bogus", StringComparison.OrdinalIgnoreCase));
         Assert.NotNull(bogusDependency);
-        Assert.Equal(DependencyClassification.PluginPrivate, bogusDependency.Classification);
+        Assert.Equal(DependencyClassification.Isolated, bogusDependency.Classification);
 
         var samplePlugin1Dependency = plugin.Dependencies.FirstOrDefault(
             dependency => dependency.PackageName.Equals("MyCompany.SamplePlugin1", StringComparison.OrdinalIgnoreCase));
         Assert.NotNull(samplePlugin1Dependency);
-        Assert.Equal(DependencyClassification.PluginPrivate, samplePlugin1Dependency.Classification);
+        Assert.Equal(DependencyClassification.Isolated, samplePlugin1Dependency.Classification);
     }
 
     public void Dispose()
