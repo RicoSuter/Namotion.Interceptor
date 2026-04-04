@@ -115,6 +115,10 @@ The library has specialized support for:
 
 - **Avoid abbreviations** in variable and parameter names unless the name is very long. Use descriptive names (e.g., `attribute` not `attr`).
 
+## Git Rules
+
+- Never include "Claude", "Co-Authored-By", or AI attribution in commit messages, PR descriptions, or GitHub comments.
+
 ## Test Conventions
 
 - **Naming**: `When<Condition>_Then<ExpectedBehavior>` (e.g., `WhenDepthIsZero_ThenReturnsNoChildren`)

@@ -379,3 +379,6 @@ FodyWeavers.xsd
 
 **/pki/own/certs/**
 **/pki/trusted/certs/**
+
+# HomeBlaze plugin output
+src/HomeBlaze/HomeBlaze/Plugins/

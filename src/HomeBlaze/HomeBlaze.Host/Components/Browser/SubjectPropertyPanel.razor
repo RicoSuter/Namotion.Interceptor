@@ -317,7 +317,18 @@
                 <span style="display: inline-block; width: 24px;"></span>
             }
             <strong>@displayName: </strong>
-            @prop.GetPropertyDisplayValue(value)
+            @{ var displayValue = prop.GetPropertyDisplayValue(value); }
+            @if (displayValue.Contains('\n'))
+            {
+                @foreach (var line in displayValue.Split('\n'))
+                {
+                    <span>@line</span><br />
+                }
+            }
+            else
+            {
+                @displayValue
+            }
         </MudText>
 
         @if (isExpanded)
