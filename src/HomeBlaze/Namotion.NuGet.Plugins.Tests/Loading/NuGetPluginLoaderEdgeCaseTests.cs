@@ -31,8 +31,8 @@ public class NuGetPluginLoaderEdgeCaseTests : IDisposable
         // Act
         var result = await loader.LoadPluginsAsync(
         [
-            new NuGetPluginRequest("Humanizer.Core", "2.14.1"),
-            new NuGetPluginRequest("NonExistent.Package.XYZ.99999", "1.0.0")
+            new NuGetPluginReference("Humanizer.Core", "2.14.1"),
+            new NuGetPluginReference("NonExistent.Package.XYZ.99999", "1.0.0")
         ], CancellationToken.None);
 
         // Assert
@@ -58,15 +58,15 @@ public class NuGetPluginLoaderEdgeCaseTests : IDisposable
         // Act
         var result = await loader.LoadPluginsAsync(
         [
-            new NuGetPluginRequest("Humanizer.Core", "2.14.1"),
+            new NuGetPluginReference("Humanizer.Core", "2.14.1"),
         ], CancellationToken.None);
 
         var allTypes = loader.GetTypes(t => t.IsPublic).ToList();
-        var groupTypes = result.LoadedPlugins[0].GetTypes(t => t.IsPublic).ToList();
+        var pluginTypes = result.LoadedPlugins[0].GetTypes(t => t.IsPublic).ToList();
 
         // Assert
         Assert.NotEmpty(allTypes);
-        Assert.Equal(groupTypes.Count, allTypes.Count);
+        Assert.Equal(pluginTypes.Count, allTypes.Count);
     }
 
     [Fact]

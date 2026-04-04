@@ -2,26 +2,32 @@ using Bogus;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Hosting;
+using MyCompany.Abstractions;
 using Namotion.Interceptor.Attributes;
 
-namespace HomeBlaze.SamplePlugin;
+namespace MyCompany.SamplePlugin1;
 
 [InterceptorSubject]
-public partial class SampleDevice : BackgroundService, IConfigurable, ITitleProvider
+public partial class SampleDevice1 : BackgroundService, IConfigurable, ITitleProvider, IMyDevice
 {
     private readonly Faker _faker = new();
 
-    public SampleDevice()
+    public SampleDevice1()
     {
-        Name = "Sample Device";
+        Name = "Sample Device 1";
         PollingIntervalMs = 2000;
         Temperature = 22.0;
         Humidity = 55.0;
         Pressure = 1013.0;
         BatteryLevel = 100.0;
     }
-    
+
     public string? Title => Name;
+
+    // IMyDevice
+    public string DeviceName => Name;
+    public string DeviceType => "TemperatureSensor";
+    public double? CurrentValue => Temperature;
 
     [Configuration]
     public partial string Name { get; set; }
@@ -47,10 +53,7 @@ public partial class SampleDevice : BackgroundService, IConfigurable, ITitleProv
     [Derived]
     public bool IsLowBattery => BatteryLevel < 20;
 
-    public Task ApplyConfigurationAsync(CancellationToken cancellationToken)
-    {
-        return Task.CompletedTask;
-    }
+    public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {

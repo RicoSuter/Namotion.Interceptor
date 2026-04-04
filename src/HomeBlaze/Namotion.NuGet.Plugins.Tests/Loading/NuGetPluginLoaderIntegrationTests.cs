@@ -30,7 +30,7 @@ public class NuGetPluginLoaderIntegrationTests : IDisposable
 
         // Act -- load a small, well-known package
         var result = await loader.LoadPluginsAsync(
-            [new NuGetPluginRequest("Humanizer.Core", "2.14.1")],
+            [new NuGetPluginReference("Humanizer.Core", "2.14.1")],
             CancellationToken.None);
 
         // Assert
@@ -52,7 +52,7 @@ public class NuGetPluginLoaderIntegrationTests : IDisposable
 
         // Act -- Polly has dependencies
         var result = await loader.LoadPluginsAsync(
-            [new NuGetPluginRequest("Polly", "8.5.2")],
+            [new NuGetPluginReference("Polly", "8.5.2")],
             CancellationToken.None);
 
         // Assert
@@ -72,7 +72,7 @@ public class NuGetPluginLoaderIntegrationTests : IDisposable
         });
 
         await loader.LoadPluginsAsync(
-            [new NuGetPluginRequest("Humanizer.Core", "2.14.1")],
+            [new NuGetPluginReference("Humanizer.Core", "2.14.1")],
             CancellationToken.None);
 
         // Act
@@ -96,7 +96,7 @@ public class NuGetPluginLoaderIntegrationTests : IDisposable
 
         // Act
         var result = await loader.LoadPluginsAsync(
-            [new NuGetPluginRequest("NonExistent.Package.XYZ.12345", "1.0.0")],
+            [new NuGetPluginReference("NonExistent.Package.XYZ.12345", "1.0.0")],
             CancellationToken.None);
 
         // Assert
@@ -116,7 +116,7 @@ public class NuGetPluginLoaderIntegrationTests : IDisposable
         });
 
         await loader.LoadPluginsAsync(
-            [new NuGetPluginRequest("Humanizer.Core", "2.14.1")],
+            [new NuGetPluginReference("Humanizer.Core", "2.14.1")],
             CancellationToken.None);
 
         // Act

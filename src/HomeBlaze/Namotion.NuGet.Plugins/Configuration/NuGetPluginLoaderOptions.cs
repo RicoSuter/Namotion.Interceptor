@@ -13,7 +13,7 @@ public class NuGetPluginLoaderOptions
     /// <summary>
     /// Gets or sets glob patterns for packages that should be loaded into the host (default) assembly context.
     /// </summary>
-    public IReadOnlyList<string> HostPackagePatterns { get; set; } = [];
+    public IReadOnlyList<string> HostPackages { get; set; } = [];
 
     /// <summary>
     /// Gets or sets the host dependency resolver for version validation against the host application.

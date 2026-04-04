@@ -1,4 +1,4 @@
-@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(SampleDevice))]
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(SampleDevice2))]
 @implements ISubjectEditComponent
 
 <MudTextField Value="_name" ValueChanged="OnNameChanged" Label="Name" T="string" />
@@ -16,12 +16,12 @@
     public event Action<bool>? IsValidChanged;
     public event Action<bool>? IsDirtyChanged;
 
-    private SampleDevice? Device => Subject as SampleDevice;
+    private SampleDevice2? Device => Subject as SampleDevice2;
 
     private string _name = "";
     private string _originalName = "";
-    private int _pollingIntervalMs = 2000;
-    private int _originalPollingIntervalMs = 2000;
+    private int _pollingIntervalMs = 3000;
+    private int _originalPollingIntervalMs = 3000;
 
     protected override void OnInitialized()
     {

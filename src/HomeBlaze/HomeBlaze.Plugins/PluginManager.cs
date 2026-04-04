@@ -2,6 +2,7 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Plugins.Models;
 using Namotion.Interceptor.Attributes;
+using Namotion.NuGet.Plugins;
 
 namespace HomeBlaze.Plugins;
 
@@ -29,13 +30,25 @@ public partial class PluginManager : IConfigurable, ITitleProvider, IIconProvide
         {
             var plugins = new Dictionary<string, PluginInfo>();
 
-            foreach (var group in result.LoadedPlugins)
+            foreach (var plugin in result.LoadedPlugins)
             {
-                plugins[group.PackageName] = new PluginInfo(this)
+                plugins[plugin.PackageName] = new PluginInfo(this)
                 {
-                    Name = group.PackageName,
-                    Version = group.PackageVersion,
-                    Assemblies = group.Assemblies
+                    Name = plugin.PackageName,
+                    Version = plugin.PackageVersion,
+                    Description = plugin.Metadata.Description,
+                    Authors = plugin.Metadata.Authors,
+                    IconUrl = plugin.Metadata.IconUrl,
+                    Tags = plugin.Metadata.Tags.ToArray(),
+                    HostDependencies = plugin.Dependencies
+                        .Where(d => d.Classification == DependencyClassification.Host)
+                        .Select(d => $"{d.PackageName} v{d.Version}")
+                        .ToArray(),
+                    PrivateDependencies = plugin.Dependencies
+                        .Where(d => d.Classification == DependencyClassification.PluginPrivate)
+                        .Select(d => $"{d.PackageName} v{d.Version}")
+                        .ToArray(),
+                    Assemblies = plugin.Assemblies
                         .Select(a =>
                         {
                             var name = a.GetName();
@@ -64,7 +77,7 @@ public partial class PluginManager : IConfigurable, ITitleProvider, IIconProvide
     }
 
     [Configuration]
-    public partial PluginConfigEntry[] Plugins { get; set; }
+    public partial PluginEntry[] Plugins { get; set; }
 
     [Configuration]
     public partial PluginFeedEntry[] Feeds { get; set; }
@@ -85,7 +98,7 @@ public partial class PluginManager : IConfigurable, ITitleProvider, IIconProvide
             throw new InvalidOperationException($"Plugin '{packageName}' is already configured.");
         }
 
-        Plugins = [.. Plugins, new PluginConfigEntry { PackageName = packageName, Version = version }];
+        Plugins = [.. Plugins, new PluginEntry { PackageName = packageName, Version = version }];
     }
 
     internal void RemovePlugin(string packageName)

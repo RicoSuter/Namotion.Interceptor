@@ -1,4 +1,4 @@
-@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SampleDevice))]
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(SampleDevice1))]
 @implements ISubjectComponent
 
 <MudPaper Class="pa-4">
@@ -52,5 +52,5 @@
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
 
-    private SampleDevice? Device => Subject as SampleDevice;
+    private SampleDevice1? Device => Subject as SampleDevice1;
 }

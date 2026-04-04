@@ -19,7 +19,7 @@ public class DependencyClassifierTests
         var classifier = new DependencyClassifier(hostResolver, [], ["PluginA"]);
 
         // Act
-        var classification = classifier.Classify("Microsoft.Extensions.Logging", NuGetVersion.Parse("9.0.0"));
+        var classification = classifier.Classify("Microsoft.Extensions.Logging");
 
         // Assert
         Assert.Equal(DependencyClassification.Host, classification);
@@ -33,7 +33,7 @@ public class DependencyClassifierTests
         var classifier = new DependencyClassifier(hostResolver, ["MyCompany.*.Abstractions"], ["PluginA"]);
 
         // Act
-        var classification = classifier.Classify("MyCompany.Devices.Abstractions", NuGetVersion.Parse("1.0.0"));
+        var classification = classifier.Classify("MyCompany.Devices.Abstractions");
 
         // Assert
         Assert.Equal(DependencyClassification.Host, classification);
@@ -47,7 +47,7 @@ public class DependencyClassifierTests
         var classifier = new DependencyClassifier(hostResolver, [], ["MyCompany.Device1.HomeBlaze"]);
 
         // Act
-        var classification = classifier.Classify("MyCompany.Device1.HomeBlaze", NuGetVersion.Parse("1.0.0"));
+        var classification = classifier.Classify("MyCompany.Device1.HomeBlaze");
 
         // Assert
         Assert.Equal(DependencyClassification.Plugin, classification);
@@ -61,7 +61,7 @@ public class DependencyClassifierTests
         var classifier = new DependencyClassifier(hostResolver, [], ["PluginA"]);
 
         // Act
-        var classification = classifier.Classify("Newtonsoft.Json", NuGetVersion.Parse("13.0.3"));
+        var classification = classifier.Classify("Newtonsoft.Json");
 
         // Assert
         Assert.Equal(DependencyClassification.PluginPrivate, classification);
@@ -75,10 +75,26 @@ public class DependencyClassifierTests
         var classifier = new DependencyClassifier(hostResolver, ["MyCompany.*"], ["MyCompany.Device1"]);
 
         // Act
-        var classification = classifier.Classify("MyCompany.Device1", NuGetVersion.Parse("1.0.0"));
+        var classification = classifier.Classify("MyCompany.Device1");
 
         // Assert -- configured plugin always wins
         Assert.Equal(DependencyClassification.Plugin, classification);
+    }
+
+    [Fact]
+    public void WhenPackageIsInDiscoveredHostShared_ThenClassifiedAsHost()
+    {
+        // Arrange
+        var hostResolver = HostDependencyResolver.FromAssemblies(
+            ("HostLib", new Version(1, 0, 0)));
+        var discoveredHostShared = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "MyCompany.Abstractions" };
+        var classifier = new DependencyClassifier(hostResolver, [], ["PluginA"], discoveredHostShared);
+
+        // Act
+        var result = classifier.Classify("MyCompany.Abstractions");
+
+        // Assert
+        Assert.Equal(DependencyClassification.Host, result);
     }
 
     [Fact]

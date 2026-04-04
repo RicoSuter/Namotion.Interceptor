@@ -1,6 +1,14 @@
+using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Runtime.Loader;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using NuGet.Versioning;
@@ -17,10 +25,10 @@ public class NuGetPluginLoader : IDisposable
 {
     private readonly NuGetPluginLoaderOptions _options;
     private readonly ILogger<NuGetPluginLoader> _logger;
-    private readonly List<NuGetPluginGroup> _loadedPlugins = [];
+    private readonly List<NuGetPlugin> _loadedPlugins = [];
     private readonly PackageExtractor _extractor;
     private readonly INuGetPackageRepository _repository;
-    private readonly ConcurrentDictionary<string, string> _additionalHostAssemblyPaths = new();
+    private readonly ConcurrentDictionary<string, string> _externalHostAssemblyPaths = new();
     private readonly object _lock = new();
     private bool _disposed;
 
@@ -40,14 +48,14 @@ public class NuGetPluginLoader : IDisposable
             .ToList();
         _repository = new CompositeNuGetPackageRepository(repositories);
 
-        // Hook default context resolving for additional host packages
+        // Hook default context resolving for external host packages
         AssemblyLoadContext.Default.Resolving += OnDefaultContextResolving;
     }
 
     /// <summary>
-    /// Gets a snapshot of all currently loaded plugin groups.
+    /// Gets a snapshot of all currently loaded plugins.
     /// </summary>
-    public IReadOnlyList<NuGetPluginGroup> LoadedPlugins
+    public IReadOnlyList<NuGetPlugin> LoadedPlugins
     {
         get
         {
@@ -59,7 +67,7 @@ public class NuGetPluginLoader : IDisposable
     }
 
     /// <summary>
-    /// Gets all types assignable to <typeparamref name="T"/> from all loaded plugin groups.
+    /// Gets all types assignable to <typeparamref name="T"/> from all loaded plugins.
     /// </summary>
     public IEnumerable<Type> GetTypes<T>()
     {
@@ -67,7 +75,7 @@ public class NuGetPluginLoader : IDisposable
     }
 
     /// <summary>
-    /// Gets all types matching the predicate from all loaded plugin groups.
+    /// Gets all types matching the predicate from all loaded plugins.
     /// </summary>
     public IEnumerable<Type> GetTypes(Func<Type, bool> predicate)
     {
@@ -78,24 +86,24 @@ public class NuGetPluginLoader : IDisposable
     /// Resolves, downloads, validates, and loads the specified plugins and their transitive dependencies.
     /// </summary>
     public async Task<NuGetPluginLoadResult> LoadPluginsAsync(
-        IEnumerable<NuGetPluginRequest> plugins,
+        IEnumerable<NuGetPluginReference> plugins,
         CancellationToken cancellationToken)
     {
         var pluginList = plugins.ToList();
         var failures = new List<NuGetPluginFailure>();
-        var loadedGroups = new List<NuGetPluginGroup>();
+        var loadedPlugins = new List<NuGetPlugin>();
 
         var hostResolver = _options.HostDependencies ?? new HostDependencyResolver([]);
         var classifier = new DependencyClassifier(
             hostResolver,
-            _options.HostPackagePatterns,
+            _options.HostPackages,
             pluginList.Select(plugin => plugin.PackageName));
 
         // Phase 1 & 2: Resolve and classify each plugin's dependencies
-        var pluginGraphs = new List<(NuGetPluginRequest Request, Dictionary<string, NuGetVersion> FlatDependencies, Dictionary<string, DependencyClassification> Classifications)>();
+        var pluginGraphs = new List<(NuGetPluginReference Request, Dictionary<string, NuGetVersion> FlatDependencies, Dictionary<string, DependencyClassification> Classifications)>();
 
         var graphResolver = new DependencyGraphResolver(
-            _options.Feeds, hostResolver, _options.HostPackagePatterns, _logger);
+            _options.Feeds, hostResolver, _options.HostPackages, _logger);
 
         foreach (var request in pluginList)
         {
@@ -128,7 +136,7 @@ public class NuGetPluginLoader : IDisposable
             allHostConflicts.AddRange(conflicts);
         }
 
-        // Phase 3b: Validate additional host package version compatibility across plugins
+        // Phase 3b: Validate external host package version compatibility across plugins
         var additionalHostRequirements = new Dictionary<string, List<(string PluginName, VersionRange Range)>>(StringComparer.OrdinalIgnoreCase);
         foreach (var (request, flatDependencies, classifications) in pluginGraphs)
         {
@@ -209,7 +217,63 @@ public class NuGetPluginLoader : IDisposable
             }
         }
 
-        // Phase 5: Load additional host packages into default context
+        // Phase 4b: Discover host-shared packages from plugin.json and assembly attributes
+        var discoveredHostShared = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pluginManifests = new Dictionary<string, JsonElement?>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (request, flatDependencies, _) in pluginGraphs)
+        {
+            if (failures.Any(failure => failure.PackageName == request.PackageName))
+            {
+                continue;
+            }
+
+            // Read plugin.json from the plugin's own extracted package
+            var pluginVersionString = flatDependencies[request.PackageName].ToNormalizedString();
+            var pluginPath = _extractor.GetCachedPackagePath(request.PackageName, pluginVersionString);
+            if (pluginPath != null)
+            {
+                var manifest = PluginManifestReader.Read(pluginPath);
+                pluginManifests[request.PackageName] = manifest;
+
+                foreach (var hostDep in PluginManifestReader.GetHostDependencies(manifest))
+                {
+                    discoveredHostShared.Add(hostDep);
+                }
+            }
+
+            // Scan dependency DLLs for HostShared attribute
+            foreach (var (packageName, version) in flatDependencies)
+            {
+                if (packageName == request.PackageName)
+                {
+                    continue;
+                }
+
+                var depPath = _extractor.GetCachedPackagePath(packageName, version.ToNormalizedString());
+                if (depPath != null && HostSharedAttributeScanner.IsAnyAssemblyHostShared(depPath))
+                {
+                    discoveredHostShared.Add(packageName);
+                }
+            }
+        }
+
+        // Re-classify with discovered host-shared packages
+        if (discoveredHostShared.Count > 0)
+        {
+            var updatedClassifier = new DependencyClassifier(
+                hostResolver, _options.HostPackages,
+                pluginList.Select(plugin => plugin.PackageName), discoveredHostShared);
+
+            for (var i = 0; i < pluginGraphs.Count; i++)
+            {
+                var (request, flatDeps, _) = pluginGraphs[i];
+                var newClassifications = updatedClassifier.ClassifyAll(flatDeps);
+                pluginGraphs[i] = (request, flatDeps, newClassifications);
+            }
+        }
+
+        // Phase 5: Load external host packages into default context
         foreach (var (_, flatDependencies, classifications) in pluginGraphs)
         {
             foreach (var (packageName, version) in flatDependencies)
@@ -224,13 +288,13 @@ public class NuGetPluginLoader : IDisposable
                     foreach (var path in paths)
                     {
                         var assemblyName = Path.GetFileNameWithoutExtension(path);
-                        _additionalHostAssemblyPaths[assemblyName] = path;
+                        _externalHostAssemblyPaths[assemblyName] = path;
                     }
                 }
             }
         }
 
-        // Phase 6: Load plugin groups
+        // Phase 6: Load plugins
         foreach (var (request, flatDependencies, classifications) in pluginGraphs)
         {
             if (failures.Any(failure => failure.PackageName == request.PackageName))
@@ -315,11 +379,37 @@ public class NuGetPluginLoader : IDisposable
                     ? resolvedVersion.ToNormalizedString()
                     : request.Version ?? "0.0.0";
 
-                var group = new NuGetPluginGroup(request.PackageName, pluginVersion, assemblies, loadContext);
-                loadedGroups.Add(group);
+                // Read nuspec and manifest
+                var pluginCachedPath = _extractor.GetCachedPackagePath(request.PackageName, pluginVersion);
+                NuGetPackageMetadata metadata = new();
+                XDocument? nuspec = null;
+                JsonElement? manifest = null;
+                IReadOnlyList<NuGetPluginDependencyInfo> dependencyInfos = [];
+
+                if (pluginCachedPath != null)
+                {
+                    var (nuspecMetadata, nuspecDoc) = NuspecHelper.ReadFromExtractedPackage(pluginCachedPath);
+                    metadata = nuspecMetadata;
+                    nuspec = nuspecDoc;
+                    pluginManifests.TryGetValue(request.PackageName, out manifest);
+
+                    dependencyInfos = flatDependencies
+                        .Select(kvp => new NuGetPluginDependencyInfo
+                        {
+                            PackageName = kvp.Key,
+                            Version = kvp.Value.ToNormalizedString(),
+                            Classification = classifications[kvp.Key],
+                        })
+                        .ToList();
+                }
+
+                var loadedPlugin = new NuGetPlugin(
+                    request.PackageName, pluginVersion, assemblies, loadContext,
+                    metadata, nuspec, manifest, dependencyInfos);
+                loadedPlugins.Add(loadedPlugin);
                 lock (_lock)
                 {
-                    _loadedPlugins.Add(group);
+                    _loadedPlugins.Add(loadedPlugin);
                 }
 
                 _logger.LogInformation("Plugin '{Plugin}' v{Version} loaded with {Count} assemblies.",
@@ -333,23 +423,23 @@ public class NuGetPluginLoader : IDisposable
             }
         }
 
-        return new NuGetPluginLoadResult(loadedGroups, failures);
+        return new NuGetPluginLoadResult(loadedPlugins, failures);
     }
 
     /// <summary>
-    /// Unloads a plugin group by package name. Returns true if the plugin was found and unloaded.
+    /// Unloads a plugin by package name. Returns true if the plugin was found and unloaded.
     /// </summary>
     public bool UnloadPlugin(string packageName)
     {
         lock (_lock)
         {
-            var group = _loadedPlugins.FirstOrDefault(plugin =>
+            var loadedPlugin = _loadedPlugins.FirstOrDefault(plugin =>
                 plugin.PackageName.Equals(packageName, StringComparison.OrdinalIgnoreCase));
 
-            if (group != null)
+            if (loadedPlugin != null)
             {
-                group.Dispose();
-                _loadedPlugins.Remove(group);
+                loadedPlugin.Dispose();
+                _loadedPlugins.Remove(loadedPlugin);
                 return true;
             }
             return false;
@@ -358,21 +448,14 @@ public class NuGetPluginLoader : IDisposable
 
     private static bool IsAssemblyInDefaultContext(string assemblyName)
     {
-        try
-        {
-            AssemblyLoadContext.Default.LoadFromAssemblyName(new AssemblyName(assemblyName));
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
+        return AssemblyLoadContext.Default.Assemblies
+            .Any(a => string.Equals(a.GetName().Name, assemblyName, StringComparison.OrdinalIgnoreCase));
     }
 
     private Assembly? OnDefaultContextResolving(AssemblyLoadContext context, AssemblyName assemblyName)
     {
         if (assemblyName.Name != null &&
-            _additionalHostAssemblyPaths.TryGetValue(assemblyName.Name, out var path))
+            _externalHostAssemblyPaths.TryGetValue(assemblyName.Name, out var path))
         {
             return context.LoadFromAssemblyPath(path);
         }

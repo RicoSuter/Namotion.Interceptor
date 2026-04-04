@@ -14,6 +14,12 @@ public partial class PluginInfo : ITitleProvider, IIconProvider, IMonitoredServi
         _manager = manager;
         Name = "";
         Version = "";
+        Description = "";
+        Authors = "";
+        IconUrl = null;
+        Tags = [];
+        HostDependencies = [];
+        PrivateDependencies = [];
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
         Assemblies = [];
@@ -37,6 +43,24 @@ public partial class PluginInfo : ITitleProvider, IIconProvider, IMonitoredServi
     public partial string Version { get; internal set; }
 
     [State]
+    public partial string Description { get; internal set; }
+
+    [State]
+    public partial string Authors { get; internal set; }
+
+    [State]
+    public partial string? IconUrl { get; internal set; }
+
+    [State]
+    public partial string[] Tags { get; internal set; }
+
+    [State]
+    public partial string[] HostDependencies { get; internal set; }
+
+    [State]
+    public partial string[] PrivateDependencies { get; internal set; }
+
+    [State]
     public partial string[] Assemblies { get; internal set; }
 
     [State]
@@ -46,8 +70,8 @@ public partial class PluginInfo : ITitleProvider, IIconProvider, IMonitoredServi
     public partial string? StatusMessage { get; internal set; }
 
     [Operation(Title = "Remove Plugin", RequiresConfirmation = true)]
-    public void RemovePlugin(string packageName)
+    public void RemovePlugin()
     {
-        _manager.RemovePlugin(packageName);
+        _manager.RemovePlugin(Name);
     }
 }

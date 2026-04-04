@@ -13,29 +13,43 @@ public class DependencyGraphResolver
     private readonly IDependencyInfoProvider _provider;
     private readonly ILogger _logger;
     private readonly HostDependencyResolver? _hostDependencies;
-    private readonly IReadOnlyList<string> _hostPackagePatterns;
+    private readonly IReadOnlyList<string> _hostPackages;
 
     internal DependencyGraphResolver(
         IDependencyInfoProvider provider,
         HostDependencyResolver? hostDependencies = null,
-        IReadOnlyList<string>? hostPackagePatterns = null,
+        IReadOnlyList<string>? hostPackages = null,
         ILogger? logger = null)
     {
         _provider = provider;
         _logger = logger ?? NullLogger.Instance;
         _hostDependencies = hostDependencies;
-        _hostPackagePatterns = hostPackagePatterns ?? [];
+        _hostPackages = hostPackages ?? [];
     }
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DependencyGraphResolver"/> class using the specified NuGet feeds.
+    /// </summary>
+    /// <param name="feeds">The NuGet feeds to query for package metadata.</param>
+    /// <param name="hostDependencies">Optional host dependency resolver for skipping already-provided packages.</param>
+    /// <param name="hostPackages">Optional glob patterns for packages treated as host-provided.</param>
+    /// <param name="logger">An optional logger for diagnostic output.</param>
     public DependencyGraphResolver(
         IReadOnlyList<NuGetFeed> feeds,
         HostDependencyResolver? hostDependencies = null,
-        IReadOnlyList<string>? hostPackagePatterns = null,
+        IReadOnlyList<string>? hostPackages = null,
         ILogger? logger = null)
-        : this(new NuGetDependencyInfoProvider(feeds, logger), hostDependencies, hostPackagePatterns, logger)
+        : this(new NuGetDependencyInfoProvider(feeds, logger), hostDependencies, hostPackages, logger)
     {
     }
 
+    /// <summary>
+    /// Resolves the full transitive dependency tree for a package.
+    /// </summary>
+    /// <param name="packageName">The NuGet package identifier.</param>
+    /// <param name="version">The specific version to resolve, or null for latest.</param>
+    /// <param name="cancellationToken">A cancellation token.</param>
+    /// <returns>The root node of the resolved dependency tree.</returns>
     public async Task<DependencyNode> ResolveAsync(
         string packageName, string? version, CancellationToken cancellationToken)
     {
@@ -100,8 +114,8 @@ public class DependencyGraphResolver
                 continue;
             }
 
-            // Skip dependencies matching host package patterns (they'll be loaded as additional host packages)
-            if (_hostPackagePatterns.Count > 0 && PackageNameMatcher.IsMatchAny(dependencyId, _hostPackagePatterns))
+            // Skip dependencies matching host packages (they'll be loaded as external host packages)
+            if (_hostPackages.Count > 0 && PackageNameMatcher.IsMatchAny(dependencyId, _hostPackages))
             {
                 _logger.LogDebug("Skipping host-pattern-matched dependency {PackageId} during resolution.", dependencyId);
                 continue;

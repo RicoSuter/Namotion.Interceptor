@@ -13,12 +13,18 @@ public class NuGetPackageRepository : INuGetPackageRepository
     private readonly NuGetFeed _feed;
     private readonly ILogger _logger;
 
+    /// <summary>
+    /// Initializes a new instance of the <see cref="NuGetPackageRepository"/> class.
+    /// </summary>
+    /// <param name="feed">The NuGet feed to use for package operations.</param>
+    /// <param name="logger">An optional logger for diagnostic output.</param>
     public NuGetPackageRepository(NuGetFeed feed, ILogger? logger = null)
     {
         _feed = feed ?? throw new ArgumentNullException(nameof(feed));
         _logger = logger ?? NullLogger.Instance;
     }
 
+    /// <inheritdoc />
     public async Task<IEnumerable<NuGetPackageInfo>> SearchPackagesAsync(
         string searchTerm, int skip, int take, CancellationToken cancellationToken)
     {
@@ -38,6 +44,7 @@ public class NuGetPackageRepository : INuGetPackageRepository
             metadata.Authors));
     }
 
+    /// <inheritdoc />
     public async Task<(NuGetPackageInfo Package, Stream Stream)> DownloadPackageAsync(
         string packageName, string? packageVersion, CancellationToken cancellationToken)
     {

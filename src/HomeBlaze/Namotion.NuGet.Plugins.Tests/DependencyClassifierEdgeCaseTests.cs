@@ -19,7 +19,7 @@ public class DependencyClassifierEdgeCaseTests
         var classifier = new DependencyClassifier(hostResolver, [], ["Plugin"]);
 
         // Act -- different casing
-        var result = classifier.Classify("microsoft.extensions.logging", NuGetVersion.Parse("9.0.0"));
+        var result = classifier.Classify("microsoft.extensions.logging");
 
         // Assert
         Assert.Equal(DependencyClassification.Host, result);
@@ -34,7 +34,7 @@ public class DependencyClassifierEdgeCaseTests
             hostResolver, ["mycompany.*.abstractions"], ["Plugin"]);
 
         // Act
-        var result = classifier.Classify("MyCompany.Devices.Abstractions", NuGetVersion.Parse("1.0.0"));
+        var result = classifier.Classify("MyCompany.Devices.Abstractions");
 
         // Assert
         Assert.Equal(DependencyClassification.Host, result);
@@ -48,8 +48,8 @@ public class DependencyClassifierEdgeCaseTests
         var classifier = new DependencyClassifier(hostResolver, [], ["MyPlugin"]);
 
         // Act
-        var pluginResult = classifier.Classify("MyPlugin", NuGetVersion.Parse("1.0.0"));
-        var depResult = classifier.Classify("SomeDep", NuGetVersion.Parse("1.0.0"));
+        var pluginResult = classifier.Classify("MyPlugin");
+        var depResult = classifier.Classify("SomeDep");
 
         // Assert
         Assert.Equal(DependencyClassification.Plugin, pluginResult);

@@ -70,8 +70,11 @@
     <Project Path="HomeBlaze/Namotion.NuGet.Plugins/Namotion.NuGet.Plugins.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/Plugins/">
-    <Project Path="HomeBlaze/HomeBlaze.SamplePlugin/HomeBlaze.SamplePlugin.csproj" />
-    <Project Path="HomeBlaze/HomeBlaze.SamplePlugin.HomeBlaze/HomeBlaze.SamplePlugin.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/MyCompany.Abstractions/MyCompany.Abstractions.csproj" />
+    <Project Path="HomeBlaze/MyCompany.SamplePlugin1/MyCompany.SamplePlugin1.csproj" />
+    <Project Path="HomeBlaze/MyCompany.SamplePlugin1.HomeBlaze/MyCompany.SamplePlugin1.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/MyCompany.SamplePlugin2/MyCompany.SamplePlugin2.csproj" />
+    <Project Path="HomeBlaze/MyCompany.SamplePlugin2.HomeBlaze/MyCompany.SamplePlugin2.HomeBlaze.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/Tests/">
     <Project Path="HomeBlaze/HomeBlaze.AI.Tests/HomeBlaze.AI.Tests.csproj" />
