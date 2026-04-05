@@ -22,7 +22,7 @@ A standalone .NET library for loading NuGet packages as plugins at runtime. It p
 dotnet add package Namotion.NuGet.Plugins
 ```
 
-## Quick Start
+## Usage
 
 ```csharp
 using Namotion.NuGet.Plugins.Configuration;
