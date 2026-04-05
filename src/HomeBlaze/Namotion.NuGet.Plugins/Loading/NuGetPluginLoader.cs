@@ -22,7 +22,10 @@ public class NuGetPluginLoader : IDisposable
     private readonly List<NuGetPlugin> _loadedPlugins = [];
     private readonly PackageExtractor _extractor;
     private readonly INuGetPackageRepository _repository;
-    private readonly ConcurrentDictionary<string, string> _externalHostAssemblyPaths = new();
+    private static readonly ConcurrentDictionary<string, string> SharedHostAssemblyPaths = new(StringComparer.OrdinalIgnoreCase);
+    private static int _instanceCount;
+    private static readonly object _staticLock = new();
+    private readonly HashSet<string> _ownedAssemblyNames = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _lock = new();
     private bool _disposed;
 
@@ -42,8 +45,14 @@ public class NuGetPluginLoader : IDisposable
             .ToList();
         _repository = new CompositeNuGetPackageRepository(repositories);
 
-        // Hook default context resolving for external host packages
-        AssemblyLoadContext.Default.Resolving += OnDefaultContextResolving;
+        // Hook default context resolving for external host packages (ref-counted across instances)
+        lock (_staticLock)
+        {
+            if (++_instanceCount == 1)
+            {
+                AssemblyLoadContext.Default.Resolving += OnDefaultContextResolving;
+            }
+        }
     }
 
     /// <summary>
@@ -261,6 +270,8 @@ public class NuGetPluginLoader : IDisposable
             {
                 foreach (var (packageName, version) in entry.FlatDependencies)
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
+
                     var classification = entry.Classifications[packageName];
                     if (classification == DependencyClassification.Host &&
                         hostResolver.Contains(packageName))
@@ -379,7 +390,8 @@ public class NuGetPluginLoader : IDisposable
                     foreach (var path in paths)
                     {
                         var assemblyName = Path.GetFileNameWithoutExtension(path);
-                        _externalHostAssemblyPaths[assemblyName] = path;
+                        SharedHostAssemblyPaths[assemblyName] = path;
+                        _ownedAssemblyNames.Add(assemblyName);
                     }
                 }
             }
@@ -565,10 +577,10 @@ public class NuGetPluginLoader : IDisposable
             .Any(a => string.Equals(a.GetName().Name, assemblyName, StringComparison.OrdinalIgnoreCase));
     }
 
-    private Assembly? OnDefaultContextResolving(AssemblyLoadContext context, AssemblyName assemblyName)
+    private static Assembly? OnDefaultContextResolving(AssemblyLoadContext context, AssemblyName assemblyName)
     {
         if (assemblyName.Name != null &&
-            _externalHostAssemblyPaths.TryGetValue(assemblyName.Name, out var path))
+            SharedHostAssemblyPaths.TryGetValue(assemblyName.Name, out var path))
         {
             return context.LoadFromAssemblyPath(path);
         }
@@ -581,7 +593,23 @@ public class NuGetPluginLoader : IDisposable
         if (!_disposed)
         {
             _disposed = true;
-            AssemblyLoadContext.Default.Resolving -= OnDefaultContextResolving;
+
+            // Remove paths owned by this instance from the shared dictionary
+            foreach (var name in _ownedAssemblyNames)
+            {
+                SharedHostAssemblyPaths.TryRemove(name, out _);
+            }
+            _ownedAssemblyNames.Clear();
+
+            // Ref-counted unsubscribe from the static event
+            lock (_staticLock)
+            {
+                if (--_instanceCount == 0)
+                {
+                    AssemblyLoadContext.Default.Resolving -= OnDefaultContextResolving;
+                }
+            }
+
             lock (_lock)
             {
                 foreach (var plugin in _loadedPlugins)

@@ -61,6 +61,27 @@ public class PluginConfigurationTests
         Assert.True(options.IsHostPackage!("MyCompany.Devices.Abstractions"));
         Assert.False(options.IsHostPackage!("Unrelated.Package"));
         Assert.Same(hostDependencies, options.HostDependencies);
+        Assert.Null(options.CacheDirectory);
+    }
+
+    [Fact]
+    public void WhenCacheDirectoryIsSet_ThenPassedThroughToOptions()
+    {
+        // Arrange
+        var json = """
+            {
+              "cacheDirectory": "/tmp/my-plugins-cache",
+              "plugins": [{ "packageName": "Foo", "version": "1.0.0" }]
+            }
+            """;
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
+        var config = PluginConfiguration.LoadFrom(stream);
+
+        // Act
+        var options = config.ToLoaderOptions();
+
+        // Assert
+        Assert.Equal("/tmp/my-plugins-cache", options.CacheDirectory);
     }
 
     [Fact]

@@ -88,6 +88,8 @@ public partial class PluginManager : IConfigurable, ITitleProvider, IIconProvide
     [State]
     public partial Dictionary<string, Plugin> LoadedPlugins { get; internal set; }
 
+    // Plugin configuration changes (feeds, packages, host packages) take effect
+    // after a restart. Runtime hot-reload of plugins is not supported.
     public Task ApplyConfigurationAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     [Operation(Title = "Add Plugin")]

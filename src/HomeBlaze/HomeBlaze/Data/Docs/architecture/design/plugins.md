@@ -56,6 +56,7 @@ Because `Plugins.json` is also a subject configuration file, it includes a `$typ
     { "name": "local", "url": "Plugins" }
   ],
   "hostPackages": [],
+  "cacheDirectory": null,
   "plugins": [
     { "packageName": "MyCompany.SamplePlugin1.HomeBlaze", "version": "1.0.0" },
     { "packageName": "MyCompany.SamplePlugin2.HomeBlaze", "version": "1.0.0" }
@@ -63,13 +64,14 @@ Because `Plugins.json` is also a subject configuration file, it includes a `$typ
 }
 ```
 
-Feeds can be remote NuGet V3 service index URLs or local folder paths. In the example above, the `"local"` feed points to a `Plugins` directory relative to the application, where `.nupkg` files are placed at build time. The NuGet SDK resolves packages from local directories natively. The `hostPackages` array is empty because host-shared packages are now discovered automatically (see [Host-Shared Package Discovery](#host-shared-package-discovery) below).
+Feeds can be remote NuGet V3 service index URLs or local folder paths. In the example above, the `"local"` feed points to a `Plugins` directory relative to the application, where `.nupkg` files are placed at build time. The NuGet SDK resolves packages from local directories natively. The `hostPackages` array is empty because host-shared packages are now discovered automatically (see [Host-Shared Package Discovery](#host-shared-package-discovery) below). The `cacheDirectory` is `null`, meaning a temporary directory is used and plugins are re-downloaded on each restart; set it to a stable path to cache packages across restarts.
 
 | Field | Purpose |
 |-------|---------|
 | `$type` | Subject type discriminator for `PluginManager` |
 | `feeds` | NuGet package sources (remote URLs or local folder paths), tried in order |
 | `hostPackages` | Manual override patterns for shared contract assemblies loaded into the default context (typically empty when using automatic discovery) |
+| `cacheDirectory` | Local directory for caching downloaded plugin packages (null = temporary directory, re-downloaded on restart) |
 | `plugins` | Plugin packages to load by name and optional version from the configured feeds |
 
 ### Subject Model
@@ -78,7 +80,7 @@ The plugin system uses two subjects in the `HomeBlaze.Plugins` namespace:
 
 **PluginManager** -- owns plugin configuration and runtime state. Implements `IConfigurable` so it can be deserialized from `Plugins.json` via the `$type` discriminator. Its `[Configuration]` properties (`Plugins`, `Feeds`, `HostPackages`) are persisted. Its `[State]` property `LoadedPlugins` is a `Dictionary<string, Plugin>` keyed by package name, populated at startup from `PluginLoader`.
 
-**Plugin** (in `HomeBlaze.Plugins.Models`) -- represents a loaded plugin. Has `[State]` properties (`Name`, `Version`, `Description`, `Authors`, `IconUrl`, `Tags`, `Assemblies` (string[]), `HostDependencies`, `PrivateDependencies`, `Status`, `StatusMessage`), `[Derived]` properties (`Title`, `IconName`, `IconColor`), and a parameterless `[Operation] RemovePlugin()` that uses `this.Name`. Holds a reference to its parent `PluginManager`.
+**Plugin** (in `HomeBlaze.Plugins`) -- represents a loaded plugin. Has `[State]` properties (`Name`, `Version`, `Description`, `Authors`, `IconUrl`, `Tags`, `Assemblies` (string[]), `HostDependencies`, `PrivateDependencies`, `Status`, `StatusMessage`), `[Derived]` properties (`Title`, `IconName`, `IconColor`), and a parameterless `[Operation] RemovePlugin()` that uses `this.Name`. Holds a reference to its parent `PluginManager`.
 
 DTOs (`PluginEntry`, `PluginFeedEntry`) also live in the `Models` namespace.
 

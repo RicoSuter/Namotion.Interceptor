@@ -25,6 +25,9 @@ public class PluginConfiguration
     [JsonPropertyName("hostPackages")]
     public IReadOnlyList<string> HostPackages { get; set; } = [];
 
+    [JsonPropertyName("cacheDirectory")]
+    public string? CacheDirectory { get; set; }
+
     [JsonPropertyName("plugins")]
     public IReadOnlyList<PluginEntry> Plugins { get; set; } = [];
 
@@ -59,6 +62,7 @@ public class PluginConfiguration
                 ? name => PackageNameMatcher.IsMatchAny(name, HostPackages)
                 : null,
             HostDependencies = hostDependencies,
+            CacheDirectory = CacheDirectory,
         };
     }
 }
