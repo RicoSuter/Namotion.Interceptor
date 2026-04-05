@@ -22,10 +22,6 @@ A standalone .NET library for loading NuGet packages as plugins at runtime. It p
 dotnet add package Namotion.NuGet.Plugins
 ```
 
----
-
-# User Guide
-
 ## Quick Start
 
 ```csharp
@@ -422,13 +418,11 @@ foreach (var plugin in result.LoadedPlugins)
 - Package extraction (`PackageExtractor`) is not thread-safe for the same cache directory.
 - `GetTypes<T>()` and `LoadedPlugins` are safe to call from any thread after loading completes.
 
----
-
-# Architecture and Internals
+## Architecture and Internals
 
 This section describes the internal design of the loader. It is not required for using the library, but is useful for understanding its behavior in detail or contributing to it.
 
-## Load Pipeline
+### Load Pipeline
 
 The loader processes plugins through seven sequential phases:
 
@@ -454,11 +448,11 @@ The library is fully standalone with no application-specific dependencies. It us
 
 Transitive dependencies are resolved recursively using the NuGet V3 API. For each package, the loader reads its dependency groups, selects the group matching the host's target framework, and resolves each dependency to the highest version satisfying the declared version range. When multiple packages require the same transitive dependency, the highest resolved version is used.
 
-## Dependency Classification
+### Dependency Classification
 
 Dependencies are classified at two stages: during resolution (Phase 1) and during assembly loading (Phase 7).
 
-### Resolution-time classification
+#### Resolution-time classification
 
 During transitive dependency resolution, the resolver skips dependencies that are already known to be provided by the host. This prevents unnecessary NuGet API calls and avoids downloading packages that won't be used:
 
@@ -469,7 +463,7 @@ During transitive dependency resolution, the resolver skips dependencies that ar
 
 This means the resolved dependency tree only contains the plugin itself and its genuinely private dependencies.
 
-### Post-resolution classification
+#### Post-resolution classification
 
 Every dependency in the resolved tree is classified into one of three categories. The classifier checks these rules in order and uses the first match:
 
@@ -481,13 +475,13 @@ Every dependency in the resolved tree is classified into one of three categories
 | 4 | **Host** | Package discovered as host-shared (assembly attribute or plugin.json) | Default `AssemblyLoadContext` (downloaded and loaded) |
 | 5 | **Isolated** | None of the above | Plugin's isolated `AssemblyLoadContext` |
 
-### Load-time framework assembly detection
+#### Load-time framework assembly detection
 
 During Phase 7, before loading each assembly into the plugin's isolated context, the loader checks whether the assembly is part of the .NET shared framework by consulting the Trusted Platform Assemblies (TPA) list. The TPA list is set by the runtime at startup and contains every assembly available in the default load context, including shared framework assemblies (e.g., `Microsoft.AspNetCore.Components`, `System.Text.Json`, `Microsoft.Extensions.Caching.Memory`). If an assembly name appears in the TPA list, it is treated as a host assembly and the plugin context falls back to the default context for it. This ensures type identity is preserved for framework types without requiring explicit configuration.
 
 > **Note:** In single-file or AOT-published applications, the TPA list may be unavailable. In that case, framework assemblies are treated as plugin-private, which is the safe default. Framework sharing can still be configured explicitly via `HostDependencyResolver.FromAssemblies()`.
 
-### External host packages
+#### External host packages
 
 The distinction between priority 2, 3, and 4 matters at runtime:
 
@@ -499,7 +493,7 @@ When multiple plugins depend on the same external host package, the loader compu
 
 When loading external host packages (Phase 6), if multiple plugins resolve the same external host package to different versions (but within a compatible range), the highest resolved version is loaded. This is deterministic regardless of plugin enumeration order.
 
-### Host-shared discovery flow
+#### Host-shared discovery flow
 
 During Phase 5, the loader discovers host-shared packages by combining all three sources:
 
@@ -514,7 +508,7 @@ Union of (a) + (b) + (c) -> classify as host
 
 Steps (a), (b), and (c) are additive. A package is host-shared if any source declares it so. The existing `HostDependencyResolver` (deps.json detection) continues to handle packages the host already references -- that path is unchanged and does not require discovery.
 
-## Assembly Isolation Model
+### Assembly Isolation Model
 
 The loader uses per-plugin `AssemblyLoadContext` instances to enforce isolation, with fallback to the default context for host assemblies.
 
@@ -550,7 +544,7 @@ The loader also registers a `Resolving` handler on `AssemblyLoadContext.Default`
 
 > **Design note:** External host packages loaded into the default `AssemblyLoadContext` share static state across all plugins. This is intentional -- it enables patterns like shared caches, connection pools, and singleton registrations. Plugin authors should be aware that static fields in host-shared packages are process-global.
 
-### Host assemblies
+#### Host assemblies
 
 Loaded into the default `AssemblyLoadContext`. This category includes:
 
@@ -560,7 +554,7 @@ Loaded into the default `AssemblyLoadContext`. This category includes:
 
 Host assemblies are shared across the host application and all plugins. This ensures that when a plugin implements a host-defined interface (e.g., `ISensorDevice`), the type identity is the same across all contexts.
 
-### Plugin-private assemblies
+#### Plugin-private assemblies
 
 Loaded into an isolated, collectible `AssemblyLoadContext` per plugin. Everything not classified as a host assembly is plugin-private. Each plugin gets its own copy, enabling:
 
@@ -568,15 +562,15 @@ Loaded into an isolated, collectible `AssemblyLoadContext` per plugin. Everythin
 - **No cross-contamination** -- a bug in one plugin's dependency does not affect others
 - **Clean unloading** -- disposing a plugin unloads its entire context
 
-### Plugins
+#### Plugins
 
 Each configured plugin package forms a loading unit. The top-level package and its transitive dependencies (that are not host-classified) share one `AssemblyLoadContext`. For example, if `Sensors.App` depends on `Sensors.Core`, both are loaded in the same context so they can share types directly.
 
-### Target framework selection
+#### Target framework selection
 
 When extracting assemblies from a `.nupkg`, the loader selects the best matching target framework from the `lib/` folder. It checks for exact matches in priority order (net10.0, net9.0, net8.0, ..., netstandard2.0), then falls back to the NuGet `FrameworkReducer` for compatibility matching against the running runtime version.
 
-## Version Validation Rules
+### Version Validation Rules
 
 Version validation applies only to **deps.json host packages** (priority 2 in the classification table). These packages are already loaded in the host, so the plugin must be compatible with the host's exact version:
 
@@ -591,7 +585,7 @@ Version validation applies only to **deps.json host packages** (priority 2 in th
 
 > **Why these rules are stricter than NuGet defaults:** The version compatibility rules are intentionally stricter than NuGet's range-based semantics. A plugin built against `Microsoft.Extensions.Logging 9.1.0` may use APIs introduced in 9.1 that are not present in 9.0. The conservative "major must match, plugin minor <= host minor" rule prevents subtle runtime failures from API surface differences within the same major version.
 
-## Namespace Organization
+### Namespace Organization
 
 The library is organized into sub-namespaces by responsibility:
 
@@ -603,11 +597,9 @@ The library is organized into sub-namespaces by responsibility:
 | `Namotion.NuGet.Plugins.Repository` | NuGet feed access: `INuGetPackageRepository`, `NuGetPackageRepository`, `CompositeNuGetPackageRepository`, `NuGetPackage`, `NuGetPackageDownload` |
 | `Namotion.NuGet.Plugins.Resolution` | Dependency graph resolution: `DependencyGraphResolver`, `DependencyNode`, `IDependencyInfoProvider`, `NuGetDependencyInfoProvider`, `HostPackageVersionResolver` |
 
----
+## API Reference
 
-# API Reference
-
-## NuGetPluginLoader (`Namotion.NuGet.Plugins.Loading`)
+### NuGetPluginLoader (`Namotion.NuGet.Plugins.Loading`)
 
 The main entry point. Implements `IDisposable`.
 
@@ -621,7 +613,7 @@ The main entry point. Implements `IDisposable`.
 | `UnloadPlugin(packageName)` | Unloads a specific plugin by package name. Returns `true` if found and unloaded. |
 | `Dispose()` | Unloads all plugins and removes the default context resolving hook. |
 
-## NuGetPluginReference (`Namotion.NuGet.Plugins.Configuration`)
+### NuGetPluginReference (`Namotion.NuGet.Plugins.Configuration`)
 
 ```csharp
 public record NuGetPluginReference(
@@ -632,7 +624,7 @@ public record NuGetPluginReference(
 - `PackageName` -- the NuGet package ID.
 - `Version` -- the desired version (optional; resolves to latest if null).
 
-## NuGetPluginLoadResult (`Namotion.NuGet.Plugins`)
+### NuGetPluginLoadResult (`Namotion.NuGet.Plugins`)
 
 | Member | Description |
 |---|---|
@@ -640,7 +632,7 @@ public record NuGetPluginReference(
 | `LoadedPlugins` | Plugins that loaded successfully (`IReadOnlyList<NuGetPlugin>`). |
 | `Failures` | Plugins that failed, with reasons and optional conflict details. |
 
-## NuGetPlugin (`Namotion.NuGet.Plugins.Loading`)
+### NuGetPlugin (`Namotion.NuGet.Plugins.Loading`)
 
 Represents one loaded plugin and its private dependencies. Implements `IDisposable`.
 
@@ -657,7 +649,7 @@ Represents one loaded plugin and its private dependencies. Implements `IDisposab
 | `GetTypes(predicate)` | Finds types matching a predicate within this plugin. |
 | `Dispose()` | Unloads the plugin's `AssemblyLoadContext`. |
 
-## NuGetPackageMetadata (`Namotion.NuGet.Plugins`)
+### NuGetPackageMetadata (`Namotion.NuGet.Plugins`)
 
 Common nuspec fields as strongly-typed properties. Populated by parsing the nuspec from the extracted nupkg at load time.
 
@@ -676,7 +668,7 @@ public record NuGetPackageMetadata
 
 For fields not covered by `NuGetPackageMetadata`, use `NuGetPlugin.Nuspec` which provides the full nuspec as an `XDocument`.
 
-## NuGetPluginDependency (`Namotion.NuGet.Plugins`)
+### NuGetPluginDependency (`Namotion.NuGet.Plugins`)
 
 Surfaces the dependency classification that the loader computes internally.
 
@@ -689,7 +681,7 @@ public record NuGetPluginDependency
 }
 ```
 
-## DependencyClassification (`Namotion.NuGet.Plugins`)
+### DependencyClassification (`Namotion.NuGet.Plugins`)
 
 ```csharp
 public enum DependencyClassification
@@ -700,7 +692,7 @@ public enum DependencyClassification
 }
 ```
 
-## NuGetPluginLoaderOptions (`Namotion.NuGet.Plugins.Configuration`)
+### NuGetPluginLoaderOptions (`Namotion.NuGet.Plugins.Configuration`)
 
 | Property | Type | Default | Description |
 |---|---|---|---|
@@ -709,7 +701,7 @@ public enum DependencyClassification
 | `HostDependencies` | `HostDependencyResolver?` | `null` | Host dependency map for version validation |
 | `CacheDirectory` | `string?` | `null` | Local directory for downloaded packages (auto-generated temp dir if null) |
 
-## HostDependencyResolver (`Namotion.NuGet.Plugins.Configuration`)
+### HostDependencyResolver (`Namotion.NuGet.Plugins.Configuration`)
 
 Uses `Microsoft.Extensions.DependencyModel` to read dependency information. Both NuGet packages and project references are included in the host dependency map.
 
@@ -724,7 +716,7 @@ Uses `Microsoft.Extensions.DependencyModel` to read dependency information. Both
 | `Contains(packageName)` | Whether the host has this package. |
 | `GetVersion(packageName)` | Gets the host's version of a package, or null. |
 
-## NuGetFeed (`Namotion.NuGet.Plugins.Configuration`)
+### NuGetFeed (`Namotion.NuGet.Plugins.Configuration`)
 
 | Member | Description |
 |---|---|
@@ -734,9 +726,7 @@ Uses `Microsoft.Extensions.DependencyModel` to read dependency information. Both
 | `Url` | NuGet V3 service index URL or local folder path. |
 | `ApiKey` | Optional authentication token. |
 
----
-
-# Future Enhancements
+## Future Enhancements
 
 The following features are not yet implemented but may be added in future versions:
 
