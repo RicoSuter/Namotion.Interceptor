@@ -44,7 +44,24 @@ public class PluginConfiguration
     public static PluginConfiguration LoadFrom(string jsonPath)
     {
         using var stream = File.OpenRead(jsonPath);
-        return LoadFrom(stream);
+        var config = LoadFrom(stream);
+
+        // Resolve relative feed URLs against the application base directory
+        config.Feeds = config.Feeds.Select(feed =>
+        {
+            if (!Uri.IsWellFormedUriString(feed.Url, UriKind.Absolute) && !Path.IsPathRooted(feed.Url))
+            {
+                return new PluginFeedEntry
+                {
+                    Name = feed.Name,
+                    Url = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, feed.Url)),
+                    ApiKey = feed.ApiKey,
+                };
+            }
+            return feed;
+        }).ToList();
+
+        return config;
     }
 
     public static PluginConfiguration LoadFrom(Stream stream)
