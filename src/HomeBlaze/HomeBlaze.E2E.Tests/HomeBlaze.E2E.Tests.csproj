@@ -22,6 +22,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\HomeBlaze\HomeBlaze.csproj" />
+    <ProjectReference Include="..\MyCompany.SamplePlugin1.HomeBlaze\MyCompany.SamplePlugin1.HomeBlaze.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\MyCompany.SamplePlugin2.HomeBlaze\MyCompany.SamplePlugin2.HomeBlaze.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <Private>false</Private>
+    </ProjectReference>
   </ItemGroup>
 
   <ItemGroup>
@@ -31,7 +39,16 @@
     <None Update="TestData\**\*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
-    <Content Include="..\HomeBlaze\Plugins\*.nupkg" CopyToOutputDirectory="PreserveNewest" Link="Plugins\%(Filename)%(Extension)" />
   </ItemGroup>
+
+  <!-- Copy plugin nupkgs after build; the Content Include glob cannot be used because
+       MSBuild evaluates globs at project-evaluation time, before the sample plugin
+       build targets that produce the nupkgs have run. -->
+  <Target Name="CopyPluginNupkgs" AfterTargets="Build">
+    <ItemGroup>
+      <_PluginNupkgs Include="..\HomeBlaze\Plugins\*.nupkg" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_PluginNupkgs)" DestinationFolder="$(OutputPath)Plugins" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

@@ -22,12 +22,23 @@ public class NuGetPluginLoader : IDisposable
     private readonly List<NuGetPlugin> _loadedPlugins = [];
     private readonly PackageExtractor _extractor;
     private readonly INuGetPackageRepository _repository;
+
     private static readonly ConcurrentDictionary<string, string> SharedHostAssemblyPaths = new(StringComparer.OrdinalIgnoreCase);
     private static int _instanceCount;
     private static readonly object _staticLock = new();
     private readonly HashSet<string> _ownedAssemblyNames = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _lock = new();
     private bool _disposed;
+
+    private static readonly Lazy<HashSet<string>> TrustedPlatformAssemblyNames = new(() =>
+    {
+        var tpa = AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES") as string;
+        if (tpa == null) return new(StringComparer.OrdinalIgnoreCase);
+        return tpa.Split(Path.PathSeparator)
+            .Select(Path.GetFileNameWithoutExtension)
+            .Where(name => name != null)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase)!;
+    });
 
     public NuGetPluginLoader(
         NuGetPluginLoaderOptions options,
@@ -377,23 +388,34 @@ public class NuGetPluginLoader : IDisposable
         List<ResolvedPluginGraph> pluginGraphs,
         HostDependencyResolver hostResolver)
     {
+        // First pass: collect the highest version per external host package across all plugins
+        var bestVersions = new Dictionary<string, (NuGetVersion Version, string VersionString)>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in pluginGraphs)
         {
             foreach (var (packageName, version) in entry.FlatDependencies)
             {
                 if (IsExternalHostPackage(packageName, entry.Classifications, hostResolver))
                 {
-                    var versionString = version.ToNormalizedString();
-                    var paths = _extractor.GetAssemblyPaths(
-                        Path.Combine(_extractor.GetCachedPackagePath(packageName, versionString)!));
-
-                    foreach (var path in paths)
+                    if (!bestVersions.TryGetValue(packageName, out var existing) || version > existing.Version)
                     {
-                        var assemblyName = Path.GetFileNameWithoutExtension(path);
-                        SharedHostAssemblyPaths[assemblyName] = path;
-                        _ownedAssemblyNames.Add(assemblyName);
+                        bestVersions[packageName] = (version, version.ToNormalizedString());
                     }
                 }
+            }
+        }
+
+        // Second pass: load assemblies from the highest-versioned package
+        foreach (var (packageName, (_, versionString)) in bestVersions)
+        {
+            var cachedPath = _extractor.GetCachedPackagePath(packageName, versionString);
+            if (cachedPath == null) continue;
+
+            var paths = _extractor.GetAssemblyPaths(cachedPath);
+            foreach (var path in paths)
+            {
+                var assemblyName = Path.GetFileNameWithoutExtension(path);
+                SharedHostAssemblyPaths[assemblyName] = path;
+                _ownedAssemblyNames.Add(assemblyName);
             }
         }
     }
@@ -417,6 +439,7 @@ public class NuGetPluginLoader : IDisposable
                 continue; // Skip failed plugins
             }
 
+            PluginAssemblyLoadContext? loadContext = null;
             try
             {
                 var hostAssemblyNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -454,9 +477,11 @@ public class NuGetPluginLoader : IDisposable
                             var assemblyName = Path.GetFileNameWithoutExtension(path);
                             if (IsAssemblyInDefaultContext(assemblyName))
                             {
-                                // Already available in default context (e.g., framework assembly)
+                                // Already available in default context (e.g., framework-provided assembly
+                                // like Microsoft.Extensions.* from the shared framework)
                                 hostAssemblyNames.Add(assemblyName);
-                                _logger.LogDebug("Assembly '{Assembly}' from plugin '{Plugin}' already in default context, treating as host.",
+                                entry.Classifications[packageName] = DependencyClassification.Host;
+                                _logger.LogDebug("Assembly '{Assembly}' from plugin '{Plugin}' already in default context, reclassifying as host.",
                                     assemblyName, entry.Request.PackageName);
                             }
                             else
@@ -467,7 +492,7 @@ public class NuGetPluginLoader : IDisposable
                     }
                 }
 
-                var loadContext = new PluginAssemblyLoadContext(
+                loadContext = new PluginAssemblyLoadContext(
                     entry.Request.PackageName, hostAssemblyNames, privateAssemblyPaths);
 
                 _logger.LogDebug("Plugin '{Plugin}': {HostCount} host assemblies, {PrivateCount} private assemblies.",
@@ -526,12 +551,14 @@ public class NuGetPluginLoader : IDisposable
                 {
                     _loadedPlugins.Add(loadedPlugin);
                 }
+                loadContext = null; // success -- ownership transferred to NuGetPlugin
 
                 _logger.LogInformation("Plugin '{Plugin}' v{Version} loaded with {Count} assemblies.",
                     entry.Request.PackageName, pluginVersion, assemblies.Count);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
+                loadContext?.Unload();
                 _logger.LogError(exception, "Failed to load plugin '{Plugin}'.", entry.Request.PackageName);
                 failures.Add(new NuGetPluginFailure(entry.Request.PackageName,
                     $"Assembly load failed: {exception.Message}", Exception: exception));
@@ -572,10 +599,7 @@ public class NuGetPluginLoader : IDisposable
     }
 
     private static bool IsAssemblyInDefaultContext(string assemblyName)
-    {
-        return AssemblyLoadContext.Default.Assemblies
-            .Any(a => string.Equals(a.GetName().Name, assemblyName, StringComparison.OrdinalIgnoreCase));
-    }
+        => TrustedPlatformAssemblyNames.Value.Contains(assemblyName);
 
     private static Assembly? OnDefaultContextResolving(AssemblyLoadContext context, AssemblyName assemblyName)
     {

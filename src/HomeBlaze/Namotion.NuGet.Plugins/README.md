@@ -354,7 +354,9 @@ Every dependency in the resolved tree is classified into one of three categories
 
 ### Load-time framework assembly detection
 
-During Phase 7, before loading each assembly into the plugin's isolated context, the loader checks whether the assembly is already available in the default `AssemblyLoadContext` (e.g., shared framework assemblies like `Microsoft.AspNetCore.Components` or `System.Text.Json`). If it is, the assembly is treated as a host assembly and the plugin context falls back to the default context for it. This ensures type identity is preserved for framework types without requiring explicit configuration.
+During Phase 7, before loading each assembly into the plugin's isolated context, the loader checks whether the assembly is part of the .NET shared framework by consulting the Trusted Platform Assemblies (TPA) list. The TPA list is set by the runtime at startup and contains every assembly available in the default load context, including shared framework assemblies (e.g., `Microsoft.AspNetCore.Components`, `System.Text.Json`, `Microsoft.Extensions.Caching.Memory`). If an assembly name appears in the TPA list, it is treated as a host assembly and the plugin context falls back to the default context for it. This ensures type identity is preserved for framework types without requiring explicit configuration.
+
+> **Note:** In single-file or AOT-published applications, the TPA list may be unavailable. In that case, framework assemblies are treated as plugin-private, which is the safe default. Framework sharing can still be configured explicitly via `HostDependencyResolver.FromAssemblies()`.
 
 ### External host packages
 
@@ -365,6 +367,8 @@ The distinction between priority 2, 3, and 4 matters at runtime:
 - **Discovered host-shared packages** (priority 4) behave identically to predicate-matched packages at load time -- their transitive trees are also fully resolved and classified as Host. The only difference is how they were discovered (via assembly attribute or plugin.json rather than the `IsHostPackage` predicate).
 
 When multiple plugins depend on the same external host package, the loader computes the common subset of all their version ranges using `VersionRange.CommonSubSet()`. If a common range exists, the highest available version within that range is used. If no common subset exists (e.g., Plugin A needs `>= 2.0.0` and Plugin B needs `< 2.0.0`), this is a version conflict that fails all plugins.
+
+When loading external host packages (Phase 6), if multiple plugins resolve the same external host package to different versions (but within a compatible range), the highest resolved version is loaded. This is deterministic regardless of plugin enumeration order.
 
 ## Assembly Isolation Model
 
@@ -400,13 +404,15 @@ Each plugin gets a collectible `AssemblyLoadContext` that overrides `Load()` wit
 
 The loader also registers a `Resolving` handler on `AssemblyLoadContext.Default` to resolve external host packages (predicate-matched or discovered packages that are not in the host's deps.json but need to be shared across all contexts).
 
+> **Design note:** External host packages loaded into the default `AssemblyLoadContext` share static state across all plugins. This is intentional -- it enables patterns like shared caches, connection pools, and singleton registrations. Plugin authors should be aware that static fields in host-shared packages are process-global.
+
 ### Host assemblies
 
 Loaded into the default `AssemblyLoadContext`. This category includes:
 
 - **DependencyContext host packages** -- assemblies already present in the host process (NuGet packages and project references from the host's `DependencyContext`). Not downloaded, only version-validated. Their transitive dependencies are skipped during resolution.
 - **External host packages** -- packages matching the `IsHostPackage` predicate or discovered as host-shared via assembly attributes and plugin.json. Downloaded from NuGet and loaded into the default context on demand via the `Resolving` hook. Their transitive dependencies are also skipped during resolution.
-- **Framework assemblies** -- assemblies from the .NET shared framework (e.g., `Microsoft.AspNetCore.Components`, `System.Text.Json`) that are already loaded in the default context. These are detected automatically at load time without explicit configuration.
+- **Framework assemblies** -- assemblies from the .NET shared framework (e.g., `Microsoft.AspNetCore.Components`, `System.Text.Json`) that appear in the Trusted Platform Assemblies (TPA) list. These are detected automatically at load time without explicit configuration, regardless of whether they have been loaded into the process yet.
 
 Host assemblies are shared across the host application and all plugins. This ensures that when a plugin implements a host-defined interface (e.g., `ISensorDevice`), the type identity is the same across all contexts.
 
@@ -592,7 +598,8 @@ Disposing the `NuGetPluginLoader` itself unloads all plugins and removes the def
 - **No plugin signing or trust verification** -- packages are loaded without signature validation.
 - **Host assemblies are permanent** -- external host packages loaded into the default `AssemblyLoadContext` cannot be unloaded by the .NET runtime. They accumulate across plugin reload cycles; a process restart clears them.
 - **`FromAssemblies()` version accuracy** -- the `HostDependencyResolver.FromAssemblies()` fallback uses assembly versions (e.g., `9.0.0.0`) which may diverge from NuGet package versions (e.g., `9.0.5`). Prefer `FromDepsJson()` when available.
-- **Framework reference assemblies** -- framework assemblies (e.g., `System.Text.Json` from the shared runtime) are not listed in `deps.json` as NuGet packages. They are handled at load time via the default `AssemblyLoadContext` and do not participate in version conflict detection.
+- **Framework reference assemblies** -- framework assemblies (e.g., `System.Text.Json` from the shared runtime) are not listed in `deps.json` as NuGet packages. They are detected at load time via the Trusted Platform Assemblies (TPA) list and do not participate in version conflict detection. In single-file or AOT-published applications, the TPA list is unavailable and framework assemblies will be treated as plugin-private unless explicitly configured via `HostDependencyResolver.FromAssemblies()`.
+- **Assembly version vs. NuGet version** -- third-party packages may have assembly versions that diverge from their NuGet package versions (e.g., assembly version `4.0.0.0` for NuGet version `13.0.3`). The version validation uses NuGet versions from `deps.json`, but runtime assembly binding uses assembly versions. This can cause `FileLoadException` at runtime for third-party host packages that bump their assembly version on every release, even when NuGet version validation passes. Microsoft packages handle this correctly via unification.
 
 ## Thread Safety
 
@@ -608,6 +615,8 @@ The following features are not yet implemented but may be added in future versio
 - **Additional authentication schemes** -- support for bearer tokens and other credential types beyond API keys.
 - **Concurrent plugin loading** -- parallel resolution and download of independent plugins.
 - **Package extraction cancellation** -- `CancellationToken` support during package extraction.
+- **Native library support** -- override `LoadUnmanagedDll` in `PluginAssemblyLoadContext` to resolve native libraries from `runtimes/{rid}/native/` folders inside NuGet packages, enabling plugins with native dependencies (e.g., SkiaSharp, SQLite).
+- **Satellite assembly support** -- resolve culture-specific resource assemblies from `lib/{tfm}/{culture}/` folders for plugins that ship localized translations.
 
 ## API Reference
 

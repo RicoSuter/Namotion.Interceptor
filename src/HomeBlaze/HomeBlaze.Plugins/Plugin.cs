@@ -43,6 +43,12 @@ public partial class Plugin : ITitleProvider, IIconProvider, IMonitoredService
     public partial string Version { get; internal set; }
 
     [State]
+    public partial ServiceStatus Status { get; internal set; }
+
+    [State]
+    public partial string? StatusMessage { get; internal set; }
+
+    [State]
     public partial string Description { get; internal set; }
 
     [State]
@@ -55,19 +61,13 @@ public partial class Plugin : ITitleProvider, IIconProvider, IMonitoredService
     public partial string[] Tags { get; internal set; }
 
     [State]
-    public partial string[] HostDependencies { get; internal set; }
+    public partial string[] Assemblies { get; internal set; }
 
     [State]
     public partial string[] PrivateDependencies { get; internal set; }
 
     [State]
-    public partial string[] Assemblies { get; internal set; }
-
-    [State]
-    public partial ServiceStatus Status { get; internal set; }
-
-    [State]
-    public partial string? StatusMessage { get; internal set; }
+    public partial string[] HostDependencies { get; internal set; }
 
     [Operation(Title = "Remove Plugin", RequiresConfirmation = true)]
     public void RemovePlugin()
