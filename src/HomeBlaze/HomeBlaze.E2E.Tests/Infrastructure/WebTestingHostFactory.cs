@@ -1,4 +1,5 @@
 using HomeBlaze.Components;
+using HomeBlaze.Plugins;
 using HomeBlaze.Samples;
 using HomeBlaze.Servers.OpcUa;
 using HomeBlaze.Servers.OpcUa.Blazor;
@@ -69,7 +70,23 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
         var typeProvider = _kestrelHost.Services.GetRequiredService<TypeProvider>();
         typeProvider
             .AddAssembly(typeof(FluentStorageContainer).Assembly)      // HomeBlaze.Storage
-            .AddAssembly(typeof(Motor).Assembly);                      // HomeBlaze.Samples (for test subjects)
+            .AddAssembly(typeof(Motor).Assembly)                       // HomeBlaze.Samples (for test subjects)
+            .AddAssembly(typeof(PluginManager).Assembly);              // HomeBlaze.Plugins
+
+        // Load runtime plugins and register their assemblies.
+        // Use Task.Run to avoid deadlocking the synchronous CreateHost call.
+        var pluginLoader = _kestrelHost.Services.GetRequiredService<PluginLoader>();
+        var pluginResult = Task.Run(() => pluginLoader.LoadPluginsAsync(CancellationToken.None)).GetAwaiter().GetResult();
+        if (pluginResult != null)
+        {
+            foreach (var plugin in pluginResult.LoadedPlugins)
+            {
+                foreach (var assembly in plugin.Assemblies)
+                {
+                    typeProvider.AddAssembly(assembly);
+                }
+            }
+        }
 
         _kestrelHost.Start();
 
