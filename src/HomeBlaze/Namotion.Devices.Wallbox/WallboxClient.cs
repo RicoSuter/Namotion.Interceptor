@@ -13,6 +13,8 @@ public class WallboxClient
 
     private string? _token;
     private DateTimeOffset _tokenExpiration;
+    private string? _refreshToken;
+    private DateTimeOffset _refreshTokenExpiration;
 
     private const string BaseUrl = "https://api.wall-box.com/";
     private const string AuthUrl = "https://user-api.wall-box.com/users/signin";
@@ -225,29 +227,21 @@ public class WallboxClient
 
     private async Task<T> AuthenticateAsync<T>(Func<Task<T>> action, CancellationToken cancellationToken)
     {
-        if (_token is null || _tokenExpiration < DateTimeOffset.UtcNow)
-        {
-            var authHeaderValue = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{_email}:{_password}"));
-
-            using var request = new HttpRequestMessage(HttpMethod.Get, AuthUrl);
-            request.Headers.Authorization = new AuthenticationHeaderValue("Basic", authHeaderValue);
-            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            request.Headers.Add("Partner", "wallbox");
-
-            var response = await _httpClient.SendAsync(request, cancellationToken);
-            response.EnsureSuccessStatusCode();
-
-            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-            var jsonDocument = JsonDocument.Parse(responseBody);
-            var attributes = jsonDocument.RootElement.GetProperty("data").GetProperty("attributes");
-
-            _token = attributes.GetProperty("token").GetString();
-            var ttlMs = attributes.GetProperty("ttl").GetInt64();
-            _tokenExpiration = DateTimeOffset.UtcNow.AddMilliseconds(ttlMs);
-        }
+        await EnsureAuthenticatedAsync(cancellationToken);
 
         try
         {
+            return await action();
+        }
+        catch (HttpRequestException exception) when (exception.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+        {
+            // Token may have been revoked server-side — force re-auth and retry once
+            _token = null;
+            _tokenExpiration = DateTimeOffset.MinValue;
+            _refreshToken = null;
+            _refreshTokenExpiration = DateTimeOffset.MinValue;
+
+            await EnsureAuthenticatedAsync(cancellationToken);
             return await action();
         }
         catch
@@ -256,5 +250,58 @@ public class WallboxClient
             _tokenExpiration = DateTimeOffset.MinValue;
             throw;
         }
+    }
+
+    private async Task EnsureAuthenticatedAsync(CancellationToken cancellationToken)
+    {
+        if (_token is not null && _tokenExpiration > DateTimeOffset.UtcNow)
+            return;
+
+        // Try refresh token first (avoids sending credentials)
+        if (_refreshToken is not null && _refreshTokenExpiration > DateTimeOffset.UtcNow)
+        {
+            using var refreshRequest = new HttpRequestMessage(HttpMethod.Get, $"{AuthUrl.Replace("users/signin", "users/refresh-token")}");
+            refreshRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _refreshToken);
+            refreshRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            refreshRequest.Headers.Add("Partner", "wallbox");
+
+            var refreshResponse = await _httpClient.SendAsync(refreshRequest, cancellationToken);
+            if (refreshResponse.IsSuccessStatusCode)
+            {
+                ApplyAuthResponse(await refreshResponse.Content.ReadAsStringAsync(cancellationToken));
+                return;
+            }
+
+            // Refresh failed — fall through to full signin
+        }
+
+        // Full signin with credentials
+        var authHeaderValue = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{_email}:{_password}"));
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, AuthUrl);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Basic", authHeaderValue);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.Add("Partner", "wallbox");
+
+        var response = await _httpClient.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        ApplyAuthResponse(await response.Content.ReadAsStringAsync(cancellationToken));
+    }
+
+    private void ApplyAuthResponse(string responseBody)
+    {
+        var jsonDocument = JsonDocument.Parse(responseBody);
+        var attributes = jsonDocument.RootElement.GetProperty("data").GetProperty("attributes");
+
+        _token = attributes.GetProperty("token").GetString();
+        var ttlMs = attributes.GetProperty("ttl").GetInt64();
+        _tokenExpiration = DateTimeOffset.UtcNow.AddMilliseconds(ttlMs);
+
+        if (attributes.TryGetProperty("refresh_token", out var refreshToken))
+            _refreshToken = refreshToken.GetString();
+
+        if (attributes.TryGetProperty("refresh_token_ttl", out var refreshTtl))
+            _refreshTokenExpiration = DateTimeOffset.UtcNow.AddMilliseconds(refreshTtl.GetInt64());
     }
 }
