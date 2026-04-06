@@ -63,6 +63,8 @@
     <Project Path="HomeBlaze/Namotion.Devices.Shelly/Namotion.Devices.Shelly.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Shelly.Tests/Namotion.Devices.Shelly.Tests.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Shelly.HomeBlaze/Namotion.Devices.Shelly.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Wallbox/Namotion.Devices.Wallbox.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Wallbox.HomeBlaze/Namotion.Devices.Wallbox.HomeBlaze.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/Tests/">
     <Project Path="HomeBlaze/HomeBlaze.AI.Tests/HomeBlaze.AI.Tests.csproj" />
