@@ -130,13 +130,13 @@ public partial class WallboxCharger : BackgroundService,
     [State]
     public partial decimal? AddedRange { get; internal set; }
 
-    [State(Unit = StateUnit.KiloWattHour)]
+    [State(Unit = StateUnit.WattHour)]
     public partial decimal? AddedEnergy { get; internal set; }
 
-    [State(Unit = StateUnit.KiloWattHour)]
+    [State(Unit = StateUnit.WattHour)]
     public partial decimal? AddedGreenEnergy { get; internal set; }
 
-    [State(Unit = StateUnit.KiloWattHour)]
+    [State(Unit = StateUnit.WattHour)]
     public partial decimal? AddedGridEnergy { get; internal set; }
 
     [State]
@@ -478,9 +478,9 @@ public partial class WallboxCharger : BackgroundService,
         ChargingSpeed = status.ChargingSpeed;
         ChargeLevel = status.StateOfCharge.HasValue ? status.StateOfCharge.Value / 100m : null;
         AddedRange = status.AddedRange;
-        AddedEnergy = status.AddedEnergy;
-        AddedGreenEnergy = status.AddedGreenEnergy;
-        AddedGridEnergy = status.AddedGridEnergy;
+        AddedEnergy = status.AddedEnergy * 1000m;
+        AddedGreenEnergy = status.AddedGreenEnergy * 1000m;
+        AddedGridEnergy = status.AddedGridEnergy * 1000m;
         ChargingTime = TimeSpan.FromSeconds(status.ChargingTime);
         SessionCost = status.Cost;
 
@@ -531,8 +531,8 @@ public partial class WallboxCharger : BackgroundService,
             }
         }
 
-        TotalEnergyConsumed = _cachedSessionEnergy +
-            (IsPluggedIn == true ? status.AddedEnergy * 1000 : 0);
+        TotalEnergyConsumed = _cachedSessionEnergy * 1000m +
+            (IsPluggedIn == true ? status.AddedEnergy * 1000m : 0);
 
         IsConnected = true;
     }
