@@ -528,7 +528,7 @@ public partial class WallboxCharger : BackgroundService,
             }
         }
 
-        TotalEnergyConsumed = _cachedSessionEnergy * 1000m +
+        TotalEnergyConsumed = _cachedSessionEnergy +
             (IsPluggedIn == true ? status.AddedEnergy * 1000m : 0);
 
         IsConnected = true;
