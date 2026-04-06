@@ -278,7 +278,7 @@ public partial class WallboxCharger : BackgroundService,
         }
     }
 
-    [Operation(Title = "Set Max Charging Current")]
+    [Operation(Title = "Set Max Charging Current", RequiresConfirmation = true)]
     public async Task SetMaxChargingCurrentAsync(int amperes, CancellationToken cancellationToken)
     {
         if (_client is not null && amperes >= 6 && amperes <= 32)
@@ -298,7 +298,7 @@ public partial class WallboxCharger : BackgroundService,
         }
     }
 
-    [Operation(Title = "Set ICP Max Current")]
+    [Operation(Title = "Set ICP Max Current", RequiresConfirmation = true)]
     public async Task SetIcpMaxCurrentAsync(int amperes, CancellationToken cancellationToken)
     {
         if (_client is not null)

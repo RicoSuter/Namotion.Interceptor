@@ -38,7 +38,7 @@ public static class StateUnitExtensions
         {
             bool b => b ? "Yes" : "No",
             DateTime dt => dt.ToString("g"),
-            DateTimeOffset dto => dto.ToString("g"),
+            DateTimeOffset dto => dto.ToLocalTime().ToString("g zzz"),
             Enum e => e.ToString(),
             _ => value.ToString() ?? ""
         };
