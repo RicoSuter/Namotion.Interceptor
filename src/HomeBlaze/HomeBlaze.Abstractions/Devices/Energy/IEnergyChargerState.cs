@@ -22,4 +22,10 @@ public interface IEnergyChargerState
     /// </summary>
     [State]
     bool? IsCharging { get; }
+
+    /// <summary>
+    /// The maximum charging current in amperes.
+    /// </summary>
+    [State(Unit = StateUnit.Ampere)]
+    decimal? MaxChargingCurrent { get; }
 }
