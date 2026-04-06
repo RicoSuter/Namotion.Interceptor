@@ -1,4 +1,3 @@
-using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -16,7 +15,7 @@ public class WallboxClient
     private DateTimeOffset _tokenExpiration;
 
     private const string BaseUrl = "https://api.wall-box.com/";
-    private const string AuthUrl = "https://api.wall-box.com/auth/token/user";
+    private const string AuthUrl = "https://user-api.wall-box.com/users/signin";
 
     public WallboxClient(IHttpClientFactory httpClientFactory, string email, string password)
     {
@@ -29,7 +28,7 @@ public class WallboxClient
     {
         return await AuthenticateAsync(async () =>
         {
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"{BaseUrl}v4/space-accesses?limit=999");
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{BaseUrl}v3/chargers/groups");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
@@ -39,44 +38,24 @@ public class WallboxClient
             var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
             var jsonDocument = JsonDocument.Parse(responseBody);
 
-            var groupUids = new List<string>();
-            foreach (var item in jsonDocument.RootElement.GetProperty("data").EnumerateArray())
+            var chargers = new List<ChargerInformation>();
+            foreach (var group in jsonDocument.RootElement.GetProperty("result").GetProperty("groups").EnumerateArray())
             {
-                var groupUid = item.GetProperty("attributes").GetProperty("group_uid").GetString();
-                if (groupUid is not null)
-                    groupUids.Add(groupUid);
+                foreach (var charger in group.GetProperty("chargers").EnumerateArray())
+                {
+                    chargers.Add(new ChargerInformation
+                    {
+                        Id = charger.TryGetProperty("id", out var id) ? id.ToString() : null,
+                        Name = charger.TryGetProperty("name", out var name) ? name.GetString() : null,
+                        SerialNumber = charger.TryGetProperty("serialNumber", out var sn)
+                            ? sn.GetString()
+                            : charger.TryGetProperty("id", out var idFallback) ? idFallback.ToString() : null,
+                    });
+                }
             }
 
-            var chargerTasks = groupUids.Select(uid => GetChargersForGroupAsync(uid, cancellationToken));
-            var results = await Task.WhenAll(chargerTasks);
-            return results.SelectMany(c => c).ToArray();
+            return chargers.ToArray();
         }, cancellationToken);
-    }
-
-    private async Task<ChargerInformation[]> GetChargersForGroupAsync(string groupUid, CancellationToken cancellationToken)
-    {
-        var url = $"{BaseUrl}perseus/organizations/{groupUid}/chargers?limit=50&offset=0&include=charger_info,charger_config,charger_status&filters=[]";
-        using var request = new HttpRequestMessage(HttpMethod.Get, url);
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
-        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-
-        var response = await _httpClient.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-        var chargersResponse = JsonSerializer.Deserialize<ChargersResponse>(responseBody, new JsonSerializerOptions
-        {
-            PropertyNameCaseInsensitive = true
-        });
-
-        return chargersResponse?.Data?.Select(c => new ChargerInformation
-        {
-            Id = c.Id,
-            Name = c.Attributes?.Name,
-            Model = c.Attributes?.Model,
-            Status = c.Attributes?.Status ?? 0,
-            SerialNumber = c.Attributes?.SerialNumber,
-        }).ToArray() ?? [];
     }
 
     internal async Task<ChargerStatusResponse> GetChargerStatusAsync(string chargerId, CancellationToken cancellationToken)
@@ -250,25 +229,21 @@ public class WallboxClient
         {
             var authHeaderValue = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{_email}:{_password}"));
 
-            using var request = new HttpRequestMessage(HttpMethod.Post, AuthUrl);
+            using var request = new HttpRequestMessage(HttpMethod.Get, AuthUrl);
             request.Headers.Authorization = new AuthenticationHeaderValue("Basic", authHeaderValue);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
-            request.Content = new StringContent(string.Empty, Encoding.UTF8, "application/json");
+            request.Headers.Add("Partner", "wallbox");
 
             var response = await _httpClient.SendAsync(request, cancellationToken);
             response.EnsureSuccessStatusCode();
 
             var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-            var authResponse = JsonSerializer.Deserialize<AuthResponse>(responseBody);
+            var jsonDocument = JsonDocument.Parse(responseBody);
+            var attributes = jsonDocument.RootElement.GetProperty("data").GetProperty("attributes");
 
-            var token = authResponse?.Jwt;
-            var tokenHandler = new JwtSecurityTokenHandler();
-            var jwtToken = tokenHandler.ReadJwtToken(token);
-
-            _token = token;
-            _tokenExpiration = jwtToken.Payload.Expiration.HasValue
-                ? DateTimeOffset.FromUnixTimeSeconds(jwtToken.Payload.Expiration.Value)
-                : DateTimeOffset.MinValue;
+            _token = attributes.GetProperty("token").GetString();
+            var ttlMs = attributes.GetProperty("ttl").GetInt64();
+            _tokenExpiration = DateTimeOffset.UtcNow.AddMilliseconds(ttlMs);
         }
 
         try

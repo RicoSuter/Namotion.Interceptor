@@ -110,9 +110,6 @@ public partial class WallboxCharger : BackgroundService,
     [State]
     public partial string? ProductCode { get; internal set; }
 
-    // SerialNumber is already a Configuration property above
-    string? IDeviceInfo.SerialNumber => SerialNumber;
-
     [State]
     public partial string? HardwareRevision { get; internal set; }
 
