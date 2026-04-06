@@ -4,6 +4,7 @@ using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
 using HomeBlaze.Abstractions.Devices.Energy;
 using HomeBlaze.Abstractions.Networking;
+using HomeBlaze.Abstractions.Sensors;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Devices.Wallbox.Model;
@@ -20,6 +21,7 @@ public partial class WallboxCharger : BackgroundService,
     IConnectionState,
     ISoftwareState,
     IDeviceInfo,
+    IPowerSensor,
     IConfigurable,
     IMonitoredService,
     ITitleProvider,
@@ -54,108 +56,103 @@ public partial class WallboxCharger : BackgroundService,
     [Configuration]
     public partial TimeSpan RetryInterval { get; set; }
 
-    // IConnectionState
+    // Charging state
 
-    [State(IsDiscrete = true)]
-    public partial bool IsConnected { get; internal set; }
+    [State(Position = 1, IsDiscrete = true)]
+    public partial WallboxChargerStatus ChargerStatus { get; internal set; }
 
-    // IMonitoredService
-
-    [State(IsDiscrete = true)]
-    public partial ServiceStatus Status { get; internal set; }
-
-    [State]
-    public partial string? StatusMessage { get; internal set; }
-
-    // ILastUpdatedProvider
-
-    [State]
-    public partial DateTimeOffset? LastUpdated { get; internal set; }
-
-    // IEnergyChargerState
-
-    [State(IsDiscrete = true)]
+    [State(Position = 2, IsDiscrete = true)]
     public partial bool? IsPluggedIn { get; internal set; }
 
-    [State(IsDiscrete = true)]
+    [State(Position = 3, IsDiscrete = true)]
     public partial bool? IsCharging { get; internal set; }
 
-    [State(Unit = StateUnit.Ampere)]
-    public partial decimal? MaxChargingCurrent { get; internal set; }
-
-    // IVehicleChargerState
-
-    [State(Unit = StateUnit.Percent)]
-    public partial decimal? ChargeLevel { get; internal set; }
-
-    [State(Unit = StateUnit.Watt)]
+    [State(Position = 4, Unit = StateUnit.Watt)]
     public partial decimal? ChargingPower { get; internal set; }
 
-    // ISoftwareState
+    // Workaround: Pulsar MAX firmware always returns charging_speed=0.
+    // Derived from power and phases assuming 230V nominal (EU/Type 2 markets).
+    [State(Position = 5, Unit = StateUnit.Ampere, IsEstimated = true)]
+    public partial decimal? ChargingSpeed { get; internal set; }
 
-    [State]
-    public partial string? SoftwareVersion { get; internal set; }
+    [State(Position = 6, Unit = StateUnit.Ampere)]
+    public partial decimal? MaxChargingCurrent { get; internal set; }
 
-    [State]
-    public partial string? AvailableSoftwareUpdate { get; internal set; }
+    [State(Position = 7, IsDiscrete = true)]
+    public partial bool? IsLocked { get; internal set; }
+
+    // IVehicleChargerState (ChargeLevel delegated to Session)
+
+    [Derived]
+    public decimal? ChargeLevel => Session.ChargeLevel;
+
+    // Energy
+
+    [State(Position = 10, Unit = StateUnit.WattHour, IsCumulative = true)]
+    public partial decimal? TotalEnergyConsumed { get; internal set; }
+
+    [State(Position = 11)]
+    public partial decimal? EnergyPrice { get; internal set; }
+
+    [State(Position = 12)]
+    public partial string? Currency { get; internal set; }
+
+    // Eco-Smart
+
+    [State(Position = 15, IsDiscrete = true)]
+    public partial bool? EcoSmartEnabled { get; internal set; }
+
+    [State(Position = 16, IsDiscrete = true)]
+    public partial WallboxEcoSmartMode? EcoSmartMode { get; internal set; }
 
     // IDeviceInfo
 
     [Derived]
     public string Manufacturer => "Wallbox";
 
-    [State]
+    [State(Position = 20)]
     public partial string? Model { get; internal set; }
 
-    [State]
+    [State(Position = 21)]
     public partial string? ProductCode { get; internal set; }
 
-    [State]
+    [State(Position = 23)]
     public partial string? HardwareRevision { get; internal set; }
 
-    // Device-specific state
+    // ISoftwareState
 
-    [State(IsDiscrete = true)]
-    public partial WallboxChargerStatus ChargerStatus { get; internal set; }
+    [State(Position = 25)]
+    public partial string? SoftwareVersion { get; internal set; }
 
-    [State(IsDiscrete = true)]
-    public partial bool? IsLocked { get; internal set; }
+    [State(Position = 26)]
+    public partial string? AvailableSoftwareUpdate { get; internal set; }
 
-    [State(Unit = StateUnit.Ampere)]
-    public partial decimal? ChargingSpeed { get; internal set; }
+    // Connection & service status
 
-    [State]
-    public partial decimal? AddedRange { get; internal set; }
+    [State(Position = 30, IsDiscrete = true)]
+    public partial bool IsConnected { get; internal set; }
 
-    [State(Unit = StateUnit.WattHour)]
-    public partial decimal? AddedEnergy { get; internal set; }
+    [State(Position = 31, IsDiscrete = true)]
+    public partial ServiceStatus Status { get; internal set; }
 
-    [State(Unit = StateUnit.WattHour)]
-    public partial decimal? AddedGreenEnergy { get; internal set; }
+    [State(Position = 32)]
+    public partial string? StatusMessage { get; internal set; }
 
-    [State(Unit = StateUnit.WattHour)]
-    public partial decimal? AddedGridEnergy { get; internal set; }
+    [State(Position = 33)]
+    public partial DateTimeOffset? LastUpdated { get; internal set; }
 
-    [State]
-    public partial TimeSpan? ChargingTime { get; internal set; }
+    // Charging session (child subject)
 
     [State]
-    public partial decimal? SessionCost { get; internal set; }
+    public partial WallboxChargingSession Session { get; internal set; }
 
-    [State]
-    public partial decimal? EnergyPrice { get; internal set; }
+    // IPowerSensor
 
-    [State]
-    public partial string? Currency { get; internal set; }
+    [Derived]
+    public decimal? Power => ChargingPower;
 
-    [State(Unit = StateUnit.WattHour, IsCumulative = true)]
-    public partial decimal? TotalEnergyConsumed { get; internal set; }
-
-    [State(IsDiscrete = true)]
-    public partial bool? EcoSmartEnabled { get; internal set; }
-
-    [State(IsDiscrete = true)]
-    public partial WallboxEcoSmartMode? EcoSmartMode { get; internal set; }
+    [Derived]
+    public decimal? EnergyConsumed => TotalEnergyConsumed;
 
     // Derived
 
@@ -208,30 +205,24 @@ public partial class WallboxCharger : BackgroundService,
         Status = ServiceStatus.Stopped;
         StatusMessage = null;
         LastUpdated = null;
+        ChargerStatus = WallboxChargerStatus.Unknown;
         IsPluggedIn = null;
         IsCharging = null;
-        MaxChargingCurrent = null;
-        ChargeLevel = null;
         ChargingPower = null;
-        SoftwareVersion = null;
-        AvailableSoftwareUpdate = null;
+        ChargingSpeed = null;
+        MaxChargingCurrent = null;
+        IsLocked = null;
+        TotalEnergyConsumed = null;
+        EnergyPrice = null;
+        Currency = null;
+        EcoSmartEnabled = null;
+        EcoSmartMode = null;
         Model = null;
         ProductCode = null;
         HardwareRevision = null;
-        ChargerStatus = WallboxChargerStatus.Unknown;
-        IsLocked = null;
-        ChargingSpeed = null;
-        AddedRange = null;
-        AddedEnergy = null;
-        AddedGreenEnergy = null;
-        AddedGridEnergy = null;
-        ChargingTime = null;
-        SessionCost = null;
-        EnergyPrice = null;
-        Currency = null;
-        TotalEnergyConsumed = null;
-        EcoSmartEnabled = null;
-        EcoSmartMode = null;
+        SoftwareVersion = null;
+        AvailableSoftwareUpdate = null;
+        Session = new WallboxChargingSession();
     }
 
     // IVehicleChargerController
@@ -467,19 +458,27 @@ public partial class WallboxCharger : BackgroundService,
 
         var status = await _client.GetChargerStatusAsync(SerialNumber, cancellationToken);
 
-        // Map status response to subject properties
+        // Charger status
         ChargerStatus = status.Status;
-        IsPluggedIn = !status.Finished;
-        IsCharging = status.ChargingPowerInKw > 1;
+
+        // Only override Finished flag for definitive "not plugged" states;
+        // all other statuses (including future ones) fall back to API's Finished flag.
+        IsPluggedIn = ChargerStatus is WallboxChargerStatus.Disconnected or WallboxChargerStatus.Ready
+            ? false
+            : !status.Finished;
+
+        IsCharging = ChargerStatus is WallboxChargerStatus.Charging or WallboxChargerStatus.Discharging;
         ChargingPower = status.ChargingPowerInKw * 1000m;
-        ChargingSpeed = status.ChargingSpeed;
-        ChargeLevel = status.StateOfCharge.HasValue ? status.StateOfCharge.Value / 100m : null;
-        AddedRange = status.AddedRange;
-        AddedEnergy = status.AddedEnergy * 1000m;
-        AddedGreenEnergy = status.AddedGreenEnergy * 1000m;
-        AddedGridEnergy = status.AddedGridEnergy * 1000m;
-        ChargingTime = TimeSpan.FromSeconds(status.ChargingTime);
-        SessionCost = status.Cost;
+
+        // Workaround: Pulsar MAX firmware always returns charging_speed=0.
+        // Derive current from power and phases assuming 230V nominal (EU/Type 2 markets).
+        ChargingSpeed = status.ChargingSpeed > 0
+            ? status.ChargingSpeed
+            : status.CurrentMode > 0 && status.ChargingPowerInKw > 0
+                ? Math.Round(status.ChargingPowerInKw * 1000m / (230m * status.CurrentMode), 1)
+                : 0;
+
+        MaxChargingCurrent = status.ConfigData?.MaxChargingCurrent;
 
         IsLocked = status.ConfigData?.Locked switch
         {
@@ -488,24 +487,37 @@ public partial class WallboxCharger : BackgroundService,
             _ => null
         };
 
-        MaxChargingCurrent = status.ConfigData?.MaxChargingCurrent;
+        // Current session
+        Session.ChargeLevel = status.StateOfCharge.HasValue ? status.StateOfCharge.Value / 100m : null;
+        Session.AddedEnergy = status.AddedEnergy * 1000m;
+        Session.AddedGreenEnergy = status.AddedGreenEnergy * 1000m;
+        Session.AddedGridEnergy = status.AddedGridEnergy * 1000m;
+        Session.AddedRange = status.AddedRange;
+        Session.ChargingTime = TimeSpan.FromSeconds(status.ChargingTime);
+        Session.SessionCost = status.Cost;
+
+        // Energy pricing
         EnergyPrice = status.ConfigData?.EnergyPrice;
         Currency = status.ConfigData?.Currency?.Symbol;
-        ProductCode = status.ConfigData?.PartNumber;
-        Model = MapPartNumberToModel(status.ConfigData?.PartNumber);
-        HardwareRevision = null; // Not available from API
 
-        SoftwareVersion = status.ConfigData?.Software?.CurrentVersion;
-        AvailableSoftwareUpdate = status.ConfigData?.Software?.UpdateAvailable == true
-            ? status.ConfigData.Software.LatestVersion
-            : null;
-
+        // Eco-Smart
         EcoSmartEnabled = status.ConfigData?.Ecosmart?.Enabled;
         EcoSmartMode = status.ConfigData?.Ecosmart is { } eco
             ? eco.Enabled ? (WallboxEcoSmartMode)eco.Mode : WallboxEcoSmartMode.Disabled
             : null;
 
-        // Session energy aggregation (cached, refreshed every 30 min when plugged in)
+        // Device info
+        ProductCode = status.ConfigData?.PartNumber;
+        Model = MapPartNumberToModel(status.ConfigData?.PartNumber);
+        HardwareRevision = null; // Not available from API
+
+        // Software
+        SoftwareVersion = status.ConfigData?.Software?.CurrentVersion;
+        AvailableSoftwareUpdate = status.ConfigData?.Software?.UpdateAvailable == true
+            ? status.ConfigData.Software.LatestVersion
+            : null;
+
+        // Session energy aggregation (cached, refreshed every 30 min)
         if (DateTimeOffset.UtcNow > _lastSessionsRetrieval.AddMinutes(30) &&
             status.ConfigData?.GroupId is > 0 &&
             status.ConfigData?.ChargerId is > 0)
@@ -515,11 +527,12 @@ public partial class WallboxCharger : BackgroundService,
                 var sessions = await _client.GetChargingSessionsAsync(
                     status.ConfigData.GroupId,
                     status.ConfigData.ChargerId,
-                    _lastSessionsRetrieval == DateTimeOffset.MinValue ? DateTimeOffset.MinValue : _lastSessionsRetrieval,
+                    DateTimeOffset.MinValue,
                     DateTimeOffset.UtcNow,
                     cancellationToken);
 
-                _cachedSessionEnergy += sessions.Sum(s => s.Attributes?.Energy ?? 0);
+                // Session energy is already in Wh; recalculate total (not incremental) to avoid drift
+                _cachedSessionEnergy = sessions.Sum(s => s.Attributes?.Energy ?? 0);
                 _lastSessionsRetrieval = DateTimeOffset.UtcNow;
             }
             catch (Exception exception)
@@ -528,6 +541,7 @@ public partial class WallboxCharger : BackgroundService,
             }
         }
 
+        // AddedEnergy from status API is in kWh; add current session energy (not yet in sessions API)
         TotalEnergyConsumed = _cachedSessionEnergy +
             (IsPluggedIn == true ? status.AddedEnergy * 1000m : 0);
 
