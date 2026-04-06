@@ -16,7 +16,7 @@ public class WallboxClient
     private DateTimeOffset _tokenExpiration;
 
     private const string BaseUrl = "https://api.wall-box.com/";
-    private const string AuthUrl = "https://user-api.wall-box.com/users/signin";
+    private const string AuthUrl = "https://api.wall-box.com/auth/token/user";
 
     public WallboxClient(IHttpClientFactory httpClientFactory, string email, string password)
     {
@@ -250,9 +250,10 @@ public class WallboxClient
         {
             var authHeaderValue = Convert.ToBase64String(Encoding.UTF8.GetBytes($"{_email}:{_password}"));
 
-            using var request = new HttpRequestMessage(HttpMethod.Get, AuthUrl);
+            using var request = new HttpRequestMessage(HttpMethod.Post, AuthUrl);
             request.Headers.Authorization = new AuthenticationHeaderValue("Basic", authHeaderValue);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+            request.Content = new StringContent(string.Empty, Encoding.UTF8, "application/json");
 
             var response = await _httpClient.SendAsync(request, cancellationToken);
             response.EnsureSuccessStatusCode();
