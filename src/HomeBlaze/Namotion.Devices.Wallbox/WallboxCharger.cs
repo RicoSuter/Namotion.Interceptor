@@ -84,6 +84,7 @@ public partial class WallboxCharger : BackgroundService,
     // IVehicleChargerState (ChargeLevel delegated to Session)
 
     [Derived]
+    [State(Position = 8, Unit = StateUnit.Percent)]
     public decimal? ChargeLevel => Session.ChargeLevel;
 
     // Energy
@@ -108,6 +109,7 @@ public partial class WallboxCharger : BackgroundService,
     // IDeviceInfo
 
     [Derived]
+    [State(Position = 19)]
     public string Manufacturer => "Wallbox";
 
     [State(Position = 20)]
@@ -146,7 +148,7 @@ public partial class WallboxCharger : BackgroundService,
     [State]
     public partial WallboxChargingSession Session { get; internal set; }
 
-    // IPowerSensor
+    // IPowerSensor (delegates to ChargingPower/TotalEnergyConsumed)
 
     [Derived]
     public decimal? Power => ChargingPower;
