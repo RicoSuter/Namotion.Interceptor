@@ -11,6 +11,7 @@ public enum StateUnit
     Watt,
     KiloWatt,
     WattHour,
+    KiloWattHour,
     Volt,
     Ampere,
     Hertz,
