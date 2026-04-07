@@ -19,7 +19,7 @@ public partial class WallboxChargingSession : ITitleProvider, IIconProvider
     [State(Position = 3, Unit = StateUnit.WattHour)]
     public partial decimal? AddedGridEnergy { get; internal set; }
 
-    [State(Position = 4)]
+    [State(Position = 4, Unit = StateUnit.Kilometer)]
     public partial decimal? AddedRange { get; internal set; }
 
     [State(Position = 5)]
