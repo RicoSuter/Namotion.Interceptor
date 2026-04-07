@@ -59,17 +59,17 @@ public class WallboxChargerPollTests
         Assert.Equal(expectedCharging, charger.IsCharging);
     }
 
-    // ChargingSpeed derivation
+    // ChargingCurrent derivation
 
     [Fact]
-    public void WhenChargingSpeedReportedByApi_ThenUsesApiValue()
+    public void WhenChargingCurrentReportedByApi_ThenUsesApiValue()
     {
         // Arrange
         var charger = CreateCharger();
         var status = new ChargerStatusResponse
         {
             StatusId = 193,
-            ChargingSpeed = 16m,
+            ChargingCurrent = 16m,
             ChargingPowerInKw = 3.68m,
             CurrentMode = 1
         };
@@ -78,18 +78,18 @@ public class WallboxChargerPollTests
         ApplyStatus(charger, status);
 
         // Assert
-        Assert.Equal(16m, charger.ChargingSpeed);
+        Assert.Equal(16m, charger.ChargingCurrent);
     }
 
     [Fact]
-    public void WhenChargingSpeedZero_ThenDerivesFromPowerAndPhases()
+    public void WhenChargingCurrentZero_ThenDerivesFromPowerAndPhases()
     {
         // Arrange
         var charger = CreateCharger();
         var status = new ChargerStatusResponse
         {
             StatusId = 193,
-            ChargingSpeed = 0,
+            ChargingCurrent = 0,
             ChargingPowerInKw = 7.36m,  // 32A × 230V × 1 phase = 7.36 kW
             CurrentMode = 1              // single phase
         };
@@ -98,18 +98,18 @@ public class WallboxChargerPollTests
         ApplyStatus(charger, status);
 
         // Assert — 7360 / 230 = 32.0A
-        Assert.Equal(32.0m, charger.ChargingSpeed);
+        Assert.Equal(32.0m, charger.ChargingCurrent);
     }
 
     [Fact]
-    public void WhenChargingSpeedZeroAndThreePhase_ThenDerivesCorrectly()
+    public void WhenChargingCurrentZeroAndThreePhase_ThenDerivesCorrectly()
     {
         // Arrange
         var charger = CreateCharger();
         var status = new ChargerStatusResponse
         {
             StatusId = 193,
-            ChargingSpeed = 0,
+            ChargingCurrent = 0,
             ChargingPowerInKw = 11.04m,  // 16A × 230V × 3 phases = 11.04 kW
             CurrentMode = 3
         };
@@ -118,18 +118,18 @@ public class WallboxChargerPollTests
         ApplyStatus(charger, status);
 
         // Assert — 11040 / (230 × 3) = 16.0A
-        Assert.Equal(16.0m, charger.ChargingSpeed);
+        Assert.Equal(16.0m, charger.ChargingCurrent);
     }
 
     [Fact]
-    public void WhenChargingSpeedZeroAndNoPower_ThenReturnsZero()
+    public void WhenChargingCurrentZeroAndNoPower_ThenReturnsZero()
     {
         // Arrange
         var charger = CreateCharger();
         var status = new ChargerStatusResponse
         {
             StatusId = 161,
-            ChargingSpeed = 0,
+            ChargingCurrent = 0,
             ChargingPowerInKw = 0,
             CurrentMode = 0
         };
@@ -138,7 +138,7 @@ public class WallboxChargerPollTests
         ApplyStatus(charger, status);
 
         // Assert
-        Assert.Equal(0m, charger.ChargingSpeed);
+        Assert.Equal(0m, charger.ChargingCurrent);
     }
 
     // ChargingPower conversion
@@ -397,8 +397,8 @@ public class WallboxChargerPollTests
         charger.IsCharging = charger.ChargerStatus is WallboxChargerStatus.Charging or WallboxChargerStatus.Discharging;
         charger.ChargingPower = status.ChargingPowerInKw * 1000m;
 
-        charger.ChargingSpeed = status.ChargingSpeed > 0
-            ? status.ChargingSpeed
+        charger.ChargingCurrent = status.ChargingCurrent > 0
+            ? status.ChargingCurrent
             : status.CurrentMode > 0 && status.ChargingPowerInKw > 0
                 ? Math.Round(status.ChargingPowerInKw * 1000m / (230m * status.CurrentMode), 1)
                 : 0;

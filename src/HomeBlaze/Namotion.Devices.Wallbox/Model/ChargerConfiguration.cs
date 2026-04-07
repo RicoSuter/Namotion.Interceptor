@@ -14,10 +14,10 @@ internal class ChargerConfiguration
     public string? Name { get; set; }
 
     [JsonPropertyName("locked")]
-    public int Locked { get; set; }
+    public int? Locked { get; set; }
 
     [JsonPropertyName("max_charging_current")]
-    public decimal? MaxChargingCurrent { get; set; }
+    public decimal? MaximumChargingCurrent { get; set; }
 
     [JsonPropertyName("icp_max_current")]
     public int IcpMaxCurrent { get; set; }

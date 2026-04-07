@@ -43,8 +43,10 @@ The Wallbox integration supports Pulsar MAX, Pulsar Plus, Commander 2, Quasar, a
 | `IsPluggedIn` | - | Whether a vehicle is plugged in |
 | `IsCharging` | - | Whether actively charging |
 | `ChargingPower` | Watt | Current charging power |
-| `ChargingSpeed` | Ampere | Actual charging current |
-| `MaximumChargingPower` | Watt | Maximum charging power |
+| `ChargingCurrent` | Ampere | Actual charging current (estimated from power/phases) |
+| `MaximumAvailableChargingCurrent` | Ampere | Hardware max current |
+| `MaximumChargingCurrent` | Ampere | Configured max current |
+| `MaximumChargingPower` | Watt | Hardware max power (current × 230V × phases) |
 | `ChargeLevel` | Percent | Vehicle battery level (when car reports SoC) |
 | `IsLocked` | - | Charger lock state |
 | `AddedEnergy` | WattHour | Energy added in current session |

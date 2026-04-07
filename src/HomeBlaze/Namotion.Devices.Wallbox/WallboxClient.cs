@@ -7,7 +7,7 @@ namespace Namotion.Devices.Wallbox;
 
 public class WallboxClient
 {
-    private readonly HttpClient _httpClient;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly string _email;
     private readonly string _password;
 
@@ -22,9 +22,15 @@ public class WallboxClient
 
     public WallboxClient(IHttpClientFactory httpClientFactory, string email, string password)
     {
-        _httpClient = httpClientFactory.CreateClient();
+        _httpClientFactory = httpClientFactory;
         _email = email;
         _password = password;
+    }
+
+    private async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        using var httpClient = _httpClientFactory.CreateClient();
+        return await httpClient.SendAsync(request, cancellationToken);
     }
 
     public async Task<ChargerInformation[]> GetChargersAsync(CancellationToken cancellationToken)
@@ -35,7 +41,7 @@ public class WallboxClient
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-            var response = await _httpClient.SendAsync(request, cancellationToken);
+            var response = await SendAsync(request, cancellationToken);
             response.EnsureSuccessStatusCode();
 
             var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -69,7 +75,7 @@ public class WallboxClient
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-            var response = await _httpClient.SendAsync(request, cancellationToken);
+            var response = await SendAsync(request, cancellationToken);
             response.EnsureSuccessStatusCode();
 
             var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -95,7 +101,7 @@ public class WallboxClient
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _token);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-            var response = await _httpClient.SendAsync(request, cancellationToken);
+            var response = await SendAsync(request, cancellationToken);
             response.EnsureSuccessStatusCode();
 
             var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
@@ -103,7 +109,7 @@ public class WallboxClient
         }, cancellationToken);
     }
 
-    internal async Task SetMaxChargingCurrentAsync(string chargerId, int current, CancellationToken cancellationToken)
+    internal async Task SetMaximumChargingCurrentAsync(string chargerId, int current, CancellationToken cancellationToken)
     {
         await ControlChargerAsync(chargerId, "maxChargingCurrent", current, cancellationToken);
     }
@@ -171,7 +177,7 @@ public class WallboxClient
             };
             request.Content = new StringContent(JsonSerializer.Serialize(data), Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.SendAsync(request, cancellationToken);
+            var response = await SendAsync(request, cancellationToken);
             response.EnsureSuccessStatusCode();
             return null;
         }, cancellationToken);
@@ -188,7 +194,7 @@ public class WallboxClient
                 JsonSerializer.Serialize(new Dictionary<string, object> { [key] = value }),
                 Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.SendAsync(request, cancellationToken);
+            var response = await SendAsync(request, cancellationToken);
             response.EnsureSuccessStatusCode();
             return null;
         }, cancellationToken);
@@ -203,7 +209,7 @@ public class WallboxClient
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             request.Content = new StringContent(JsonSerializer.Serialize(data), Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.SendAsync(request, cancellationToken);
+            var response = await SendAsync(request, cancellationToken);
             response.EnsureSuccessStatusCode();
             return null;
         }, cancellationToken);
@@ -224,7 +230,7 @@ public class WallboxClient
                 JsonSerializer.Serialize(new Dictionary<string, object> { ["action"] = action }),
                 Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.SendAsync(request, cancellationToken);
+            var response = await SendAsync(request, cancellationToken);
             response.EnsureSuccessStatusCode();
             return null;
         }, cancellationToken);
@@ -270,7 +276,7 @@ public class WallboxClient
             refreshRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             refreshRequest.Headers.Add("Partner", "wallbox");
 
-            var refreshResponse = await _httpClient.SendAsync(refreshRequest, cancellationToken);
+            var refreshResponse = await SendAsync(refreshRequest, cancellationToken);
             if (refreshResponse.IsSuccessStatusCode)
             {
                 ApplyAuthResponse(await refreshResponse.Content.ReadAsStringAsync(cancellationToken));
@@ -288,7 +294,7 @@ public class WallboxClient
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         request.Headers.Add("Partner", "wallbox");
 
-        var response = await _httpClient.SendAsync(request, cancellationToken);
+        var response = await SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         ApplyAuthResponse(await response.Content.ReadAsStringAsync(cancellationToken));
