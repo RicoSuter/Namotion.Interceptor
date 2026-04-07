@@ -7,6 +7,9 @@ namespace Namotion.Devices.Wallbox;
 [InterceptorSubject]
 public partial class WallboxChargingSession : ITitleProvider, IIconProvider
 {
+    [State(Position = 0, IsDiscrete = true)]
+    public partial bool IsCharging { get; internal set; }
+
     [State(Position = 1, Unit = StateUnit.WattHour)]
     public partial decimal? AddedEnergy { get; internal set; }
 
@@ -38,6 +41,7 @@ public partial class WallboxChargingSession : ITitleProvider, IIconProvider
 
     public WallboxChargingSession()
     {
+        IsCharging = false;
         AddedEnergy = null;
         AddedGreenEnergy = null;
         AddedGridEnergy = null;

@@ -17,7 +17,7 @@ internal class ChargerStatusResponse
     public decimal MaxAvailablePower { get; set; }
 
     [JsonPropertyName("charging_speed")]
-    public decimal ChargingSpeed { get; set; }
+    public decimal ChargingCurrent { get; set; }
 
     [JsonPropertyName("added_range")]
     public decimal AddedRange { get; set; }

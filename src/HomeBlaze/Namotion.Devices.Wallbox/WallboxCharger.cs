@@ -35,6 +35,7 @@ public partial class WallboxCharger : BackgroundService,
 
     private WallboxClient? _client;
     private DateTimeOffset _lastSessionsRetrieval = DateTimeOffset.MinValue;
+    private readonly Dictionary<int, decimal> _yearlySessionEnergy = new();
     private decimal _cachedSessionEnergy;
 
     // Configuration
@@ -74,29 +75,36 @@ public partial class WallboxCharger : BackgroundService,
     // Workaround: Pulsar MAX firmware always returns charging_speed=0.
     // Derived from power and phases assuming 230V nominal (EU/Type 2 markets).
     [State(Position = 5, Unit = StateUnit.Ampere, IsEstimated = true)]
-    public partial decimal? ChargingSpeed { get; internal set; }
+    public partial decimal? ChargingCurrent { get; internal set; }
 
-    [State(Position = 6, Unit = StateUnit.Watt)]
+    // max_available_power from the API is actually the hardware max current in amps
+    [State(Position = 6, Unit = StateUnit.Ampere)]
+    public partial decimal? MaximumAvailableChargingCurrent { get; internal set; }
+
+    [State(Position = 7, Unit = StateUnit.Ampere)]
+    public partial decimal? MaximumChargingCurrent { get; internal set; }
+
+    [State(Position = 8, Unit = StateUnit.Watt)]
     public partial decimal? MaximumChargingPower { get; internal set; }
 
-    [State(Position = 7, IsDiscrete = true)]
+    [State(Position = 9, IsDiscrete = true)]
     public partial bool? IsLocked { get; internal set; }
 
     // IVehicleChargerState (ChargeLevel delegated to Session)
 
     [Derived]
-    [State(Position = 8, Unit = StateUnit.Percent)]
+    [State(Position = 10, Unit = StateUnit.Percent)]
     public decimal? ChargeLevel => Session.ChargeLevel;
 
     // Energy
 
-    [State(Position = 10, Unit = StateUnit.WattHour, IsCumulative = true)]
+    [State(Position = 12, Unit = StateUnit.WattHour, IsCumulative = true)]
     public partial decimal? TotalEnergyConsumed { get; internal set; }
 
-    [State(Position = 11)]
+    [State(Position = 13)]
     public partial decimal? EnergyPrice { get; internal set; }
 
-    [State(Position = 12)]
+    [State(Position = 14)]
     public partial string? Currency { get; internal set; }
 
     // Eco-Smart
@@ -212,7 +220,9 @@ public partial class WallboxCharger : BackgroundService,
         IsPluggedIn = null;
         IsCharging = null;
         ChargingPower = null;
-        ChargingSpeed = null;
+        ChargingCurrent = null;
+        MaximumAvailableChargingCurrent = null;
+        MaximumChargingCurrent = null;
         MaximumChargingPower = null;
         IsLocked = null;
         TotalEnergyConsumed = null;
@@ -272,12 +282,12 @@ public partial class WallboxCharger : BackgroundService,
         }
     }
 
-    [Operation(Title = "Set Max Charging Current", RequiresConfirmation = true)]
-    public async Task SetMaxChargingCurrentAsync(int amperes, CancellationToken cancellationToken)
+    [Operation(Title = "Set Maximum Charging Current", RequiresConfirmation = true)]
+    public async Task SetMaximumChargingCurrentAsync(int amperes, CancellationToken cancellationToken)
     {
         if (_client is not null && amperes >= 6 && amperes <= 32)
         {
-            await _client.SetMaxChargingCurrentAsync(SerialNumber, amperes, cancellationToken);
+            await _client.SetMaximumChargingCurrentAsync(SerialNumber, amperes, cancellationToken);
             await PollAsync(cancellationToken);
         }
     }
@@ -355,7 +365,10 @@ public partial class WallboxCharger : BackgroundService,
     [Operation(Title = "Unlock Charge Port")]
     public async Task UnlockChargePortAsync(CancellationToken cancellationToken)
     {
-        // Pause the session so the connector latch disengages
+        // The Type 2 connector latch disengages when the session is paused.
+        // If actively charging, we pause to release the latch. If idle but plugged in
+        // (e.g., WaitingForCarDemand), we resume first to start a session, which can
+        // then be paused to release the latch. Tested with Tesla Model 3 (v1, 2024-08).
         if (ChargerStatus != WallboxChargerStatus.Paused)
         {
             if (IsCharging == true)
@@ -448,6 +461,7 @@ public partial class WallboxCharger : BackgroundService,
                 {
                     _client = null;
                     _lastSessionsRetrieval = DateTimeOffset.MinValue;
+                    _yearlySessionEnergy.Clear();
                     _cachedSessionEnergy = 0;
                     return;
                 }
@@ -480,14 +494,21 @@ public partial class WallboxCharger : BackgroundService,
 
         // Workaround: Pulsar MAX firmware always returns charging_speed=0.
         // Derive current from power and phases assuming 230V nominal (EU/Type 2 markets).
-        ChargingSpeed = status.ChargingSpeed > 0
-            ? status.ChargingSpeed
+        ChargingCurrent = status.ChargingCurrent > 0
+            ? status.ChargingCurrent
             : status.CurrentMode > 0 && status.ChargingPowerInKw > 0
                 ? Math.Round(status.ChargingPowerInKw * 1000m / (230m * status.CurrentMode), 1)
                 : 0;
 
-        MaximumChargingPower = status.MaxAvailablePower > 0
-            ? status.MaxAvailablePower * 1000m
+        // max_available_power from the API is actually the hardware max current in amps
+        MaximumAvailableChargingCurrent = status.MaxAvailablePower > 0
+            ? status.MaxAvailablePower
+            : null;
+
+        MaximumChargingCurrent = status.ConfigData?.MaximumChargingCurrent;
+
+        MaximumChargingPower = status.MaxAvailablePower > 0 && status.CurrentMode > 0
+            ? status.MaxAvailablePower * 230m * status.CurrentMode
             : null;
 
         IsLocked = status.ConfigData?.Locked switch
@@ -498,6 +519,7 @@ public partial class WallboxCharger : BackgroundService,
         };
 
         // Current session
+        Session.IsCharging = IsCharging == true;
         Session.ChargeLevel = status.StateOfCharge.HasValue ? status.StateOfCharge.Value / 100m : null;
         Session.AddedEnergy = status.AddedEnergy * 1000m;
         Session.AddedGreenEnergy = status.AddedGreenEnergy * 1000m;
@@ -527,22 +549,41 @@ public partial class WallboxCharger : BackgroundService,
             ? status.ConfigData.Software.LatestVersion
             : null;
 
-        // Session energy aggregation (cached, refreshed every 30 min)
+        // Session energy aggregation per year. Completed years are fetched once
+        // and cached for the service lifetime. Only the current year is re-fetched
+        // every 30 min. Session energy values are in Wh.
         if (DateTimeOffset.UtcNow > _lastSessionsRetrieval.AddMinutes(30) &&
             status.ConfigData?.GroupId is > 0 &&
             status.ConfigData?.ChargerId is > 0)
         {
             try
             {
-                var sessions = await _client.GetChargingSessionsAsync(
-                    status.ConfigData.GroupId,
-                    status.ConfigData.ChargerId,
-                    DateTimeOffset.UnixEpoch,
-                    DateTimeOffset.UtcNow,
-                    cancellationToken);
+                var currentYear = DateTimeOffset.UtcNow.Year;
 
-                // Session energy is already in Wh; recalculate total (not incremental) to avoid drift
-                _cachedSessionEnergy = sessions.Sum(s => s.Attributes?.Energy ?? 0);
+                // Cache completed years (fetched once per service lifetime)
+                for (var year = currentYear - 1; year >= 2019; year--)
+                {
+                    if (_yearlySessionEnergy.ContainsKey(year))
+                        continue;
+
+                    var yearStart = new DateTimeOffset(year, 1, 1, 0, 0, 0, TimeSpan.Zero);
+                    var yearEnd = new DateTimeOffset(year + 1, 1, 1, 0, 0, 0, TimeSpan.Zero);
+                    var sessions = await _client.GetChargingSessionsAsync(
+                        status.ConfigData.GroupId, status.ConfigData.ChargerId,
+                        yearStart, yearEnd, cancellationToken);
+                    _yearlySessionEnergy[year] = sessions.Sum(s => s.Attributes?.Energy ?? 0);
+                }
+
+                // Always re-fetch current year
+                {
+                    var yearStart = new DateTimeOffset(currentYear, 1, 1, 0, 0, 0, TimeSpan.Zero);
+                    var sessions = await _client.GetChargingSessionsAsync(
+                        status.ConfigData.GroupId, status.ConfigData.ChargerId,
+                        yearStart, DateTimeOffset.UtcNow, cancellationToken);
+                    _yearlySessionEnergy[currentYear] = sessions.Sum(s => s.Attributes?.Energy ?? 0);
+                }
+
+                _cachedSessionEnergy = _yearlySessionEnergy.Values.Sum();
                 _lastSessionsRetrieval = DateTimeOffset.UtcNow;
             }
             catch (Exception exception)
