@@ -48,13 +48,13 @@ public partial class HueLightbulb : HueDevice,
 
     [Derived]
     [State]
-    public string? Color => LightResource?.Color != null ? LightResource.ToHex(ModelId ?? "LCT001") : null;
+    public string? Color => LightResource?.Color != null ? LightResource.ToHex(Model ?? "LCT001") : null;
 
     // From https://homeautotechs.com/philips-hue-light-models-full-list/
     [Derived]
     [State]
     public decimal? Power =>
-        IsOn == true ? ModelId switch
+        IsOn == true ? Model switch
         {
             "LWA001" => 9m,
             "LWA011" => 9m,
@@ -99,7 +99,7 @@ public partial class HueLightbulb : HueDevice,
     [Derived]
     [State]
     public string? Socket =>
-        ModelId switch
+        Model switch
         {
             "LWA001" => "E26/E27",
             "LWA011" => "E26/E27",
@@ -139,7 +139,7 @@ public partial class HueLightbulb : HueDevice,
     [Derived]
     [State]
     public decimal? Lumen =>
-        IsOn == true ? ModelId switch
+        IsOn == true ? Model switch
         {
             "LWA001" => 806m,
             "LWA011" => 806m,
@@ -186,7 +186,7 @@ public partial class HueLightbulb : HueDevice,
             ColorTemperature.HasValue ? "Temperature" : null,
             Brightness.HasValue ? "Dimmable" : null,
             IsOnOffLight ? "On/Off" : null,
-            ModelId
+            Model
         }.Where(element => element != null))})";
 
     [Derived]
@@ -275,7 +275,7 @@ public partial class HueLightbulb : HueDevice,
     {
         var rgbColor = new RGBColor(color);
         var command = new UpdateLight()
-            .SetColor(rgbColor, ModelId ?? "LCT001");
+            .SetColor(rgbColor, Model ?? "LCT001");
 
         var client = Bridge.GetOrCreateClient();
         var response = await client.Light.UpdateAsync(LightResource.Id, command);

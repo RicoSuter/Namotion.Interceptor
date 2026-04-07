@@ -5,6 +5,13 @@ namespace HomeBlaze.Abstractions.Devices.Energy;
 /// </summary>
 public interface IVehicleChargerController
 {
+    /// <summary>
+    /// Pauses the current charging session.
+    /// </summary>
     Task PauseChargingAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Resumes a paused charging session.
+    /// </summary>
     Task ResumeChargingAsync(CancellationToken cancellationToken);
 }

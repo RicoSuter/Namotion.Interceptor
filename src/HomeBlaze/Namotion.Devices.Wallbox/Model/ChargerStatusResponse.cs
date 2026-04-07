@@ -55,6 +55,9 @@ internal class ChargerStatusResponse
     [JsonPropertyName("config_data")]
     public ChargerConfiguration? ConfigData { get; set; }
 
+    // Status codes from Wallbox cloud API (status_id field).
+    // See https://github.com/cliviu74/wallbox/blob/master/wallbox/statuses.py
+    // See https://github.com/home-assistant/core/blob/dev/homeassistant/components/wallbox/const.py
     public WallboxChargerStatus Status => StatusId switch
     {
         0 => WallboxChargerStatus.Disconnected,

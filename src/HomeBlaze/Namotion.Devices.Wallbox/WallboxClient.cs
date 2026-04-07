@@ -208,6 +208,10 @@ public class WallboxClient
         }, cancellationToken);
     }
 
+    // Remote action codes for POST /v3/chargers/{id}/remote-action.
+    // 1 = Resume, 2 = Pause, 3 = Reboot, 4 = Factory Reset, 5 = Update Firmware, 9 = Resume Schedule/EcoSmart
+    // See https://github.com/SKB-CGN/wallbox#variables-for-action-value
+    // See https://github.com/home-assistant/core/blob/dev/homeassistant/components/wallbox/coordinator.py
     private async Task PerformRemoteActionAsync(string chargerId, int action, CancellationToken cancellationToken)
     {
         await AuthenticateAsync<object?>(async () =>

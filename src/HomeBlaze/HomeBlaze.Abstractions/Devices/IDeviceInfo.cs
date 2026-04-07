@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 
-namespace HomeBlaze.Abstractions.Common;
+namespace HomeBlaze.Abstractions.Devices;
 
 /// <summary>
 /// Reports hardware identity: manufacturer, model, product code, serial number.

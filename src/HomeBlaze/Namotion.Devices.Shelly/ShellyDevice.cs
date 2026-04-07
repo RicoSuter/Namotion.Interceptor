@@ -4,6 +4,7 @@ using System.Text.Json;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
+using HomeBlaze.Abstractions.Devices;
 using HomeBlaze.Abstractions.Networking;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -23,7 +24,8 @@ public partial class ShellyDevice : BackgroundService,
     ILastUpdatedProvider,
     IConnectionState,
     INetworkAdapter,
-    ISoftwareState
+    ISoftwareState,
+    IDeviceInfo
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<ShellyDevice> _logger;
@@ -119,9 +121,27 @@ public partial class ShellyDevice : BackgroundService,
     [State]
     public string? DeviceName => _deviceInfo?.Name;
 
+    // IDeviceInfo
+
+    [Derived]
+    [State]
+    public string Manufacturer => "Shelly";
+
     [Derived]
     [State]
     public string? Model => _deviceInfo?.Model;
+
+    [Derived]
+    [State]
+    public string? ProductCode => _deviceInfo?.Application;
+
+    [Derived]
+    [State]
+    public string? SerialNumber => _deviceInfo?.Mac;
+
+    [Derived]
+    [State]
+    public string? HardwareRevision => _deviceInfo?.Generation?.ToString();
 
     [Derived]
     [State]
