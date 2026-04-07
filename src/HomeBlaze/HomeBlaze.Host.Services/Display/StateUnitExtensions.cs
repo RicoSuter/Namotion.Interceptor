@@ -38,7 +38,7 @@ public static class StateUnitExtensions
         {
             bool b => b ? "Yes" : "No",
             DateTime dt => dt.ToString("g"),
-            DateTimeOffset dto => dto.ToString("g"),
+            DateTimeOffset dto => dto.ToLocalTime().ToString("g zzz"),
             Enum e => e.ToString(),
             _ => value.ToString() ?? ""
         };
@@ -89,6 +89,7 @@ public static class StateUnitExtensions
         StateUnit.Hertz => "Hz",
         StateUnit.Lumen => "lm",
         StateUnit.Lux => "lx",
+        StateUnit.Kilometer => "km",
         StateUnit.Meter => "m",
         StateUnit.Millimeter => "mm",
         StateUnit.MillimeterPerHour => "mm/h",

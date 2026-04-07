@@ -1,0 +1,9 @@
+{
+  "$type": "Namotion.Devices.Wallbox.WallboxCharger",
+  "name": "Wallbox Charger",
+  "email": "your@email.com",
+  "password": "",
+  "serialNumber": "",
+  "pollingInterval": "00:01:30",
+  "retryInterval": "00:01:00"
+}
