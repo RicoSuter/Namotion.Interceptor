@@ -89,6 +89,7 @@ public static class StateUnitExtensions
         StateUnit.Hertz => "Hz",
         StateUnit.Lumen => "lm",
         StateUnit.Lux => "lx",
+        StateUnit.Kilometer => "km",
         StateUnit.Meter => "m",
         StateUnit.Millimeter => "mm",
         StateUnit.MillimeterPerHour => "mm/h",

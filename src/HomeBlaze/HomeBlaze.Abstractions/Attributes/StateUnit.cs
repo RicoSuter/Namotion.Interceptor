@@ -17,6 +17,7 @@ public enum StateUnit
     Lumen,
     Lux,
     Meter,
+    Kilometer,
     Millimeter,
     MillimeterPerHour,
     Kilobyte,

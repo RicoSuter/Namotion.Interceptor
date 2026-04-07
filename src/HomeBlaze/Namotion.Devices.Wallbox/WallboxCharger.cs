@@ -526,7 +526,7 @@ public partial class WallboxCharger : BackgroundService,
         Session.AddedGridEnergy = status.AddedGridEnergy * 1000m;
         Session.AddedRange = status.AddedRange;
         Session.ChargingTime = TimeSpan.FromSeconds(status.ChargingTime);
-        Session.SessionCost = status.Cost;
+        Session.SessionCost = status.AddedEnergy > 0 && status.Cost == 0 ? null : status.Cost;
 
         // Energy pricing
         EnergyPrice = status.ConfigData?.EnergyPrice;

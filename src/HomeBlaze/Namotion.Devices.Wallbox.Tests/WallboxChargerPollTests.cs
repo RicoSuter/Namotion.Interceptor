@@ -160,17 +160,33 @@ public class WallboxChargerPollTests
     // MaximumChargingPower
 
     [Fact]
-    public void WhenMaxAvailablePowerPositive_ThenConvertsToWatts()
+    public void WhenMaxAvailablePowerAndCurrentMode_ThenComputesWatts()
     {
         // Arrange
         var charger = CreateCharger();
-        var status = new ChargerStatusResponse { StatusId = 193, MaxAvailablePower = 22m };
+        var status = new ChargerStatusResponse { StatusId = 193, MaxAvailablePower = 16m, CurrentMode = 3 };
+
+        // Act
+        ApplyStatus(charger, status);
+
+        // Assert — 16A × 230V × 3 phases = 11040W
+        Assert.Equal(11040m, charger.MaximumChargingPower);
+        Assert.Equal(16m, charger.MaximumAvailableChargingCurrent);
+    }
+
+    [Fact]
+    public void WhenMaxAvailablePowerPositiveButCurrentModeZero_ThenReturnsNull()
+    {
+        // Arrange
+        var charger = CreateCharger();
+        var status = new ChargerStatusResponse { StatusId = 193, MaxAvailablePower = 16m, CurrentMode = 0 };
 
         // Act
         ApplyStatus(charger, status);
 
         // Assert
-        Assert.Equal(22000m, charger.MaximumChargingPower);
+        Assert.Null(charger.MaximumChargingPower);
+        Assert.Equal(16m, charger.MaximumAvailableChargingCurrent);
     }
 
     [Fact]
@@ -185,6 +201,27 @@ public class WallboxChargerPollTests
 
         // Assert
         Assert.Null(charger.MaximumChargingPower);
+        Assert.Null(charger.MaximumAvailableChargingCurrent);
+    }
+
+    // MaximumChargingCurrent (from config)
+
+    [Fact]
+    public void WhenConfigMaxChargingCurrent_ThenSetsValue()
+    {
+        // Arrange
+        var charger = CreateCharger();
+        var status = new ChargerStatusResponse
+        {
+            StatusId = 193,
+            ConfigData = new ChargerConfiguration { MaximumChargingCurrent = 12m }
+        };
+
+        // Act
+        ApplyStatus(charger, status);
+
+        // Assert
+        Assert.Equal(12m, charger.MaximumChargingCurrent);
     }
 
     // IsLocked
@@ -280,6 +317,44 @@ public class WallboxChargerPollTests
         Assert.Equal(30m, charger.Session.AddedRange);
         Assert.Equal(TimeSpan.FromHours(1), charger.Session.ChargingTime);
         Assert.Equal(1.50m, charger.Session.SessionCost);
+    }
+
+    [Fact]
+    public void WhenSessionCostZeroAndEnergyAdded_ThenSessionCostNull()
+    {
+        // Arrange
+        var charger = CreateCharger();
+        var status = new ChargerStatusResponse
+        {
+            StatusId = 193,
+            AddedEnergy = 5.5m,
+            Cost = 0m
+        };
+
+        // Act
+        ApplyStatus(charger, status);
+
+        // Assert — cost not yet calculated by API during active session
+        Assert.Null(charger.Session.SessionCost);
+    }
+
+    [Fact]
+    public void WhenSessionCostZeroAndNoEnergy_ThenSessionCostZero()
+    {
+        // Arrange
+        var charger = CreateCharger();
+        var status = new ChargerStatusResponse
+        {
+            StatusId = 161,
+            AddedEnergy = 0m,
+            Cost = 0m
+        };
+
+        // Act
+        ApplyStatus(charger, status);
+
+        // Assert
+        Assert.Equal(0m, charger.Session.SessionCost);
     }
 
     // EcoSmart
@@ -403,8 +478,14 @@ public class WallboxChargerPollTests
                 ? Math.Round(status.ChargingPowerInKw * 1000m / (230m * status.CurrentMode), 1)
                 : 0;
 
-        charger.MaximumChargingPower = status.MaxAvailablePower > 0
-            ? status.MaxAvailablePower * 1000m
+        charger.MaximumAvailableChargingCurrent = status.MaxAvailablePower > 0
+            ? status.MaxAvailablePower
+            : null;
+
+        charger.MaximumChargingCurrent = status.ConfigData?.MaximumChargingCurrent;
+
+        charger.MaximumChargingPower = status.MaxAvailablePower > 0 && status.CurrentMode > 0
+            ? status.MaxAvailablePower * 230m * status.CurrentMode
             : null;
 
         charger.IsLocked = status.ConfigData?.Locked switch
@@ -420,7 +501,7 @@ public class WallboxChargerPollTests
         charger.Session.AddedGridEnergy = status.AddedGridEnergy * 1000m;
         charger.Session.AddedRange = status.AddedRange;
         charger.Session.ChargingTime = TimeSpan.FromSeconds(status.ChargingTime);
-        charger.Session.SessionCost = status.Cost;
+        charger.Session.SessionCost = status.AddedEnergy > 0 && status.Cost == 0 ? null : status.Cost;
 
         charger.EcoSmartEnabled = status.ConfigData?.Ecosmart?.Enabled;
         charger.EcoSmartMode = status.ConfigData?.Ecosmart is { } eco
