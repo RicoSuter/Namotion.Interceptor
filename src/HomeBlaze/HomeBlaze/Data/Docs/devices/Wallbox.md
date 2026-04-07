@@ -64,6 +64,7 @@ The Wallbox integration supports Pulsar MAX, Pulsar Plus, Commander 2, Quasar, a
 ## Interfaces
 
 - `IVehicleCharger` - EV charger state and control (pause/resume)
+- `IPowerSensor` - Power and energy consumption
 - `IConnectionState` - Cloud connectivity
 - `ISoftwareState` - Firmware version tracking
 - `IDeviceInfo` - Hardware identity (manufacturer, model, serial, product code)
@@ -85,13 +86,16 @@ The Wallbox integration supports Pulsar MAX, Pulsar Plus, Commander 2, Quasar, a
 
 ## Cloud API
 
-The integration uses the Wallbox cloud API (`api.wall-box.com`) with JWT authentication. The API has rate limiting -- polling intervals below 60 seconds are not recommended.
+The integration uses two Wallbox cloud API hosts: `user-api.wall-box.com` for authentication and `api.wall-box.com` for data/control. The API has rate limiting -- polling intervals below 60 seconds are not recommended.
 
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /users/signin` | Authentication (JWT) |
-| `GET /chargers/status/{id}` | Charger status and configuration |
-| `PUT /v2/charger/{id}` | Lock/unlock, set current |
-| `POST /v3/chargers/{id}/remote-action` | Pause, resume, reboot |
-| `PUT /v4/chargers/{id}/eco-smart` | Solar charging mode |
-| `GET /v4/groups/{id}/charger-charging-sessions` | Historical sessions |
+| Endpoint | Host | Purpose |
+|----------|------|---------|
+| `GET /users/signin` | user-api | Authentication (Basic → JWT) |
+| `GET /users/refresh-token` | user-api | Token refresh (Bearer) |
+| `GET /v3/chargers/groups` | api | List chargers for account |
+| `GET /chargers/status/{id}` | api | Charger status and configuration |
+| `PUT /v2/charger/{id}` | api | Lock/unlock, set current |
+| `POST /chargers/config/{id}` | api | Set energy price, ICP max current |
+| `POST /v3/chargers/{id}/remote-action` | api | Pause, resume, reboot, firmware update |
+| `PUT /v4/chargers/{id}/eco-smart` | api | Solar charging mode |
+| `GET /v4/groups/{id}/charger-charging-sessions` | api | Historical sessions |

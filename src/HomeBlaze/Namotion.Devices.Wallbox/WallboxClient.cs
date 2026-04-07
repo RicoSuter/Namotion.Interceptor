@@ -18,6 +18,7 @@ public class WallboxClient
 
     private const string BaseUrl = "https://api.wall-box.com/";
     private const string AuthUrl = "https://user-api.wall-box.com/users/signin";
+    private const string RefreshUrl = "https://user-api.wall-box.com/users/refresh-token";
 
     public WallboxClient(IHttpClientFactory httpClientFactory, string email, string password)
     {
@@ -248,7 +249,7 @@ public class WallboxClient
             await EnsureAuthenticatedAsync(cancellationToken);
             return await action();
         }
-        catch
+        catch (HttpRequestException)
         {
             _token = null;
             _tokenExpiration = DateTimeOffset.MinValue;
@@ -264,7 +265,7 @@ public class WallboxClient
         // Try refresh token first (avoids sending credentials)
         if (_refreshToken is not null && _refreshTokenExpiration > DateTimeOffset.UtcNow)
         {
-            using var refreshRequest = new HttpRequestMessage(HttpMethod.Get, $"{AuthUrl.Replace("users/signin", "users/refresh-token")}");
+            using var refreshRequest = new HttpRequestMessage(HttpMethod.Get, RefreshUrl);
             refreshRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _refreshToken);
             refreshRequest.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             refreshRequest.Headers.Add("Partner", "wallbox");
@@ -299,13 +300,14 @@ public class WallboxClient
         var attributes = jsonDocument.RootElement.GetProperty("data").GetProperty("attributes");
 
         _token = attributes.GetProperty("token").GetString();
+        // Wallbox API returns TTL as an absolute Unix timestamp in milliseconds
         var ttlMs = attributes.GetProperty("ttl").GetInt64();
-        _tokenExpiration = DateTimeOffset.UtcNow.AddMilliseconds(ttlMs);
+        _tokenExpiration = DateTimeOffset.FromUnixTimeMilliseconds(ttlMs);
 
         if (attributes.TryGetProperty("refresh_token", out var refreshToken))
             _refreshToken = refreshToken.GetString();
 
         if (attributes.TryGetProperty("refresh_token_ttl", out var refreshTtl))
-            _refreshTokenExpiration = DateTimeOffset.UtcNow.AddMilliseconds(refreshTtl.GetInt64());
+            _refreshTokenExpiration = DateTimeOffset.FromUnixTimeMilliseconds(refreshTtl.GetInt64());
     }
 }
