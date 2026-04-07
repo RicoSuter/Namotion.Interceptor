@@ -125,7 +125,7 @@ public partial class ShellyDevice : BackgroundService,
 
     [Derived]
     [State]
-    public string Manufacturer => "Shelly";
+    public string? Manufacturer => "Shelly";
 
     [Derived]
     [State]

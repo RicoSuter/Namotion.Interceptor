@@ -85,8 +85,12 @@ public partial class HueDevice :
     [State]
     public string? ProductCode => Device?.ProductData?.ProductName;
 
+    [Derived]
+    [State]
     public string? SerialNumber => null;
 
+    [Derived]
+    [State]
     public string? HardwareRevision => null;
 
     public HueDevice(Device device, ZigbeeConnectivity? zigbeeConnectivity, HueBridge bridge)

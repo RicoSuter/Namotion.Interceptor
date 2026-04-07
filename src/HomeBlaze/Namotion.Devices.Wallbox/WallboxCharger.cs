@@ -331,6 +331,9 @@ public partial class WallboxCharger : BackgroundService,
     }
 
     // Charge port lock operations (v1 parity)
+    // Wallbox has no dedicated charge port lock API. The Type 2 connector locks
+    // mechanically while a charging session is active and unlocks when paused.
+    // These operations therefore toggle pause/resume to control the physical latch.
 
     [Operation(Title = "Toggle Charge Port Lock")]
     public async Task ToggleChargePortLockAsync(CancellationToken cancellationToken)
@@ -344,6 +347,7 @@ public partial class WallboxCharger : BackgroundService,
     [Operation(Title = "Lock Charge Port")]
     public async Task LockChargePortAsync(CancellationToken cancellationToken)
     {
+        // Resume charging to re-engage the connector latch
         if (ChargerStatus == WallboxChargerStatus.Paused)
             await ResumeChargingAsync(cancellationToken);
     }
@@ -351,6 +355,7 @@ public partial class WallboxCharger : BackgroundService,
     [Operation(Title = "Unlock Charge Port")]
     public async Task UnlockChargePortAsync(CancellationToken cancellationToken)
     {
+        // Pause the session so the connector latch disengages
         if (ChargerStatus != WallboxChargerStatus.Paused)
         {
             if (IsCharging == true)
@@ -532,7 +537,7 @@ public partial class WallboxCharger : BackgroundService,
                 var sessions = await _client.GetChargingSessionsAsync(
                     status.ConfigData.GroupId,
                     status.ConfigData.ChargerId,
-                    DateTimeOffset.MinValue,
+                    DateTimeOffset.UnixEpoch,
                     DateTimeOffset.UtcNow,
                     cancellationToken);
 
@@ -578,5 +583,11 @@ public partial class WallboxCharger : BackgroundService,
         try { _configChangedSignal.Release(); }
         catch (SemaphoreFullException) { }
         return Task.CompletedTask;
+    }
+
+    public override void Dispose()
+    {
+        _configChangedSignal.Dispose();
+        base.Dispose();
     }
 }
