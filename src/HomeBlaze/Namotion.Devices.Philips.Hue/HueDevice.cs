@@ -17,6 +17,7 @@ public partial class HueDevice :
     IConnectionState,
     IMonitoredService,
     IUnknownDevice,
+    IDeviceInfo,
     ITitleProvider,
     IIconProvider,
     ILastUpdatedProvider
@@ -70,13 +71,23 @@ public partial class HueDevice :
     [State]
     public string? SoftwareVersion => Device?.ProductData?.SoftwareVersion;
 
-    [Derived]
-    [State]
-    public string? ManufacturerName => Device?.ProductData?.ManufacturerName;
+    // IDeviceInfo
 
     [Derived]
     [State]
-    public string? ModelId => Device?.ProductData?.ModelId;
+    public string? Manufacturer => Device?.ProductData?.ManufacturerName;
+
+    [Derived]
+    [State]
+    public string? Model => Device?.ProductData?.ModelId;
+
+    [Derived]
+    [State]
+    public string? ProductCode => Device?.ProductData?.ProductName;
+
+    public string? SerialNumber => null;
+
+    public string? HardwareRevision => null;
 
     public HueDevice(Device device, ZigbeeConnectivity? zigbeeConnectivity, HueBridge bridge)
     {

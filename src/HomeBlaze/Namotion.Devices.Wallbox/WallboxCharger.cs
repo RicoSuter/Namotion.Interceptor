@@ -2,6 +2,7 @@ using System.ComponentModel;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
+using HomeBlaze.Abstractions.Devices;
 using HomeBlaze.Abstractions.Devices.Energy;
 using HomeBlaze.Abstractions.Networking;
 using HomeBlaze.Abstractions.Sensors;
@@ -75,8 +76,8 @@ public partial class WallboxCharger : BackgroundService,
     [State(Position = 5, Unit = StateUnit.Ampere, IsEstimated = true)]
     public partial decimal? ChargingSpeed { get; internal set; }
 
-    [State(Position = 6, Unit = StateUnit.Ampere)]
-    public partial decimal? MaxChargingCurrent { get; internal set; }
+    [State(Position = 6, Unit = StateUnit.Watt)]
+    public partial decimal? MaximumChargingPower { get; internal set; }
 
     [State(Position = 7, IsDiscrete = true)]
     public partial bool? IsLocked { get; internal set; }
@@ -212,7 +213,7 @@ public partial class WallboxCharger : BackgroundService,
         IsCharging = null;
         ChargingPower = null;
         ChargingSpeed = null;
-        MaxChargingCurrent = null;
+        MaximumChargingPower = null;
         IsLocked = null;
         TotalEnergyConsumed = null;
         EnergyPrice = null;
@@ -480,7 +481,9 @@ public partial class WallboxCharger : BackgroundService,
                 ? Math.Round(status.ChargingPowerInKw * 1000m / (230m * status.CurrentMode), 1)
                 : 0;
 
-        MaxChargingCurrent = status.ConfigData?.MaxChargingCurrent;
+        MaximumChargingPower = status.MaxAvailablePower > 0
+            ? status.MaxAvailablePower * 1000m
+            : null;
 
         IsLocked = status.ConfigData?.Locked switch
         {
