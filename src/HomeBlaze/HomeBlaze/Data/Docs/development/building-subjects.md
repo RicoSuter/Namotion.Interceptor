@@ -116,7 +116,7 @@ public enum StateUnit
     Percent,           // 75%
     DegreeCelsius,     // 23.5 °C
     Watt,              // 100 W
-    KiloWatt,          // 1.5 kW
+    Kilowatt,          // 1.5 kW
     WattHour,          // 500 Wh
     Volt,              // 230 V
     Ampere,            // 5 A
@@ -128,7 +128,9 @@ public enum StateUnit
     MillimeterPerHour, // 5 mm/h
     Kilobyte,          // 1024 KB
     KilobytePerSecond, // 100 KB/s
-    MegabitsPerSecond, // 100 Mbps
+    MegabitPerSecond,  // 100 Mbps
+    KilowattHour,      // 500 kWh
+    Milliampere,       // 100 mA
     LiterPerHour,      // 50 L/h
     Currency,          // $10.00
     HexColor           // #FF0000
