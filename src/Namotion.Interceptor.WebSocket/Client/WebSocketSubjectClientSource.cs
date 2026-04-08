@@ -12,6 +12,7 @@ using Namotion.Interceptor.Connectors.Resilience;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.WebSocket.Internal;
 using Namotion.Interceptor.WebSocket.Protocol;
 using Namotion.Interceptor.WebSocket.Serialization;
@@ -44,6 +45,14 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
 
     private readonly ClientSequenceTracker _sequenceTracker = new();
+    private long _lastUpdateAppliedTicks;
+
+    /// <summary>
+    /// Gets the last successfully received sequence number from the server.
+    /// Returns the Welcome sequence if no updates have been received yet, or -1 if not connected.
+    /// </summary>
+    public long LastReceivedSequence => _sequenceTracker.ExpectedNextSequence - 1;
+
     private volatile bool _isStarted;
     private volatile bool _isForceKill;
     private volatile CancellationTokenSource? _forceKillCts;
@@ -251,6 +260,16 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             // Claim ownership of all properties matching the path provider
             ClaimPropertyOwnership();
 
+            // Auto-claim properties of new subjects when they appear via structural mutations.
+            // This ensures value changes on dynamically added collection/dictionary items
+            // are forwarded to the server.
+            var lifecycle = _subject.Context.TryGetLifecycleInterceptor();
+            if (lifecycle is not null)
+            {
+                lifecycle.SubjectAttached -= OnSubjectAttached;
+                lifecycle.SubjectAttached += OnSubjectAttached;
+            }
+
             _initialState = null;
         });
     }
@@ -266,10 +285,12 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             return;
         }
 
-        // Get all leaf properties, filtered by PathProvider if configured
+        // Get all properties (including structural), filtered by PathProvider if configured.
+        // Structural properties (Collection, Dictionary, ObjectRef) must be claimed so that
+        // client-side structural mutations are forwarded to the server.
         var properties = registeredSubject
             .GetAllProperties()
-            .Where(p => !p.CanContainSubjects && (pathProvider is null || pathProvider.IsPropertyIncluded(p)))
+            .Where(p => pathProvider is null || pathProvider.IsPropertyIncluded(p))
             .ToList();
 
         var claimedCount = 0;
@@ -288,6 +309,22 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         }
 
         _logger.LogInformation("Claimed ownership of {Count} properties for WebSocket sync.", claimedCount);
+    }
+
+    private void OnSubjectAttached(SubjectLifecycleChange change)
+    {
+        var pathProvider = _configuration.PathProvider;
+        var registeredSubject = change.Subject.TryGetRegisteredSubject();
+        if (registeredSubject is null)
+            return;
+
+        foreach (var property in registeredSubject.Properties)
+        {
+            if (pathProvider is not null && !pathProvider.IsPropertyIncluded(property))
+                continue;
+
+            _ownership.ClaimSource(property.Reference);
+        }
     }
 
     public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
@@ -426,6 +463,36 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                                         heartbeat.Sequence, _sequenceTracker.ExpectedNextSequence);
                                     return; // Exit receive loop -> triggers reconnection
                                 }
+
+                                // State hash divergence detection: only compare when the system
+                                // is quiet (no updates applied recently). During active mutations,
+                                // server and client are always slightly out of sync — comparing
+                                // hashes would trigger constant unnecessary reconnections.
+                                var timeSinceLastUpdate = Environment.TickCount64 - Volatile.Read(ref _lastUpdateAppliedTicks);
+                                if (heartbeat.StateHash is not null && timeSinceLastUpdate > 10_000)
+                                {
+                                    try
+                                    {
+                                        var applyLock = _subject.GetApplyLock();
+                                        string? clientHash;
+                                        lock (applyLock)
+                                        {
+                                            clientHash = Internal.StateHashComputer.ComputeStructuralHash(
+                                                _subject);
+                                        }
+                                        if (clientHash is not null && clientHash != heartbeat.StateHash)
+                                        {
+                                            _logger.LogWarning(
+                                                "Structural hash mismatch: server={ServerHash}, client={ClientHash}. Triggering reconnection.",
+                                                heartbeat.StateHash?[..8], clientHash[..8]);
+                                            return; // Exit receive loop -> triggers reconnection
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger.LogDebug(ex, "Failed to compute client state hash");
+                                    }
+                                }
                                 break;
 
                             case MessageType.Error:
@@ -482,6 +549,8 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     {
         var propertyWriter = _propertyWriter;
         if (propertyWriter is null) return;
+
+        Volatile.Write(ref _lastUpdateAppliedTicks, Environment.TickCount64);
 
         propertyWriter.Write(
             (update, subject: _subject, source: this, factory: _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance),
@@ -694,6 +763,11 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
             _receiveCts.Dispose();
         }
+
+        // Unsubscribe from lifecycle events
+        var lifecycle = _subject.Context.TryGetLifecycleInterceptor();
+        if (lifecycle is not null)
+            lifecycle.SubjectAttached -= OnSubjectAttached;
 
         // Clean up resources
         _ownership.Dispose();

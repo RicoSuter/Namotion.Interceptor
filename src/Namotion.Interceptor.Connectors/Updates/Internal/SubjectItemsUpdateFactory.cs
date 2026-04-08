@@ -1,5 +1,4 @@
 using System.Collections;
-using Namotion.Interceptor.Registry.Performance;
 
 namespace Namotion.Interceptor.Connectors.Updates.Internal;
 
@@ -9,10 +8,9 @@ namespace Namotion.Interceptor.Connectors.Updates.Internal;
 /// </summary>
 internal static class SubjectItemsUpdateFactory
 {
-    private static readonly ObjectPool<CollectionDiffBuilder> ChangeBuilderPool = new(() => new CollectionDiffBuilder());
-
     /// <summary>
     /// Builds a complete collection update with all items.
+    /// Items array order defines collection ordering.
     /// </summary>
     internal static void BuildCollectionComplete(
         SubjectPropertyUpdate update,
@@ -25,7 +23,6 @@ internal static class SubjectItemsUpdateFactory
             return;
 
         var items = collection as IReadOnlyList<IInterceptorSubject> ?? collection.ToList();
-        update.Count = items.Count;
         update.Items = new List<SubjectPropertyItemUpdate>(items.Count);
 
         for (var i = 0; i < items.Count; i++)
@@ -36,101 +33,61 @@ internal static class SubjectItemsUpdateFactory
 
             update.Items.Add(new SubjectPropertyItemUpdate
             {
-                Index = i,
                 Id = itemId
             });
         }
     }
 
     /// <summary>
-    /// Builds a diff collection update with Insert, Remove, Move operations and sparse property updates.
+    /// Builds a collection update with complete item ordering but only full properties for newly inserted items.
+    /// Uses the old collection to determine which items are new (need full properties) vs existing (just ID reference).
+    /// This avoids computing diff operations (Move/Insert/Remove) which can be incorrect when old values are stale
+    /// (e.g., from the retry queue after reconnection or after ChangeQueueProcessor deduplication).
     /// </summary>
-    internal static void BuildCollectionDiff(
+    internal static void BuildCollectionUpdate(
         SubjectPropertyUpdate update,
         IEnumerable<IInterceptorSubject>? oldCollection,
-        IEnumerable<IInterceptorSubject>? newCollection,
+        IEnumerable<IInterceptorSubject> newCollection,
         SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Collection;
 
-        if (newCollection is null)
-            return;
-
-        var oldItems = oldCollection as IReadOnlyList<IInterceptorSubject> ?? oldCollection?.ToList() ?? [];
         var newItems = newCollection as IReadOnlyList<IInterceptorSubject> ?? newCollection.ToList();
-        update.Count = newItems.Count;
+        update.Items = new List<SubjectPropertyItemUpdate>(newItems.Count);
 
-        var changeBuilder = ChangeBuilderPool.Rent();
-        try
+        // Items in the old collection are assumed known to receivers (via Welcome or previous updates)
+        HashSet<IInterceptorSubject>? oldItemSet = null;
+        if (oldCollection is not null)
         {
-            changeBuilder.GetCollectionChanges(
-                oldItems, newItems,
-                out var operations,
-                out var newItemsToProcess,
-                out var reorderedItems);
-
-            // Add Insert operations for new items
-            if (newItemsToProcess is not null)
+            foreach (var item in oldCollection)
             {
-                foreach (var (index, item) in newItemsToProcess)
-                {
-                    var itemId = builder.GetOrCreateId(item);
-                    SubjectUpdateFactory.ProcessSubjectComplete(item, builder);
-
-                    operations ??= [];
-                    operations.Add(new SubjectCollectionOperation
-                    {
-                        Action = SubjectCollectionOperationType.Insert,
-                        Index = index,
-                        Id = itemId
-                    });
-                }
+                oldItemSet ??= new(ReferenceEqualityComparer.Instance);
+                oldItemSet.Add(item);
             }
-
-            // Add Move operations for reordered items
-            if (reorderedItems is not null)
-            {
-                foreach (var (oldIndex, newIndex, _) in reorderedItems)
-                {
-                    operations ??= [];
-                    operations.Add(new SubjectCollectionOperation
-                    {
-                        Action = SubjectCollectionOperationType.Move,
-                        FromIndex = oldIndex,
-                        Index = newIndex
-                    });
-                }
-            }
-
-            // Generate sparse updates for common items with property changes
-            List<SubjectPropertyItemUpdate>? updates = null;
-            foreach (var item in changeBuilder.GetCommonItems())
-            {
-                if (builder.SubjectHasUpdates(item))
-                {
-                    var itemId = builder.GetOrCreateId(item);
-                    var newIndex = changeBuilder.GetNewIndex(item);
-                    updates ??= [];
-                    updates.Add(new SubjectPropertyItemUpdate
-                    {
-                        Index = newIndex,
-                        Id = itemId
-                    });
-                }
-            }
-
-            update.Operations = operations;
-            update.Items = updates;
         }
-        finally
+
+        for (var i = 0; i < newItems.Count; i++)
         {
-            changeBuilder.Clear();
-            ChangeBuilderPool.Return(changeBuilder);
+            var item = newItems[i];
+            var itemId = builder.GetOrCreateId(item);
+
+            // Only include full properties for items not in the old collection
+            // (they are new and receivers need full data to create them)
+            if (oldItemSet is null || !oldItemSet.Contains(item))
+            {
+                SubjectUpdateFactory.ProcessSubjectComplete(item, builder);
+            }
+
+            update.Items.Add(new SubjectPropertyItemUpdate
+            {
+                Id = itemId
+            });
         }
     }
 
     /// <summary>
     /// Builds a complete dictionary update with all entries.
+    /// Each item includes id + key.
     /// </summary>
     internal static void BuildDictionaryComplete(
         SubjectPropertyUpdate update,
@@ -142,7 +99,6 @@ internal static class SubjectItemsUpdateFactory
         if (dictionary is null)
             return;
 
-        update.Count = dictionary.Count;
         update.Items = new List<SubjectPropertyItemUpdate>(dictionary.Count);
 
         foreach (DictionaryEntry entry in dictionary)
@@ -154,110 +110,50 @@ internal static class SubjectItemsUpdateFactory
 
                 update.Items.Add(new SubjectPropertyItemUpdate
                 {
-                    Index = entry.Key,
-                    Id = itemId
+                    Id = itemId,
+                    Key = entry.Key.ToString()
                 });
             }
         }
     }
 
     /// <summary>
-    /// Builds a diff dictionary update with Insert, Remove operations and sparse property updates.
+    /// Builds a dictionary update with complete entries but only full properties for newly added items.
+    /// Uses the old dictionary to determine which items are new (need full properties) vs existing (just ID + key).
+    /// This avoids computing diff operations (Insert/Remove) which can be incorrect when old values are stale.
     /// </summary>
-    internal static void BuildDictionaryDiff(
+    internal static void BuildDictionaryUpdate(
         SubjectPropertyUpdate update,
-        IDictionary? oldDict,
-        IDictionary? newDict,
+        IDictionary? oldDictionary,
+        IDictionary newDictionary,
         SubjectUpdateBuilder builder)
     {
         update.Kind = SubjectPropertyUpdateKind.Dictionary;
 
-        if (newDict is null)
-            return;
+        update.Items = new List<SubjectPropertyItemUpdate>(newDictionary.Count);
 
-        update.Count = newDict.Count;
-
-        var changeBuilder = ChangeBuilderPool.Rent();
-        try
+        foreach (DictionaryEntry entry in newDictionary)
         {
-            changeBuilder.GetDictionaryChanges(
-                oldDict, newDict,
-                out var operations,
-                out var newItemsToProcess,
-                out var removedKeys);
-
-            // Add Insert operations for new items
-            if (newItemsToProcess is not null)
+            if (entry.Value is IInterceptorSubject item)
             {
-                foreach (var (key, item) in newItemsToProcess)
+                var itemId = builder.GetOrCreateId(item);
+
+                // Only include full properties for items not in the old dictionary
+                var isExisting = oldDictionary is not null
+                    && oldDictionary.Contains(entry.Key)
+                    && ReferenceEquals(oldDictionary[entry.Key], item);
+
+                if (!isExisting)
                 {
-                    var itemId = builder.GetOrCreateId(item);
                     SubjectUpdateFactory.ProcessSubjectComplete(item, builder);
-
-                    operations ??= [];
-                    operations.Add(new SubjectCollectionOperation
-                    {
-                        Action = SubjectCollectionOperationType.Insert,
-                        Index = key,
-                        Id = itemId
-                    });
                 }
-            }
 
-            // Add Remove operations
-            if (removedKeys is not null)
-            {
-                foreach (var removedKey in removedKeys)
+                update.Items.Add(new SubjectPropertyItemUpdate
                 {
-                    operations ??= [];
-                    operations.Add(new SubjectCollectionOperation
-                    {
-                        Action = SubjectCollectionOperationType.Remove,
-                        Index = removedKey
-                    });
-                }
+                    Id = itemId,
+                    Key = entry.Key.ToString()
+                });
             }
-
-            // Check for property updates on existing items
-            // Build HashSet for O(1) lookup instead of O(n) Any() per iteration
-            HashSet<object>? newKeysSet = null;
-            if (newItemsToProcess is not null)
-            {
-                newKeysSet = new HashSet<object>(newItemsToProcess.Count);
-                foreach (var (key, _) in newItemsToProcess)
-                    newKeysSet.Add(key);
-            }
-
-            List<SubjectPropertyItemUpdate>? updates = null;
-            foreach (DictionaryEntry entry in newDict)
-            {
-                var key = entry.Key;
-                if (entry.Value is not IInterceptorSubject item)
-                    continue;
-
-                // Skip if this is a new item (already handled above)
-                if (newKeysSet?.Contains(key) == true)
-                    continue;
-
-                if (builder.SubjectHasUpdates(item))
-                {
-                    var itemId = builder.GetOrCreateId(item);
-                    updates ??= [];
-                    updates.Add(new SubjectPropertyItemUpdate
-                    {
-                        Index = key,
-                        Id = itemId
-                    });
-                }
-            }
-
-            update.Operations = operations;
-            update.Items = updates;
-        }
-        finally
-        {
-            changeBuilder.Clear();
-            ChangeBuilderPool.Return(changeBuilder);
         }
     }
 }

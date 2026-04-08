@@ -1,5 +1,4 @@
 using Namotion.Interceptor.Connectors.Updates.Internal;
-using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.Connectors.Updates;
 
@@ -8,8 +7,18 @@ namespace Namotion.Interceptor.Connectors.Updates;
 /// </summary>
 public static class SubjectUpdateExtensions
 {
+    private static readonly (string?, string) ApplyLockKey = (null, "Namotion.Interceptor.Connectors.ApplyLock");
+
     /// <summary>
-    /// Applies update to a subject.
+    /// Gets the per-subject apply lock. Use this to serialize operations that read
+    /// graph state (e.g., hash computation) with concurrent applies.
+    /// </summary>
+    public static object GetApplyLock(this IInterceptorSubject subject)
+        => subject.Data.GetOrAdd(ApplyLockKey, new object())!;
+
+    /// <summary>
+    /// Applies update to a subject. Serialized per subject — concurrent applies
+    /// to the same root subject are safe.
     /// </summary>
     /// <param name="subject">The subject.</param>
     /// <param name="update">The update data.</param>
@@ -19,12 +28,16 @@ public static class SubjectUpdateExtensions
         this IInterceptorSubject subject,
         SubjectUpdate update,
         ISubjectFactory? subjectFactory,
-        Action<RegisteredSubjectProperty, SubjectPropertyUpdate>? transformValueBeforeApply = null)
+        Action<PropertyReference, SubjectPropertyUpdate>? transformValueBeforeApply = null)
     {
-        SubjectUpdateApplier.ApplyUpdate(
-            subject,
-            update,
-            subjectFactory ?? DefaultSubjectFactory.Instance,
-            transformValueBeforeApply);
+        var applyLock = subject.GetApplyLock();
+        lock (applyLock)
+        {
+            SubjectUpdateApplier.ApplyUpdate(
+                subject,
+                update,
+                subjectFactory ?? DefaultSubjectFactory.Instance,
+                transformValueBeforeApply);
+        }
     }
 }

@@ -446,6 +446,8 @@ Unlike MQTT and OPC UA connectors which maintain per-property topic/node caches 
 
 - **Broadcast timeout**: A slow client can delay broadcast completion for other clients. Broadcasts have a 10-second timeout to mitigate this — sends that haven't completed continue in the background, and zombie detection cleans up persistently slow connections. However, very slow clients may still cause temporary backpressure before being removed. This should be revisited if it becomes a bottleneck in high-throughput scenarios.
 
+- **No server acknowledgment for client writes**: When a client sends an update to the server, `WriteChangesAsync` returns success as soon as the WebSocket send completes — it does not wait for the server to acknowledge or apply the change. This means transactions committed over WebSocket confirm only that the message was sent, not that the server accepted it. This differs from OPC UA and MQTT sources, where the external system provides real write confirmation. If the server fails to apply the update (e.g., validation error, concurrent conflict), the client is not notified. See [#231](https://github.com/RicoSuter/Namotion.Interceptor/issues/231) for planned server-ack support.
+
 ## Future Extensibility
 
 The protocol is designed for future enhancements:
