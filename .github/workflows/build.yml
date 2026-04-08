@@ -250,7 +250,13 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - run: dotnet pack src/Namotion.Interceptor.slnx --configuration Release --output ${{ env.NUGET_DIRECTORY }} -p:PackageVersion=${{ github.event.release.tag_name }}
+      - name: Extract version from tag
+        id: version
+        run: |
+          $version = "${{ github.event.release.tag_name }}" -replace '^v', ''
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+
+      - run: dotnet pack src/Namotion.Interceptor.slnx --configuration Release --output ${{ env.NUGET_DIRECTORY }} -p:PackageVersion=${{ steps.version.outputs.VERSION }}
 
       - uses: actions/upload-artifact@v4
         with:
