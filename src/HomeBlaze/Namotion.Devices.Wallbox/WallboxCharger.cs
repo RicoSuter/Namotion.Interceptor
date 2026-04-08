@@ -60,45 +60,45 @@ public partial class WallboxCharger : BackgroundService,
 
     // Charging state
 
-    [State(Position = 1, IsDiscrete = true)]
+    [State(IsDiscrete = true, Position = 1)]
     public partial WallboxChargerStatus ChargerStatus { get; internal set; }
 
-    [State(Position = 2, IsDiscrete = true)]
+    [State(IsDiscrete = true, Position = 2)]
     public partial bool? IsPluggedIn { get; internal set; }
 
-    [State(Position = 3, IsDiscrete = true)]
+    [State(IsDiscrete = true, Position = 3)]
     public partial bool? IsCharging { get; internal set; }
 
-    [State(Position = 4, Unit = StateUnit.Watt)]
+    [State(Unit = StateUnit.Watt, Position = 4)]
     public partial decimal? ChargingPower { get; internal set; }
 
     // Workaround: Pulsar MAX firmware always returns charging_speed=0.
     // Derived from power and phases assuming 230V nominal (EU/Type 2 markets).
-    [State(Position = 5, Unit = StateUnit.Ampere, IsEstimated = true)]
+    [State(Unit = StateUnit.Ampere, IsEstimated = true, Position = 5)]
     public partial decimal? ChargingCurrent { get; internal set; }
 
     // max_available_power from the API is actually the hardware max current in amps
-    [State(Position = 6, Unit = StateUnit.Ampere)]
+    [State(Unit = StateUnit.Ampere, Position = 6)]
     public partial decimal? MaximumAvailableChargingCurrent { get; internal set; }
 
-    [State(Position = 7, Unit = StateUnit.Ampere)]
+    [State(Unit = StateUnit.Ampere, Position = 7)]
     public partial decimal? MaximumChargingCurrent { get; internal set; }
 
-    [State(Position = 8, Unit = StateUnit.Watt)]
+    [State(Unit = StateUnit.Watt, Position = 8)]
     public partial decimal? MaximumChargingPower { get; internal set; }
 
-    [State(Position = 9, IsDiscrete = true)]
+    [State(IsDiscrete = true, Position = 9)]
     public partial bool? IsLocked { get; internal set; }
 
     // IVehicleChargerState (ChargeLevel delegated to Session)
 
     [Derived]
-    [State(Position = 10, Unit = StateUnit.Percent)]
+    [State(Unit = StateUnit.Percent, Position = 10)]
     public decimal? ChargeLevel => Session.ChargeLevel;
 
     // Energy
 
-    [State(Position = 12, Unit = StateUnit.WattHour, IsCumulative = true)]
+    [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 12)]
     public partial decimal? TotalEnergyConsumed { get; internal set; }
 
     [State(Position = 13)]
@@ -109,10 +109,10 @@ public partial class WallboxCharger : BackgroundService,
 
     // Eco-Smart
 
-    [State(Position = 15, IsDiscrete = true)]
+    [State(IsDiscrete = true, Position = 15)]
     public partial bool? EcoSmartEnabled { get; internal set; }
 
-    [State(Position = 16, IsDiscrete = true)]
+    [State(IsDiscrete = true, Position = 16)]
     public partial WallboxEcoSmartMode? EcoSmartMode { get; internal set; }
 
     // IDeviceInfo
@@ -140,10 +140,10 @@ public partial class WallboxCharger : BackgroundService,
 
     // Connection & service status
 
-    [State(Position = 30, IsDiscrete = true)]
+    [State(IsDiscrete = true, Position = 30)]
     public partial bool IsConnected { get; internal set; }
 
-    [State(Position = 31, IsDiscrete = true)]
+    [State(IsDiscrete = true, Position = 31)]
     public partial ServiceStatus Status { get; internal set; }
 
     [State(Position = 32)]

@@ -30,7 +30,7 @@ public partial class ShellySwitch :
     [State(IsDiscrete = true)]
     public partial bool? IsOn { get; internal set; }
 
-    [State]
+    [State(Position = 400)]
     public partial string? Source { get; internal set; }
 
     [State(Unit = StateUnit.Watt)]
@@ -48,7 +48,7 @@ public partial class ShellySwitch :
     [State(Unit = StateUnit.DegreeCelsius)]
     public partial decimal? Temperature { get; internal set; }
 
-    [State]
+    [State(Position = 950)]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
 
     [Derived]

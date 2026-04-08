@@ -14,6 +14,6 @@ public interface IBatteryState
     /// <summary>
     /// The current battery level (0..1).
     /// </summary>
-    [State(Unit = StateUnit.Percent)]
+    [State(Unit = StateUnit.Percent, Position = 340)]
     decimal? BatteryLevel { get; }
 }

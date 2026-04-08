@@ -59,7 +59,7 @@ public partial class MyStromSwitch : BackgroundService,
     [State]
     public partial string? StatusMessage { get; internal set; }
 
-    [State]
+    [State(Position = 950)]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
 
     [State(IsDiscrete = true)]
@@ -74,7 +74,7 @@ public partial class MyStromSwitch : BackgroundService,
     [State(Unit = StateUnit.DegreeCelsius)]
     public partial decimal? Temperature { get; internal set; }
 
-    [State]
+    [State(Position = 400)]
     public partial TimeSpan? Uptime { get; internal set; }
 
     [Derived]
@@ -108,11 +108,11 @@ public partial class MyStromSwitch : BackgroundService,
     public string? Gateway => _information?.Gateway;
 
     [Derived]
-    [State]
+    [State(Position = 401)]
     public string? DeviceType => _information?.Type;
 
     [Derived]
-    [State]
+    [State(Position = 402)]
     public string? FirmwareVersion => _information?.Version;
 
     public bool? IsWireless => true;

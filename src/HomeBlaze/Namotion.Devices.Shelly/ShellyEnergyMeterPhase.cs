@@ -26,22 +26,22 @@ public partial class ShellyEnergyMeterPhase :
     [State(Unit = StateUnit.Hertz)]
     public partial decimal? ElectricalFrequency { get; internal set; }
 
-    [State(Unit = StateUnit.Watt)]
+    [State(Unit = StateUnit.Watt, Position = 312)]
     public partial decimal? ActivePower { get; internal set; }
 
-    [State(Unit = StateUnit.Watt)]
+    [State(Unit = StateUnit.Watt, Position = 313)]
     public partial decimal? ApparentPower { get; internal set; }
 
-    [State]
+    [State(Position = 350)]
     public partial decimal? PowerFactor { get; internal set; }
 
-    [State(Unit = StateUnit.WattHour, IsCumulative = true)]
+    [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 316)]
     public partial decimal? TotalActiveEnergy { get; internal set; }
 
-    [State(Unit = StateUnit.WattHour, IsCumulative = true)]
+    [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 317)]
     public partial decimal? TotalReturnedEnergy { get; internal set; }
 
-    [State]
+    [State(Position = 950)]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
 
     [Derived]

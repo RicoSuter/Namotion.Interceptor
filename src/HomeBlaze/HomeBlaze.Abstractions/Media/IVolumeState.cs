@@ -13,6 +13,6 @@ public interface IVolumeState
     /// <summary>
     /// The current volume level (0..1).
     /// </summary>
-    [State(Unit = StateUnit.Percent)]
+    [State(Unit = StateUnit.Percent, Position = 145)]
     decimal? Volume { get; }
 }

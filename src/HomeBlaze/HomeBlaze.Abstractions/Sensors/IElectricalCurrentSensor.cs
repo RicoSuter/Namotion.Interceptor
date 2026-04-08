@@ -13,6 +13,6 @@ public interface IElectricalCurrentSensor
     /// <summary>
     /// The current electrical current reading.
     /// </summary>
-    [State(Unit = StateUnit.Ampere)]
+    [State(Unit = StateUnit.Ampere, Position = 321)]
     decimal? ElectricalCurrent { get; }
 }

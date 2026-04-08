@@ -13,6 +13,6 @@ public interface IPresenceSensor
     /// <summary>
     /// Whether presence is detected.
     /// </summary>
-    [State]
+    [State(Position = 220)]
     bool? IsPresent { get; }
 }

@@ -13,7 +13,7 @@ public interface IActionDevice
     /// <summary>
     /// The available actions on this device.
     /// </summary>
-    [State]
+    [State(Position = 170)]
     DeviceAction[] Actions { get; }
 
     /// <summary>

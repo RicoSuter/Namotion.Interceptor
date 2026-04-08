@@ -88,10 +88,10 @@ public partial class Motor
     [State("Speed", Position = 1)]
     public partial int CurrentSpeed { get; set; }
 
-    [State(Position = 2, Unit = StateUnit.DegreeCelsius)]
+    [State(Unit = StateUnit.DegreeCelsius, Position = 2)]
     public partial double Temperature { get; set; }
 
-    [State(Position = 3, IsDiscrete = true)]
+    [State(IsDiscrete = true, Position = 3)]
     public partial MotorStatus Status { get; set; }
 }
 ```
@@ -136,6 +136,51 @@ public enum StateUnit
     HexColor           // #FF0000
 }
 ```
+
+Values are auto-scaled for display within unit families (e.g., 1500 W displays as "1.5 kW", 0.5 A displays as "500 mA").
+
+### Interface Inheritance and Attribute Merging
+
+When a class implements an interface with `[State]` properties, the attributes are **merged**. Class values take priority; interface values fill in any fields the class doesn't specify.
+
+This means you can add `Position` on the class without re-specifying `Unit` from the interface:
+
+```csharp
+// Interface provides Unit
+public interface IPowerSensor
+{
+    [State(Unit = StateUnit.Watt)]
+    decimal? Power { get; }
+}
+
+// Class adds Position — Unit is inherited from the interface
+[InterceptorSubject]
+public partial class MyDevice : IPowerSensor
+{
+    [Derived]
+    [State(Position = 1)]
+    public decimal? Power => InternalPower;  // Merged: Position=1, Unit=Watt
+}
+```
+
+Properties without any `Position` (from class or interface) sort **last** in the UI panel.
+
+### Position Ranges
+
+HomeBlaze abstraction interfaces use reserved position ranges to ensure consistent default ordering when a device implements multiple interfaces:
+
+| Range | Category | Examples |
+|-------|----------|---------|
+| 0–99 | Device-specific primary (custom per class) | Pin number, enabled state |
+| 100–199 | Primary device function | Switch on/off, brightness, cover position |
+| 200–299 | Sensor measurements | Temperature, humidity, presence |
+| 300–399 | Power & energy | Power, energy, voltage, current |
+| 400–499 | Device-specific details | Uptime, source, firmware |
+| 800–849 | Device identity | Manufacturer, model, serial number |
+| 850–899 | Software & networking | Firmware version, IP address |
+| 900–999 | Connection & service status | IsConnected, Status, StatusMessage |
+
+Concrete classes can override interface positions via the merge. Use ranges 0–99 and 400–499 for class-specific properties.
 
 ## Derived Properties
 
@@ -453,7 +498,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, I
     [State("Speed", Position = 3)]
     public partial int CurrentSpeed { get; set; }
 
-    [State(Position = 4, Unit = StateUnit.DegreeCelsius)]
+    [State(Unit = StateUnit.DegreeCelsius, Position = 4)]
     public partial double Temperature { get; set; }
 
     [State(Position = 1)]
