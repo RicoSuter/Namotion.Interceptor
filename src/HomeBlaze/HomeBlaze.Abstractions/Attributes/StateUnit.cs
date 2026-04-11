@@ -25,5 +25,9 @@ public enum StateUnit
     MegabitsPerSecond,
     LiterPerHour,
     Currency,
-    HexColor
+    HexColor,
+    MetersPerSecond,
+    Hectopascal,
+    Degree,
+    UvIndex
 }

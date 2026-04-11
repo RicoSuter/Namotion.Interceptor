@@ -62,10 +62,11 @@ public static class StateUnitExtensions
             return $"{value:C}";
         }
 
-        var suffix = GetUnitSuffix(unit);
-        if (suffix != null)
+        var unitInfo = GetUnitInfo(unit);
+        if (unitInfo != null)
         {
-            return $"{value} {suffix}";
+            var separator = unitInfo.Value.NeedsSpace ? " " : "";
+            return $"{value}{separator}{unitInfo.Value.Suffix}";
         }
 
         return unit == StateUnit.Default
@@ -77,29 +78,43 @@ public static class StateUnitExtensions
     /// Gets the unit suffix string for a given StateUnit.
     /// </summary>
     /// <returns>The unit suffix (e.g., "°C", "W") or null if no suffix applies.</returns>
-    public static string? GetUnitSuffix(StateUnit unit) => unit switch
+    /// <summary>
+    /// Gets the unit suffix and whether it needs a space separator.
+    /// </summary>
+    /// <returns>Tuple of (suffix, needsSpace), or null if no suffix applies.</returns>
+    public static (string Suffix, bool NeedsSpace)? GetUnitInfo(StateUnit unit) => unit switch
     {
-        StateUnit.Percent => "%",
-        StateUnit.DegreeCelsius => "°C",
-        StateUnit.Watt => "W",
-        StateUnit.KiloWatt => "kW",
-        StateUnit.WattHour => "Wh",
-        StateUnit.Volt => "V",
-        StateUnit.Ampere => "A",
-        StateUnit.Hertz => "Hz",
-        StateUnit.Lumen => "lm",
-        StateUnit.Lux => "lx",
-        StateUnit.Kilometer => "km",
-        StateUnit.Meter => "m",
-        StateUnit.Millimeter => "mm",
-        StateUnit.MillimeterPerHour => "mm/h",
-        StateUnit.Kilobyte => "kB",
-        StateUnit.KilobytePerSecond => "kB/s",
-        StateUnit.MegabitsPerSecond => "Mbit/s",
-        StateUnit.LiterPerHour => "l/h",
-        StateUnit.HexColor => "hex",
+        StateUnit.Percent => ("%", false),
+        StateUnit.DegreeCelsius => ("°C", false),
+        StateUnit.Degree => ("°", false),
+        StateUnit.Watt => ("W", true),
+        StateUnit.KiloWatt => ("kW", true),
+        StateUnit.WattHour => ("Wh", true),
+        StateUnit.Volt => ("V", true),
+        StateUnit.Ampere => ("A", true),
+        StateUnit.Hertz => ("Hz", true),
+        StateUnit.Lumen => ("lm", true),
+        StateUnit.Lux => ("lx", true),
+        StateUnit.Kilometer => ("km", true),
+        StateUnit.Meter => ("m", true),
+        StateUnit.Millimeter => ("mm", true),
+        StateUnit.MillimeterPerHour => ("mm/h", true),
+        StateUnit.Kilobyte => ("kB", true),
+        StateUnit.KilobytePerSecond => ("kB/s", true),
+        StateUnit.MegabitsPerSecond => ("Mbit/s", true),
+        StateUnit.LiterPerHour => ("l/h", true),
+        StateUnit.MetersPerSecond => ("m/s", true),
+        StateUnit.Hectopascal => ("hPa", true),
+        StateUnit.UvIndex => ("UV", true),
+        StateUnit.HexColor => ("hex", true),
         _ => null
     };
+
+    /// <summary>
+    /// Gets the unit suffix string for a given StateUnit.
+    /// </summary>
+    /// <returns>The unit suffix (e.g., "°C", "W") or null if no suffix applies.</returns>
+    public static string? GetUnitSuffix(StateUnit unit) => GetUnitInfo(unit)?.Suffix;
 
     private static string FormatWattHour(object value)
     {

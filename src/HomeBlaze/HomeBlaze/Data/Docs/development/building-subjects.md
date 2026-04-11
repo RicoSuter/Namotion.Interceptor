@@ -103,7 +103,7 @@ public partial class Motor
 | `Name` | Display name (overrides property name) | `"Speed"` |
 | `Position` | Sort position in property panel | `1`, `2`, `3` |
 | `Unit` | Formatting unit | `StateUnit.DegreeCelsius` |
-| `IsCumulative` | Value accumulates over time | `true` for energy meters |
+| `IsCumulative` | Value only increases over time (monotonic counter). The subject is responsible for providing a value that never decreases — if the underlying API uses periodic buckets (daily/monthly) that reset, the subject must accumulate them into a true cumulative counter and persist the offset via `[Configuration]`. Consumers can query any time range by computing deltas. | `true` for energy meters, rain totals |
 | `IsDiscrete` | Discrete variable (binary on/off, every transition matters) vs analog (sensor readings) | `true` for commands, flags |
 | `IsEstimated` | Calculated/estimated value | `true` for predictions |
 
