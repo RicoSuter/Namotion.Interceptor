@@ -82,7 +82,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
     /// When stopped manually, this is set to false to prevent auto-restart.
     /// </summary>
     [Configuration]
-    [State]
+    [State(Position = 0)]
     public partial bool IsEnabled { get; set; }
 
     // State properties (runtime only)

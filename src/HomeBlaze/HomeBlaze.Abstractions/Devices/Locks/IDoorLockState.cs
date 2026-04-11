@@ -14,13 +14,13 @@ public interface IDoorLockState
     /// <summary>
     /// The current lock state.
     /// </summary>
-    [State]
+    [State(Position = 130)]
     DoorLockState? LockState { get; }
 
     /// <summary>
     /// Whether the lock is locked.
     /// </summary>
-    [State]
+    [State(Position = 131)]
     bool? IsLocked => LockState switch
     {
         Locks.DoorLockState.Locked => true,

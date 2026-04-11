@@ -20,25 +20,25 @@ public partial class ShellyEnergyMeter :
     [State(Unit = StateUnit.WattHour, IsCumulative = true)]
     public partial decimal? MeasuredEnergyConsumed { get; internal set; }
 
-    [State(Unit = StateUnit.Watt)]
+    [State(Unit = StateUnit.Watt, Position = 312)]
     public partial decimal? TotalActivePower { get; internal set; }
 
-    [State(Unit = StateUnit.Watt)]
+    [State(Unit = StateUnit.Watt, Position = 313)]
     public partial decimal? TotalApparentPower { get; internal set; }
 
-    [State(Unit = StateUnit.Ampere)]
+    [State(Unit = StateUnit.Ampere, Position = 314)]
     public partial decimal? TotalCurrent { get; internal set; }
 
-    [State(Unit = StateUnit.Ampere)]
+    [State(Unit = StateUnit.Ampere, Position = 315)]
     public partial decimal? NeutralCurrent { get; internal set; }
 
-    [State(Unit = StateUnit.WattHour, IsCumulative = true)]
+    [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 316)]
     public partial decimal? TotalReturnedEnergy { get; internal set; }
 
     [State]
     public partial ShellyEnergyMeterPhase[] Phases { get; internal set; }
 
-    [State]
+    [State(Position = 950)]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
 
     [Derived]

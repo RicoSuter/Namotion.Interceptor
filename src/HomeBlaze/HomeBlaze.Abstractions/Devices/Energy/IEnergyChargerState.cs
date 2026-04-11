@@ -14,18 +14,18 @@ public interface IEnergyChargerState
     /// <summary>
     /// Whether a device is plugged in.
     /// </summary>
-    [State]
+    [State(Position = 101)]
     bool? IsPluggedIn { get; }
 
     /// <summary>
     /// Whether charging is currently active.
     /// </summary>
-    [State]
+    [State(Position = 102)]
     bool? IsCharging { get; }
 
     /// <summary>
     /// The maximum charging power in watts.
     /// </summary>
-    [State(Unit = StateUnit.Watt)]
+    [State(Unit = StateUnit.Watt, Position = 330)]
     decimal? MaximumChargingPower { get; }
 }

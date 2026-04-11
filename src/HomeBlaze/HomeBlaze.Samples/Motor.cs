@@ -66,7 +66,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITemperatureSenso
     /// <summary>
     /// Current temperature in Celsius.
     /// </summary>
-    [State(Position = 4, Unit = StateUnit.DegreeCelsius)]
+    [State(Unit = StateUnit.DegreeCelsius, Position = 4)]
     public partial decimal? Temperature { get; set; }
 
     /// <summary>

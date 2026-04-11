@@ -13,6 +13,6 @@ public interface ILightSensor
     /// <summary>
     /// The current illuminance level.
     /// </summary>
-    [State(Unit = StateUnit.Lux)]
+    [State(Unit = StateUnit.Lux, Position = 240)]
     decimal? Illuminance { get; }
 }

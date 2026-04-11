@@ -13,6 +13,6 @@ public interface IConnectionState
     /// <summary>
     /// Whether the device is currently connected.
     /// </summary>
-    [State]
+    [State(Position = 900)]
     bool IsConnected { get; }
 }

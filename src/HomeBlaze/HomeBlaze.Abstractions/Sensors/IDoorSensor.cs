@@ -13,13 +13,13 @@ public interface IDoorSensor
     /// <summary>
     /// The current door state.
     /// </summary>
-    [State]
+    [State(Position = 230)]
     DoorState? State { get; }
 
     /// <summary>
     /// Whether the door is closed.
     /// </summary>
-    [State]
+    [State(Position = 231)]
     bool? IsClosed => State switch
     {
         DoorState.Closed => true,
