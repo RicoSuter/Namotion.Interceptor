@@ -16,12 +16,12 @@ public interface IPowerMeter
     /// <summary>
     /// The currently measured power in watts.
     /// </summary>
-    [State(Unit = StateUnit.Watt)]
+    [State(Unit = StateUnit.Watt, Position = 310)]
     decimal? MeasuredPower { get; }
 
     /// <summary>
     /// The total measured energy consumed in watt-hours.
     /// </summary>
-    [State(Unit = StateUnit.WattHour)]
+    [State(Unit = StateUnit.WattHour, IsCumulative = true, Position = 311)]
     decimal? MeasuredEnergyConsumed { get; }
 }

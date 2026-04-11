@@ -60,7 +60,7 @@ public partial class ShellyDevice : BackgroundService,
     [State]
     public partial string? StatusMessage { get; internal set; }
 
-    [State]
+    [State(Position = 950)]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
 
     [State]
@@ -78,7 +78,7 @@ public partial class ShellyDevice : BackgroundService,
     [State]
     public partial ShellyEnergyMeter? EnergyMeter { get; internal set; }
 
-    [State]
+    [State(Position = 402)]
     public partial TimeSpan? Uptime { get; internal set; }
     
     [Derived]
@@ -118,7 +118,7 @@ public partial class ShellyDevice : BackgroundService,
         Status == ServiceStatus.Error ? "Error" : "Warning";
     
     [Derived]
-    [State]
+    [State(Position = 400)]
     public string? DeviceName => _deviceInfo?.Name;
 
     // IDeviceInfo
@@ -144,7 +144,7 @@ public partial class ShellyDevice : BackgroundService,
     public string? HardwareRevision => _deviceInfo?.Generation?.ToString();
 
     [Derived]
-    [State]
+    [State(Position = 401)]
     public int? Generation => _deviceInfo?.Generation;
 
     public ShellyDevice(IHttpClientFactory httpClientFactory, ILogger<ShellyDevice> logger)

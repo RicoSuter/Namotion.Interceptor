@@ -31,13 +31,13 @@ public partial class EcowittOutdoorSensor :
     [State(Unit = StateUnit.DegreeCelsius)]
     public partial decimal? FeelsLikeTemperature { get; internal set; }
 
-    [State(Unit = StateUnit.MetersPerSecond)]
+    [State(Unit = StateUnit.MeterPerSecond)]
     public partial decimal? WindSpeed { get; internal set; }
 
-    [State(Unit = StateUnit.MetersPerSecond)]
+    [State(Unit = StateUnit.MeterPerSecond)]
     public partial decimal? WindGust { get; internal set; }
 
-    [State(Unit = StateUnit.MetersPerSecond)]
+    [State(Unit = StateUnit.MeterPerSecond)]
     public partial decimal? MaxDailyGust { get; internal set; }
 
     [State(Unit = StateUnit.Degree)]

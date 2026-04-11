@@ -13,6 +13,6 @@ public interface IElectricalVoltageSensor
     /// <summary>
     /// The current electrical voltage reading.
     /// </summary>
-    [State(Unit = StateUnit.Volt)]
+    [State(Unit = StateUnit.Volt, Position = 320)]
     decimal? ElectricalVoltage { get; }
 }

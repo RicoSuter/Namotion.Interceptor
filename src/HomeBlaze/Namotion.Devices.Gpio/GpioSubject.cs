@@ -65,7 +65,7 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
     /// When true, uses a simulation driver instead of real hardware.
     /// Enables GPIO functionality on non-Pi platforms for testing/development.
     /// </summary>
-    [State(IsDiscrete = true)]
+    [State(IsDiscrete = true, Position = 400)]
     [Configuration]
     public partial bool UseSimulation { get; set; }
 

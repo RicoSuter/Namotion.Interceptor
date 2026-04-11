@@ -15,6 +15,6 @@ public interface IPositionState
     /// <summary>
     /// The current position (0 = fully open, 1 = fully closed).
     /// </summary>
-    [State(Unit = StateUnit.Percent)]
+    [State(Unit = StateUnit.Percent, Position = 120)]
     decimal? Position { get; }
 }

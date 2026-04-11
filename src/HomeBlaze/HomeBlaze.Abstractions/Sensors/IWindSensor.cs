@@ -13,13 +13,13 @@ public interface IWindSensor
     /// <summary>
     /// The current wind speed.
     /// </summary>
-    [State(Unit = StateUnit.MetersPerSecond)]
+    [State(Unit = StateUnit.MeterPerSecond)]
     decimal? WindSpeed { get; }
 
     /// <summary>
     /// The current wind gust speed.
     /// </summary>
-    [State(Unit = StateUnit.MetersPerSecond)]
+    [State(Unit = StateUnit.MeterPerSecond)]
     decimal? WindGust { get; }
 
     /// <summary>
