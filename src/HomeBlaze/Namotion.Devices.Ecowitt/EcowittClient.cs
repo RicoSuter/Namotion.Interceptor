@@ -18,20 +18,22 @@ public class EcowittClient
     public async Task<EcowittSensorInfo[]> GetSensorsInfoAsync(CancellationToken cancellationToken)
     {
         // Page 1 = outdoor, rain, indoor, channel slots; Page 2 = soil, leaf, temp, PM2.5, CO2, leak, lightning
-        using var page1Response = await _httpClient.GetAsync(
-            $"http://{_hostAddress}/get_sensors_info?page=1", cancellationToken);
-        page1Response.EnsureSuccessStatusCode();
-        var page1Json = await page1Response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
-
-        using var page2Response = await _httpClient.GetAsync(
-            $"http://{_hostAddress}/get_sensors_info?page=2", cancellationToken);
-        page2Response.EnsureSuccessStatusCode();
-        var page2Json = await page2Response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+        var page1Task = FetchSensorsPageAsync(1, cancellationToken);
+        var page2Task = FetchSensorsPageAsync(2, cancellationToken);
+        await Task.WhenAll(page1Task, page2Task);
 
         var sensors = new List<EcowittSensorInfo>();
-        sensors.AddRange(ParseSensorsInfo(page1Json));
-        sensors.AddRange(ParseSensorsInfo(page2Json));
+        sensors.AddRange(ParseSensorsInfo(await page1Task));
+        sensors.AddRange(ParseSensorsInfo(await page2Task));
         return sensors.ToArray();
+    }
+
+    private async Task<JsonElement> FetchSensorsPageAsync(int page, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.GetAsync(
+            $"http://{_hostAddress}/get_sensors_info?page={page}", cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
     }
 
     internal static EcowittSensorInfo[] ParseSensorsInfo(JsonElement array)
