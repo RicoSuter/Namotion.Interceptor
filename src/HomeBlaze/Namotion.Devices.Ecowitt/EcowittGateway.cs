@@ -238,9 +238,9 @@ public partial class EcowittGateway : BackgroundService,
                 var deviceInfoTask = client.GetDeviceInfoAsync(stoppingToken);
                 await Task.WhenAll(versionTask, networkTask, deviceInfoTask);
 
-                _versionInfo = versionTask.Result;
-                _networkInfo = networkTask.Result;
-                _deviceInfo = deviceInfoTask.Result;
+                _versionInfo = await versionTask;
+                _networkInfo = await networkTask;
+                _deviceInfo = await deviceInfoTask;
                 _sensorsInfo = await client.GetSensorsInfoAsync(stoppingToken);
 
                 Status = ServiceStatus.Running;
