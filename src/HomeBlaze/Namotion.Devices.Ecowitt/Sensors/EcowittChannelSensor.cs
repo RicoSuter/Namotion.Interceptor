@@ -18,6 +18,9 @@ public partial class EcowittChannelSensor :
 {
     public int Channel { get; }
 
+    [State]
+    public partial string? Name { get; internal set; }
+
     [State(Unit = StateUnit.DegreeCelsius)]
     public partial decimal? Temperature { get; internal set; }
 
@@ -37,7 +40,7 @@ public partial class EcowittChannelSensor :
     public partial int? SignalStrength { get; internal set; }
 
     [Derived]
-    public string? Title => $"Channel {Channel}";
+    public string? Title => !string.IsNullOrEmpty(Name) ? Name : $"Channel {Channel}";
 
     [Derived]
     public string IconName => "Thermostat";
@@ -47,6 +50,7 @@ public partial class EcowittChannelSensor :
     public EcowittChannelSensor(int channel)
     {
         Channel = channel;
+        Name = null;
         Temperature = null;
         Humidity = null;
         BatteryLevel = null;

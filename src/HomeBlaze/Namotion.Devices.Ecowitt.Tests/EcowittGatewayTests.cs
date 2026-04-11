@@ -402,6 +402,137 @@ public class EcowittGatewayTests
         Assert.Null(gateway.LightningSensor);
     }
 
+    [Fact]
+    public void WhenSensorInfoHasIndoorBattery_ThenMapsToIndoorSensor()
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        gateway.UpdateFromLiveData(new EcowittLiveData
+        {
+            Indoor = new EcowittIndoorData { Temperature = 19.3m }
+        });
+
+        var sensorsInfo = new[]
+        {
+            new EcowittSensorInfo { SensorId = "0xAB", TypeCode = 4, Rssi = -55, Battery = 0 }
+        };
+
+        // Act
+        gateway.UpdateSensorInfo(sensorsInfo);
+
+        // Assert
+        Assert.Equal("0xAB", gateway.IndoorSensor!.SensorId);
+        Assert.Equal(-55, gateway.IndoorSensor.SignalStrength);
+        Assert.Equal(1.0m, gateway.IndoorSensor.BatteryLevel); // binary: 0 = OK = full
+    }
+
+    [Fact]
+    public void WhenWs90SensorInfo_ThenPiezoRainGaugeGetsBattery()
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        gateway.UpdateFromLiveData(new EcowittLiveData
+        {
+            Outdoor = new EcowittOutdoorData { Temperature = 18.0m },
+            PiezoRain = new EcowittRainData { DailyRain = 1.0m }
+        });
+
+        var sensorsInfo = new[]
+        {
+            new EcowittSensorInfo { SensorId = "0x9637", TypeCode = 48, Rssi = -48, Battery = 4 }
+        };
+
+        // Act
+        gateway.UpdateSensorInfo(sensorsInfo);
+
+        // Assert
+        Assert.Equal("0x9637", gateway.PiezoRainGauge!.SensorId);
+        Assert.Equal(0.8m, gateway.PiezoRainGauge.BatteryLevel); // 4/5 = 0.8
+    }
+
+    [Fact]
+    public void WhenChannelHasName_ThenSensorUsesNameAsTitle()
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        var data = new EcowittLiveData
+        {
+            Channels =
+            [
+                new EcowittChannelData { Channel = 1, Name = "Living Room", Temperature = 21.3m }
+            ]
+        };
+
+        // Act
+        gateway.UpdateFromLiveData(data);
+
+        // Assert
+        Assert.Equal("Living Room", gateway.ChannelSensors[0].Name);
+        Assert.Equal("Living Room", gateway.ChannelSensors[0].Title);
+    }
+
+    [Fact]
+    public void WhenChannelHasNoName_ThenSensorUsesDefaultTitle()
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        var data = new EcowittLiveData
+        {
+            Channels =
+            [
+                new EcowittChannelData { Channel = 2, Temperature = 19.0m }
+            ]
+        };
+
+        // Act
+        gateway.UpdateFromLiveData(data);
+
+        // Assert
+        Assert.Null(gateway.ChannelSensors[0].Name);
+        Assert.Equal("Channel 2", gateway.ChannelSensors[0].Title);
+    }
+
+    [Fact]
+    public void WhenRainBucketIncreases_ThenConfigChangedIsTrue()
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        gateway.UpdateFromLiveData(new EcowittLiveData
+        {
+            Rain = new EcowittRainData { YearlyRain = 50m }
+        });
+
+        // Act — bucket value increased from 50 to 60
+        var configChanged = gateway.UpdateFromLiveData(new EcowittLiveData
+        {
+            Rain = new EcowittRainData { YearlyRain = 60m }
+        });
+
+        // Assert — config should be persisted so lastBucketValue is saved
+        Assert.True(configChanged);
+        Assert.Equal(60m, gateway.RainLastMonthlyValue);
+    }
+
+    [Fact]
+    public void WhenRainBucketUnchanged_ThenConfigChangedIsFalse()
+    {
+        // Arrange
+        var gateway = CreateGateway();
+        gateway.UpdateFromLiveData(new EcowittLiveData
+        {
+            Rain = new EcowittRainData { YearlyRain = 50m }
+        });
+
+        // Act — same value, no change
+        var configChanged = gateway.UpdateFromLiveData(new EcowittLiveData
+        {
+            Rain = new EcowittRainData { YearlyRain = 50m }
+        });
+
+        // Assert
+        Assert.False(configChanged);
+    }
+
     private class TestHttpClientFactory : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => new();

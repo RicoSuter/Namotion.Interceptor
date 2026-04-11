@@ -420,4 +420,24 @@ public class EcowittValueParserTests
         // Assert
         Assert.Null(result);
     }
+
+    [Fact]
+    public void WhenBatteryIsSixWithBinaryMode_ThenReturnsFull()
+    {
+        // Act — value 6 = DC powered
+        var result = EcowittValueParser.NormalizeBatteryLevel(6, isBinaryBattery: true);
+
+        // Assert
+        Assert.Equal(1.0m, result);
+    }
+
+    [Fact]
+    public void WhenBatteryIsSixWithLevelMode_ThenReturnsFull()
+    {
+        // Act — value 6 = DC powered
+        var result = EcowittValueParser.NormalizeBatteryLevel(6, isBinaryBattery: false);
+
+        // Assert
+        Assert.Equal(1.0m, result);
+    }
 }

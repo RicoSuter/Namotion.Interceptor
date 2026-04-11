@@ -48,7 +48,7 @@ The gateway may pick up sensors from neighboring stations. Use the Hidden Sensor
 {
   "$type": "Namotion.Devices.Ecowitt.EcowittGateway",
   "name": "Weather Station",
-  "hostAddress": "192.168.1.216",
+  "hostAddress": "192.168.1.x",
   "pollingInterval": "00:00:30",
   "retryInterval": "00:01:00",
   "hiddenSensors": ["ch:3", "ch:6"]

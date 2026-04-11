@@ -185,6 +185,10 @@ internal static class EcowittValueParser
         if (rawValue == null || rawValue == 9)
             return null;
 
+        // Value 6 = DC powered (always full)
+        if (rawValue == 6)
+            return 1.0m;
+
         if (isBinaryBattery)
             return rawValue == 0 ? 1.0m : 0.0m;
 

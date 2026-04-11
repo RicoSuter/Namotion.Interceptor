@@ -1,6 +1,7 @@
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Common;
+using HomeBlaze.Abstractions.Devices.Energy;
 using HomeBlaze.Abstractions.Sensors;
 using Namotion.Interceptor.Attributes;
 
@@ -11,6 +12,7 @@ public partial class EcowittIndoorSensor :
     ITemperatureSensor,
     IHumiditySensor,
     IBarometricPressureSensor,
+    IBatteryState,
     ITitleProvider,
     IIconProvider,
     ILastUpdatedProvider
@@ -26,6 +28,9 @@ public partial class EcowittIndoorSensor :
 
     [State(Unit = StateUnit.Hectopascal)]
     public partial decimal? RelativePressure { get; internal set; }
+
+    [State(Unit = StateUnit.Percent)]
+    public partial decimal? BatteryLevel { get; internal set; }
 
     [State]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
@@ -50,6 +55,7 @@ public partial class EcowittIndoorSensor :
         Humidity = null;
         AbsolutePressure = null;
         RelativePressure = null;
+        BatteryLevel = null;
         LastUpdated = null;
         SensorId = null;
         SignalStrength = null;

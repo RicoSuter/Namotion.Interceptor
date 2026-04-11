@@ -372,13 +372,13 @@ public partial class EcowittGateway : BackgroundService,
         {
             RainGauge ??= new EcowittRainGauge("Rain Gauge");
             var longestBucket = data.Rain.YearlyRain ?? data.Rain.MonthlyRain;
-            var previousOffset = RainCumulativeOffset;
+            var previousLastBucketValue = RainLastMonthlyValue;
             var cumulativeOffset = RainCumulativeOffset;
             var lastBucketValue = RainLastMonthlyValue;
             var cumulativeTotal = AccumulateRain(longestBucket, ref cumulativeOffset, ref lastBucketValue);
             RainCumulativeOffset = cumulativeOffset;
             RainLastMonthlyValue = lastBucketValue;
-            configChanged |= cumulativeOffset != previousOffset;
+            configChanged |= lastBucketValue != previousLastBucketValue;
             UpdateRainGauge(RainGauge, data.Rain, cumulativeTotal, now);
         }
         else if (IsSensorHidden("rain"))
@@ -390,13 +390,13 @@ public partial class EcowittGateway : BackgroundService,
         {
             PiezoRainGauge ??= new EcowittRainGauge("Piezo Rain");
             var longestBucket = data.PiezoRain.YearlyRain ?? data.PiezoRain.MonthlyRain;
-            var previousPiezoOffset = PiezoRainCumulativeOffset;
+            var previousPiezoLastValue = PiezoRainLastMonthlyValue;
             var piezoOffset = PiezoRainCumulativeOffset;
             var piezoLastValue = PiezoRainLastMonthlyValue;
             var cumulativeTotal = AccumulateRain(longestBucket, ref piezoOffset, ref piezoLastValue);
             PiezoRainCumulativeOffset = piezoOffset;
             PiezoRainLastMonthlyValue = piezoLastValue;
-            configChanged |= piezoOffset != previousPiezoOffset;
+            configChanged |= piezoLastValue != previousPiezoLastValue;
             UpdateRainGauge(PiezoRainGauge, data.PiezoRain, cumulativeTotal, now);
         }
         else if (IsSensorHidden("piezo"))
@@ -457,6 +457,8 @@ public partial class EcowittGateway : BackgroundService,
             {
                 PiezoRainGauge.SensorId = outdoorSensorInfo.SensorId;
                 PiezoRainGauge.SignalStrength = outdoorSensorInfo.Rssi;
+                PiezoRainGauge.BatteryLevel = EcowittValueParser.NormalizeBatteryLevel(
+                    outdoorSensorInfo.Battery, isBinaryBattery: false);
             }
         }
 
@@ -474,10 +476,12 @@ public partial class EcowittGateway : BackgroundService,
                     RainGauge.SignalStrength = sensorInfo.Rssi;
                     break;
 
-                // Indoor: WH25 (4)
+                // Indoor: WH25 (4) — binary battery
                 case 4 when IndoorSensor != null:
                     IndoorSensor.SensorId = sensorInfo.SensorId;
                     IndoorSensor.SignalStrength = sensorInfo.Rssi;
+                    IndoorSensor.BatteryLevel = EcowittValueParser.NormalizeBatteryLevel(
+                        sensorInfo.Battery, isBinaryBattery: true);
                     break;
 
                 // Channel 1-8: types 6-13
@@ -617,6 +621,7 @@ public partial class EcowittGateway : BackgroundService,
 
         for (var i = 0; i < visible.Length; i++)
         {
+            ChannelSensors[i].Name = visible[i].Name;
             ChannelSensors[i].Temperature = visible[i].Temperature;
             ChannelSensors[i].Humidity = visible[i].Humidity;
             ChannelSensors[i].BatteryLevel = EcowittValueParser.NormalizeBatteryLevel(visible[i].Battery, isBinaryBattery: true);
