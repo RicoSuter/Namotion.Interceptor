@@ -102,12 +102,7 @@ public partial class GpioSubject : BackgroundService, IConfigurable, IMonitoredS
 
     /// <inheritdoc />
     [Derived]
-    public string IconColor => Status switch
-    {
-        ServiceStatus.Running => "Success",
-        ServiceStatus.Error => "Error",
-        _ => "Warning"
-    };
+    public string? IconColor => Status == ServiceStatus.Running ? "Success" : null;
 
     /// <summary>
     /// Creates a GpioSubject with optional context and GPIO driver.

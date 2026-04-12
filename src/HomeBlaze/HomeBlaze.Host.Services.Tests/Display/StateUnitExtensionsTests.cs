@@ -33,7 +33,7 @@ public class StateUnitExtensionsTests
     [InlineData(StateUnit.KilobytePerSecond, 1500, "1.5 MB/s")]
     [InlineData(StateUnit.KilobytePerSecond, 500, "500 kB/s")]
     [InlineData(StateUnit.Volt, 230, "230 V")]
-    [InlineData(StateUnit.DegreeCelsius, 23.5, "23.5 °C")]
+    [InlineData(StateUnit.DegreeCelsius, 23.5, "23.5°C")]
     public void WhenFormatWithUnit_ThenAutoScalesCorrectly(StateUnit unit, double value, string expected)
     {
         // Act

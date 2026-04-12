@@ -74,13 +74,7 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
 
     /// <inheritdoc />
     [Derived]
-    public string? IconColor => Status switch
-    {
-        ServiceStatus.Running => Value ? "Success" : "Default",
-        ServiceStatus.Error => "Error",
-        ServiceStatus.Unavailable => "Default",
-        _ => "Warning"
-    };
+    public string? IconColor => Status == ServiceStatus.Running && Value ? "Success" : null;
 
     /// <inheritdoc />
     [Derived]

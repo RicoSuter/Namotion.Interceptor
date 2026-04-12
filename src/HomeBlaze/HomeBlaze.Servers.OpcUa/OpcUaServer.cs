@@ -139,12 +139,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
     public string? IconName => "Dns";
 
     [Derived]
-    public string? IconColor => Status switch
-    {
-        ServiceStatus.Running => "Success",
-        ServiceStatus.Error => "Error",
-        _ => "Warning"
-    };
+    public string? IconColor => Status == ServiceStatus.Running ? "Success" : null;
 
     public OpcUaServer(
         RootManager rootManager,

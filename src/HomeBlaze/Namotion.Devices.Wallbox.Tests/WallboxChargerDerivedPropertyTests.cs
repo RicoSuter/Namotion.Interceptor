@@ -43,14 +43,14 @@ public class WallboxChargerDerivedPropertyTests
     // IconColor
 
     [Fact]
-    public void WhenDisconnected_ThenIconColorError()
+    public void WhenDisconnected_ThenIconColorNull()
     {
         // Arrange
         var charger = CreateCharger();
         charger.IsConnected = false;
 
         // Act & Assert
-        Assert.Equal("Error", charger.IconColor);
+        Assert.Null(charger.IconColor);
     }
 
     [Fact]
@@ -88,7 +88,7 @@ public class WallboxChargerDerivedPropertyTests
         charger.IsPluggedIn = false;
 
         // Act & Assert
-        Assert.Equal("Default", charger.IconColor);
+        Assert.Null(charger.IconColor);
     }
 
     // Operation enable conditions

@@ -27,5 +27,9 @@ public enum StateUnit
     KilowattHour,
     Milliampere,
     Currency,
-    HexColor
+    HexColor,
+    MeterPerSecond,
+    Hectopascal,
+    Degree,
+    UvIndex
 }

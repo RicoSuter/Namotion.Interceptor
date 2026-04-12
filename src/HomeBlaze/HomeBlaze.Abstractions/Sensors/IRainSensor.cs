@@ -25,6 +25,6 @@ public interface IRainSensor
     /// <summary>
     /// The total accumulated rain.
     /// </summary>
-    [State(Unit = StateUnit.Millimeter, Position = 252)]
+    [State(Unit = StateUnit.Millimeter, Position = 252, IsCumulative = true)]
     decimal? TotalRain { get; }
 }

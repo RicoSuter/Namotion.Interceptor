@@ -22,7 +22,7 @@ public partial class HueButtonDevice : HueDevice,
             : "RadioButtonUnchecked";
 
     [Derived]
-    public override string? IconColor => IsConnected ? "Default" : "Error";
+    public override string? IconColor => null;
 
     [Derived]
     [State]

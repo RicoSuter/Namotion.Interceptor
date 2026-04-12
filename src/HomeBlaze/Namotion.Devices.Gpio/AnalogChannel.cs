@@ -64,12 +64,7 @@ public partial class AnalogChannel : IMonitoredService, ITitleProvider, IIconPro
 
     /// <inheritdoc />
     [Derived]
-    public string? IconColor => Status switch
-    {
-        ServiceStatus.Running => "Success",
-        ServiceStatus.Error => "Error",
-        _ => "Warning"
-    };
+    public string? IconColor => Status == ServiceStatus.Running ? "Success" : null;
 
     public AnalogChannel()
     {
