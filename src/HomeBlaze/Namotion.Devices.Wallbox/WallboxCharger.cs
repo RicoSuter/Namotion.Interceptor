@@ -174,11 +174,8 @@ public partial class WallboxCharger : BackgroundService,
     public string IconName => "EvStation";
 
     [Derived]
-    public string? IconColor => IsConnected switch
-    {
-        false => "Error",
-        true => IsCharging == true ? "Success" : IsPluggedIn == true ? "Warning" : "Default"
-    };
+    public string? IconColor =>
+        IsCharging == true ? "Success" : IsPluggedIn == true ? "Warning" : null;
 
     // Operation enable conditions
 

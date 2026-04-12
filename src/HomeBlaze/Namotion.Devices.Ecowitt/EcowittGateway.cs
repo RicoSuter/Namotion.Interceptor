@@ -166,9 +166,7 @@ public partial class EcowittGateway : BackgroundService,
     public string IconName => IsConnected ? "Cloud" : "CloudOff";
 
     [Derived]
-    public string IconColor =>
-        IsConnected ? "Success" :
-        Status == ServiceStatus.Error ? "Error" : "Warning";
+    public string? IconColor => IsConnected ? "Success" : null;
 
     public EcowittGateway(IHttpClientFactory httpClientFactory, ILogger<EcowittGateway> logger)
     {

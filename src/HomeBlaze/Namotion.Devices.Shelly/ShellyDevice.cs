@@ -113,9 +113,7 @@ public partial class ShellyDevice : BackgroundService,
     public string IconName => IsConnected ? "Hub" : "HubOutlined";
 
     [Derived]
-    public string IconColor =>
-        IsConnected ? "Success" :
-        Status == ServiceStatus.Error ? "Error" : "Warning";
+    public string? IconColor => IsConnected ? "Success" : null;
     
     [Derived]
     [State(Position = 400)]
