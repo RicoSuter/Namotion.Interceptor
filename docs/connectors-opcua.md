@@ -581,7 +581,8 @@ Monitor client and server health in production via the `Diagnostics` property on
 
 ## Security
 
-**Client security:**
+### Transport Security
+
 ```csharp
 var config = new OpcUaClientConfiguration
 {
@@ -593,7 +594,67 @@ var config = new OpcUaClientConfiguration
 
 When `UseSecurity = true`, the client prefers secure endpoints with message signing and encryption. The default is `false` for development convenience.
 
-**Server security:**
+### Client Authentication
+
+By default, the client connects with anonymous authentication. Use `CreateUserIdentity` to provide credentials:
+
+```csharp
+var config = new OpcUaClientConfiguration
+{
+    ServerUrl = "opc.tcp://plc.factory.com:4840",
+    CreateUserIdentity = _ => Task.FromResult(new UserIdentity("user", "password")),
+    // ... other settings
+};
+```
+
+For credentials from a secret manager or vault:
+
+```csharp
+var config = new OpcUaClientConfiguration
+{
+    ServerUrl = "opc.tcp://plc.factory.com:4840",
+    CreateUserIdentity = async cancellationToken =>
+    {
+        var secret = await vault.GetSecretAsync("opcua-credentials", cancellationToken);
+        return new UserIdentity(secret.Username, secret.Password);
+    },
+    // ... other settings
+};
+```
+
+For certificate-based authentication:
+
+```csharp
+CreateUserIdentity = _ =>
+{
+    var certificate = X509Certificate2.CreateFromPemFile("client.pem", "client.key");
+    return Task.FromResult(new UserIdentity(certificate));
+}
+```
+
+### Custom Application Configuration
+
+Override `CreateApplicationInstanceAsync()` in a derived configuration class for full control over OPC UA application settings (certificates, transport quotas, security policies):
+
+```csharp
+public class MyOpcUaClientConfiguration : OpcUaClientConfiguration
+{
+    public override async Task<ApplicationInstance> CreateApplicationInstanceAsync()
+    {
+        var application = await base.CreateApplicationInstanceAsync();
+
+        // Customize the application configuration
+        var config = application.ApplicationConfiguration;
+        config.SecurityConfiguration.AutoAcceptUntrustedCertificates = false;
+        config.TransportQuotas.MaxMessageSize = 64_000_000;
+
+        return application;
+    }
+}
+```
+
+### Server Security
+
 By default, the server accepts anonymous connections without encryption. For production deployments requiring authentication:
 - Configure custom `UserTokenPolicies` in a derived `OpcUaServerConfiguration`
 - Use certificate-based authentication
