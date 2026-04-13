@@ -1,5 +1,7 @@
 # OPC UA Mapping Guide
 
+> Part of the [OPC UA integration](connectors-opcua.md). See also: [Client](connectors-opcua-client.md) | [Server](connectors-opcua-server.md)
+
 This document describes how to map C# object models to OPC UA address spaces using Namotion.Interceptor's OPC UA integration.
 
 ## Overview
@@ -21,8 +23,8 @@ Some configuration applies only to one side:
 
 ## Node Mapper Configuration
 
-The mapping is driven by the `IOpcUaNodeMapper` interface, configured via the `NodeMapper` property on `OpcUaClientConfiguration` and `OpcUaServerConfiguration`. The default is a `CompositeNodeMapper` combining:
-- `PathProviderOpcUaNodeMapper` — maps `[Path("opc", "...")]` attributes
+The mapping is driven by the `IOpcUaNodeMapper` interface, configured via the `NodeMapper` property on `OpcUaClientConfiguration` and `OpcUaServerConfiguration`. This extends the general [path provider](connectors.md#path-providers) concept with OPC UA-specific node metadata. The default is a `CompositeNodeMapper` combining:
+- `PathProviderOpcUaNodeMapper` — maps `[Path("opc", "...")]` attributes (see [Path Providers](connectors.md#path-providers))
 - `AttributeOpcUaNodeMapper` — maps `[OpcUaNode]` and `[OpcUaReference]` attributes
 
 For custom mapping, set `NodeMapper` explicitly:
@@ -125,7 +127,7 @@ public class OpcUaNodeAttribute : Attribute
 }
 ```
 
-> For details on sampling vs exception-based monitoring, see [Monitoring & Subscriptions](connectors-opcua.md#monitoring--subscriptions).
+> For details on sampling vs exception-based monitoring, see [Monitoring & Subscriptions](connectors-opcua-client.md#monitoring--subscriptions).
 
 **Resolution order:**
 1. Class-level `[OpcUaNode]` - defaults for the type
@@ -530,7 +532,7 @@ Result: { BrowseName: "Speed", SamplingInterval: 50 }
 
 **Note on ReferenceType defaults:** `PathProviderOpcUaNodeMapper` returns `null` for `ReferenceType` on non-attribute properties, allowing later mappers to specify it. `AttributeOpcUaNodeMapper` uses `"HasProperty"` as the default when `[OpcUaReference]` is not specified. This design allows the composite chain to resolve defaults correctly.
 
-> For custom value converters and type resolvers, see [Extensibility](connectors-opcua.md#extensibility).
+> For custom value converters and type resolvers, see [Extensibility](connectors-opcua-client.md#extensibility).
 
 ## Standard Reference Types
 
