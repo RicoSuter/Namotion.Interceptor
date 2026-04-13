@@ -75,10 +75,18 @@ public class NavigationItemResolver
     }
 
     /// <summary>
-    /// Checks if subject has any direct child that is a page or a folder.
+    /// Recursively checks if subject has any descendant that is a page.
     /// </summary>
     private bool HasPageDescendants(IInterceptorSubject subject)
     {
+        return HasPageDescendants(subject, []);
+    }
+
+    private bool HasPageDescendants(IInterceptorSubject subject, HashSet<IInterceptorSubject> visited)
+    {
+        if (!visited.Add(subject))
+            return false;
+
         var registered = subject.TryGetRegisteredSubject();
         if (registered == null)
             return false;
@@ -92,12 +100,10 @@ public class NavigationItemResolver
             {
                 var child = childInfo.Subject;
 
-                // Direct child is a page
                 if (_componentRegistry.HasComponent(child.GetType(), SubjectComponentType.Page))
                     return true;
 
-                // Direct child is a VirtualFolder (potential container) - check by type name to avoid assembly reference
-                if (child.GetType().Name == "VirtualFolder")
+                if (HasPageDescendants(child, visited))
                     return true;
             }
         }
