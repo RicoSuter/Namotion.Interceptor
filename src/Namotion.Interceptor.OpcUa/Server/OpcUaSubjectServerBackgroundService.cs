@@ -2,7 +2,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
@@ -10,7 +9,7 @@ using Opc.Ua.Configuration;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
-internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubjectConnector, IFaultInjectable
+internal class OpcUaSubjectServerBackgroundService : BackgroundService, IOpcUaSubjectServer, ISubjectConnector, IFaultInjectable
 {
     internal const string OpcVariableKey = "OpcVariable";
 

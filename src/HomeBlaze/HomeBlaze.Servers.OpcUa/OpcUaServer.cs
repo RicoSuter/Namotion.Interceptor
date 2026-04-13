@@ -10,7 +10,6 @@ using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.Registry.Attributes;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace HomeBlaze.Servers.OpcUa;
 
@@ -25,7 +24,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
     private readonly RootManager _rootManager;
     private readonly SubjectPathResolver _pathResolver;
     private readonly ILogger<OpcUaServer> _logger;
-    private IHostedService? _serverService;
+    private IOpcUaSubjectServer? _serverService;
 
     // Configuration properties (persisted to JSON)
 

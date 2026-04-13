@@ -5,7 +5,6 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
@@ -73,7 +72,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         Root = createRoot(_context);
 
         builder.Services.AddSingleton(Root);
-        builder.Services.AddOpcUaSubjectClientSource(
+        var registration = builder.Services.AddOpcUaSubjectClientSource(
             sp => sp.GetRequiredService<TRoot>(),
             sp =>
             {
@@ -94,12 +93,12 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
                     ReconnectHandlerTimeout = TimeSpan.FromSeconds(5),
                     MaxReconnectDuration = TimeSpan.FromSeconds(15),
                     SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(5),
-                    
+
                     // SessionTimeout must be >= server's MinSessionTimeout (10s), use 30s for margin
                     SessionTimeout = TimeSpan.FromSeconds(30),
                     KeepAliveInterval = TimeSpan.FromSeconds(5),
                     OperationTimeout = TimeSpan.FromSeconds(30),
-                    
+
                     BufferTime = TimeSpan.FromMilliseconds(100),
 
                     CertificateStoreBasePath = certificateStoreBasePath ?? "pki"
@@ -113,16 +112,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
 
         _host = builder.Build();
 
-        // Get diagnostics from the client source
-        var clientSource = _host.Services
-            .GetServices<IHostedService>()
-            .OfType<OpcUaSubjectClientSource>()
-            .FirstOrDefault();
-
-        if (clientSource != null)
-        {
-            Diagnostics = clientSource.Diagnostics;
-        }
+        Diagnostics = _host.Services.GetOpcUaSubjectClientSource(registration).Diagnostics;
 
         await _host.StartAsync();
         _logger.Log($"Client host started in {sw.ElapsedMilliseconds}ms");

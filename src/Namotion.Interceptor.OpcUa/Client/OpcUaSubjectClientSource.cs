@@ -12,7 +12,7 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
-internal sealed class OpcUaSubjectClientSource : BackgroundService, ISubjectSource, IFaultInjectable, IAsyncDisposable
+internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjectClientSource, ISubjectSource, IFaultInjectable, IAsyncDisposable
 {
     private const int DefaultChunkSize = 512;
 

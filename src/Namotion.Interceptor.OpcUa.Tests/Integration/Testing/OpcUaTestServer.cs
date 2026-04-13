@@ -77,7 +77,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         _initializeDefaults?.Invoke(_context, Root);
 
         builder.Services.AddSingleton(Root);
-        builder.Services.AddOpcUaSubjectServer(
+        var registration = builder.Services.AddOpcUaSubjectServer(
             sp => sp.GetRequiredService<TRoot>(),
             sp =>
             {
@@ -94,22 +94,14 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
                     CleanCertificateStore = false,
                     AutoAcceptUntrustedCertificates = true,
                     CertificateStoreBasePath = _certificateStoreBasePath,
-                    
+
                     BufferTime = TimeSpan.FromMilliseconds(100)
                 };
             });
 
         _host = builder.Build();
 
-        var serverService = _host.Services
-            .GetServices<IHostedService>()
-            .OfType<OpcUaSubjectServerBackgroundService>()
-            .FirstOrDefault();
-
-        if (serverService != null)
-        {
-            Diagnostics = serverService.Diagnostics;
-        }
+        Diagnostics = _host.Services.GetOpcUaSubjectServer(registration).Diagnostics;
 
         await _host.StartAsync();
         sw.Stop();

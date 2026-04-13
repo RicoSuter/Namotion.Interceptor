@@ -17,7 +17,7 @@ public partial class Machine
     public partial decimal Speed { get; set; }
 }
 
-builder.Services.AddOpcUaSubjectClientSource<Machine>(
+var registration = builder.Services.AddOpcUaSubjectClientSource<Machine>(
     serverUrl: "opc.tcp://plc.factory.com:4840",
     sourceName: "opc",
     pathPrefix: null,
@@ -29,6 +29,8 @@ await host.StartAsync();
 Console.WriteLine(machine.Temperature); // Read property which is synchronized with OPC UA server
 machine.Speed = 100; // Writes to OPC UA server
 ```
+
+All `AddOpcUaSubjectClientSource` overloads return an `OpcUaClientRegistration` handle for accessing the client instance and diagnostics later (see [Diagnostics](#diagnostics)).
 
 **Parameters:**
 - `serverUrl` - The OPC UA server endpoint (e.g., `"opc.tcp://localhost:4840"`)
@@ -43,7 +45,7 @@ Three DI overloads are available: the simple generic shown above, one with a cus
 For advanced scenarios, use the full configuration API to customize connection behavior, subscription settings, and dynamic property discovery.
 
 ```csharp
-builder.Services.AddOpcUaSubjectClientSource(
+var registration = builder.Services.AddOpcUaSubjectClientSource(
     subjectSelector: sp => sp.GetRequiredService<MyRoot>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {
@@ -499,30 +501,7 @@ For 24/7 production use, the default configuration provides robust resilience:
 
 ## Extensibility
 
-### Custom Value Converter
-
-Extend `OpcUaValueConverter` to implement custom type conversions between OPC UA and C# types. Override `ConvertToPropertyValue` for OPC UA -> C# conversions and `ConvertToNodeValue` for C# -> OPC UA conversions.
-
-```csharp
-public class CustomValueConverter : OpcUaValueConverter
-{
-    public override object? ConvertToPropertyValue(
-        object? nodeValue, RegisteredSubjectProperty property)
-    {
-        if (property.Type == typeof(MyCustomType) && nodeValue is string str)
-            return MyCustomType.Parse(str);
-        return base.ConvertToPropertyValue(nodeValue, property);
-    }
-
-    public override object? ConvertToNodeValue(
-        object? propertyValue, RegisteredSubjectProperty property)
-    {
-        if (propertyValue is MyCustomType custom)
-            return custom.ToString();
-        return base.ConvertToNodeValue(propertyValue, property);
-    }
-}
-```
+For custom type conversions (used by both client and server), see [Custom Value Converter](connectors-opcua.md#custom-value-converter).
 
 ### Custom Type Resolver
 
@@ -600,11 +579,40 @@ if (dynamicProperty != null)
 }
 ```
 
+## Write Error Handling
+
+When a batch write to the OPC UA server partially fails, the client throws an `OpcUaWriteException`. The exception distinguishes between transient failures (connectivity issues, timeouts — may succeed on retry) and permanent failures (invalid nodes, access denied — should not be retried). The write retry queue (see [Resilience](#write-retry-queue-during-disconnection)) handles transient failures automatically during disconnection, but writes that fail while connected surface this exception.
+
 ## Diagnostics
 
-Monitor client health in production via the `Diagnostics` property on `OpcUaSubjectClientSource`.
+Access client diagnostics through the `IOpcUaSubjectClientSource` interface. When using DI, the registration handle returned by `AddOpcUaSubjectClientSource` provides access:
 
-`OpcUaClientDiagnostics` provides: connection state, session ID, subscription/monitored item counts, reconnection metrics, and polling statistics.
+```csharp
+var registration = builder.Services.AddOpcUaSubjectClientSource<Machine>(
+    serverUrl: "opc.tcp://plc.factory.com:4840",
+    sourceName: "opc");
+
+// After building the host:
+IOpcUaSubjectClientSource source = serviceProvider.GetOpcUaSubjectClientSource(registration);
+var diagnostics = source.Diagnostics;
+```
+
+When using direct instantiation, the return value is already the interface:
+
+```csharp
+IOpcUaSubjectClientSource source = subject.CreateOpcUaClientSource(configuration, logger);
+var diagnostics = source.Diagnostics;
+```
+
+The diagnostics object is a live facade — resolve it once and poll its properties repeatedly. Categories available:
+
+- **Connection**: whether connected, whether reconnecting, session ID, last connected timestamp
+- **Subscriptions**: active subscription count, total monitored items
+- **Reconnection history**: total attempts, successes, and failures
+- **Polling fallback**: item count, read success/failure counts, value changes detected, slow polls, and circuit breaker state (see [Polling Fallback](#polling-fallback-for-unsupported-nodes))
+- **Read-after-write**: scheduled, executed, coalesced, and failed counts (see [Read After Write Fallback](#read-after-write-fallback))
+
+All diagnostics properties are thread-safe for reading.
 
 ## Thread Safety
 
@@ -636,7 +644,4 @@ The OPC UA client hooks into the interceptor lifecycle system (see [Subject Life
 - OPC UA subscription items remain on the server until session ends
 - Cleanup is skipped during reconnection to avoid interfering with subscription transfer
 
-**Limitations:**
-- Does NOT dynamically add new subjects to OPC UA after initialization
-- Does NOT update the OPC UA address space when subjects are attached
-- New subjects added after startup require a restart to appear in OPC UA
+See also [Lifecycle Limitations](connectors-opcua.md#lifecycle-limitations) that apply to both client and server.

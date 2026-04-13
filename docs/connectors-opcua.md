@@ -31,7 +31,7 @@ public partial class Machine
     public partial decimal Speed { get; set; }
 }
 
-builder.Services.AddOpcUaSubjectClientSource<Machine>(
+var clientRegistration = builder.Services.AddOpcUaSubjectClientSource<Machine>(
     serverUrl: "opc.tcp://plc.factory.com:4840",
     sourceName: "opc",
     pathPrefix: null,
@@ -41,6 +41,10 @@ var machine = serviceProvider.GetRequiredService<Machine>();
 await host.StartAsync();
 Console.WriteLine(machine.Temperature); // Synchronized with OPC UA server
 machine.Speed = 100; // Writes to OPC UA server
+
+// Access diagnostics via registration handle
+IOpcUaSubjectClientSource source = serviceProvider.GetOpcUaSubjectClientSource(clientRegistration);
+Console.WriteLine(source.Diagnostics.IsConnected);
 ```
 
 See [OPC UA Client](connectors-opcua-client.md) for configuration, authentication, monitoring, resilience, and extensibility.
@@ -57,7 +61,7 @@ public partial class Sensor
     public partial decimal Value { get; set; }
 }
 
-builder.Services.AddOpcUaSubjectServer<Sensor>(
+var serverRegistration = builder.Services.AddOpcUaSubjectServer<Sensor>(
     sourceName: "opc",
     pathPrefix: null,
     rootName: "MySensor");
@@ -65,13 +69,19 @@ builder.Services.AddOpcUaSubjectServer<Sensor>(
 var sensor = serviceProvider.GetRequiredService<Sensor>();
 sensor.Value = 42.5m;
 await host.StartAsync();
+
+// Access diagnostics via registration handle
+IOpcUaSubjectServer server = serviceProvider.GetOpcUaSubjectServer(serverRegistration);
+Console.WriteLine(server.Diagnostics.IsRunning);
 ```
 
 See [OPC UA Server](connectors-opcua-server.md) for configuration, security, companion specifications, and diagnostics.
 
 ## Property Mapping
 
-Map C# properties to OPC UA nodes using attributes. For simple cases, use `[Path]`. For advanced OPC UA-specific configuration, use `[OpcUaNode]` and related attributes.
+Both client and server configurations include a `NodeMapper` property (`IOpcUaNodeMapper`) that controls how C# properties map to OPC UA nodes. The default is a `CompositeNodeMapper` combining `PathProviderOpcUaNodeMapper` (maps `[Path]` attributes) and `AttributeOpcUaNodeMapper` (maps `[OpcUaNode]` / `[OpcUaReference]` attributes). A `FluentOpcUaNodeMapper<T>` is also available for runtime code-based configuration. Custom mappers can be added to the composite chain.
+
+For simple cases, use `[Path]`. For advanced OPC UA-specific configuration, use `[OpcUaNode]` and related attributes:
 
 ```csharp
 [InterceptorSubject]
@@ -93,11 +103,7 @@ public partial class Machine
 }
 ```
 
-For comprehensive mapping documentation including companion spec support, VariableTypes, and fluent configuration, see [OPC UA Mapping Guide](connectors-opcua-mapping.md).
-
-### Node Mapper
-
-Both client and server configurations include a `NodeMapper` property (`IOpcUaNodeMapper`) that controls how C# properties map to OPC UA nodes. The default is a `CompositeNodeMapper` combining `PathProviderOpcUaNodeMapper` (maps `[Path]` attributes) and `AttributeOpcUaNodeMapper` (maps `[OpcUaNode]` attributes). For custom mapping strategies including fluent configuration and composite mappers, see [OPC UA Mapping Guide](connectors-opcua-mapping.md).
+For comprehensive mapping documentation including companion spec support, VariableTypes, fluent configuration, and composite mappers, see [OPC UA Mapping Guide](connectors-opcua-mapping.md).
 
 ## Type Conversions
 
@@ -106,7 +112,46 @@ OPC UA doesn't natively support C# `decimal`, so automatic conversion is applied
 - `decimal` <-> `double`
 - `decimal[]` <-> `double[]`
 
-All other C# primitive types map directly to OPC UA built-in types. For custom conversions, extend `OpcUaValueConverter` (see [Client Extensibility](connectors-opcua-client.md#custom-value-converter)).
+All other C# primitive types map directly to OPC UA built-in types.
+
+### Custom Value Converter
+
+Both client and server configurations use `OpcUaValueConverter` for type conversions. The converter handles three concerns: converting OPC UA values to C# property values (`ConvertToPropertyValue`), converting C# values back to OPC UA (`ConvertToNodeValue`), and resolving OPC UA type information for C# types (`GetNodeTypeInfo`, used by the server to declare correct data types in the address space). Extend it to add custom conversions:
+
+```csharp
+public class CustomValueConverter : OpcUaValueConverter
+{
+    public override object? ConvertToPropertyValue(
+        object? nodeValue, RegisteredSubjectProperty property)
+    {
+        if (property.Type == typeof(MyCustomType) && nodeValue is string str)
+            return MyCustomType.Parse(str);
+        return base.ConvertToPropertyValue(nodeValue, property);
+    }
+
+    public override object? ConvertToNodeValue(
+        object? propertyValue, RegisteredSubjectProperty property)
+    {
+        if (propertyValue is MyCustomType custom)
+            return custom.ToString();
+        return base.ConvertToNodeValue(propertyValue, property);
+    }
+}
+```
+
+## Custom Application Configuration
+
+Both client and server configurations support overriding `CreateApplicationInstanceAsync()` for full control over OPC UA application settings (certificates, transport quotas, security policies). See [Client](connectors-opcua-client.md#custom-application-configuration) and [Server](connectors-opcua-server.md#custom-application-configuration) for side-specific examples.
+
+## Lifecycle Limitations
+
+The OPC UA integration takes a snapshot of the object model at startup. Both client and server share these limitations:
+
+- Does NOT dynamically add new subjects to OPC UA after initialization
+- Does NOT update the OPC UA address space when subjects are attached
+- New subjects added after startup require a restart to appear in OPC UA
+
+For side-specific cleanup behavior, see [Client Lifecycle](connectors-opcua-client.md#lifecycle) and [Server Lifecycle](connectors-opcua-server.md#lifecycle).
 
 ## Performance
 

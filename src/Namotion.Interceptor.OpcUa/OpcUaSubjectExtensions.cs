@@ -19,8 +19,8 @@ public static class OpcUaSubjectExtensions
     /// <param name="subject">The subject to expose via OPC UA.</param>
     /// <param name="configuration">The OPC UA server configuration.</param>
     /// <param name="logger">The logger instance.</param>
-    /// <returns>An IHostedService that runs the OPC UA server.</returns>
-    public static IHostedService CreateOpcUaServer(
+    /// <returns>An <see cref="IOpcUaSubjectServer"/> that runs the OPC UA server.</returns>
+    public static IOpcUaSubjectServer CreateOpcUaServer(
         this IInterceptorSubject subject,
         OpcUaServerConfiguration configuration,
         ILogger logger)
@@ -35,8 +35,8 @@ public static class OpcUaSubjectExtensions
     /// <param name="subject">The subject to synchronize with OPC UA.</param>
     /// <param name="configuration">The OPC UA client configuration.</param>
     /// <param name="logger">The logger instance.</param>
-    /// <returns>An IHostedService that runs the OPC UA client.</returns>
-    public static IHostedService CreateOpcUaClientSource(
+    /// <returns>An <see cref="IOpcUaSubjectClientSource"/> that runs the OPC UA client.</returns>
+    public static IOpcUaSubjectClientSource CreateOpcUaClientSource(
         this IInterceptorSubject subject,
         OpcUaClientConfiguration configuration,
         ILogger logger)
@@ -44,7 +44,7 @@ public static class OpcUaSubjectExtensions
         return new OpcUaSubjectClientSource(subject, configuration, logger);
     }
 
-    public static IServiceCollection AddOpcUaSubjectClientSource<TSubject>(
+    public static OpcUaClientRegistration AddOpcUaSubjectClientSource<TSubject>(
         this IServiceCollection serviceCollection,
         string serverUrl,
         string sourceName,
@@ -60,7 +60,7 @@ public static class OpcUaSubjectExtensions
             rootName);
     }
 
-    public static IServiceCollection AddOpcUaSubjectClientSource(
+    public static OpcUaClientRegistration AddOpcUaSubjectClientSource(
         this IServiceCollection serviceCollection,
         string serverUrl,
         string sourceName,
@@ -86,16 +86,16 @@ public static class OpcUaSubjectExtensions
         });
     }
 
-    public static IServiceCollection AddOpcUaSubjectClientSource(
+    public static OpcUaClientRegistration AddOpcUaSubjectClientSource(
         this IServiceCollection serviceCollection,
         Func<IServiceProvider, IInterceptorSubject> subjectSelector,
         Func<IServiceProvider, OpcUaClientConfiguration> configurationProvider)
     {
         var key = Guid.NewGuid().ToString();
-        return serviceCollection
+        serviceCollection
             .AddKeyedSingleton(key, (sp, _) => configurationProvider(sp))
             .AddKeyedSingleton(key, (sp, _) => subjectSelector(sp))
-            .AddKeyedSingleton(key, (sp, _) =>
+            .AddKeyedSingleton<IOpcUaSubjectClientSource>(key, (sp, _) =>
             {
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
                 return new OpcUaSubjectClientSource(
@@ -103,22 +103,25 @@ public static class OpcUaSubjectExtensions
                     sp.GetRequiredKeyedService<OpcUaClientConfiguration>(key),
                     sp.GetRequiredService<ILogger<OpcUaSubjectClientSource>>());
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaSubjectClientSource>(key))
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<IOpcUaSubjectClientSource>(key))
             .AddSingleton<IHostedService>(sp =>
             {
                 var configuration = sp.GetRequiredKeyedService<OpcUaClientConfiguration>(key);
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
+                var clientSource = (OpcUaSubjectClientSource)sp.GetRequiredKeyedService<IOpcUaSubjectClientSource>(key);
                 return new SubjectSourceBackgroundService(
-                    sp.GetRequiredKeyedService<OpcUaSubjectClientSource>(key),
+                    clientSource,
                     subject.Context,
                     sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>(),
                     configuration.BufferTime,
                     configuration.RetryTime,
                     configuration.WriteRetryQueueSize);
             });
+
+        return new OpcUaClientRegistration(key);
     }
 
-    public static IServiceCollection AddOpcUaSubjectServer<TSubject>(
+    public static OpcUaServerRegistration AddOpcUaSubjectServer<TSubject>(
         this IServiceCollection serviceCollection,
         string sourceName,
         string? pathPrefix = null,
@@ -132,7 +135,7 @@ public static class OpcUaSubjectExtensions
             rootName);
     }
 
-    public static IServiceCollection AddOpcUaSubjectServer(
+    public static OpcUaServerRegistration AddOpcUaSubjectServer(
         this IServiceCollection serviceCollection,
         string sourceName,
         Func<IServiceProvider, IInterceptorSubject> subjectSelector,
@@ -154,16 +157,16 @@ public static class OpcUaSubjectExtensions
         });
     }
 
-    public static IServiceCollection AddOpcUaSubjectServer(
+    public static OpcUaServerRegistration AddOpcUaSubjectServer(
         this IServiceCollection serviceCollection,
         Func<IServiceProvider, IInterceptorSubject> subjectSelector,
         Func<IServiceProvider, OpcUaServerConfiguration> configurationProvider)
     {
         var key = Guid.NewGuid().ToString();
-        return serviceCollection
+        serviceCollection
             .AddKeyedSingleton(key, (sp, _) => configurationProvider(sp))
             .AddKeyedSingleton(key, (sp, _) => subjectSelector(sp))
-            .AddKeyedSingleton(key, (sp, _) =>
+            .AddKeyedSingleton<IOpcUaSubjectServer>(key, (sp, _) =>
             {
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
                 return new OpcUaSubjectServerBackgroundService(
@@ -171,6 +174,8 @@ public static class OpcUaSubjectExtensions
                     sp.GetRequiredKeyedService<OpcUaServerConfiguration>(key),
                     sp.GetRequiredService<ILogger<OpcUaSubjectServerBackgroundService>>());
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaSubjectServerBackgroundService>(key));
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<IOpcUaSubjectServer>(key));
+
+        return new OpcUaServerRegistration(key);
     }
 }

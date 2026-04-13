@@ -14,7 +14,7 @@ public partial class Sensor
     public partial decimal Value { get; set; }
 }
 
-builder.Services.AddOpcUaSubjectServer<Sensor>(
+var registration = builder.Services.AddOpcUaSubjectServer<Sensor>(
     sourceName: "opc",
     pathPrefix: null,
     rootName: "MySensor");
@@ -24,12 +24,14 @@ sensor.Value = 42.5m;
 await host.StartAsync();
 ```
 
+All `AddOpcUaSubjectServer` overloads return an `OpcUaServerRegistration` handle for accessing the server instance and diagnostics later (see [Diagnostics](#diagnostics)).
+
 Three DI overloads are available with increasing control:
 
 **Simple generic** - resolves the subject from DI automatically:
 
 ```csharp
-builder.Services.AddOpcUaSubjectServer<Machine>(
+var registration = builder.Services.AddOpcUaSubjectServer<Machine>(
     sourceName: "opc",
     pathPrefix: null,
     rootName: "MyMachine");
@@ -38,7 +40,7 @@ builder.Services.AddOpcUaSubjectServer<Machine>(
 **With subject selector** - custom subject resolution:
 
 ```csharp
-builder.Services.AddOpcUaSubjectServer(
+var registration = builder.Services.AddOpcUaSubjectServer(
     sourceName: "opc",
     subjectSelector: sp => sp.GetRequiredService<Machine>(),
     pathPrefix: null,
@@ -48,7 +50,7 @@ builder.Services.AddOpcUaSubjectServer(
 **Full configuration** - complete control over all settings:
 
 ```csharp
-builder.Services.AddOpcUaSubjectServer(
+var registration = builder.Services.AddOpcUaSubjectServer(
     subjectSelector: sp => sp.GetRequiredService<MyRoot>(),
     configurationProvider: sp => new OpcUaServerConfiguration
     {
@@ -74,7 +76,7 @@ Multiple servers can be registered in the same DI container. Each registration u
 For scenarios without DI, create a server directly from a subject:
 
 ```csharp
-var server = subject.CreateOpcUaServer(configuration, logger);
+IOpcUaSubjectServer server = subject.CreateOpcUaServer(configuration, logger);
 await server.StartAsync(cancellationToken);
 ```
 
@@ -220,16 +222,31 @@ The `LoadNodeSetFromEmbeddedResource<T>()` helper loads NodeSet XML files embedd
 
 ## Diagnostics
 
-The server runs as a [hosted service](hosting.md). Monitor its health in production via the `Diagnostics` property on `OpcUaSubjectServerBackgroundService`.
+Access server diagnostics through the `IOpcUaSubjectServer` interface. When using DI, the registration handle returned by `AddOpcUaSubjectServer` provides access:
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `IsRunning` | `bool` | Whether the server is accepting connections |
-| `ActiveSessionCount` | `int` | Number of currently connected clients |
-| `StartTime` | `DateTimeOffset?` | When the server started (null if not running) |
-| `Uptime` | `TimeSpan?` | Time since server started (null if not running) |
-| `LastError` | `Exception?` | Most recent error (null if no errors) |
-| `ConsecutiveFailures` | `int` | Number of consecutive startup failures (resets on success) |
+```csharp
+var registration = builder.Services.AddOpcUaSubjectServer<Sensor>(
+    sourceName: "opc",
+    rootName: "MySensor");
+
+// After building the host:
+IOpcUaSubjectServer server = serviceProvider.GetOpcUaSubjectServer(registration);
+var diagnostics = server.Diagnostics;
+```
+
+When using direct instantiation, the return value is already the interface:
+
+```csharp
+IOpcUaSubjectServer server = subject.CreateOpcUaServer(configuration, logger);
+var diagnostics = server.Diagnostics;
+```
+
+The diagnostics object is a live facade — resolve it once and poll its properties repeatedly. Categories available:
+
+- **Running state**: whether the server is accepting connections
+- **Sessions**: number of currently connected clients
+- **Uptime**: when the server started and how long it has been running
+- **Errors**: most recent error and consecutive startup failure count (resets on success, see [Resilience](#resilience))
 
 ## Resilience
 
@@ -254,7 +271,4 @@ The OPC UA server hooks into the interceptor lifecycle system (see [Subject Life
 - The OPC UA node remains in the address space until server restart (OPC UA SDK limitation)
 - Local tracking is cleaned up immediately to prevent memory leaks
 
-**Limitations:**
-- Does NOT dynamically add new subjects to OPC UA after initialization
-- Does NOT update the OPC UA address space when subjects are attached
-- New subjects added after startup require a restart to appear in OPC UA
+See also [Lifecycle Limitations](connectors-opcua.md#lifecycle-limitations) that apply to both client and server.
