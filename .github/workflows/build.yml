@@ -296,7 +296,13 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - run: dotnet pack src/Namotion.Interceptor.slnx --configuration Release --output ${{ env.NUGET_DIRECTORY }} -p:PackageVersion=${{ github.event.release.tag_name }}
+      - name: Extract version from tag
+        id: version
+        run: |
+          $version = "${{ github.event.release.tag_name }}" -replace '^v', ''
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+
+      - run: dotnet pack src/Namotion.Interceptor.slnx --configuration Release --output ${{ env.NUGET_DIRECTORY }} -p:PackageVersion=${{ steps.version.outputs.VERSION }}
 
       - uses: actions/upload-artifact@v4
         with:
@@ -322,7 +328,7 @@ jobs:
           path: ${{ env.NUGET_DIRECTORY }}
 
       - name: Install nuget validator
-        run: dotnet tool update Meziantou.Framework.NuGetPackageValidation.Tool --global
+        run: dotnet tool update Meziantou.Framework.NuGetPackageValidation.Tool --global --version 1.0.46
 
       - name: Validate package
         run: meziantou.validate-nuget-package --excluded-rules IconMustBeSet,ReadmeMustBeSet,Symbols,ProjectUrlMustBeSet (Get-ChildItem "${{ env.NUGET_DIRECTORY }}/*.nupkg")

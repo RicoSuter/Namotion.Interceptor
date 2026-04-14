@@ -1,0 +1,118 @@
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Setup, typeof(WallboxCharger))]
+@implements ISubjectEditComponent
+
+@inject IHttpClientFactory HttpClientFactory
+
+<MudForm>
+    <MudTextField @bind-Value="_email"
+                  Label="Email"
+                  Required="true"
+                  Class="mt-2" />
+
+    <MudTextField @bind-Value="_password"
+                  Label="Password"
+                  Required="true"
+                  InputType="InputType.Password"
+                  Class="mt-4" />
+
+    <MudButton OnClick="LoadChargersAsync"
+               Variant="Variant.Filled"
+               Color="Color.Primary"
+               Disabled="_loading"
+               Class="mt-4">
+        @if (_loading)
+        {
+            <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
+        }
+        Load Chargers
+    </MudButton>
+
+    @if (_errorMessage != null)
+    {
+        <MudAlert Severity="Severity.Error" Class="mt-4">@_errorMessage</MudAlert>
+    }
+
+    @if (_chargers.Length > 0)
+    {
+        <MudList T="string" @bind-SelectedValue="_selectedSerialNumber" Class="mt-4">
+            <MudDivider />
+            @foreach (var charger in _chargers)
+            {
+                <MudListItem T="string" Value="@charger.SerialNumber">
+                    @charger.Name (@charger.SerialNumber)
+                </MudListItem>
+                <MudDivider />
+            }
+        </MudList>
+    }
+</MudForm>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private WallboxCharger? Charger => Subject as WallboxCharger;
+
+    private string _email = string.Empty;
+    private string _password = string.Empty;
+    private string? _selectedSerialNumber;
+    private ChargerInformation[] _chargers = [];
+    private bool _loading;
+    private string? _errorMessage;
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(_email) &&
+                           !string.IsNullOrWhiteSpace(_password) &&
+                           !string.IsNullOrWhiteSpace(_selectedSerialNumber);
+
+    public bool IsDirty => IsValid;
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    private async Task LoadChargersAsync()
+    {
+        _loading = true;
+        _errorMessage = null;
+
+        try
+        {
+            var client = new WallboxClient(HttpClientFactory, _email, _password);
+            _chargers = await client.GetChargersAsync(default);
+
+            if (_chargers.Length == 0)
+                _errorMessage = "No chargers found for this account.";
+        }
+        catch (Exception exception)
+        {
+            _chargers = [];
+            _errorMessage = $"Failed to load chargers: {exception.Message}";
+        }
+        finally
+        {
+            _loading = false;
+            IsValidChanged?.Invoke(IsValid);
+            IsDirtyChanged?.Invoke(IsDirty);
+        }
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Charger != null && IsValid)
+        {
+            Charger.Email = _email;
+            Charger.Password = _password;
+            Charger.SerialNumber = _selectedSerialNumber!;
+
+            var selectedCharger = _chargers.FirstOrDefault(c => c.SerialNumber == _selectedSerialNumber);
+            if (selectedCharger?.Name != null)
+                Charger.Name = selectedCharger.Name;
+        }
+
+        return Task.CompletedTask;
+    }
+}

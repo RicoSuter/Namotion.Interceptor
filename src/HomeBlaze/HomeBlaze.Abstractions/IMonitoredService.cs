@@ -13,12 +13,12 @@ public interface IMonitoredService
     /// <summary>
     /// Current lifecycle status.
     /// </summary>
-    [State]
+    [State(Position = 910)]
     ServiceStatus Status { get; }
 
     /// <summary>
     /// Human-readable status message (error details, progress info, etc.).
     /// </summary>
-    [State]
+    [State(Position = 911)]
     string? StatusMessage { get; }
 }

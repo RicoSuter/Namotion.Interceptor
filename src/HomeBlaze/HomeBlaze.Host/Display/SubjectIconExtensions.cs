@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Reflection;
 using HomeBlaze.Abstractions;
+using HomeBlaze.Abstractions.Networking;
 using MudBlazor;
 using Namotion.Interceptor;
 
@@ -33,8 +34,14 @@ public static class SubjectIconExtensions
     /// </summary>
     public static string? GetIconColor(this IInterceptorSubject subject)
     {
-        if (subject is IIconProvider iconProvider)
-            return iconProvider.IconColor;
+        if (subject is IIconProvider iconProvider && iconProvider.IconColor is { } color)
+            return color;
+
+        if (subject is IConnectionState { IsConnected: false } ||
+            subject is IMonitoredService { Status: ServiceStatus.Error })
+        {
+            return "Error";
+        }
 
         return null;
     }

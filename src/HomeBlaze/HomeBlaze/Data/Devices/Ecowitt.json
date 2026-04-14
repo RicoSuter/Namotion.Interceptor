@@ -1,0 +1,8 @@
+{
+  "$type": "Namotion.Devices.Ecowitt.EcowittGateway",
+  "name": "Ecowitt Gateway",
+  "hostAddress": "192.168.1.x",
+  "pollingInterval": "00:00:30",
+  "retryInterval": "00:01:00",
+  "hiddenSensors": []
+}

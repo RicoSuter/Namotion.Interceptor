@@ -13,30 +13,30 @@ public interface IAudioPlayerState : IVolumeState
     /// <summary>
     /// Whether audio is currently playing.
     /// </summary>
-    [State]
+    [State(Position = 140)]
     bool? IsPlaying { get; }
 
     /// <summary>
     /// Whether audio is muted.
     /// </summary>
-    [State]
+    [State(Position = 141)]
     bool? IsMuted { get; }
 
     /// <summary>
     /// The current track name or title.
     /// </summary>
-    [State]
+    [State(Position = 142)]
     string? CurrentTrack { get; }
 
     /// <summary>
     /// The current playback position.
     /// </summary>
-    [State]
+    [State(Position = 143)]
     TimeSpan? CurrentPosition { get; }
 
     /// <summary>
     /// The total duration of the current track.
     /// </summary>
-    [State]
+    [State(Position = 144)]
     TimeSpan? Duration { get; }
 }

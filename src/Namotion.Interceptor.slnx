@@ -64,6 +64,12 @@
     <Project Path="HomeBlaze/Namotion.Devices.Shelly/Namotion.Devices.Shelly.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Shelly.Tests/Namotion.Devices.Shelly.Tests.csproj" />
     <Project Path="HomeBlaze/Namotion.Devices.Shelly.HomeBlaze/Namotion.Devices.Shelly.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Wallbox/Namotion.Devices.Wallbox.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Wallbox.Tests/Namotion.Devices.Wallbox.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Wallbox.HomeBlaze/Namotion.Devices.Wallbox.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Ecowitt/Namotion.Devices.Ecowitt.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Ecowitt.Tests/Namotion.Devices.Ecowitt.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Ecowitt.HomeBlaze/Namotion.Devices.Ecowitt.HomeBlaze.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/NuGet/">
     <Project Path="HomeBlaze/Namotion.NuGet.Plugins.Tests/Namotion.NuGet.Plugins.Tests.csproj" />

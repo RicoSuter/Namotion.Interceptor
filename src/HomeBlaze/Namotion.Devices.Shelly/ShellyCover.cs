@@ -38,16 +38,16 @@ public partial class ShellyCover :
     [State(Unit = StateUnit.Hertz)]
     public partial decimal? ElectricalFrequency { get; internal set; }
 
-    [State]
+    [State(Position = 350)]
     public partial decimal? PowerFactor { get; internal set; }
 
     [State(Unit = StateUnit.DegreeCelsius)]
     public partial decimal? Temperature { get; internal set; }
 
-    [State]
+    [State(Position = 400)]
     public partial string? Source { get; internal set; }
 
-    [State]
+    [State(Position = 401)]
     public partial string? LastDirection { get; internal set; }
 
     /// <summary>
@@ -60,10 +60,10 @@ public partial class ShellyCover :
     /// </summary>
     public partial string? ApiState { get; internal set; }
 
-    [State(IsDiscrete = true)]
+    [State(IsDiscrete = true, Position = 402)]
     public partial bool? IsCalibrating { get; internal set; }
 
-    [State]
+    [State(Position = 950)]
     public partial DateTimeOffset? LastUpdated { get; internal set; }
 
     [Derived]

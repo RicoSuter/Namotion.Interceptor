@@ -1,3 +1,4 @@
+using System.Globalization;
 using HomeBlaze.Abstractions.Attributes;
 using HomeBlaze.Abstractions.Metadata;
 using HomeBlaze.Services;
@@ -10,6 +11,37 @@ namespace HomeBlaze.Host.Services.Display;
 /// </summary>
 public static class StateUnitExtensions
 {
+    private static readonly (StateUnit Unit, string Suffix, decimal Factor)[][] UnitFamilies =
+    [
+        [(StateUnit.Watt, "W", 1m), (StateUnit.Kilowatt, "kW", 1000m)],
+        [(StateUnit.WattHour, "Wh", 1m), (StateUnit.KilowattHour, "kWh", 1000m)],
+        [(StateUnit.Millimeter, "mm", 1m), (StateUnit.Meter, "m", 1000m), (StateUnit.Kilometer, "km", 1_000_000m)],
+        [(StateUnit.Milliampere, "mA", 1m), (StateUnit.Ampere, "A", 1000m)],
+        [(StateUnit.Kilobyte, "kB", 1m), (default, "MB", 1000m), (default, "GB", 1_000_000m)],
+        [(StateUnit.KilobytePerSecond, "kB/s", 1m), (default, "MB/s", 1000m)],
+    ];
+
+    private static readonly Dictionary<StateUnit, (int FamilyIndex, int UnitIndex)> UnitFamilyLookup = BuildLookup();
+
+    private static Dictionary<StateUnit, (int FamilyIndex, int UnitIndex)> BuildLookup()
+    {
+        var lookup = new Dictionary<StateUnit, (int, int)>();
+        for (var familyIndex = 0; familyIndex < UnitFamilies.Length; familyIndex++)
+        {
+            var family = UnitFamilies[familyIndex];
+            for (var unitIndex = 0; unitIndex < family.Length; unitIndex++)
+            {
+                var entry = family[unitIndex];
+                if (entry.Unit != default)
+                {
+                    lookup[entry.Unit] = (familyIndex, unitIndex);
+                }
+            }
+        }
+
+        return lookup;
+    }
+
     /// <summary>
     /// Renders a property value with proper formatting including unit support.
     /// </summary>
@@ -30,7 +62,34 @@ public static class StateUnitExtensions
         var stateMetadata = property.GetStateMetadata();
         if (stateMetadata != null && stateMetadata.Unit != StateUnit.Default)
         {
-            return FormatWithUnit(value, stateMetadata.Unit);
+            var unit = stateMetadata.Unit;
+
+            // Percent and Currency use special formatting, not auto-scaling
+            if (unit == StateUnit.Percent)
+            {
+                return $"{(int)(Convert.ToDecimal(value) * 100m)}%";
+            }
+
+            if (unit == StateUnit.Currency)
+            {
+                return $"{value:C}";
+            }
+
+            if (unit == StateUnit.HexColor)
+            {
+                return value.ToString() ?? "";
+            }
+
+            // Try to convert to decimal for auto-scaling
+            try
+            {
+                var decimalValue = Convert.ToDecimal(value, CultureInfo.InvariantCulture);
+                return FormatWithUnit(decimalValue, unit);
+            }
+            catch
+            {
+                // Fall through to default formatting for non-convertible types
+            }
         }
 
         // Default formatting for common types
@@ -38,75 +97,104 @@ public static class StateUnitExtensions
         {
             bool b => b ? "Yes" : "No",
             DateTime dt => dt.ToString("g"),
-            DateTimeOffset dto => dto.ToString("g"),
+            DateTimeOffset dto => $"{dto.ToLocalTime().ToString("g")} {dto.ToLocalTime():zzz}",
             Enum e => e.ToString(),
             IEnumerable<string> strings => string.Join("\n", strings),
             _ => value.ToString() ?? ""
         };
     }
 
-    private static string FormatWithUnit(object value, StateUnit unit)
+    /// <summary>
+    /// Formats a decimal value with auto-scaling within its unit family.
+    /// </summary>
+    public static string FormatWithUnit(decimal value, StateUnit unit)
     {
-        // Special handling for units that need value transformation
-        if (unit == StateUnit.Percent)
+        // Check if this unit belongs to a scalable family
+        if (UnitFamilyLookup.TryGetValue(unit, out var lookup))
         {
-            return $"{(int)(Convert.ToDecimal(value) * 100m)}%";
+            var family = UnitFamilies[lookup.FamilyIndex];
+            var inputEntry = family[lookup.UnitIndex];
+
+            // Convert to base unit (multiply by the input unit's factor)
+            var baseValue = value * inputEntry.Factor;
+
+            // Find the best display unit: largest unit where |baseValue / factor| >= 1
+            var bestIndex = 0; // default to smallest
+            for (var i = family.Length - 1; i >= 0; i--)
+            {
+                if (Math.Abs(baseValue / family[i].Factor) >= 1m)
+                {
+                    bestIndex = i;
+                    break;
+                }
+            }
+
+            var bestEntry = family[bestIndex];
+            var displayValue = baseValue / bestEntry.Factor;
+
+            return FormatDecimalValue(displayValue, bestEntry.Suffix);
         }
 
-        if (unit == StateUnit.WattHour)
+        // No family found — use static suffix with space handling
+        var unitInfo = GetUnitInfo(unit);
+        if (unitInfo != null)
         {
-            return FormatWattHour(value);
-        }
-
-        if (unit == StateUnit.Currency)
-        {
-            return $"{value:C}";
-        }
-
-        var suffix = GetUnitSuffix(unit);
-        if (suffix != null)
-        {
-            return $"{value} {suffix}";
+            var rounded = Math.Round(value, 2);
+            var formatted = rounded.ToString("0.##", CultureInfo.InvariantCulture);
+            var separator = unitInfo.Value.NeedsSpace ? " " : "";
+            return $"{formatted}{separator}{unitInfo.Value.Suffix}";
         }
 
         return unit == StateUnit.Default
-            ? value.ToString() ?? ""
-            : $"{value} {unit}";
+            ? value.ToString(CultureInfo.InvariantCulture)
+            : $"{value.ToString(CultureInfo.InvariantCulture)} {unit}";
     }
+
+    private static string FormatDecimalValue(decimal value, string suffix)
+    {
+        // Round to 2 decimal places, strip trailing zeros
+        var rounded = Math.Round(value, 2);
+        var formatted = rounded.ToString("0.##", CultureInfo.InvariantCulture);
+        return $"{formatted} {suffix}";
+    }
+
+    /// <summary>
+    /// Gets the unit suffix and whether it needs a space separator.
+    /// </summary>
+    public static (string Suffix, bool NeedsSpace)? GetUnitInfo(StateUnit unit) => unit switch
+    {
+        StateUnit.Percent => ("%", false),
+        StateUnit.DegreeCelsius => ("°C", false),
+        StateUnit.Degree => ("°", false),
+        StateUnit.Watt => ("W", true),
+        StateUnit.Kilowatt => ("kW", true),
+        StateUnit.WattHour => ("Wh", true),
+        StateUnit.Volt => ("V", true),
+        StateUnit.Ampere => ("A", true),
+        StateUnit.Hertz => ("Hz", true),
+        StateUnit.Lumen => ("lm", true),
+        StateUnit.Lux => ("lx", true),
+        StateUnit.Kilometer => ("km", true),
+        StateUnit.Meter => ("m", true),
+        StateUnit.Millimeter => ("mm", true),
+        StateUnit.MillimeterPerHour => ("mm/h", true),
+        StateUnit.Kilobyte => ("kB", true),
+        StateUnit.KilobytePerSecond => ("kB/s", true),
+        StateUnit.MegabitPerSecond => ("Mbit/s", true),
+        StateUnit.KilowattHour => ("kWh", true),
+        StateUnit.Milliampere => ("mA", true),
+        StateUnit.LiterPerHour => ("l/h", true),
+        StateUnit.MeterPerSecond => ("m/s", true),
+        StateUnit.Hectopascal => ("hPa", true),
+        StateUnit.UvIndex => ("UV", true),
+        StateUnit.HexColor => ("hex", true),
+        _ => null
+    };
 
     /// <summary>
     /// Gets the unit suffix string for a given StateUnit.
     /// </summary>
-    /// <returns>The unit suffix (e.g., "°C", "W") or null if no suffix applies.</returns>
-    public static string? GetUnitSuffix(StateUnit unit) => unit switch
-    {
-        StateUnit.Percent => "%",
-        StateUnit.DegreeCelsius => "°C",
-        StateUnit.Watt => "W",
-        StateUnit.KiloWatt => "kW",
-        StateUnit.WattHour => "Wh",
-        StateUnit.Volt => "V",
-        StateUnit.Ampere => "A",
-        StateUnit.Hertz => "Hz",
-        StateUnit.Lumen => "lm",
-        StateUnit.Lux => "lx",
-        StateUnit.Meter => "m",
-        StateUnit.Millimeter => "mm",
-        StateUnit.MillimeterPerHour => "mm/h",
-        StateUnit.Kilobyte => "kB",
-        StateUnit.KilobytePerSecond => "kB/s",
-        StateUnit.MegabitsPerSecond => "Mbit/s",
-        StateUnit.LiterPerHour => "l/h",
-        StateUnit.HexColor => "hex",
-        _ => null
-    };
-
-    private static string FormatWattHour(object value)
-    {
-        if (decimal.TryParse(value.ToString(), out var wh) && wh > 10000)
-            return $"{Math.Round(wh / 1000, 3)} kWh";
-        return $"{value} Wh";
-    }
+    public static string? GetUnitSuffix(StateUnit unit) => GetUnitInfo(unit)?.Suffix;
 
     private static string FormatTimeSpan(TimeSpan ts)
     {

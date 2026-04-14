@@ -99,9 +99,7 @@ public partial class HueBridge : BackgroundService,
     public string IconName => IsConnected ? "Hub" : "HubOutlined";
 
     [Derived]
-    public string? IconColor =>
-        IsConnected ? "Success" :
-        Status == ServiceStatus.Error ? "Error" : "Warning";
+    public string? IconColor => IsConnected ? "Success" : null;
 
     [Derived]
     public decimal? Power => IsConnected ? 3.0m : null;

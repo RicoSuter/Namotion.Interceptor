@@ -63,7 +63,7 @@ _lastProcessedValues[(subject, "Collection")] = current collection reference
 _lastProcessedValues[(subject, "ObjectRef")]   = current child subject
 ```
 
-This establishes the initial baseline. Without seeding, the first `WriteProperty` would fall back to `context.CurrentValue`, which could be wrong if another thread wrote between attach and the first write.
+This establishes the initial baseline. Without seeding, the first `WriteProperty` would fall back to `null` (meaning "nothing was ever processed"), which triggers a full diff against the backing store — correct but slightly more work than diffing against a known baseline.
 
 ### 2. Updated on every structural write
 
@@ -81,10 +81,10 @@ On the next `WriteProperty` for the same property:
 
 ```csharp
 if (!_lastProcessedValues.TryGetValue(context.Property, out var lastProcessed))
-    lastProcessed = context.CurrentValue;  // fallback for edge cases
+    lastProcessed = null;  // nothing was ever processed for this property
 ```
 
-The fallback to `context.CurrentValue` handles the rare case where no entry exists (e.g., a write to a property whose entry was concurrently removed by a parent detach).
+The fallback to `null` handles the rare case where no entry exists (e.g., a write to a property whose entry was concurrently removed by a parent detach). Using `null` rather than `context.CurrentValue` is important: `context.CurrentValue` reflects what is *in the backing store*, not what the lifecycle *actually processed*. If the property already contains children that were never attached, `context.CurrentValue` would make them look "already processed", causing `ReferenceEquals` to skip re-discovery. `null` honestly represents "nothing was processed" and ensures the diff discovers all children in the backing store.
 
 ### 4. Read during detach (instead of backing store)
 
@@ -149,8 +149,8 @@ Thread X processes Thread Y's write; Thread Y becomes a no-op. Correct and effic
 1. Thread A: detaching parent → `_attachedSubjects.Remove(parent)`
 2. Thread B: `next()` wrote new child to backing store (before lock)
 3. Thread A: reads `_lastProcessedValues` → detaches old children → removes entries → releases lock
-4. Thread B: acquires lock → no `_lastProcessedValues` entry → falls back to `context.CurrentValue`
-   - Diffs, attaches new child, writes `_lastProcessedValues`
+4. Thread B: acquires lock → no `_lastProcessedValues` entry → falls back to `null`
+   - Diffs `null` vs backing store, attaches new child, writes `_lastProcessedValues`
    - Parent-dead check fires → undo (removes entry, detaches child)
 
 No leak.

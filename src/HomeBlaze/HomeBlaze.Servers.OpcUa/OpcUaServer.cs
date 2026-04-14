@@ -82,7 +82,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
     /// When stopped manually, this is set to false to prevent auto-restart.
     /// </summary>
     [Configuration]
-    [State]
+    [State(Position = 0)]
     public partial bool IsEnabled { get; set; }
 
     // State properties (runtime only)
@@ -139,12 +139,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
     public string? IconName => "Dns";
 
     [Derived]
-    public string? IconColor => Status switch
-    {
-        ServiceStatus.Running => "Success",
-        ServiceStatus.Error => "Error",
-        _ => "Warning"
-    };
+    public string? IconColor => Status == ServiceStatus.Running ? "Success" : null;
 
     public OpcUaServer(
         RootManager rootManager,

@@ -367,6 +367,7 @@ public class OpcUaNodeIdResolverTests
         public ITypeTable TypeTable => null!;
         public NodeStateFactory NodeStateFactory => null!;
         public object? UserIdentity => null;
+        public string UserId => "n/a";
         public IList<string>? PreferredLocales => null;
         public DiagnosticsMasks DiagnosticsMask => DiagnosticsMasks.None;
         public StringTable? StringTable => null;

@@ -88,10 +88,10 @@ public partial class Motor
     [State("Speed", Position = 1)]
     public partial int CurrentSpeed { get; set; }
 
-    [State(Position = 2, Unit = StateUnit.DegreeCelsius)]
+    [State(Unit = StateUnit.DegreeCelsius, Position = 2)]
     public partial double Temperature { get; set; }
 
-    [State(Position = 3, IsDiscrete = true)]
+    [State(IsDiscrete = true, Position = 3)]
     public partial MotorStatus Status { get; set; }
 }
 ```
@@ -103,7 +103,7 @@ public partial class Motor
 | `Name` | Display name (overrides property name) | `"Speed"` |
 | `Position` | Sort position in property panel | `1`, `2`, `3` |
 | `Unit` | Formatting unit | `StateUnit.DegreeCelsius` |
-| `IsCumulative` | Value accumulates over time | `true` for energy meters |
+| `IsCumulative` | Value only increases over time (monotonic counter). The subject is responsible for providing a value that never decreases — if the underlying API uses periodic buckets (daily/monthly) that reset, the subject must accumulate them into a true cumulative counter and persist the offset via `[Configuration]`. Consumers can query any time range by computing deltas. | `true` for energy meters, rain totals |
 | `IsDiscrete` | Discrete variable (binary on/off, every transition matters) vs analog (sensor readings) | `true` for commands, flags |
 | `IsEstimated` | Calculated/estimated value | `true` for predictions |
 
@@ -116,7 +116,7 @@ public enum StateUnit
     Percent,           // 75%
     DegreeCelsius,     // 23.5 °C
     Watt,              // 100 W
-    KiloWatt,          // 1.5 kW
+    Kilowatt,          // 1.5 kW
     WattHour,          // 500 Wh
     Volt,              // 230 V
     Ampere,            // 5 A
@@ -128,12 +128,59 @@ public enum StateUnit
     MillimeterPerHour, // 5 mm/h
     Kilobyte,          // 1024 KB
     KilobytePerSecond, // 100 KB/s
-    MegabitsPerSecond, // 100 Mbps
+    MegabitPerSecond,  // 100 Mbps
+    KilowattHour,      // 500 kWh
+    Milliampere,       // 100 mA
     LiterPerHour,      // 50 L/h
     Currency,          // $10.00
     HexColor           // #FF0000
 }
 ```
+
+Values are auto-scaled for display within unit families (e.g., 1500 W displays as "1.5 kW", 0.5 A displays as "500 mA").
+
+### Interface Inheritance and Attribute Merging
+
+When a class implements an interface with `[State]` properties, the attributes are **merged**. Class values take priority; interface values fill in any fields the class doesn't specify.
+
+This means you can add `Position` on the class without re-specifying `Unit` from the interface:
+
+```csharp
+// Interface provides Unit
+public interface IPowerSensor
+{
+    [State(Unit = StateUnit.Watt)]
+    decimal? Power { get; }
+}
+
+// Class adds Position — Unit is inherited from the interface
+[InterceptorSubject]
+public partial class MyDevice : IPowerSensor
+{
+    [Derived]
+    [State(Position = 1)]
+    public decimal? Power => InternalPower;  // Merged: Position=1, Unit=Watt
+}
+```
+
+Properties without any `Position` (from class or interface) sort **last** in the UI panel.
+
+### Position Ranges
+
+HomeBlaze abstraction interfaces use reserved position ranges to ensure consistent default ordering when a device implements multiple interfaces:
+
+| Range | Category | Examples |
+|-------|----------|---------|
+| 0–99 | Device-specific primary (custom per class) | Pin number, enabled state |
+| 100–199 | Primary device function | Switch on/off, brightness, cover position |
+| 200–299 | Sensor measurements | Temperature, humidity, presence |
+| 300–399 | Power & energy | Power, energy, voltage, current |
+| 400–499 | Device-specific details | Uptime, source, firmware |
+| 800–849 | Device identity | Manufacturer, model, serial number |
+| 850–899 | Software & networking | Firmware version, IP address |
+| 900–999 | Connection & service status | IsConnected, Status, StatusMessage |
+
+Concrete classes can override interface positions via the merge. Use ranges 0–99 and 400–499 for class-specific properties.
 
 ## Derived Properties
 
@@ -451,7 +498,7 @@ public partial class Motor : BackgroundService, IConfigurable, ITitleProvider, I
     [State("Speed", Position = 3)]
     public partial int CurrentSpeed { get; set; }
 
-    [State(Position = 4, Unit = StateUnit.DegreeCelsius)]
+    [State(Unit = StateUnit.DegreeCelsius, Position = 4)]
     public partial double Temperature { get; set; }
 
     [State(Position = 1)]

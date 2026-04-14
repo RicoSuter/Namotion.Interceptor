@@ -329,7 +329,7 @@ Units for formatting state values:
 | `Percent` | % | 75% |
 | `DegreeCelsius` | °C | 23.5 °C |
 | `Watt` | W | 100 W |
-| `KiloWatt` | kW | 1.5 kW |
+| `Kilowatt` | kW | 1.5 kW |
 | `Volt` | V | 230 V |
 | `Ampere` | A | 5 A |
 | `Hertz` | Hz | 50 Hz |

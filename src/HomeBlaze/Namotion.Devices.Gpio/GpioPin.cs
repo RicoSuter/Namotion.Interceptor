@@ -22,7 +22,7 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
     /// <summary>
     /// The GPIO pin number (BCM numbering).
     /// </summary>
-    [State]
+    [State(Position = 0)]
     public partial int PinNumber { get; set; }
 
     /// <summary>
@@ -34,14 +34,14 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
     /// <summary>
     /// The pin operating mode.
     /// </summary>
-    [State]
+    [State(Position = 1)]
     [Configuration]
     public partial GpioPinMode Mode { get; set; }
 
     /// <summary>
     /// The current pin value (true = high, false = low).
     /// </summary>
-    [State]
+    [State(Position = 2)]
     public partial bool Value { get; set; }
 
     /// <summary>
@@ -74,13 +74,7 @@ public partial class GpioPin : IMonitoredService, ITitleProvider, IIconProvider,
 
     /// <inheritdoc />
     [Derived]
-    public string? IconColor => Status switch
-    {
-        ServiceStatus.Running => Value ? "Success" : "Default",
-        ServiceStatus.Error => "Error",
-        ServiceStatus.Unavailable => "Default",
-        _ => "Warning"
-    };
+    public string? IconColor => Status == ServiceStatus.Running && Value ? "Success" : null;
 
     /// <inheritdoc />
     [Derived]
