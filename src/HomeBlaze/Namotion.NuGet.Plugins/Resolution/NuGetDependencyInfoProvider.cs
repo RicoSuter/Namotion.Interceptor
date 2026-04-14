@@ -12,7 +12,7 @@ namespace Namotion.NuGet.Plugins.Resolution;
 internal class NuGetDependencyInfoProvider : IDependencyInfoProvider
 {
     private readonly IReadOnlyList<NuGetFeed> _feeds;
-    private readonly Dictionary<string, global::NuGet.Protocol.Core.Types.SourceRepository> _repositories;
+    private readonly Dictionary<string, SourceRepository> _repositories;
     private readonly NuGetFramework _targetFramework;
     private readonly bool _includePrerelease;
     private readonly ILogger _logger;
@@ -68,6 +68,7 @@ internal class NuGetDependencyInfoProvider : IDependencyInfoProvider
             {
                 var sourceRepository = _repositories[feed.Url];
                 var metadataResource = await sourceRepository.GetResourceAsync<PackageMetadataResource>(cancellationToken);
+            
                 using var metadataCacheContext = new SourceCacheContext();
                 var packages = await metadataResource.GetMetadataAsync(
                     packageName, includePrerelease: _includePrerelease, includeUnlisted: false,
@@ -78,7 +79,10 @@ internal class NuGetDependencyInfoProvider : IDependencyInfoProvider
                     .OrderByDescending(package => package.Identity.Version)
                     .FirstOrDefault();
 
-                if (best != null) return best.Identity.Version;
+                if (best != null)
+                {
+                    return best.Identity.Version;
+                }
             }
             catch (Exception exception) when (exception is not HttpRequestException and not FatalProtocolException)
             {
