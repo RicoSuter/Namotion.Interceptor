@@ -199,7 +199,9 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             updateBeforeConnect: false,
             sessionName: application.ApplicationName,
             sessionTimeout: (uint)configuration.SessionTimeout.TotalMilliseconds,
-            identity: new UserIdentity(), // TODO: configuration.GetIdentity() default implementation: new UserIdentity()
+            identity: configuration.CreateUserIdentity != null
+                ? await configuration.CreateUserIdentity(cancellationToken).ConfigureAwait(false)
+                : new UserIdentity(),
             preferredLocales: null,
             cancellationToken).ConfigureAwait(false);
 

@@ -307,6 +307,12 @@ public class OpcUaClientConfiguration
     public bool UseSecurity { get; set; } = false;
 
     /// <summary>
+    /// Gets or sets an async factory for creating the user identity used when connecting to the OPC UA server.
+    /// When null (default), anonymous authentication is used.
+    /// </summary>
+    public Func<CancellationToken, Task<UserIdentity>>? CreateUserIdentity { get; set; }
+
+    /// <summary>
     /// Gets or sets the telemetry context for OPC UA operations.
     /// Defaults to NullTelemetryContext for minimal overhead.
     /// For DI integration, use DefaultTelemetry.Create(builder => builder.Services.AddSingleton(loggerFactory)).
