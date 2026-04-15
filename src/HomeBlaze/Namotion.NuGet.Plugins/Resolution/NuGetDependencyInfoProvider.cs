@@ -51,6 +51,8 @@ internal class NuGetDependencyInfoProvider : IDependencyInfoProvider
                         .ToList();
                 }
             }
+            // Network/protocol errors and cancellation propagate immediately (fail fast).
+            // Other errors (e.g., feed returned unexpected data) are logged and the next feed is tried.
             catch (Exception exception) when (exception is not HttpRequestException and not FatalProtocolException and not OperationCanceledException)
             {
                 _logger.LogDebug(exception, "Package not found on {Feed} for {Package}.", feed.Name, packageName);
@@ -85,6 +87,8 @@ internal class NuGetDependencyInfoProvider : IDependencyInfoProvider
                     return best.Identity.Version;
                 }
             }
+            // Network/protocol errors and cancellation propagate immediately (fail fast).
+            // Other errors (e.g., feed returned unexpected data) are logged and the next feed is tried.
             catch (Exception exception) when (exception is not HttpRequestException and not FatalProtocolException and not OperationCanceledException)
             {
                 _logger.LogDebug(exception, "Package not found on {Feed} for {Package}.", feed.Name, packageName);
