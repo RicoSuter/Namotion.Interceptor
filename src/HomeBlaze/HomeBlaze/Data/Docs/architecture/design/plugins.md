@@ -55,6 +55,7 @@ Because `Plugins.json` is also a subject configuration file, it includes a `$typ
   "feeds": [
     { "name": "local", "url": "Plugins" }
   ],
+  "hostIdentifier": "HomeBlaze",
   "hostPackages": [],
   "cacheDirectory": null,
   "plugins": [
@@ -70,6 +71,7 @@ Feeds can be remote NuGet V3 service index URLs or local folder paths. In the ex
 |-------|---------|
 | `$type` | Subject type discriminator for `PluginManager` |
 | `feeds` | NuGet package sources (remote URLs or local folder paths), tried in order |
+| `hostIdentifier` | Host identifier for assembly attribute matching (required for automatic discovery via attributes) |
 | `hostPackages` | Manual override patterns for shared contract assemblies loaded into the default context (typically empty when using automatic discovery) |
 | `cacheDirectory` | Local directory for caching downloaded plugin packages (null = temporary directory, re-downloaded on restart) |
 | `plugins` | Plugin packages to load by name and optional version from the configured feeds |
@@ -78,7 +80,7 @@ Feeds can be remote NuGet V3 service index URLs or local folder paths. In the ex
 
 The plugin system uses two subjects in the `HomeBlaze.Plugins` namespace:
 
-**PluginManager** -- owns plugin configuration and runtime state. Implements `IConfigurable` so it can be deserialized from `Plugins.json` via the `$type` discriminator. Its `[Configuration]` properties (`Plugins`, `Feeds`, `HostPackages`) are persisted. Its `[State]` property `LoadedPlugins` is a `Dictionary<string, Plugin>` keyed by package name, populated at startup from `PluginLoader`.
+**PluginManager** -- owns plugin configuration and runtime state. Implements `IConfigurable` so it can be deserialized from `Plugins.json` via the `$type` discriminator. Its `[Configuration]` properties (`Plugins`, `Feeds`, `HostIdentifier`, `HostPackages`) are persisted. Its `[State]` property `LoadedPlugins` is a `Dictionary<string, Plugin>` keyed by package name, populated at startup from `PluginLoader`.
 
 **Plugin** (in `HomeBlaze.Plugins`) -- represents a loaded plugin. Has `[State]` properties (`Name`, `Version`, `Description`, `Authors`, `IconUrl`, `Tags`, `Assemblies` (string[]), `HostDependencies`, `PrivateDependencies`, `Status`, `StatusMessage`), `[Derived]` properties (`Title`, `IconName`, `IconColor`), and a parameterless `[Operation] RemovePlugin()` that uses `this.Name`. Holds a reference to its parent `PluginManager`.
 
@@ -159,7 +161,7 @@ The key ordering constraints:
 
 The sample plugins demonstrate the recommended headless/UI separation pattern and the host-shared package discovery mechanism:
 
-- **`MyCompany.Abstractions`** -- a shared contract package defining the `IMyDevice` interface. Declares itself as host-shared via `[assembly: AssemblyMetadata("Namotion.NuGet.Plugins.HostShared", "true")]`, so the loader automatically loads it into the default `AssemblyLoadContext` without any manual `HostPackages` configuration.
+- **`MyCompany.Abstractions`** -- a shared contract package defining the `IMyDevice` interface. Declares itself as host-shared via `[assembly: AssemblyMetadata("Namotion.NuGet.Plugins.HostPackage", "HomeBlaze")]`, so the loader automatically loads it into the default `AssemblyLoadContext` without any manual `HostPackages` configuration.
 - **`MyCompany.SamplePlugin1`** -- a headless library containing a temperature sensor device subject that generates fake sensor data using the Bogus library. Implements `IMyDevice` from `MyCompany.Abstractions`. This package has no Blazor or UI dependencies.
 - **`MyCompany.SamplePlugin1.HomeBlaze`** -- a Razor SDK project containing Blazor UI components (widget and edit components) for the sample temperature sensor. It references `MyCompany.SamplePlugin1` as a dependency and includes a `plugin.json` declaring `hostDependencies`.
 - **`MyCompany.SamplePlugin2`** -- a second headless library containing a light sensor device subject. Also implements `IMyDevice`.
@@ -175,7 +177,7 @@ Plugins support unload and reload but not hot-reload. In practice, HomeBlaze res
 
 Plugin dependencies that need to be shared across plugins (e.g., contract/abstractions packages) must be loaded into the default `AssemblyLoadContext` to preserve type identity. The loader discovers host-shared packages through three complementary mechanisms:
 
-1. **Assembly attribute** -- The contract package author adds `[assembly: AssemblyMetadata("Namotion.NuGet.Plugins.HostShared", "true")]`. The loader detects this via `System.Reflection.Metadata` without loading the assembly into any context.
+1. **Assembly attribute** -- The contract package author adds `[assembly: AssemblyMetadata("Namotion.NuGet.Plugins.HostPackage", "HomeBlaze")]`. The value is a host identifier; the loader only recognizes this attribute when `HostIdentifier` is configured in the options and the attribute value matches (case-insensitive). The loader detects this via `System.Reflection.Metadata` without loading the assembly into any context.
 2. **`plugin.json` manifest** -- The plugin author includes a `plugin.json` file in the nupkg root with a `hostDependencies` array listing packages that should be host-shared. This is useful when the contract author has not added the attribute.
 3. **`HostPackages` configuration** -- The host author lists glob patterns in the loader options as a manual fallback.
 

@@ -5,6 +5,7 @@
     { "name": "nuget.org", "url": "https://api.nuget.org/v3/index.json" }
   ],
   "hostPackages": [],
+  "hostIdentifier": "HomeBlaze",
   "cacheDirectory": null,
   "plugins": [
     { "packageName": "MyCompany.SamplePlugin1.HomeBlaze", "version": "1.0.0" },

@@ -4,23 +4,23 @@ using System.Reflection.PortableExecutable;
 namespace Namotion.NuGet.Plugins.Loading;
 
 /// <summary>
-/// Scans assembly DLLs for the Namotion.NuGet.Plugins.HostShared assembly metadata attribute
+/// Scans assembly DLLs for the Namotion.NuGet.Plugins.HostPackage assembly metadata attribute
 /// using System.Reflection.Metadata (without loading the assembly into any AssemblyLoadContext).
 /// </summary>
 internal static class HostSharedAttributeScanner
 {
-    private const string HostSharedKey = "Namotion.NuGet.Plugins.HostShared";
+    private const string HostPackageKey = "Namotion.NuGet.Plugins.HostPackage";
 
     /// <summary>
-    /// Checks whether the DLL at the given path has
-    /// [assembly: AssemblyMetadata("Namotion.NuGet.Plugins.HostShared", "true")].
-    /// Returns false if the file doesn't exist, isn't a valid PE, or doesn't have the attribute.
+    /// Returns the host identifier from the
+    /// [assembly: AssemblyMetadata("Namotion.NuGet.Plugins.HostPackage", "...")] attribute,
+    /// or null if the file doesn't exist, isn't a valid PE, or doesn't have the attribute.
     /// </summary>
-    public static bool IsHostShared(string assemblyPath)
+    public static string? GetHostIdentifier(string assemblyPath)
     {
         if (!File.Exists(assemblyPath))
         {
-            return false;
+            return null;
         }
 
         try
@@ -30,7 +30,7 @@ internal static class HostSharedAttributeScanner
 
             if (!peReader.HasMetadata)
             {
-                return false;
+                return null;
             }
 
             var metadataReader = peReader.GetMetadataReader();
@@ -52,32 +52,28 @@ internal static class HostSharedAttributeScanner
 
                 // Decode the attribute's fixed arguments
                 var value = attribute.DecodeValue(new AttributeTypeProvider());
-                if (value.FixedArguments.Length == 2 &&
-                    value.FixedArguments[0].Value is string key &&
-                    value.FixedArguments[1].Value is string val &&
-                    key == HostSharedKey &&
-                    string.Equals(val, "true", StringComparison.OrdinalIgnoreCase))
+                if (value.FixedArguments is [{ Value: HostPackageKey } _, { Value: string val } _])
                 {
-                    return true;
+                    return val;
                 }
             }
 
-            return false;
+            return null;
         }
         catch
         {
-            return false;
+            return null;
         }
     }
 
     /// <summary>
-    /// Scans all DLLs in the given directory for the HostShared attribute.
-    /// Returns true if any DLL has the attribute.
+    /// Scans all DLLs in the given directory for the HostPackage attribute.
+    /// Returns the host identifier from the first matching DLL, or null if none match.
     /// </summary>
-    public static bool IsAnyAssemblyHostShared(string packageDirectory)
+    public static string? GetHostIdentifierFromPackage(string packageDirectory)
     {
         var dllFiles = Directory.GetFiles(packageDirectory, "*.dll", SearchOption.AllDirectories);
-        return dllFiles.Any(IsHostShared);
+        return dllFiles.Select(GetHostIdentifier).FirstOrDefault(v => v != null);
     }
 
     private static bool IsAssemblyMetadataAttribute(MetadataReader reader, CustomAttribute attribute)

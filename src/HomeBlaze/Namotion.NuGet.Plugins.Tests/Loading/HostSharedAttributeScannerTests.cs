@@ -12,65 +12,65 @@ public class HostSharedAttributeScannerTests : IDisposable
     private readonly List<string> _tempFiles = [];
 
     [Fact]
-    public void WhenAssemblyHasHostSharedAttribute_ThenReturnsTrue()
+    public void WhenAssemblyHasHostPackageAttribute_ThenReturnsHostIdentifier()
     {
         // Arrange
-        var dllPath = CreateAssemblyWithMetadata("Namotion.NuGet.Plugins.HostShared", "true");
+        var dllPath = CreateAssemblyWithMetadata("Namotion.NuGet.Plugins.HostPackage", "MyHost");
 
         // Act
-        var result = HostSharedAttributeScanner.IsHostShared(dllPath);
+        var result = HostSharedAttributeScanner.GetHostIdentifier(dllPath);
 
         // Assert
-        Assert.True(result);
+        Assert.Equal("MyHost", result);
     }
 
     [Fact]
-    public void WhenAssemblyDoesNotHaveAttribute_ThenReturnsFalse()
+    public void WhenAssemblyDoesNotHaveAttribute_ThenReturnsNull()
     {
         // Arrange
         var dllPath = CreateAssemblyWithoutMetadata();
 
         // Act
-        var result = HostSharedAttributeScanner.IsHostShared(dllPath);
+        var result = HostSharedAttributeScanner.GetHostIdentifier(dllPath);
 
         // Assert
-        Assert.False(result);
+        Assert.Null(result);
     }
 
     [Fact]
-    public void WhenAssemblyHasAttributeWithWrongValue_ThenReturnsFalse()
+    public void WhenAssemblyHasAttributeWithAnyValue_ThenReturnsValue()
     {
         // Arrange
-        var dllPath = CreateAssemblyWithMetadata("Namotion.NuGet.Plugins.HostShared", "false");
+        var dllPath = CreateAssemblyWithMetadata("Namotion.NuGet.Plugins.HostPackage", "AnotherHost");
 
         // Act
-        var result = HostSharedAttributeScanner.IsHostShared(dllPath);
+        var result = HostSharedAttributeScanner.GetHostIdentifier(dllPath);
 
         // Assert
-        Assert.False(result);
+        Assert.Equal("AnotherHost", result);
     }
 
     [Fact]
-    public void WhenAssemblyHasAttributeWithWrongKey_ThenReturnsFalse()
+    public void WhenAssemblyHasAttributeWithWrongKey_ThenReturnsNull()
     {
         // Arrange
-        var dllPath = CreateAssemblyWithMetadata("SomeOther.Key", "true");
+        var dllPath = CreateAssemblyWithMetadata("SomeOther.Key", "MyHost");
 
         // Act
-        var result = HostSharedAttributeScanner.IsHostShared(dllPath);
+        var result = HostSharedAttributeScanner.GetHostIdentifier(dllPath);
 
         // Assert
-        Assert.False(result);
+        Assert.Null(result);
     }
 
     [Fact]
-    public void WhenFileDoesNotExist_ThenReturnsFalse()
+    public void WhenFileDoesNotExist_ThenReturnsNull()
     {
         // Act
-        var result = HostSharedAttributeScanner.IsHostShared("/nonexistent/path.dll");
+        var result = HostSharedAttributeScanner.GetHostIdentifier("/nonexistent/path.dll");
 
         // Assert
-        Assert.False(result);
+        Assert.Null(result);
     }
 
     private string CreateAssemblyWithMetadata(string key, string value)

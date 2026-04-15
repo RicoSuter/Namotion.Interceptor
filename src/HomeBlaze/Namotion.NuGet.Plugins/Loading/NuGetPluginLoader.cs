@@ -338,18 +338,26 @@ public class NuGetPluginLoader : IDisposable
                 }
             }
 
-            // Scan dependency DLLs for HostShared attribute
-            foreach (var (packageName, version) in entry.FlatDependencies)
+            // Scan dependency DLLs for HostPackage attribute (only if host identifier is configured)
+            if (_options.HostIdentifier != null)
             {
-                if (packageName == entry.Request.PackageName)
+                foreach (var (packageName, version) in entry.FlatDependencies)
                 {
-                    continue;
-                }
+                    if (packageName == entry.Request.PackageName)
+                    {
+                        continue;
+                    }
 
-                var depPath = _extractor.GetCachedPackagePath(packageName, version.ToNormalizedString());
-                if (depPath != null && HostSharedAttributeScanner.IsAnyAssemblyHostShared(depPath))
-                {
-                    discoveredHostShared.Add(packageName);
+                    var depPath = _extractor.GetCachedPackagePath(packageName, version.ToNormalizedString());
+                    if (depPath != null)
+                    {
+                        var hostIdentifier = HostSharedAttributeScanner.GetHostIdentifierFromPackage(depPath);
+                        if (hostIdentifier != null &&
+                            string.Equals(hostIdentifier, _options.HostIdentifier, StringComparison.OrdinalIgnoreCase))
+                        {
+                            discoveredHostShared.Add(packageName);
+                        }
+                    }
                 }
             }
         }

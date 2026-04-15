@@ -17,6 +17,7 @@ public class PluginConfigurationTests
             "MyCompany.*.Abstractions",
             "Exact.Package"
           ],
+          "hostIdentifier": "HomeBlaze",
           "plugins": [
             { "packageName": "Plugin.One", "version": "1.0.0" },
             { "packageName": "Plugin.Two", "version": "2.0.0" }
@@ -39,6 +40,7 @@ public class PluginConfigurationTests
         Assert.Equal("secret123", config.Feeds[1].ApiKey);
         Assert.Equal(2, config.HostPackages.Count);
         Assert.Equal("MyCompany.*.Abstractions", config.HostPackages[0]);
+        Assert.Equal("HomeBlaze", config.HostIdentifier);
         Assert.Equal(2, config.Plugins.Count);
         Assert.Equal("Plugin.One", config.Plugins[0].PackageName);
         Assert.Equal("Plugin.Two", config.Plugins[1].PackageName);
@@ -61,6 +63,7 @@ public class PluginConfigurationTests
         Assert.True(options.IsHostPackage!("MyCompany.Devices.Abstractions"));
         Assert.False(options.IsHostPackage!("Unrelated.Package"));
         Assert.Same(hostDependencies, options.HostDependencies);
+        Assert.Equal("HomeBlaze", options.HostIdentifier);
         Assert.Null(options.CacheDirectory);
     }
 
@@ -82,6 +85,20 @@ public class PluginConfigurationTests
 
         // Assert
         Assert.Equal("/tmp/my-plugins-cache", options.CacheDirectory);
+    }
+
+    [Fact]
+    public void WhenJsonHasNoHostIdentifier_ThenDefaultsToNull()
+    {
+        // Arrange
+        var json = """{ "plugins": [{ "packageName": "Foo", "version": "1.0.0" }] }""";
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(json));
+
+        // Act
+        var config = PluginConfiguration.LoadFrom(stream);
+
+        // Assert
+        Assert.Null(config.HostIdentifier);
     }
 
     [Fact]

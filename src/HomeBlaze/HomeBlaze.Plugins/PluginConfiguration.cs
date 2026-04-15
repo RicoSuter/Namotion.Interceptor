@@ -27,6 +27,9 @@ public class PluginConfiguration
     [JsonPropertyName("cacheDirectory")]
     public string? CacheDirectory { get; set; }
 
+    [JsonPropertyName("hostIdentifier")]
+    public string? HostIdentifier { get; set; }
+
     [JsonPropertyName("plugins")]
     public IReadOnlyList<PluginEntry> Plugins { get; set; } = [];
 
@@ -79,6 +82,7 @@ public class PluginConfiguration
                 : null,
             HostDependencies = hostDependencies,
             CacheDirectory = CacheDirectory,
+            HostIdentifier = HostIdentifier,
         };
     }
 }

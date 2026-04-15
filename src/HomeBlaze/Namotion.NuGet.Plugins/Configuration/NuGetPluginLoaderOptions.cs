@@ -30,4 +30,12 @@ public class NuGetPluginLoaderOptions
     /// Gets or sets whether pre-release package versions should be considered. Defaults to false.
     /// </summary>
     public bool IncludePrerelease { get; set; }
+
+    /// <summary>
+    /// Gets or sets the host identifier for matching assembly-level host package attributes.
+    /// When null, assembly attribute discovery is skipped entirely.
+    /// When set, only packages whose [assembly: AssemblyMetadata("Namotion.NuGet.Plugins.HostPackage", "...")] value
+    /// matches this identifier (case-insensitive) are treated as host-shared.
+    /// </summary>
+    public string? HostIdentifier { get; set; }
 }

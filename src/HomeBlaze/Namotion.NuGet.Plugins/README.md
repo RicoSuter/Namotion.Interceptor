@@ -32,6 +32,7 @@ var options = new NuGetPluginLoaderOptions
 {
     Feeds = [NuGetFeed.NuGetOrg],
     HostDependencies = HostDependencyResolver.FromDepsJson(),
+    HostIdentifier = "MyHost",
     IsHostPackage = name => NuGetPackageNameMatcher.IsMatchAny(name, ["MyCompany.*.Abstractions"]),
 };
 
@@ -76,6 +77,7 @@ foreach (var type in loader.GetTypes<ISensorDevice>())
 | `Feeds` | `IReadOnlyList<NuGetFeed>` | `[NuGetFeed.NuGetOrg]` | NuGet package sources to search, in priority order |
 | `IsHostPackage` | `Func<string, bool>?` | `null` | Predicate that determines whether a package should be loaded as a host assembly |
 | `HostDependencies` | `HostDependencyResolver?` | `null` | Host dependency map for version validation |
+| `HostIdentifier` | `string?` | `null` | Host identifier for matching assembly-level host package attributes. When null, attribute discovery is skipped. |
 | `CacheDirectory` | `string?` | `null` | Local directory for downloaded packages (auto-generated temp dir if null) |
 | `IncludePrerelease` | `bool` | `false` | Whether to include pre-release package versions when resolving |
 
@@ -144,7 +146,7 @@ Plugins typically need to share certain packages with the host application so th
 
 | Actor | Mechanism | When to use |
 |---|---|---|
-| Contract/abstractions author | Assembly attribute | You own the shared library and want it always treated as host |
+| Contract/abstractions author | Assembly attribute | You own the shared library and want it always treated as host (requires matching `HostIdentifier` on the host) |
 | Plugin author | `plugin.json` manifest | You depend on a third-party contract you don't own |
 | Host author | `IsHostPackage` predicate in loader options | Manual fallback / escape hatch |
 
@@ -187,11 +189,13 @@ var options = new NuGetPluginLoaderOptions
 
 ### Assembly attribute
 
-The author of a shared contract package adds a single assembly-level attribute:
+The author of a shared contract package adds a single assembly-level attribute with a host identifier value:
 
 ```csharp
-[assembly: AssemblyMetadata("Namotion.NuGet.Plugins.HostShared", "true")]
+[assembly: AssemblyMetadata("Namotion.NuGet.Plugins.HostPackage", "MyHost")]
 ```
+
+The value is a host identifier (not a boolean). For this attribute to take effect, the host application must configure `HostIdentifier = "MyHost"` in `NuGetPluginLoaderOptions`. Matching is case-insensitive. When `HostIdentifier` is null (the default), assembly attribute discovery is skipped entirely.
 
 This uses `System.Reflection.AssemblyMetadataAttribute` from the BCL, so it requires zero additional dependencies. The loader reads this attribute via `System.Reflection.Metadata` from the extracted DLL on disk, without loading the assembly into any `AssemblyLoadContext`.
 
@@ -212,7 +216,7 @@ And includes it in the nupkg via the csproj:
 <None Include="plugin.json" Pack="true" PackagePath="" />
 ```
 
-The loader reads `plugin.json` from the root of the extracted nupkg. This is useful when the plugin depends on a third-party contract package that does not have the `HostShared` assembly attribute.
+The loader reads `plugin.json` from the root of the extracted nupkg. This is useful when the plugin depends on a third-party contract package that does not have the `HostPackage` assembly attribute.
 
 ## Plugin Manifest (plugin.json)
 
@@ -496,7 +500,7 @@ During Phase 5, the loader discovers host-shared packages by combining all three
 For each plugin:
   a. Read plugin.json from extracted nupkg -> collect hostDependencies
 For each dependency in the resolved tree:
-  b. Read DLL via System.Reflection.Metadata -> check for HostShared attribute
+  b. If HostIdentifier is configured: read DLL via System.Reflection.Metadata -> check for HostPackage attribute with matching value (case-insensitive)
   c. Check against IsHostPackage predicate (manual config)
 Union of (a) + (b) + (c) -> classify as host
 ```
@@ -694,6 +698,7 @@ public enum NuGetDependencyClassification
 | `Feeds` | `IReadOnlyList<NuGetFeed>` | `[NuGetFeed.NuGetOrg]` | NuGet package sources to search, in priority order |
 | `IsHostPackage` | `Func<string, bool>?` | `null` | Predicate that determines whether a package should be loaded as a host assembly |
 | `HostDependencies` | `HostDependencyResolver?` | `null` | Host dependency map for version validation |
+| `HostIdentifier` | `string?` | `null` | Host identifier for matching assembly-level host package attributes. When null, attribute discovery is skipped. |
 | `CacheDirectory` | `string?` | `null` | Local directory for downloaded packages (auto-generated temp dir if null) |
 | `IncludePrerelease` | `bool` | `false` | Whether to include pre-release package versions when resolving |
 

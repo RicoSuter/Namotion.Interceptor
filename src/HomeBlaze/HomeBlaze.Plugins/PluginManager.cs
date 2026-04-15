@@ -22,6 +22,7 @@ public partial class PluginManager : IConfigurable, ITitleProvider, IIconProvide
         Plugins = [];
         Feeds = [];
         HostPackages = [];
+        HostIdentifier = null;
         LoadedPlugins = new Dictionary<string, Plugin>();
 
         // Read already-loaded results from service
@@ -84,6 +85,9 @@ public partial class PluginManager : IConfigurable, ITitleProvider, IIconProvide
 
     [Configuration]
     public partial string[] HostPackages { get; set; }
+
+    [Configuration]
+    public partial string? HostIdentifier { get; set; }
 
     [State]
     public partial Dictionary<string, Plugin> LoadedPlugins { get; internal set; }
