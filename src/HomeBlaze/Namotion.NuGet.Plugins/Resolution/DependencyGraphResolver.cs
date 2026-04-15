@@ -121,6 +121,13 @@ public class DependencyGraphResolver
                     node.Dependencies.Add(upgradedNode);
                     await ResolveRecursiveAsync(upgradedNode, visited, cancellationToken);
                 }
+                else
+                {
+                    throw new InvalidOperationException(
+                        $"Cannot satisfy dependency '{dependencyId}' {versionRange}. " +
+                        $"Existing resolved version {existingVersion} does not satisfy the range " +
+                        $"and no compatible upgrade was found.");
+                }
                 continue;
             }
 
@@ -128,6 +135,13 @@ public class DependencyGraphResolver
             if (_hostDependencies != null && _hostDependencies.Contains(dependencyId))
             {
                 _logger.LogDebug("Skipping host dependency {PackageId} during resolution.", dependencyId);
+                continue;
+            }
+
+            // Skip dependencies matching the host package predicate
+            if (_isHostPackage?.Invoke(dependencyId) == true)
+            {
+                _logger.LogDebug("Skipping host package {PackageId} during resolution (matched IsHostPackage predicate).", dependencyId);
                 continue;
             }
 

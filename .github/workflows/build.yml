@@ -45,8 +45,8 @@ jobs:
             nugetplugins:
               - 'src/HomeBlaze/Namotion.NuGet.Plugins/**'
               - 'src/HomeBlaze/Namotion.NuGet.Plugins.Tests/**'
-              - 'src/HomeBlaze/HomeBlaze.SamplePlugin/**'
-              - 'src/HomeBlaze/HomeBlaze.SamplePlugin.HomeBlaze/**'
+              - 'src/HomeBlaze/MyCompany.Abstractions/**'
+              - 'src/HomeBlaze/MyCompany.SamplePlugin*/**'
               - 'src/HomeBlaze/HomeBlaze.Plugins/**'
               - 'src/HomeBlaze/HomeBlaze.Plugins.Tests/**'
             opcua:

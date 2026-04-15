@@ -1,7 +1,10 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using ILogger = Microsoft.Extensions.Logging.ILogger;
+using NuGet.Packaging.Core;
+using NuGet.Protocol.Core.Types;
+using NuGet.Versioning;
 using Namotion.NuGet.Plugins.Configuration;
+using ILogger = Microsoft.Extensions.Logging.ILogger;
 
 namespace Namotion.NuGet.Plugins.Repository;
 
@@ -11,7 +14,7 @@ namespace Namotion.NuGet.Plugins.Repository;
 public class NuGetPackageRepository : INuGetPackageRepository
 {
     private readonly NuGetFeed _feed;
-    private readonly global::NuGet.Protocol.Core.Types.SourceRepository _sourceRepository;
+    private readonly SourceRepository _sourceRepository;
     private readonly bool _includePrerelease;
     private readonly ILogger _logger;
 
@@ -31,15 +34,15 @@ public class NuGetPackageRepository : INuGetPackageRepository
 
     /// <inheritdoc />
     public async Task<IEnumerable<NuGetPackage>> SearchPackagesAsync(
-        string searchTerm, int skip, int take, CancellationToken cancellationToken)
+        string searchTerm, int take, CancellationToken cancellationToken)
     {
-        var sourceRepository = _sourceRepository;
-        var resource = await sourceRepository.GetResourceAsync<global::NuGet.Protocol.Core.Types.PackageSearchResource>(cancellationToken);
+        ArgumentException.ThrowIfNullOrWhiteSpace(searchTerm);
+        var resource = await _sourceRepository.GetResourceAsync<PackageSearchResource>(cancellationToken);
 
         var results = await resource.SearchAsync(
             searchTerm,
-            new global::NuGet.Protocol.Core.Types.SearchFilter(includePrerelease: _includePrerelease) { IncludeDelisted = false },
-            skip, take, global::NuGet.Common.NullLogger.Instance, cancellationToken);
+            new SearchFilter(includePrerelease: _includePrerelease) { IncludeDelisted = false },
+            0, take, global::NuGet.Common.NullLogger.Instance, cancellationToken);
 
         return results.Select(metadata => new NuGetPackage(
             metadata.Identity.Id,
@@ -53,20 +56,19 @@ public class NuGetPackageRepository : INuGetPackageRepository
     public async Task<NuGetPackageDownload> DownloadPackageAsync(
         string packageName, string? packageVersion, CancellationToken cancellationToken)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageName);
         const int maxRetries = 5;
         for (int attempt = 0; ; attempt++)
         {
             try
             {
-                var sourceRepository = _sourceRepository;
-
-                var metadataResource = await sourceRepository.GetResourceAsync<global::NuGet.Protocol.Core.Types.PackageMetadataResource>(cancellationToken);
+                var metadataResource = await _sourceRepository.GetResourceAsync<PackageMetadataResource>(cancellationToken);
 
                 var resolvedVersion = await ResolveVersionAsync(
                     packageName, packageVersion, metadataResource, cancellationToken);
-                var identity = new global::NuGet.Packaging.Core.PackageIdentity(packageName, resolvedVersion);
+                var identity = new PackageIdentity(packageName, resolvedVersion);
 
-                using var metadataCacheContext = new global::NuGet.Protocol.Core.Types.SourceCacheContext();
+                using var metadataCacheContext = new SourceCacheContext();
                 var metadata = await metadataResource.GetMetadataAsync(
                     identity, metadataCacheContext, global::NuGet.Common.NullLogger.Instance, cancellationToken);
 
@@ -75,15 +77,16 @@ public class NuGetPackageRepository : INuGetPackageRepository
                     throw new PackageNotFoundException(packageName, packageVersion);
                 }
 
-                var downloadResource = await sourceRepository.GetResourceAsync<global::NuGet.Protocol.Core.Types.DownloadResource>(cancellationToken);
-                using var downloadCacheContext = new global::NuGet.Protocol.Core.Types.SourceCacheContext { DirectDownload = true };
+                var downloadResource = await _sourceRepository.GetResourceAsync<DownloadResource>(cancellationToken);
+                using var downloadCacheContext = new SourceCacheContext { DirectDownload = true };
                 var downloadResult = await downloadResource.GetDownloadResourceResultAsync(
                     metadata.Identity,
-                    new global::NuGet.Protocol.Core.Types.PackageDownloadContext(downloadCacheContext),
+                    new PackageDownloadContext(downloadCacheContext),
                     Path.GetTempPath(), global::NuGet.Common.NullLogger.Instance, cancellationToken);
 
                 if (downloadResult.PackageStream == null)
                 {
+                    downloadResult.Dispose();
                     throw new HttpRequestException($"Package stream is empty for '{packageName}'. Retry.");
                 }
 
@@ -98,7 +101,7 @@ public class NuGetPackageRepository : INuGetPackageRepository
             }
             catch (Exception exception) when (
                 attempt < maxRetries &&
-                (exception is HttpRequestException || exception is global::NuGet.Protocol.Core.Types.FatalProtocolException))
+                (exception is HttpRequestException || exception is FatalProtocolException))
             {
                 var delay = TimeSpan.FromSeconds(Math.Pow(2, attempt));
                 _logger.LogDebug(exception, "Download attempt {Attempt} failed for '{Package}'. Retrying in {Delay}s.",
@@ -108,19 +111,24 @@ public class NuGetPackageRepository : INuGetPackageRepository
         }
     }
 
-    private async Task<global::NuGet.Versioning.NuGetVersion> ResolveVersionAsync(
+    private async Task<NuGetVersion> ResolveVersionAsync(
         string packageName,
         string? packageVersion,
-        global::NuGet.Protocol.Core.Types.PackageMetadataResource metadataResource,
+        PackageMetadataResource metadataResource,
         CancellationToken cancellationToken)
     {
         if (!string.IsNullOrEmpty(packageVersion))
         {
-            return new global::NuGet.Versioning.NuGetVersion(packageVersion);
+            if (!NuGetVersion.TryParse(packageVersion, out var parsedVersion))
+            {
+                throw new ArgumentException($"'{packageVersion}' is not a valid NuGet version for package '{packageName}'.", nameof(packageVersion));
+            }
+
+            return parsedVersion;
         }
 
         // Resolve latest version first to avoid NuGet SDK SingleOrDefault issue
-        using var cacheContext = new global::NuGet.Protocol.Core.Types.SourceCacheContext();
+        using var cacheContext = new SourceCacheContext();
         var versions = await metadataResource.GetMetadataAsync(
             packageName, includePrerelease: _includePrerelease, includeUnlisted: false,
             cacheContext, global::NuGet.Common.NullLogger.Instance, cancellationToken);

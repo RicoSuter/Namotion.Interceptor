@@ -6,12 +6,13 @@ namespace Namotion.NuGet.Plugins.Loading;
 
 /// <summary>
 /// Manages shared host assembly paths across all NuGetPluginLoader instances.
-/// Uses ref-counting to register/unregister the AssemblyLoadContext.Default.Resolving handler.
+/// Uses ref-counting per assembly name so that disposal only removes an assembly
+/// path when no other loader instance still references it.
 /// </summary>
 internal class SharedHostAssemblyRegistry : IDisposable
 {
     private static readonly Lock StaticLock = new();
-    private static readonly ConcurrentDictionary<string, string> SharedAssemblyPaths = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, (string Path, int RefCount)> SharedAssemblyPaths = new(StringComparer.OrdinalIgnoreCase);
 
     private static int _instanceCount;
 
@@ -31,16 +32,23 @@ internal class SharedHostAssemblyRegistry : IDisposable
 
     public void AddAssemblyPath(string assemblyName, string path)
     {
-        SharedAssemblyPaths[assemblyName] = path;
+        lock (StaticLock)
+        {
+            SharedAssemblyPaths.AddOrUpdate(
+                assemblyName,
+                _ => (path, 1),
+                (_, existing) => (existing.Path, existing.RefCount + 1));
+        }
+
         _ownedAssemblyNames.Add(assemblyName);
     }
 
     private static Assembly? OnDefaultContextResolving(AssemblyLoadContext context, AssemblyName assemblyName)
     {
         if (assemblyName.Name != null &&
-            SharedAssemblyPaths.TryGetValue(assemblyName.Name, out var path))
+            SharedAssemblyPaths.TryGetValue(assemblyName.Name, out var entry))
         {
-            return context.LoadFromAssemblyPath(path);
+            return context.LoadFromAssemblyPath(entry.Path);
         }
         return null;
     }
@@ -51,10 +59,24 @@ internal class SharedHostAssemblyRegistry : IDisposable
         {
             _disposed = true;
 
-            foreach (var name in _ownedAssemblyNames)
+            lock (StaticLock)
             {
-                SharedAssemblyPaths.TryRemove(name, out _);
+                foreach (var name in _ownedAssemblyNames)
+                {
+                    if (SharedAssemblyPaths.TryGetValue(name, out var entry))
+                    {
+                        if (entry.RefCount <= 1)
+                        {
+                            SharedAssemblyPaths.TryRemove(name, out _);
+                        }
+                        else
+                        {
+                            SharedAssemblyPaths[name] = (entry.Path, entry.RefCount - 1);
+                        }
+                    }
+                }
             }
+
             _ownedAssemblyNames.Clear();
 
             lock (StaticLock)

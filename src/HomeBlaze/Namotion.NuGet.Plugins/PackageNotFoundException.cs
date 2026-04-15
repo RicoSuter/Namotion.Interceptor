@@ -16,6 +16,17 @@ public class PackageNotFoundException : Exception
     }
 
     /// <summary>
+    /// Initializes a new instance of the <see cref="PackageNotFoundException"/> class
+    /// with an inner exception aggregating per-feed lookup failures.
+    /// </summary>
+    public PackageNotFoundException(string packageName, string? packageVersion, Exception innerException)
+        : base($"The package '{packageName}' v{packageVersion ?? "latest"} could not be found.", innerException)
+    {
+        PackageName = packageName;
+        PackageVersion = packageVersion;
+    }
+
+    /// <summary>
     /// Gets the name of the package that was not found.
     /// </summary>
     public string PackageName { get; }

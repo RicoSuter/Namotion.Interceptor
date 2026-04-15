@@ -21,6 +21,7 @@ public class NuGetPluginLoader : IDisposable
     private readonly PackageExtractor _extractor;
     private readonly INuGetPackageRepository _repository;
     private readonly SharedHostAssemblyRegistry _hostAssemblyRegistry;
+    private readonly string? _ownedCacheDirectory;
     private readonly Lock _lock = new();
 
     private bool _disposed;
@@ -44,6 +45,7 @@ public class NuGetPluginLoader : IDisposable
 
         var cacheDirectory = options.CacheDirectory
             ?? Path.Combine(Path.GetTempPath(), "Namotion.NuGet.Plugins", Guid.NewGuid().ToString("N"));
+        _ownedCacheDirectory = options.CacheDirectory == null ? cacheDirectory : null;
         _extractor = new PackageExtractor(cacheDirectory);
 
         var repositories = options.Feeds
@@ -111,7 +113,10 @@ public class NuGetPluginLoader : IDisposable
         failures.AddRange(hostFailures);
         pluginGraphs.RemoveAll(graph => hostFailures.Any(failure => failure.PackageName == graph.Request.PackageName));
 
+        var failureCountBeforeDownload = failures.Count;
         await DownloadPackagesAsync(pluginGraphs, failures, hostResolver, cancellationToken);
+        pluginGraphs.RemoveAll(graph => failures.Skip(failureCountBeforeDownload)
+            .Any(failure => failure.PackageName == graph.Request.PackageName));
 
         var pluginManifests = DiscoverHostSharedPackages(
             pluginGraphs, failures, pluginList, hostResolver);
@@ -598,6 +603,18 @@ public class NuGetPluginLoader : IDisposable
                     plugin.Dispose();
                 }
                 _loadedPlugins.Clear();
+            }
+
+            if (_ownedCacheDirectory != null && Directory.Exists(_ownedCacheDirectory))
+            {
+                try
+                {
+                    Directory.Delete(_ownedCacheDirectory, recursive: true);
+                }
+                catch (Exception exception)
+                {
+                    _logger.LogWarning(exception, "Failed to clean up temporary cache directory '{CacheDirectory}'.", _ownedCacheDirectory);
+                }
             }
         }
     }

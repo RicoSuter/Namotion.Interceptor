@@ -13,7 +13,6 @@ public class PluginLoadingTests
 {
     private const int PageLoadTimeout = 30000;
     private const int ElementVisibilityTimeout = 10000;
-    private const int BlazorRenderDelay = 500;
 
     private readonly PlaywrightFixture _fixture;
 
@@ -23,7 +22,7 @@ public class PluginLoadingTests
     }
 
     [Fact]
-    public async Task BothSamplePlugins_ShouldAppearInPluginManager()
+    public async Task WhenPluginsLoaded_ThenBothSamplePluginsAppearInPluginManager()
     {
         // Arrange
         var page = await _fixture.CreatePageAsync();
@@ -40,7 +39,7 @@ public class PluginLoadingTests
     }
 
     [Fact]
-    public async Task PluginDetail_ShouldShowHostDependencies()
+    public async Task WhenPluginClicked_ThenDetailShowsHostDependencies()
     {
         // Arrange
         var page = await _fixture.CreatePageAsync();
@@ -51,7 +50,6 @@ public class PluginLoadingTests
         var plugin1 = page.GetByText("MyCompany.SamplePlugin1.HomeBlaze v1.0.0");
         await Assertions.Expect(plugin1).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
         await plugin1.ClickAsync();
-        await page.WaitForTimeoutAsync(BlazorRenderDelay);
 
         // Assert - The plugin detail pane should show HostDependencies containing MyCompany.Abstractions
         var hostDependencies = page.GetByText("MyCompany.Abstractions");
@@ -73,6 +71,9 @@ public class PluginLoadingTests
         var pluginsEntry = page.GetByText("Plugins").First;
         await Assertions.Expect(pluginsEntry).ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
         await pluginsEntry.ClickAsync();
-        await page.WaitForTimeoutAsync(BlazorRenderDelay);
+
+        // Wait for plugin list to render
+        await Assertions.Expect(page.GetByText("MyCompany.SamplePlugin1.HomeBlaze v1.0.0"))
+            .ToBeVisibleAsync(new() { Timeout = ElementVisibilityTimeout });
     }
 }

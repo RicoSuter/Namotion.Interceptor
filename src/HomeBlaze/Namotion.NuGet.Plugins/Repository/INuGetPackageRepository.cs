@@ -9,7 +9,7 @@ public interface INuGetPackageRepository
     /// Searches for packages matching the given search term.
     /// </summary>
     Task<IEnumerable<NuGetPackage>> SearchPackagesAsync(
-        string searchTerm, int skip, int take, CancellationToken cancellationToken);
+        string searchTerm, int take, CancellationToken cancellationToken);
 
     /// <summary>
     /// Downloads a package by name and optional version. Returns package metadata and the package stream.

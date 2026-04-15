@@ -15,7 +15,7 @@ public class NuGetPackageRepositoryTests
         var repository = new NuGetPackageRepository(NuGetFeed.NuGetOrg);
 
         // Act
-        var results = await repository.SearchPackagesAsync("Newtonsoft.Json", 0, 10, CancellationToken.None);
+        var results = await repository.SearchPackagesAsync("Newtonsoft.Json", 10, CancellationToken.None);
 
         // Assert
         Assert.NotEmpty(results);

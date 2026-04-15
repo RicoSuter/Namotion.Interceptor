@@ -95,6 +95,9 @@ public partial class PluginManager : IConfigurable, ITitleProvider, IIconProvide
     [Operation(Title = "Add Plugin")]
     public void AddPlugin(string packageName, string version)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(version);
+
         if (Plugins.Any(plugin => plugin.PackageName.Equals(packageName, StringComparison.OrdinalIgnoreCase)))
         {
             throw new InvalidOperationException($"Plugin '{packageName}' is already configured.");

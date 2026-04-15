@@ -12,7 +12,7 @@ public class NuGetPlugin : IDisposable
 {
     private readonly AssemblyLoadContext? _loadContext;
     private IReadOnlyList<Assembly>? _assemblies;
-    private bool _disposed;
+    private int _disposed;
 
     internal NuGetPlugin(
         string packageName,
@@ -51,7 +51,7 @@ public class NuGetPlugin : IDisposable
     {
         get
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            ObjectDisposedException.ThrowIf(_disposed != 0, this);
             return _assemblies!;
         }
     }
@@ -81,7 +81,7 @@ public class NuGetPlugin : IDisposable
     /// </summary>
     public IEnumerable<Type> GetTypes<T>()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
         return GetTypes(type => typeof(T).IsAssignableFrom(type) && !type.IsAbstract && !type.IsInterface);
     }
 
@@ -90,12 +90,13 @@ public class NuGetPlugin : IDisposable
     /// </summary>
     public IEnumerable<Type> GetTypes(Func<Type, bool> predicate)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(_disposed != 0, this);
         return Assemblies
             .SelectMany(assembly =>
             {
                 try { return assembly.ExportedTypes; }
-                catch { return []; }
+                catch (ReflectionTypeLoadException) { return []; }
+                catch (TypeLoadException) { return []; }
             })
             .Where(predicate);
     }
@@ -103,9 +104,8 @@ public class NuGetPlugin : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        if (!_disposed)
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
         {
-            _disposed = true;
             _assemblies = null;
             if (_loadContext?.IsCollectible == true)
             {

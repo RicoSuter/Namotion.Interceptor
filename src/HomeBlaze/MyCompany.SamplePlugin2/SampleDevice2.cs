@@ -2,11 +2,14 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Hosting;
 using MyCompany.Abstractions;
+using System.ComponentModel;
 using Namotion.Interceptor.Attributes;
 
 namespace MyCompany.SamplePlugin2;
 
 [InterceptorSubject]
+[Category("Devices")]
+[Description("A sample light sensor plugin that simulates ambient light and UV index readings.")]
 public partial class SampleDevice2 : BackgroundService, IConfigurable, ITitleProvider, IMyDevice
 {
     private readonly Random _random = new();
@@ -18,11 +21,14 @@ public partial class SampleDevice2 : BackgroundService, IConfigurable, ITitlePro
         LightLevel = 500.0;
     }
 
+    [Derived]
     public string? Title => Name;
 
     // IMyDevice
+    [Derived]
     public string DeviceName => Name;
     public string DeviceType => "LightSensor";
+    [Derived]
     public double? CurrentValue => LightLevel;
 
     [Configuration]

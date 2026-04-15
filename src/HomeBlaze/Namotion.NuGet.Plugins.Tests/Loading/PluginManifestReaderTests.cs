@@ -3,8 +3,10 @@ using Xunit;
 
 namespace Namotion.NuGet.Plugins.Tests.Loading;
 
-public class PluginManifestReaderTests
+public class PluginManifestReaderTests : IDisposable
 {
+    private readonly List<string> _tempDirectories = [];
+
     [Fact]
     public void WhenPluginJsonExists_ThenReturnsManifest()
     {
@@ -27,15 +29,13 @@ public class PluginManifestReaderTests
         // Arrange
         var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
+        _tempDirectories.Add(directory);
 
         // Act
         var manifest = PluginManifestReader.Read(directory);
 
         // Assert
         Assert.Null(manifest);
-
-        // Cleanup
-        Directory.Delete(directory, true);
     }
 
     [Fact]
@@ -83,11 +83,23 @@ public class PluginManifestReaderTests
         Assert.Null(manifest);
     }
 
-    private static string CreateExtractedPackageWithPluginJson(string json)
+    private string CreateExtractedPackageWithPluginJson(string json)
     {
         var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         File.WriteAllText(Path.Combine(directory, "plugin.json"), json);
+        _tempDirectories.Add(directory);
         return directory;
+    }
+
+    public void Dispose()
+    {
+        foreach (var directory in _tempDirectories)
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
     }
 }

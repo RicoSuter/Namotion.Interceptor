@@ -77,6 +77,7 @@ foreach (var type in loader.GetTypes<ISensorDevice>())
 | `IsHostPackage` | `Func<string, bool>?` | `null` | Predicate that determines whether a package should be loaded as a host assembly |
 | `HostDependencies` | `HostDependencyResolver?` | `null` | Host dependency map for version validation |
 | `CacheDirectory` | `string?` | `null` | Local directory for downloaded packages (auto-generated temp dir if null) |
+| `IncludePrerelease` | `bool` | `false` | Whether to include pre-release package versions when resolving |
 
 The `CacheDirectory` option controls where extracted packages are stored. When omitted, a temporary directory with a unique name is created per loader instance -- packages are re-downloaded on every application restart. Set `CacheDirectory` to a stable path (e.g., `Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyApp", "plugins")`) to cache packages across restarts.
 
@@ -348,18 +349,12 @@ Disposing the `NuGetPluginLoader` itself unloads all plugins and removes the def
 
 The loader distinguishes between two levels of failure:
 
-### Host-level failures (fail all)
-
-These failures prevent any plugins from loading because they would result in an inconsistent default `AssemblyLoadContext`:
-
-- **Version conflicts with host dependencies** -- throws `NuGetPluginVersionConflictException`
-- **Incompatible version ranges for shared host packages** -- throws `NuGetPluginVersionConflictException`
-- **Host package download failure** -- exception propagates, nothing is loaded
-
 ### Plugin-level failures (isolated)
 
-These failures skip the affected plugin while other plugins continue loading normally:
+All failures are isolated to the affected plugin while other plugins continue loading normally:
 
+- **Version conflicts with host dependencies** -- reported in `NuGetPluginLoadResult.Failures`
+- **Incompatible version ranges for shared host packages** -- reported in `NuGetPluginLoadResult.Failures`
 - **Package not found or download error** -- reported in `NuGetPluginLoadResult.Failures`
 - **Dependency resolution failure** -- reported in `NuGetPluginLoadResult.Failures`
 - **Assembly load error within a plugin** -- reported in `NuGetPluginLoadResult.Failures`
@@ -367,8 +362,7 @@ These failures skip the affected plugin while other plugins continue loading nor
 ```csharp
 var result = await loader.LoadPluginsAsync(plugins, cancellationToken);
 
-// Host-level conflicts throw before reaching here.
-// Plugin-level failures are reported in the result:
+// All failures are reported in the result:
 foreach (var failure in result.Failures)
 {
     logger.LogWarning("Plugin '{Plugin}' failed to load: {Reason}",
@@ -487,8 +481,8 @@ During Phase 7, before loading each assembly into the plugin's isolated context,
 The distinction between priority 2, 3, and 4 matters at runtime:
 
 - **deps.json host packages** (priority 2) are already loaded in the host process. The loader skips downloading them entirely and only validates version compatibility. Their transitive dependencies are skipped during resolution since they are already satisfied by the host.
-- **Predicate-matched host packages** (priority 3) are *not* in the host process. The loader fully resolves their entire transitive dependency tree, classifies all transitive dependencies as Host, downloads them from NuGet, extracts them, and loads their assemblies into the default `AssemblyLoadContext` via a `Resolving` event hook. This makes them available to both the host and all plugins. These are called "external host packages".
-- **Discovered host-shared packages** (priority 4) behave identically to predicate-matched packages at load time -- their transitive trees are also fully resolved and classified as Host. The only difference is how they were discovered (via assembly attribute or plugin.json rather than the `IsHostPackage` predicate).
+- **Predicate-matched host packages** (priority 3) are *not* in the host process. They are skipped during dependency resolution (not resolved, not downloaded as transitive dependencies). When encountered during classification, they are marked as Host and their assemblies are loaded into the default `AssemblyLoadContext` via a `Resolving` event hook. These are called "external host packages".
+- **Discovered host-shared packages** (priority 4) behave identically to predicate-matched packages at load time. The only difference is how they were discovered (via assembly attribute or plugin.json rather than the `IsHostPackage` predicate).
 
 When multiple plugins depend on the same external host package, the loader computes the common subset of all their version ranges using `VersionRange.CommonSubSet()`. If a common range exists, the highest available version within that range is used. If no common subset exists (e.g., Plugin A needs `>= 2.0.0` and Plugin B needs `< 2.0.0`), this is a version conflict that fails all plugins.
 
@@ -569,7 +563,7 @@ Each configured plugin package forms a loading unit. The top-level package and i
 
 #### Target framework selection
 
-When extracting assemblies from a `.nupkg`, the loader selects the best matching target framework from the `lib/` folder. It checks for exact matches in priority order (net10.0, net9.0, net8.0, ..., netstandard2.0), then falls back to the NuGet `FrameworkReducer` for compatibility matching against the running runtime version.
+When extracting assemblies from a `.nupkg`, the loader uses the NuGet `FrameworkReducer` to select the best matching target framework from the `lib/` folder for the running runtime version.
 
 ### Version Validation Rules
 
@@ -592,7 +586,7 @@ The library is organized into sub-namespaces by responsibility:
 
 | Namespace | Contents |
 |---|---|
-| `Namotion.NuGet.Plugins` | Root types: `NuGetPluginLoadResult`, `NuGetPluginFailure`, `NuGetPluginConflict`, `NuGetPackageMetadata`, `NuGetPluginDependency`, `NuGetPluginVersionConflictException`, `PackageNotFoundException`, `NuGetDependencyClassification`, `NuGetNuGetPackageNameMatcher`, `NuGetVersionCompatibility` |
+| `Namotion.NuGet.Plugins` | Root types: `NuGetPluginLoadResult`, `NuGetPluginFailure`, `NuGetPluginConflict`, `NuGetPackageMetadata`, `NuGetPluginDependency`, `PackageNotFoundException`, `NuGetDependencyClassification`, `NuGetPackageNameMatcher`, `NuGetVersionCompatibility` |
 | `Namotion.NuGet.Plugins.Configuration` | Options, configuration, and feed types: `NuGetPluginLoaderOptions`, `HostDependencyResolver`, `NuGetFeed`, `NuGetPluginReference` |
 | `Namotion.NuGet.Plugins.Loading` | Loader and plugin types: `NuGetPluginLoader`, `NuGetPlugin` |
 | `Namotion.NuGet.Plugins.Repository` | NuGet feed access: `INuGetPackageRepository`, `NuGetPackageRepository`, `CompositeNuGetPackageRepository`, `NuGetPackage`, `NuGetPackageDownload` |
@@ -701,6 +695,7 @@ public enum NuGetDependencyClassification
 | `IsHostPackage` | `Func<string, bool>?` | `null` | Predicate that determines whether a package should be loaded as a host assembly |
 | `HostDependencies` | `HostDependencyResolver?` | `null` | Host dependency map for version validation |
 | `CacheDirectory` | `string?` | `null` | Local directory for downloaded packages (auto-generated temp dir if null) |
+| `IncludePrerelease` | `bool` | `false` | Whether to include pre-release package versions when resolving |
 
 ### HostDependencyResolver (`Namotion.NuGet.Plugins.Configuration`)
 

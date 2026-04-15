@@ -20,29 +20,31 @@ public class CompositeNuGetPackageRepository : INuGetPackageRepository
     public async Task<NuGetPackageDownload> DownloadPackageAsync(
         string packageName, string? packageVersion, CancellationToken cancellationToken)
     {
+        var feedExceptions = new List<Exception>();
         foreach (var repository in _repositories)
         {
             try
             {
                 return await repository.DownloadPackageAsync(packageName, packageVersion, cancellationToken);
             }
-            catch (PackageNotFoundException)
+            catch (PackageNotFoundException exception)
             {
-                // Try next repository
+                feedExceptions.Add(exception);
             }
         }
 
-        throw new PackageNotFoundException(packageName, packageVersion);
+        throw new PackageNotFoundException(
+            packageName, packageVersion, new AggregateException(feedExceptions));
     }
 
     /// <inheritdoc />
     public async Task<IEnumerable<NuGetPackage>> SearchPackagesAsync(
-        string searchTerm, int skip, int take, CancellationToken cancellationToken)
+        string searchTerm, int take, CancellationToken cancellationToken)
     {
         var allResults = new List<NuGetPackage>();
         foreach (var repository in _repositories)
         {
-            var results = await repository.SearchPackagesAsync(searchTerm, skip, take, cancellationToken);
+            var results = await repository.SearchPackagesAsync(searchTerm, take, cancellationToken);
             allResults.AddRange(results);
         }
 
@@ -51,6 +53,8 @@ public class CompositeNuGetPackageRepository : INuGetPackageRepository
             .Select(g => g.OrderByDescending(p =>
                 global::NuGet.Versioning.NuGetVersion.TryParse(p.PackageVersion, out var version)
                     ? version
-                    : new global::NuGet.Versioning.NuGetVersion(0, 0, 0)).First());
+                    : new global::NuGet.Versioning.NuGetVersion(0, 0, 0)).First())
+            .OrderBy(p => p.PackageName, StringComparer.OrdinalIgnoreCase)
+            .Take(take);
     }
 }

@@ -3,11 +3,14 @@ using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
 using Microsoft.Extensions.Hosting;
 using MyCompany.Abstractions;
+using System.ComponentModel;
 using Namotion.Interceptor.Attributes;
 
 namespace MyCompany.SamplePlugin1;
 
 [InterceptorSubject]
+[Category("Devices")]
+[Description("A sample temperature sensor plugin that simulates temperature, humidity, pressure and battery readings.")]
 public partial class SampleDevice1 : BackgroundService, IConfigurable, ITitleProvider, IMyDevice
 {
     private readonly Faker _faker = new();
@@ -22,11 +25,14 @@ public partial class SampleDevice1 : BackgroundService, IConfigurable, ITitlePro
         BatteryLevel = 100.0;
     }
 
+    [Derived]
     public string? Title => Name;
 
     // IMyDevice
+    [Derived]
     public string DeviceName => Name;
     public string DeviceType => "TemperatureSensor";
+    [Derived]
     public double? CurrentValue => Temperature;
 
     [Configuration]

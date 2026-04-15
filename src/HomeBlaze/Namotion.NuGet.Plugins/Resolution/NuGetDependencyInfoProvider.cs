@@ -51,12 +51,13 @@ internal class NuGetDependencyInfoProvider : IDependencyInfoProvider
                         .ToList();
                 }
             }
-            catch (Exception exception) when (exception is not HttpRequestException and not FatalProtocolException)
+            catch (Exception exception) when (exception is not HttpRequestException and not FatalProtocolException and not OperationCanceledException)
             {
                 _logger.LogDebug(exception, "Package not found on {Feed} for {Package}.", feed.Name, packageName);
             }
         }
-        return [];
+
+        throw new PackageNotFoundException(packageName, version);
     }
 
     public async Task<NuGetVersion?> ResolveVersionAsync(
@@ -84,7 +85,7 @@ internal class NuGetDependencyInfoProvider : IDependencyInfoProvider
                     return best.Identity.Version;
                 }
             }
-            catch (Exception exception) when (exception is not HttpRequestException and not FatalProtocolException)
+            catch (Exception exception) when (exception is not HttpRequestException and not FatalProtocolException and not OperationCanceledException)
             {
                 _logger.LogDebug(exception, "Package not found on {Feed} for {Package}.", feed.Name, packageName);
             }
