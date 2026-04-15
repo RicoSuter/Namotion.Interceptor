@@ -382,3 +382,4 @@ FodyWeavers.xsd
 
 # HomeBlaze plugin output
 src/HomeBlaze/HomeBlaze/Plugins/
+src/HomeBlaze/HomeBlaze/PluginsCache/

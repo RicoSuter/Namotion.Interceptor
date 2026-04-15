@@ -38,9 +38,8 @@ internal class SharedHostAssemblyRegistry : IDisposable
                 assemblyName,
                 _ => (path, 1),
                 (_, existing) => (existing.Path, existing.RefCount + 1));
+            _ownedAssemblyNames.Add(assemblyName);
         }
-
-        _ownedAssemblyNames.Add(assemblyName);
     }
 
     private static Assembly? OnDefaultContextResolving(AssemblyLoadContext context, AssemblyName assemblyName)
@@ -75,9 +74,9 @@ internal class SharedHostAssemblyRegistry : IDisposable
                         }
                     }
                 }
-            }
 
-            _ownedAssemblyNames.Clear();
+                _ownedAssemblyNames.Clear();
+            }
 
             lock (StaticLock)
             {
