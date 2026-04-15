@@ -18,5 +18,5 @@ public record NuGetPluginDependency
     /// <summary>
     /// Gets how this dependency was classified (Host, Entry, or Isolated).
     /// </summary>
-    public required DependencyClassification Classification { get; init; }
+    public required NuGetDependencyClassification Classification { get; init; }
 }

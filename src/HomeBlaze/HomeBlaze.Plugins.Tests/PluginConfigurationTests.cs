@@ -123,7 +123,7 @@ public class PluginConfigurationTests
         try
         {
             // Act
-            var config = PluginConfiguration.LoadFrom(path);
+            var config = PluginConfiguration.LoadFrom(path, Path.GetTempPath());
 
             // Assert
             Assert.Equal(2, config.Plugins.Count);

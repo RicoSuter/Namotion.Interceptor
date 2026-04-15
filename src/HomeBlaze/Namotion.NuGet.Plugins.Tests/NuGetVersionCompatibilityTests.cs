@@ -5,7 +5,7 @@ using Namotion.NuGet.Plugins.Configuration;
 
 namespace Namotion.NuGet.Plugins.Tests;
 
-public class VersionCompatibilityTests
+public class NuGetVersionCompatibilityTests
 {
     [Theory]
     [InlineData("1.0.0", "1.0.0", true)]   // exact match
@@ -20,7 +20,7 @@ public class VersionCompatibilityTests
         var availableVersion = NuGetVersion.Parse(available);
 
         // Act
-        var result = VersionCompatibility.IsCompatible(requiredVersion, availableVersion);
+        var result = NuGetVersionCompatibility.IsCompatible(requiredVersion, availableVersion);
 
         // Assert
         Assert.Equal(expected, result);
@@ -37,7 +37,7 @@ public class VersionCompatibilityTests
         var availableVersion = NuGetVersion.Parse(available);
 
         // Act
-        var result = VersionCompatibility.IsCompatible(requiredVersion, availableVersion);
+        var result = NuGetVersionCompatibility.IsCompatible(requiredVersion, availableVersion);
 
         // Assert
         Assert.False(result);
@@ -55,7 +55,7 @@ public class VersionCompatibilityTests
         var availableVersion = NuGetVersion.Parse(available);
 
         // Act
-        var result = VersionCompatibility.IsCompatible(requiredVersion, availableVersion);
+        var result = NuGetVersionCompatibility.IsCompatible(requiredVersion, availableVersion);
 
         // Assert
         Assert.Equal(expected, result);
@@ -76,7 +76,7 @@ public class VersionCompatibilityTests
         };
 
         // Act
-        var conflicts = VersionCompatibility.FindConflicts(
+        var conflicts = NuGetVersionCompatibility.FindConflicts(
             pluginDependencies, hostResolver, "TestPlugin");
 
         // Assert
@@ -100,7 +100,7 @@ public class VersionCompatibilityTests
         };
 
         // Act
-        var conflicts = VersionCompatibility.FindConflicts(
+        var conflicts = NuGetVersionCompatibility.FindConflicts(
             pluginDependencies, hostResolver, "TestPlugin");
 
         // Assert
@@ -121,7 +121,7 @@ public class VersionCompatibilityTests
         };
 
         // Act
-        var conflicts = VersionCompatibility.FindConflicts(
+        var conflicts = NuGetVersionCompatibility.FindConflicts(
             pluginDependencies, hostResolver, "TestPlugin");
 
         // Assert
@@ -137,7 +137,7 @@ public class VersionCompatibilityTests
         string required, string available, bool expected)
     {
         // Act
-        var result = VersionCompatibility.IsCompatible(
+        var result = NuGetVersionCompatibility.IsCompatible(
             NuGetVersion.Parse(required), NuGetVersion.Parse(available));
 
         // Assert
@@ -164,7 +164,7 @@ public class VersionCompatibilityTests
         var available = NuGetVersion.Parse("1.0.0");
 
         // Act
-        var result = VersionCompatibility.IsCompatible(required, available);
+        var result = NuGetVersionCompatibility.IsCompatible(required, available);
 
         // Assert
         Assert.True(result);
@@ -178,7 +178,7 @@ public class VersionCompatibilityTests
             ("Lib", new Version(1, 0, 0)));
 
         // Act
-        var conflicts = VersionCompatibility.FindConflicts(
+        var conflicts = NuGetVersionCompatibility.FindConflicts(
             new Dictionary<string, NuGetVersion>(), resolver, "Plugin");
 
         // Assert

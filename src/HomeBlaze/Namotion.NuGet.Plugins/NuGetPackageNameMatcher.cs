@@ -1,7 +1,4 @@
-using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
 using System.Text.RegularExpressions;
 
 namespace Namotion.NuGet.Plugins;
@@ -9,7 +6,7 @@ namespace Namotion.NuGet.Plugins;
 /// <summary>
 /// Matches package names against glob patterns where * matches one or more characters (including dots), consistent with NuGet package source mapping conventions.
 /// </summary>
-public static class PackageNameMatcher
+public static class NuGetPackageNameMatcher
 {
     private static readonly ConcurrentDictionary<string, Regex> RegexCache = new(StringComparer.OrdinalIgnoreCase);
 

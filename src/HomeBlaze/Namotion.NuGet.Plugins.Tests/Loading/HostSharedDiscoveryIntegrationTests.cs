@@ -49,8 +49,8 @@ public class HostSharedDiscoveryIntegrationTests : IDisposable
 
         Assert.NotNull(abstractionsDep1);
         Assert.NotNull(abstractionsDep2);
-        Assert.Equal(DependencyClassification.Host, abstractionsDep1.Classification);
-        Assert.Equal(DependencyClassification.Host, abstractionsDep2.Classification);
+        Assert.Equal(NuGetDependencyClassification.Host, abstractionsDep1.Classification);
+        Assert.Equal(NuGetDependencyClassification.Host, abstractionsDep2.Classification);
 
         // Verify both plugins can discover types implementing IMyDevice.
         // Plugin1 loads many private assemblies including framework deps, so ExportedTypes
@@ -123,17 +123,17 @@ public class HostSharedDiscoveryIntegrationTests : IDisposable
         var abstractionsDependency = plugin.Dependencies.FirstOrDefault(
             dependency => dependency.PackageName.Equals("MyCompany.Abstractions", StringComparison.OrdinalIgnoreCase));
         Assert.NotNull(abstractionsDependency);
-        Assert.Equal(DependencyClassification.Host, abstractionsDependency.Classification);
+        Assert.Equal(NuGetDependencyClassification.Host, abstractionsDependency.Classification);
 
         var bogusDependency = plugin.Dependencies.FirstOrDefault(
             dependency => dependency.PackageName.Equals("Bogus", StringComparison.OrdinalIgnoreCase));
         Assert.NotNull(bogusDependency);
-        Assert.Equal(DependencyClassification.Isolated, bogusDependency.Classification);
+        Assert.Equal(NuGetDependencyClassification.Isolated, bogusDependency.Classification);
 
         var samplePlugin1Dependency = plugin.Dependencies.FirstOrDefault(
             dependency => dependency.PackageName.Equals("MyCompany.SamplePlugin1", StringComparison.OrdinalIgnoreCase));
         Assert.NotNull(samplePlugin1Dependency);
-        Assert.Equal(DependencyClassification.Isolated, samplePlugin1Dependency.Classification);
+        Assert.Equal(NuGetDependencyClassification.Isolated, samplePlugin1Dependency.Classification);
     }
 
     public void Dispose()

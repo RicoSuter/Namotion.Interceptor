@@ -6,7 +6,7 @@ namespace Namotion.NuGet.Plugins;
 /// Validates semantic version compatibility between plugin requirements and host availability.
 /// Rules: major must match exactly, plugin minor &lt;= host minor, patch ignored.
 /// </summary>
-public static class VersionCompatibility
+public static class NuGetVersionCompatibility
 {
     /// <summary>
     /// Checks if a required version is compatible with an available version.

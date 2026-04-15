@@ -21,16 +21,26 @@ public class NuGetPluginLoaderTests
     }
 
     [Fact]
-    public void WhenUnloadingNonExistentPlugin_ThenReturnsFalse()
+    public async Task WhenUnloadingUnknownPlugin_ThenReturnsFalse()
     {
         // Arrange
-        using var loader = new NuGetPluginLoader(new NuGetPluginLoaderOptions());
+        using var loader = new NuGetPluginLoader(new NuGetPluginLoaderOptions
+        {
+            Feeds = [NuGetFeed.NuGetOrg],
+            HostDependencies = HostDependencyResolver.FromDepsJson()
+        });
 
-        // Act
-        var result = loader.UnloadPlugin("NonExistent");
+        var result = await loader.LoadPluginsAsync(
+            [new NuGetPluginReference("Humanizer.Core", "2.14.1")],
+            CancellationToken.None);
+
+        // Act — unload a plugin that was loaded, then try again (should be false)
+        var plugin = result.LoadedPlugins[0];
+        Assert.True(loader.UnloadPlugin(plugin));
+        var secondAttempt = loader.UnloadPlugin(plugin);
 
         // Assert
-        Assert.False(result);
+        Assert.False(secondAttempt);
     }
 
     [Fact]

@@ -1,6 +1,4 @@
-using System.Collections.Concurrent;
 using System.Reflection;
-using System.Runtime.Loader;
 using System.Text.Json;
 using System.Xml.Linq;
 using Microsoft.Extensions.Logging;
@@ -22,12 +20,9 @@ public class NuGetPluginLoader : IDisposable
     private readonly List<NuGetPlugin> _loadedPlugins = [];
     private readonly PackageExtractor _extractor;
     private readonly INuGetPackageRepository _repository;
+    private readonly SharedHostAssemblyRegistry _hostAssemblyRegistry;
+    private readonly Lock _lock = new();
 
-    private static readonly ConcurrentDictionary<string, string> SharedHostAssemblyPaths = new(StringComparer.OrdinalIgnoreCase);
-    private static int _instanceCount;
-    private static readonly object _staticLock = new();
-    private readonly HashSet<string> _ownedAssemblyNames = new(StringComparer.OrdinalIgnoreCase);
-    private readonly object _lock = new();
     private bool _disposed;
 
     private static readonly Lazy<HashSet<string>> TrustedPlatformAssemblyNames = new(() =>
@@ -55,15 +50,7 @@ public class NuGetPluginLoader : IDisposable
             .Select(feed => (INuGetPackageRepository)new NuGetPackageRepository(feed, options.IncludePrerelease, _logger))
             .ToList();
         _repository = new CompositeNuGetPackageRepository(repositories);
-
-        // Hook default context resolving for external host packages (ref-counted across instances)
-        lock (_staticLock)
-        {
-            if (++_instanceCount == 1)
-            {
-                AssemblyLoadContext.Default.Resolving += OnDefaultContextResolving;
-            }
-        }
+        _hostAssemblyRegistry = new SharedHostAssemblyRegistry();
     }
 
     /// <summary>
@@ -109,7 +96,7 @@ public class NuGetPluginLoader : IDisposable
         var failures = new List<NuGetPluginFailure>();
 
         var hostResolver = _options.HostDependencies ?? new HostDependencyResolver([]);
-        var classifier = new DependencyClassifier(
+        var classifier = new NuGetDependencyClassifier(
             hostResolver,
             _options.IsHostPackage,
             pluginList.Select(plugin => plugin.PackageName));
@@ -132,7 +119,7 @@ public class NuGetPluginLoader : IDisposable
         LoadHostPackages(pluginGraphs, hostResolver);
 
         var loadedPlugins = LoadPluginAssemblies(
-            pluginGraphs, failures, pluginManifests, hostResolver);
+            pluginGraphs, failures, pluginManifests);
 
         return new NuGetPluginLoadResult(loadedPlugins, failures);
     }
@@ -142,7 +129,7 @@ public class NuGetPluginLoader : IDisposable
     /// </summary>
     private async Task<List<ResolvedPluginGraph>> ResolvePluginGraphsAsync(
         List<NuGetPluginReference> pluginList,
-        DependencyClassifier classifier,
+        NuGetDependencyClassifier classifier,
         DependencyGraphResolver graphResolver,
         List<NuGetPluginFailure> failures,
         CancellationToken cancellationToken)
@@ -186,10 +173,10 @@ public class NuGetPluginLoader : IDisposable
         foreach (var entry in pluginGraphs)
         {
             var hostDependencies = entry.FlatDependencies
-                .Where(kvp => entry.Classifications.TryGetValue(kvp.Key, out var classification) && classification == DependencyClassification.Host)
+                .Where(kvp => entry.Classifications.TryGetValue(kvp.Key, out var classification) && classification == NuGetDependencyClassification.Host)
                 .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
 
-            var conflicts = VersionCompatibility.FindConflicts(hostDependencies, hostResolver, entry.Request.PackageName);
+            var conflicts = NuGetVersionCompatibility.FindConflicts(hostDependencies, hostResolver, entry.Request.PackageName);
             if (conflicts.Count > 0)
             {
                 failures.Add(new NuGetPluginFailure(
@@ -284,7 +271,7 @@ public class NuGetPluginLoader : IDisposable
                     cancellationToken.ThrowIfCancellationRequested();
 
                     var classification = entry.Classifications[packageName];
-                    if (classification == DependencyClassification.Host &&
+                    if (classification == NuGetDependencyClassification.Host &&
                         hostResolver.Contains(packageName))
                     {
                         // Already in host, skip download
@@ -365,7 +352,7 @@ public class NuGetPluginLoader : IDisposable
         // Re-classify with discovered host-shared packages
         if (discoveredHostShared.Count > 0)
         {
-            var updatedClassifier = new DependencyClassifier(
+            var updatedClassifier = new NuGetDependencyClassifier(
                 hostResolver, _options.IsHostPackage,
                 pluginList.Select(plugin => plugin.PackageName), discoveredHostShared);
 
@@ -414,8 +401,7 @@ public class NuGetPluginLoader : IDisposable
             foreach (var path in paths)
             {
                 var assemblyName = Path.GetFileNameWithoutExtension(path);
-                SharedHostAssemblyPaths[assemblyName] = path;
-                _ownedAssemblyNames.Add(assemblyName);
+                _hostAssemblyRegistry.AddAssemblyPath(assemblyName, path);
             }
         }
     }
@@ -427,8 +413,7 @@ public class NuGetPluginLoader : IDisposable
     private List<NuGetPlugin> LoadPluginAssemblies(
         List<ResolvedPluginGraph> pluginGraphs,
         List<NuGetPluginFailure> failures,
-        Dictionary<string, JsonElement?> pluginManifests,
-        HostDependencyResolver hostResolver)
+        Dictionary<string, JsonElement?> pluginManifests)
     {
         var loadedPlugins = new List<NuGetPlugin>();
 
@@ -451,7 +436,7 @@ public class NuGetPluginLoader : IDisposable
                     var versionString = version.ToNormalizedString();
                     var cachedPath = _extractor.GetCachedPackagePath(packageName, versionString);
 
-                    if (classification == DependencyClassification.Host)
+                    if (classification == NuGetDependencyClassification.Host)
                     {
                         // Collect host assembly names so the ALC falls back
                         if (cachedPath != null)
@@ -480,7 +465,7 @@ public class NuGetPluginLoader : IDisposable
                                 // Already available in default context (e.g., framework-provided assembly
                                 // like Microsoft.Extensions.* from the shared framework)
                                 hostAssemblyNames.Add(assemblyName);
-                                entry.Classifications[packageName] = DependencyClassification.Host;
+                                entry.Classifications[packageName] = NuGetDependencyClassification.Host;
                                 _logger.LogDebug("Assembly '{Assembly}' from plugin '{Plugin}' already in default context, reclassifying as host.",
                                     assemblyName, entry.Request.PackageName);
                             }
@@ -569,19 +554,15 @@ public class NuGetPluginLoader : IDisposable
     }
 
     /// <summary>
-    /// Unloads a plugin by package name. Returns true if the plugin was found and unloaded.
+    /// Unloads the specified plugin. Returns true if the plugin was found and unloaded.
     /// </summary>
-    public bool UnloadPlugin(string packageName)
+    public bool UnloadPlugin(NuGetPlugin plugin)
     {
         lock (_lock)
         {
-            var loadedPlugin = _loadedPlugins.FirstOrDefault(plugin =>
-                plugin.PackageName.Equals(packageName, StringComparison.OrdinalIgnoreCase));
-
-            if (loadedPlugin != null)
+            if (_loadedPlugins.Remove(plugin))
             {
-                loadedPlugin.Dispose();
-                _loadedPlugins.Remove(loadedPlugin);
+                plugin.Dispose();
                 return true;
             }
             return false;
@@ -590,26 +571,16 @@ public class NuGetPluginLoader : IDisposable
 
     private static bool IsExternalHostPackage(
         string packageName,
-        Dictionary<string, DependencyClassification> classifications,
+        Dictionary<string, NuGetDependencyClassification> classifications,
         HostDependencyResolver hostResolver)
     {
         return classifications.TryGetValue(packageName, out var classification)
-            && classification == DependencyClassification.Host
+            && classification == NuGetDependencyClassification.Host
             && !hostResolver.Contains(packageName);
     }
 
     private static bool IsAssemblyInDefaultContext(string assemblyName)
         => TrustedPlatformAssemblyNames.Value.Contains(assemblyName);
-
-    private static Assembly? OnDefaultContextResolving(AssemblyLoadContext context, AssemblyName assemblyName)
-    {
-        if (assemblyName.Name != null &&
-            SharedHostAssemblyPaths.TryGetValue(assemblyName.Name, out var path))
-        {
-            return context.LoadFromAssemblyPath(path);
-        }
-        return null;
-    }
 
     /// <inheritdoc />
     public void Dispose()
@@ -618,21 +589,7 @@ public class NuGetPluginLoader : IDisposable
         {
             _disposed = true;
 
-            // Remove paths owned by this instance from the shared dictionary
-            foreach (var name in _ownedAssemblyNames)
-            {
-                SharedHostAssemblyPaths.TryRemove(name, out _);
-            }
-            _ownedAssemblyNames.Clear();
-
-            // Ref-counted unsubscribe from the static event
-            lock (_staticLock)
-            {
-                if (--_instanceCount == 0)
-                {
-                    AssemblyLoadContext.Default.Resolving -= OnDefaultContextResolving;
-                }
-            }
+            _hostAssemblyRegistry.Dispose();
 
             lock (_lock)
             {
@@ -651,5 +608,5 @@ public class NuGetPluginLoader : IDisposable
     private record ResolvedPluginGraph(
         NuGetPluginReference Request,
         Dictionary<string, NuGetVersion> FlatDependencies,
-        Dictionary<string, DependencyClassification> Classifications);
+        Dictionary<string, NuGetDependencyClassification> Classifications);
 }

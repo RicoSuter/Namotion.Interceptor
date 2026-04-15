@@ -74,7 +74,8 @@ public class NuGetPluginLoaderIntegrationTests : IDisposable
             CancellationToken.None);
 
         // Act
-        var unloaded = loader.UnloadPlugin("Humanizer.Core");
+        var plugin = loader.LoadedPlugins.First(p => p.PackageName == "Humanizer.Core");
+        var unloaded = loader.UnloadPlugin(plugin);
 
         // Assert
         Assert.True(unloaded);

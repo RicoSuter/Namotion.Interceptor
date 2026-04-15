@@ -45,7 +45,7 @@ The runtime loader handles:
 
 ### Configuration (`Data/Plugins.json`)
 
-Plugin configuration lives in `Data/Plugins.json` relative to the application directory. The path can be overridden via the `PluginConfigPath` setting in `appsettings.json`.
+Plugin configuration lives in `Data/Plugins.json` relative to the application directory. The path can be overridden via the `PluginConfigurationPath` setting in `appsettings.json`.
 
 Because `Plugins.json` is also a subject configuration file, it includes a `$type` discriminator so the subject system can deserialize it as a `PluginManager`:
 
@@ -198,3 +198,14 @@ These three sources are additive -- a package is host-shared if any source decla
 | Runtime loader | `Namotion.NuGet.Plugins` (standalone) | General-purpose, no HomeBlaze dependency |
 | Plugin updates | Restart (no hot-reload) | Simplifies lifecycle |
 | Host-shared discovery | Automatic via attribute + plugin.json + manual config | Three complementary actors (contract author, plugin author, host author) can declare packages as host-shared; manual config becomes a fallback, not the primary mechanism |
+
+## Planned
+
+### Runtime Plugin Unload/Reload
+
+Currently plugins require an application restart to pick up changes. Runtime unloading is planned but involves several challenges beyond assembly unloading:
+
+1. **Assembly unloading** -- `NuGetPluginLoader.UnloadPlugin()` already supports unloading the plugin's `AssemblyLoadContext`. However, host-shared assemblies loaded into the default context cannot be unloaded.
+2. **Subject instance lifecycle** -- When a plugin is unloaded, subject instances created from plugin types are still live in the object graph. These must either be removed from the graph entirely, or converted to JSON/proxy subjects that preserve their state without requiring the original type. This is similar to how HomeBlaze handles subjects whose types are not (yet) available.
+3. **Reload sequence** -- After unloading, the updated plugin version must be downloaded, loaded into a fresh `AssemblyLoadContext`, and subject instances re-created from the preserved state.
+4. **UI invalidation** -- Blazor components from the old plugin must be replaced or removed when the plugin is unloaded.

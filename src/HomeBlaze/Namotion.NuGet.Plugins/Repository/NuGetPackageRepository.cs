@@ -62,31 +62,8 @@ public class NuGetPackageRepository : INuGetPackageRepository
 
                 var metadataResource = await sourceRepository.GetResourceAsync<global::NuGet.Protocol.Core.Types.PackageMetadataResource>(cancellationToken);
 
-                global::NuGet.Versioning.NuGetVersion resolvedVersion;
-                if (!string.IsNullOrEmpty(packageVersion))
-                {
-                    resolvedVersion = new global::NuGet.Versioning.NuGetVersion(packageVersion);
-                }
-                else
-                {
-                    // Resolve latest version first to avoid NuGet SDK SingleOrDefault issue
-                    using var listCacheContext = new global::NuGet.Protocol.Core.Types.SourceCacheContext();
-                    var versions = await metadataResource.GetMetadataAsync(
-                        packageName, includePrerelease: _includePrerelease, includeUnlisted: false,
-                        listCacheContext, global::NuGet.Common.NullLogger.Instance, cancellationToken);
-
-                    var latest = versions?
-                        .OrderByDescending(m => m.Identity.Version)
-                        .FirstOrDefault();
-
-                    if (latest == null)
-                    {
-                        throw new PackageNotFoundException(packageName, packageVersion);
-                    }
-
-                    resolvedVersion = latest.Identity.Version;
-                }
-
+                var resolvedVersion = await ResolveVersionAsync(
+                    packageName, packageVersion, metadataResource, cancellationToken);
                 var identity = new global::NuGet.Packaging.Core.PackageIdentity(packageName, resolvedVersion);
 
                 using var metadataCacheContext = new global::NuGet.Protocol.Core.Types.SourceCacheContext();
@@ -129,5 +106,34 @@ public class NuGetPackageRepository : INuGetPackageRepository
                 await Task.Delay(delay, cancellationToken);
             }
         }
+    }
+
+    private async Task<global::NuGet.Versioning.NuGetVersion> ResolveVersionAsync(
+        string packageName,
+        string? packageVersion,
+        global::NuGet.Protocol.Core.Types.PackageMetadataResource metadataResource,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrEmpty(packageVersion))
+        {
+            return new global::NuGet.Versioning.NuGetVersion(packageVersion);
+        }
+
+        // Resolve latest version first to avoid NuGet SDK SingleOrDefault issue
+        using var cacheContext = new global::NuGet.Protocol.Core.Types.SourceCacheContext();
+        var versions = await metadataResource.GetMetadataAsync(
+            packageName, includePrerelease: _includePrerelease, includeUnlisted: false,
+            cacheContext, global::NuGet.Common.NullLogger.Instance, cancellationToken);
+
+        var latest = versions?
+            .OrderByDescending(m => m.Identity.Version)
+            .FirstOrDefault();
+
+        if (latest == null)
+        {
+            throw new PackageNotFoundException(packageName, packageVersion);
+        }
+
+        return latest.Identity.Version;
     }
 }

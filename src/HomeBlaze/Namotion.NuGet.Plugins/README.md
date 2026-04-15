@@ -32,7 +32,7 @@ var options = new NuGetPluginLoaderOptions
 {
     Feeds = [NuGetFeed.NuGetOrg],
     HostDependencies = HostDependencyResolver.FromDepsJson(),
-    IsHostPackage = name => PackageNameMatcher.IsMatchAny(name, ["MyCompany.*.Abstractions"]),
+    IsHostPackage = name => NuGetPackageNameMatcher.IsMatchAny(name, ["MyCompany.*.Abstractions"]),
 };
 
 using var loader = new NuGetPluginLoader(options);
@@ -158,8 +158,8 @@ Packages for which the predicate returns `true` are downloaded from the configur
 ```csharp
 var options = new NuGetPluginLoaderOptions
 {
-    // Use PackageNameMatcher for glob-based matching
-    IsHostPackage = name => PackageNameMatcher.IsMatchAny(name,
+    // Use NuGetPackageNameMatcher for glob-based matching
+    IsHostPackage = name => NuGetPackageNameMatcher.IsMatchAny(name,
     [
         "MyCompany.*.Abstractions",  // Shared interface packages
         "Shared.Contracts",          // Exact match
@@ -167,7 +167,7 @@ var options = new NuGetPluginLoaderOptions
 };
 ```
 
-The `PackageNameMatcher` utility class provides glob-based matching where `*` matches one or more characters including dots, consistent with NuGet package source mapping conventions:
+The `NuGetPackageNameMatcher` utility class provides glob-based matching where `*` matches one or more characters including dots, consistent with NuGet package source mapping conventions:
 
 | Pattern | Matches | Does not match |
 |---|---|---|
@@ -326,7 +326,8 @@ foreach (var plugin in loader.LoadedPlugins)
 Individual plugins can be unloaded at runtime:
 
 ```csharp
-bool wasUnloaded = loader.UnloadPlugin("MyCompany.Plugin.Sensors");
+var plugin = loader.LoadedPlugins.First(p => p.PackageName == "MyCompany.Plugin.Sensors");
+bool wasUnloaded = loader.UnloadPlugin(plugin);
 ```
 
 This disposes the plugin's `AssemblyLoadContext` (which is collectible), allowing the runtime to reclaim the loaded assemblies. Note that any objects instantiated from plugin types must be released before the GC can fully collect the context.
@@ -591,7 +592,7 @@ The library is organized into sub-namespaces by responsibility:
 
 | Namespace | Contents |
 |---|---|
-| `Namotion.NuGet.Plugins` | Root types: `NuGetPluginLoadResult`, `NuGetPluginFailure`, `NuGetPluginConflict`, `NuGetPackageMetadata`, `NuGetPluginDependency`, `NuGetPluginVersionConflictException`, `PackageNotFoundException`, `DependencyClassification`, `DependencyClassifier`, `PackageNameMatcher`, `VersionCompatibility` |
+| `Namotion.NuGet.Plugins` | Root types: `NuGetPluginLoadResult`, `NuGetPluginFailure`, `NuGetPluginConflict`, `NuGetPackageMetadata`, `NuGetPluginDependency`, `NuGetPluginVersionConflictException`, `PackageNotFoundException`, `NuGetDependencyClassification`, `NuGetNuGetPackageNameMatcher`, `NuGetVersionCompatibility` |
 | `Namotion.NuGet.Plugins.Configuration` | Options, configuration, and feed types: `NuGetPluginLoaderOptions`, `HostDependencyResolver`, `NuGetFeed`, `NuGetPluginReference` |
 | `Namotion.NuGet.Plugins.Loading` | Loader and plugin types: `NuGetPluginLoader`, `NuGetPlugin` |
 | `Namotion.NuGet.Plugins.Repository` | NuGet feed access: `INuGetPackageRepository`, `NuGetPackageRepository`, `CompositeNuGetPackageRepository`, `NuGetPackage`, `NuGetPackageDownload` |
@@ -610,7 +611,7 @@ The main entry point. Implements `IDisposable`.
 | `LoadedPlugins` | All currently loaded plugins. |
 | `GetTypes<T>()` | Finds all concrete types assignable to `T` across all loaded plugins. |
 | `GetTypes(predicate)` | Finds all types matching a predicate across all loaded plugins. |
-| `UnloadPlugin(packageName)` | Unloads a specific plugin by package name. Returns `true` if found and unloaded. |
+| `UnloadPlugin(plugin)` | Unloads a specific `NuGetPlugin`. Returns `true` if found and unloaded. |
 | `Dispose()` | Unloads all plugins and removes the default context resolving hook. |
 
 ### NuGetPluginReference (`Namotion.NuGet.Plugins.Configuration`)
@@ -677,14 +678,14 @@ public record NuGetPluginDependency
 {
     public required string PackageName { get; init; }
     public required string Version { get; init; }
-    public required DependencyClassification Classification { get; init; }
+    public required NuGetDependencyClassification Classification { get; init; }
 }
 ```
 
-### DependencyClassification (`Namotion.NuGet.Plugins`)
+### NuGetDependencyClassification (`Namotion.NuGet.Plugins`)
 
 ```csharp
-public enum DependencyClassification
+public enum NuGetDependencyClassification
 {
     Host,       // Loaded into the default (host) assembly context
     Entry,      // A top-level plugin package in its own assembly context

@@ -45,7 +45,7 @@ public class WebTestingHostFactory<TProgram> : WebApplicationFactory<TProgram>
         builder.UseSetting("HomeBlaze:RootConfigFile", "testRoot.json");
 
         // Point to test-specific plugin configuration
-        builder.UseSetting("PluginConfigPath", Path.Combine(AppContext.BaseDirectory, "TestData", "Plugins.json"));
+        builder.UseSetting("PluginConfigurationPath", Path.Combine(AppContext.BaseDirectory, "TestData", "Plugins.json"));
     }
 
     private void EnsureServer()

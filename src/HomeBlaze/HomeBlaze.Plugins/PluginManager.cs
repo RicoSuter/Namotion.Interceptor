@@ -41,11 +41,11 @@ public partial class PluginManager : IConfigurable, ITitleProvider, IIconProvide
                     IconUrl = plugin.Metadata.IconUrl,
                     Tags = plugin.Metadata.Tags.ToArray(),
                     HostDependencies = plugin.Dependencies
-                        .Where(d => d.Classification == DependencyClassification.Host)
+                        .Where(d => d.Classification == NuGetDependencyClassification.Host)
                         .Select(d => $"{d.PackageName} v{d.Version}")
                         .ToArray(),
                     PrivateDependencies = plugin.Dependencies
-                        .Where(d => d.Classification == DependencyClassification.Isolated)
+                        .Where(d => d.Classification == NuGetDependencyClassification.Isolated)
                         .Select(d => $"{d.PackageName} v{d.Version}")
                         .ToArray(),
                     Assemblies = plugin.Assemblies
@@ -103,6 +103,9 @@ public partial class PluginManager : IConfigurable, ITitleProvider, IIconProvide
         Plugins = [.. Plugins, new PluginEntry { PackageName = packageName, Version = version }];
     }
 
+    // TODO: Implement runtime plugin unloading. This requires:
+    // 1. Call PluginLoader.Loader.UnloadPlugin() to unload the plugin assemblies
+    // 2. Remove or convert live subject instances from the plugin (e.g., serialize to JSON subjects to preserve state)
     internal void RemovePlugin(string packageName)
     {
         Plugins = Plugins

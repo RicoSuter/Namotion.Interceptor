@@ -30,7 +30,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddHomeBlazeHost();
 builder.Services.AddHomeBlazeStorage();
 
-var pluginConfigPath = builder.Configuration.GetValue<string>("PluginConfigPath")
+var pluginConfigPath = builder.Configuration.GetValue<string>("PluginConfigurationPath")
     ?? Path.Combine(AppContext.BaseDirectory, "Data", "Plugins.json");
 builder.Services.AddHomeBlazePlugins(pluginConfigPath);
 builder.Services.AddHotKeys2();

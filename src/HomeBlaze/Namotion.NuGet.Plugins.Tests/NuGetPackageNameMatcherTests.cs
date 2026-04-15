@@ -2,7 +2,7 @@ using Xunit;
 
 namespace Namotion.NuGet.Plugins.Tests;
 
-public class PackageNameMatcherTests
+public class NuGetPackageNameMatcherTests
 {
     [Theory]
     [InlineData("MyCompany.*.Abstractions", "MyCompany.Devices.Abstractions", true)]
@@ -14,7 +14,7 @@ public class PackageNameMatcherTests
     public void WhenPatternHasWildcard_ThenMatchesCorrectly(string pattern, string packageName, bool expected)
     {
         // Act
-        var result = PackageNameMatcher.IsMatch(packageName, pattern);
+        var result = NuGetPackageNameMatcher.IsMatch(packageName, pattern);
 
         // Assert
         Assert.Equal(expected, result);
@@ -27,7 +27,7 @@ public class PackageNameMatcherTests
     public void WhenPatternIsExact_ThenMatchesExactly(string pattern, string packageName, bool expected)
     {
         // Act
-        var result = PackageNameMatcher.IsMatch(packageName, pattern);
+        var result = NuGetPackageNameMatcher.IsMatch(packageName, pattern);
 
         // Assert
         Assert.Equal(expected, result);
@@ -41,7 +41,7 @@ public class PackageNameMatcherTests
     public void WhenWildcardAtEdge_ThenMatchesCorrectly(string pattern, string packageName, bool expected)
     {
         // Act
-        var result = PackageNameMatcher.IsMatch(packageName, pattern);
+        var result = NuGetPackageNameMatcher.IsMatch(packageName, pattern);
 
         // Assert
         Assert.Equal(expected, result);
@@ -54,7 +54,7 @@ public class PackageNameMatcherTests
     public void WhenMultipleWildcards_ThenMatchesCorrectly(string pattern, string packageName, bool expected)
     {
         // Act
-        var result = PackageNameMatcher.IsMatch(packageName, pattern);
+        var result = NuGetPackageNameMatcher.IsMatch(packageName, pattern);
 
         // Assert
         Assert.Equal(expected, result);
@@ -67,16 +67,16 @@ public class PackageNameMatcherTests
         var patterns = new[] { "MyCompany.*.Abstractions", "OtherCompany.*" };
 
         // Act & Assert
-        Assert.True(PackageNameMatcher.IsMatchAny("MyCompany.Devices.Abstractions", patterns));
-        Assert.True(PackageNameMatcher.IsMatchAny("OtherCompany.Foo", patterns));
-        Assert.False(PackageNameMatcher.IsMatchAny("Unrelated.Package", patterns));
+        Assert.True(NuGetPackageNameMatcher.IsMatchAny("MyCompany.Devices.Abstractions", patterns));
+        Assert.True(NuGetPackageNameMatcher.IsMatchAny("OtherCompany.Foo", patterns));
+        Assert.False(NuGetPackageNameMatcher.IsMatchAny("Unrelated.Package", patterns));
     }
 
     [Fact]
     public void WhenPatternsListIsEmpty_ThenNothingMatches()
     {
         // Act
-        var result = PackageNameMatcher.IsMatchAny("Any.Package", []);
+        var result = NuGetPackageNameMatcher.IsMatchAny("Any.Package", []);
 
         // Assert
         Assert.False(result);

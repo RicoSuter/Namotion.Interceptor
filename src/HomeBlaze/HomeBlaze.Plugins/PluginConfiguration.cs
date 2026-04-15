@@ -14,7 +14,6 @@ public class PluginConfiguration
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
-        PropertyNameCaseInsensitive = true,
         ReadCommentHandling = JsonCommentHandling.Skip,
         AllowTrailingCommas = true,
     };
@@ -41,12 +40,12 @@ public class PluginConfiguration
     public IReadOnlyList<NuGetPluginReference> PluginReferences =>
         Plugins.Select(p => new NuGetPluginReference(p.PackageName, p.Version)).ToList();
 
-    public static PluginConfiguration LoadFrom(string jsonPath)
+    public static PluginConfiguration LoadFrom(string jsonPath, string baseDirectory)
     {
         using var stream = File.OpenRead(jsonPath);
         var config = LoadFrom(stream);
 
-        // Resolve relative feed URLs against the application base directory
+        // Resolve relative feed URLs against the provided base directory
         config.Feeds = config.Feeds.Select(feed =>
         {
             if (!Uri.IsWellFormedUriString(feed.Url, UriKind.Absolute) && !Path.IsPathRooted(feed.Url))
@@ -54,7 +53,7 @@ public class PluginConfiguration
                 return new PluginFeedEntry
                 {
                     Name = feed.Name,
-                    Url = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, feed.Url)),
+                    Url = Path.GetFullPath(Path.Combine(baseDirectory, feed.Url)),
                     ApiKey = feed.ApiKey,
                 };
             }
@@ -76,7 +75,7 @@ public class PluginConfiguration
         {
             Feeds = NuGetFeeds,
             IsHostPackage = HostPackages.Count > 0
-                ? name => PackageNameMatcher.IsMatchAny(name, HostPackages)
+                ? name => NuGetPackageNameMatcher.IsMatchAny(name, HostPackages)
                 : null,
             HostDependencies = hostDependencies,
             CacheDirectory = CacheDirectory,
