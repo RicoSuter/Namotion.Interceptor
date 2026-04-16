@@ -81,7 +81,7 @@ foreach (var type in loader.GetTypes<ISensorDevice>())
 | `CacheDirectory` | `string?` | `null` | Local directory for downloaded packages (auto-generated temp dir if null) |
 | `IncludePrerelease` | `bool` | `false` | Whether to include pre-release package versions when resolving |
 
-The `CacheDirectory` option controls where extracted packages are stored. When omitted, a temporary directory with a unique name is created per loader instance -- packages are re-downloaded on every application restart. Set `CacheDirectory` to a stable path (e.g., `Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyApp", "plugins")`) to cache packages across restarts.
+The `CacheDirectory` option controls where extracted packages are stored. When omitted, a temporary directory with a unique name is created per loader instance -- packages are re-downloaded on every application restart. Set `CacheDirectory` to a stable path (e.g., `Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MyApp", "plugins")`) to cache packages across restarts. When using multiple `NuGetPluginLoader` instances in the same process, sharing a single `CacheDirectory` is recommended to avoid redundant downloads.
 
 ## Host Dependency Resolution
 

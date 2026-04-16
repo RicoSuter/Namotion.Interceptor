@@ -6,17 +6,22 @@ namespace Namotion.NuGet.Plugins.Loading;
 
 /// <summary>
 /// Manages shared host assembly paths across all NuGetPluginLoader instances.
-/// Uses ref-counting per assembly name so that disposal only removes an assembly
-/// path when no other loader instance still references it.
+/// Each instance tracks the paths it registered. On disposal, only those paths
+/// are removed. The Resolving handler tries all registered paths for a given
+/// assembly name until one succeeds.
+/// When using multiple loader instances, sharing a single CacheDirectory is
+/// recommended to avoid redundant downloads.
 /// </summary>
 internal class SharedHostAssemblyRegistry : IDisposable
 {
     private static readonly Lock StaticLock = new();
-    private static readonly ConcurrentDictionary<string, (string Path, int RefCount)> SharedAssemblyPaths = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, List<string>> SharedAssemblyPaths
+        = new(StringComparer.OrdinalIgnoreCase);
 
     private static int _instanceCount;
 
-    private readonly HashSet<string> _ownedAssemblyNames = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _ownedPaths = new(StringComparer.OrdinalIgnoreCase);
+
     private bool _disposed;
 
     public SharedHostAssemblyRegistry()
@@ -34,21 +39,33 @@ internal class SharedHostAssemblyRegistry : IDisposable
     {
         lock (StaticLock)
         {
-            SharedAssemblyPaths.AddOrUpdate(
-                assemblyName,
-                _ => (path, 1),
-                (_, existing) => (existing.Path, existing.RefCount + 1));
-            _ownedAssemblyNames.Add(assemblyName);
+            var paths = SharedAssemblyPaths.GetOrAdd(assemblyName, _ => []);
+            if (!paths.Contains(path, StringComparer.OrdinalIgnoreCase))
+            {
+                paths.Add(path);
+            }
+
+            _ownedPaths[assemblyName] = path;
         }
     }
 
     private static Assembly? OnDefaultContextResolving(AssemblyLoadContext context, AssemblyName assemblyName)
     {
         if (assemblyName.Name != null &&
-            SharedAssemblyPaths.TryGetValue(assemblyName.Name, out var entry))
+            SharedAssemblyPaths.TryGetValue(assemblyName.Name, out var paths))
         {
-            return context.LoadFromAssemblyPath(entry.Path);
+            lock (StaticLock)
+            {
+                foreach (var path in paths)
+                {
+                    if (File.Exists(path))
+                    {
+                        return context.LoadFromAssemblyPath(path);
+                    }
+                }
+            }
         }
+
         return null;
     }
 
@@ -60,22 +77,19 @@ internal class SharedHostAssemblyRegistry : IDisposable
 
             lock (StaticLock)
             {
-                foreach (var name in _ownedAssemblyNames)
+                foreach (var (assemblyName, path) in _ownedPaths)
                 {
-                    if (SharedAssemblyPaths.TryGetValue(name, out var entry))
+                    if (SharedAssemblyPaths.TryGetValue(assemblyName, out var paths))
                     {
-                        if (entry.RefCount <= 1)
+                        paths.Remove(path);
+                        if (paths.Count == 0)
                         {
-                            SharedAssemblyPaths.TryRemove(name, out _);
-                        }
-                        else
-                        {
-                            SharedAssemblyPaths[name] = (entry.Path, entry.RefCount - 1);
+                            SharedAssemblyPaths.TryRemove(assemblyName, out _);
                         }
                     }
                 }
 
-                _ownedAssemblyNames.Clear();
+                _ownedPaths.Clear();
             }
 
             lock (StaticLock)

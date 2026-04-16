@@ -22,7 +22,9 @@ public class NuGetPluginLoaderOptions
     public HostDependencyResolver? HostDependencies { get; set; }
 
     /// <summary>
-    /// Gets or sets the directory for caching extracted packages. If null, a temporary directory is used.
+    /// Gets or sets the directory for caching extracted packages. If null, a temporary directory is
+    /// created per loader instance and cleaned up on disposal. When using multiple loader instances
+    /// in the same process, sharing a single cache directory is recommended to avoid redundant downloads.
     /// </summary>
     public string? CacheDirectory { get; set; }
 
