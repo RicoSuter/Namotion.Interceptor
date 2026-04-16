@@ -63,6 +63,12 @@ public class PluginConfiguration
             return feed;
         }).ToList();
 
+        // Resolve relative cache directory against the provided base directory
+        if (config.CacheDirectory != null && !Path.IsPathRooted(config.CacheDirectory))
+        {
+            config.CacheDirectory = Path.GetFullPath(Path.Combine(baseDirectory, config.CacheDirectory));
+        }
+
         return config;
     }
 
