@@ -15,12 +15,12 @@ namespace Namotion.NuGet.Plugins.Loading;
 internal class SharedHostAssemblyRegistry : IDisposable
 {
     private static readonly Lock StaticLock = new();
-    private static readonly ConcurrentDictionary<string, List<string>> SharedAssemblyPaths
+    private static readonly ConcurrentDictionary<string, HashSet<string>> SharedAssemblyPaths
         = new(StringComparer.OrdinalIgnoreCase);
 
     private static int _instanceCount;
 
-    private readonly Dictionary<string, string> _ownedPaths = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _ownedPaths = new(StringComparer.OrdinalIgnoreCase);
 
     private bool _disposed;
 
@@ -39,13 +39,10 @@ internal class SharedHostAssemblyRegistry : IDisposable
     {
         lock (StaticLock)
         {
-            var paths = SharedAssemblyPaths.GetOrAdd(assemblyName, _ => []);
-            if (!paths.Contains(path, StringComparer.OrdinalIgnoreCase))
-            {
-                paths.Add(path);
-            }
-
-            _ownedPaths[assemblyName] = path;
+            var paths = SharedAssemblyPaths.GetOrAdd(
+                assemblyName, _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+            paths.Add(path);
+            _ownedPaths.Add(path);
         }
     }
 
@@ -54,14 +51,17 @@ internal class SharedHostAssemblyRegistry : IDisposable
         if (assemblyName.Name != null &&
             SharedAssemblyPaths.TryGetValue(assemblyName.Name, out var paths))
         {
+            string[] snapshot;
             lock (StaticLock)
             {
-                foreach (var path in paths)
+                snapshot = [.. paths];
+            }
+
+            foreach (var path in snapshot)
+            {
+                if (File.Exists(path))
                 {
-                    if (File.Exists(path))
-                    {
-                        return context.LoadFromAssemblyPath(path);
-                    }
+                    return context.LoadFromAssemblyPath(path);
                 }
             }
         }
@@ -77,15 +77,12 @@ internal class SharedHostAssemblyRegistry : IDisposable
 
             lock (StaticLock)
             {
-                foreach (var (assemblyName, path) in _ownedPaths)
+                foreach (var (assemblyName, paths) in SharedAssemblyPaths)
                 {
-                    if (SharedAssemblyPaths.TryGetValue(assemblyName, out var paths))
+                    paths.ExceptWith(_ownedPaths);
+                    if (paths.Count == 0)
                     {
-                        paths.Remove(path);
-                        if (paths.Count == 0)
-                        {
-                            SharedAssemblyPaths.TryRemove(assemblyName, out _);
-                        }
+                        SharedAssemblyPaths.TryRemove(assemblyName, out _);
                     }
                 }
 
