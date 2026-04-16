@@ -87,10 +87,7 @@ internal class SharedHostAssemblyRegistry : IDisposable
                 }
 
                 _ownedPaths.Clear();
-            }
 
-            lock (StaticLock)
-            {
                 if (--_instanceCount == 0)
                 {
                     AssemblyLoadContext.Default.Resolving -= OnDefaultContextResolving;
