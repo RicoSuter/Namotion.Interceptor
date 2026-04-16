@@ -4,6 +4,7 @@ using HomeBlaze.Host;
 using HomeBlaze.Samples;
 using HomeBlaze.Servers.OpcUa;
 using HomeBlaze.Servers.OpcUa.Blazor;
+using HomeBlaze.Plugins;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Blazor;
@@ -28,6 +29,10 @@ var builder = WebApplication.CreateBuilder(args);
 // This registers the singleton IInterceptorSubjectContext with HostedServiceHandler
 builder.Services.AddHomeBlazeHost();
 builder.Services.AddHomeBlazeStorage();
+
+var pluginConfigPath = builder.Configuration.GetValue<string>("PluginConfigurationPath")
+    ?? Path.Combine(AppContext.BaseDirectory, "Data", "Plugins.json");
+builder.Services.AddHomeBlazePlugins(pluginConfigPath);
 builder.Services.AddHotKeys2();
 
 // Optionally add the MCP subject server (default: false, enabled in Development)
@@ -70,6 +75,23 @@ typeProvider
     .AddAssembly(typeof(WallboxChargerWidget).Assembly)
     .AddAssembly(typeof(EcowittGateway).Assembly)
     .AddAssembly(typeof(EcowittGatewayWidget).Assembly);
+
+// Register HomeBlaze.Plugins subject types
+typeProvider.AddAssembly(typeof(PluginManager).Assembly);
+
+// Load runtime plugins
+var pluginLoader = app.Services.GetRequiredService<PluginLoader>();
+var pluginResult = await pluginLoader.LoadPluginsAsync(CancellationToken.None);
+if (pluginResult != null)
+{
+    foreach (var plugin in pluginResult.LoadedPlugins)
+    {
+        foreach (var assembly in plugin.Assemblies)
+        {
+            typeProvider.AddAssembly(assembly);
+        }
+    }
+}
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
