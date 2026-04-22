@@ -351,6 +351,16 @@ The `SourceOwnershipManager` class simplifies implementing custom sources by han
 - Automatic cleanup when subjects are detached from the object graph
 - Safe ownership claims that prevent conflicts with other sources
 
+To enumerate the members a source should claim, walk the registry with a nested loop: `subject.GetAllProperties()` yields properties across child subjects, and `property.GetAllAttributes()` yields the attributes attached to each one.
+
+Properties and attributes vary in value shape, and it is up to the source to decide how to handle each:
+
+- **Scalar values** (strings, numbers, timestamps) serialize straightforwardly through the configured value converter.
+- **Complex value objects** (records, POCOs, arrays) may or may not be supported by the value converter. Register a custom converter or skip unsupported types.
+- **Trackable subjects** (`member.CanContainSubjects == true`) either need to be skipped or traversed explicitly via `member.Children`. The built-in MQTT and WebSocket connectors currently skip them (see [issue #266](https://github.com/RicoSuter/Namotion.Interceptor/issues/266)).
+
+The example below skips all subject-containing members via `!CanContainSubjects` and leaves value serialization to the converter.
+
 ```csharp
 public class DatabaseSource : ISubjectSource, IDisposable
 {
@@ -388,20 +398,32 @@ public class DatabaseSource : ISubjectSource, IDisposable
 
         foreach (var property in registeredSubject.GetAllProperties())
         {
+            if (!property.CanContainSubjects)
+                TryClaim(property);
+
+            foreach (var attribute in property.GetAllAttributes())
+            {
+                if (!attribute.CanContainSubjects)
+                    TryClaim(attribute);
+            }
+        }
+
+        return subscription;
+
+        void TryClaim(RegisteredSubjectProperty property)
+        {
             // ClaimSource returns false if already owned by another source
             if (!_ownership.ClaimSource(property.Reference))
             {
                 _logger.LogWarning(
                     "Property {Name} already owned by another source, skipping.",
                     property.Name);
-                continue;
+                return;
             }
 
             // Set up database subscription for this property...
             property.Reference.SetPropertyData("DatabaseRowId", rowId);
         }
-
-        return subscription;
     }
 
     public void Dispose()

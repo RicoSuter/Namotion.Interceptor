@@ -49,26 +49,30 @@ public static class SubjectRegistryExtensions
     }
 
     /// <summary>
-    /// Gets all registered properties of the subject and child subjects.
+    /// Enumerates every property registered on the subject and all reachable
+    /// child subjects, flattening the child-subject hierarchy into a single
+    /// sequence. Does not include attribute members — call
+    /// <see cref="GetAllAttributes"/> per property for those.
     /// </summary>
+    /// <remarks>
+    /// Traversal is depth-first and cycle-safe (each subject is visited once).
+    /// Yields properties in declared order; for each property, its child subjects'
+    /// properties follow before the next sibling property.
+    /// </remarks>
     /// <param name="subject">The root subject.</param>
-    /// <returns>The update.</returns>
+    /// <returns>All registered properties, flattened across child subjects.</returns>
     public static IEnumerable<RegisteredSubjectProperty> GetAllProperties(this RegisteredSubject subject)
     {
-        foreach (var registeredSubjectProperty in InnerGetAllProperties(subject, []))
-        {
-            yield return registeredSubjectProperty;
-        } 
+        return InnerGetAllProperties(subject, []);
 
-        IEnumerable<RegisteredSubjectProperty> InnerGetAllProperties(
-            RegisteredSubject innerSubject, HashSet<RegisteredSubject> registeredSubjects)
+        static IEnumerable<RegisteredSubjectProperty> InnerGetAllProperties(
+            RegisteredSubject innerSubject, HashSet<RegisteredSubject> visited)
         {
-            if (!registeredSubjects.Add(innerSubject))
+            if (!visited.Add(innerSubject))
             {
                 yield break;
             }
 
-            // TODO(perf): Implement directly on subject to avoid accessing Properties property
             foreach (var property in innerSubject.Properties)
             {
                 yield return property;
@@ -76,14 +80,65 @@ public static class SubjectRegistryExtensions
                 foreach (var childProperty in property.Children
                     .Select(c => c.Subject.TryGetRegisteredSubject())
                     .Where(s => s is not null)
-                    .SelectMany(s => InnerGetAllProperties(s!, registeredSubjects)))
+                    .SelectMany(s => InnerGetAllProperties(s!, visited)))
                 {
                     yield return childProperty;
                 }
             }
         }
     }
-    
+
+    /// <summary>
+    /// Enumerates every registered member (properties and their attributes)
+    /// reachable from the subject, flattened into a single sequence. For each
+    /// property, its attributes (including nested attributes-of-attributes)
+    /// follow before the next sibling property, and child subjects are
+    /// traversed depth-first.
+    /// </summary>
+    /// <remarks>
+    /// Traversal is cycle-safe (each subject is visited once). Equivalent to
+    /// <see cref="GetAllProperties"/> interleaved with <see cref="GetAllAttributes"/>
+    /// per property; use this when consumers need a uniform stream of members.
+    /// </remarks>
+    /// <param name="subject">The root subject.</param>
+    /// <returns>All registered members, flattened across child subjects and attribute nesting.</returns>
+    public static IEnumerable<RegisteredSubjectProperty> GetAllMembers(this RegisteredSubject subject)
+    {
+        foreach (var property in subject.GetAllProperties())
+        {
+            yield return property;
+
+            foreach (var attribute in property.GetAllAttributes())
+            {
+                yield return attribute;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Enumerates every attribute registered on the property, including
+    /// attributes-of-attributes, flattening the nested attribute hierarchy
+    /// into a single sequence.
+    /// </summary>
+    /// <remarks>
+    /// Traversal is depth-first. Yields attributes in declared order; for each
+    /// attribute, its nested attributes follow before the next sibling attribute.
+    /// </remarks>
+    /// <param name="property">The property whose attributes to enumerate.</param>
+    /// <returns>All attributes declared on the property, flattened across nesting.</returns>
+    public static IEnumerable<RegisteredSubjectAttribute> GetAllAttributes(this RegisteredSubjectProperty property)
+    {
+        foreach (var attribute in property.Attributes)
+        {
+            yield return attribute;
+
+            foreach (var nested in GetAllAttributes(attribute))
+            {
+                yield return nested;
+            }
+        }
+    }
+
     /// <summary>
     /// Gets a registered property by name.
     /// </summary>

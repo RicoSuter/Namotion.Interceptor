@@ -135,6 +135,16 @@ internal class CustomNodeManager : CustomNodeManager2
                         DeleteNode(SystemContext, variableNode.NodeId);
                         property.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
                     }
+
+                    foreach (var attribute in property.Attributes)
+                    {
+                        if (attribute.Reference.TryGetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, out var attrNode)
+                            && attrNode is BaseDataVariableState attrVariableNode)
+                        {
+                            DeleteNode(SystemContext, attrVariableNode.NodeId);
+                            attribute.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
+                        }
+                    }
                 }
             }
 
@@ -159,9 +169,6 @@ internal class CustomNodeManager : CustomNodeManager2
     {
         foreach (var property in subject.Properties)
         {
-            if (property.IsAttribute)
-                continue;
-
             var propertyName = property.ResolvePropertyName(_nodeMapper);
             if (propertyName is not null)
             {

@@ -3,6 +3,7 @@ using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Connectors.Tests.Models;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
@@ -41,11 +42,10 @@ public class PathExtensionsTests
         };
 
         // Act
-        var allPaths = person
-            .TryGetRegisteredSubject()?
-            .GetAllProperties()
-            .GetPaths(pathProvider, person)
-            .ToArray() ?? [];
+        var registered = person.TryGetRegisteredSubject();
+        var allPaths = registered is null
+            ? []
+            : registered.GetAllMembers().GetPaths(pathProvider, person).ToArray();
 
         // Assert
         await Verify(allPaths.Select(p => p.path))

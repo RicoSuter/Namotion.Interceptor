@@ -273,7 +273,7 @@
             return [];
 
         return _registeredSubject.Properties
-            .Where(p => p is { IsAttribute: false, CanContainSubjects: true })
+            .Where(p => p.CanContainSubjects)
             .OrderBy(p => p.GetDisplayPosition());
     }
 
@@ -290,18 +290,18 @@
             _expandedProperties.Add(propertyName);
     }
 
-    private RenderFragment RenderProperty(RegisteredSubjectProperty prop, int depth) => __builder =>
+    private RenderFragment RenderProperty(RegisteredSubjectProperty property, int depth) => __builder =>
     {
         // Property reads are automatically recorded via the context-based ReadPropertyRecorder
-        var value = prop.GetValue();
-        var attributes = prop.Attributes
-            .Where(a => a.AttributeMetadata.AttributeName != KnownAttributes.State &&
-                        a.AttributeMetadata.AttributeName != KnownAttributes.Configuration)
+        var value = property.GetValue();
+        var attributes = property.Attributes
+            .Where(a => a.AttributeName != KnownAttributes.State &&
+                        a.AttributeName != KnownAttributes.Configuration)
             .ToArray();
         var hasAttributes = attributes.Length > 0;
-        var isExpanded = _expandedProperties.Contains(prop.Name);
+        var isExpanded = _expandedProperties.Contains(property.Name);
         var marginLeft = depth * 24;
-        var displayName = prop.IsAttribute ? prop.AttributeMetadata.AttributeName : GetPropertyDisplayName(prop);
+        var displayName = property is RegisteredSubjectAttribute attribute ? attribute.AttributeName : GetPropertyDisplayName(property);
 
         <MudText Style="@($"margin-left: {marginLeft}px; {(value is null ? "opacity: 0.5" : "")}")">
             @if (hasAttributes)
@@ -310,14 +310,14 @@
                                Size="Size.Small"
                                Class="mr-1"
                                Style="padding: 0; width: 20px; height: 20px;"
-                               OnClick="@(() => TogglePropertyExpanded(prop.Name))" />
+                               OnClick="@(() => TogglePropertyExpanded(property.Name))" />
             }
             else if (depth > 0)
             {
                 <span style="display: inline-block; width: 24px;"></span>
             }
             <strong>@displayName: </strong>
-            @{ var displayValue = prop.GetPropertyDisplayValue(value); }
+            @{ var displayValue = property.GetPropertyDisplayValue(value); }
             @if (displayValue.Contains('\n'))
             {
                 @foreach (var line in displayValue.Split('\n'))
@@ -333,9 +333,9 @@
 
         @if (isExpanded)
         {
-            foreach (var attr in attributes)
+            foreach (var attributeProperty in attributes)
             {
-                @RenderProperty(attr, depth + 1)
+                @RenderProperty(attributeProperty, depth + 1)
             }
         }
     };
@@ -361,7 +361,7 @@
         if (registered == null) return 0;
 
         return registered.Properties
-            .Where(p => p is { IsAttribute: false, CanContainSubjects: true })
+            .Where(p => p.CanContainSubjects)
             .Sum(p => p.Children.Length);
     }
 

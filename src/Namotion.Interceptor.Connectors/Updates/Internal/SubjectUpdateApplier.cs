@@ -52,8 +52,10 @@ internal static class SubjectUpdateApplier
             {
                 foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)
                 {
-                    var registeredAttribute = subject.TryGetRegisteredSubject()?
-                        .TryGetPropertyAttribute(propertyName, attributeName);
+                    var registeredAttribute = subject
+                        .TryGetRegisteredSubject()?
+                        .TryGetProperty(propertyName)?
+                        .TryGetAttribute(attributeName);
 
                     if (registeredAttribute is not null)
                     {

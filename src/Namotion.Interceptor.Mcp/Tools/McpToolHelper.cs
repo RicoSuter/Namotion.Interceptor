@@ -97,7 +97,7 @@ internal static class McpToolHelper
             properties = new Dictionary<string, SubjectNodeProperty>();
             foreach (var property in subject.Properties)
             {
-                if (property.IsAttribute || !pathProvider.IsPropertyIncluded(property) || property.CanContainSubjects)
+                if (!pathProvider.IsPropertyIncluded(property) || property.CanContainSubjects)
                 {
                     continue;
                 }

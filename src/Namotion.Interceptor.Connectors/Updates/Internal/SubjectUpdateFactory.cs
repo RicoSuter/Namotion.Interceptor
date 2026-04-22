@@ -81,7 +81,7 @@ internal static class SubjectUpdateFactory
 
         foreach (var property in registeredSubject.Properties)
         {
-            if (!property.HasGetter || property.IsAttribute)
+            if (!property.HasGetter)
                 continue;
 
             if (!IsPropertyIncluded(property, builder.Processors))
@@ -111,7 +111,7 @@ internal static class SubjectUpdateFactory
         var subjectId = builder.GetOrCreateId(changedSubject);
         var properties = builder.GetOrCreateProperties(subjectId);
 
-        if (registeredProperty.IsAttribute)
+        if (registeredProperty is RegisteredSubjectAttribute)
         {
             ProcessAttributeChange(registeredProperty, change, properties, builder);
         }
@@ -379,7 +379,7 @@ internal static class SubjectUpdateFactory
 
             // Reuse the same property update logic for attributes
             var attributeUpdate = CreatePropertyUpdate(attribute, builder);
-            attributes[attribute.AttributeMetadata.AttributeName] = attributeUpdate;
+            attributes[attribute.AttributeName] = attributeUpdate;
             builder.TrackPropertyUpdate(attributeUpdate, attribute, attributes);
         }
 
@@ -392,11 +392,11 @@ internal static class SubjectUpdateFactory
         Dictionary<string, SubjectPropertyUpdate> subjectProperties,
         SubjectUpdateBuilder builder)
     {
-        // Find the root property
+        // Find the root property by walking up the attribute chain
         var rootProperty = attributeProperty;
-        while (rootProperty.IsAttribute)
+        while (rootProperty is RegisteredSubjectAttribute rootAttribute)
         {
-            rootProperty = rootProperty.GetAttributedProperty();
+            rootProperty = (RegisteredSubjectProperty)rootAttribute.GetAttributedMember();
         }
 
         if (!subjectProperties.TryGetValue(rootProperty.Name, out var rootUpdate))
@@ -407,12 +407,12 @@ internal static class SubjectUpdateFactory
 
         // Navigate/create an attribute chain (excluding the last one which we'll create from change)
         var currentUpdate = rootUpdate;
-        var attributeChain = new List<RegisteredSubjectProperty>();
+        var attributeChain = new List<RegisteredSubjectAttribute>();
         var currentProperty = attributeProperty;
-        while (currentProperty.IsAttribute)
+        while (currentProperty is RegisteredSubjectAttribute currentAttr)
         {
-            attributeChain.Add(currentProperty);
-            currentProperty = currentProperty.GetAttributedProperty();
+            attributeChain.Add(currentAttr);
+            currentProperty = (RegisteredSubjectProperty)currentAttr.GetAttributedMember();
         }
         attributeChain.Reverse();
 
@@ -421,7 +421,7 @@ internal static class SubjectUpdateFactory
         {
             var chainedAttribute = attributeChain[i];
             currentUpdate.Attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
-            var attributeName = chainedAttribute.AttributeMetadata.AttributeName;
+            var attributeName = chainedAttribute.AttributeName;
 
             if (!currentUpdate.Attributes.TryGetValue(attributeName, out var nestedAttributeUpdate))
             {
@@ -435,7 +435,7 @@ internal static class SubjectUpdateFactory
         // Get or create the final attribute update
         var finalAttribute = attributeChain[^1];
         currentUpdate.Attributes ??= new Dictionary<string, SubjectPropertyUpdate>();
-        var finalAttributeName = finalAttribute.AttributeMetadata.AttributeName;
+        var finalAttributeName = finalAttribute.AttributeName;
 
         if (!currentUpdate.Attributes.TryGetValue(finalAttributeName, out var attributeUpdate))
         {

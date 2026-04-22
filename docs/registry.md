@@ -41,9 +41,11 @@ The registry makes it easy to find metadata associated with properties:
 var property = registered.TryGetProperty("Pressure");
 foreach (var attribute in property!.Attributes)
 {
-    Console.WriteLine($"{attribute.AttributeMetadata.AttributeName}: {attribute.Reference.GetValue()}");
+    Console.WriteLine($"{attribute.AttributeName}: {attribute.Reference.GetValue()}");
 }
 ```
+
+Attributes inherit from the same base as properties, so an attribute can hold any value a property can: a scalar (string, number, timestamp), a complex value object (record or POCO), or a trackable subject (check `attribute.CanContainSubjects`). Consumers that enumerate attributes must decide per case how to handle each value shape. `GetAllProperties()` recurses through `property.Children` but does not descend into `attribute.Children`, so attribute-held subjects only participate in traversal if the consumer walks them explicitly.
 
 ## Define attributes using properties
 
