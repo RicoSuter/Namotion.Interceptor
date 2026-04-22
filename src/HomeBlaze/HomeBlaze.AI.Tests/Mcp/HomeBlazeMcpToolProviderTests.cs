@@ -7,9 +7,9 @@ using Namotion.Interceptor;
 using Namotion.Interceptor.Mcp;
 using Namotion.Interceptor.Mcp.Tools;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Lifecycle;
 using Xunit;
 
 namespace HomeBlaze.AI.Tests.Mcp;
@@ -22,15 +22,19 @@ public class HomeBlazeMcpToolProviderTests
         // Arrange
         var (room, config, factory) = CreateTestSetup(isReadOnly: false);
 
-        // Add a method property to the room
+        // Add a method with MethodMetadata attribute
         var registered = room.TryGetRegisteredSubject()!;
-        registered.AddProperty<MethodMetadata>("TurnOn", _ => new MethodMetadata(_ => "done")
-        {
-            Kind = MethodKind.Operation,
-            Title = "Turn On",
-            PropertyName = "TurnOn",
-            Parameters = []
-        });
+        var method = registered.AddMethod("TurnOn", typeof(string), [],
+            (s, p) => "done");
+        method.AddAttribute("Metadata", typeof(MethodMetadata),
+            _ => new MethodMetadata(_ => "done")
+            {
+                Kind = MethodKind.Operation,
+                Title = "Turn On",
+                MethodName = "TurnOn",
+                PropertyName = "TurnOn",
+                Parameters = []
+            }, null);
 
         var tool = factory.CreateTools().First(t => t.Name == "list_methods");
 
@@ -52,14 +56,18 @@ public class HomeBlazeMcpToolProviderTests
         var (room, config, factory) = CreateTestSetup(isReadOnly: true);
 
         var registered = room.TryGetRegisteredSubject()!;
-        registered.AddProperty<MethodMetadata>("GetStatus", _ => new MethodMetadata(_ => "OK")
-        {
-            Kind = MethodKind.Query,
-            Title = "Get Status",
-            PropertyName = "GetStatus",
-            ResultType = typeof(string),
-            Parameters = []
-        });
+        var method = registered.AddMethod("GetStatus", typeof(string), [],
+            (s, p) => "OK");
+        method.AddAttribute("Metadata", typeof(MethodMetadata),
+            _ => new MethodMetadata(_ => "OK")
+            {
+                Kind = MethodKind.Query,
+                Title = "Get Status",
+                MethodName = "GetStatus",
+                PropertyName = "GetStatus",
+                ResultType = typeof(string),
+                Parameters = []
+            }, null);
 
         var tool = factory.CreateTools().First(t => t.Name == "invoke_method");
 
@@ -79,13 +87,17 @@ public class HomeBlazeMcpToolProviderTests
         var (room, config, factory) = CreateTestSetup(isReadOnly: true);
 
         var registered = room.TryGetRegisteredSubject()!;
-        registered.AddProperty<MethodMetadata>("TurnOn", _ => new MethodMetadata(_ => "done")
-        {
-            Kind = MethodKind.Operation,
-            Title = "Turn On",
-            PropertyName = "TurnOn",
-            Parameters = []
-        });
+        var method = registered.AddMethod("TurnOn", typeof(string), [],
+            (s, p) => "done");
+        method.AddAttribute("Metadata", typeof(MethodMetadata),
+            _ => new MethodMetadata(_ => "done")
+            {
+                Kind = MethodKind.Operation,
+                Title = "Turn On",
+                MethodName = "TurnOn",
+                PropertyName = "TurnOn",
+                Parameters = []
+            }, null);
 
         var tool = factory.CreateTools().First(t => t.Name == "invoke_method");
 
@@ -140,20 +152,25 @@ public class HomeBlazeMcpToolProviderTests
 
         string? capturedInput = null;
         var registered = room.TryGetRegisteredSubject()!;
-        registered.AddProperty<MethodMetadata>("SetName", _ => new MethodMetadata(args =>
-        {
-            capturedInput = args?[0] as string;
-            return null;
-        })
-        {
-            Kind = MethodKind.Operation,
-            Title = "Set Name",
-            PropertyName = "SetName",
-            Parameters =
-            [
-                new MethodParameter { Name = "name", Type = typeof(string) }
-            ]
-        });
+        var method = registered.AddMethod("SetName", typeof(void),
+            [new SubjectMethodParameterMetadata("name", typeof(string), [])],
+            (s, p) => { capturedInput = p[0] as string; return null; });
+        method.AddAttribute("Metadata", typeof(MethodMetadata),
+            _ => new MethodMetadata(args =>
+            {
+                capturedInput = args?[0] as string;
+                return null;
+            })
+            {
+                Kind = MethodKind.Operation,
+                Title = "Set Name",
+                MethodName = "SetName",
+                PropertyName = "SetName",
+                Parameters =
+                [
+                    new MethodParameter { Name = "name", Type = typeof(string) }
+                ]
+            }, null);
 
         var tool = factory.CreateTools().First(t => t.Name == "invoke_method");
 
@@ -179,14 +196,18 @@ public class HomeBlazeMcpToolProviderTests
         var (room, config, factory) = CreateTestSetup(isReadOnly: false);
 
         var registered = room.TryGetRegisteredSubject()!;
-        registered.AddProperty<MethodMetadata>("FailMethod", _ => new MethodMetadata(_ =>
-            throw new InvalidOperationException("Internal failure"))
-        {
-            Kind = MethodKind.Operation,
-            Title = "Fail",
-            PropertyName = "FailMethod",
-            Parameters = []
-        });
+        var method = registered.AddMethod("FailMethod", typeof(void), [],
+            (s, p) => throw new InvalidOperationException("Internal failure"));
+        method.AddAttribute("Metadata", typeof(MethodMetadata),
+            _ => new MethodMetadata(_ =>
+                throw new InvalidOperationException("Internal failure"))
+            {
+                Kind = MethodKind.Operation,
+                Title = "Fail",
+                MethodName = "FailMethod",
+                PropertyName = "FailMethod",
+                Parameters = []
+            }, null);
 
         var tool = factory.CreateTools().First(t => t.Name == "invoke_method");
 
@@ -205,10 +226,9 @@ public class HomeBlazeMcpToolProviderTests
         var context = InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry()
-            .WithLifecycle()
-            .WithService<ILifecycleHandler>(
-                () => new PropertyAttributeInitializer(),
-                handler => handler is PropertyAttributeInitializer);
+            .WithService<ISubjectMethodInitializer>(
+                () => new MethodInitializer(),
+                handler => handler is MethodInitializer);
 
         var room = new TestThing(context) { Name = "Test Room", Temperature = 21.5m };
 

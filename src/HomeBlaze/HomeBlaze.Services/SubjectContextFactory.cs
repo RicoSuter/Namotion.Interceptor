@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.Validation;
@@ -28,9 +29,9 @@ public static class SubjectContextFactory
             .WithRegistry()
             .WithParents()
             .WithLifecycle()
-            .WithService<ILifecycleHandler>(
-                () => new MethodPropertyInitializer(),
-                handler => handler is MethodPropertyInitializer)
+            .WithService<ISubjectMethodInitializer>(
+                () => new MethodInitializer(),
+                handler => handler is MethodInitializer)
             .WithService<ILifecycleHandler>(
                 () => new PropertyAttributeInitializer(),
                 handler => handler is PropertyAttributeInitializer)

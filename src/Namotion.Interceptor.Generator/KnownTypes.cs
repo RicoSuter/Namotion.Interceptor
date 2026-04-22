@@ -6,4 +6,5 @@ internal static class KnownTypes
     public const string DerivedAttribute = "Namotion.Interceptor.Attributes.DerivedAttribute";
     public const string IInterceptorSubject = "Namotion.Interceptor.IInterceptorSubject";
     public const string IRaisePropertyChanged = "Namotion.Interceptor.IRaisePropertyChanged";
+    public const string SubjectMethodAttribute = "Namotion.Interceptor.Attributes.SubjectMethodAttribute";
 }

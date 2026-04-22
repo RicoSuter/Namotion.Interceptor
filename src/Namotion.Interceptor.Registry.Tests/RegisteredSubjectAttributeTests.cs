@@ -207,6 +207,26 @@ public class RegisteredSubjectAttributeTests
     }
 
     [Fact]
+    public void WhenDynamicAttributeAddedToMethod_ThenAppearsInAttributes()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var calculator = new Calculator(context);
+        var method = calculator.TryGetRegisteredSubject()!.TryGetMethod("Add")!;
+
+        // Act
+        method.AddAttribute("Description", typeof(string),
+            _ => "Adds two numbers", null);
+
+        // Assert
+        var description = method.TryGetAttribute("Description");
+        Assert.NotNull(description);
+        Assert.Equal("Adds two numbers", description.GetValue());
+    }
+
+    [Fact]
     public void WhenAddingAttributesConcurrently_ThenAllAttributesAreRegistered()
     {
         // Arrange

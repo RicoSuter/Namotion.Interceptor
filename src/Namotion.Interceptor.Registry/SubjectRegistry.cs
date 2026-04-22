@@ -96,6 +96,8 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     /// <inheritdoc />
     void ILifecycleHandler.HandleLifecycleChange(SubjectLifecycleChange change)
     {
+        List<RegisteredSubject>? newlyRegistered = null;
+
         lock (_knownSubjects)
         {
             if (change.IsContextAttach || change.IsPropertyReferenceAdded)
@@ -103,6 +105,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                 if (!_knownSubjects.TryGetValue(change.Subject, out var registeredSubject))
                 {
                     registeredSubject = RegisterSubject(change.Subject);
+                    (newlyRegistered ??= new List<RegisteredSubject>()).Add(registeredSubject);
                 }
 
                 if (change.IsContextAttach)
@@ -125,6 +128,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                     if (!_knownSubjects.TryGetValue(property.Subject, out var parentRegisteredSubject))
                     {
                         parentRegisteredSubject = RegisterSubject(property.Subject);
+                        (newlyRegistered ??= new List<RegisteredSubject>()).Add(parentRegisteredSubject);
                     }
 
                     var registeredProperty = parentRegisteredSubject.TryGetProperty(property.Name) ??
@@ -191,6 +195,25 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // Run method initializers outside the lock so they can call back into
+        // the registry safely. Mirrors how AttachProperty runs property
+        // initializers outside _knownSubjects.
+        // A concurrent thread could detach a subject between the lock release
+        // and the loop below. The RegisteredSubject instance is still valid
+        // (it is GC-rooted by newlyRegistered) and initializers are idempotent
+        // metadata setup, so running them against a just-detached subject is
+        // harmless.
+        if (newlyRegistered is not null)
+        {
+            foreach (var subject in newlyRegistered)
+            {
+                foreach (var method in subject.Methods)
+                {
+                    method.RunInitializers();
                 }
             }
         }

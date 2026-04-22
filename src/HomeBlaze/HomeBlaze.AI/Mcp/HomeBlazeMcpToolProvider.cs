@@ -84,7 +84,7 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
 
         var methods = subject.GetAllMethods().Select(method => new
         {
-            name = method.PropertyName,
+            name = method.MethodName,
             kind = method.Kind.ToString().ToLowerInvariant(),
             title = method.Title,
             description = method.Description,
@@ -111,8 +111,9 @@ public class HomeBlazeMcpToolProvider : IMcpToolProvider
         }
 
         var methodName = input.GetProperty("method").GetString()!;
-        var methodProperty = subject.TryGetProperty(methodName);
-        if (methodProperty?.GetValue() is not MethodMetadata method)
+        var registeredMethod = subject.TryGetMethod(methodName);
+        var method = registeredMethod?.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
+        if (method is null)
         {
             return new { error = $"Method not found: {methodName}" };
         }

@@ -184,6 +184,29 @@ public partial class Calculator
 
 The generated method routes through the interception pipeline, enabling cross-cutting concerns.
 
+### Subject Methods
+
+Methods marked with `[SubjectMethod]` (or any attribute derived from `SubjectMethodAttribute`) are emitted into `IInterceptorSubject.Methods` as `SubjectMethodMetadata` entries containing the return type, typed parameter list, declared reflection attributes, and a strongly-typed invocation delegate. This enables the Registry to surface methods as first-class members (`RegisteredSubjectMethod`) alongside properties and attributes, with no runtime reflection at invocation time.
+
+```csharp
+[InterceptorSubject]
+public partial class Compressor
+{
+    public partial CompressorStatus Status { get; set; }
+
+    [SubjectMethod]
+    public void Start() { /* ... */ }
+}
+
+// Generator emits Compressor.DefaultMethods with a SubjectMethodMetadata entry
+// for Start(), including the invocation delegate. Accessible at runtime via
+// compressor.Methods["Start"].Invoke(compressor, []).
+```
+
+See [Registry / Registered methods](registry.md#registered-methods) for how consumers enumerate and invoke these methods and for the `ISubjectMethodInitializer` hook used to attach metadata to registered methods.
+
+Subject methods must be instance methods and have unique names within the type. Non-public methods are supported (see `SubjectMethodMetadata.IsPublic`); connectors and protocol tooling filter by visibility when exposing methods externally. Violations are reported as [diagnostics](#diagnostics).
+
 ### Virtual and Override Properties
 
 ```csharp
@@ -308,6 +331,22 @@ Both properties are included in the generated code.
 | Abstract properties not supported | Use `virtual` instead |
 | Init-only properties cannot be set after construction | Design constraint of C# |
 | Partial properties cannot have field initializers | Initialize in constructor |
+
+## Diagnostics
+
+The generator reports the following compile-time diagnostics. All are errors by default.
+
+### `NI0001` Duplicate [SubjectMethod] name
+
+Multiple methods on the same subject type are marked `[SubjectMethod]` with the same name. Overloads are not supported because subject methods are addressed by name across protocol boundaries (MCP, OPC UA, etc.) where parameter signatures do not disambiguate.
+
+Fix: rename one of the methods, or remove `[SubjectMethod]` from all but one.
+
+### `NI0002` Static [SubjectMethod]
+
+A `static` method is marked `[SubjectMethod]`. Subject methods are invoked against a subject instance and must be instance methods.
+
+Fix: remove `static`, or remove `[SubjectMethod]`.
 
 ## Requirements
 

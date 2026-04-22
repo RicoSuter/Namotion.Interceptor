@@ -5,6 +5,7 @@ using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor.Tracking.Lifecycle;
@@ -19,9 +20,9 @@ public class RegistryAttributeMigrationIntegrationTests
             .WithFullPropertyTracking()
             .WithRegistry()
             .WithLifecycle()
-            .WithService<ILifecycleHandler>(
-                () => new MethodPropertyInitializer(),
-                handler => handler is MethodPropertyInitializer)
+            .WithService<ISubjectMethodInitializer>(
+                () => new MethodInitializer(),
+                handler => handler is MethodInitializer)
             .WithService<ILifecycleHandler>(
                 () => new PropertyAttributeInitializer(),
                 handler => handler is PropertyAttributeInitializer);
@@ -47,17 +48,17 @@ public class RegistryAttributeMigrationIntegrationTests
         Assert.True(configProperty.IsConfigurationProperty());
 
         // Assert — Operations
-        var stopProperty = registered.TryGetProperty("Stop");
-        Assert.NotNull(stopProperty);
-        var stopMetadata = stopProperty.GetValue() as MethodMetadata;
+        var stopMethod = registered.TryGetMethod("StopAsync");
+        Assert.NotNull(stopMethod);
+        var stopMetadata = stopMethod.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
         Assert.NotNull(stopMetadata);
         Assert.Equal(MethodKind.Operation, stopMetadata.Kind);
         Assert.True(stopMetadata.RequiresConfirmation);
 
         // Assert — Queries
-        var diagProperty = registered.TryGetProperty("GetDiagnostics");
-        Assert.NotNull(diagProperty);
-        var diagMetadata = diagProperty.GetValue() as MethodMetadata;
+        var diagMethod = registered.TryGetMethod("GetDiagnosticsAsync");
+        Assert.NotNull(diagMethod);
+        var diagMetadata = diagMethod.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
         Assert.NotNull(diagMetadata);
         Assert.Equal(MethodKind.Query, diagMetadata.Kind);
 
@@ -79,8 +80,8 @@ public class RegistryAttributeMigrationIntegrationTests
         var context = CreateFullContext();
         var subject = new FullIntegrationSubject(context);
         var registered = subject.TryGetRegisteredSubject()!;
-        var stopProperty = registered.TryGetProperty("Stop");
-        var stopMetadata = stopProperty!.GetValue() as MethodMetadata;
+        var stopMethod = registered.TryGetMethod("StopAsync");
+        var stopMetadata = stopMethod!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Act
         await stopMetadata!.InvokeAsync(null, null, CancellationToken.None);

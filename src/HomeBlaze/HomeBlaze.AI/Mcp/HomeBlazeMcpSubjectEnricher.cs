@@ -58,7 +58,7 @@ public class HomeBlazeMcpSubjectEnricher : IMcpSubjectEnricher
 
         var methods = subject.GetAllMethods()
             .Where(method => !_isReadOnly || method.Kind == MethodKind.Query)
-            .Select(method => method.PropertyName)
+            .Select(method => method.MethodName)
             .ToArray();
 
         if (methods.Length > 0)

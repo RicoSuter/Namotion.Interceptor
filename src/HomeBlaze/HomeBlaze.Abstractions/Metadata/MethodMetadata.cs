@@ -1,11 +1,8 @@
-using System.Reflection;
-using Namotion.Interceptor;
-
 namespace HomeBlaze.Abstractions.Metadata;
 
 /// <summary>
-/// Registry property value for methods exposed as dynamic properties.
-/// Contains metadata and invocation capability, bound to a specific subject instance.
+/// HomeBlaze-specific metadata for methods exposed via the Registry.
+/// Contains display metadata, parameter descriptors, and invocation capability.
 /// </summary>
 public class MethodMetadata
 {
@@ -19,24 +16,6 @@ public class MethodMetadata
     public MethodMetadata(Func<object?[]?, object?> invoke)
     {
         _invoke = invoke;
-    }
-
-    /// <summary>
-    /// Creates a <see cref="MethodMetadata"/> that invokes a reflected method on the bound subject.
-    /// </summary>
-    public MethodMetadata(IInterceptorSubject subject, MethodInfo method)
-        : this(arguments =>
-        {
-            try
-            {
-                return method.Invoke(subject, arguments);
-            }
-            catch (TargetInvocationException exception) when (exception.InnerException != null)
-            {
-                throw exception.InnerException;
-            }
-        })
-    {
     }
 
     /// <summary>
@@ -55,7 +34,13 @@ public class MethodMetadata
     public string? Description { get; init; }
 
     /// <summary>
-    /// The name of the registry property this metadata is registered under.
+    /// The actual method name in the registry (e.g. "StopAsync").
+    /// Used to look up the <c>RegisteredSubjectMethod</c> for attribute access.
+    /// </summary>
+    public string MethodName { get; init; } = string.Empty;
+
+    /// <summary>
+    /// The display-friendly name (e.g. "Stop" without "Async" suffix).
     /// </summary>
     public string PropertyName { get; init; } = string.Empty;
 

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -19,6 +20,7 @@ internal static class SubjectMetadataExtractor
         INamedTypeSymbol typeSymbol,
         ClassDeclarationSyntax classDeclaration,
         SemanticModel semanticModel,
+        Action<Diagnostic> reportDiagnostic,
         CancellationToken cancellationToken)
     {
         var className = classDeclaration.Identifier.ValueText;
@@ -58,7 +60,7 @@ internal static class SubjectMetadataExtractor
         var properties = classProperties.Concat(interfaceProperties).ToList();
 
         // Collect methods from all partial declarations
-        var methods = CollectMethods(typeSymbol, semanticModel, cancellationToken);
+        var methods = CollectMethods(typeSymbol, semanticModel, reportDiagnostic, cancellationToken);
 
         // Detect constructor state
         var (needsGeneratedParameterlessConstructor, hasOrWillHaveParameterlessConstructor) =
@@ -167,42 +169,142 @@ internal static class SubjectMetadataExtractor
     private static IReadOnlyList<MethodMetadata> CollectMethods(
         INamedTypeSymbol typeSymbol,
         SemanticModel semanticModel,
+        Action<Diagnostic> reportDiagnostic,
         CancellationToken cancellationToken)
     {
         var methods = new List<MethodMetadata>();
+        var discoveredNames = new HashSet<string>();
+        var interfaceDiscoveredNames = new HashSet<string>();
 
+        // Pass 1: Existing WithoutInterceptor methods
         foreach (var syntaxReference in typeSymbol.DeclaringSyntaxReferences)
         {
             var declaration = syntaxReference.GetSyntax(cancellationToken);
-            if (declaration is not ClassDeclarationSyntax classDecl)
-            {
-                continue;
-            }
-
+            if (declaration is not ClassDeclarationSyntax classDecl) continue;
             var declarationModel = semanticModel.Compilation.GetSemanticModel(classDecl.SyntaxTree);
 
             foreach (var method in classDecl.Members.OfType<MethodDeclarationSyntax>())
             {
                 var fullMethodName = method.Identifier.Text;
-                if (!fullMethodName.EndsWith(InterceptedMethodPostfix))
+                if (!fullMethodName.EndsWith(InterceptedMethodPostfix)) continue;
+
+                var methodName = fullMethodName.Substring(0, fullMethodName.Length - InterceptedMethodPostfix.Length);
+                var returnType = GetFullTypeName(method.ReturnType, declarationModel) ?? "void";
+                var parameters = method.ParameterList.Parameters
+                    .Select(p => new ParameterMetadata(p.Identifier.ValueText, GetFullTypeName(p.Type, declarationModel) ?? "object"))
+                    .ToList();
+
+                // The generated wrapper is always emitted as public regardless of the underlying WithoutInterceptor method's accessibility.
+                methods.Add(new MethodMetadata(methodName, fullMethodName, returnType, parameters,
+                    IsIntercepted: true, IsFromInterface: false, InterfaceTypeName: null,
+                    ClassTypeName: null, IsPublic: true));
+                discoveredNames.Add(methodName);
+            }
+        }
+
+        // Pass 2: SubjectMethod-attributed class methods (not already discovered)
+        foreach (var syntaxReference in typeSymbol.DeclaringSyntaxReferences)
+        {
+            var declaration = syntaxReference.GetSyntax(cancellationToken);
+            if (declaration is not ClassDeclarationSyntax classDecl) continue;
+            var declarationModel = semanticModel.Compilation.GetSemanticModel(classDecl.SyntaxTree);
+
+            foreach (var method in classDecl.Members.OfType<MethodDeclarationSyntax>())
+            {
+                var fullMethodName = method.Identifier.Text;
+                if (fullMethodName.EndsWith(InterceptedMethodPostfix)) continue;
+
+                if (!SymbolExtensions.HasAttribute(method.AttributeLists, KnownTypes.SubjectMethodAttribute, declarationModel, cancellationToken))
+                    continue;
+
+                var methodName = fullMethodName;
+
+                // Static methods cannot be subject methods. Report NI0002 before the
+                // duplicate-name check because static is the more fundamental violation.
+                if (method.Modifiers.Any(m => m.IsKind(SyntaxKind.StaticKeyword)))
                 {
+                    reportDiagnostic(Diagnostic.Create(
+                        DiagnosticDescriptors.StaticSubjectMethod,
+                        method.Identifier.GetLocation(),
+                        methodName));
                     continue;
                 }
 
-                var methodName = fullMethodName.Substring(0, fullMethodName.Length - InterceptedMethodPostfix.Length);
-                var returnType = GetFullTypeName(method.ReturnType, declarationModel);
+                if (discoveredNames.Contains(methodName))
+                {
+                    reportDiagnostic(Diagnostic.Create(
+                        DiagnosticDescriptors.DuplicateSubjectMethodName,
+                        method.Identifier.GetLocation(),
+                        methodName));
+                    continue;
+                }
 
+                var returnType = GetFullTypeName(method.ReturnType, declarationModel) ?? "void";
                 var parameters = method.ParameterList.Parameters
-                    .Select(p => new ParameterMetadata(
-                        p.Identifier.ValueText,
-                        GetFullTypeName(p.Type, declarationModel) ?? "object"))
+                    .Select(p => new ParameterMetadata(p.Identifier.ValueText, GetFullTypeName(p.Type, declarationModel) ?? "object"))
                     .ToList();
 
-                methods.Add(new MethodMetadata(
-                    methodName,
-                    fullMethodName,
-                    returnType ?? "void",
-                    parameters));
+                var methodSymbol = declarationModel.GetDeclaredSymbol(method, cancellationToken);
+                var isPublic = methodSymbol?.DeclaredAccessibility == Accessibility.Public;
+
+                methods.Add(new MethodMetadata(methodName, fullMethodName, returnType, parameters,
+                    IsIntercepted: false, IsFromInterface: false, InterfaceTypeName: null,
+                    ClassTypeName: null, IsPublic: isPublic));
+                discoveredNames.Add(methodName);
+            }
+        }
+
+        // Pass 3: SubjectMethod-attributed interface methods
+        foreach (var interfaceType in typeSymbol.AllInterfaces)
+        {
+            foreach (var member in interfaceType.GetMembers())
+            {
+                if (member is not IMethodSymbol methodSymbol) continue;
+                if (methodSymbol.MethodKind != MethodKind.Ordinary) continue;
+                if (!methodSymbol.GetAttributes().Any(a => SymbolExtensions.IsTypeOrInheritsFrom(a.AttributeClass, KnownTypes.SubjectMethodAttribute)))
+                    continue;
+
+                var methodName = methodSymbol.Name;
+
+                // Static interface methods (C# 11+) cannot be subject methods. Report NI0002
+                // before the duplicate-name check because static is the more fundamental violation.
+                if (methodSymbol.IsStatic)
+                {
+                    reportDiagnostic(Diagnostic.Create(
+                        DiagnosticDescriptors.StaticSubjectMethod,
+                        methodSymbol.Locations.FirstOrDefault() ?? Location.None,
+                        methodName));
+                    continue;
+                }
+
+                if (discoveredNames.Contains(methodName))
+                {
+                    // If the name was previously discovered on another interface (Pass 3 collision),
+                    // that is a real duplicate. If it was discovered on the class (Pass 1/2), the
+                    // class method implements the interface method and no diagnostic is emitted.
+                    if (interfaceDiscoveredNames.Contains(methodName))
+                    {
+                        var location = methodSymbol.Locations.FirstOrDefault() ?? Location.None;
+                        reportDiagnostic(Diagnostic.Create(
+                            DiagnosticDescriptors.DuplicateSubjectMethodName,
+                            location,
+                            methodName));
+                    }
+                    continue;
+                }
+
+                var returnType = methodSymbol.ReturnType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                var interfaceTypeName = interfaceType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                var parameters = methodSymbol.Parameters
+                    .Select(p => new ParameterMetadata(p.Name, p.Type.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)))
+                    .ToList();
+
+                // Interface members are effectively public from the consumer's perspective.
+                methods.Add(new MethodMetadata(methodName, methodName, returnType, parameters,
+                    IsIntercepted: false, IsFromInterface: true, InterfaceTypeName: interfaceTypeName,
+                    ClassTypeName: null, IsPublic: true));
+                discoveredNames.Add(methodName);
+                interfaceDiscoveredNames.Add(methodName);
             }
         }
 

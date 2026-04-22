@@ -166,6 +166,97 @@ public partial decimal Temperature { get; set; }
 
 This pattern allows you to define reusable metadata behaviors that are automatically applied when subjects are registered.
 
+## Registered methods
+
+Methods marked with `[SubjectMethod]` (or any attribute derived from it) are collected by the source generator and registered as first-class members alongside properties and attributes. Each method is represented by a `RegisteredSubjectMethod` that carries the signature, reflection attributes, and an invocation delegate. No runtime reflection.
+
+### Mark methods as subject methods
+
+Apply `[SubjectMethod]` directly, or derive your own attribute from `SubjectMethodAttribute` to carry domain-specific metadata. The source generator picks up either:
+
+```csharp
+using Namotion.Interceptor.Attributes;
+
+[InterceptorSubject]
+public partial class Tire
+{
+    public partial decimal Pressure { get; set; }
+
+    [SubjectMethod]
+    public void Inflate(decimal bar) => Pressure += bar;
+}
+
+// Derived attribute adds domain metadata; source generator still discovers it
+[AttributeUsage(AttributeTargets.Method)]
+public sealed class CommandAttribute : SubjectMethodAttribute
+{
+    public string? DisplayName { get; set; }
+}
+
+[InterceptorSubject]
+public partial class Compressor
+{
+    [Command(DisplayName = "Start Pump")]
+    public void Start() { /* ... */ }
+}
+```
+
+### Enumerate and invoke registered methods
+
+Methods are exposed on both the subject (`IInterceptorSubject.Methods`) and the registered subject (`RegisteredSubject.Methods` / `TryGetMethod`):
+
+```csharp
+var registered = tire.TryGetRegisteredSubject()!;
+foreach (var method in registered.Methods)
+{
+    Console.WriteLine($"{method.Name} ({method.ReturnType.Name})");
+}
+
+var inflate = registered.TryGetMethod("Inflate");
+inflate?.Invoke([0.2m]);
+```
+
+`RegisteredSubjectMethod.Invoke` takes an `object?[]` of parameters in declared order. The subject instance is resolved automatically from `method.Parent.Subject`. It returns the method result, or `null` for void methods. Method-level .NET reflection attributes are available via `method.ReflectionAttributes`.
+
+### Method initializers
+
+Implement `ISubjectMethodInitializer` on a .NET attribute to attach metadata to registered methods during subject attach. This is the parallel of `ISubjectPropertyInitializer`:
+
+```csharp
+public sealed class CommandAttribute : SubjectMethodAttribute, ISubjectMethodInitializer
+{
+    public string? DisplayName { get; set; }
+
+    public void InitializeMethod(RegisteredSubjectMethod method)
+    {
+        method.AddAttribute("DisplayName", typeof(string), _ => DisplayName ?? method.Name, null);
+    }
+}
+```
+
+The registry invokes `InitializeMethod` once per registered method on attach. An `ISubjectMethodInitializer` registered as a context service applies to every method on every subject.
+
+### Method attributes
+
+Methods support the same attribute model as properties. Use `method.AddAttribute(...)` from a method initializer (as above), or declare a property-backed method attribute via `[MethodAttribute]`:
+
+```csharp
+[InterceptorSubject]
+public partial class Compressor
+{
+    public partial CompressorStatus Status { get; set; }
+
+    [SubjectMethod]
+    public void Start() { /* ... */ }
+
+    [Derived]
+    [MethodAttribute(nameof(Start), "IsEnabled")]
+    public bool Start_IsEnabled => Status == CompressorStatus.Stopped;
+}
+```
+
+The `Start_IsEnabled` property is registered as an attribute on the `Start` method and is trackable and derived like any other property.
+
 ## Subject IDs
 
 The registry provides a subject ID system that assigns stable string identifiers to subjects. This is useful for protocol-level lookups where connectors (e.g., WebSocket) need to identify subjects by string IDs.

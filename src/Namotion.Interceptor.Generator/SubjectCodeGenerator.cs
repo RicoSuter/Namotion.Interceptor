@@ -20,6 +20,7 @@ internal static class SubjectCodeGenerator
         EmitNotifyPropertyChangedImplementation(builder, metadata.BaseClassHasInpc);
         EmitInterceptorSubjectImplementation(builder);
         EmitDefaultProperties(builder, metadata);
+        EmitDefaultMethods(builder, metadata);
         EmitConstructors(builder, metadata);
         EmitProperties(builder, metadata);
         EmitMethods(builder, metadata);
@@ -137,6 +138,7 @@ internal static class SubjectCodeGenerator
         builder.Append("""
                     private IInterceptorExecutor? _context;
                     private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
+                    private IReadOnlyDictionary<string, SubjectMethodMetadata>? _methods;
 
                     [JsonIgnore]
                     IInterceptorSubjectContext IInterceptorSubject.Context => _context ??= new InterceptorExecutor(this);
@@ -148,6 +150,9 @@ internal static class SubjectCodeGenerator
                     IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
 
                     [JsonIgnore]
+                    IReadOnlyDictionary<string, SubjectMethodMetadata> IInterceptorSubject.Methods => _methods ?? DefaultMethods;
+
+                    [JsonIgnore]
                     object IInterceptorSubject.SyncRoot { get; } = new object();
 
                     void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
@@ -156,6 +161,16 @@ internal static class SubjectCodeGenerator
                         {
                             _properties = (_properties ?? DefaultProperties)
                                 .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+                                .ToFrozenDictionary();
+                        }
+                    }
+
+                    void IInterceptorSubject.AddMethods(params IEnumerable<SubjectMethodMetadata> methods)
+                    {
+                        lock (((IInterceptorSubject)this).SyncRoot)
+                        {
+                            _methods = (_methods ?? DefaultMethods)
+                                .Concat(methods.Select(m => new KeyValuePair<string, SubjectMethodMetadata>(m.Name, m)))
                                 .ToFrozenDictionary();
                         }
                     }
@@ -221,6 +236,64 @@ internal static class SubjectCodeGenerator
         if (metadata.BaseClassTypeName is not null)
         {
             builder.AppendLine($"            .Concat({metadata.BaseClassTypeName}.DefaultProperties)");
+        }
+
+        builder.AppendLine("            .ToFrozenDictionary();");
+        builder.AppendLine();
+    }
+
+    private static void EmitDefaultMethods(StringBuilder builder, SubjectMetadata metadata)
+    {
+        var nonInterceptedMethods = metadata.Methods.Where(m => !m.IsIntercepted).ToList();
+        var newModifier = metadata.BaseClassTypeName is not null ? "new " : "";
+
+        builder.AppendLine($"        public {newModifier}static IReadOnlyDictionary<string, SubjectMethodMetadata> DefaultMethods {{ get; }} =");
+        builder.AppendLine("            new Dictionary<string, SubjectMethodMetadata>");
+        builder.AppendLine("            {");
+
+        foreach (var method in nonInterceptedMethods)
+        {
+            var castTarget = method.IsFromInterface
+                ? method.InterfaceTypeName
+                : metadata.ClassName;
+
+            // The per-parameter GetMethod lookup duplicates work with the method-level
+            // reflection below, but the CLR caches MethodInfo per type and name so the
+            // cost is one-time at static init. Consolidation into a shared MethodInfo
+            // local is tracked as part of the AOT follow-up (issue #267).
+            var parameterArray = string.Join(", ", method.Parameters.Select((p, i) =>
+                $"new SubjectMethodParameterMetadata(\"{p.Name}\", typeof({p.Type}), " +
+                $"typeof({castTarget}).GetMethod(nameof({castTarget}.{method.FullMethodName}), " +
+                $"BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)" +
+                $"?.GetParameters()[{i}].GetCustomAttributes(true).Cast<Attribute>().ToArray() " +
+                $"?? Array.Empty<Attribute>())"));
+
+            var parameterCasts = string.Join(", ", method.Parameters.Select((p, i) =>
+                $"({p.Type})p[{i}]!"));
+
+            var invokeLambda = method.ReturnType == "void"
+                ? $"static (s, p) => {{ (({castTarget})s).{method.FullMethodName}({parameterCasts}); return null; }}"
+                : $"static (s, p) => (({castTarget})s).{method.FullMethodName}({parameterCasts})";
+
+            builder.AppendLine("                {");
+            builder.AppendLine($"                    \"{method.Name}\",");
+            builder.AppendLine("                    new SubjectMethodMetadata(");
+            builder.AppendLine($"                        \"{method.Name}\",");
+            builder.AppendLine($"                        typeof({method.ReturnType}),");
+            builder.AppendLine($"                        new SubjectMethodParameterMetadata[] {{ {parameterArray} }},");
+            builder.AppendLine($"                        typeof({castTarget}).GetMethod(nameof({castTarget}.{method.FullMethodName}), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)?.GetCustomAttributes(true).Cast<Attribute>().ToArray() ?? Array.Empty<Attribute>(),");
+            builder.AppendLine($"                        {invokeLambda},");
+            builder.AppendLine($"                        isIntercepted: {(method.IsIntercepted ? "true" : "false")},");
+            builder.AppendLine("                        isDynamic: false,");
+            builder.AppendLine($"                        isPublic: {(method.IsPublic ? "true" : "false")})");
+            builder.AppendLine("                },");
+        }
+
+        builder.AppendLine("            }");
+
+        if (metadata.BaseClassTypeName is not null)
+        {
+            builder.AppendLine($"            .Concat({metadata.BaseClassTypeName}.DefaultMethods)");
         }
 
         builder.AppendLine("            .ToFrozenDictionary();");
@@ -333,7 +406,7 @@ internal static class SubjectCodeGenerator
 
     private static void EmitMethods(StringBuilder builder, SubjectMetadata metadata)
     {
-        foreach (var method in metadata.Methods)
+        foreach (var method in metadata.Methods.Where(m => m.IsIntercepted))
         {
             EmitMethod(builder, method, metadata);
         }

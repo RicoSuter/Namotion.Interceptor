@@ -69,8 +69,8 @@
                     {
                         var isQuery = method.Kind == MethodKind.Query;
                         var defaultIcon = isQuery ? "Search" : "PlayArrow";
-                        var methodProperty = _registeredSubject?.TryGetProperty(method.PropertyName);
-                        var isEnabledAttribute = methodProperty?.TryGetAttribute(KnownAttributes.IsEnabled);
+                        var registeredMethod = _registeredSubject?.TryGetMethod(method.MethodName);
+                        var isEnabledAttribute = registeredMethod?.TryGetAttribute(KnownAttributes.IsEnabled);
                         var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
                         <MudButton Variant="Variant.Filled"
                                    Color="@(isQuery ? Color.Info : Color.Primary)"
