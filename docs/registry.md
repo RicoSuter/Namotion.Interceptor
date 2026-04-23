@@ -45,7 +45,7 @@ foreach (var attribute in property!.Attributes)
 }
 ```
 
-Attributes inherit from the same base as properties, so an attribute can hold any value a property can: a scalar (string, number, timestamp), a complex value object (record or POCO), or a trackable subject (check `attribute.CanContainSubjects`). Consumers that enumerate attributes must decide per case how to handle each value shape. `GetAllProperties()` recurses through `property.Children` but does not descend into `attribute.Children`, so attribute-held subjects only participate in traversal if the consumer walks them explicitly.
+Attributes inherit from properties and can hold any value a property can: a scalar, a complex object, a subject reference, a subject collection, or a subject dictionary (check `attribute.CanContainSubjects`, `attribute.IsSubjectReference`, `attribute.IsSubjectCollection`, or `attribute.IsSubjectDictionary`). Consumers that enumerate attributes decide per case how to handle each shape. `GetAllProperties()` recurses through `property.Children` but does not descend into `attribute.Children` — attribute-held subject trees are opt-in and must be walked explicitly.
 
 ## Define attributes using properties
 

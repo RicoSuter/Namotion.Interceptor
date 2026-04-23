@@ -1,12 +1,9 @@
 using System.Collections;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
-using Namotion.Interceptor.Registry.Attributes;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Registry.Abstractions;
-
-#pragma warning disable CS8618, CS9264
 
 public class RegisteredSubjectProperty : RegisteredSubjectMember
 {
@@ -160,22 +157,6 @@ public class RegisteredSubjectProperty : RegisteredSubjectMember
         params Attribute[] attributes)
     {
         return AddAttribute(name, typeof(TProperty), getValue, setValue, attributes);
-    }
-
-    /// <summary>
-    /// Creates either a <see cref="RegisteredSubjectAttribute"/> or plain <see cref="RegisteredSubjectProperty"/>
-    /// depending on whether the reflection attributes contain a <see cref="MemberAttributeAttribute"/>.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public static RegisteredSubjectProperty Create(
-        RegisteredSubject parent, string name, Type type,
-        IReadOnlyCollection<Attribute> reflectionAttributes)
-    {
-        var memberAttribute = reflectionAttributes.OfType<MemberAttributeAttribute>().SingleOrDefault();
-        if (memberAttribute is not null)
-            return new RegisteredSubjectAttribute(parent, name, type, reflectionAttributes, memberAttribute);
-
-        return new RegisteredSubjectProperty(parent, name, type, reflectionAttributes);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

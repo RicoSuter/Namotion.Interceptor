@@ -45,7 +45,7 @@ public class PathExtensionsTests
         var registered = person.TryGetRegisteredSubject();
         var allPaths = registered is null
             ? []
-            : registered.GetAllMembers().GetPaths(pathProvider, person).ToArray();
+            : registered.GetAllPropertiesAndAttributes().GetPaths(pathProvider, person).ToArray();
 
         // Assert
         await Verify(allPaths.Select(p => p.path))

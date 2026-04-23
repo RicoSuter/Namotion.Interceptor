@@ -77,32 +77,33 @@ public static class SubjectRegistryExtensions
             {
                 yield return property;
 
-                foreach (var childProperty in property.Children
-                    .Select(c => c.Subject.TryGetRegisteredSubject())
-                    .Where(s => s is not null)
-                    .SelectMany(s => InnerGetAllProperties(s!, visited)))
+                foreach (var child in property.Children)
                 {
-                    yield return childProperty;
+                    var childSubject = child.Subject.TryGetRegisteredSubject();
+                    if (childSubject is null)
+                        continue;
+
+                    foreach (var childProperty in InnerGetAllProperties(childSubject, visited))
+                        yield return childProperty;
                 }
             }
         }
     }
 
     /// <summary>
-    /// Enumerates every registered member (properties and their attributes)
-    /// reachable from the subject, flattened into a single sequence. For each
-    /// property, its attributes (including nested attributes-of-attributes)
-    /// follow before the next sibling property, and child subjects are
-    /// traversed depth-first.
+    /// Enumerates every registered property and attribute reachable from the
+    /// subject, flattened into a single sequence. For each property, its
+    /// attributes (including nested attributes-of-attributes) follow before the
+    /// next sibling property, and child subjects are traversed depth-first.
     /// </summary>
     /// <remarks>
     /// Traversal is cycle-safe (each subject is visited once). Equivalent to
     /// <see cref="GetAllProperties"/> interleaved with <see cref="GetAllAttributes"/>
-    /// per property; use this when consumers need a uniform stream of members.
+    /// per property; use this when consumers need a uniform stream.
     /// </remarks>
     /// <param name="subject">The root subject.</param>
-    /// <returns>All registered members, flattened across child subjects and attribute nesting.</returns>
-    public static IEnumerable<RegisteredSubjectProperty> GetAllMembers(this RegisteredSubject subject)
+    /// <returns>All registered properties and attributes, flattened across child subjects and attribute nesting.</returns>
+    public static IEnumerable<RegisteredSubjectProperty> GetAllPropertiesAndAttributes(this RegisteredSubject subject)
     {
         foreach (var property in subject.GetAllProperties())
         {

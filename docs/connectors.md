@@ -353,13 +353,13 @@ The `SourceOwnershipManager` class simplifies implementing custom sources by han
 
 To enumerate the members a source should claim, walk the registry with a nested loop: `subject.GetAllProperties()` yields properties across child subjects, and `property.GetAllAttributes()` yields the attributes attached to each one.
 
-Properties and attributes vary in value shape, and it is up to the source to decide how to handle each:
+Values on properties and attributes vary in shape. Sources decide per case:
 
-- **Scalar values** (strings, numbers, timestamps) serialize straightforwardly through the configured value converter.
-- **Complex value objects** (records, POCOs, arrays) may or may not be supported by the value converter. Register a custom converter or skip unsupported types.
-- **Trackable subjects** (`member.CanContainSubjects == true`) either need to be skipped or traversed explicitly via `member.Children`. The built-in MQTT and WebSocket connectors currently skip them (see [issue #266](https://github.com/RicoSuter/Namotion.Interceptor/issues/266)).
+- **Scalars** (strings, numbers, timestamps) — serialize directly.
+- **Complex objects** (records, POCOs, collections, dictionaries) — provide a custom serializer or skip.
+- **Trackable subjects** (`member.CanContainSubjects == true`) — either skip or recurse via `member.Children`.
 
-The example below skips all subject-containing members via `!CanContainSubjects` and leaves value serialization to the converter.
+The example below skips all subject-containing members via `!CanContainSubjects`.
 
 ```csharp
 public class DatabaseSource : ISubjectSource, IDisposable

@@ -172,10 +172,10 @@ public static class SubjectRegistryJsonExtensions
 
     private static string GetJsonPropertyName(this RegisteredSubjectProperty property, JsonSerializerOptions jsonSerializerOptions)
     {
-        if (property is RegisteredSubjectAttribute attribute)
+        if (property is RegisteredSubjectAttribute attribute
+            && attribute.GetAttributedMember() is RegisteredSubjectProperty attributedPropertyOrAttribute)
         {
-            return ((RegisteredSubjectProperty)attribute.GetAttributedMember())
-                .GetJsonPropertyName(jsonSerializerOptions) + "@" + attribute.AttributeName;
+            return attributedPropertyOrAttribute.GetJsonPropertyName(jsonSerializerOptions) + "@" + attribute.AttributeName;
         }
 
         return jsonSerializerOptions.PropertyNamingPolicy?

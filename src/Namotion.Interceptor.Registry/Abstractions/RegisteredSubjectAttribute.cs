@@ -6,7 +6,6 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 public class RegisteredSubjectAttribute : RegisteredSubjectProperty
 {
     private RegisteredSubjectMember? _attributedMemberCache;
-    internal readonly string MemberName;
 
     internal RegisteredSubjectAttribute(
         RegisteredSubject parent, string name, Type type,
@@ -22,6 +21,11 @@ public class RegisteredSubjectAttribute : RegisteredSubjectProperty
     /// Gets the name of the attribute.
     /// </summary>
     public string AttributeName { get; }
+
+    /// <summary>
+    /// Gets the name of the member this attribute is attached to.
+    /// </summary>
+    public string MemberName { get; }
 
     /// <summary>
     /// Gets the browse name of the attribute.
