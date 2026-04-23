@@ -29,6 +29,7 @@ Working design documents for features not yet implemented. During implementation
 
 - [Dynamic Subject Proxying](plans/dynamic-subject-proxying.md) — WebSocket sync with dynamic proxy subjects
 - [AI Agents](plans/ai-agents.md) — Built-in LLM-powered agent subjects
+- [Automation and Workflows](plans/automation.md) — Deterministic automation with state machines, scripting, and progressive UI
 
 ### [Administration](administration/installation.md)
 
