@@ -5,6 +5,9 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public class RegisteredSubjectAttribute : RegisteredSubjectProperty
 {
+    // Memoized lookup of the attributed member. The ??= below is not atomic,
+    // but the race is benign: concurrent readers each resolve to the same
+    // member reference via TryGetMember, so duplicate writes are idempotent.
     private RegisteredSubjectMember? _attributedMemberCache;
 
     internal RegisteredSubjectAttribute(

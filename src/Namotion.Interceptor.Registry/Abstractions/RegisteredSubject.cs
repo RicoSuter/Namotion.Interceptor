@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
@@ -19,9 +20,11 @@ public class RegisteredSubject
     private volatile FrozenDictionary<string, RegisteredSubjectMember> _members;
 
     // Filtered view of _members excluding attributes. Rebuilt under _lock on
-    // non-attribute adds; readers observe via the volatile reference inside
-    // ImmutableArray<T>. All non-attribute properties in _members are reflected here.
-    private ImmutableArray<RegisteredSubjectProperty> _propertiesSnapshot;
+    // non-attribute adds; the volatile reference guarantees publication of the
+    // new array to readers on weak memory models (ARM). The array itself is
+    // never mutated after publication, so ImmutableCollectionsMarshal can wrap
+    // it as an ImmutableArray without copying.
+    private volatile RegisteredSubjectProperty[] _propertiesSnapshot = [];
 
     private ImmutableArray<SubjectPropertyParent> _parents = [];
 
@@ -58,7 +61,11 @@ public class RegisteredSubject
     /// Gets all registered properties (attributes are excluded; access via
     /// <see cref="RegisteredSubjectMember.Attributes"/>).
     /// </summary>
-    public ImmutableArray<RegisteredSubjectProperty> Properties => _propertiesSnapshot;
+    public ImmutableArray<RegisteredSubjectProperty> Properties
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => ImmutableCollectionsMarshal.AsImmutableArray(_propertiesSnapshot);
+    }
 
     /// <summary>
     /// Gets a member by name (property or attribute).
@@ -276,7 +283,11 @@ public class RegisteredSubject
             else
             {
                 // Regular property: extend the properties snapshot.
-                _propertiesSnapshot = _propertiesSnapshot.Add(subjectProperty);
+                var existing = _propertiesSnapshot;
+                var extended = new RegisteredSubjectProperty[existing.Length + 1];
+                Array.Copy(existing, extended, existing.Length);
+                extended[existing.Length] = subjectProperty;
+                _propertiesSnapshot = extended;
             }
         }
 
@@ -310,7 +321,7 @@ public class RegisteredSubject
     private void PopulateInitialCaches()
     {
         Dictionary<string, List<RegisteredSubjectAttribute>>? attributesByMember = null;
-        var propertiesBuilder = ImmutableArray.CreateBuilder<RegisteredSubjectProperty>();
+        var properties = new List<RegisteredSubjectProperty>(_members.Count);
 
         foreach (var member in _members.Values)
         {
@@ -326,11 +337,11 @@ public class RegisteredSubject
             }
             else if (member is RegisteredSubjectProperty property)
             {
-                propertiesBuilder.Add(property);
+                properties.Add(property);
             }
         }
 
-        _propertiesSnapshot = propertiesBuilder.ToImmutable();
+        _propertiesSnapshot = properties.ToArray();
 
         foreach (var member in _members.Values)
         {
