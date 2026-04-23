@@ -767,7 +767,7 @@ public partial class Widget : IConfigurable
 
 ### Referencing Other Subjects
 
-Use paths to reference subjects in the object graph. See [Configuration Guide - Path Syntax](../administration/configuration.md#path-syntax) for full documentation.
+Use paths to reference subjects in the object graph. See [Paths](../administration/paths.md) for full documentation.
 
 **Quick Reference:**
 
