@@ -146,10 +146,9 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return;
         }
 
-        // Derived-with-setter: Setter modifies state, but value comes from the getter → recalculate.
-        // Guard on data.IsDerived (not HasRequiredProperties): a getter that returns early without
-        // touching any tracked property records an empty dependency set at attach time and still
-        // needs recalculation once the setter runs — possibly surfacing new dependencies.
+        // Derived-with-setter: value comes from the getter, so setter changes require recalc.
+        // Guard on IsDerived (not HasRequiredProperties): a short-circuiting getter records zero
+        // deps at attach and still needs recalc to surface new dependencies.
         if (data.IsDerived && context.Property.Metadata.SetValue is not null)
         {
             var currentTimestampUtcTicks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
@@ -173,7 +172,9 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 var dependent = usedByProperties[i];
                 if (dependent == context.Property)
                 {
-                    continue; // Skip self-references (rare edge case)
+                    // Defensive: DerivedPropertyRecorder filters self-refs, so this is unreachable
+                    // via the normal recorder path.
+                    continue;
                 }
 
                 RecalculateDerivedProperty(ref dependent, timestampUtcTicks);

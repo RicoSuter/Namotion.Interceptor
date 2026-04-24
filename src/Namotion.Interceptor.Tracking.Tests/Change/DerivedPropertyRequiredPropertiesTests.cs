@@ -46,12 +46,17 @@ public class DerivedPropertyRequiredPropertiesTests
 
         // Act
         var deps = dynamicDerived.Reference.GetRequiredProperties().ToArray();
+        var usedBy = dynamicDerived.Reference.GetUsedByProperties().Items.ToArray();
 
         // Assert
         Assert.DoesNotContain(dynamicDerived.Reference, deps);
         Assert.Contains(new PropertyReference(person, nameof(Person.FirstName)), deps);
         Assert.Contains(new PropertyReference(person, nameof(Person.LastName)), deps);
         Assert.Equal(2, deps.Length);
+
+        // Symmetric: the derived property must not appear in its own used-by list either
+        // (a self-ref in RequiredProperties would transitively register itself in UsedBy).
+        Assert.DoesNotContain(dynamicDerived.Reference, usedBy);
     }
 
     [Fact]
@@ -102,13 +107,15 @@ public class DerivedPropertyRequiredPropertiesTests
             "DoubledFirstName",
             s => ((Person)s).FirstName + ((Person)s).FirstName);
 
+        var firstNameReference = new PropertyReference(person, nameof(Person.FirstName));
+
         // Act
         var deps = dynamicDerived.Reference.GetRequiredProperties().ToArray();
 
         // Assert
         Assert.DoesNotContain(dynamicDerived.Reference, deps);
         Assert.Single(deps);
-        Assert.Equal(nameof(Person.FirstName), deps[0].Metadata.Name);
+        Assert.Equal(firstNameReference, deps[0]);
     }
 
     [Fact]
@@ -139,12 +146,9 @@ public class DerivedPropertyRequiredPropertiesTests
     [Fact]
     public void WhenDynamicDerivedWithSetterShortCircuitsAtAttach_ThenSetterTriggeredRecalcDiscoversNewDependency()
     {
-        // Pins the DerivedPropertyData.IsDerived guard in WriteProperty. Before that guard was
-        // introduced, the check used HasRequiredProperties — which was incorrectly true for dynamic
-        // derived properties only because self-reference pollution kept the deps list non-empty.
-        // Filtering self-refs made the short-circuit-at-attach case record zero deps, which would
-        // skip the setter-triggered recalc with the old guard and leave the getter permanently
-        // stale. Regressing the guard to HasRequiredProperties must fail this test.
+        // Pins the IsDerived guard in WriteProperty: a short-circuiting getter records zero deps
+        // at attach, and the setter-triggered recalc must still run to surface new dependencies.
+        // Regressing the guard to HasRequiredProperties fails this test.
 
         // Arrange
         var context = InterceptorSubjectContext
@@ -159,8 +163,7 @@ public class DerivedPropertyRequiredPropertiesTests
 
         var shortCircuitFlag = true;
 
-        // Getter short-circuits on shortCircuitFlag=true so FirstName is not read at attach →
-        // recorded deps are empty → IsDerived is the only correct guard for the setter recalc.
+        // shortCircuitFlag=true means FirstName is not read at attach → recorded deps are empty.
         var derived = registered.AddDerivedProperty<bool>(
             "ComputedFlag",
             _ => shortCircuitFlag || !string.IsNullOrEmpty(firstNameProperty.GetValue() as string),
@@ -168,15 +171,14 @@ public class DerivedPropertyRequiredPropertiesTests
 
         var derivedReference = derived.Reference;
 
-        // Sanity: attach left RequiredProperties empty (no FirstName dep recorded yet).
+        // Sanity: attach recorded zero deps.
         Assert.Empty(derivedReference.GetRequiredProperties().ToArray());
 
-        // Act — invoking the setter flips shortCircuitFlag=false, forcing a recalc that now reads
-        // FirstName. The IsDerived guard must allow this recalc despite empty prior deps.
+        // Act — setter flips the flag; the recalc now reads FirstName.
         derived.SetValue(false);
         var deps = derivedReference.GetRequiredProperties().ToArray();
 
-        // Assert — FirstName is now recorded as a dep; no self-ref present.
+        // Assert
         Assert.DoesNotContain(derivedReference, deps);
         Assert.Contains(firstNameReference, deps);
     }

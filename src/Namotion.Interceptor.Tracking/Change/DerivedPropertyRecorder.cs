@@ -32,14 +32,12 @@ internal sealed class DerivedPropertyRecorder
     public bool IsRecording => _depth > 0;
 
     /// <summary>
-    /// Starts a new recording session. Reuses existing pooled buffer if available (allocation-free steady state).
+    /// Starts a new recording session (reuses pooled buffer; allocation-free in steady state).
+    /// Reads of <paramref name="property"/> are filtered from the dependency set so a derived
+    /// property never depends on itself — needed because dynamic derived getters re-enter
+    /// <c>ReadProperty</c> via <c>GetPropertyValue</c> wrapping.
     /// </summary>
-    /// <param name="property">
-    /// The derived property being evaluated. Reads of this property via the outer interceptor chain
-    /// (e.g. <c>GetPropertyValue</c> wrapping on dynamic properties) are excluded from the recorded
-    /// dependency set so the property never depends on itself.
-    /// </param>
-    public void StartRecording(PropertyReference property)
+    public void StartRecording(in PropertyReference property)
     {
         // Grow frame stack if needed (rare - only happens on first use or deep nesting)
         if (_depth == _frames.Length)
@@ -62,10 +60,8 @@ internal sealed class DerivedPropertyRecorder
     {
         ref var frame = ref _frames[_depth - 1];
 
-        // Skip the self-read of the property being recorded. For dynamic derived properties,
-        // Metadata.GetValue is wrapped in GetPropertyValue(name, rawGetter), so invoking it from
-        // EvaluateAndStabilize re-enters the interceptor chain and fires ReadProperty for the
-        // derived property itself. Excluding it here keeps the property out of its own deps.
+        // Filter the self-read: dynamic derived getters re-enter ReadProperty for themselves via
+        // GetPropertyValue wrapping. See StartRecording.
         if (property == frame.Property)
         {
             return;

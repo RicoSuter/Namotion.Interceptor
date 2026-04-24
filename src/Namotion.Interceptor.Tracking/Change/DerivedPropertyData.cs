@@ -68,18 +68,16 @@ internal sealed class DerivedPropertyData
     internal bool IsAttached = true;
 
     /// <summary>
-    /// True when this data belongs to a derived property; false for source properties
-    /// whose data exists only because a derived property depends on them.
-    /// Used by WriteProperty to identify derived-with-setter writes without re-reading
-    /// the property metadata in a hot path.
+    /// True if this data belongs to a derived property (vs. a source property whose data exists only
+    /// because a derived depends on it). Lets WriteProperty identify derived-with-setter writes
+    /// without touching metadata on the hot path.
     /// </summary>
     /// <remarks>
-    /// Write-once: set in AttachProperty under lock(this) when <c>metadata.IsDerived</c> is true,
-    /// never reset. Safe to read without a lock in WriteProperty: the full fence from
-    /// <c>Interlocked.Increment(ref _writeGeneration)</c> earlier in WriteProperty publishes
-    /// prior attach writes, and a stale <c>false</c> only skips a recalc that AttachProperty's
-    /// own initial EvaluateAndStabilize already performed. Metadata.IsDerived is immutable
-    /// per property, so there's nothing to reset on detach.
+    /// Write-once under lock(this) in AttachProperty; never reset (metadata.IsDerived is immutable).
+    /// Lock-free read in WriteProperty is safe: the <c>data</c> reference comes from
+    /// <see cref="System.Collections.Concurrent.ConcurrentDictionary{TKey,TValue}"/>, whose acquire
+    /// pairs with the <c>lock(data)</c> release in AttachProperty. A stale <c>false</c> in the narrow
+    /// pre-publish race only skips a recalc that AttachProperty's own EvaluateAndStabilize performs.
     /// </remarks>
     internal bool IsDerived;
 
@@ -93,7 +91,8 @@ internal sealed class DerivedPropertyData
     }
 
     /// <summary>
-    /// Whether this property has dependencies (has been evaluated as a derived property).
+    /// Whether any evaluation recorded dependencies. Do NOT use as an "is derived" proxy:
+    /// a short-circuiting derived getter legitimately records zero deps. Use <see cref="IsDerived"/> instead.
     /// </summary>
     internal bool HasRequiredProperties
     {
