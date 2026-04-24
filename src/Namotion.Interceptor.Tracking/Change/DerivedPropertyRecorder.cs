@@ -21,8 +21,9 @@ internal sealed class DerivedPropertyRecorder
     // Frame holds buffer and current count for one recording session
     private struct RecordingFrame
     {
-        public PropertyReference[]? Buffer; // Rented from pool, reused across sessions
-        public int Count;                   // Number of recorded items in this session
+        public PropertyReference Property;   // Property whose dependencies are being recorded (excluded from touches)
+        public PropertyReference[]? Buffer;  // Rented from pool, reused across sessions
+        public int Count;                    // Number of recorded items in this session
     }
 
     /// <summary>
@@ -31,9 +32,12 @@ internal sealed class DerivedPropertyRecorder
     public bool IsRecording => _depth > 0;
 
     /// <summary>
-    /// Starts a new recording session. Reuses existing pooled buffer if available (allocation-free steady state).
+    /// Starts a new recording session (reuses pooled buffer; allocation-free in steady state).
+    /// Reads of <paramref name="property"/> are filtered from the dependency set so a derived
+    /// property never depends on itself — needed because dynamic derived getters re-enter
+    /// <c>ReadProperty</c> via <c>GetPropertyValue</c> wrapping.
     /// </summary>
-    public void StartRecording()
+    public void StartRecording(in PropertyReference property)
     {
         // Grow frame stack if needed (rare - only happens on first use or deep nesting)
         if (_depth == _frames.Length)
@@ -42,6 +46,7 @@ internal sealed class DerivedPropertyRecorder
         // Get a frame for this depth level and reset count
         ref var frame = ref _frames[_depth++];
         frame.Count = 0;
+        frame.Property = property;
 
         // Rent pooled buffer if not already allocated (allocation-free on subsequent calls)
         frame.Buffer ??= _pool.Rent(8); // Typical derived property has < 8 dependencies
@@ -54,6 +59,14 @@ internal sealed class DerivedPropertyRecorder
     public void TouchProperty(ref PropertyReference property)
     {
         ref var frame = ref _frames[_depth - 1];
+
+        // Filter the self-read: dynamic derived getters re-enter ReadProperty for themselves via
+        // GetPropertyValue wrapping. See StartRecording.
+        if (property == frame.Property)
+        {
+            return;
+        }
+
         var buffer = frame.Buffer!;
 
         // Deduplicate: Skip if already recorded in this session
@@ -103,5 +116,7 @@ internal sealed class DerivedPropertyRecorder
             Array.Clear(frame.Buffer!, 0, frame.Count);
             frame.Count = 0;
         }
+
+        frame.Property = default;
     }
 }

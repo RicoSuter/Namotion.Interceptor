@@ -243,9 +243,11 @@ public class RegisteredSubject
 
         var property = AddPropertyInternal(name, type, attributes);
 
-        // Trigger the initial change event with CurrentValue=null to indicate a new property.
-        // Using null (not readValue) ensures interceptors see a null→value transition,
-        // which is correct for lifecycle tracking of subjects in the initial value.
+        // Fires a null→value transition for lifecycle tracking of subject-valued initial values.
+        // TODO(perf): For derived-with-setter this re-enters RecalculateDerivedProperty (total
+        // 3 getter invocations: AttachProperty + invoke below + recalc), but AttachProperty has
+        // already seeded LastKnownValue. Consider a dedicated lifecycle notification for derived,
+        // or passing currentValue so PropertyValueEqualityCheckHandler short-circuits the write.
         property.Reference.SetPropertyValueWithInterception(getValue?.Invoke(Subject) ?? null,
             null, delegate { });
 
