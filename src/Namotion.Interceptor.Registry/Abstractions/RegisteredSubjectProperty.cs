@@ -301,19 +301,6 @@ public class RegisteredSubjectProperty
         return Parent.TryGetPropertyAttribute(Name, attributeName);
     } 
 
-    /// <summary>
-    /// Gets the attribute property this property is attached to.
-    /// </summary>
-    /// <returns>The property.</returns>
-    /// <exception cref="InvalidOperationException">Thrown when this property is not an attribute.</exception>
-    /// <exception cref="InvalidOperationException">Thrown when the property this attribute is attached could not be found.</exception>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public RegisteredSubjectProperty GetAttributedProperty()
-    {
-        return Parent.TryGetProperty(AttributeMetadata.PropertyName) ??
-            throw new InvalidOperationException($"The attributed property '{AttributeMetadata.PropertyName}' could not be found on the parent subject.");
-    }
-
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static implicit operator PropertyReference(RegisteredSubjectProperty property)
     {

@@ -142,8 +142,8 @@ public class RegisteredSubject
     {
         foreach (var reflectionAttribute in reflectionAttributes)
         {
-            if (reflectionAttribute is Namotion.Interceptor.Registry.Attributes.PropertyAttributeAttribute)
-                return new RegisteredSubjectAttribute(parent, name, type, reflectionAttributes);
+            if (reflectionAttribute is Namotion.Interceptor.Registry.Attributes.PropertyAttributeAttribute attributeMetadata)
+                return new RegisteredSubjectAttribute(parent, name, type, reflectionAttributes, attributeMetadata);
         }
 
         return new RegisteredSubjectProperty(parent, name, type, reflectionAttributes);

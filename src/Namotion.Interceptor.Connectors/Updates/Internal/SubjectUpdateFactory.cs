@@ -394,9 +394,9 @@ internal static class SubjectUpdateFactory
     {
         // Find the root property
         var rootProperty = attributeProperty;
-        while (rootProperty.IsAttribute)
+        while (rootProperty is RegisteredSubjectAttribute rootAttr)
         {
-            rootProperty = rootProperty.GetAttributedProperty();
+            rootProperty = rootAttr.GetAttributedProperty();
         }
 
         if (!subjectProperties.TryGetValue(rootProperty.Name, out var rootUpdate))
@@ -409,10 +409,10 @@ internal static class SubjectUpdateFactory
         var currentUpdate = rootUpdate;
         var attributeChain = new List<RegisteredSubjectProperty>();
         var currentProperty = attributeProperty;
-        while (currentProperty.IsAttribute)
+        while (currentProperty is RegisteredSubjectAttribute currentAttr)
         {
-            attributeChain.Add(currentProperty);
-            currentProperty = currentProperty.GetAttributedProperty();
+            attributeChain.Add(currentAttr);
+            currentProperty = currentAttr.GetAttributedProperty();
         }
         attributeChain.Reverse();
 
