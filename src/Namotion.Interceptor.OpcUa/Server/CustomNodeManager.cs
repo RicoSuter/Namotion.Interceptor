@@ -159,9 +159,6 @@ internal class CustomNodeManager : CustomNodeManager2
     {
         foreach (var property in subject.Properties)
         {
-            if (property.IsAttribute)
-                continue;
-
             var propertyName = property.ResolvePropertyName(_nodeMapper);
             if (propertyName is not null)
             {

@@ -56,9 +56,6 @@ public class PathProviderOpcUaNodeMapper : IOpcUaNodeMapper
 
         foreach (var property in subject.Properties)
         {
-            if (property.IsAttribute)
-                continue;
-
             if (!_pathProvider.IsPropertyIncluded(property))
             {
                 continue;

@@ -111,9 +111,6 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
         RegisteredSubjectProperty? browseNameMatch = null;
         foreach (var property in subject.Properties)
         {
-            if (property.IsAttribute)
-                continue;
-
             var attribute = property.ReflectionAttributes
                 .OfType<OpcUaNodeAttribute>()
                 .FirstOrDefault();

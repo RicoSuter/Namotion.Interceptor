@@ -81,7 +81,7 @@ internal static class SubjectUpdateFactory
 
         foreach (var property in registeredSubject.Properties)
         {
-            if (!property.HasGetter || property.IsAttribute)
+            if (!property.HasGetter)
                 continue;
 
             if (!IsPropertyIncluded(property, builder.Processors))

@@ -49,37 +49,49 @@ public static class SubjectRegistryExtensions
     }
 
     /// <summary>
-    /// Gets all registered properties of the subject and child subjects.
+    /// Gets all registered properties (excluding attributes) of the subject and its reachable
+    /// child subjects, flattened depth-first. Use <see cref="GetAllPropertiesAndAttributes"/>
+    /// if attributes should be included.
     /// </summary>
     /// <param name="subject">The root subject.</param>
-    /// <returns>The update.</returns>
+    /// <returns>The registered properties reachable from the root.</returns>
     public static IEnumerable<RegisteredSubjectProperty> GetAllProperties(this RegisteredSubject subject)
     {
-        foreach (var registeredSubjectProperty in InnerGetAllProperties(subject, []))
+        return Walk(subject, [], includeAttributes: false);
+    }
+
+    /// <summary>
+    /// Gets all registered properties and their attributes of the subject and its reachable
+    /// child subjects, flattened depth-first.
+    /// </summary>
+    /// <param name="subject">The root subject.</param>
+    /// <returns>The registered properties and attributes reachable from the root.</returns>
+    public static IEnumerable<RegisteredSubjectProperty> GetAllPropertiesAndAttributes(this RegisteredSubject subject)
+    {
+        return Walk(subject, [], includeAttributes: true);
+    }
+
+    private static IEnumerable<RegisteredSubjectProperty> Walk(
+        RegisteredSubject subject, HashSet<RegisteredSubject> visited, bool includeAttributes)
+    {
+        if (!visited.Add(subject))
         {
-            yield return registeredSubjectProperty;
-        } 
+            yield break;
+        }
 
-        IEnumerable<RegisteredSubjectProperty> InnerGetAllProperties(
-            RegisteredSubject innerSubject, HashSet<RegisteredSubject> registeredSubjects)
+        var entries = includeAttributes ? subject.PropertiesAndAttributes : subject.Properties;
+        foreach (var property in entries)
         {
-            if (!registeredSubjects.Add(innerSubject))
-            {
-                yield break;
-            }
+            yield return property;
 
-            // TODO(perf): Implement directly on subject to avoid accessing Properties property
-            foreach (var property in innerSubject.Properties)
+            foreach (var child in property.Children)
             {
-                yield return property;
+                var childSubject = child.Subject.TryGetRegisteredSubject();
+                if (childSubject is null)
+                    continue;
 
-                foreach (var childProperty in property.Children
-                    .Select(c => c.Subject.TryGetRegisteredSubject())
-                    .Where(s => s is not null)
-                    .SelectMany(s => InnerGetAllProperties(s!, registeredSubjects)))
-                {
+                foreach (var childProperty in Walk(childSubject, visited, includeAttributes))
                     yield return childProperty;
-                }
             }
         }
     }
