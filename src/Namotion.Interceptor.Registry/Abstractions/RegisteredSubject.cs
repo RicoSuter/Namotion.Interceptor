@@ -1,6 +1,7 @@
 ﻿using System.Collections.Frozen;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
@@ -13,6 +14,7 @@ public class RegisteredSubject
     private readonly Lock _lock = new();
 
     private volatile FrozenDictionary<string, RegisteredSubjectProperty> _properties;
+    private volatile RegisteredSubjectProperty[]? _propertiesSnapshot;
     private ImmutableArray<SubjectPropertyParent> _parents = [];
 
     [JsonIgnore] public IInterceptorSubject Subject { get; }
@@ -37,9 +39,47 @@ public class RegisteredSubject
     }
 
     /// <summary>
-    /// Gets all registered properties.
+    /// Gets all registered properties, excluding attributes. Use <see cref="PropertiesAndAttributes"/>
+    /// to enumerate properties and their attributes together. Access attributes for a specific
+    /// property via <see cref="RegisteredSubjectProperty.Attributes"/>.
     /// </summary>
-    public ImmutableArray<RegisteredSubjectProperty> Properties => _properties.Values;
+    public ImmutableArray<RegisteredSubjectProperty> Properties
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+            var snapshot = _propertiesSnapshot;
+            if (snapshot is null)
+            {
+                snapshot = BuildPropertiesSnapshot();
+                _propertiesSnapshot = snapshot;
+            }
+            return ImmutableCollectionsMarshal.AsImmutableArray(snapshot);
+        }
+    }
+
+    /// <summary>
+    /// Gets all registered properties and their attributes (the inclusive view).
+    /// Allocation-free; backed directly by the internal frozen dictionary.
+    /// </summary>
+    public ImmutableArray<RegisteredSubjectProperty> PropertiesAndAttributes => _properties.Values;
+
+    private RegisteredSubjectProperty[] BuildPropertiesSnapshot()
+    {
+        var properties = _properties;
+        var buffer = new RegisteredSubjectProperty[properties.Count];
+        var count = 0;
+        foreach (var entry in properties.Values)
+        {
+            if (!entry.IsAttribute)
+                buffer[count++] = entry;
+        }
+        return count == buffer.Length
+            ? buffer
+            : count == 0
+                ? []
+                : buffer.AsSpan(0, count).ToArray();
+    }
 
     /// <summary>
     /// Gets all attributes that are attached to this property.
@@ -249,6 +289,7 @@ public class RegisteredSubject
                 .ToFrozenDictionary(p => p.Key, p => p.Value);
 
             _properties = newProperties;
+            _propertiesSnapshot = null;
 
             foreach (var property in newProperties.Values)
             {

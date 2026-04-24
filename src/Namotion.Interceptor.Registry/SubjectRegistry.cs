@@ -168,7 +168,9 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                     {
                         // Remove stale parent references from children and clear
                         // children lists before this subject leaves _knownSubjects.
-                        foreach (var property in registeredSubject.Properties)
+                        // Use PropertiesAndAttributes (alloc-free) to avoid triggering
+                        // the lazy Properties snapshot build here.
+                        foreach (var property in registeredSubject.PropertiesAndAttributes)
                         {
                             if (!property.CanContainSubjects)
                                 continue;
