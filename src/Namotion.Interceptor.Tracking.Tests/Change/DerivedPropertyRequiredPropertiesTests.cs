@@ -144,11 +144,40 @@ public class DerivedPropertyRequiredPropertiesTests
     }
 
     [Fact]
+    public void WhenDerivedAttributeIsEvaluated_ThenRequiredPropertiesDoesNotContainItself()
+    {
+        // AddDerivedAttribute routes through AddDerivedProperty with a "Name@Attr" property name,
+        // so self-ref filtering must apply transparently.
+
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithDerivedPropertyChangeDetection();
+
+        var person = new Person(context) { FirstName = "A", LastName = "B" };
+        var registered = person.TryGetRegisteredSubject()!;
+        var firstNameProperty = registered.TryGetProperty(nameof(Person.FirstName))!;
+
+        var derivedAttribute = firstNameProperty.AddDerivedAttribute(
+            "Upper",
+            typeof(string),
+            s => ((Person)s).FirstName?.ToUpperInvariant(),
+            setValue: null);
+
+        // Act
+        var deps = derivedAttribute.Reference.GetRequiredProperties().ToArray();
+
+        // Assert
+        Assert.DoesNotContain(derivedAttribute.Reference, deps);
+        Assert.Contains(new PropertyReference(person, nameof(Person.FirstName)), deps);
+    }
+
+    [Fact]
     public void WhenDynamicDerivedWithSetterShortCircuitsAtAttach_ThenSetterTriggeredRecalcDiscoversNewDependency()
     {
         // Pins the IsDerived guard in WriteProperty: a short-circuiting getter records zero deps
         // at attach, and the setter-triggered recalc must still run to surface new dependencies.
-        // Regressing the guard to HasRequiredProperties fails this test.
 
         // Arrange
         var context = InterceptorSubjectContext

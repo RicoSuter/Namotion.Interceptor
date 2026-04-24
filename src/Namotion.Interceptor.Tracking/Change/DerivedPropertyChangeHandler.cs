@@ -62,7 +62,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             data.IsAttached = true;
             if (metadata.IsDerived)
             {
-                data.IsDerived = true;
+                Volatile.Write(ref data.IsDerived, true);
                 try
                 {
                     data.LastKnownValue = EvaluateAndStabilize(data, change.Property, callerHoldsLock: true);
@@ -146,10 +146,9 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             return;
         }
 
-        // Derived-with-setter: value comes from the getter, so setter changes require recalc.
-        // Guard on IsDerived (not HasRequiredProperties): a short-circuiting getter records zero
-        // deps at attach and still needs recalc to surface new dependencies.
-        if (data.IsDerived && context.Property.Metadata.SetValue is not null)
+        // Derived-with-setter: value comes from the getter, so setter changes require recalc
+        // even when the getter recorded zero deps (e.g. short-circuited at attach).
+        if (Volatile.Read(ref data.IsDerived) && context.Property.Metadata.SetValue is not null)
         {
             var currentTimestampUtcTicks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
             var property = context.Property;

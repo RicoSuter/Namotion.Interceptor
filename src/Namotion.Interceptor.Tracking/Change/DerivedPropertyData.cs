@@ -73,11 +73,8 @@ internal sealed class DerivedPropertyData
     /// without touching metadata on the hot path.
     /// </summary>
     /// <remarks>
-    /// Write-once under lock(this) in AttachProperty; never reset (metadata.IsDerived is immutable).
-    /// Lock-free read in WriteProperty is safe: the <c>data</c> reference comes from
-    /// <see cref="System.Collections.Concurrent.ConcurrentDictionary{TKey,TValue}"/>, whose acquire
-    /// pairs with the <c>lock(data)</c> release in AttachProperty. A stale <c>false</c> in the narrow
-    /// pre-publish race only skips a recalc that AttachProperty's own EvaluateAndStabilize performs.
+    /// Written via <c>Volatile.Write</c> in AttachProperty, read via <c>Volatile.Read</c> in
+    /// WriteProperty. Write-once; never reset (metadata.IsDerived is immutable).
     /// </remarks>
     internal bool IsDerived;
 
@@ -88,16 +85,6 @@ internal sealed class DerivedPropertyData
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => Volatile.Read(ref _usedByProperties);
-    }
-
-    /// <summary>
-    /// Whether any evaluation recorded dependencies. Do NOT use as an "is derived" proxy:
-    /// a short-circuiting derived getter legitimately records zero deps. Use <see cref="IsDerived"/> instead.
-    /// </summary>
-    internal bool HasRequiredProperties
-    {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => _requiredProperties is not null;
     }
 
     /// <summary>
