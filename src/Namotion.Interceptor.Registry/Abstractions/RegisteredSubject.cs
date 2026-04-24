@@ -133,8 +133,20 @@ public class RegisteredSubject
             .Properties
             .ToFrozenDictionary(
                 p => p.Key,
-                p => new RegisteredSubjectProperty(
-                    this, p.Key, p.Value.Type, p.Value.Attributes));
+                p => CreateEntry(this, p.Key, p.Value.Type, p.Value.Attributes));
+    }
+
+    private static RegisteredSubjectProperty CreateEntry(
+        RegisteredSubject parent, string name, Type type,
+        IReadOnlyCollection<Attribute> reflectionAttributes)
+    {
+        foreach (var reflectionAttribute in reflectionAttributes)
+        {
+            if (reflectionAttribute is Namotion.Interceptor.Registry.Attributes.PropertyAttributeAttribute)
+                return new RegisteredSubjectAttribute(parent, name, type, reflectionAttributes);
+        }
+
+        return new RegisteredSubjectProperty(parent, name, type, reflectionAttributes);
     }
 
     internal void AddParent(RegisteredSubjectProperty parent, object? index)
@@ -280,7 +292,7 @@ public class RegisteredSubject
 
     private RegisteredSubjectProperty AddPropertyInternal(string name, Type type, Attribute[] attributes)
     {
-        var subjectProperty = new RegisteredSubjectProperty(this, name, type, attributes);
+        var subjectProperty = CreateEntry(this, name, type, attributes);
 
         lock (_lock)
         {
