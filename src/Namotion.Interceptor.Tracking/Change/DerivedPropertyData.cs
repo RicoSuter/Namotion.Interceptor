@@ -68,6 +68,22 @@ internal sealed class DerivedPropertyData
     internal bool IsAttached = true;
 
     /// <summary>
+    /// True when this data belongs to a derived property; false for source properties
+    /// whose data exists only because a derived property depends on them.
+    /// Used by WriteProperty to identify derived-with-setter writes without re-reading
+    /// the property metadata in a hot path.
+    /// </summary>
+    /// <remarks>
+    /// Write-once: set in AttachProperty under lock(this) when <c>metadata.IsDerived</c> is true,
+    /// never reset. Safe to read without a lock in WriteProperty: the full fence from
+    /// <c>Interlocked.Increment(ref _writeGeneration)</c> earlier in WriteProperty publishes
+    /// prior attach writes, and a stale <c>false</c> only skips a recalc that AttachProperty's
+    /// own initial EvaluateAndStabilize already performed. Metadata.IsDerived is immutable
+    /// per property, so there's nothing to reset on detach.
+    /// </remarks>
+    internal bool IsDerived;
+
+    /// <summary>
     /// Read-only access to used-by properties for public API.
     /// </summary>
     internal PropertyReferenceCollection? UsedByDependencies

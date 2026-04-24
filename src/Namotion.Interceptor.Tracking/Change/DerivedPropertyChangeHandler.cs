@@ -62,6 +62,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             data.IsAttached = true;
             if (metadata.IsDerived)
             {
+                data.IsDerived = true;
                 try
                 {
                     data.LastKnownValue = EvaluateAndStabilize(data, change.Property, callerHoldsLock: true);
@@ -146,7 +147,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
 
         // Derived-with-setter: Setter modifies state, but value comes from the getter → recalculate.
-        if (data.HasRequiredProperties && context.Property.Metadata.SetValue is not null)
+        // Guard on data.IsDerived (not HasRequiredProperties): a getter that returns early without
+        // touching any tracked property records an empty dependency set at attach time and still
+        // needs recalculation once the setter runs — possibly surfacing new dependencies.
+        if (data.IsDerived && context.Property.Metadata.SetValue is not null)
         {
             var currentTimestampUtcTicks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
             var property = context.Property;
@@ -366,7 +370,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         try
         {
-            StartRecordingTouchedProperties();
+            StartRecordingTouchedProperties(property);
             var result = property.Metadata.GetValue?.Invoke(property.Subject);
             var recordedDeps = _recorder!.FinishRecording();
 
@@ -397,7 +401,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             // Concurrent write detected while dependencies changed — stabilize.
             for (var iteration = 0; iteration < MaxStabilizationIterations; iteration++)
             {
-                StartRecordingTouchedProperties();
+                StartRecordingTouchedProperties(property);
                 result = property.Metadata.GetValue?.Invoke(property.Subject);
                 recordedDeps = _recorder.FinishRecording();
 
@@ -438,10 +442,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         }
     }
 
-    private static void StartRecordingTouchedProperties()
+    private static void StartRecordingTouchedProperties(in PropertyReference property)
     {
         _recorder ??= new DerivedPropertyRecorder();
-        _recorder.StartRecording();
+        _recorder.StartRecording(property);
     }
 
     /// <summary>

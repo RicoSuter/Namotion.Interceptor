@@ -21,8 +21,9 @@ internal sealed class DerivedPropertyRecorder
     // Frame holds buffer and current count for one recording session
     private struct RecordingFrame
     {
-        public PropertyReference[]? Buffer; // Rented from pool, reused across sessions
-        public int Count;                   // Number of recorded items in this session
+        public PropertyReference Property;   // Property whose dependencies are being recorded (excluded from touches)
+        public PropertyReference[]? Buffer;  // Rented from pool, reused across sessions
+        public int Count;                    // Number of recorded items in this session
     }
 
     /// <summary>
@@ -33,7 +34,12 @@ internal sealed class DerivedPropertyRecorder
     /// <summary>
     /// Starts a new recording session. Reuses existing pooled buffer if available (allocation-free steady state).
     /// </summary>
-    public void StartRecording()
+    /// <param name="property">
+    /// The derived property being evaluated. Reads of this property via the outer interceptor chain
+    /// (e.g. <c>GetPropertyValue</c> wrapping on dynamic properties) are excluded from the recorded
+    /// dependency set so the property never depends on itself.
+    /// </param>
+    public void StartRecording(PropertyReference property)
     {
         // Grow frame stack if needed (rare - only happens on first use or deep nesting)
         if (_depth == _frames.Length)
@@ -42,6 +48,7 @@ internal sealed class DerivedPropertyRecorder
         // Get a frame for this depth level and reset count
         ref var frame = ref _frames[_depth++];
         frame.Count = 0;
+        frame.Property = property;
 
         // Rent pooled buffer if not already allocated (allocation-free on subsequent calls)
         frame.Buffer ??= _pool.Rent(8); // Typical derived property has < 8 dependencies
@@ -54,6 +61,16 @@ internal sealed class DerivedPropertyRecorder
     public void TouchProperty(ref PropertyReference property)
     {
         ref var frame = ref _frames[_depth - 1];
+
+        // Skip the self-read of the property being recorded. For dynamic derived properties,
+        // Metadata.GetValue is wrapped in GetPropertyValue(name, rawGetter), so invoking it from
+        // EvaluateAndStabilize re-enters the interceptor chain and fires ReadProperty for the
+        // derived property itself. Excluding it here keeps the property out of its own deps.
+        if (property == frame.Property)
+        {
+            return;
+        }
+
         var buffer = frame.Buffer!;
 
         // Deduplicate: Skip if already recorded in this session
@@ -103,5 +120,7 @@ internal sealed class DerivedPropertyRecorder
             Array.Clear(frame.Buffer!, 0, frame.Count);
             frame.Count = 0;
         }
+
+        frame.Property = default;
     }
 }
