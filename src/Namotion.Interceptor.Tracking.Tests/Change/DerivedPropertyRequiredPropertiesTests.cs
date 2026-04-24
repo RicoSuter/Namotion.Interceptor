@@ -82,6 +82,8 @@ public class DerivedPropertyRequiredPropertiesTests
         // Act
         var innerDeps = inner.Reference.GetRequiredProperties().ToArray();
         var outerDeps = outer.Reference.GetRequiredProperties().ToArray();
+        var innerUsedBy = inner.Reference.GetUsedByProperties().Items.ToArray();
+        var outerUsedBy = outer.Reference.GetUsedByProperties().Items.ToArray();
 
         // Assert — inner must not contain itself; outer must not contain itself
         Assert.DoesNotContain(inner.Reference, innerDeps);
@@ -89,6 +91,13 @@ public class DerivedPropertyRequiredPropertiesTests
 
         // Outer should have recorded inner as a dependency (only the nested self-ref must be excluded)
         Assert.Contains(inner.Reference, outerDeps);
+
+        // Symmetric: neither appears in its own used-by list.
+        Assert.DoesNotContain(inner.Reference, innerUsedBy);
+        Assert.DoesNotContain(outer.Reference, outerUsedBy);
+
+        // Outer should appear in inner's used-by list (consequence of outer depending on inner).
+        Assert.Contains(outer.Reference, innerUsedBy);
     }
 
     [Fact]
@@ -171,6 +180,63 @@ public class DerivedPropertyRequiredPropertiesTests
         // Assert
         Assert.DoesNotContain(derivedAttribute.Reference, deps);
         Assert.Contains(new PropertyReference(person, nameof(Person.FirstName)), deps);
+    }
+
+    [Fact]
+    public void WhenSourcePropertyHasDependents_ThenIsDerivedStaysFalse()
+    {
+        // A source property acquires DerivedPropertyData because a derived depends on it.
+        // Its IsDerived flag must stay false — otherwise WriteProperty would treat the source
+        // as derived-with-setter and trigger a spurious self-recalc on every write.
+
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithDerivedPropertyChangeDetection();
+
+        var person = new Person(context) { FirstName = "A", LastName = "B" };
+        var registered = person.TryGetRegisteredSubject()!;
+
+        registered.AddDerivedProperty<string>(
+            "DynamicFull",
+            s => ((Person)s).FirstName + " " + ((Person)s).LastName);
+
+        var firstNameReference = new PropertyReference(person, nameof(Person.FirstName));
+
+        // Act
+        var firstNameData = firstNameReference.TryGetDerivedPropertyData();
+
+        // Assert — data exists (created because DynamicFull depends on FirstName), but IsDerived is false.
+        Assert.NotNull(firstNameData);
+        Assert.False(firstNameData!.IsDerived);
+    }
+
+    [Fact]
+    public void WhenDerivedPropertyIsEvaluated_ThenIsDerivedIsTrue()
+    {
+        // Counterpart to the source-property test: ensure AttachProperty flips IsDerived
+        // for genuinely derived properties.
+
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry()
+            .WithDerivedPropertyChangeDetection();
+
+        var person = new Person(context) { FirstName = "A", LastName = "B" };
+        var registered = person.TryGetRegisteredSubject()!;
+
+        var derived = registered.AddDerivedProperty<string>(
+            "DynamicFull",
+            s => ((Person)s).FirstName + " " + ((Person)s).LastName);
+
+        // Act
+        var derivedData = derived.Reference.TryGetDerivedPropertyData();
+
+        // Assert
+        Assert.NotNull(derivedData);
+        Assert.True(derivedData!.IsDerived);
     }
 
     [Fact]
