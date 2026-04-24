@@ -84,32 +84,29 @@ public class RegisteredSubject
     /// <summary>
     /// Gets all attributes that are attached to this property.
     /// </summary>
-    public IEnumerable<RegisteredSubjectProperty> GetPropertyAttributes(string propertyName)
+    public IEnumerable<RegisteredSubjectAttribute> GetPropertyAttributes(string propertyName)
     {
         foreach (var property in _properties.Values)
         {
-            if (property.IsAttribute && property.AttributeMetadata.PropertyName == propertyName)
+            if (property is RegisteredSubjectAttribute attribute && attribute.PropertyName == propertyName)
             {
-                yield return property;
+                yield return attribute;
             }
         }
     }
 
     /// <summary>
-    /// Gets a property attribute by name.
+    /// Gets an attribute by the owning property name and attribute name.
     /// </summary>
-    /// <param name="propertyName">The property name.</param>
-    /// <param name="attributeName">The attribute name to find.</param>
-    /// <returns>The attribute property.</returns>
-    public RegisteredSubjectProperty? TryGetPropertyAttribute(string propertyName, string attributeName)
+    public RegisteredSubjectAttribute? TryGetPropertyAttribute(string propertyName, string attributeName)
     {
         foreach (var property in _properties.Values)
         {
-            if (property.IsAttribute &&
-                property.AttributeMetadata.PropertyName == propertyName &&
-                property.AttributeMetadata.AttributeName == attributeName)
+            if (property is RegisteredSubjectAttribute attribute
+                && attribute.PropertyName == propertyName
+                && attribute.AttributeName == attributeName)
             {
-                return property;
+                return attribute;
             }
         }
         return null;

@@ -131,8 +131,8 @@ internal sealed class SubjectUpdateBuilder
                 if (transformed != update)
                 {
                     // Use AttributeName for attributes, Name for regular properties
-                    var key = info.Property.IsAttribute
-                        ? info.Property.AttributeMetadata.AttributeName
+                    var key = info.Property is RegisteredSubjectAttribute attribute
+                        ? attribute.AttributeName
                         : info.Property.Name;
 
                     info.Parent[key] = transformed;

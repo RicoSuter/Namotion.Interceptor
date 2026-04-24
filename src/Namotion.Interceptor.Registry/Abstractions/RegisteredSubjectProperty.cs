@@ -18,7 +18,7 @@ public class RegisteredSubjectProperty
 
     private readonly PropertyAttributeAttribute? _attributeMetadata;
 
-    internal RegisteredSubjectProperty[]? AttributesCache = null; // TODO: Dangerous cache, needs review
+    internal RegisteredSubjectAttribute[]? AttributesCache = null; // TODO: Dangerous cache, needs review
 
     public RegisteredSubjectProperty(RegisteredSubject parent, string name,
         Type type, IReadOnlyCollection<Attribute> reflectionAttributes)
@@ -88,20 +88,22 @@ public class RegisteredSubjectProperty
     public IReadOnlyCollection<Attribute> ReflectionAttributes { get; }
     
     /// <summary>
-    /// Gets the browse name of the property (either the property or attribute name).
+    /// Gets the browse name of the property. Overridden in <see cref="RegisteredSubjectAttribute"/> to return the attribute name.
     /// </summary>
-    public string BrowseName => IsAttribute ? AttributeMetadata.AttributeName : Name;
-    
+    public virtual string BrowseName => Name;
+
     /// <summary>
     /// Specifies whether the property is an attribute property (property attached to another property).
     /// </summary>
     public bool IsAttribute => _attributeMetadata is not null;
 
     /// <summary>
-    /// Gets the attribute with information about this attribute property.
+    /// Gets the attribute metadata when this property is an attribute. Internal because
+    /// external consumers should pattern-match to <see cref="RegisteredSubjectAttribute"/> and
+    /// use its typed <see cref="RegisteredSubjectAttribute.AttributeName"/> / <see cref="RegisteredSubjectAttribute.PropertyName"/> accessors.
     /// </summary>
     /// <exception cref="InvalidOperationException">Thrown when this property is not an attribute.</exception>
-    public PropertyAttributeAttribute AttributeMetadata => _attributeMetadata 
+    internal PropertyAttributeAttribute AttributeMetadata => _attributeMetadata
         ?? throw new InvalidOperationException("The property is not an attribute.");
     
     /// <summary>
@@ -284,19 +286,19 @@ public class RegisteredSubjectProperty
     /// <summary>
     /// Gets all attributes which are attached to this property.
     /// </summary>
-    public RegisteredSubjectProperty[] Attributes
+    public RegisteredSubjectAttribute[] Attributes
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => AttributesCache = (AttributesCache ?? Parent.GetPropertyAttributes(Name).ToArray());
     }
-    
+
     /// <summary>
-    /// Gets a property attribute by name.
+    /// Gets an attribute of this property by name.
     /// </summary>
     /// <param name="attributeName">The attribute name to find.</param>
-    /// <returns>The attribute property.</returns>
+    /// <returns>The attribute, or null if no such attribute exists.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public RegisteredSubjectProperty? TryGetAttribute(string attributeName)
+    public RegisteredSubjectAttribute? TryGetAttribute(string attributeName)
     {
         return Parent.TryGetPropertyAttribute(Name, attributeName);
     } 

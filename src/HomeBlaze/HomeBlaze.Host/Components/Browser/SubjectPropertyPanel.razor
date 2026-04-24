@@ -295,13 +295,13 @@
         // Property reads are automatically recorded via the context-based ReadPropertyRecorder
         var value = prop.GetValue();
         var attributes = prop.Attributes
-            .Where(a => a.AttributeMetadata.AttributeName != KnownAttributes.State &&
-                        a.AttributeMetadata.AttributeName != KnownAttributes.Configuration)
+            .Where(a => a.AttributeName != KnownAttributes.State &&
+                        a.AttributeName != KnownAttributes.Configuration)
             .ToArray();
         var hasAttributes = attributes.Length > 0;
         var isExpanded = _expandedProperties.Contains(prop.Name);
         var marginLeft = depth * 24;
-        var displayName = prop.IsAttribute ? prop.AttributeMetadata.AttributeName : GetPropertyDisplayName(prop);
+        var displayName = prop is RegisteredSubjectAttribute propAttr ? propAttr.AttributeName : GetPropertyDisplayName(prop);
 
         <MudText Style="@($"margin-left: {marginLeft}px; {(value is null ? "opacity: 0.5" : "")}")">
             @if (hasAttributes)

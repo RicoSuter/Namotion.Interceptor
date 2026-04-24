@@ -31,6 +31,9 @@ public sealed class RegisteredSubjectAttribute : RegisteredSubjectProperty
     /// </summary>
     public string PropertyName { get; }
 
+    /// <inheritdoc />
+    public override string BrowseName => AttributeName;
+
     /// <summary>
     /// Gets the property this attribute is attached to.
     /// </summary>
