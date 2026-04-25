@@ -89,6 +89,29 @@ public sealed partial class MarkdownContentParser
     }
 
     /// <summary>
+    /// Computes the base path used to resolve relative links in markdown.
+    /// During initial scan, markdown files are parsed BEFORE being placed in their parent's Children,
+    /// so their own graph path isn't available yet. Use the storage container's graph path (which IS
+    /// attached by the time ScanAsync runs) combined with the file's storage-local directory.
+    /// </summary>
+    private string GetLinkBasePath(MarkdownFile parent)
+    {
+        var fileDirectory = Path.GetDirectoryName(parent.FullPath)?.Replace('\\', '/') ?? string.Empty;
+
+        if (parent.Storage is not IInterceptorSubject storageSubject
+            || _pathResolver.GetPath(storageSubject, PathStyle.Route) is not { } storageGraphPath)
+        {
+            return fileDirectory;
+        }
+
+        var trimmedStorage = storageGraphPath.TrimEnd('/');
+        var trimmedDirectory = fileDirectory.Trim('/');
+        return string.IsNullOrEmpty(trimmedDirectory)
+            ? trimmedStorage
+            : $"{trimmedStorage}/{trimmedDirectory}";
+    }
+
+    /// <summary>
     /// Resolves a relative path against a base path, handling .. navigation.
     /// </summary>
     private static string ResolvePath(string basePath, string relativePath)
@@ -134,12 +157,44 @@ public sealed partial class MarkdownContentParser
         _pathResolver = pathResolver;
     }
 
-    // Source-generated regexes for performance
+    // Source-generated regexes for performance.
+    // ExpressionPattern is shared between SegmentMarkerRegex (HTML post-processing) and
+    // ExpressionRegex (raw-content rendering) so the two code paths agree on what a {{...}} is.
+    private const string ExpressionPattern = @"\{\{\s*([^}]+)\s*\}\}";
+
     [GeneratedRegex(@"```subject\(([^)]+)\)\s*\n([\s\S]*?)```", RegexOptions.Singleline)]
     private static partial Regex SubjectBlockRegex();
 
-    [GeneratedRegex(@"(<!--SUBJECT:([^>]+)-->|\{\{\s*([^}]+)\s*\}\})")]
+    [GeneratedRegex(@"(<!--SUBJECT:([^>]+)-->|" + ExpressionPattern + ")")]
     private static partial Regex SegmentMarkerRegex();
+
+    [GeneratedRegex(ExpressionPattern)]
+    private static partial Regex ExpressionRegex();
+
+    /// <summary>
+    /// Renders markdown content by replacing {{ path }} expressions with their resolved values.
+    /// Embedded subject blocks are kept as-is. Frontmatter is preserved.
+    /// Uses the same resolution semantics as <see cref="RenderExpression"/> (relative to the markdown file).
+    /// </summary>
+    public string? RenderContent(string? content, MarkdownFile parent)
+    {
+        if (string.IsNullOrEmpty(content))
+            return content;
+
+        return ExpressionRegex().Replace(content, match =>
+        {
+            var path = match.Groups[1].Value;
+            try
+            {
+                var value = _pathResolver.ResolveValue(path, PathStyle.Canonical, relativeTo: parent);
+                return value?.ToString() ?? string.Empty;
+            }
+            catch
+            {
+                return match.Value;
+            }
+        });
+    }
 
     /// <summary>
     /// Parses markdown content and reconciles with existing children.
@@ -158,8 +213,7 @@ public sealed partial class MarkdownContentParser
         var contentWithoutFrontmatter = FrontmatterParser.GetContentAfterFrontmatter(content);
         var (markdownWithMarkers, subjectBlocks) = ExtractSubjectBlocks(contentWithoutFrontmatter);
 
-        // Get directory path for relative link resolution
-        var basePath = Path.GetDirectoryName(parent.FullPath)?.Replace('\\', '/') ?? string.Empty;
+        var basePath = GetLinkBasePath(parent);
         var html = ToHtml(markdownWithMarkers, basePath);
         var segments = ParseHtmlSegments(html, subjectBlocks);
         return await ReconcileChildrenAsync(segments, parent, existingChildren, cancellationToken);
