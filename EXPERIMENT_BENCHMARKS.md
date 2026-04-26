@@ -12,14 +12,14 @@ the original PR regressed 9.2%.
 
 ## Summary
 
-| Step | Commit | Branch (ms) | Master (ms) | Δ time | Branch (MB) | Δ alloc |
-|---|---|---:|---:|---:|---:|---:|
-| 1. `Properties` filters attributes + `PropertiesAndAttributes` inclusive | `e4b5e889` | 33.29 | 33.05 | +0.7% | 22.83 | +0.17% |
-| 2. Cold-path `IsAttribute` cleanup + `GetAllPropertiesAndAttributes` | `e2d8955e` | 33.16 | 33.26 | −0.3% | 22.83 | +0.17% |
-| 3. Minimal sealed `RegisteredSubjectAttribute` subclass (no fields) | `98799f99` | 33.30 | 32.43 | +2.7% | 23.01 | +0.97% |
-| 4. Typed fields + `GetAttributedProperty` on subclass | `aa3e5dc0` | 33.64 | 33.24 | +1.2% | 23.04 | +1.10% |
-| 5. Hide `AttributeMetadata` (internal); type `Attributes` / `TryGetAttribute` | `6725d7f7` | 33.70 | 32.88 | +2.5% | 23.04 | +1.10% |
-| 5. *(rerun)* | `6725d7f7` | 33.39 | 32.07 | +4.1% | 23.04 | +1.10% |
+| Step | Commit | Branch (ms) | Master (ms) | Δ vs master | Δ vs prev step | Branch (MB) | Δ alloc |
+|---|---|---:|---:|---:|---:|---:|---:|
+| 1. `Properties` filters attributes + `PropertiesAndAttributes` inclusive | `e4b5e889` | 33.29 | 33.05 | +0.7% | (baseline) | 22.83 | +0.17% |
+| 2. Cold-path `IsAttribute` cleanup + `GetAllPropertiesAndAttributes` | `e2d8955e` | 33.16 | 33.26 | −0.3% | −0.13 ms | 22.83 | +0.17% |
+| 3. Minimal sealed `RegisteredSubjectAttribute` subclass (no fields) | `98799f99` | 33.30 | 32.43 | +2.7% | +0.14 ms | 23.01 | +0.97% |
+| 4. Typed fields + `GetAttributedProperty` on subclass | `aa3e5dc0` | 33.64 | 33.24 | +1.2% | +0.34 ms | 23.04 | +1.10% |
+| 5. Hide `AttributeMetadata` (internal); type `Attributes` / `TryGetAttribute` | `6725d7f7` | 33.70 | 32.88 | +2.5% | +0.06 ms | 23.04 | +1.10% |
+| 5. *(rerun)* | `6725d7f7` | 33.39 | 32.07 | +4.1% | −0.31 ms | 23.04 | +1.10% |
 
 ## Key observations
 
@@ -119,3 +119,101 @@ For a PR decision this is not a flat statistical comparison — interpret the
 **branch absolute time as stable at ~33.5 ms** and master as having real noise.
 The honest verdict is "~2–4% regression vs master depending on the baseline
 day", isolated to an extreme attach-heavy scenario.
+
+---
+
+## Laptop B (Intel Core Ultra 7 258V, .NET 9.0.15, BenchmarkDotNet v0.15.5)
+
+Switched machines mid-experiment. Absolute ms numbers are not comparable to
+laptop A (different CPU, OS, JIT codegen). Same-session within-day Δ% vs master
+remains comparable.
+
+Each row is a single `scripts/benchmark.ps1 -Filter "*AddLotsOfPreviousCars*"
+-LaunchCount 3` invocation, which runs master and the branch back-to-back from
+the same warm working tree.
+
+| Step | Branch (ms) | Master (ms) | Δ vs master | Δ vs prev step | Branch (MB) | Δ alloc |
+|---|---:|---:|---:|---:|---:|---:|
+| 5 (re-baseline at `b7092806`) | 56.84 | 53.64 | **+5.97%** | (baseline) | 21.63 | +1.17% |
+| 6 (`RegisteredSubjectMember` abstract base + `TryGetMember` + `GetAttributedMember`) | 58.79 | 53.61 | **+9.66%** | **+1.95 ms (+3.4%)** | 21.77 | +1.82% |
+| 6 + experiment B (`[MethodImpl(AggressiveInlining)]` on `Member.ctor`) | 58.50 *(median)* | *master noisy: 64.51 mean / 54.77 median, StdDev 17 ms* | n/a | **~0 vs step 6** | 21.77 | 0% |
+
+### Step 6 — Member abstract base + TryGetMember + GetAttributedMember
+
+Hoisted `Parent`, `Name`, `BrowseName` (virtual), `ReflectionAttributes`,
+`AttributesCache`, `Attributes`, `TryGetAttribute`, `AddAttribute`,
+`AddDerivedAttribute` from `RegisteredSubjectProperty` to a new abstract
+`RegisteredSubjectMember` base. `RegisteredSubjectProperty` now inherits from
+it; `RegisteredSubjectAttribute` chain is unchanged. Added
+`RegisteredSubject.TryGetMember(string)` returning `RegisteredSubjectMember?`
+(today probes `_properties` only). Renamed
+`RegisteredSubjectAttribute.GetAttributedProperty()` →
+`GetAttributedMember()` returning `RegisteredSubjectMember`. Updated callers
+in `SubjectUpdateFactory` (root-member walk) and
+`SubjectRegistryJsonExtensions` (pattern-match back to property).
+
+Rationale: prepare for the `[SubjectMethod]` follow-up (PR #264) so methods
+can slot in as `RegisteredSubjectMethod : RegisteredSubjectMember` on a
+separate `_methods` store, without restructuring connector code that walks
+attribute chains via the common base. Two-store design avoids compounding the
+JIT regression PR #268's unified `_members` dict would introduce.
+
+**Result: +3.4% time, +0.65% alloc on top of step 5.** Master is rock-stable
+between runs (53.64 → 53.61 ms), so the delta is hardware-real, not session
+drift. Most plausible mechanism: extra constructor chain hop per
+`RegisteredSubjectProperty` allocation (Member ctor → Property ctor) plus
+field relocation; no new virtual dispatch was introduced at hot sites.
+
+### Experiment B — `[MethodImpl(AggressiveInlining)]` on `Member.ctor`
+
+Hypothesis: the JIT was skipping ctor inlining and the extra base-ctor frame
+per allocation accounted for some of step 6's cost.
+
+**Result: no measurable change.** Branch absolute time stayed at ~58.5 ms
+(median) — within noise of step 6 without the attribute (58.79 ms). Run C's
+master measurement is too noisy to use directly (StdDev 17 ms, mean 64.51 vs
+median 54.77 — likely a background-process or thermal blip during the master
+segment), so the Δ-vs-master percentage is not interpretable for run C.
+Comparing branch absolute times across runs confirms the inlining attribute
+did not help; the JIT was already inlining the ctor, or the regression has a
+different root cause.
+
+### Per-step regression vs master (laptop B)
+
+Run A and Run B masters were essentially identical (53.64 / 53.61 ms),
+giving a stable laptop B master baseline of **~53.6 ms**. Run C's master
+measurement was contaminated (StdDev 17 ms, mean 64.51 vs median 54.77 — a
+clear outlier session); comparison against the stable baseline is more
+honest.
+
+| Step / change | Branch (ms) | Δ vs master (ms) | Δ vs master (%) |
+|---|---:|---:|---:|
+| Step 5 baseline (subclass already in place from steps 3–5) | 56.84 | +3.20 | **+5.97%** |
+| + step 6 (Member abstract base, `TryGetMember`, rename) | 58.79 | +5.18 | **+9.66%** |
+| + experiment B (`[MethodImpl(AggressiveInlining)]` on `Member.ctor`) | 58.50 *(median)* | +4.90 | **+9.14%** |
+
+Cumulative cost: subclass alone ~6%, + abstract base ~10%, +
+AggressiveInlining tweak no recovery.
+
+### Decision point
+
+Step 6's pre-commitment said: re-benchmark; if step 6 stays in the step 5
+band (≤1% delta) the abstract base is safe; if it grows by ≥1% prefer the
+interface variant. **It grew by ~3.4%**, and experiment B confirmed the cost
+is not from a non-inlined ctor.
+
+Options:
+
+1. **Keep the abstract base, accept ~10% total** on this synthetic micro. The
+   typed `RegisteredSubjectMember` API enables the `[SubjectMethod]` PR to
+   land cleanly with shared field-backed implementations.
+2. **Replace the abstract base with `IRegisteredSubjectMember` interface** —
+   field hoisting reverts; Property and (later) Method each declare their own
+   `Parent`/`Name`/`AttributesCache` (≈10 lines duplication). Should restore
+   step 5's ~6% baseline. `GetAttributedMember()` returns the interface; cold
+   call sites pay interface dispatch instead of virtual dispatch.
+3. **Accept ~6% (revert step 6 entirely)**, defer the methods-PR enablement
+   until that work lands and prove necessity then.
+4. **Try experiment A** (drop stored `Name`; abstract on Member, override on
+   Property as `=> Reference.Name`). Trades the field for a virtual call;
+   could regress further if `Name` reads dominate. Not yet measured.

@@ -392,27 +392,27 @@ internal static class SubjectUpdateFactory
         Dictionary<string, SubjectPropertyUpdate> subjectProperties,
         SubjectUpdateBuilder builder)
     {
-        // Find the root property
-        var rootProperty = attributeProperty;
-        while (rootProperty is RegisteredSubjectAttribute rootAttr)
+        // Find the root member
+        RegisteredSubjectMember rootMember = attributeProperty;
+        while (rootMember is RegisteredSubjectAttribute rootAttr)
         {
-            rootProperty = rootAttr.GetAttributedProperty();
+            rootMember = rootAttr.GetAttributedMember();
         }
 
-        if (!subjectProperties.TryGetValue(rootProperty.Name, out var rootUpdate))
+        if (!subjectProperties.TryGetValue(rootMember.Name, out var rootUpdate))
         {
             rootUpdate = new SubjectPropertyUpdate();
-            subjectProperties[rootProperty.Name] = rootUpdate;
+            subjectProperties[rootMember.Name] = rootUpdate;
         }
 
         // Navigate/create an attribute chain (excluding the last one which we'll create from change)
         var currentUpdate = rootUpdate;
         var attributeChain = new List<RegisteredSubjectAttribute>();
-        var currentProperty = attributeProperty;
-        while (currentProperty is RegisteredSubjectAttribute currentAttr)
+        RegisteredSubjectMember currentMember = attributeProperty;
+        while (currentMember is RegisteredSubjectAttribute currentAttr)
         {
             attributeChain.Add(currentAttr);
-            currentProperty = currentAttr.GetAttributedProperty();
+            currentMember = currentAttr.GetAttributedMember();
         }
         attributeChain.Reverse();
 

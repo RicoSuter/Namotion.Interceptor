@@ -41,7 +41,7 @@ public class RegisteredSubject
     /// <summary>
     /// Gets all registered properties, excluding attributes. Use <see cref="PropertiesAndAttributes"/>
     /// to enumerate properties and their attributes together. Access attributes for a specific
-    /// property via <see cref="RegisteredSubjectProperty.Attributes"/>.
+    /// property via <see cref="RegisteredSubjectMember.Attributes"/>.
     /// </summary>
     public ImmutableArray<RegisteredSubjectProperty> Properties
     {
@@ -121,6 +121,18 @@ public class RegisteredSubject
     public RegisteredSubjectProperty? TryGetProperty(string propertyName)
     {
         return _properties.GetValueOrDefault(propertyName);
+    }
+
+    /// <summary>
+    /// Gets a member by name (property or attribute today; future kinds such as registered
+    /// methods will probe additional storage transparently).
+    /// </summary>
+    /// <param name="memberName">The member name.</param>
+    /// <returns>The member, or null.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public RegisteredSubjectMember? TryGetMember(string memberName)
+    {
+        return _properties.GetValueOrDefault(memberName);
     }
 
     public RegisteredSubject(IInterceptorSubject subject)

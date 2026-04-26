@@ -35,14 +35,14 @@ public sealed class RegisteredSubjectAttribute : RegisteredSubjectProperty
     public override string BrowseName => AttributeName;
 
     /// <summary>
-    /// Gets the property this attribute is attached to.
+    /// Gets the member this attribute is attached to.
     /// </summary>
-    /// <exception cref="InvalidOperationException">Thrown when the attributed property cannot be resolved on the parent subject.</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the attributed member cannot be resolved on the parent subject.</exception>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public RegisteredSubjectProperty GetAttributedProperty()
+    public RegisteredSubjectMember GetAttributedMember()
     {
-        return Parent.TryGetProperty(PropertyName)
+        return Parent.TryGetMember(PropertyName)
             ?? throw new InvalidOperationException(
-                $"The attributed property '{PropertyName}' could not be found on the parent subject.");
+                $"The attributed member '{PropertyName}' could not be found on the parent subject.");
     }
 }
