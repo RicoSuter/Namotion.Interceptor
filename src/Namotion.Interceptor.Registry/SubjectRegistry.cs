@@ -9,14 +9,27 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
 {
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
     private readonly Dictionary<string, IInterceptorSubject> _subjectIdToSubject = new();
-    
+    private ImmutableDictionary<IInterceptorSubject, RegisteredSubject>? _knownSubjectsSnapshot;
+
     /// <inheritdoc />
     public IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> KnownSubjects
     {
         get
         {
+            var snapshot = Volatile.Read(ref _knownSubjectsSnapshot);
+            if (snapshot is not null)
+                return snapshot;
+
             lock (_knownSubjects)
-                return _knownSubjects.ToImmutableDictionary();
+            {
+                snapshot = _knownSubjectsSnapshot;
+                if (snapshot is not null)
+                    return snapshot;
+
+                snapshot = _knownSubjects.ToImmutableDictionary();
+                Volatile.Write(ref _knownSubjectsSnapshot, snapshot);
+                return snapshot;
+            }
         }
     }
 
@@ -183,6 +196,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                         }
 
                         _knownSubjects.Remove(change.Subject);
+                        _knownSubjectsSnapshot = null;
 
                         // Clean up subject ID reverse index
                         if (_subjectIdToSubject.Count > 0)
@@ -222,6 +236,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     {
         var registeredSubject = new RegisteredSubject(subject);
         _knownSubjects[subject] = registeredSubject;
+        _knownSubjectsSnapshot = null;
         return registeredSubject;
     }
 
