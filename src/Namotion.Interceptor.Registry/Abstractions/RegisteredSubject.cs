@@ -13,7 +13,14 @@ public class RegisteredSubject
     private readonly Lock _lock = new();
 
     private volatile FrozenDictionary<string, RegisteredSubjectProperty> _properties;
-    private ImmutableArray<SubjectPropertyParent> _parents = [];
+
+    // Inline single-parent storage: most subjects have exactly one parent,
+    // so we keep the first parent in a nullable struct field and only allocate
+    // an overflow list when a second parent is added. No snapshot cache: the
+    // ImmutableArray view is rebuilt on each Parents read so mutation paths
+    // stay allocation-free in the common single-parent case.
+    private SubjectPropertyParent? _firstParent;
+    private List<SubjectPropertyParent>? _additionalParents;
 
     [JsonIgnore] public IInterceptorSubject Subject { get; }
 
@@ -25,14 +32,35 @@ public class RegisteredSubject
 
     /// <summary>
     /// Gets the properties which reference this subject.
-    /// Thread-safe: lock ensures atomic struct copy during read.
+    /// Thread-safe: lock ensures atomic snapshot during read. The result is
+    /// rebuilt on each call (no cached snapshot) to avoid eager allocations
+    /// on every mutation; the common 0/1-parent paths allocate at most one
+    /// single-element ImmutableArray.
     /// </summary>
     public ImmutableArray<SubjectPropertyParent> Parents
     {
         get
         {
             lock (_lock)
-                return _parents;
+            {
+                if (_firstParent is null)
+                {
+                    return ImmutableArray<SubjectPropertyParent>.Empty;
+                }
+
+                if (_additionalParents is null || _additionalParents.Count == 0)
+                {
+                    return ImmutableArray.Create(_firstParent.Value);
+                }
+
+                var builder = ImmutableArray.CreateBuilder<SubjectPropertyParent>(1 + _additionalParents.Count);
+                builder.Add(_firstParent.Value);
+                for (var i = 0; i < _additionalParents.Count; i++)
+                {
+                    builder.Add(_additionalParents[i]);
+                }
+                return builder.MoveToImmutable();
+            }
         }
     }
 
@@ -101,7 +129,16 @@ public class RegisteredSubject
     {
         lock (_lock)
         {
-            _parents = _parents.Add(new SubjectPropertyParent { Property = parent, Index = index });
+            var entry = new SubjectPropertyParent { Property = parent, Index = index };
+            if (_firstParent is null)
+            {
+                _firstParent = entry;
+            }
+            else
+            {
+                _additionalParents ??= new List<SubjectPropertyParent>();
+                _additionalParents.Add(entry);
+            }
         }
     }
 
@@ -109,7 +146,21 @@ public class RegisteredSubject
     {
         lock (_lock)
         {
-            _parents = _parents.Remove(new SubjectPropertyParent { Property = parent, Index = index });
+            var entry = new SubjectPropertyParent { Property = parent, Index = index };
+            if (_firstParent is { } first && first.Equals(entry))
+            {
+                PromoteLastFromAdditional();
+                return;
+            }
+
+            if (_additionalParents is not null)
+            {
+                var indexInList = _additionalParents.IndexOf(entry);
+                if (indexInList >= 0)
+                {
+                    _additionalParents.RemoveAt(indexInList);
+                }
+            }
         }
     }
 
@@ -117,16 +168,27 @@ public class RegisteredSubject
     {
         lock (_lock)
         {
-            var parents = _parents;
-            for (var i = parents.Length - 1; i >= 0; i--)
+            // Compact the additional list in place (back-to-front to keep removed indices stable).
+            if (_additionalParents is not null && _additionalParents.Count > 0)
             {
-                if (parents[i].Property == parent)
+                for (var i = _additionalParents.Count - 1; i >= 0; i--)
                 {
-                    parents = parents.RemoveAt(i);
+                    if (_additionalParents[i].Property == parent)
+                    {
+                        _additionalParents.RemoveAt(i);
+                    }
                 }
             }
 
-            _parents = parents;
+            // After compaction, if the inline first parent matches, promote the last remaining
+            // additional entry (if any) into the inline slot. Doing this last keeps the
+            // semantics matching the previous ImmutableArray-based implementation: we end up
+            // with the same set of remaining entries, regardless of which slot the matching
+            // entry occupied.
+            if (_firstParent is { } first && first.Property == parent)
+            {
+                PromoteLastFromAdditional();
+            }
         }
     }
 
@@ -134,12 +196,39 @@ public class RegisteredSubject
     {
         lock (_lock)
         {
-            var oldParent = new SubjectPropertyParent { Property = property, Index = oldIndex };
-            var idx = _parents.IndexOf(oldParent);
-            if (idx >= 0)
+            var oldEntry = new SubjectPropertyParent { Property = property, Index = oldIndex };
+            if (_firstParent is { } first && first.Equals(oldEntry))
             {
-                _parents = _parents.SetItem(idx, new SubjectPropertyParent { Property = property, Index = newIndex });
+                _firstParent = new SubjectPropertyParent { Property = property, Index = newIndex };
+                return;
             }
+
+            if (_additionalParents is not null)
+            {
+                var indexInList = _additionalParents.IndexOf(oldEntry);
+                if (indexInList >= 0)
+                {
+                    _additionalParents[indexInList] = new SubjectPropertyParent { Property = property, Index = newIndex };
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Clears the inline first-parent slot, promoting the last entry of the overflow list
+    /// (if any) into the slot via O(1) tail-pop. Caller must hold <see cref="_lock"/>.
+    /// </summary>
+    private void PromoteLastFromAdditional()
+    {
+        if (_additionalParents is not null && _additionalParents.Count > 0)
+        {
+            var lastIndex = _additionalParents.Count - 1;
+            _firstParent = _additionalParents[lastIndex];
+            _additionalParents.RemoveAt(lastIndex);
+        }
+        else
+        {
+            _firstParent = null;
         }
     }
 
