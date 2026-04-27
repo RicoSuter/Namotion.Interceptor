@@ -74,6 +74,7 @@ On selection:
 - Cherry-pick each picked candidate's implementation commit onto `performance/<slug>` in the order chosen. Stop on conflict and surface the file list to the user.
 - Re-run the benchmark on the combined parent branch: `pwsh scripts/benchmark.ps1 -Filter "<filter>" -BaseBranch master -LaunchCount <n>`. This catches interaction effects between picked candidates.
 - Append a `## Combined results` section to the design doc with this final report. Commit on the parent branch.
+- Delete every candidate branch (`performance/<slug>/<candidate-slug>`) with `git branch -D`. Picked branches are now redundant (their commit lives on the parent). Unpicked branches are also discarded; their results stay recorded in the doc. The parent branch (`performance/<slug>`) and `master` are never deleted.
 
 Print the parent branch name and a suggested next step (`gh pr create -B master -H performance/<slug>`). Do NOT open the PR. Do NOT push.
 
@@ -86,7 +87,8 @@ Print the parent branch name and a suggested next step (`gh pr create -B master 
 
 ## Constraints
 
-- Never push branches. Never open PRs. Never delete branches automatically.
+- Never push branches. Never open PRs.
+- Candidate branches (`performance/<slug>/<candidate-slug>`) are deleted automatically only at the end of Phase 3, after the combined benchmark is committed. The parent branch (`performance/<slug>`) and `master` are never deleted automatically.
 - Never modify `master` outside this skill. The parent branch holds all in-progress changes.
 - Branch names: `performance/<slug>` for the parent, `performance/<slug>/<candidate-slug>` for each candidate. Slugs are lowercase, kebab-case, no slashes.
 - Doc path: `performance-<slug>.md` at the repo root (treated as a transient working doc tied to the parent branch). If the file already exists, ask the user whether to append a new dated section or use a different slug.
