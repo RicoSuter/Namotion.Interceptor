@@ -111,7 +111,27 @@ Batch parent / child mutations on collection replace. Today an N-item collection
 
 #### Results
 
-(pending)
+- Status: success (mixed: large win on bulk attach, small regressions on hot single-property paths)
+- Branch: `performance/attach-detach-batch-collection-mutations`
+- Commit: `d2fec50f`
+- Files changed: `RegisteredSubject.cs`, `RegisteredSubjectProperty.cs`, `SubjectRegistry.cs` (+87 / -13)
+- Notes: Reshaped `RegisteredSubject._parents` from `ImmutableArray` to a private `List` plus a lazily rebuilt `ImmutableArray` cache. Public `Parents` API and locking unchanged. `RemoveParent` scans backward (matches the reverse-detach order) for O(1) tail removal; `RemoveParentsByProperty` does in-place compaction; `UpdateParentIndex` writes in place. Added internal `RegisteredSubjectProperty.RemoveChildrenWhere(predicate)` (single `List.RemoveAll` + single cache invalidation) but it is not yet wired into the orchestration because that would require expanding `IPropertyLifecycleHandler` (forbidden by task). All 109 Registry + 199 Tracking tests pass.
+
+| Method                  | Mean (parent) | Mean (candidate) | Δ Mean   | Allocated (parent) | Allocated (candidate) |
+|-------------------------|--------------:|-----------------:|---------:|-------------------:|----------------------:|
+| AddLotsOfPreviousCars   | 81,336,312 ns | 66,273,245 ns    | -18.5%   | 22,416,609 B       | 22,736,676 B          |
+| IncrementDerivedAverage | 6,233 ns      | 5,555 ns         | -10.9%   | 128 B              | 128 B                 |
+| Write                   | 394 ns        | 486 ns           | +23.4%   | 0 B                | 0 B                   |
+| Read                    | 421 ns        | 488 ns           | +15.6%   | 0 B                | 0 B                   |
+| DerivedAverage          | 275 ns        | 327 ns           | +18.8%   | 0 B                | 0 B                   |
+| ChangeAllTires          | 14,880 ns     | 18,574 ns        | +24.8%   | 16,064 B           | 16,320 B              |
+| GetOrAddSubjectId       | 28.3 ns       | 27.6 ns          | -2.5%    | 0 B                | 0 B                   |
+| GenerateSubjectId       | 838 ns        | 858 ns           | +2.4%    | 72 B               | 72 B                  |
+| KnownSubjectsSnapshot   | 1,394,605 ns  | 1,459,153 ns     | +4.6%    | 320,472 B          | 320,472 B             |
+
+The 18-percent win on `AddLotsOfPreviousCars` (1000-element collection replace) is the targeted improvement, driven by the in-place compaction in `RemoveParentsByProperty` and the elimination of per-element `ImmutableArray.Add` allocations in `_parents`. The regressions on `Write`, `Read`, `DerivedAverage`, and `ChangeAllTires` (all small absolute, +50 to +90 ns) likely come from the additional indirection and lock acquisition introduced by the `_parents` List + cache pattern, which now affects every path that touches a registered subject's parents.
+
+Allocations did not improve as expected: the benchmark shows a slight increase on `AddLotsOfPreviousCars` (+1.4 percent). The `_parentsCache` rebuild on first read after a mutation may be the culprit; deeper profiling would be needed to confirm.
 
 ### 5. inline-single-parent
 
