@@ -111,27 +111,27 @@ Batch parent / child mutations on collection replace. Today an N-item collection
 
 #### Results
 
-- Status: success (mixed: large win on bulk attach, small regressions on hot single-property paths)
+- Status: success — but **net negative** at LaunchCount=3 (recommend reject)
 - Branch: `performance/attach-detach-batch-collection-mutations`
 - Commit: `d2fec50f`
 - Files changed: `RegisteredSubject.cs`, `RegisteredSubjectProperty.cs`, `SubjectRegistry.cs` (+87 / -13)
-- Notes: Reshaped `RegisteredSubject._parents` from `ImmutableArray` to a private `List` plus a lazily rebuilt `ImmutableArray` cache. Public `Parents` API and locking unchanged. `RemoveParent` scans backward (matches the reverse-detach order) for O(1) tail removal; `RemoveParentsByProperty` does in-place compaction; `UpdateParentIndex` writes in place. Added internal `RegisteredSubjectProperty.RemoveChildrenWhere(predicate)` (single `List.RemoveAll` + single cache invalidation) but it is not yet wired into the orchestration because that would require expanding `IPropertyLifecycleHandler` (forbidden by task). All 109 Registry + 199 Tracking tests pass.
+- Notes: Reshaped `RegisteredSubject._parents` from `ImmutableArray` to a private `List` plus a lazily rebuilt `ImmutableArray` cache. Public `Parents` API and locking unchanged. `RemoveParent` scans backward (matches the reverse-detach order) for O(1) tail removal; `RemoveParentsByProperty` does in-place compaction; `UpdateParentIndex` writes in place. Added internal `RegisteredSubjectProperty.RemoveChildrenWhere(predicate)` (single `List.RemoveAll` + single cache invalidation) but not wired into orchestration (would require expanding `IPropertyLifecycleHandler`). All 109 Registry + 199 Tracking tests pass.
 
-| Method                  | Mean (parent) | Mean (candidate) | Δ Mean   | Allocated (parent) | Allocated (candidate) |
-|-------------------------|--------------:|-----------------:|---------:|-------------------:|----------------------:|
-| AddLotsOfPreviousCars   | 81,336,312 ns | 66,273,245 ns    | -18.5%   | 22,416,609 B       | 22,736,676 B          |
-| IncrementDerivedAverage | 6,233 ns      | 5,555 ns         | -10.9%   | 128 B              | 128 B                 |
-| Write                   | 394 ns        | 486 ns           | +23.4%   | 0 B                | 0 B                   |
-| Read                    | 421 ns        | 488 ns           | +15.6%   | 0 B                | 0 B                   |
-| DerivedAverage          | 275 ns        | 327 ns           | +18.8%   | 0 B                | 0 B                   |
-| ChangeAllTires          | 14,880 ns     | 18,574 ns        | +24.8%   | 16,064 B           | 16,320 B              |
-| GetOrAddSubjectId       | 28.3 ns       | 27.6 ns          | -2.5%    | 0 B                | 0 B                   |
-| GenerateSubjectId       | 838 ns        | 858 ns           | +2.4%    | 72 B               | 72 B                  |
-| KnownSubjectsSnapshot   | 1,394,605 ns  | 1,459,153 ns     | +4.6%    | 320,472 B          | 320,472 B             |
+LaunchCount=3 results (the LaunchCount=1 numbers reported earlier turned out to be dominated by baseline drift; the supposed -18.5 percent on AddLots was noise):
 
-The 18-percent win on `AddLotsOfPreviousCars` (1000-element collection replace) is the targeted improvement, driven by the in-place compaction in `RemoveParentsByProperty` and the elimination of per-element `ImmutableArray.Add` allocations in `_parents`. The regressions on `Write`, `Read`, `DerivedAverage`, and `ChangeAllTires` (all small absolute, +50 to +90 ns) likely come from the additional indirection and lock acquisition introduced by the `_parents` List + cache pattern, which now affects every path that touches a registered subject's parents.
+| Method                  | Mean (parent) | Mean (candidate) | Δ Mean | Allocated (parent) | Allocated (candidate) |
+|-------------------------|--------------:|-----------------:|-------:|-------------------:|----------------------:|
+| AddLotsOfPreviousCars   | 54,077,497 ns | 55,579,390 ns    | +2.8%  | 22,416,671 B       | 22,736,756 B          |
+| IncrementDerivedAverage | 4,159.95 ns   | 4,160.25 ns      | flat   | 128 B              | 128 B                 |
+| Write                   | 266.62 ns     | 265.66 ns        | flat   | 0 B                | 0 B                   |
+| Read                    | 284.40 ns     | 288.62 ns        | +1.5%  | 0 B                | 0 B                   |
+| DerivedAverage          | 185.29 ns     | 180.24 ns        | -2.7%  | 0 B                | 0 B                   |
+| ChangeAllTires          | 9,790.01 ns   | 9,497.63 ns      | -3.0%  | 16,064 B           | 16,320 B              |
+| GetOrAddSubjectId       | 19.76 ns      | 18.17 ns         | -8.0%  | 0 B                | 0 B                   |
+| GenerateSubjectId       | 540.87 ns     | 531.30 ns        | -1.8%  | 72 B               | 72 B                  |
+| KnownSubjectsSnapshot   | 926,600 ns    | 898,454 ns       | -3.0%  | 320,472 B          | 320,472 B             |
 
-Allocations did not improve as expected: the benchmark shows a slight increase on `AddLotsOfPreviousCars` (+1.4 percent). The `_parentsCache` rebuild on first read after a mutation may be the culprit; deeper profiling would be needed to confirm.
+At LaunchCount=3, `AddLotsOfPreviousCars` regresses ~2.8 percent on mean and adds 320 KB of allocation (the `_parentsCache` rebuild allocates a fresh ImmutableArray per read-after-mutation, which offsets the in-place compaction win and then some). All other deltas are within ±3 percent — noise band even at LaunchCount=3. The candidate's targeted hot path is the only one with a real signed delta, and it is negative. Recommend rejecting.
 
 ### 5. inline-single-parent
 
