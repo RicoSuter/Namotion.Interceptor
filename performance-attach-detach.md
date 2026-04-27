@@ -253,4 +253,53 @@ Headline:
 
 Allocation deltas are mechanism-confirmed and not movable by noise. Mean deltas on the targeted paths (`AddLotsOfPreviousCars`, `ChangeAllTires`) are real wins. Cross-cutting +1-4% on unrelated paths is the same LaunchCount=1 noise signature seen throughout this pass and is unlikely to reflect a real regression.
 
+### 8. inline-parent-no-cache (refinement of candidate 5)
+
+Same inline-first-parent + overflow-list storage as candidate 5, but with the eager `_parentsSnapshot` ImmutableArray cache removed. `Parents` builds the result on each call (single-element fast path for the common case). The cache invalidation churn that regressed candidate 5 by +17.6% on bulk attach is gone.
+
+#### Results
+
+- Status: success
+- Branch: `performance/attach-detach-inline-parent-no-cache`
+- Commit: `55c8f2f6`
+- Files changed: `src/Namotion.Interceptor.Registry/Abstractions/RegisteredSubject.cs` (+103 / -14)
+- Notes: `_firstParent` (`SubjectPropertyParent?`) for the single-parent case + `_additionalParents` (`List<SubjectPropertyParent>?`) lazily allocated for 2+ parents. `Parents` getter: 0 → `ImmutableArray.Empty`; 1 → `ImmutableArray.Create(_firstParent.Value)`; 2+ → builder + `MoveToImmutable`. `RemoveParent` does O(1) tail-pop promotion when the inline first is removed. `RemoveParentsByProperty` does in-place compaction of the list then promotes from tail. Locking and public surface unchanged. All 109 Registry + 199 Tracking tests pass; full suite green.
+
+Compared at LaunchCount=1 against the parent perf branch which already includes candidates 1 + 6:
+
+| Method                  | Parent (mean) | Candidate (mean) | Δ Mean | Parent (alloc) | Candidate (alloc) | Δ Allocated |
+|-------------------------|--------------:|-----------------:|-------:|---------------:|------------------:|------------:|
+| AddLotsOfPreviousCars   | 54,354,085 ns | 54,445,169 ns    | flat   | 20,456,730 B   | 20,256,606 B      | **-200 KB** |
+| IncrementDerivedAverage | 4,480 ns      | 4,514 ns         | flat   | 128 B          | 128 B             | 0           |
+| Write                   | 289.60 ns     | 294.75 ns        | +1.8%  | 0 B            | 0 B               | 0           |
+| Read                    | 313.01 ns     | 308.76 ns        | -1.4%  | 0 B            | 0 B               | 0           |
+| DerivedAverage          | 199.51 ns     | 193.50 ns        | -3.0%  | 0 B            | 0 B               | 0           |
+| ChangeAllTires          | 10,175 ns     | 9,905 ns         | -2.7%  | 14,496 B       | 14,336 B          | -160 B      |
+| GetOrAddSubjectId       | 19.46 ns      | 19.44 ns         | flat   | 0 B            | 0 B               | 0           |
+| GenerateSubjectId       | 557.48 ns     | 559.42 ns        | flat   | 72 B           | 72 B              | 0           |
+| KnownSubjectsSnapshot   | 1.349 ns      | 1.330 ns         | flat   | 0 B            | 0 B               | 0           |
+
+Headline:
+
+- **AddLotsOfPreviousCars**: -200 KB allocated on top of candidate 6's -1.96 MB (mean flat). Mechanism: each parent-add no longer allocates an `ImmutableArray.Add` copy; the only ImmutableArray allocation is the one built when `Parents` is read, which the bulk-attach path does less often than it writes.
+- **ChangeAllTires**: -2.7% mean, -160 B allocated. Same mechanism, smaller scale.
+- All other benchmarks flat or within ±3% noise. No across-the-board regression signature.
+
+Diagnosis vs candidate 5: the `_parentsSnapshot` cache invalidated on every mutation and rebuilt on the next read. At the bulk-attach read-after-write ratio that meant ~one ImmutableArray rebuild per add, allocating roughly the same as the original ImmutableArray.Add path while also paying List bookkeeping. Removing the cache fixes the trade.
+
+Verdict: keep. Cherry-pick onto the parent on top of 1+6.
+
+## Final picks
+
+**1 (cache-known-subjects), 6 (inline-attached-references), 8 (inline-parent-no-cache).**
+
+All three target distinct allocation sites:
+- 1: `KnownSubjects` snapshot allocation (`ImmutableDictionary` rebuild per call → cached)
+- 6: per-subject `HashSet` allocation in `_attachedSubjects` (eliminated for single-reference case)
+- 8: per-attach `ImmutableArray.Add` allocation in `RegisteredSubject._parents` (eliminated; on-demand build instead)
+
+Combined effect on `AddLotsOfPreviousCars` (1000-subject bulk attach) vs `master`:
+- Mean: ~-3.3% (combined 1+6); 8 keeps mean flat while saving another 200 KB
+- Allocated: ~-2.16 MB (1.96 MB from candidate 6 + 200 KB from candidate 8)
+
 Verdict: ready to merge.
