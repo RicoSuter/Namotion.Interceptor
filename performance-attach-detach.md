@@ -139,7 +139,25 @@ Inline the single-parent case in `RegisteredSubject._parents`. Most subjects hav
 
 #### Results
 
-(pending)
+- Status: success (small allocation drop on bulk attach; mean numbers within run-to-run noise at LaunchCount=1)
+- Branch: `performance/attach-detach-inline-single-parent`
+- Commit: `7e71b7f2`
+- Files changed: `src/Namotion.Interceptor.Registry/Abstractions/RegisteredSubject.cs` (+119 / -14)
+- Notes: Replaced `_parents` `ImmutableArray` with inline-storage layout: `_firstParent` struct + `_hasFirstParent` flag + nullable `_additionalParents` `List`, plus a cached `_parentsSnapshot` invalidated on mutation. Common case (one parent) avoids the per-add `ImmutableArray` allocation. Promotion / demotion logic handles the transition between zero, one, and many parents. All 1497 unit tests pass (Registry 109, Tracking 199, full suite green). No public API change. Locking unchanged.
+
+| Method                  | Mean (parent) | Mean (candidate) | Δ Mean | Allocated (parent) | Allocated (candidate) | Δ Allocated |
+|-------------------------|--------------:|-----------------:|-------:|-------------------:|----------------------:|------------:|
+| AddLotsOfPreviousCars   | 57,205,844 ns | 55,106,307 ns    | -3.7%  | 22,416,667 B       | 22,257,372 B          | -159 KB     |
+| IncrementDerivedAverage | 4,285 ns      | 4,287 ns         | flat   | 128 B              | 128 B                 | 0           |
+| Write                   | 270 ns        | 272 ns           | flat   | 0 B                | 0 B                   | 0           |
+| Read                    | 285 ns        | 289 ns           | +1.4%  | 0 B                | 0 B                   | 0           |
+| DerivedAverage          | 189 ns        | 192 ns           | flat   | 0 B                | 0 B                   | 0           |
+| ChangeAllTires          | 10,113 ns     | 13,992 ns        | +38%   | 16,064 B           | 15,936 B              | -128 B      |
+| GetOrAddSubjectId       | 18.9 ns       | 22.1 ns          | +17%   | 0 B                | 0 B                   | 0           |
+| GenerateSubjectId       | 545 ns        | 650 ns           | +19%   | 72 B               | 72 B                  | 0           |
+| KnownSubjectsSnapshot   | 938,490 ns    | 1,147,613 ns     | +22%   | 320,472 B          | 320,472 B             | 0           |
+
+Caveat on the Δ Mean column: the parent perf branch's own LaunchCount=1 numbers shifted ~30 percent between the candidate 4 run and this one (no parent commits in between), so single-launch comparisons here are dominated by environmental noise. `GenerateSubjectId` and `KnownSubjectsSnapshot` show large positive deltas despite touching code paths this candidate did not modify, which is a clear noise signature. The targeted win shows up in the allocation column (159 KB drop on the 1000-element bulk attach, plus a small mean drop on the same benchmark). Phase 3 combined benchmark at LaunchCount=3 will give a defensible verdict on the cross-cutting deltas.
 
 ### 6. inline-attached-references
 
