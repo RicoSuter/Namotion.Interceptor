@@ -298,8 +298,26 @@ All three target distinct allocation sites:
 - 6: per-subject `HashSet` allocation in `_attachedSubjects` (eliminated for single-reference case)
 - 8: per-attach `ImmutableArray.Add` allocation in `RegisteredSubject._parents` (eliminated; on-demand build instead)
 
-Combined effect on `AddLotsOfPreviousCars` (1000-subject bulk attach) vs `master`:
-- Mean: ~-3.3% (combined 1+6); 8 keeps mean flat while saving another 200 KB
-- Allocated: ~-2.16 MB (1.96 MB from candidate 6 + 200 KB from candidate 8)
+Cherry-picked onto `performance/attach-detach` in order: 1 (`541cecb8`), 6 (`166dbd77`), 8 (`b7e3a9d4`). Compared at LaunchCount=1 against `master`.
 
-Verdict: ready to merge.
+| Method                  | Master (mean) | Combined (mean) | Δ Mean  | Master (alloc) | Combined (alloc) | Δ Allocated   |
+|-------------------------|--------------:|----------------:|--------:|---------------:|-----------------:|--------------:|
+| AddLotsOfPreviousCars   | 53,910,890 ns | 51,143,659 ns   | **-5.1%** | 22,416,706 B   | 20,256,706 B     | **-2.16 MB**  |
+| IncrementDerivedAverage | 4,486 ns      | 4,417 ns        | -1.5%   | 128 B          | 128 B            | 0             |
+| Write                   | 276.26 ns     | 284.36 ns       | +2.9%   | 0 B            | 0 B              | 0             |
+| Read                    | 301.38 ns     | 301.31 ns       | flat    | 0 B            | 0 B              | 0             |
+| DerivedAverage          | 194.95 ns     | 191.74 ns       | -1.6%   | 0 B            | 0 B              | 0             |
+| ChangeAllTires          | 10,153 ns     | 9,697 ns        | **-4.5%** | 16,064 B       | 14,336 B         | **-1,728 B**  |
+| GetOrAddSubjectId       | 19.00 ns      | 19.01 ns        | flat    | 0 B            | 0 B              | 0             |
+| GenerateSubjectId       | 546.03 ns     | 546.06 ns       | flat    | 72 B           | 72 B             | 0             |
+| KnownSubjectsSnapshot   | (not on master) | 1.28 ns       | n/a     | (not on master)| 0 B              | n/a           |
+
+Headline:
+
+- **Bulk-attach win.** `AddLotsOfPreviousCars`: -5.1% mean, **-2.16 MB allocated** per 1000-subject attach. Mechanism: candidate 6 saves ~2 KB per subject (HashSet allocation), candidate 8 saves the per-add `ImmutableArray.Add` allocation in parent storage.
+- **Smaller bulk-attach win.** `ChangeAllTires`: -4.5% mean, -1,728 B allocated. Same mechanism, smaller scale.
+- **Constant-time known-subjects snapshot.** `KnownSubjectsSnapshot`: 1.28 ns / 0 B per call. Previous parent-branch baseline (with the new benchmark but no candidate 1) was ~919 us / 320 KB, now eliminated.
+- **Cross-cutting noise minimal.** `Write` +2.9% is the only above-noise drift on an unrelated benchmark; `Read`, `DerivedAverage`, `IncrementDerivedAverage` all flat or slightly negative. The earlier +1-4% noise band on these in the 1+6 run did not reappear with 8 added — consistent with that being LaunchCount=1 drift rather than a real regression.
+- **Flat as expected.** `GetOrAddSubjectId`, `GenerateSubjectId` (untouched static / id-registry paths).
+
+Verdict: ready to merge. Suggested next step: `gh pr create -B master -H performance/attach-detach`.
