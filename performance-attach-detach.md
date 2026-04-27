@@ -198,24 +198,29 @@ Lock-free fast path in `WriteProperty` for `ReferenceEquals(lastProcessed, newVa
 
 #### Results
 
-- Status: success (LaunchCount=1 numbers inconclusive; mostly noise but possibly a real regression on the locked path)
+- Status: success — but **net negative** at LaunchCount=3 for the current benchmark coverage (recommend reject)
 - Branch: `performance/attach-detach-lock-free-equality-check`
 - Commit: `c8230995`
 - Files changed: `src/Namotion.Interceptor.Tracking/Lifecycle/LifecycleInterceptor.cs` (+22 / -4)
 - Notes: `_lastProcessedValues` switched to `ConcurrentDictionary`. Added a lock-free `TryGetValue` + `ReferenceEquals` early-out before lock acquisition in `WriteProperty`. Locked path retains the existing double-checked re-read so concurrent updates between fast-path and lock acquisition are caught. All mutating sites still hold the `_attachedSubjects` lock; only `Remove` -> `TryRemove` rename was needed. All Tracking + Registry unit tests pass (one transient flake in `Hosting.Tests` due to a `Task.Delay(100)` race, unrelated, passes on rerun).
 
-| Method                  | Mean (parent) | Mean (candidate) | Δ Mean | Allocated (parent) | Allocated (candidate) |
-|-------------------------|--------------:|-----------------:|-------:|-------------------:|----------------------:|
-| AddLotsOfPreviousCars   | 56,115,551 ns | 66,724,678 ns    | +18.9% | 22,416,617 B       | 22,656,715 B          |
-| IncrementDerivedAverage | 4,467 ns      | 5,088 ns         | +13.9% | 128 B              | 128 B                 |
-| Write                   | 282 ns        | 324 ns           | +14.9% | 0 B                | 0 B                   |
-| Read                    | 304 ns        | 350 ns           | +15.3% | 0 B                | 0 B                   |
-| DerivedAverage          | 199 ns        | 220 ns           | +10.8% | 0 B                | 0 B                   |
-| ChangeAllTires          | 10,282 ns     | 12,233 ns        | +19.0% | 16,064 B           | 16,064 B              |
-| GetOrAddSubjectId       | 19.3 ns       | 22.9 ns          | +18.5% | 0 B                | 0 B                   |
-| GenerateSubjectId       | 561 ns        | 668 ns           | +19.0% | 72 B               | 72 B                  |
-| KnownSubjectsSnapshot   | 985,419 ns    | 1,147,515 ns     | +16.4% | 320,472 B          | 320,472 B             |
+LaunchCount=3 results (replaces the earlier LaunchCount=1 numbers, which showed an across-the-board ~15-19 percent shift driven by baseline drift, including on benchmarks the candidate cannot affect):
 
-Every benchmark regressed by a similar ~15 percent, including `GenerateSubjectId` (a static method that does not touch any code path this candidate modifies) and `Write`/`Read` (which target value-type properties that never enter `WriteProperty`'s subject-containing branch). That across-the-board shift on impossible-to-affect benchmarks is the same baseline-drift noise pattern seen in candidates 5 and 6 at LaunchCount=1.
+| Method                  | Mean (parent) | Mean (candidate) | Δ Mean | Allocated (parent) | Allocated (candidate) | Δ Allocated |
+|-------------------------|--------------:|-----------------:|-------:|-------------------:|----------------------:|------------:|
+| AddLotsOfPreviousCars   | 53,526,991 ns | 58,590,081 ns    | +9.5%  | 22,416,703 B       | 22,656,796 B          | +240 KB     |
+| IncrementDerivedAverage | 4,179.52 ns   | 4,188.68 ns      | flat   | 128 B              | 128 B                 | 0           |
+| Write                   | 264.19 ns     | 271.66 ns        | +2.8%  | 0 B                | 0 B                   | 0           |
+| Read                    | 284.31 ns     | 296.09 ns        | +4.1%  | 0 B                | 0 B                   | 0           |
+| DerivedAverage          | 186.85 ns     | 187.69 ns        | flat   | 0 B                | 0 B                   | 0           |
+| ChangeAllTires          | 10,447 ns     | 10,052 ns        | -3.8%  | 16,064 B           | 16,064 B              | 0           |
+| GetOrAddSubjectId       | 18.68 ns      | 18.84 ns         | flat   | 0 B                | 0 B                   | 0           |
+| GenerateSubjectId       | 531.10 ns     | 551.53 ns        | +3.8%  | 72 B               | 72 B                  | 0           |
+| KnownSubjectsSnapshot   | 919,494 ns    | 964,616 ns       | +4.9%  | 320,472 B          | 320,472 B             | 0           |
 
-That said: this candidate is the most likely of all seven to actually slow down the locked path even when the fast-path saves a lock acquisition, because `ConcurrentDictionary` has higher per-op overhead than `Dictionary` even uncontended, and the existing benchmarks always assign a fresh value (the fast path NEVER triggers in them). Phase 3 LaunchCount=3 will tell whether candidate 7 is a real regression or noise. If the existing benchmark suite cannot demonstrate a win, this candidate may need a dedicated benchmark that exercises the "same-reference write" pattern to justify keeping it.
+Cross-cutting noise mostly settled at LaunchCount=3. `IncrementDerivedAverage`, `DerivedAverage`, `GetOrAddSubjectId` are flat as expected (untouched code paths). The signed deltas attributable to the candidate:
+
+- `AddLotsOfPreviousCars`: +9.5% mean, +240 KB allocated. The 1000-subject bulk attach hammers the locked write path (every subject's properties get a first-time write, so the fast path always misses); `ConcurrentDictionary` is measurably slower than `Dictionary` here and adds per-bucket allocation. Real signal.
+- Cross-cutting +3-5% on `Write` / `Read` / `GenerateSubjectId` / `KnownSubjectsSnapshot` is harder to attribute, since these benchmarks should be ~unaffected by the change. Likely residual baseline drift, but the consistent direction leaves room for a small fixed-cost regression on the fast path itself.
+
+The fast path NEVER triggers in any existing benchmark (every value is fresh). The win this candidate is meant to capture (skip the lock when the same reference is written twice) is never measured, while the cost of switching to `ConcurrentDictionary` shows up cleanly on the bulk-attach path. Without a benchmark that exercises same-reference writes, this candidate is purely a regression. Recommend rejecting; revisit if and when a same-reference-write benchmark is added.
