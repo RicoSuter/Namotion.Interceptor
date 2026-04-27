@@ -75,11 +75,11 @@ Replace `_knownSubjects` `Dictionary + lock` with `ConcurrentDictionary` (the au
 
 #### Results
 
-- Status: success (standalone regression on snapshot read; combined value with candidate 1 to be checked in Phase 3)
+- Status: success (regression on `AddLotsOfPreviousCars` ~+8 percent)
 - Branch: `performance/attach-detach-concurrent-known-subjects`
 - Commit: `c279d4f2`
 - Files changed: `src/Namotion.Interceptor.Registry/SubjectRegistry.cs` (+30 / -23)
-- Notes: `_knownSubjects` switched to `ConcurrentDictionary`, lock-free reads via `TryGetValue`, multi-step transactions moved under a new `_writeLock`. All 109 Registry and 199 Tracking tests pass. Standalone, the snapshot read regresses sharply (1.47 ms / 400 KB) because this branch does NOT carry candidate 1's cache. Without the cache, `KnownSubjects` rebuilds from `ConcurrentDictionary.ToArray()` on every call, which is more expensive than `Dictionary.ToImmutableDictionary()`. The expected real value of this change is in concurrent write paths once layered on top of candidate 1's cache. The existing benchmark suite is single-threaded, so we cannot measure the write-contention benefit directly; Phase 3 combined benchmark will show whether `cache + concurrent` improves on `cache + dictionary` for the existing benchmarks.
+- Notes: `_knownSubjects` switched to `ConcurrentDictionary`, lock-free reads via `TryGetValue`, multi-step transactions moved under a new `_writeLock`. All 109 Registry and 199 Tracking tests pass. Compared against master (the script bug at the time forced master as base; now fixed). `AddLotsOfPreviousCars` regresses ~8 percent. `KnownSubjectsSnapshot` reports 1.47 ms / 400 KB but has no master baseline (the benchmark only exists on the parent branch), so this is an absolute number, not a delta. The win this candidate is meant to capture (lock contention on concurrent writes) is not exercised by the single-threaded benchmark suite. The existing 8-percent regression on the bulk-attach path is the only signed delta vs base.
 
 | Method                  | Mean (master)    | Mean (candidate)   | Allocated (master) | Allocated (candidate) |
 |-------------------------|-----------------:|-------------------:|-------------------:|----------------------:|
@@ -99,7 +99,11 @@ Hoist `SubjectAttached` / `SubjectDetaching` invocation outside the lock. Buffer
 
 #### Results
 
-(pending)
+- Status: skipped
+- Reason: not benchmarkable with the current setup, and the implementation collides with a documented invariant. Concretely:
+  - The `RegistryBenchmark` suite has no external subscribers wired to `SubjectAttached` / `SubjectDetaching`. Internal handlers route through `ILifecycleHandler.HandleLifecycleChange`, which we do NOT move out of the lock. With no subscriber work happening under the lock in the benchmark setup, hoisting the events shows no measurable delta.
+  - `SubjectDetaching` is documented (XML doc on the event) and tested (`LifecycleEventsTests.SubjectAttached_FiresAfterHandler_And_SubjectDetaching_FiresBeforeHandler`) to fire BEFORE the lifecycle handler, so detach subscribers see the full graph. Hoisting both events outside the lock inverts the detach-side ordering, breaks the test, and silently weakens a public-facing guarantee. A partial implementation that hoists only `SubjectAttached` would preserve semantics but reduce the already-invisible win.
+- Recommendation: revisit if and when a benchmark exercises external subscribers under contention. Out of scope for this pass.
 
 ### 4. batch-collection-mutations
 
