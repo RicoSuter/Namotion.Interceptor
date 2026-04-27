@@ -191,4 +191,24 @@ Lock-free fast path in `WriteProperty` for `ReferenceEquals(lastProcessed, newVa
 
 #### Results
 
-(pending)
+- Status: success (LaunchCount=1 numbers inconclusive; mostly noise but possibly a real regression on the locked path)
+- Branch: `performance/attach-detach-lock-free-equality-check`
+- Commit: `c8230995`
+- Files changed: `src/Namotion.Interceptor.Tracking/Lifecycle/LifecycleInterceptor.cs` (+22 / -4)
+- Notes: `_lastProcessedValues` switched to `ConcurrentDictionary`. Added a lock-free `TryGetValue` + `ReferenceEquals` early-out before lock acquisition in `WriteProperty`. Locked path retains the existing double-checked re-read so concurrent updates between fast-path and lock acquisition are caught. All mutating sites still hold the `_attachedSubjects` lock; only `Remove` -> `TryRemove` rename was needed. All Tracking + Registry unit tests pass (one transient flake in `Hosting.Tests` due to a `Task.Delay(100)` race, unrelated, passes on rerun).
+
+| Method                  | Mean (parent) | Mean (candidate) | Δ Mean | Allocated (parent) | Allocated (candidate) |
+|-------------------------|--------------:|-----------------:|-------:|-------------------:|----------------------:|
+| AddLotsOfPreviousCars   | 56,115,551 ns | 66,724,678 ns    | +18.9% | 22,416,617 B       | 22,656,715 B          |
+| IncrementDerivedAverage | 4,467 ns      | 5,088 ns         | +13.9% | 128 B              | 128 B                 |
+| Write                   | 282 ns        | 324 ns           | +14.9% | 0 B                | 0 B                   |
+| Read                    | 304 ns        | 350 ns           | +15.3% | 0 B                | 0 B                   |
+| DerivedAverage          | 199 ns        | 220 ns           | +10.8% | 0 B                | 0 B                   |
+| ChangeAllTires          | 10,282 ns     | 12,233 ns        | +19.0% | 16,064 B           | 16,064 B              |
+| GetOrAddSubjectId       | 19.3 ns       | 22.9 ns          | +18.5% | 0 B                | 0 B                   |
+| GenerateSubjectId       | 561 ns        | 668 ns           | +19.0% | 72 B               | 72 B                  |
+| KnownSubjectsSnapshot   | 985,419 ns    | 1,147,515 ns     | +16.4% | 320,472 B          | 320,472 B             |
+
+Every benchmark regressed by a similar ~15 percent, including `GenerateSubjectId` (a static method that does not touch any code path this candidate modifies) and `Write`/`Read` (which target value-type properties that never enter `WriteProperty`'s subject-containing branch). That across-the-board shift on impossible-to-affect benchmarks is the same baseline-drift noise pattern seen in candidates 5 and 6 at LaunchCount=1.
+
+That said: this candidate is the most likely of all seven to actually slow down the locked path even when the fast-path saves a lock acquisition, because `ConcurrentDictionary` has higher per-op overhead than `Dictionary` even uncontended, and the existing benchmarks always assign a fresh value (the fast path NEVER triggers in them). Phase 3 LaunchCount=3 will tell whether candidate 7 is a real regression or noise. If the existing benchmark suite cannot demonstrate a win, this candidate may need a dedicated benchmark that exercises the "same-reference write" pattern to justify keeping it.
