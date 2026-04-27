@@ -75,7 +75,23 @@ Replace `_knownSubjects` `Dictionary + lock` with `ConcurrentDictionary` (the au
 
 #### Results
 
-(pending)
+- Status: success (regression — recommend rejecting)
+- Branch: `performance/attach-detach-concurrent-known-subjects`
+- Commit: `c279d4f2`
+- Files changed: `src/Namotion.Interceptor.Registry/SubjectRegistry.cs` (+30 / -23)
+- Notes: `_knownSubjects` switched to `ConcurrentDictionary`, lock-free reads via `TryGetValue`, multi-step transactions moved under a new `_writeLock`. All 109 Registry and 199 Tracking tests pass. The regression is on the snapshot path: `KnownSubjects` rebuilds from `ConcurrentDictionary.ToArray()` which costs 1.47 ms and 400 KB per call (vs 1.8 ns / 0 B with the cache from candidate 1, and the original Dictionary baseline is missing because `KnownSubjectsSnapshot` doesn't exist on master). The hot path here is the snapshot, not concurrent writes, so this candidate is dominated by candidate 1.
+
+| Method                  | Mean (master)    | Mean (candidate)   | Allocated (master) | Allocated (candidate) |
+|-------------------------|-----------------:|-------------------:|-------------------:|----------------------:|
+| AddLotsOfPreviousCars   | 77,977,910 ns    | 84,356,741 ns (+8%)| 22,416,634 B       | 22,656,712 B          |
+| IncrementDerivedAverage | 6,469 ns         | 6,160 ns           | 128 B              | 128 B                 |
+| Write                   | 387 ns           | 394 ns             | 0 B                | 0 B                   |
+| Read                    | 427 ns           | 420 ns             | 0 B                | 0 B                   |
+| DerivedAverage          | 276 ns           | 278 ns             | 0 B                | 0 B                   |
+| ChangeAllTires          | 14,588 ns        | 14,971 ns          | 16,064 B           | 16,256 B              |
+| GetOrAddSubjectId       | 27.8 ns          | 27.9 ns            | 0 B                | 0 B                   |
+| GenerateSubjectId       | 827 ns           | 821 ns             | 72 B               | 72 B                  |
+| KnownSubjectsSnapshot   | (not on master)  | 1,473,572 ns       | (not on master)    | 400,520 B             |
 
 ### 3. events-outside-lock
 
