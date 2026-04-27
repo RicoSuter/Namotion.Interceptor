@@ -49,7 +49,25 @@ Cache the `KnownSubjects` snapshot. Maintain a lazily rebuilt `ImmutableDictiona
 
 #### Results
 
-(pending)
+- Status: success
+- Branch: `performance/attach-detach-cache-known-subjects`
+- Commit: `9112081f`
+- Files changed: `src/Namotion.Interceptor.Registry/SubjectRegistry.cs` (+17 / -2)
+- Notes: Added `_knownSubjectsSnapshot` field. `KnownSubjects` getter does a lock-free `Volatile.Read` first; on miss it locks, double-checks, builds the snapshot, and stores via `Volatile.Write`. Invalidation (set to null) added at the two `_knownSubjects` mutation sites under the lock. Comparison ran against `master` instead of the parent perf branch (script ignored `-BaseBranch`); the absolute numbers are still meaningful since master had no baseline benchmark for this method.
+
+| Method                  | Mean (master)   | Mean (candidate) | Allocated (master) | Allocated (candidate) |
+|-------------------------|----------------:|-----------------:|-------------------:|----------------------:|
+| AddLotsOfPreviousCars   | 80,446,703 ns   | 79,142,265 ns    | 22,416,635 B       | 22,416,635 B          |
+| IncrementDerivedAverage | 6,450 ns        | 6,264 ns         | 128 B              | 128 B                 |
+| Write                   | 408 ns          | 397 ns           | 0 B                | 0 B                   |
+| Read                    | 426 ns          | 424 ns           | 0 B                | 0 B                   |
+| DerivedAverage          | 280 ns          | 274 ns           | 0 B                | 0 B                   |
+| ChangeAllTires          | 15,021 ns       | 14,460 ns        | 16,064 B           | 16,064 B              |
+| GetOrAddSubjectId       | 28.3 ns         | 27.7 ns          | 0 B                | 0 B                   |
+| GenerateSubjectId       | 836 ns          | 822 ns           | 72 B               | 72 B                  |
+| KnownSubjectsSnapshot   | (not on master) | 1.801 ns         | (not on master)    | 0 B                   |
+
+`KnownSubjectsSnapshot` is now constant-time and zero-allocation. The previous `ToImmutableDictionary()` of a 1001-subject graph produced significant per-call allocation; the cached path skips it entirely. Other benchmarks within noise.
 
 ### 2. concurrent-known-subjects
 
