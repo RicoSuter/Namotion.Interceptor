@@ -139,25 +139,32 @@ Inline the single-parent case in `RegisteredSubject._parents`. Most subjects hav
 
 #### Results
 
-- Status: success (small allocation drop on bulk attach; mean numbers within run-to-run noise at LaunchCount=1)
+- Status: success — but **net negative** at LaunchCount=3 on the targeted bulk-attach path (recommend reject)
 - Branch: `performance/attach-detach-inline-single-parent`
 - Commit: `7e71b7f2`
 - Files changed: `src/Namotion.Interceptor.Registry/Abstractions/RegisteredSubject.cs` (+119 / -14)
 - Notes: Replaced `_parents` `ImmutableArray` with inline-storage layout: `_firstParent` struct + `_hasFirstParent` flag + nullable `_additionalParents` `List`, plus a cached `_parentsSnapshot` invalidated on mutation. Common case (one parent) avoids the per-add `ImmutableArray` allocation. Promotion / demotion logic handles the transition between zero, one, and many parents. All 1497 unit tests pass (Registry 109, Tracking 199, full suite green). No public API change. Locking unchanged.
 
-| Method                  | Mean (parent) | Mean (candidate) | Δ Mean | Allocated (parent) | Allocated (candidate) | Δ Allocated |
-|-------------------------|--------------:|-----------------:|-------:|-------------------:|----------------------:|------------:|
-| AddLotsOfPreviousCars   | 57,205,844 ns | 55,106,307 ns    | -3.7%  | 22,416,667 B       | 22,257,372 B          | -159 KB     |
-| IncrementDerivedAverage | 4,285 ns      | 4,287 ns         | flat   | 128 B              | 128 B                 | 0           |
-| Write                   | 270 ns        | 272 ns           | flat   | 0 B                | 0 B                   | 0           |
-| Read                    | 285 ns        | 289 ns           | +1.4%  | 0 B                | 0 B                   | 0           |
-| DerivedAverage          | 189 ns        | 192 ns           | flat   | 0 B                | 0 B                   | 0           |
-| ChangeAllTires          | 10,113 ns     | 13,992 ns        | +38%   | 16,064 B           | 15,936 B              | -128 B      |
-| GetOrAddSubjectId       | 18.9 ns       | 22.1 ns          | +17%   | 0 B                | 0 B                   | 0           |
-| GenerateSubjectId       | 545 ns        | 650 ns           | +19%   | 72 B               | 72 B                  | 0           |
-| KnownSubjectsSnapshot   | 938,490 ns    | 1,147,613 ns     | +22%   | 320,472 B          | 320,472 B             | 0           |
+LaunchCount=3 results (replaces the earlier LaunchCount=1 numbers, which were dominated by baseline drift):
 
-Caveat on the Δ Mean column: the parent perf branch's own LaunchCount=1 numbers shifted ~30 percent between the candidate 4 run and this one (no parent commits in between), so single-launch comparisons here are dominated by environmental noise. `GenerateSubjectId` and `KnownSubjectsSnapshot` show large positive deltas despite touching code paths this candidate did not modify, which is a clear noise signature. The targeted win shows up in the allocation column (159 KB drop on the 1000-element bulk attach, plus a small mean drop on the same benchmark). Phase 3 combined benchmark at LaunchCount=3 will give a defensible verdict on the cross-cutting deltas.
+| Method                  | Mean (parent)   | Mean (candidate) | Δ Mean | Allocated (parent) | Allocated (candidate) | Δ Allocated |
+|-------------------------|----------------:|-----------------:|-------:|-------------------:|----------------------:|------------:|
+| AddLotsOfPreviousCars   | 54,959,038 ns   | 64,635,493 ns    | +17.6% | 22,416,691 B       | 22,257,019 B          | -159 KB     |
+| IncrementDerivedAverage | 4,242 ns        | 4,969 ns         | +17.1% | 128 B              | 128 B                 | 0           |
+| Write                   | 268.86 ns       | 322.63 ns        | +20.0% | 0 B                | 0 B                   | 0           |
+| Read                    | 290.38 ns       | 362.01 ns        | +24.7% | 0 B                | 0 B                   | 0           |
+| DerivedAverage          | 196.20 ns       | 206.29 ns        | +5.1%  | 0 B                | 0 B                   | 0           |
+| ChangeAllTires          | 11,571 ns       | 9,784 ns         | -15.4% | 16,064 B           | 15,936 B              | -128 B      |
+| GetOrAddSubjectId       | 20.85 ns        | 18.94 ns         | -9.2%  | 0 B                | 0 B                   | 0           |
+| GenerateSubjectId       | 595.60 ns       | 533.17 ns        | -10.5% | 72 B               | 72 B                  | 0           |
+| KnownSubjectsSnapshot   | 1,103,203 ns    | 917,887 ns       | -16.8% | 320,472 B          | 320,472 B             | 0           |
+
+Cross-cutting noise is still visible: `Write`, `Read`, `DerivedAverage`, `GenerateSubjectId`, `KnownSubjectsSnapshot`, and `GetOrAddSubjectId` all post double-digit deltas in different directions despite the candidate not touching their code paths. Three LaunchCounts is not enough to fully suppress system-level drift on this run. The signed deltas that *can* plausibly be attributed to the candidate are:
+
+- `AddLotsOfPreviousCars`: +17.6% mean, -159 KB allocated. The 1000-subject bulk attach pays for the new cache-rebuild path on every read after every parent mutation, and the saved `ImmutableArray` allocation is not enough to offset the per-mutation overhead.
+- `ChangeAllTires`: -15.4% mean, -128 B allocated. The smaller bulk-attach path benefits because the cache-rebuild is amortized across far fewer mutations.
+
+Net judgment: the candidate trades CPU on the largest hot path (1000-subject attach) for a 159 KB allocation drop. The mean regression on the dominant bulk-attach scenario outweighs the allocation win. Same conclusion as candidate 4. Recommend rejecting.
 
 ### 6. inline-attached-references
 
