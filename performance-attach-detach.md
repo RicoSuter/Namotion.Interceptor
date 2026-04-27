@@ -165,7 +165,25 @@ Inline-storage for `_attachedSubjects[subject]`. Replace the per-subject `HashSe
 
 #### Results
 
-(pending)
+- Status: success (clean allocation win on bulk attach paths)
+- Branch: `performance/attach-detach-inline-attached-references`
+- Commit: `38aa3d71`
+- Files changed: `src/Namotion.Interceptor.Tracking/Lifecycle/LifecycleInterceptor.cs` (+111 / -6)
+- Notes: Replaced `Dictionary<IInterceptorSubject, HashSet<PropertyReference>>` with `Dictionary<IInterceptorSubject, PropertyReferenceSet>` where `PropertyReferenceSet` is a private struct holding the first reference inline and only allocating a backing `HashSet` for the second-and-beyond references. Invariant: `Additional` never duplicates `First`. Used `CollectionsMarshal.GetValueRefOrAddDefault` and `CollectionsMarshal.GetValueRefOrNullRef` to mutate the dictionary value slot in place; without these the struct copy semantics would silently drop mutations. Lock scope and ordering unchanged. Public surface unchanged. All Registry + Tracking unit tests pass.
+
+| Method                  | Mean (parent) | Mean (candidate) | Δ Mean | Allocated (parent) | Allocated (candidate) | Δ Allocated |
+|-------------------------|--------------:|-----------------:|-------:|-------------------:|----------------------:|------------:|
+| AddLotsOfPreviousCars   | 56,958,413 ns | 52,468,750 ns    | -7.9%  | 22,416,667 B       | 20,456,707 B          | **-1.96 MB**|
+| IncrementDerivedAverage | 4,373 ns      | 4,443 ns         | +1.6%  | 128 B              | 128 B                 | 0           |
+| Write                   | 278 ns        | 284 ns           | +2.2%  | 0 B                | 0 B                   | 0           |
+| Read                    | 299 ns        | 323 ns           | +8.0%  | 0 B                | 0 B                   | 0           |
+| DerivedAverage          | 200 ns        | 204 ns           | +2.3%  | 0 B                | 0 B                   | 0           |
+| ChangeAllTires          | 10,163 ns     | 10,250 ns        | +0.9%  | 16,064 B           | 14,496 B              | -1,568 B    |
+| GetOrAddSubjectId       | 19.3 ns       | 22.6 ns          | +17%   | 0 B                | 0 B                   | 0           |
+| GenerateSubjectId       | 554 ns        | 652 ns           | +18%   | 72 B               | 72 B                  | 0           |
+| KnownSubjectsSnapshot   | 980,247 ns    | 1,123,147 ns     | +14.6% | 320,472 B          | 320,472 B             | 0           |
+
+The targeted allocation drop is clear: each subject in the bulk attach now skips a per-subject `HashSet` allocation (~2 KB per subject × 1000 subjects ~= 2 MB saved on `AddLotsOfPreviousCars`, plus ~1.5 KB saved on the smaller `ChangeAllTires`). `GenerateSubjectId` and `KnownSubjectsSnapshot` regressing despite untouched code paths and identical allocations is the same noise signature seen in candidate 5; LaunchCount=3 in Phase 3 will settle whether any cross-cutting mean delta is real.
 
 ### 7. lock-free-equality-check
 
