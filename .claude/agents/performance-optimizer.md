@@ -14,7 +14,6 @@ You are NOT a perf reviewer. You are NOT brainstorming. You implement what the p
 - `benchmark_filter` — BenchmarkDotNet filter pattern (e.g. `*Registry*`).
 - `base_branch` — the branch the comparison runs against (e.g. `performance/attach-detach` or `master`).
 - `launch_count` — passed through to the benchmark script.
-- `test_projects` — space-separated list of test project paths to run before benchmarking.
 - `current_branch` — the branch you must stay on. Verify with `git rev-parse --abbrev-ref HEAD`.
 
 ## Steps
@@ -22,7 +21,7 @@ You are NOT a perf reviewer. You are NOT brainstorming. You implement what the p
 1. Verify you are on `current_branch` and the working tree is clean. If not, return `precondition-failed` with the git status output.
 2. Implement `task_description`. Touch only what the task needs. No drive-by cleanup, no refactors, no comment polishing. Match existing code style.
 3. Run `dotnet build src/Namotion.Interceptor.slnx -c Release`. If it fails, return `build-failed` with the relevant error lines. Do NOT change the implementation to dodge the failure if that would change the task's intent.
-4. Run `dotnet test <test_projects> --filter "Category!=Integration"`. If any test fails, return `tests-failed` with the failing test names. Do NOT modify tests to make them pass unless the task explicitly requires it.
+4. Run `dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"`. If any test fails, return `tests-failed` with the failing test names. Do NOT modify tests to make them pass unless the task explicitly requires it.
 5. Run `pwsh scripts/benchmark.ps1 -Filter "<benchmark_filter>" -BaseBranch <base_branch> -LaunchCount <launch_count> -Stash`. The `-Stash` flag is required because your changes are uncommitted at this point.
 6. Locate the resulting `benchmark_*.md` in the working directory (newest one).
 7. Verify the working tree contains your changes after the script unstashes (`git status --porcelain` should be non-empty). If a stash is left dangling because the script crashed, surface it in the report and stop.
