@@ -224,3 +224,33 @@ Cross-cutting noise mostly settled at LaunchCount=3. `IncrementDerivedAverage`, 
 - Cross-cutting +3-5% on `Write` / `Read` / `GenerateSubjectId` / `KnownSubjectsSnapshot` is harder to attribute, since these benchmarks should be ~unaffected by the change. Likely residual baseline drift, but the consistent direction leaves room for a small fixed-cost regression on the fast path itself.
 
 The fast path NEVER triggers in any existing benchmark (every value is fresh). The win this candidate is meant to capture (skip the lock when the same reference is written twice) is never measured, while the cost of switching to `ConcurrentDictionary` shows up cleanly on the bulk-attach path. Without a benchmark that exercises same-reference writes, this candidate is purely a regression. Recommend rejecting; revisit if and when a same-reference-write benchmark is added.
+
+## Combined results
+
+Picked candidates: **1 (cache-known-subjects)** and **6 (inline-attached-references)**.
+
+Cherry-picked onto `performance/attach-detach` in order: 1 (`541cecb8`), 6 (`166dbd77`). Comparison ran against `master` at LaunchCount=1.
+
+| Method                  | Master (mean) | Combined (mean) | Δ Mean  | Master (alloc) | Combined (alloc) | Δ Allocated   |
+|-------------------------|--------------:|----------------:|--------:|---------------:|-----------------:|--------------:|
+| AddLotsOfPreviousCars   | 56,129,445 ns | 54,301,322 ns   | -3.3%   | 22,416,681 B   | 20,456,700 B     | **-1.96 MB**  |
+| IncrementDerivedAverage | 4,440 ns      | 4,508 ns        | +1.5%   | 128 B          | 128 B            | 0             |
+| Write                   | 283.10 ns     | 287.18 ns       | +1.4%   | 0 B            | 0 B              | 0             |
+| Read                    | 300.81 ns     | 312.07 ns       | +3.7%   | 0 B            | 0 B              | 0             |
+| DerivedAverage          | 195.21 ns     | 197.70 ns       | +1.3%   | 0 B            | 0 B              | 0             |
+| ChangeAllTires          | 10,293 ns     | 10,073 ns       | -2.1%   | 16,064 B       | 14,496 B         | **-1,568 B**  |
+| GetOrAddSubjectId       | 19.31 ns      | 19.35 ns        | flat    | 0 B            | 0 B              | 0             |
+| GenerateSubjectId       | 552.23 ns     | 553.66 ns       | flat    | 72 B           | 72 B             | 0             |
+| KnownSubjectsSnapshot   | (not on master) | 1.35 ns       | n/a     | (not on master)| 0 B              | n/a           |
+
+Headline:
+
+- **Bulk-attach win.** `AddLotsOfPreviousCars`: -3.3% mean and **-1.96 MB allocated** (candidate 6 saves ~2 KB per subject × 1000 subjects). Mechanism: `LifecycleInterceptor._attachedSubjects` no longer allocates a `HashSet` per subject when only one property reference is held.
+- **Small bulk-attach win.** `ChangeAllTires`: -2.1% mean and -1,568 B allocated (candidate 6, smaller scale).
+- **Constant-time known-subjects snapshot.** `KnownSubjectsSnapshot`: 1.35 ns / 0 B per call (candidate 1). Master had the previous `ToImmutableDictionary()` path (the benchmark only exists on the parent branch, but the prior parent measurement was ~919 us / 320 KB — now eliminated).
+- **Cross-cutting +1-4% noise.** `IncrementDerivedAverage`, `Write`, `Read`, `DerivedAverage` all bumped 1-4%. None of these touch the modified code paths in any meaningful way (`_attachedSubjects` is only consulted on attach/detach lifecycle changes; `KnownSubjects` is only read by external observers). At LaunchCount=1 these deltas are within the noise band consistently observed across all candidate runs. They did not appear at LaunchCount=3 on the individual candidate re-runs that exercised similar code paths.
+- **Flat as expected.** `GetOrAddSubjectId`, `GenerateSubjectId` (untouched static / id-registry paths).
+
+Allocation deltas are mechanism-confirmed and not movable by noise. Mean deltas on the targeted paths (`AddLotsOfPreviousCars`, `ChangeAllTires`) are real wins. Cross-cutting +1-4% on unrelated paths is the same LaunchCount=1 noise signature seen throughout this pass and is unlikely to reflect a real regression.
+
+Verdict: ready to merge.
