@@ -75,11 +75,11 @@ Replace `_knownSubjects` `Dictionary + lock` with `ConcurrentDictionary` (the au
 
 #### Results
 
-- Status: success (regression — recommend rejecting)
+- Status: success (standalone regression on snapshot read; combined value with candidate 1 to be checked in Phase 3)
 - Branch: `performance/attach-detach-concurrent-known-subjects`
 - Commit: `c279d4f2`
 - Files changed: `src/Namotion.Interceptor.Registry/SubjectRegistry.cs` (+30 / -23)
-- Notes: `_knownSubjects` switched to `ConcurrentDictionary`, lock-free reads via `TryGetValue`, multi-step transactions moved under a new `_writeLock`. All 109 Registry and 199 Tracking tests pass. The regression is on the snapshot path: `KnownSubjects` rebuilds from `ConcurrentDictionary.ToArray()` which costs 1.47 ms and 400 KB per call (vs 1.8 ns / 0 B with the cache from candidate 1, and the original Dictionary baseline is missing because `KnownSubjectsSnapshot` doesn't exist on master). The hot path here is the snapshot, not concurrent writes, so this candidate is dominated by candidate 1.
+- Notes: `_knownSubjects` switched to `ConcurrentDictionary`, lock-free reads via `TryGetValue`, multi-step transactions moved under a new `_writeLock`. All 109 Registry and 199 Tracking tests pass. Standalone, the snapshot read regresses sharply (1.47 ms / 400 KB) because this branch does NOT carry candidate 1's cache. Without the cache, `KnownSubjects` rebuilds from `ConcurrentDictionary.ToArray()` on every call, which is more expensive than `Dictionary.ToImmutableDictionary()`. The expected real value of this change is in concurrent write paths once layered on top of candidate 1's cache. The existing benchmark suite is single-threaded, so we cannot measure the write-contention benefit directly; Phase 3 combined benchmark will show whether `cache + concurrent` improves on `cache + dictionary` for the existing benchmarks.
 
 | Method                  | Mean (master)    | Mean (candidate)   | Allocated (master) | Allocated (candidate) |
 |-------------------------|-----------------:|-------------------:|-------------------:|----------------------:|
