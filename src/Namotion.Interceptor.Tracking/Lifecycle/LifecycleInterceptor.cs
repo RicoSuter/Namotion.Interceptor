@@ -1,13 +1,116 @@
 using System.Collections;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 {
-    private readonly Dictionary<IInterceptorSubject, HashSet<PropertyReference>> _attachedSubjects = [];
+    private readonly Dictionary<IInterceptorSubject, PropertyReferenceSet> _attachedSubjects = [];
     private readonly Dictionary<PropertyReference, object?> _lastProcessedValues = new(PropertyReference.Comparer);
+
+    /// <summary>
+    /// Inline-optimized set of PropertyReference values. Holds the first reference inline
+    /// and only allocates a backing HashSet when a second distinct reference is added.
+    /// </summary>
+    private struct PropertyReferenceSet
+    {
+        public bool HasFirst;
+        public PropertyReference First;
+        public HashSet<PropertyReference>? Additional;
+
+        public readonly int Count
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get
+            {
+                if (!HasFirst)
+                {
+                    return 0;
+                }
+
+                return Additional is null ? 1 : 1 + Additional.Count;
+            }
+        }
+
+        public readonly bool IsEmpty
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => !HasFirst && (Additional is null || Additional.Count == 0);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public readonly bool Contains(PropertyReference propertyRef)
+        {
+            if (HasFirst && First.Equals(propertyRef))
+            {
+                return true;
+            }
+
+            return Additional is not null && Additional.Contains(propertyRef);
+        }
+
+        // Invariant: Additional never contains First. Additional holds only the extras.
+
+        public bool Add(PropertyReference propertyRef)
+        {
+            if (!HasFirst)
+            {
+                HasFirst = true;
+                First = propertyRef;
+                return true;
+            }
+
+            if (First.Equals(propertyRef))
+            {
+                return false;
+            }
+
+            Additional ??= new HashSet<PropertyReference>();
+            return Additional.Add(propertyRef);
+        }
+
+        public bool Remove(PropertyReference propertyRef)
+        {
+            if (HasFirst && First.Equals(propertyRef))
+            {
+                if (Additional is null || Additional.Count == 0)
+                {
+                    HasFirst = false;
+                    First = default;
+                    return true;
+                }
+
+                // Migrate one element from Additional into the First slot.
+                PropertyReference promoted;
+                using (var enumerator = Additional.GetEnumerator())
+                {
+                    enumerator.MoveNext();
+                    promoted = enumerator.Current;
+                }
+                Additional.Remove(promoted);
+                First = promoted;
+                if (Additional.Count == 0)
+                {
+                    Additional = null;
+                }
+                return true;
+            }
+
+            if (Additional is null)
+            {
+                return false;
+            }
+
+            var removed = Additional.Remove(propertyRef);
+            if (removed && Additional.Count == 0)
+            {
+                Additional = null;
+            }
+            return removed;
+        }
+    }
 
     [ThreadStatic]
     private static Stack<List<(IInterceptorSubject subject, PropertyReference property, object? index)>>? _listPool;
@@ -84,7 +187,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void AttachToContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
-        var isFirstAttach = _attachedSubjects.TryAdd(subject, []);
+        var isFirstAttach = _attachedSubjects.TryAdd(subject, default);
         if (!isFirstAttach)
         {
             return;
@@ -115,8 +218,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     private void AttachToProperty(IInterceptorSubject subject, IInterceptorSubjectContext context,
         PropertyReference property, object? index)
     {
-        var isFirstAttach = _attachedSubjects.TryAdd(subject, []);
-        if (!_attachedSubjects[subject].Add(property))
+        ref var set = ref CollectionsMarshal.GetValueRefOrAddDefault(_attachedSubjects, subject, out var existed);
+        var isFirstAttach = !existed;
+        if (!set.Add(property))
         {
             return;
         }
@@ -201,12 +305,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         IInterceptorSubject subject, IInterceptorSubjectContext context,
         PropertyReference property, object? index)
     {
-        if (!_attachedSubjects.TryGetValue(subject, out var set) || !set.Remove(property))
+        ref var set = ref CollectionsMarshal.GetValueRefOrNullRef(_attachedSubjects, subject);
+        if (Unsafe.IsNullRef(ref set) || !set.Remove(property))
         {
             return;
         }
 
-        var isLastDetach = set.Count == 0;
+        var isLastDetach = set.IsEmpty;
 
         // Collect children and clean up in a single pass over properties
         List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
