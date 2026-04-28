@@ -6,6 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Namotion.Interceptor is a .NET library for creating trackable object models through automatic property interception using C# 13 partial properties and source generation. It enables property change tracking, derived property updates, and object graph management with zero runtime reflection.
 
+## Priorities
+
+When tradeoffs conflict, prefer in this order:
+
+1. **Correctness** — documented semantics, thread-safety (no data races, no torn reads/writes), quiescent consistency (state agrees once writes settle), existing invariants hold.
+2. **Performance** — minimize allocations and CPU time. Both matter; when they trade, allocations usually win (GC pressure compounds across the host).
+3. **Code style / idiom** — non-idiomatic API is fine when 1 or 2 demand it (e.g., `ImmutableArray<T>` in public API instead of `IEnumerable<T>`).
+
 ## Development Commands
 
 ### Build and Test
