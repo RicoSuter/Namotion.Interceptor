@@ -73,6 +73,8 @@ Cache the `KnownSubjects` snapshot. Maintain a lazily rebuilt `ImmutableDictiona
 
 Replace `_knownSubjects` `Dictionary + lock` with `ConcurrentDictionary` (the author TODO from #67). Keep small write-side coordination only where multi-step atomicity matters.
 
+Follow-up tracked in #273 (needs a multi-threaded contention benchmark to demonstrate the win).
+
 #### Results
 
 - Status: success (regression on `AddLotsOfPreviousCars` ~+8 percent)
@@ -195,6 +197,8 @@ The targeted allocation drop is clear: each subject in the bulk attach now skips
 ### 7. lock-free-equality-check
 
 Lock-free fast path in `WriteProperty` for `ReferenceEquals(lastProcessed, newValue)`. Use `ConcurrentDictionary` for `_lastProcessedValues` so the equality check can happen before the lock.
+
+Follow-up tracked in #273 (needs a same-reference-write benchmark, plus a possibly lighter-weight lock-free pattern than full `ConcurrentDictionary`).
 
 #### Results
 
