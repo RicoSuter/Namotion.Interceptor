@@ -41,7 +41,7 @@ The registry makes it easy to find metadata associated with properties:
 var property = registered.TryGetProperty("Pressure");
 foreach (var attribute in property!.Attributes)
 {
-    Console.WriteLine($"{attribute.AttributeMetadata.AttributeName}: {attribute.Reference.GetValue()}");
+    Console.WriteLine($"{attribute.AttributeMetadata.AttributeName}: {attribute.GetValue()}");
 }
 ```
 
@@ -134,7 +134,7 @@ Use `AddDerivedAttribute` to create computed metadata that updates automatically
 ```csharp
 // Add a derived attribute that computes the maximum based on current value
 pressureProperty.AddDerivedAttribute("DynamicMax", typeof(decimal),
-    getValue: s => ((decimal)pressureProperty.Reference.GetValue()) * 1.5m,
+    getValue: s => ((decimal)pressureProperty.GetValue()!) * 1.5m,
     setValue: null);
 ```
 

@@ -13,7 +13,7 @@ The `Namotion.Interceptor.Mqtt` package provides integration between Namotion.In
 
 ## Client Setup
 
-Connect to an MQTT broker as a subscriber with `AddMqttSubjectClient`. The client automatically establishes connections, subscribes to topics, and synchronizes values with your C# properties.
+Connect to an MQTT broker as a subscriber with `AddMqttSubjectClientSource`. The client automatically establishes connections, subscribes to topics, and synchronizes values with your C# properties.
 
 ```csharp
 [InterceptorSubject]
@@ -26,17 +26,26 @@ public partial class Sensor
     public partial decimal Humidity { get; set; }
 }
 
-builder.Services.AddMqttSubjectClient<Sensor>(
+var builder = Host.CreateApplicationBuilder(args);
+
+var context = InterceptorSubjectContext
+    .Create()
+    .WithFullPropertyTracking()
+    .WithRegistry()
+    .WithHostedServices(builder.Services);
+
+builder.Services.AddSingleton(new Sensor(context));
+builder.Services.AddMqttSubjectClientSource<Sensor>(
     brokerHost: "mqtt.example.com",
-    sourceName: "mqtt",
-    brokerPort: 1883,
+    pathProviderName: "mqtt",
     topicPrefix: "sensors/room1");
 
-// Use in application
-var sensor = serviceProvider.GetRequiredService<Sensor>();
+var host = builder.Build();
+var sensor = host.Services.GetRequiredService<Sensor>();
 await host.StartAsync();
-Console.WriteLine(sensor.Temperature); // Read property synchronized with MQTT broker
-sensor.Temperature = 25.5m; // Publishes to MQTT broker
+
+Console.WriteLine(sensor.Temperature); // Synchronized with broker
+sensor.Temperature = 25.5m;             // Published to broker
 ```
 
 ## Server Setup
@@ -51,15 +60,25 @@ public partial class Device
     public partial string Status { get; set; }
 }
 
+var builder = Host.CreateApplicationBuilder(args);
+
+var context = InterceptorSubjectContext
+    .Create()
+    .WithFullPropertyTracking()
+    .WithRegistry()
+    .WithHostedServices(builder.Services);
+
+builder.Services.AddSingleton(new Device(context));
 builder.Services.AddMqttSubjectServer<Device>(
-    brokerHost: "localhost",
-    sourceName: "mqtt",
+    pathProviderName: "mqtt",
     brokerPort: 1883,
     topicPrefix: "devices/mydevice");
 
-var device = serviceProvider.GetRequiredService<Device>();
-device.Status = "Online"; // Published to all connected MQTT clients
+var host = builder.Build();
+var device = host.Services.GetRequiredService<Device>();
 await host.StartAsync();
+
+device.Status = "Online"; // Published to all connected MQTT clients
 ```
 
 ## Configuration
@@ -69,13 +88,13 @@ await host.StartAsync();
 For advanced scenarios, use the full configuration API to customize connection behavior and MQTT settings.
 
 ```csharp
-builder.Services.AddMqttSubjectClient(
+builder.Services.AddMqttSubjectClientSource(
     subjectSelector: sp => sp.GetRequiredService<Sensor>(),
     configurationProvider: sp => new MqttClientConfiguration
     {
         BrokerHost = "mqtt.example.com",
         BrokerPort = 1883,
-        PathProvider = new AttributeBasedPathProvider("mqtt", "/"),
+        PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
 
         // Authentication
         Username = "user",
@@ -125,7 +144,7 @@ builder.Services.AddMqttSubjectServer(
     {
         BrokerHost = "127.0.0.1", // Optional: bind to specific interface (default: all interfaces)
         BrokerPort = 1883,
-        PathProvider = new AttributeBasedPathProvider("mqtt", "/"),
+        PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
 
         // Connection settings
         ClientId = "my-server-id",

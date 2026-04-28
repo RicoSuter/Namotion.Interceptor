@@ -358,14 +358,14 @@ var referenceCount = subject.GetReferenceCount();
 The `SubjectLifecycleChange` includes `ReferenceCount` after the operation. Use the flags to determine the event type:
 
 ```csharp
-handler.HandleLifecycleChange = change =>
+public void HandleLifecycleChange(SubjectLifecycleChange change)
 {
     if (change.IsContextDetach)
     {
         // Subject leaving graph - safe to clean up
         CleanupResources(change.Subject);
     }
-};
+}
 ```
 
 This enables proper cleanup when subjects are removed from all parent references, even when referenced by multiple properties or collections.

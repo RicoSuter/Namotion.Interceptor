@@ -6,9 +6,9 @@
 
 Namotion.Interceptor is a .NET library for building reactive applications with automatic property tracking and change propagation. It uses **C# 13 partial properties** and **source generation** to transform your classes into observable object graphs, without runtime reflection or proxy objects.
 
-Simply mark your classes with `[InterceptorSubject]` and declare properties as `partial`. The source generator handles the rest: creating interception logic, change detection, derived property updates, and lifecycle management. Your domain models remain clean POCOs while gaining powerful reactive capabilities.
+Mark your classes with `[InterceptorSubject]` and declare properties as `partial`. The source generator handles the rest: creating interception logic, change detection, derived property updates, and lifecycle management. Your domain models remain clean POCOs while gaining reactive capabilities.
 
-The library supports **bidirectional synchronization** with external systems. When a property changes locally, connectors propagate the change outward. When external data arrives, your object model updates and triggers change notifications. Built-in integrations include MQTT, OPC UA, ASP.NET Core, Blazor, and GraphQL, useful for IoT dashboards, industrial HMIs, real-time web apps, and data synchronization services.
+The library supports **bidirectional synchronization** with external systems. When a property changes locally, connectors propagate the change outward. When external data arrives, your object model updates and triggers change notifications. Built-in integrations include MQTT, OPC UA, ASP.NET Core, Blazor, and GraphQL. Typical use cases are IoT dashboards, industrial HMIs, real-time web apps, and data synchronization services.
 
 ![](features.png)
 
@@ -18,7 +18,7 @@ The library supports **bidirectional synchronization** with external systems. Wh
 - **Zero runtime reflection** - All interception logic is generated at compile-time for maximum performance
 - **Bidirectional synchronization** - Connect your object model to MQTT brokers, OPC UA servers, or databases with minimal code
 - **Clean domain models** - Your classes stay as POCOs with simple attributes
-- **INotifyPropertyChanged built-in** - Generated classes implement it automatically, including derived properties, for seamless UI data binding
+- **INotifyPropertyChanged built-in** - Generated classes implement it automatically, including derived properties, for UI data binding
 
 ## Packages
 
@@ -40,7 +40,7 @@ Several extension points let you plug in your own behavior:
 | **Custom Property Validation** | Implement custom validation logic beyond data annotations | [Validation](docs/validation.md) |
 | **Custom Connectors** | Synchronize with any external system (databases, message queues, APIs) | [Connectors](docs/connectors.md) |
 
-The rest of this README walks through each in turn, then lists every package with a documentation link.
+The rest of this README walks through each, then lists every package with a documentation link.
 
 ## Requirements
 
@@ -147,7 +147,7 @@ Property reads and writes flow through a configurable chain of interceptors. Eac
 ```csharp
 public class LoggingInterceptor : IWriteInterceptor
 {
-    public void WriteProperty<T>(ref PropertyWriteContext<T> context, WritePropertyDelegate<T> next)
+    public void WriteProperty<T>(ref PropertyWriteContext<T> context, WriteInterceptionDelegate<T> next)
     {
         Console.WriteLine($"Writing {context.Property.Name} = {context.NewValue}");
         next(ref context);
@@ -159,7 +159,7 @@ var context = InterceptorSubjectContext
     .WithService(() => new LoggingInterceptor());
 ```
 
-Methods can be intercepted similarly: implement `IMethodInterceptor` and suffix your method name with `WithoutInterceptor`. The generator emits a public wrapper (with the suffix dropped) that routes through the chain.
+Methods can be intercepted similarly: implement `IMethodInterceptor` and suffix your method name with `WithoutInterceptor`. The generator emits a wrapper (with the suffix dropped) that routes through the chain.
 
 Interceptor ordering, fallback contexts, and the read/write pipeline diagrams are documented in [Interceptors and Contexts](docs/interceptor.md).
 
@@ -173,7 +173,7 @@ var context = InterceptorSubjectContext
     .WithFullPropertyTracking();
 ```
 
-`WithFullPropertyTracking()` registers equality checking, derived-property change detection, the property-change observable and queue, and context inheritance for child subjects. Each feature can also be enabled individually if you only need part of the package.
+`WithFullPropertyTracking()` registers equality checking, derived-property change detection, the property-change observable and queue, and context inheritance for child subjects.
 
 The samples below use the `Person` class from the Core section above.
 
@@ -224,7 +224,23 @@ Higher-level features rely on this to start and stop work as the graph grows and
 
 > **Note**: Property interceptors only fire when you assign to a property. Mutating a collection in-place (`person.Children[0] = ...`) does not trigger interception. Replace the whole collection instead. See [Subject Design Guidelines](docs/subject-guidelines.md) for details.
 
-For batching multiple property writes into an atomic operation (with read-your-writes consistency, optimistic locking, and rollback on failure), see [Transactions](docs/tracking-transactions.md).
+### Transactions
+
+`WithTransactions()` enables atomic batching: writes inside a transaction are captured and applied together on commit, with notifications firing only after the commit succeeds. Reading a property inside the transaction returns its pending value (read-your-writes), and an uncommitted transaction discards its changes when disposed.
+
+```csharp
+var context = InterceptorSubjectContext
+    .Create()
+    .WithFullPropertyTracking()
+    .WithTransactions();
+
+using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
+person.FirstName = "John";
+person.LastName = "Doe";
+await tx.CommitAsync(cancellationToken);
+```
+
+For source-bound properties, `WithSourceTransactions()` writes to the external system before the local apply, providing confirmed delivery (used in the Connectors section below). See [Transactions](docs/tracking-transactions.md) for locking modes (exclusive vs optimistic), conflict detection, and the multi-stage commit flow.
 
 ## Validation
 
@@ -294,10 +310,10 @@ The MQTT connector illustrates a typical setup. Define your subject with topic m
 [InterceptorSubject]
 public partial class Sensor
 {
-    [Path("mqtt", "temperature")]
+    [Path("mqtt", "Temperature")]
     public partial decimal Temperature { get; set; }
 
-    [Path("mqtt", "humidity")]
+    [Path("mqtt", "Humidity")]
     public partial decimal Humidity { get; set; }
 
     public Sensor()
@@ -308,20 +324,31 @@ public partial class Sensor
 }
 ```
 
-Then register the client:
+Then wire up the host, register the subject, and configure the MQTT client:
 
 ```csharp
-builder.Services.AddMqttSubjectClient<Sensor>(
+var builder = Host.CreateApplicationBuilder(args);
+
+var context = InterceptorSubjectContext
+    .Create()
+    .WithFullPropertyTracking()
+    .WithRegistry()
+    .WithHostedServices(builder.Services);
+
+builder.Services.AddSingleton(new Sensor(context));
+builder.Services.AddMqttSubjectClientSource<Sensor>(
     brokerHost: "mqtt.example.com",
-    sourceName: "mqtt",
-    brokerPort: 1883,
+    pathProviderName: "mqtt",
     topicPrefix: "sensors/room1");
+
+var host = builder.Build();
+await host.StartAsync();
 ```
 
 Property changes now flow in both directions automatically:
 
 ```csharp
-var sensor = serviceProvider.GetRequiredService<Sensor>();
+var sensor = host.Services.GetRequiredService<Sensor>();
 
 // Local change is published to the broker
 sensor.Temperature = 25.5m;
@@ -339,8 +366,7 @@ Integrations expose subjects through .NET host frameworks. They reuse the tracki
 - **[Blazor](docs/blazor.md)** - `<TrackingScope>` automatically re-renders content when any property accessed inside it (or anywhere in its descendant graph) changes. Works with both server and WebAssembly hosting models.
 - **[GraphQL](docs/graphql.md)** - adds a `root` query and a `root` subscription via HotChocolate, streaming property changes to subscribed clients.
 - **[MCP](docs/mcp.md)** *(experimental)* - exposes the subject registry as Model Context Protocol tools (`browse`, `search`, `get_property`, `set_property`, `list_types`) so AI agents can navigate and interact with the object graph.
-
-For background-service scenarios (a subject that runs as `BackgroundService`, or services dynamically attached and detached from a subject), the [Hosting](docs/hosting.md) package wires `WithHostedServices()` into the .NET Generic Host so attach/detach drives `StartAsync`/`StopAsync`.
+- **[Hosting](docs/hosting.md)** - `WithHostedServices()` integrates with the .NET Generic Host so subjects extending `BackgroundService` (or services dynamically attached to subjects) start and stop with attach/detach.
 
 ## Package Reference
 
