@@ -320,4 +320,19 @@ Headline:
 - **Cross-cutting noise minimal.** `Write` +2.9% is the only above-noise drift on an unrelated benchmark; `Read`, `DerivedAverage`, `IncrementDerivedAverage` all flat or slightly negative. The earlier +1-4% noise band on these in the 1+6 run did not reappear with 8 added — consistent with that being LaunchCount=1 drift rather than a real regression.
 - **Flat as expected.** `GetOrAddSubjectId`, `GenerateSubjectId` (untouched static / id-registry paths).
 
+### Write +2.9% bisection (LaunchCount=3, Write only)
+
+Re-ran the Write benchmark in isolation at LaunchCount=3 to confirm whether the +2.9% on the combined run reflects a real regression. Each candidate's branch was benchmarked vs `master` sequentially on the same machine state:
+
+| Run | Branch                                  | Master (mean) | Candidate (mean) | Δ      |
+|-----|-----------------------------------------|--------------:|-----------------:|-------:|
+| 0   | combined 1+6+8                          | 269.0 ns      | 276.3 ns         | +2.7%  |
+| 1   | candidate 1 only                        | 259.0 ns      | 256.9 ns         | -0.8%  |
+| 2   | candidate 6 only                        | 262.3 ns      | 256.0 ns         | -2.4%  |
+| 3   | combined 1+6+8 (re-measure via c8 branch) | 269.5 ns    | 257.1 ns         | -4.6%  |
+
+Run 3 measures the same combined code as run 0 (the candidate 8 branch was created from parent post-1+6 cherry-picks, so it carries 1+6+8). The Δ flipped from +2.7% to -4.6% on identical code. Master's own baseline drifted across runs: 259.0 → 262.3 → 269.0 → 269.5 ns — an ~11 ns swing on unchanged code. The +2.9% / +2.7% reading in the original combined run was within machine-level run-to-run drift, not a real regression.
+
+Conclusion: no Write regression from any candidate. Merge clean.
+
 Verdict: ready to merge. Suggested next step: `gh pr create -B master -H performance/attach-detach`.
