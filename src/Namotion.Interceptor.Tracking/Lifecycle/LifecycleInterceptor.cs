@@ -10,54 +10,24 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     private readonly Dictionary<IInterceptorSubject, PropertyReferenceSet> _attachedSubjects = [];
     private readonly Dictionary<PropertyReference, object?> _lastProcessedValues = new(PropertyReference.Comparer);
 
-    /// <summary>
-    /// Inline-optimized set of PropertyReference values. Holds the first reference inline
-    /// and only allocates a backing HashSet when a second distinct reference is added.
-    /// </summary>
+    // Inline-optimized set of PropertyReference values. Holds the first reference inline
+    // and only allocates a backing HashSet when a second distinct reference is added.
+    // Empty sentinel: First.Subject is null. Invariant: Additional never contains First.
     private struct PropertyReferenceSet
     {
-        public bool HasFirst;
         public PropertyReference First;
         public HashSet<PropertyReference>? Additional;
-
-        public readonly int Count
-        {
-            [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get
-            {
-                if (!HasFirst)
-                {
-                    return 0;
-                }
-
-                return Additional is null ? 1 : 1 + Additional.Count;
-            }
-        }
 
         public readonly bool IsEmpty
         {
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
-            get => !HasFirst && (Additional is null || Additional.Count == 0);
+            get => First.Subject is null;
         }
-
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public readonly bool Contains(PropertyReference propertyRef)
-        {
-            if (HasFirst && First.Equals(propertyRef))
-            {
-                return true;
-            }
-
-            return Additional is not null && Additional.Contains(propertyRef);
-        }
-
-        // Invariant: Additional never contains First. Additional holds only the extras.
 
         public bool Add(PropertyReference propertyRef)
         {
-            if (!HasFirst)
+            if (First.Subject is null)
             {
-                HasFirst = true;
                 First = propertyRef;
                 return true;
             }
@@ -73,21 +43,20 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         public bool Remove(PropertyReference propertyRef)
         {
-            if (HasFirst && First.Equals(propertyRef))
+            if (First.Subject is not null && First.Equals(propertyRef))
             {
                 if (Additional is null || Additional.Count == 0)
                 {
-                    HasFirst = false;
                     First = default;
                     return true;
                 }
 
-                // Migrate one element from Additional into the First slot.
-                PropertyReference promoted;
-                using (var enumerator = Additional.GetEnumerator())
+                // Promote an arbitrary element from Additional into the First slot.
+                PropertyReference promoted = default;
+                foreach (var item in Additional)
                 {
-                    enumerator.MoveNext();
-                    promoted = enumerator.Current;
+                    promoted = item;
+                    break;
                 }
                 Additional.Remove(promoted);
                 First = promoted;

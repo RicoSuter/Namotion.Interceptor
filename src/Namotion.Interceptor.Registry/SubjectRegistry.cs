@@ -196,7 +196,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                         }
 
                         _knownSubjects.Remove(change.Subject);
-                        _knownSubjectsSnapshot = null;
+                        Volatile.Write(ref _knownSubjectsSnapshot, null);
 
                         // Clean up subject ID reverse index
                         if (_subjectIdToSubject.Count > 0)
@@ -236,7 +236,7 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     {
         var registeredSubject = new RegisteredSubject(subject);
         _knownSubjects[subject] = registeredSubject;
-        _knownSubjectsSnapshot = null;
+        Volatile.Write(ref _knownSubjectsSnapshot, null);
         return registeredSubject;
     }
 

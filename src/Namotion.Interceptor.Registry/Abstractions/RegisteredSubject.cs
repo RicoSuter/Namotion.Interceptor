@@ -14,13 +14,16 @@ public class RegisteredSubject
 
     private volatile FrozenDictionary<string, RegisteredSubjectProperty> _properties;
 
-    // Inline single-parent storage: most subjects have exactly one parent,
-    // so we keep the first parent in a nullable struct field and only allocate
-    // an overflow list when a second parent is added. No snapshot cache: the
-    // ImmutableArray view is rebuilt on each Parents read so mutation paths
-    // stay allocation-free in the common single-parent case.
-    private SubjectPropertyParent? _firstParent;
+    // Inline single-parent storage. Most subjects have exactly one parent; the
+    // overflow list is allocated only on the second parent. Empty sentinel:
+    // _firstParent.Property is null (Property is a class, never null on a real entry).
+    private SubjectPropertyParent _firstParent;
     private List<SubjectPropertyParent>? _additionalParents;
+
+    // Lazily built snapshot of Parents. default (IsDefault) == not cached;
+    // invalidated on every mutation so reads return a fresh view but repeated
+    // reads without intervening mutations are allocation-free.
+    private ImmutableArray<SubjectPropertyParent> _parentsSnapshot;
 
     [JsonIgnore] public IInterceptorSubject Subject { get; }
 
@@ -32,10 +35,8 @@ public class RegisteredSubject
 
     /// <summary>
     /// Gets the properties which reference this subject.
-    /// Thread-safe: lock ensures atomic snapshot during read. The result is
-    /// rebuilt on each call (no cached snapshot) to avoid eager allocations
-    /// on every mutation; the common 0/1-parent paths allocate at most one
-    /// single-element ImmutableArray.
+    /// Thread-safe: returns a cached immutable snapshot, rebuilt on demand
+    /// after a mutation invalidates it.
     /// </summary>
     public ImmutableArray<SubjectPropertyParent> Parents
     {
@@ -43,25 +44,34 @@ public class RegisteredSubject
         {
             lock (_lock)
             {
-                if (_firstParent is null)
+                if (_parentsSnapshot.IsDefault)
                 {
-                    return ImmutableArray<SubjectPropertyParent>.Empty;
+                    _parentsSnapshot = BuildParentsSnapshot();
                 }
-
-                if (_additionalParents is null || _additionalParents.Count == 0)
-                {
-                    return ImmutableArray.Create(_firstParent.Value);
-                }
-
-                var builder = ImmutableArray.CreateBuilder<SubjectPropertyParent>(1 + _additionalParents.Count);
-                builder.Add(_firstParent.Value);
-                for (var i = 0; i < _additionalParents.Count; i++)
-                {
-                    builder.Add(_additionalParents[i]);
-                }
-                return builder.MoveToImmutable();
+                return _parentsSnapshot;
             }
         }
+    }
+
+    private ImmutableArray<SubjectPropertyParent> BuildParentsSnapshot()
+    {
+        if (_firstParent.Property is null)
+        {
+            return ImmutableArray<SubjectPropertyParent>.Empty;
+        }
+
+        if (_additionalParents is null || _additionalParents.Count == 0)
+        {
+            return ImmutableArray.Create(_firstParent);
+        }
+
+        var builder = ImmutableArray.CreateBuilder<SubjectPropertyParent>(1 + _additionalParents.Count);
+        builder.Add(_firstParent);
+        for (var i = 0; i < _additionalParents.Count; i++)
+        {
+            builder.Add(_additionalParents[i]);
+        }
+        return builder.MoveToImmutable();
     }
 
     /// <summary>
@@ -130,7 +140,7 @@ public class RegisteredSubject
         lock (_lock)
         {
             var entry = new SubjectPropertyParent { Property = parent, Index = index };
-            if (_firstParent is null)
+            if (_firstParent.Property is null)
             {
                 _firstParent = entry;
             }
@@ -139,6 +149,7 @@ public class RegisteredSubject
                 _additionalParents ??= new List<SubjectPropertyParent>();
                 _additionalParents.Add(entry);
             }
+            _parentsSnapshot = default;
         }
     }
 
@@ -147,9 +158,10 @@ public class RegisteredSubject
         lock (_lock)
         {
             var entry = new SubjectPropertyParent { Property = parent, Index = index };
-            if (_firstParent is { } first && first.Equals(entry))
+            if (_firstParent.Property is not null && _firstParent.Equals(entry))
             {
                 PromoteLastFromAdditional();
+                _parentsSnapshot = default;
                 return;
             }
 
@@ -159,16 +171,22 @@ public class RegisteredSubject
                 if (indexInList >= 0)
                 {
                     _additionalParents.RemoveAt(indexInList);
+                    _parentsSnapshot = default;
                 }
             }
         }
     }
 
+    // Removes all entries whose property matches. Called only during context-detach
+    // cleanup before the subject is dropped from the registry, so the order of any
+    // remaining (non-matching) entries is not observable to callers — we use that
+    // freedom to promote-from-tail when the inline slot matches.
     internal void RemoveParentsByProperty(RegisteredSubjectProperty parent)
     {
         lock (_lock)
         {
-            // Compact the additional list in place (back-to-front to keep removed indices stable).
+            var changed = false;
+
             if (_additionalParents is not null && _additionalParents.Count > 0)
             {
                 for (var i = _additionalParents.Count - 1; i >= 0; i--)
@@ -176,18 +194,20 @@ public class RegisteredSubject
                     if (_additionalParents[i].Property == parent)
                     {
                         _additionalParents.RemoveAt(i);
+                        changed = true;
                     }
                 }
             }
 
-            // After compaction, if the inline first parent matches, promote the last remaining
-            // additional entry (if any) into the inline slot. Doing this last keeps the
-            // semantics matching the previous ImmutableArray-based implementation: we end up
-            // with the same set of remaining entries, regardless of which slot the matching
-            // entry occupied.
-            if (_firstParent is { } first && first.Property == parent)
+            if (_firstParent.Property == parent)
             {
                 PromoteLastFromAdditional();
+                changed = true;
+            }
+
+            if (changed)
+            {
+                _parentsSnapshot = default;
             }
         }
     }
@@ -197,9 +217,10 @@ public class RegisteredSubject
         lock (_lock)
         {
             var oldEntry = new SubjectPropertyParent { Property = property, Index = oldIndex };
-            if (_firstParent is { } first && first.Equals(oldEntry))
+            if (_firstParent.Property is not null && _firstParent.Equals(oldEntry))
             {
                 _firstParent = new SubjectPropertyParent { Property = property, Index = newIndex };
+                _parentsSnapshot = default;
                 return;
             }
 
@@ -209,15 +230,14 @@ public class RegisteredSubject
                 if (indexInList >= 0)
                 {
                     _additionalParents[indexInList] = new SubjectPropertyParent { Property = property, Index = newIndex };
+                    _parentsSnapshot = default;
                 }
             }
         }
     }
 
-    /// <summary>
-    /// Clears the inline first-parent slot, promoting the last entry of the overflow list
-    /// (if any) into the slot via O(1) tail-pop. Caller must hold <see cref="_lock"/>.
-    /// </summary>
+    // Clears the inline first-parent slot, O(1) tail-pop promoting from overflow if any.
+    // Caller must hold _lock and is responsible for snapshot invalidation.
     private void PromoteLastFromAdditional()
     {
         if (_additionalParents is not null && _additionalParents.Count > 0)
@@ -228,7 +248,7 @@ public class RegisteredSubject
         }
         else
         {
-            _firstParent = null;
+            _firstParent = default;
         }
     }
 
