@@ -1,6 +1,7 @@
 ﻿using System.Collections.Frozen;
 using System.Collections.Immutable;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Interceptors;
@@ -20,10 +21,14 @@ public class RegisteredSubject
     private SubjectPropertyParent _firstParent;
     private List<SubjectPropertyParent>? _additionalParents;
 
-    // Lazily built snapshot of Parents. default (IsDefault) == not cached;
-    // invalidated on every mutation so reads return a fresh view but repeated
-    // reads without intervening mutations are allocation-free.
-    private ImmutableArray<SubjectPropertyParent> _parentsSnapshot;
+    // Lazily built cache of Parents. null = not cached. Stored as a raw array
+    // (wrapped to ImmutableArray on read via ImmutableCollectionsMarshal) so
+    // we can use Volatile.Read/Write for a lock-free read fast path; the
+    // ImmutableArray<T> struct can't be read atomically. Mutations invalidate
+    // under _lock; build-and-publish happens under _lock with Volatile.Write,
+    // pairing with the lock-free Volatile.Read so the array contents are
+    // visible to readers that bypass the lock.
+    private SubjectPropertyParent[]? _parentsSnapshot;
 
     [JsonIgnore] public IInterceptorSubject Subject { get; }
 
@@ -35,44 +40,46 @@ public class RegisteredSubject
 
     /// <summary>
     /// Gets the properties which reference this subject.
-    /// Thread-safe: returns a cached immutable snapshot, rebuilt on demand
-    /// after a mutation invalidates it.
+    /// Thread-safe: lock-free read on the cache hit; falls into the lock to
+    /// build and publish on the cache miss.
     /// </summary>
     public ImmutableArray<SubjectPropertyParent> Parents
     {
         get
         {
+            var snapshot = Volatile.Read(ref _parentsSnapshot);
+            if (snapshot is not null)
+                return ImmutableCollectionsMarshal.AsImmutableArray(snapshot);
+
             lock (_lock)
             {
-                if (_parentsSnapshot.IsDefault)
+                snapshot = _parentsSnapshot;
+                if (snapshot is null)
                 {
-                    _parentsSnapshot = BuildParentsSnapshot();
+                    snapshot = BuildParentsSnapshot();
+                    Volatile.Write(ref _parentsSnapshot, snapshot);
                 }
-                return _parentsSnapshot;
+                return ImmutableCollectionsMarshal.AsImmutableArray(snapshot);
             }
         }
     }
 
-    private ImmutableArray<SubjectPropertyParent> BuildParentsSnapshot()
+    private SubjectPropertyParent[] BuildParentsSnapshot()
     {
         if (_firstParent.Property is null)
-        {
-            return ImmutableArray<SubjectPropertyParent>.Empty;
-        }
+            return Array.Empty<SubjectPropertyParent>();
 
         if (_additionalParents is null || _additionalParents.Count == 0)
-        {
-            return ImmutableArray.Create(_firstParent);
-        }
+            return [_firstParent];
 
-        var builder = ImmutableArray.CreateBuilder<SubjectPropertyParent>(1 + _additionalParents.Count);
-        builder.Add(_firstParent);
-        for (var i = 0; i < _additionalParents.Count; i++)
-        {
-            builder.Add(_additionalParents[i]);
-        }
-        return builder.MoveToImmutable();
+        var array = new SubjectPropertyParent[1 + _additionalParents.Count];
+        array[0] = _firstParent;
+        _additionalParents.CopyTo(array, 1);
+        return array;
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void InvalidateParentsSnapshot() => Volatile.Write(ref _parentsSnapshot, null);
 
     /// <summary>
     /// Gets all registered properties.
@@ -149,7 +156,7 @@ public class RegisteredSubject
                 _additionalParents ??= new List<SubjectPropertyParent>();
                 _additionalParents.Add(entry);
             }
-            _parentsSnapshot = default;
+            InvalidateParentsSnapshot();
         }
     }
 
@@ -170,7 +177,7 @@ public class RegisteredSubject
                 if (indexInList >= 0)
                 {
                     _additionalParents.RemoveAt(indexInList);
-                    _parentsSnapshot = default;
+                    InvalidateParentsSnapshot();
                 }
             }
         }
@@ -206,7 +213,7 @@ public class RegisteredSubject
 
             if (changed)
             {
-                _parentsSnapshot = default;
+                InvalidateParentsSnapshot();
             }
         }
     }
@@ -219,7 +226,7 @@ public class RegisteredSubject
             if (_firstParent.Property is not null && _firstParent.Equals(oldEntry))
             {
                 _firstParent = new SubjectPropertyParent { Property = property, Index = newIndex };
-                _parentsSnapshot = default;
+                InvalidateParentsSnapshot();
                 return;
             }
 
@@ -229,7 +236,7 @@ public class RegisteredSubject
                 if (indexInList >= 0)
                 {
                     _additionalParents[indexInList] = new SubjectPropertyParent { Property = property, Index = newIndex };
-                    _parentsSnapshot = default;
+                    InvalidateParentsSnapshot();
                 }
             }
         }
@@ -249,7 +256,7 @@ public class RegisteredSubject
         {
             _firstParent = default;
         }
-        _parentsSnapshot = default;
+        InvalidateParentsSnapshot();
     }
 
     /// <summary>
