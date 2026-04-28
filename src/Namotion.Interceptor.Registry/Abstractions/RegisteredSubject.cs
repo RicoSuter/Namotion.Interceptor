@@ -161,7 +161,6 @@ public class RegisteredSubject
             if (_firstParent.Property is not null && _firstParent.Equals(entry))
             {
                 PromoteLastFromAdditional();
-                _parentsSnapshot = default;
                 return;
             }
 
@@ -177,10 +176,10 @@ public class RegisteredSubject
         }
     }
 
-    // Removes all entries whose property matches. Called only during context-detach
-    // cleanup before the subject is dropped from the registry, so the order of any
-    // remaining (non-matching) entries is not observable to callers — we use that
-    // freedom to promote-from-tail when the inline slot matches.
+    // Called only during context-detach cleanup before the subject is dropped from
+    // the registry, so the order of any remaining (non-matching) entries is not
+    // observable to callers — we use that freedom to promote-from-tail when the
+    // inline slot matches.
     internal void RemoveParentsByProperty(RegisteredSubjectProperty parent)
     {
         lock (_lock)
@@ -236,8 +235,8 @@ public class RegisteredSubject
         }
     }
 
-    // Clears the inline first-parent slot, O(1) tail-pop promoting from overflow if any.
-    // Caller must hold _lock and is responsible for snapshot invalidation.
+    // Clears the inline first-parent slot, O(1) tail-pop promoting from overflow if any,
+    // and invalidates the snapshot. Caller must hold _lock.
     private void PromoteLastFromAdditional()
     {
         if (_additionalParents is not null && _additionalParents.Count > 0)
@@ -250,6 +249,7 @@ public class RegisteredSubject
         {
             _firstParent = default;
         }
+        _parentsSnapshot = default;
     }
 
     /// <summary>
