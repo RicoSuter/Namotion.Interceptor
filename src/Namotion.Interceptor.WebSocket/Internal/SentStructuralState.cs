@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Security.Cryptography;
 using System.Text;
 using Namotion.Interceptor.Connectors.Updates;
+using Namotion.Interceptor.Registry.Abstractions;
 
 namespace Namotion.Interceptor.WebSocket.Internal;
 
@@ -283,5 +284,28 @@ internal sealed class SentStructuralState
         }
 
         return builder.ToString();
+    }
+
+    /// <summary>
+    /// Checks whether the tracked sent-state subjects match the actual registry.
+    /// Returns true if they match, false if divergence is detected.
+    /// Only checks subject presence/absence (not structural content) —
+    /// catches the common case where a CQP-dropped mutation added or removed
+    /// a subject that the server never learned about.
+    /// </summary>
+    public bool MatchesRegistry(ISubjectIdRegistry idRegistry, int registrySubjectCount)
+    {
+        // Quick count check (O(1))
+        if (_subjectStructure.Count != registrySubjectCount)
+            return false;
+
+        // Check each tracked subject exists in registry (O(N))
+        foreach (var subjectId in _subjectStructure.Keys)
+        {
+            if (!idRegistry.TryGetSubjectById(subjectId, out _))
+                return false;
+        }
+
+        return true;
     }
 }

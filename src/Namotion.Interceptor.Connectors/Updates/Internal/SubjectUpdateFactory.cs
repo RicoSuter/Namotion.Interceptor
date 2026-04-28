@@ -17,6 +17,12 @@ internal static class SubjectUpdateFactory
 {
     private static readonly ObjectPool<SubjectUpdateBuilder> BuilderPool = new(() => new SubjectUpdateBuilder());
 
+    /// <summary>Diagnostic: changes serialized via the unregistered-subject fallback path.</summary>
+    internal static long FallbackSerializationCount;
+
+    /// <summary>Diagnostic: changes dropped because the subject had no ID and was unregistered.</summary>
+    internal static long DroppedNoIdCount;
+
     /// <summary>
     /// Creates a complete update with all properties for the given subject.
     /// </summary>
@@ -79,10 +85,14 @@ internal static class SubjectUpdateFactory
         var registeredSubject = subject.TryGetRegisteredSubject();
         if (registeredSubject is null)
         {
-            // Subject is detached (concurrent mutation removed it from the graph).
-            // Still, create an empty properties entry so the client can instantiate the
-            // subject from its type metadata. Future updates will populate properties.
-            builder.GetOrCreateProperties(subjectId);
+            // Subject is in the graph (reachable via structural properties) but momentarily
+            // unregistered — a concurrent structural mutation wrote it to the backing store
+            // but the lifecycle interceptor hasn't processed/registered it yet.
+            // Use the subject's own property metadata to create a complete snapshot.
+            // This avoids producing an empty entry that causes permanent divergence
+            // (empty properties can't converge via re-sync since the applier skips
+            // properties not present in the update).
+            ProcessSubjectFromMetadata(subject, subjectId, builder);
             return;
         }
 
@@ -133,6 +143,7 @@ internal static class SubjectUpdateFactory
             if (droppedId is not null &&
                 changedSubject.Properties.TryGetValue(change.Property.Name, out var fallbackMetadata))
             {
+                Interlocked.Increment(ref FallbackSerializationCount);
                 var fallbackId = builder.GetOrCreateId(changedSubject);
                 var fallbackProps = builder.GetOrCreateProperties(fallbackId);
 
@@ -175,6 +186,10 @@ internal static class SubjectUpdateFactory
                     fallbackUpdate.Kind = SubjectPropertyUpdateKind.Value;
                     fallbackUpdate.Value = change.GetNewValue<object?>();
                 }
+            }
+            else
+            {
+                Interlocked.Increment(ref DroppedNoIdCount);
             }
 
             return;
@@ -409,6 +424,59 @@ internal static class SubjectUpdateFactory
         // Apply the change in place (preserves any existing nested attributes)
         ApplyPropertyChangeToUpdate(attributeUpdate, attributeProperty, change, builder);
         builder.TrackPropertyUpdate(attributeUpdate, attributeProperty, currentUpdate.Attributes);
+    }
+
+    /// <summary>
+    /// Fallback path for subjects that are in the graph but momentarily unregistered.
+    /// Uses the subject's own property metadata (always available, even without registry)
+    /// to create property updates. Skips processor filtering and attribute processing
+    /// since those require registry information.
+    /// </summary>
+    private static void ProcessSubjectFromMetadata(
+        IInterceptorSubject subject,
+        string subjectId,
+        SubjectUpdateBuilder builder)
+    {
+        var properties = builder.GetOrCreateProperties(subjectId);
+
+        foreach (var (propertyName, metadata) in subject.Properties)
+        {
+            if (metadata.GetValue is null || metadata.IsDerived)
+                continue;
+
+            var value = metadata.GetValue.Invoke(subject);
+            var propertyType = metadata.Type;
+
+            var update = new SubjectPropertyUpdate();
+
+            if (propertyType.IsSubjectDictionaryType())
+            {
+                update.Kind = SubjectPropertyUpdateKind.Dictionary;
+                if (value is not null)
+                {
+                    SubjectItemsUpdateFactory.BuildDictionaryComplete(update, value as IDictionary, builder);
+                }
+            }
+            else if (propertyType.IsSubjectCollectionType())
+            {
+                update.Kind = SubjectPropertyUpdateKind.Collection;
+                if (value is not null)
+                {
+                    SubjectItemsUpdateFactory.BuildCollectionComplete(update, value as IEnumerable<IInterceptorSubject>, builder);
+                }
+            }
+            else if (propertyType.IsSubjectReferenceType())
+            {
+                BuildObjectReference(update, value as IInterceptorSubject, builder);
+            }
+            else
+            {
+                update.Kind = SubjectPropertyUpdateKind.Value;
+                update.Value = value;
+            }
+
+            properties[propertyName] = update;
+        }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

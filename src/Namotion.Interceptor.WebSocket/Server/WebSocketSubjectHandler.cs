@@ -9,6 +9,7 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.WebSocket.Protocol;
 using Namotion.Interceptor.WebSocket.Serialization;
 
@@ -32,6 +33,8 @@ public sealed class WebSocketSubjectHandler
     private readonly JsonWebSocketSerializer _serializer = JsonWebSocketSerializer.Instance;
     private readonly ConcurrentDictionary<string, WebSocketClientConnection> _connections = new();
     private readonly Lock _applyUpdateLock = new();
+    private readonly string _filterCachePrefix = $"ws:{Guid.NewGuid():N}";
+    private long _lastBroadcastTicks = Environment.TickCount64;
 
     public IInterceptorSubjectContext Context { get; }
     
@@ -55,6 +58,19 @@ public sealed class WebSocketSubjectHandler
         _logger = logger;
         Context = subject.Context;
         _processors = configuration.Processors;
+
+        // Eagerly cache PathProvider decisions when subjects are attached to the graph.
+        // This ensures the CQP filter cache is populated before any value changes reach
+        // the filter — closing the window where a brand-new subject is unregistered
+        // before its first CQP filter call (cache miss → value drop).
+        if (configuration.PathProvider is not null)
+        {
+            var lifecycle = Context.TryGetLifecycleInterceptor();
+            if (lifecycle is not null)
+            {
+                lifecycle.SubjectAttached += OnSubjectAttachedForFilterCache;
+            }
+        }
     }
     
     public async Task HandleClientAsync(System.Net.WebSockets.WebSocket webSocket, CancellationToken stoppingToken)
@@ -127,6 +143,7 @@ public sealed class WebSocketSubjectHandler
             {
                 welcomeSequence = Volatile.Read(ref _sequence);
                 initialState = SubjectUpdate.CreateCompleteUpdate(_subject, _processors);
+                connection.InitializeSentState(initialState);
             }
 
             // Send Welcome (flushes queued updates under _sendLock)
@@ -228,20 +245,17 @@ public sealed class WebSocketSubjectHandler
         var batchSize = _configuration.WriteBatchSize;
         if (batchSize <= 0 || changes.Length <= batchSize)
         {
-            // Single batch — use complete structural state because multiple concurrent writers
-            // (server mutations + client updates) can cause dedup-based diffs to be incorrect.
-            var (update, sequence) = CreateUpdateWithSequence(changes.Span);
-            await BroadcastUpdateAsync(update, sequence, cancellationToken).ConfigureAwait(false);
+            var (update, sequence, hashes) = CreateUpdateWithSequence(changes.Span);
+            await BroadcastUpdateAsync(update, sequence, hashes, cancellationToken).ConfigureAwait(false);
         }
         else
         {
-            // Multiple batches
             for (var i = 0; i < changes.Length; i += batchSize)
             {
                 var currentBatchSize = Math.Min(batchSize, changes.Length - i);
                 var batch = changes.Slice(i, currentBatchSize);
-                var (update, sequence) = CreateUpdateWithSequence(batch.Span);
-                await BroadcastUpdateAsync(update, sequence, cancellationToken).ConfigureAwait(false);
+                var (update, sequence, hashes) = CreateUpdateWithSequence(batch.Span);
+                await BroadcastUpdateAsync(update, sequence, hashes, cancellationToken).ConfigureAwait(false);
             }
         }
     }
@@ -256,32 +270,48 @@ public sealed class WebSocketSubjectHandler
     /// already been fully created from their change data, preventing stale change data
     /// from being assigned a post-Welcome sequence number.
     /// </remarks>
-    private (SubjectUpdate Update, long Sequence) CreateUpdateWithSequence(ReadOnlySpan<SubjectPropertyChange> changes)
+    private (SubjectUpdate Update, long Sequence, Dictionary<string, string?> ConnectionHashes) CreateUpdateWithSequence(ReadOnlySpan<SubjectPropertyChange> changes)
     {
         lock (_applyUpdateLock)
         {
             var update = SubjectUpdate.CreatePartialUpdateFromChanges(_subject, changes, _processors);
             var sequence = Interlocked.Increment(ref _sequence);
-            return (update, sequence);
+
+            // Update all connections' sent states and compute hashes under the lock.
+            // Both operations must be inside the lock to avoid racing with
+            // InitializeSentState (which runs under the same lock during Welcome).
+            var connectionHashes = new Dictionary<string, string?>(_connections.Count);
+            foreach (var (connectionId, connection) in _connections)
+            {
+                connection.UpdateSentState(update);
+                connectionHashes[connectionId] = connection.ComputeSentStateHash();
+            }
+
+            return (update, sequence, connectionHashes);
         }
     }
 
-    private async Task BroadcastUpdateAsync(SubjectUpdate update, long sequence, CancellationToken cancellationToken)
+    private async Task BroadcastUpdateAsync(SubjectUpdate update, long sequence,
+        Dictionary<string, string?> connectionHashes, CancellationToken cancellationToken)
     {
+        Volatile.Write(ref _lastBroadcastTicks, Environment.TickCount64);
         if (_connections.IsEmpty) return;
 
-        var updatePayload = new UpdatePayload
+        // Per-connection hash: each connection has its own SentStructuralState
+        // initialized from its Welcome. Hashes were pre-computed under _applyUpdateLock.
+        await BroadcastToAllAsync(connection =>
         {
-            Root = update.Root,
-            Subjects = update.Subjects,
-            Sequence = sequence
-        };
-
-        var serializedMessage = _serializer.SerializeMessage(MessageType.Update, updatePayload);
-
-        await BroadcastToAllAsync(
-            connection => connection.SendUpdateAsync(serializedMessage, sequence, cancellationToken),
-            cancellationToken).ConfigureAwait(false);
+            connectionHashes.TryGetValue(connection.ConnectionId, out var hash);
+            var updatePayload = new UpdatePayload
+            {
+                Root = update.Root,
+                Subjects = update.Subjects,
+                Sequence = sequence,
+                StructuralHash = hash
+            };
+            var serializedMessage = _serializer.SerializeMessage(MessageType.Update, updatePayload);
+            return connection.SendUpdateAsync(serializedMessage, sequence, cancellationToken);
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task RunHeartbeatLoopAsync(CancellationToken cancellationToken)
@@ -326,27 +356,38 @@ public sealed class WebSocketSubjectHandler
     {
         if (_connections.IsEmpty) return;
 
-        string? stateHash = null;
-        try
+        // Only send heartbeat if no update was broadcast recently (idle detection)
+        var timeSinceLastBroadcast = Environment.TickCount64 - Volatile.Read(ref _lastBroadcastTicks);
+        if (timeSinceLastBroadcast < _configuration.HeartbeatInterval.TotalMilliseconds)
+            return;
+
+        // Compute per-connection hashes under _applyUpdateLock to avoid racing
+        // with UpdateSentState in CreateUpdateWithSequence (SentStructuralState
+        // uses non-concurrent dictionaries internally).
+        Dictionary<string, (long Sequence, string? Hash)> connectionHashes;
+        lock (_applyUpdateLock)
         {
-            stateHash = Internal.StateHashComputer.ComputeStructuralHash(_subject);
+            var sequence = Volatile.Read(ref _sequence);
+            connectionHashes = new Dictionary<string, (long, string?)>(_connections.Count);
+            foreach (var (connectionId, connection) in _connections)
+            {
+                connectionHashes[connectionId] = (sequence, connection.ComputeSentStateHash());
+            }
         }
-        catch (Exception ex)
+
+        await BroadcastToAllAsync(connection =>
         {
-            _logger.LogWarning(ex, "Failed to compute state hash for heartbeat");
-        }
+            if (!connectionHashes.TryGetValue(connection.ConnectionId, out var entry))
+                return Task.CompletedTask;
 
-        var heartbeat = new HeartbeatPayload
-        {
-            Sequence = Volatile.Read(ref _sequence),
-            StateHash = stateHash
-        };
-
-        var serializedMessage = _serializer.SerializeMessage(MessageType.Heartbeat, heartbeat);
-
-        await BroadcastToAllAsync(
-            connection => connection.SendHeartbeatAsync(serializedMessage, cancellationToken),
-            cancellationToken).ConfigureAwait(false);
+            var heartbeat = new HeartbeatPayload
+            {
+                Sequence = entry.Sequence,
+                StateHash = entry.Hash
+            };
+            var serializedMessage = _serializer.SerializeMessage(MessageType.Heartbeat, heartbeat);
+            return connection.SendHeartbeatAsync(serializedMessage, cancellationToken);
+        }, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task BroadcastToAllAsync(Func<WebSocketClientConnection, Task> sendAsync, CancellationToken cancellationToken)
@@ -386,13 +427,75 @@ public sealed class WebSocketSubjectHandler
 
     public ChangeQueueProcessor CreateChangeQueueProcessor(ILogger logger) =>
         new(source: this, Context,
-            // TODO: Accept unregistered properties to avoid CQP drops during concurrent
-            // structural mutations. ProcessPropertyChange handles serialization fallback.
-            // Revisit: add PathProvider-aware filtering that doesn't drop unregistered subjects.
-            propertyFilter: propertyReference =>
-                propertyReference.TryGetRegisteredProperty() is not { } property ||
-                (_configuration.PathProvider?.IsPropertyIncluded(property) ?? true),
+            propertyFilter: CreatePropertyFilter(),
             writeHandler: BroadcastChangesAsync, BufferTime, logger);
+
+    private void OnSubjectAttachedForFilterCache(SubjectLifecycleChange change)
+    {
+        var pathProvider = _configuration.PathProvider;
+        if (pathProvider is null)
+            return;
+
+        var registeredSubject = change.Subject.TryGetRegisteredSubject();
+        if (registeredSubject is null)
+            return;
+
+        var cachePrefix = _filterCachePrefix;
+        var eagerCacheKey = (cachePrefix, string.Empty);
+
+        if (change.Subject.Data.ContainsKey(eagerCacheKey))
+            return;
+
+        foreach (var property in registeredSubject.Properties)
+        {
+            var key = (cachePrefix, property.Name);
+            change.Subject.Data.GetOrAdd(key, pathProvider.IsPropertyIncluded(property));
+        }
+
+        change.Subject.Data.GetOrAdd(eagerCacheKey, true);
+    }
+
+    private Func<PropertyReference, bool> CreatePropertyFilter()
+    {
+        var pathProvider = _configuration.PathProvider;
+        if (pathProvider is null)
+            return static _ => true;
+
+        var cachePrefix = _filterCachePrefix;
+        var logger = _logger;
+
+        return propertyReference =>
+        {
+            var cacheKey = (cachePrefix, propertyReference.Name);
+
+            // Cache is populated at SubjectAttached time (OnSubjectAttachedForFilterCache).
+            // Fast path: cache hit (lock-free ConcurrentDictionary read).
+            if (propertyReference.Subject.Data.TryGetValue(cacheKey, out var cached)
+                && cached is bool cachedIncluded)
+            {
+                return cachedIncluded;
+            }
+
+            // Cache miss — subject was never attached, or attached before this handler existed.
+            // Try live PathProvider lookup as fallback.
+            var property = propertyReference.TryGetRegisteredProperty();
+            if (property is not null)
+            {
+                var included = pathProvider.IsPropertyIncluded(property);
+                propertyReference.Subject.Data.GetOrAdd(cacheKey, included);
+                return included;
+            }
+
+            // Unregistered and no cache — log for diagnostics.
+            var subjectId = propertyReference.Subject.TryGetSubjectId();
+            logger.LogWarning(
+                "CQP filter drop: {SubjectType}.{Property} (subjectId={SubjectId}, unregistered, no cache entry)",
+                propertyReference.Subject.GetType().Name,
+                propertyReference.Name,
+                subjectId ?? "none");
+            return false;
+        };
+    }
 
     public async ValueTask CloseAllConnectionsAsync()
     {

@@ -196,6 +196,7 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
                         ValueConverter = new OpcUaValueConverter(),
                         SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
                         TelemetryContext = telemetryContext,
+                        WriteRetryQueueSize = 10000,
                     };
                 });
             break;
@@ -210,6 +211,7 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
                     PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
                     DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
                     UseRetainedMessages = true,
+                    WriteRetryQueueSize = 10000,
                     SourceTimestampSerializer = static ts =>
                     {
                         Span<byte> buffer = stackalloc byte[20];

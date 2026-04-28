@@ -13,7 +13,6 @@ using Namotion.Interceptor.ConnectorTester.Logging;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-
 namespace Namotion.Interceptor.ConnectorTester.Engine;
 
 /// <summary>
@@ -144,6 +143,7 @@ public class VerificationEngine : BackgroundService
 
             // 1. Mutate phase
             _coordinator.Resume();
+
             var profileLabel = activeProfileName != null ? $" [profile: {activeProfileName}]" : "";
             _logger.LogInformation("=== Cycle {Cycle}: Mutate phase started ({Duration}){Profile} ===",
                 _cycleNumber, _configuration.MutatePhaseDuration, profileLabel);
@@ -182,6 +182,29 @@ public class VerificationEngine : BackgroundService
                 {
                     convergeStopwatch.Stop();
                     cycleStopwatch.Stop();
+
+                    // Check for structural hash mismatches — these indicate pipeline bugs
+                    // that were auto-healed via reconnection. Fail the cycle so the bug
+                    // is investigated rather than silently masked.
+                    var hashMismatches = _cycleLoggerProvider?.GetHashMismatchWarnings() ?? [];
+                    if (hashMismatches.Count > 0)
+                    {
+                        _logger.LogError(
+                            "=== Cycle {Cycle}: FAIL — {Count} structural hash mismatch(es) detected (pipeline bug auto-healed via reconnection) ===",
+                            _cycleNumber, hashMismatches.Count);
+                        foreach (var mismatch in hashMismatches)
+                        {
+                            _logger.LogError("  {Mismatch}", mismatch);
+                        }
+
+                        WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, "FAIL");
+                        AppendMemoryLog(activeProfileName, "FAIL");
+                        _cycleLoggerProvider?.FinishCycle(_cycleNumber, false);
+
+                        _failed = true;
+                        _applicationLifetime.StopApplication();
+                        return;
+                    }
 
                     WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, "PASS");
                     AppendMemoryLog(activeProfileName, "PASS");
@@ -235,8 +258,20 @@ public class VerificationEngine : BackgroundService
 
                 // Detailed failure diagnostics
                 LogPropertyDiffsWithTimestamps(snapshots);
+                LogBackingStoreCheck(snapshots);
                 LogSequenceDiagnostics();
                 LogReSyncCheck(snapshots);
+
+                // Check if structural hash mismatches occurred during this cycle
+                var hashMismatches = _cycleLoggerProvider?.GetHashMismatchWarnings() ?? [];
+                if (hashMismatches.Count > 0)
+                {
+                    _logger.LogError("Structural hash mismatch(es) detected during this cycle ({Count} total):", hashMismatches.Count);
+                    foreach (var mismatch in hashMismatches)
+                    {
+                        _logger.LogError("  {Mismatch}", mismatch);
+                    }
+                }
 
                 WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, "FAIL");
                 AppendMemoryLog(activeProfileName, "FAIL");
@@ -317,6 +352,67 @@ public class VerificationEngine : BackgroundService
 
         var timestamp = new PropertyReference(subject, propertyName).TryGetWriteTimestamp();
         return timestamp?.ToString("HH:mm:ss.fff");
+    }
+
+    /// <summary>
+    /// For each diverged property, reads the value directly from the backing store
+    /// (bypassing CreateCompleteUpdate/snapshot). If the backing store has a different
+    /// value than the snapshot, the bug is in snapshot creation. If they match, the
+    /// value was truly lost from the graph.
+    /// </summary>
+    private void LogBackingStoreCheck(List<(string Name, string Snapshot)> snapshots)
+    {
+        try
+        {
+            var reference = JsonNode.Parse(snapshots[0].Snapshot)!["subjects"]!.AsObject();
+
+            for (var i = 1; i < snapshots.Count; i++)
+            {
+                var other = JsonNode.Parse(snapshots[i].Snapshot)!["subjects"]!.AsObject();
+
+                foreach (var (subjectId, refSubjectNode) in reference)
+                {
+                    if (refSubjectNode is not JsonObject refProperties || !other.ContainsKey(subjectId))
+                        continue;
+
+                    var otherProperties = other[subjectId]!.AsObject();
+                    foreach (var (propertyName, refValue) in refProperties)
+                    {
+                        var otherValue = otherProperties[propertyName];
+                        if (refValue?.ToJsonString() == otherValue?.ToJsonString())
+                            continue;
+
+                        // Read backing store directly for ALL participants
+                        foreach (var (participantName, participantRoot) in _participants)
+                        {
+                            var idRegistry = ((IInterceptorSubject)participantRoot).Context
+                                .TryGetService<ISubjectIdRegistry>();
+                            if (idRegistry is null || !idRegistry.TryGetSubjectById(subjectId, out var subject))
+                            {
+                                _logger.LogError("  BackingStore[{Participant}]: subject {SubjectId} NOT in registry",
+                                    participantName, subjectId);
+                                continue;
+                            }
+
+                            if (subject.Properties.TryGetValue(propertyName, out var metadata))
+                            {
+                                var backingValue = metadata.GetValue?.Invoke(subject);
+                                var registered = subject.TryGetRegisteredSubject() is not null;
+                                _logger.LogError(
+                                    "  BackingStore[{Participant}].{SubjectId}.{Property} = {Value} (registered={Registered})",
+                                    participantName, subjectId, propertyName, backingValue ?? "(null)", registered);
+                            }
+                        }
+
+                        return; // Only check the first diverged property
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to log backing store check");
+        }
     }
 
     /// <summary>
@@ -482,8 +578,13 @@ public class VerificationEngine : BackgroundService
         return a.ToJsonString() == b.ToJsonString();
     }
 
-    private static string CreateSnapshot(TestNode root)
+    private string CreateSnapshot(TestNode root)
     {
+        if (!_configuration.CompareBySubjectId)
+        {
+            return CreatePathBasedSnapshot(root);
+        }
+
         var update = SubjectUpdate.CreateCompleteUpdate(root, []);
 
         // Serialize to JSON, then normalize the JSON tree for deterministic comparison.
@@ -592,6 +693,55 @@ public class VerificationEngine : BackgroundService
         return result.ToJsonString(SnapshotJsonOptions);
     }
 
+    /// <summary>
+    /// Creates a snapshot based on graph position (path from root) instead of subject IDs.
+    /// Used for connectors like OPC UA and MQTT where each participant has independent subject IDs.
+    /// Only compares value properties — structural topology is expressed implicitly via the path hierarchy.
+    /// </summary>
+    private static string CreatePathBasedSnapshot(TestNode root)
+    {
+        var entries = new SortedDictionary<string, JsonObject>(StringComparer.Ordinal);
+        VisitNodeForSnapshot(root, "ROOT", entries, []);
+        return JsonSerializer.Serialize(entries, SnapshotJsonOptions);
+    }
+
+    private static void VisitNodeForSnapshot(TestNode node, string path,
+        SortedDictionary<string, JsonObject> entries, HashSet<TestNode> visited)
+    {
+        if (!visited.Add(node))
+            return;
+
+        var values = new JsonObject();
+        values["StringValue"] = node.StringValue;
+        values["DecimalValue"] = node.DecimalValue;
+        values["IntValue"] = node.IntValue;
+        entries[path] = values;
+
+        var collection = node.Collection;
+        if (collection is not null)
+        {
+            for (var i = 0; i < collection.Length; i++)
+            {
+                VisitNodeForSnapshot(collection[i], $"{path}/Collection[{i}]", entries, visited);
+            }
+        }
+
+        var items = node.Items;
+        if (items is not null)
+        {
+            foreach (var (key, child) in items.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
+            {
+                VisitNodeForSnapshot(child, $"{path}/Items[{key}]", entries, visited);
+            }
+        }
+
+        var objectRef = node.ObjectRef;
+        if (objectRef is not null)
+        {
+            VisitNodeForSnapshot(objectRef, $"{path}/ObjectRef", entries, visited);
+        }
+    }
+
     private void WriteStatistics(TimeSpan cycleDuration, TimeSpan convergeDuration, string result)
     {
         var totalValueMutations = _mutationEngines.Sum(engine => engine.ValueMutationCount);
@@ -606,6 +756,16 @@ public class VerificationEngine : BackgroundService
             """,
             _cycleNumber, cycleDuration.TotalSeconds, convergeDuration.TotalSeconds,
             totalValueMutations, totalStructuralMutations, totalChaos, result);
+
+        // Applier diagnostics
+        _logger.LogInformation(
+            "  Applier: {Applied:N0} values applied, {Dropped:N0} subjects dropped, {Unknown:N0} unknown props | " +
+            "Factory: {Fallback:N0} fallback serializations, {NoId:N0} no-ID drops",
+            SubjectUpdateExtensions.DiagAppliedValueCount,
+            SubjectUpdateExtensions.DiagDroppedSubjectUpdateCount,
+            SubjectUpdateExtensions.DiagUnknownPropertyCount,
+            SubjectUpdateExtensions.DiagFallbackSerializationCount,
+            SubjectUpdateExtensions.DiagDroppedNoIdCount);
 
         // Per-participant breakdown
         foreach (var engine in _mutationEngines)
@@ -634,6 +794,31 @@ public class VerificationEngine : BackgroundService
         GC.WaitForPendingFinalizers();
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
 
+        // Signal-triggered dump: touch "logs/trigger-dump" to take a gcdump right after forced GC
+        var triggerPath = Path.Combine(Path.GetDirectoryName(MemoryLogPath)!, "trigger-dump");
+        if (File.Exists(triggerPath))
+        {
+            File.Delete(triggerPath);
+            var dumpPath = Path.Combine(Path.GetDirectoryName(MemoryLogPath)!, $"post-gc-cycle-{_cycleNumber}.gcdump");
+            _logger.LogWarning("Triggered post-GC dump: {Path}", dumpPath);
+            try
+            {
+                using var dumpProcess = Process.Start(new ProcessStartInfo
+                {
+                    FileName = "dotnet-gcdump",
+                    Arguments = $"collect -p {Environment.ProcessId} -o {dumpPath}",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                });
+                dumpProcess?.WaitForExit(30_000);
+                _logger.LogWarning("Post-GC dump complete: {Path}", dumpPath);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to collect post-GC dump");
+            }
+        }
+
         using var process = Process.GetCurrentProcess();
         var workingSetMb = process.WorkingSet64 / (1024.0 * 1024.0);
         var heapMb = GC.GetTotalMemory(forceFullCollection: false) / (1024.0 * 1024.0);
@@ -643,6 +828,13 @@ public class VerificationEngine : BackgroundService
             CultureInfo.InvariantCulture,
             "{0:yyyy-MM-ddTHH:mm:ss.fffZ}, Cycle {1}, {2}, {3}, ProcessMB: {4:F1}, HeapMB: {5:F1}",
             DateTimeOffset.UtcNow, _cycleNumber, profile, result, workingSetMb, heapMb);
+
+        // Diagnostic: track GC survivor count per cycle to detect object accumulation.
+        // GCMemoryInfo gives precise post-GC counts after the forced collection above.
+        var gcInfo = GC.GetGCMemoryInfo();
+        var survivorBytes = gcInfo.HeapSizeBytes;
+        var totalObjects = GC.GetTotalAllocatedBytes(precise: false); // cumulative, for rate
+        line += $", SurvivorKB: {survivorBytes / 1024.0:F0}";
 
         // Diagnostic: log registry vs reachable subject counts to distinguish leak from tree growth
         var registryInfo = string.Join(", ", _participants.Select(p =>

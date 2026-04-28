@@ -37,7 +37,7 @@ internal static class SubjectItemsUpdateApplier
         // This builds the full subgraph before it enters the graph, so concurrent
         // mutations that read the backing store after Phase 2 get fully-populated instances.
         // For EXISTING subjects (have context + interceptors): defer to Phase 3 (after rooting).
-        var newItems = new List<(IInterceptorSubject Subject, string Id)>(propertyUpdate.Items.Count);
+        var newItems = new List<(IInterceptorSubject Subject, string Id, bool IsNew)>(propertyUpdate.Items.Count);
         foreach (var itemUpdate in propertyUpdate.Items)
         {
             var (item, isNew) = ResolveOrCreateSubject(
@@ -52,7 +52,7 @@ internal static class SubjectItemsUpdateApplier
                 ApplyPropertiesIfAvailable(item, itemUpdate.Id, context);
             }
 
-            newItems.Add((item, itemUpdate.Id));
+            newItems.Add((item, itemUpdate.Id, isNew));
         }
 
         // Phase 2: Assign collection to graph (roots all items via lifecycle attach,
@@ -67,9 +67,12 @@ internal static class SubjectItemsUpdateApplier
             metadata.SetValue?.Invoke(parent, collection);
         }
 
+        // Note: eager discovery of pre-populated children was investigated and abandoned —
+        // AttachSubjectToContext already provides eager seeding via FindSubjectsInProperties.
+
         // Phase 3: Apply properties for EXISTING subjects (now rooted, lifecycle works correctly).
         // New subjects were already applied in Phase 1.
-        foreach (var (item, id) in newItems)
+        foreach (var (item, id, _) in newItems)
         {
             ApplyPropertiesIfAvailable(item, id, context);
         }
@@ -106,7 +109,7 @@ internal static class SubjectItemsUpdateApplier
         // For EXISTING subjects (have context + interceptors): defer to Phase 3 (after rooting).
         // Does NOT read the backing store — avoids race with concurrent structural mutations
         // whose next() wrote a different dictionary before acquiring the lifecycle lock.
-        var newItems = new List<(object Key, IInterceptorSubject Subject, string Id)>(propertyUpdate.Items.Count);
+        var newItems = new List<(object Key, IInterceptorSubject Subject, string Id, bool IsNew)>(propertyUpdate.Items.Count);
         foreach (var itemUpdate in propertyUpdate.Items)
         {
             if (itemUpdate.Key is null)
@@ -125,13 +128,13 @@ internal static class SubjectItemsUpdateApplier
                 ApplyPropertiesIfAvailable(item, itemUpdate.Id, context);
             }
 
-            newItems.Add((key, item, itemUpdate.Id));
+            newItems.Add((key, item, itemUpdate.Id, isNew));
         }
 
         // Phase 2: Build dictionary and assign to graph (roots all items via lifecycle attach,
         // which discovers the fully-populated subgraph from backing store values)
         var workingDictionary = new Dictionary<object, IInterceptorSubject>(newItems.Count);
-        foreach (var (key, subject, _) in newItems)
+        foreach (var (key, subject, _, _) in newItems)
             workingDictionary[key] = subject;
 
         var dictionary = context.SubjectFactory.CreateSubjectDictionary(metadata.Type, workingDictionary);
@@ -140,9 +143,12 @@ internal static class SubjectItemsUpdateApplier
             metadata.SetValue?.Invoke(parent, dictionary);
         }
 
+        // Note: eager discovery of pre-populated children was investigated and abandoned —
+        // AttachSubjectToContext already provides eager seeding via FindSubjectsInProperties.
+
         // Phase 3: Apply properties for EXISTING subjects (now rooted, lifecycle works correctly).
         // New subjects were already applied in Phase 1.
-        foreach (var (_, subject, id) in newItems)
+        foreach (var (_, subject, id, _) in newItems)
         {
             ApplyPropertiesIfAvailable(subject, id, context);
         }

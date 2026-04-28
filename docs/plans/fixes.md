@@ -756,11 +756,221 @@ Server CQP filter accepts unregistered properties (relaxed `TryGetRegisteredProp
 Step 2 loop buffers unresolvable subjects and retries after structural processing. Handles within-batch ordering where value changes for new subjects precede the structural change that creates them.
 
 ### Fix 21: Heartbeat structural hash
-**Files:** `HeartbeatPayload.cs`, `StateHashComputer.cs` (new), `WebSocketSubjectHandler.cs`, `WebSocketSubjectClientSource.cs`, `Program.cs` (tester heartbeat config)
+**Files:** `HeartbeatPayload.cs`, `StateHashComputer.cs` (new, later replaced), `WebSocketSubjectHandler.cs`, `WebSocketSubjectClientSource.cs`, `Program.cs` (tester heartbeat config)
 
-Structural state hash in heartbeats detects and auto-heals any divergence via reconnection + Welcome. WebSocket-level reliability mechanism.
+Structural state hash in heartbeats detects and auto-heals any divergence via reconnection + Welcome. **Superseded by Fix 24 (sent-state hash):** live graph hash replaced by sent-state hash to eliminate false positives during concurrent structural mutations. `StateHashComputer.cs` removed.
 
 ### Fix 22: Apply lock + consistent hash
 **Files:** `SubjectUpdateExtensions.cs`, `WebSocketSubjectClientSource.cs`
 
 Per-subject apply lock (`subject.Data`) serializes concurrent `ApplySubjectUpdate` calls (e.g., WebSocket receive loop + tester re-sync, or heartbeat-triggered reconnection + partial update). Hash computation runs under the same lock to guarantee a consistent snapshot — no mid-apply state visible.
+
+### Fix 23: CQP filter cache + hash-in-update
+**Files:** `WebSocketSubjectHandler.cs`, `UpdatePayload.cs`, `WebSocketSubjectClientSource.cs`
+
+CQP filter caches PathProvider decisions in `subject.Data` — no PathProvider bypass during momentary unregistration. Structural hash embedded in every broadcast via `UpdatePayload.StructuralHash`. Client compares after each apply. Heartbeat only fires during idle periods (no broadcasts for 10s). **Hash source changed in Fix 24** from live graph (`StateHashComputer`) to sent-state model (`SentStructuralState`). Design: [registry-independent pipeline design](2026-04-06-registry-independent-pipeline-design.md).
+
+---
+
+## Fix 24: Sent-state structural hash
+
+**Files changed:** `SentStructuralState.cs` (new), `WebSocketSubjectHandler.cs`, `WebSocketSubjectClientSource.cs`, `WebSocketClientConnection.cs`, `StateHashComputer.cs` (deleted)
+
+**Cause:** Fix 23's per-update hash comparison used `StateHashComputer` to walk the live graph for the hash. The live graph always contains unflushed mutations from the mutation engine — structural mutations that CQP hasn't flushed yet. The `_applyUpdateLock` blocks other CQP flushes but not the mutation engine. The hash captured state not in the update, causing false-positive mismatches (~120 per cycle in ConnectorTester at 500+ structural mutations/sec).
+
+**Fix:** Replaced live graph hash with per-connection sent-state hash. `SentStructuralState` maintains a lightweight dictionary tracking structural state implied by sent/received `SubjectUpdate` content. SHA256 hash computed from this dictionary. On the server, each `WebSocketClientConnection` owns its own `SentStructuralState`, initialized from the Welcome sent to that client and updated from each broadcast under `_applyUpdateLock`. The client maintains its own instance, initialized from the received Welcome and updated from each received update. Hash is computed and serialized per-connection — each client gets its own hash in the broadcast. The hash is consistent by construction — no false positives regardless of concurrent mutation rate.
+
+**Why per-connection:** A single global `_sentState` on the server gets re-initialized on each new client Welcome, breaking sent-state tracking for other connected clients. Even "initialize once" fails because the Welcome includes unflushed CQP mutations that the cumulative sent state doesn't have, creating false-positive mismatches and cascading reconnections.
+
+**Thread safety:** All `SentStructuralState` access on the server — both `UpdateSentState` (in `CreateUpdateWithSequence`, broadcast path) and `ComputeSentStateHash` (in `BroadcastHeartbeatAsync`, heartbeat path) — happens under `_applyUpdateLock`. No unsynchronized access. The hash is pre-computed under the lock and passed as a dictionary of per-connection hashes to `BroadcastUpdateAsync`, which runs outside the lock. This ensures hash consistency without holding the lock during I/O.
+
+**Eager PathProvider caching:** The CQP filter (Fix 23) was enhanced with eager caching — on the first registered encounter for any property, ALL sibling properties are cached via PathProvider. This eliminates the "never seen while registered" cache miss window. The "no cache → drop" default is now safe because all known properties are eagerly cached before any unregistered access can occur. No security bypass is possible.
+
+**Per-instance cache prefix:** The filter cache uses a per-instance prefix (`_filterCachePrefix` = GUID) to isolate cache entries between server instances. Multiple `WebSocketSubjectHandler` instances sharing the same subject graph have independent caches, preventing stale cache hits or cross-instance interference.
+
+**What was removed:** `StateHashComputer.cs` (106 lines of live graph walking). Client no longer needs apply lock for hash computation. Server no longer walks the graph under `_applyUpdateLock`.
+
+**What was added:** `SentStructuralState.cs` — ~150 lines, self-contained, no dependency on registry/interceptors/core library. Pure WebSocket-internal concern.
+
+**ConnectorTester validation:** 42+ cycles with 114K+ structural mutations/cycle and all chaos profiles — zero hash mismatches, zero failures. The structural hash mechanism is confirmed consistent (no false positives). Hash mismatches never fire because chaos events cause clean TCP disconnects — reconnection is driven by connection loss, not hash detection. The hash is defense-in-depth for silent pipeline corruption that doesn't drop the connection.
+
+**ConnectorTester bugs found during validation:**
+- Structural mutation task silently crashed on first exception (missing catch in `MutationEngine.RunStructuralMutationsAsync`) — resulted in 0 structural mutations per cycle. Fixed with catch + warning log.
+- `appsettings.websocket.json` was never loaded — `--launch-profile websocket` required (sets `DOTNET_ENVIRONMENT=websocket` for environment-specific config loading). Config had structural mutation rates but defaults in `ConnectorTesterConfiguration` had `StructuralMutationRate=0`.
+- CQP filter dropped value changes on brand-new subjects that had no cached PathProvider decision (cache miss → drop). Caused permanent value loss for subjects created by structural mutations. Fixed with eager caching — first registered encounter caches ALL sibling properties.
+- VerificationEngine now fails the cycle if any "Structural hash mismatch" warnings are found in the cycle log, preventing pipeline bugs from being silently masked by auto-healing reconnection.
+
+**Design:** See [registry-independent pipeline design](2026-04-06-registry-independent-pipeline-design.md), Layer 2: Per-Connection Sent-State Structural Hash.
+
+---
+
+## ~~Fix 25b: CQP subscription gap during reconnection~~ REVERTED
+
+**Files changed:** `SubjectSourceBackgroundService.cs`, `SubjectSourceBackgroundServiceTests.cs`
+
+**Cause (hypothesized):** In `SubjectSourceBackgroundService.ExecuteAsync`, the `ChangeQueueProcessor` subscription was created AFTER the Welcome state was applied. This left a nanosecond race window where a concurrent local mutation could fire between Welcome application and CQP creation.
+
+**Attempted fix:** Move CQP creation before `LoadInitialStateAndResumeAsync` + drain accumulated changes after Welcome to discard stale pre-Welcome mutations.
+
+**Why it was reverted:** Two fundamental problems:
+1. **Without drain:** Pre-Welcome stale mutations (with stale old values) were sent to the server, corrupting server state with pre-Welcome values that the Welcome had already overwrote on the client.
+2. **With drain:** The drain couldn't distinguish pre-Welcome from post-Welcome changes. Legitimate post-Welcome mutations that fired between Welcome apply and drain were discarded — the client's graph changed but the server was never notified. This caused a regression from ~22 cycles to 2-5 cycles.
+
+**Resolution:** Reverted to original CQP-after-Welcome order. The nanosecond gap between Welcome and CQP creation is acceptable — any delivery gaps from this window are now caught by Fix 28 (registry divergence detection).
+
+**Test change retained:** `WhenStartingSourceAndPushingChanges_ThenUpdatesAreInCorrectOrder` — added `PropertyChangeQueue` to mock context (CQP constructor needs it regardless of ordering).
+
+**Key insight discovered during investigation:** The source-generated code lazily creates an `InterceptorExecutor` on first `Context` access (`_context ??= new InterceptorExecutor(this)`). This means `ContextInheritanceHandler` → `AddFallbackContext` → `AttachSubjectToContext` ALREADY fires for ALL child subjects when they enter the graph, providing eager seeding of `_lastProcessedValues` for their structural properties. The `_lastProcessedValues` "lazy discovery" issue was a red herring — the seeding already happens. The `DiscoverChildrenIfNeeded` approach was abandoned as redundant and harmful (double-seeding interfered with concurrent WriteProperty processing).
+
+**Diagnostic finding:** `BUG-UNREGISTERED` diagnostic (added to WriteProperty to check if any subject in the processed value was NOT in `_attachedSubjects`) showed **zero** hits in 10 cycles — confirming the lifecycle processes correctly. The remaining failures are delivery gaps, not lifecycle races.
+
+---
+
+## Fix 26: Snapshot returns empty properties for momentarily-unregistered subjects
+
+**Files changed:** `SubjectUpdateFactory.cs`
+
+**Cause:** `ProcessSubjectComplete` checks `TryGetRegisteredSubject()`. When a concurrent structural mutation adds a subject to the backing store but the lifecycle interceptor hasn't registered it yet, the lookup returns null. The old code created an empty properties entry — the snapshot included the subject but with null/missing properties. This made re-sync fail: the applier skips properties not present in the update, so the client keeps its stale values.
+
+**Symptom:** Re-sync check: "still diverged after applying server's complete update → structural/applier bug." Mismatch shows server=null for all properties of one subject, client has default values. Subject counts are perfectly aligned (structural graph correct), only VALUE properties diverge.
+
+**Fix:** Added `ProcessSubjectFromMetadata` fallback method. When `TryGetRegisteredSubject()` returns null, uses `subject.Properties` (compile-time generated, always available) to iterate and serialize each property. Checks property types via `IsSubjectDictionaryType()` / `IsSubjectCollectionType()` / `IsSubjectReferenceType()` extension methods. Structural properties are recursively traversed via existing `SubjectItemsUpdateFactory` methods. Processor filtering and attribute processing are skipped (require registry info).
+
+**First observed:** Cycle 28 of ConnectorTester (post-Fix 25).
+
+**Status:** Applied. All 391 Connectors.Tests pass.
+
+---
+
+## Fix 27: CQP unflushed changes lost on connection error
+
+**Files changed:** `ChangeQueueProcessor.cs`
+
+**Cause:** When a connection error exits the CQP's `ProcessAsync` dequeue loop, the periodic flush task is cancelled. Any changes in the CQP's `ConcurrentQueue` that were enqueued after the last periodic flush are permanently lost — the CQP is about to be disposed, discarding the queue contents. The `WriteRetryQueue` only receives changes that the `writeHandler` failed to send, not changes that were never flushed.
+
+**Symptom:** Value property divergence (server has default value, clients have mutated value). Re-sync converges. Occurs when a chaos event kills the connection right after a mutation was captured by the CQP but before the next 8ms flush timer fires.
+
+**Fix:** Added a final `TryFlushAsync` call in `ProcessAsync`'s finally block, after the periodic flush task exits. Uses the original `cancellationToken` (not the linked token, which is already cancelled). If the flush fails (connection is dead), `SubjectSourceBackgroundService.WriteChangesAsync` routes the failure to the `WriteRetryQueue`, which is re-applied on the next reconnection via `ReapplyRetryQueue`.
+
+**First observed:** Cycle 9 of ConnectorTester.
+
+**Status:** Applied.
+
+**Performance optimization:** Added dirty flag + cached hash to `SentStructuralState` — value-only updates skip SHA256 recomputation entirely. Removed LINQ allocations from `UpdateFromBroadcast` and `BuildStructuralContent` (manual loops instead of `.Any()`, `.Except()`, `.Where().OrderBy().ToList()`). All under `_applyUpdateLock`, so reducing lock duration matters.
+
+**Status:** Applied.
+
+---
+
+## Fix 25: CQP filter cache populated at SubjectAttached time
+
+**Files changed:** `WebSocketSubjectHandler.cs`
+
+**Cause:** The CQP filter cached PathProvider decisions per-instance on the first filter call while the subject was registered ("eager caching"). But brand-new subjects created by structural mutations could be unregistered before any of their properties went through the CQP filter — the cache was empty, the filter dropped the change. 31 drops per 60-second cycle at 500 structural mutations/sec. Confirmed by diagnostic logging: `"CQP filter drop: TestNode.IntValue (subjectId=..., unregistered, no cache entry)"`.
+
+**Fix:** Subscribe to `SubjectAttached` in the `WebSocketSubjectHandler` constructor. When a subject is attached to the graph, eagerly cache PathProvider decisions for ALL its properties in `subject.Data`. The lifecycle guarantees `SubjectAttached` fires after `SubjectRegistry` registers the subject (so `TryGetRegisteredSubject()` succeeds) and before any value changes on the subject reach the CQP (attachment is synchronous inside the interceptor chain, CQP flush is async on a timer). This eliminates the cache-miss window entirely.
+
+The previous "eager sibling caching" inside the filter was removed — it was redundant with the `SubjectAttached` hook and added complexity. The filter now has three paths:
+1. Cache hit (fast path, lock-free ConcurrentDictionary read)
+2. Cache miss + registered (fallback for subjects that existed before the handler)
+3. Cache miss + unregistered (diagnostic log, drop)
+
+**First observed:** Cycle 58 (before fix) and cycle 3 (with diagnostic logging).
+
+**Validation:** After fix, zero CQP filter drops. Tester reached 20 cycles before hitting a different issue (see below).
+
+**Status:** Applied.
+
+---
+
+## Under Investigation: Value divergence despite zero CQP filter drops (cycle 20)
+
+**Observed:** Cycle 20, profile `full-chaos`. Subject `2lo4OtvEbm8xqMekZwgxsJ` — server has newer values, client-a has older/default values. **Only client-a diverges; client-b matches server.** Zero CQP filter drop warnings. Sequences match (all participants). Re-sync fixes it → transient delivery gap.
+
+**Evidence that Fix 25 worked:** Zero "CQP filter drop" warnings in the entire cycle log. The filter is no longer dropping changes.
+
+**Key observation:** StringValue had value `0063df73` on client-a (written 11:14:42.699) and `0063e2df` on server (written 11:14:42.870). The subject WAS receiving updates, then stopped — a later value was lost.
+
+**Diagnostic approach — narrowing the drop point:**
+
+| Evidence | Server CQP (filter/factory) | Server broadcast | Client apply |
+|----------|---------------------------|-----------------|-------------|
+| Zero CQP filter drops | ✓ ruled out | | |
+| Sequences match | | ✓ delivered | |
+| Only client-a diverges, client-b OK | | Server DID broadcast the value (client-b has it) | **client-a failed to apply** |
+
+**Conclusion:** The value was broadcast by the server (client-b received it). Client-a's own concurrent structural mutations (StructuralMutationRate=200/sec) detached the subject while the WebSocket receive loop's `ApplyUpdate` tried to apply the value. The applier's `TryResolveSubject` or `TryGetSubjectById` failed → value silently dropped.
+
+**Two candidate mechanisms on client-a:**
+
+1. **Applier deferred retry fails:** The applier pre-resolves subjects at the start of `ApplyUpdate`. If a concurrent client-side structural mutation detaches the subject between pre-resolve and property apply, `TryResolveSubject` fails → deferred to retry → retry also fails → silently dropped.
+
+2. **Mutation engine writes to detached subject:** Client-a's own mutation engine writes a value to a subject from stale `_knownNodes` while the subject is detached. The write succeeds on the CLR object but the change notification doesn't reach the CQP (no context). However, this would cause client-a's values to DIFFER from what the server broadcast — not to be MISSING ("written never").
+
+Mechanism 1 is more likely: the server broadcast the correct value, but client-a couldn't apply it due to concurrent structural mutations on client-a's graph.
+
+**This is a library concern** — `ApplyUpdate` uses a lifecycle batch scope for subjects moving within the same update, but it doesn't protect against concurrent structural mutations from the application's own threads.
+
+**Potential fixes:**
+
+1. **Library fix:** Extend `ApplyUpdate` to hold a broader lock that prevents concurrent structural mutations during apply. Trade-off: serializes all graph mutations during update application.
+2. **Library fix:** When `TryResolveSubject` fails on retry, check the pre-resolved cache (already implemented). If the subject was pre-resolved but is now gone, use the cached reference to apply the value. The CLR object still exists — just not in the registry.
+3. **Tester mitigation:** Pause client structural mutations during the converge phase (doesn't fix the root cause but reduces the race window for testing).
+
+**Diagnostics in place:**
+- CQP filter drop warning with subject ID (server side)
+- No client-side applier drop logging yet — next step is to add logging when `TryResolveSubject` fails after retry
+
+**Status:** Under investigation. Next run should confirm mechanism 1 by checking which client diverges relative to chaos profile.
+
+---
+
+## Fix 28: Client-side registry divergence detection
+
+**Files changed:** `SentStructuralState.cs`, `ChangeQueueProcessor.cs`, `WebSocketSubjectClientSource.cs`
+
+**Problem:** The SentStructuralState hash (Fix 24) detects server→client delivery gaps (server sent an update, client missed it). But it CANNOT detect client→server delivery gaps: when a concurrent mutation changes the client's graph and the CQP fails to send the change to the server. Both sides' SentStructuralState agree (they track updates, not actual graph state), so no hash mismatch is detected. The divergence persists permanently.
+
+**Root cause investigation findings:**
+- `BUG-UNREGISTERED` diagnostic (added to WriteProperty) showed **zero** hits in 10 cycles — the lifecycle is processing correctly. The `_lastProcessedValues` seeding via `AttachSubjectToContext` (triggered by the source-generated lazy executor) already provides eager grandchild discovery.
+- Fix 25 (subscribe-before-Welcome + drain) was **reverted**: the drain discards legitimate post-Welcome mutations, causing a regression (2-5 cycles vs 22+ without). The original CQP-after-Welcome order has a nanosecond gap that's acceptable.
+- `DiscoverChildrenIfNeeded` in the applier was **disabled**: redundant with `AttachSubjectToContext` and caused regression by double-seeding `_lastProcessedValues`.
+- The remaining failures are **delivery gaps during chaos**, not lifecycle races.
+
+**Fix:** On each heartbeat received by the client, compare the client's SentStructuralState (what updates said) against the actual registry (what the lifecycle processed). If they differ, a CQP-dropped mutation changed the graph without notifying the server. Trigger reconnection → Welcome resets everything.
+
+**Implementation:**
+1. **`SentStructuralState.MatchesRegistry(idRegistry, registryCount)`**: compares tracked subject IDs against the live registry. O(1) count check + O(N) membership check.
+2. **`ChangeQueueProcessor.IsIdle(duration)`**: tracks `_lastFlushWithChangesTicks`. Returns true if no changes have been flushed for the specified duration.
+3. **`WebSocketSubjectClientSource.HasRegistryDivergence()`**: on heartbeat, if client has been idle (no updates received for 5 seconds), compares SentStructuralState against registry. Idle check prevents false positives during active mutations (unflushed mutations are in the registry but not yet in SentStructuralState).
+
+**Properties:**
+- Catches ANY client→server structural divergence, regardless of cause
+- No false positives during active mutations (idle check)
+- O(N) per heartbeat during idle (N = subject count, typically 100-500)
+- Self-healing: reconnection + Welcome provides authoritative state
+- Complements existing server→client detection (SentStructuralState hash)
+
+**Analogous to:** TCP checksums, OPC UA subscription monitoring, CRDT anti-entropy protocols.
+
+**ConnectorTester validation:** 2284+ cycles (all chaos profiles, 500+ structural mutations/sec), zero failures. The detection fires ~2 times per chaos cycle (reconnection heals the divergence before the convergence check). Zero detections on no-chaos cycles — no false positives.
+
+**Status:** Applied.
+
+---
+
+## Memory investigation: HeapMB growth (~48 KB/cycle)
+
+**Symptom:** HeapMB (measured after forced Gen2 compacting GC) grows at ~48 KB/cycle consistently across all chaos profiles.
+
+**Investigation:**
+- `BUG-UNREGISTERED` diagnostic in WriteProperty: **zero** hits in 10+ cycles — lifecycle processes correctly
+- `SourceOwnershipManager._properties` leak counter: **leaked=0** — event pairing (SubjectAttached/SubjectDetaching) is correct
+- `_attachedSubjects` count: matches registry exactly per participant
+- `_lastProcessedValues` count: matches `subjects × structural_properties` exactly
+- `_usedByContexts` on root contexts: count=1 each — clean
+- Unit tests at all escalation levels (basic, registry, applier, concurrent, deep graph): all pass with zero GC retention
+
+**Root cause:** Post-GC gcdump comparison (cycle 13 vs cycle 2286) showed **only 1.9 KB/cycle** of actual managed object growth — entirely from dictionary/HashSet backing array capacity drift (`Entry<PropertyReference>[]`, `Slot<SubjectPropertyChange>[]`). The remaining ~46 KB/cycle in `HeapMB` is GC internal fragmentation from the high-churn mutation workload (millions of short-lived objects per cycle).
+
+**Conclusion:** Not a reference leak. Dictionary/HashSet capacity drift + GC heap fragmentation. At 1.9 KB/cycle actual growth, it would take ~500K cycles to reach 1 GB. Low priority. Could be mitigated with periodic `TrimExcess()` on key collections.

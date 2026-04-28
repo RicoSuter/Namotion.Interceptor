@@ -11,6 +11,7 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Resilience;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.WebSocket.Internal;
@@ -45,7 +46,8 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
 
     private readonly ClientSequenceTracker _sequenceTracker = new();
-    private long _lastUpdateAppliedTicks;
+    private readonly SentStructuralState _clientState = new();
+    private long _lastUpdateReceivedTicks;
 
     /// <summary>
     /// Gets the last successfully received sequence number from the server.
@@ -221,6 +223,10 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
             _initialState = welcome.State;
             _sequenceTracker.InitializeFromWelcome(welcome.Sequence);
+            if (welcome.State is not null)
+            {
+                _clientState.InitializeFromSnapshot(welcome.State);
+            }
 
             _logger.LogInformation("Connected to WebSocket server (sequence: {Sequence})", welcome.Sequence);
 
@@ -451,7 +457,10 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                                         _sequenceTracker.ExpectedNextSequence, update.Sequence);
                                     return; // Exit receive loop -> triggers reconnection
                                 }
-                                HandleUpdate(update);
+                                if (!HandleUpdate(update))
+                                {
+                                    return; // Hash mismatch -> triggers reconnection
+                                }
                                 break;
 
                             case MessageType.Heartbeat:
@@ -464,34 +473,20 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                                     return; // Exit receive loop -> triggers reconnection
                                 }
 
-                                // State hash divergence detection: only compare when the system
-                                // is quiet (no updates applied recently). During active mutations,
-                                // server and client are always slightly out of sync — comparing
-                                // hashes would trigger constant unnecessary reconnections.
-                                var timeSinceLastUpdate = Environment.TickCount64 - Volatile.Read(ref _lastUpdateAppliedTicks);
-                                if (heartbeat.StateHash is not null && timeSinceLastUpdate > 10_000)
+                                // Idle heartbeat: compare structural hash (server only sends
+                                // heartbeat when no updates were broadcast recently)
+                                if (HasStructuralHashMismatch(heartbeat.StateHash))
                                 {
-                                    try
-                                    {
-                                        var applyLock = _subject.GetApplyLock();
-                                        string? clientHash;
-                                        lock (applyLock)
-                                        {
-                                            clientHash = Internal.StateHashComputer.ComputeStructuralHash(
-                                                _subject);
-                                        }
-                                        if (clientHash is not null && clientHash != heartbeat.StateHash)
-                                        {
-                                            _logger.LogWarning(
-                                                "Structural hash mismatch: server={ServerHash}, client={ClientHash}. Triggering reconnection.",
-                                                heartbeat.StateHash?[..8], clientHash[..8]);
-                                            return; // Exit receive loop -> triggers reconnection
-                                        }
-                                    }
-                                    catch (Exception ex)
-                                    {
-                                        _logger.LogDebug(ex, "Failed to compute client state hash");
-                                    }
+                                    return; // Exit receive loop -> triggers reconnection
+                                }
+
+                                // Client-side divergence check: compare sent-state against
+                                // actual registry. Catches CQP-dropped mutations where the
+                                // client's graph changed but the server was never notified.
+                                // Only runs when client CQP is idle (all mutations flushed).
+                                if (HasRegistryDivergence())
+                                {
+                                    return; // Exit receive loop -> triggers reconnection
                                 }
                                 break;
 
@@ -545,12 +540,14 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         }
     }
 
-    private void HandleUpdate(SubjectUpdate update)
+    /// <summary>
+    /// Returns true if the update was applied successfully and hashes match (or no hash present).
+    /// Returns false if a structural hash mismatch was detected (caller should trigger reconnection).
+    /// </summary>
+    private bool HandleUpdate(UpdatePayload update)
     {
         var propertyWriter = _propertyWriter;
-        if (propertyWriter is null) return;
-
-        Volatile.Write(ref _lastUpdateAppliedTicks, Environment.TickCount64);
+        if (propertyWriter is null) return true;
 
         propertyWriter.Write(
             (update, subject: _subject, source: this, factory: _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance),
@@ -561,6 +558,68 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                     state.subject.ApplySubjectUpdate(state.update, state.factory);
                 }
             });
+
+        // Update client-side sent state from received update content
+        _clientState.UpdateFromBroadcast(update);
+        Volatile.Write(ref _lastUpdateReceivedTicks, Environment.TickCount64);
+
+        return !HasStructuralHashMismatch(update.StructuralHash);
+    }
+
+    /// <summary>
+    /// Compares the server's structural hash against the client's sent-state hash.
+    /// Returns true if a mismatch was detected (caller should trigger reconnection).
+    /// Returns false if hashes match or server hash is null.
+    /// </summary>
+    private bool HasStructuralHashMismatch(string? serverHash)
+    {
+        if (serverHash is null)
+            return false;
+
+        var clientHash = _clientState.ComputeHash();
+        if (clientHash is not null && clientHash != serverHash)
+        {
+            _logger.LogWarning(
+                "Structural hash mismatch: server={ServerHash}, client={ClientHash}. Triggering reconnection.",
+                serverHash[..Math.Min(8, serverHash.Length)],
+                clientHash[..Math.Min(8, clientHash.Length)]);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Compares the client's SentStructuralState against the actual registry.
+    /// Returns true if divergence is detected (CQP dropped a mutation).
+    /// Only runs when the client has been idle (no updates received for HeartbeatInterval).
+    /// </summary>
+    private bool HasRegistryDivergence()
+    {
+        // Only check when client is idle (no updates received recently).
+        // The server heartbeat only fires during server idle, so receiving a heartbeat
+        // means the server has been quiet. We additionally require the client to be quiet
+        // (no updates received for 5 seconds) to avoid false positives from in-flight updates.
+        const long clientIdleThresholdMs = 5000;
+        var timeSinceLastUpdate = Environment.TickCount64 - Volatile.Read(ref _lastUpdateReceivedTicks);
+        if (timeSinceLastUpdate < clientIdleThresholdMs)
+            return false;
+
+        var idRegistry = _subject.Context.TryGetService<ISubjectIdRegistry>();
+        var registry = _subject.Context.TryGetService<ISubjectRegistry>();
+        if (idRegistry is null || registry is null)
+            return false;
+
+        var registryCount = registry.KnownSubjects.Count;
+        if (!_clientState.MatchesRegistry(idRegistry, registryCount))
+        {
+            _logger.LogWarning(
+                "Client registry divergence: SentStructuralState has {SentCount} subjects, registry has {RegistryCount}. Triggering reconnection.",
+                _clientState.TrackedSubjectCount, registryCount);
+            return true;
+        }
+
+        return false;
     }
 
     /// <inheritdoc />

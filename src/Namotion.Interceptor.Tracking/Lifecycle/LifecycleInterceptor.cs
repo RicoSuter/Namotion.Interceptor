@@ -427,8 +427,14 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 
         lock (_attachedSubjects)
         {
+            // Use null as baseline when no prior processed value exists.
+            // Using context.CurrentValue here would be wrong: if structural properties
+            // were populated before the subject had a context (e.g., applier sets
+            // properties on new subjects before SetValue), context.CurrentValue already
+            // contains those children. The lifecycle would think they were "already
+            // processed" and never attach them.
             if (!_lastProcessedValues.TryGetValue(context.Property, out var lastProcessed))
-                lastProcessed = context.CurrentValue;
+                lastProcessed = null;
 
             // Read the actual backing store value to handle concurrent writes correctly.
             // context.NewValue may differ from the backing store if another thread

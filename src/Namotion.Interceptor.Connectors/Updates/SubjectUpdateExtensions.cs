@@ -9,6 +9,21 @@ public static class SubjectUpdateExtensions
 {
     private static readonly (string?, string) ApplyLockKey = (null, "Namotion.Interceptor.Connectors.ApplyLock");
 
+    /// <summary>Diagnostic: total value properties applied by the applier.</summary>
+    public static long DiagAppliedValueCount => Volatile.Read(ref Internal.SubjectUpdateApplier.AppliedValueCount);
+
+    /// <summary>Diagnostic: total subject updates dropped (subject not found after deferred retry).</summary>
+    public static long DiagDroppedSubjectUpdateCount => Volatile.Read(ref Internal.SubjectUpdateApplier.DroppedSubjectUpdateCount);
+
+    /// <summary>Diagnostic: total properties skipped (property name not found on subject).</summary>
+    public static long DiagUnknownPropertyCount => Volatile.Read(ref Internal.SubjectUpdateApplier.UnknownPropertyCount);
+
+    /// <summary>Diagnostic: changes serialized via the unregistered-subject fallback path in the factory.</summary>
+    public static long DiagFallbackSerializationCount => Volatile.Read(ref Internal.SubjectUpdateFactory.FallbackSerializationCount);
+
+    /// <summary>Diagnostic: changes dropped by factory because subject had no ID and was unregistered.</summary>
+    public static long DiagDroppedNoIdCount => Volatile.Read(ref Internal.SubjectUpdateFactory.DroppedNoIdCount);
+
     /// <summary>
     /// Gets the per-subject apply lock. Use this to serialize operations that read
     /// graph state (e.g., hash computation) with concurrent applies.

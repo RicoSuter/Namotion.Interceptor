@@ -13,6 +13,15 @@ internal static class SubjectUpdateApplier
 {
     private static readonly ObjectPool<SubjectUpdateApplyContext> ContextPool = new(() => new SubjectUpdateApplyContext());
 
+    /// <summary>Diagnostic counter: total subject updates dropped because the subject was not found after deferred retry.</summary>
+    internal static long DroppedSubjectUpdateCount;
+
+    /// <summary>Diagnostic counter: total value properties applied successfully.</summary>
+    internal static long AppliedValueCount;
+
+    /// <summary>Diagnostic counter: total properties skipped because the subject doesn't have the property.</summary>
+    internal static long UnknownPropertyCount;
+
     public static void ApplyUpdate(
         IInterceptorSubject subject,
         SubjectUpdate update,
@@ -69,6 +78,9 @@ internal static class SubjectUpdateApplier
                     {
                         deferred ??= [];
                         deferred.Add((subjectId, properties));
+                        System.Diagnostics.Trace.TraceInformation(
+                            $"SubjectUpdateApplier: Deferring subject {subjectId} " +
+                            $"({properties.Count} properties: {string.Join(", ", properties.Keys)})");
                     }
                 }
 
@@ -81,6 +93,17 @@ internal static class SubjectUpdateApplier
                             context.TryMarkAsProcessed(subjectId))
                         {
                             ApplyPropertyUpdates(targetSubject, properties, context);
+                        }
+                        else
+                        {
+                            // Subject was not created by structural processing and is not in
+                            // the registry — silently dropped. This can happen when a concurrent
+                            // structural mutation detaches the subject during apply.
+                            Interlocked.Increment(ref DroppedSubjectUpdateCount);
+                            System.Diagnostics.Trace.TraceWarning(
+                                $"SubjectUpdateApplier: Dropped update for subject {subjectId} " +
+                                $"({properties.Count} properties: {string.Join(", ", properties.Keys)}). " +
+                                $"Not found in registry after deferred retry.");
                         }
                     }
                 }
@@ -133,7 +156,10 @@ internal static class SubjectUpdateApplier
         SubjectUpdateApplyContext context)
     {
         if (!subject.Properties.ContainsKey(property.Name))
+        {
+            Interlocked.Increment(ref UnknownPropertyCount);
             return; // Unknown property
+        }
 
         var metadata = property.Metadata;
 
@@ -145,6 +171,7 @@ internal static class SubjectUpdateApplier
                 {
                     var value = ConvertValue(propertyUpdate.Value, metadata.Type);
                     metadata.SetValue?.Invoke(subject, value);
+                    Interlocked.Increment(ref AppliedValueCount);
                 }
                 break;
 
@@ -230,6 +257,9 @@ internal static class SubjectUpdateApplier
         {
             metadata.SetValue?.Invoke(parent, targetItem);
         }
+
+        // Note: eager discovery of pre-populated children was investigated and abandoned —
+        // AttachSubjectToContext already provides eager seeding via FindSubjectsInProperties.
 
         // For EXISTING subjects (have context + interceptors): apply properties after rooting.
         if (!isNew)
