@@ -353,9 +353,9 @@ To enumerate the members a source should claim, walk the registry with a nested 
 
 Values on properties and attributes vary in shape. Sources decide per case:
 
-- **Scalars** (strings, numbers, timestamps) — serialize directly.
-- **Complex objects** (records, POCOs, collections, dictionaries) — provide a custom serializer or skip.
-- **Trackable subjects** (`member.CanContainSubjects == true`) — either skip or recurse via `member.Children`.
+- **Scalars** (strings, numbers, timestamps): serialize directly.
+- **Complex objects** (records, POCOs, collections, dictionaries): provide a custom serializer or skip.
+- **Trackable subjects** (`member.CanContainSubjects == true`): either skip or recurse via `member.Children`.
 
 The example below skips all subject-containing members via `!CanContainSubjects`.
 
