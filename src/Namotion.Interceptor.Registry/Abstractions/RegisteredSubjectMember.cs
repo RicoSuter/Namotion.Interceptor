@@ -83,7 +83,7 @@ public abstract class RegisteredSubjectMember
         params Attribute[] attributes)
     {
         var propertyName = $"{Name}@{name}";
-        var combined = AppendMemberAttribute(attributes, name);
+        var combined = RegisteredSubject.AppendAttribute(attributes, new PropertyAttributeAttribute(Name, name));
 
         var attribute = Parent.AddProperty(propertyName, type, getValue, setValue, combined);
         return (RegisteredSubjectAttribute)attribute;
@@ -105,17 +105,9 @@ public abstract class RegisteredSubjectMember
         params Attribute[] attributes)
     {
         var propertyName = $"{Name}@{name}";
-        var combined = AppendMemberAttribute(attributes, name);
+        var combined = RegisteredSubject.AppendAttribute(attributes, new PropertyAttributeAttribute(Name, name));
 
         var attribute = Parent.AddDerivedProperty(propertyName, type, getValue, setValue, combined);
         return (RegisteredSubjectAttribute)attribute;
-    }
-
-    private Attribute[] AppendMemberAttribute(Attribute[] attributes, string attributeName)
-    {
-        var combined = new Attribute[attributes.Length + 1];
-        Array.Copy(attributes, combined, attributes.Length);
-        combined[attributes.Length] = new PropertyAttributeAttribute(Name, attributeName);
-        return combined;
     }
 }

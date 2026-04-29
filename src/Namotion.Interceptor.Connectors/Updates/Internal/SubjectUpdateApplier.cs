@@ -54,7 +54,7 @@ internal static class SubjectUpdateApplier
                 {
                     var registeredAttribute = subject
                         .TryGetRegisteredSubject()?
-                        .TryGetProperty(propertyName)?
+                        .TryGetMember(propertyName)?
                         .TryGetAttribute(attributeName);
 
                     if (registeredAttribute is not null)

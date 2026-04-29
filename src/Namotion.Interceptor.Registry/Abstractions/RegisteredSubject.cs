@@ -80,7 +80,8 @@ public class RegisteredSubject
 
     /// <summary>
     /// Gets the property with the given name. An attribute registered under the
-    /// supplied name is also returned (attributes inherit from properties).
+    /// supplied name is also returned because attributes inherit from properties;
+    /// use <see cref="TryGetMember"/> when the intent is to look up either kind.
     /// </summary>
     /// <param name="propertyName">The property name.</param>
     /// <returns>The property or null.</returns>
@@ -349,14 +350,14 @@ public class RegisteredSubject
             return;
         }
 
-        Dictionary<string, List<RegisteredSubjectAttribute>>? attributesByMember = null;
+        // hasAttributes == true here, so attributesByMember will gain at least one entry.
+        var attributesByMember = new Dictionary<string, List<RegisteredSubjectAttribute>>();
         var properties = new List<RegisteredSubjectProperty>(_members.Count);
 
         foreach (var member in _members.Values)
         {
             if (member is RegisteredSubjectAttribute attribute)
             {
-                attributesByMember ??= new Dictionary<string, List<RegisteredSubjectAttribute>>();
                 if (!attributesByMember.TryGetValue(attribute.MemberName, out var list))
                 {
                     list = [];
@@ -371,9 +372,6 @@ public class RegisteredSubject
         }
 
         _propertiesSnapshot = properties.ToArray();
-
-        if (attributesByMember is null)
-            return;
 
         foreach (var (memberName, list) in attributesByMember)
         {
@@ -404,9 +402,10 @@ public class RegisteredSubject
 
     /// <summary>
     /// Allocation-minimal single-attribute append. Avoids the LINQ Concat/ToArray
-    /// iterator wrapper chain.
+    /// iterator wrapper chain. Shared with <see cref="RegisteredSubjectMember"/>.
     /// </summary>
-    private static Attribute[] AppendAttribute(Attribute[] attributes, Attribute extra)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static Attribute[] AppendAttribute(Attribute[] attributes, Attribute extra)
     {
         var combined = new Attribute[attributes.Length + 1];
         Array.Copy(attributes, combined, attributes.Length);
