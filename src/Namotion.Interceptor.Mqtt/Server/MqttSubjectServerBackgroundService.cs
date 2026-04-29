@@ -399,18 +399,10 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
             var server = _mqttServer;
             if (server is null) return;
 
-            foreach (var property in registeredSubject.GetAllProperties())
+            foreach (var member in registeredSubject.GetAllPropertiesAndAttributes())
             {
-                if (!property.CanContainSubjects)
-                {
-                    await PublishOneAsync(property, server, cancellationToken).ConfigureAwait(false);
-                }
-
-                foreach (var attribute in property.GetAllAttributes())
-                {
-                    if (attribute.CanContainSubjects) continue;
-                    await PublishOneAsync(attribute, server, cancellationToken).ConfigureAwait(false);
-                }
+                if (member.CanContainSubjects) continue;
+                await PublishOneAsync(member, server, cancellationToken).ConfigureAwait(false);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

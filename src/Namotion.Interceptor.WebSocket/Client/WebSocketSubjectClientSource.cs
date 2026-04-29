@@ -267,19 +267,11 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         }
 
         var claimedCount = 0;
-        foreach (var property in registeredSubject.GetAllProperties())
+        foreach (var member in registeredSubject.GetAllPropertiesAndAttributes())
         {
-            if (!property.CanContainSubjects && (pathProvider is null || pathProvider.IsPropertyIncluded(property)))
+            if (!member.CanContainSubjects && (pathProvider is null || pathProvider.IsPropertyIncluded(member)))
             {
-                if (TryClaim(property)) claimedCount++;
-            }
-
-            foreach (var attribute in property.GetAllAttributes())
-            {
-                if (!attribute.CanContainSubjects && (pathProvider is null || pathProvider.IsPropertyIncluded(attribute)))
-                {
-                    if (TryClaim(attribute)) claimedCount++;
-                }
+                if (TryClaim(member)) claimedCount++;
             }
         }
 
