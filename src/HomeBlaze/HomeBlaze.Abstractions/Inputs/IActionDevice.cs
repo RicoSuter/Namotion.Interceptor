@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Inputs;
@@ -5,12 +6,14 @@ namespace HomeBlaze.Abstractions.Inputs;
 /// <summary>
 /// Interface for devices with executable actions.
 /// </summary>
+[SubjectAbstraction]
+[Description("Device with a list of executable actions.")]
 public interface IActionDevice
 {
     /// <summary>
     /// The available actions on this device.
     /// </summary>
-    [State]
+    [State(Position = 170)]
     DeviceAction[] Actions { get; }
 
     /// <summary>

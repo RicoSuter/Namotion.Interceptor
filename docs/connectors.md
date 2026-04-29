@@ -2,9 +2,11 @@
 
 The `Namotion.Interceptor.Connectors` package provides infrastructure for connecting subject graphs to external systems. It includes **sources** (for synchronizing FROM external systems) and shared components used by both sources and servers.
 
-- [MQTT](connectors/mqtt.md) - MQTT client/server integration for IoT scenarios
-- [OPC UA](connectors/opcua.md) - OPC UA client/server integration for industrial automation
-- [Subject Updates](connectors/subject-updates.md) - Wire format for serializing subject state
+- [WebSocket](connectors-websocket.md) - Bidirectional WebSocket protocol for real-time synchronization
+- [MQTT](connectors-mqtt.md) - MQTT client/server integration for IoT scenarios
+- [OPC UA](connectors-opcua.md) - OPC UA client/server integration for industrial automation
+  - [Client](connectors-opcua-client.md) | [Server](connectors-opcua-server.md) | [Mapping](connectors-opcua-mapping.md)
+- [Subject Updates](connectors-subject-updates.md) - Wire format for serializing subject state
 
 ## Architecture Overview
 
@@ -120,25 +122,34 @@ When the external system sends new values:
 
 #### Outbound (Subject → External)
 
-When you change a property value in code:
+When you change a property value in code, the **local model is updated immediately** — these are regular C# property setters. The change is then picked up by the change queue and written to the attached source **asynchronously** in the background:
 
-1. Subject property is changed
-2. `WriteChangesAsync()` is called with the change
-3. Source sends update to external system
+1. Property setter writes the new value to the backing field (immediate)
+2. Change notification is enqueued
+3. Background service dequeues the change and calls `WriteChangesAsync()` on the source
+4. Source sends the update to the external system
+
+This means the local model and the external system can be temporarily inconsistent. If the source write fails (network error, validation on the remote system), the local model already has the new value. The write retry queue handles transient failures by buffering and retrying, but the local model is always ahead of the external system.
+
+For **servers**, the pattern is similar: local writes are applied immediately, then eventually pushed to connected clients.
+
+#### Source-First Writes with Transactions
+
+If you need the external source to accept the change *before* updating the local model, use source transactions. This inverts the write order so the source confirms before the local model changes. See [Write Consistency Guarantees](#write-consistency-guarantees) for a comparison of both approaches and [Transactions](tracking-transactions.md) for full details.
 
 ### Initialization Sequence
 
-Sources use a buffer-flush-load-replay pattern during initialization and reconnection:
+Sources use a buffer-load-replay pattern during initialization and reconnection:
 
 1. **Buffer**: During `StartListeningAsync()`, inbound updates are buffered
-2. **Flush**: Pending writes from the retry queue are flushed to the external system
-3. **Load**: `LoadInitialStateAsync()` fetches complete state from external system
-4. **Replay**: Buffered updates are replayed in order after initial state is applied
+2. **Load**: `LoadInitialStateAsync()` fetches complete state from external system
+3. **Replay**: Buffered updates are replayed in order after initial state is applied
+4. **Optimistic retry re-apply**: Queued writes from the retry queue are compared against current property values and re-applied locally if the source hasn't changed them (see [Write Retry Queue](#write-retry-queue))
 
 This ensures:
 - Updates received during initialization are not lost
 - Updates are applied in the correct order relative to the initial state
-- No visible state toggle (flush before load avoids showing stale server values)
+- Stale queued writes don't overwrite newer source values
 
 ### Inbound Update Error Handling
 
@@ -182,19 +193,19 @@ public interface IPathProvider
     /// Get the path segment for a property.
     /// Returns null if no explicit mapping exists.
     /// </summary>
-    string? GetPropertySegment(RegisteredSubjectProperty property);
+    string? TryGetPropertySegment(RegisteredSubjectProperty property);
 
     /// <summary>
     /// Find a property by its path segment.
     /// </summary>
-    RegisteredSubjectProperty? GetPropertyFromSegment(RegisteredSubject subject, string segment);
+    RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment);
 }
 ```
 
 ### Built-in Providers
 
 - **DefaultPathProvider** - Uses property names exactly as defined
-- **JsonCamelCasePathProvider** - Converts property names to camelCase for JSON APIs
+- **CamelCasePathProvider** - Converts property names to camelCase for JSON APIs
 - **AttributeBasedPathProvider** - Uses `[Path]` attributes for custom mapping
 
 ### [Path] Attribute
@@ -237,7 +248,8 @@ public partial class Machine
 
 With `[InlinePaths]`:
 - Path `Line.CNC01.Status` resolves to `Line.Machines["CNC01"].Status`
-- Direct properties take precedence over child keys
+- Direct properties take precedence over child keys — if a subject has both a direct property and a dictionary key with the same name, the property wins and the key is unreachable via that segment
+- Only one property per class may be marked with `[InlinePaths]`; multiple properties throws `InvalidOperationException`
 - Works with `AttributeBasedPathProvider` without requiring `[Path]` attribute on the dictionary
 - Built into `PathProviderBase.TryGetPropertyFromSegment`
 
@@ -251,7 +263,7 @@ The `Updates/` folder contains serialization infrastructure for subject state:
 
 These are used by both sources and servers (e.g., ASP.NET Core controllers, SignalR hubs).
 
-For details on the update format, collection synchronization, and apply logic, see [Subject Updates](connectors/subject-updates.md).
+For details on the update format, collection synchronization, and apply logic, see [Subject Updates](connectors-subject-updates.md).
 
 ## Setup
 
@@ -259,14 +271,12 @@ For details on the update format, collection synchronization, and apply logic, s
 
 ```csharp
 // OPC UA Client Source
-builder.Services.AddOpcUaSubjectClient<Sensor>("opc.tcp://localhost:4840", "opc", rootName: "Root");
+builder.Services.AddOpcUaSubjectClientSource<Sensor>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 
 // MQTT Client Source
-builder.Services.AddMqttSubjectClient<Sensor>(config =>
-{
-    config.BrokerHost = "localhost";
-    config.BrokerPort = 1883;
-});
+builder.Services.AddMqttSubjectClientSource<Sensor>(
+    brokerHost: "localhost",
+    pathProviderName: "mqtt");
 ```
 
 ### Custom Source Implementation
@@ -312,7 +322,7 @@ public class DatabaseSource : ISubjectSource
         try
         {
             await WriteToDatabaseAsync(changes, cancellationToken);
-            return WriteResult.Success();
+            return WriteResult.Success;
         }
         catch (Exception ex)
         {
@@ -361,8 +371,7 @@ public class DatabaseSource : ISubjectSource, IDisposable
                 // Called when a subject is detached from the object graph
                 // Use this to clean up caches or subscriptions for the subject
                 CleanupCachesForSubject(subject);
-            },
-            logger);
+            });
     }
 
     public IInterceptorSubject RootSubject => _root;
@@ -456,9 +465,46 @@ services.AddHostedService(sp =>
 
 **Behavior:**
 - Ring buffer semantics: oldest writes dropped when capacity reached
-- FIFO flush order when connection restored
-- Automatic retry when `WriteChangesAsync` throws an exception
+- Automatic retry when `WriteChangesAsync` fails during normal operation
+- Optimistic re-apply on reconnection: after loading initial state, queued changes are compared against the current (post-reconnection) property values. Only changes where the source hasn't modified the property are re-applied locally and sent to the source as fresh writes. Changes where the source value diverged are dropped (source wins).
 - In-memory only: queued writes are lost on process restart
+
+## Write Consistency Guarantees
+
+Property writes to sources follow a **local-first** model: the local property is updated immediately, and the change is sent to the source asynchronously. This means the local model and the source can be temporarily out of sync.
+
+| Scenario | Local Model | Source | Outcome |
+|---|---|---|---|
+| Write succeeds | Updated immediately | Updated via async write | In sync |
+| Write fails, retry succeeds | Updated immediately | Updated on retry | Eventually in sync |
+| Disconnect + reconnect, source unchanged | Initial state restores source state, retry re-applies change | Receives change via fresh write | In sync |
+| Disconnect + reconnect, source changed | Initial state applies source's new value, retry dropped | Unchanged (source wins) | In sync |
+
+In all cases, the local model and source converge after reconnection. However, in the last scenario the local model temporarily shows a value that the source never accepted — users may briefly see the local value before it snaps back to the source's value on reconnect.
+
+### Confirmed writes with transactions
+
+If you need the source to accept a change **before** updating the local model, use [source transactions](tracking-transactions.md). With transactions, the source is written first during commit — the local model is only updated if the source accepts the change. If the source is unreachable, the commit fails and the local model remains unchanged.
+
+```csharp
+var context = InterceptorSubjectContext
+    .Create()
+    .WithFullPropertyTracking()
+    .WithTransactions()
+    .WithSourceTransactions();
+
+using var tx = await context.BeginTransactionAsync(TransactionFailureHandling.Rollback);
+sensor.Temperature = 42.0m; // Captured, NOT applied locally yet
+await tx.CommitAsync(ct);   // Writes to source first, then applies locally
+                             // If source rejects → local model unchanged
+```
+
+| Approach | Local update | Source guarantee | On disconnect |
+|---|---|---|---|
+| Without transactions | Immediate | Eventual (async + retry) | Optimistic re-apply or snap-back |
+| With source transactions | After source confirms | Confirmed before local apply | Commit fails, local unchanged |
+
+Choose based on your consistency requirements: local-first for responsiveness, transactions for confirmed delivery.
 
 ## Thread Safety
 

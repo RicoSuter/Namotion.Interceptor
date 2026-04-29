@@ -13,7 +13,14 @@
 <TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
     @if (Subject != null)
     {
-        @if (ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit))
+        @if (IsCreating && ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Setup))
+        {
+            <SubjectComponent Subject="@Subject"
+                              Type="SubjectComponentType.Setup"
+                              AdditionalParameters="@(new Dictionary<string, object?> { ["IsCreating"] = IsCreating })"
+                              @bind-ComponentInstance="_subjectComponent" />
+        }
+        else if (ComponentRegistry.HasComponent(Subject.GetType(), SubjectComponentType.Edit))
         {
             <SubjectComponent Subject="@Subject"
                               Type="SubjectComponentType.Edit"
@@ -102,14 +109,14 @@
                 _propertiesEditor?.ApplyChanges();
             }
 
-            if (subject is not IConfigurableSubject)
+            if (subject is not IConfigurable)
             {
-                subject = subject.TryGetFirstParent<IConfigurableSubject>() as IInterceptorSubject;
+                subject = subject.TryGetFirstParent<IConfigurable>() as IInterceptorSubject;
             }
 
-            if (subject is IConfigurableSubject)
+            if (subject is IConfigurable)
             {
-                var configurationWriter = subject.TryGetFirstParent<IConfigurationWriter>() ?? RootManager;
+                var configurationWriter = RootManager.GetConfigurationWriter(subject);
                 await configurationWriter.WriteConfigurationAsync(subject, CancellationToken.None);
             }
 
@@ -118,7 +125,7 @@
                 await storageFile.OnFileChangedAsync(cancellationToken);
             }
 
-            if (subject is IConfigurableSubject configurableSubject)
+            if (subject is IConfigurable configurableSubject)
             {
                 await configurableSubject.ApplyConfigurationAsync(cancellationToken);
             }
@@ -141,4 +148,5 @@
 
         return ValueTask.CompletedTask;
     }
+
 }

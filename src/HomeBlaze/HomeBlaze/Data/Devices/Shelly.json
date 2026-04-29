@@ -1,0 +1,7 @@
+{
+  "$type": "Namotion.Devices.Shelly.ShellyDevice",
+  "name": "Shelly Device",
+  "hostAddress": "192.168.1.x",
+  "pollingInterval": "00:00:15",
+  "retryInterval": "00:00:30"
+}

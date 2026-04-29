@@ -147,6 +147,78 @@ namespace TestNamespace
         return Verify(generatedSource);
     }
 
+    [Fact]
+    public Task WhenGeneratingClassWithProtectedInternalProperty_ThenPropertyCorrectlyGenerated()
+    {
+        // Arrange
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+
+[InterceptorSubject]
+public partial class SampleSubject
+{
+    protected internal partial string Name { get; set; }
+}";
+
+        // Act
+        var generated = GeneratedSourceCode(source);
+
+        // Assert
+        var generatedSource = generated.Single().SourceText.ToString();
+        return Verify(generatedSource);
+    }
+
+    [Fact]
+    public Task WhenGeneratingClassWithPrivateProtectedProperty_ThenPropertyCorrectlyGenerated()
+    {
+        // Arrange
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+
+[InterceptorSubject]
+public partial class SampleSubject
+{
+    private protected partial string Name { get; set; }
+}";
+
+        // Act
+        var generated = GeneratedSourceCode(source);
+
+        // Assert
+        var generatedSource = generated.Single().SourceText.ToString();
+        return Verify(generatedSource);
+    }
+
+    [Fact]
+    public Task WhenGeneratingClassWithInheritanceAndCustomAttribute_ThenBasePropertiesAreIncluded()
+    {
+        // Arrange
+        const string source = @"
+using Namotion.Interceptor.Attributes;
+
+public class MyInterceptorSubjectAttribute : InterceptorSubjectAttribute { }
+
+[MyInterceptorSubject]
+public partial class Light
+{
+    public partial string Name { get; set; }
+    public partial bool On { get; set; }
+}
+
+[MyInterceptorSubject]
+public partial class DimmableLight : Light
+{
+    public partial double Brightness { get; set; }
+}";
+
+        // Act
+        var generated = GeneratedSourceCode(source);
+
+        // Assert
+        var generatedSource = string.Join("\n\n", generated.Select(s => s.SourceText));
+        return Verify(generatedSource);
+    }
+
     private static IEnumerable<GeneratedSourceResult> GeneratedSourceCode(string source)
     {
         var syntaxTree = CSharpSyntaxTree.ParseText(source);

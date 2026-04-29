@@ -11,6 +11,7 @@
     <File Path="../.gitignore" />
     <File Path="../features.png" />
     <File Path="../README.md" />
+    <File Path="../CLAUDE.md" />
     <File Path="Directory.Build.props" />
   </Folder>
   <Folder Name="/Connectors/">
@@ -21,16 +22,22 @@
     <Project Path="Namotion.Interceptor.OpcUa.SampleServer/Namotion.Interceptor.OpcUa.SampleServer.csproj" />
     <Project Path="Namotion.Interceptor.OpcUa/Namotion.Interceptor.OpcUa.csproj" />
     <Project Path="Namotion.Interceptor.SamplesModel/Namotion.Interceptor.SamplesModel.csproj" />
+    <Project Path="Namotion.Interceptor.WebSocket/Namotion.Interceptor.WebSocket.csproj" />
+    <Project Path="Namotion.Interceptor.WebSocket.SampleServer/Namotion.Interceptor.WebSocket.SampleServer.csproj" />
+    <Project Path="Namotion.Interceptor.WebSocket.SampleClient/Namotion.Interceptor.WebSocket.SampleClient.csproj" />
   </Folder>
   <Folder Name="/Extensions/">
     <Project Path="Namotion.Interceptor.AspNetCore/Namotion.Interceptor.AspNetCore.csproj" />
     <Project Path="Namotion.Interceptor.Blazor/Namotion.Interceptor.Blazor.csproj" />
     <Project Path="Namotion.Interceptor.GraphQL/Namotion.Interceptor.GraphQL.csproj" />
+    <Project Path="Namotion.Interceptor.Mcp/Namotion.Interceptor.Mcp.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/">
+    <Project Path="HomeBlaze/HomeBlaze.AI/HomeBlaze.AI.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Components/HomeBlaze.Components.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Host.Services/HomeBlaze.Host.Services.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Host/HomeBlaze.Host.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Plugins/HomeBlaze.Plugins.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Samples/HomeBlaze.Samples.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Servers.OpcUa/HomeBlaze.Servers.OpcUa.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Servers.OpcUa.Blazor/HomeBlaze.Servers.OpcUa.Blazor.csproj" />
@@ -45,18 +52,47 @@
     <Project Path="HomeBlaze/HomeBlaze.Storage.Abstractions/HomeBlaze.Storage.Abstractions.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/Devices/">
-    <Project Path="Namotion.Devices.Gpio.HomeBlaze/Namotion.Devices.Gpio.HomeBlaze.csproj" />
-    <Project Path="Namotion.Devices.Gpio.Tests/Namotion.Devices.Gpio.Tests.csproj" />
-    <Project Path="Namotion.Devices.Gpio/Namotion.Devices.Gpio.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Gpio.HomeBlaze/Namotion.Devices.Gpio.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Gpio.Tests/Namotion.Devices.Gpio.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Gpio/Namotion.Devices.Gpio.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Philips.Hue/Namotion.Devices.Philips.Hue.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Philips.Hue.Tests/Namotion.Devices.Philips.Hue.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Philips.Hue.HomeBlaze/Namotion.Devices.Philips.Hue.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.MyStrom/Namotion.Devices.MyStrom.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.MyStrom.Tests/Namotion.Devices.MyStrom.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.MyStrom.HomeBlaze/Namotion.Devices.MyStrom.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Shelly/Namotion.Devices.Shelly.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Shelly.Tests/Namotion.Devices.Shelly.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Shelly.HomeBlaze/Namotion.Devices.Shelly.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Wallbox/Namotion.Devices.Wallbox.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Wallbox.Tests/Namotion.Devices.Wallbox.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Wallbox.HomeBlaze/Namotion.Devices.Wallbox.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Ecowitt/Namotion.Devices.Ecowitt.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Ecowitt.Tests/Namotion.Devices.Ecowitt.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.Devices.Ecowitt.HomeBlaze/Namotion.Devices.Ecowitt.HomeBlaze.csproj" />
+  </Folder>
+  <Folder Name="/HomeBlaze/NuGet/">
+    <Project Path="HomeBlaze/Namotion.NuGet.Plugins.Tests/Namotion.NuGet.Plugins.Tests.csproj" />
+    <Project Path="HomeBlaze/Namotion.NuGet.Plugins/Namotion.NuGet.Plugins.csproj" />
+  </Folder>
+  <Folder Name="/HomeBlaze/Plugins/">
+    <Project Path="HomeBlaze/MyCompany.Abstractions/MyCompany.Abstractions.csproj" />
+    <Project Path="HomeBlaze/MyCompany.SamplePlugin1/MyCompany.SamplePlugin1.csproj" />
+    <Project Path="HomeBlaze/MyCompany.SamplePlugin1.HomeBlaze/MyCompany.SamplePlugin1.HomeBlaze.csproj" />
+    <Project Path="HomeBlaze/MyCompany.SamplePlugin2/MyCompany.SamplePlugin2.csproj" />
+    <Project Path="HomeBlaze/MyCompany.SamplePlugin2.HomeBlaze/MyCompany.SamplePlugin2.HomeBlaze.csproj" />
   </Folder>
   <Folder Name="/HomeBlaze/Tests/">
+    <Project Path="HomeBlaze/HomeBlaze.AI.Tests/HomeBlaze.AI.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.E2E.Tests/HomeBlaze.E2E.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Host.Services.Tests/HomeBlaze.Host.Services.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Services.Tests/HomeBlaze.Services.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Blazor.Tests/HomeBlaze.Storage.Blazor.Tests.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Tests/HomeBlaze.Storage.Tests.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.Plugins.Tests/HomeBlaze.Plugins.Tests.csproj" />
   </Folder>
   <Folder Name="/Samples/">
+    <Project Path="Namotion.Interceptor.ConnectorTester/Namotion.Interceptor.ConnectorTester.csproj" />
     <Project Path="Namotion.Interceptor.SampleBlazor/Namotion.Interceptor.SampleBlazor.csproj" />
     <Project Path="Namotion.Interceptor.SampleConsole/Namotion.Interceptor.SampleConsole.csproj" />
     <Project Path="Namotion.Interceptor.SampleMachine/Namotion.Interceptor.SampleMachine.csproj" />
@@ -70,9 +106,11 @@
     <Project Path="Namotion.Interceptor.OpcUa.Tests/Namotion.Interceptor.OpcUa.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Registry.Tests/Namotion.Interceptor.Registry.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Connectors.Tests/Namotion.Interceptor.Connectors.Tests.csproj" />
+    <Project Path="Namotion.Interceptor.Mcp.Tests/Namotion.Interceptor.Mcp.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Tests/Namotion.Interceptor.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Validation.Tests/Namotion.Interceptor.Validation.Tests.csproj" />
+    <Project Path="Namotion.Interceptor.WebSocket.Tests/Namotion.Interceptor.WebSocket.Tests.csproj" />
   </Folder>
   <Project Path="Namotion.Interceptor.Dynamic/Namotion.Interceptor.Dynamic.csproj" />
   <Project Path="Namotion.Interceptor.Generator/Namotion.Interceptor.Generator.csproj" />

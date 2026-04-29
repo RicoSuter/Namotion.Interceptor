@@ -17,10 +17,6 @@
           {
             Index: 1,
             Id: 3
-          },
-          {
-            Index: 3,
-            Id: 3
           }
         ],
         Count: 2
@@ -70,6 +66,9 @@
       },
       mother: {
         Kind: Object
+      },
+      relationships: {
+        Kind: Value
       }
     },
     3: {
@@ -106,6 +105,9 @@
       },
       mother: {
         Kind: Object
+      },
+      relationships: {
+        Kind: Value
       }
     },
     4: {
@@ -141,6 +143,9 @@
       },
       mother: {
         Kind: Object
+      },
+      relationships: {
+        Kind: Value
       }
     }
   }

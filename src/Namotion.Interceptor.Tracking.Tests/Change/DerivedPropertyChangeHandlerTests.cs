@@ -162,14 +162,14 @@ public class DerivedPropertyChangeHandlerTests
 
         // Initially FullName depends on FirstName and LastName
         var initialDeps = fullNameProp.GetRequiredProperties();
-        Assert.Equal(2, initialDeps.Count);
+        Assert.Equal(2, initialDeps.Length);
 
         // Act - Change FirstName which will re-record dependencies
         person.FirstName = "Jane";
 
         // Assert - Should still have 2 dependencies (FirstName, LastName)
         var afterDeps = fullNameProp.GetRequiredProperties();
-        Assert.Equal(2, afterDeps.Count);
+        Assert.Equal(2, afterDeps.Length);
     }
 
     [Fact]

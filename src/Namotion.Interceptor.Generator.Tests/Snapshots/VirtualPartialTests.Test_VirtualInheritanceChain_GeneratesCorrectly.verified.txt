@@ -47,25 +47,27 @@ namespace YourDefaultNamespace
 
         void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
         {
-            _properties = (_properties ?? DefaultProperties)
-                .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
-                .ToFrozenDictionary();
+            lock (((IInterceptorSubject)this).SyncRoot)
+            {
+                _properties = (_properties ?? DefaultProperties)
+                    .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+                    .ToFrozenDictionary();
+            }
         }
 
         public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
                 {
-                    "Name",       
+                    "Name",
                     new SubjectPropertyMetadata(
-                        typeof(BaseEntity).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
-                        (o) => ((BaseEntity)o).Name, 
-                        (o, v) => ((BaseEntity)o).Name = (string)v, 
+                        typeof(BaseEntity).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((BaseEntity)o).Name,
+                        (o, v) => ((BaseEntity)o).Name = (string)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
             }
-            
             .ToFrozenDictionary();
 
         public BaseEntity()
@@ -81,16 +83,16 @@ namespace YourDefaultNamespace
 
         public virtual partial string Name
         {
-             get
+            get
             {
                 return GetPropertyValue<string>(nameof(Name), static (o) => ((BaseEntity)o)._Name);
             }
-             set
+            set
             {
                 var newValue = value;
                 var cancel = false;
                 OnNameChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Name), newValue, static (o) => ((BaseEntity)o)._Name, static (o, v) => ((BaseEntity)o)._Name = v))
+                if (!cancel && SetPropertyValue(nameof(Name), newValue, _Name, static (o, v) => ((BaseEntity)o)._Name = v))
                 {
                     OnNameChanged(_Name);
                     RaisePropertyChanged(nameof(Name));
@@ -109,7 +111,7 @@ namespace YourDefaultNamespace
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
+        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
         {
             if (_context is null)
             {
@@ -118,7 +120,7 @@ namespace YourDefaultNamespace
             }
             else
             {
-                return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
+                return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
             }
         }
 
@@ -156,8 +158,6 @@ namespace YourDefaultNamespace
 {
     public partial class Person : IInterceptorSubject
     {
-        
-
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
@@ -175,29 +175,32 @@ namespace YourDefaultNamespace
 
         void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
         {
-            _properties = (_properties ?? DefaultProperties)
-                .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
-                .ToFrozenDictionary();
+            lock (((IInterceptorSubject)this).SyncRoot)
+            {
+                _properties = (_properties ?? DefaultProperties)
+                    .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+                    .ToFrozenDictionary();
+            }
         }
 
         public new static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
                 {
-                    "Name",       
+                    "Name",
                     new SubjectPropertyMetadata(
-                        typeof(Person).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
-                        (o) => ((Person)o).Name, 
-                        (o, v) => ((Person)o).Name = (string)v, 
+                        typeof(Person).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((Person)o).Name,
+                        (o, v) => ((Person)o).Name = (string)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
                 {
-                    "Age",       
+                    "Age",
                     new SubjectPropertyMetadata(
-                        typeof(Person).GetProperty(nameof(Age), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
-                        (o) => ((Person)o).Age, 
-                        (o, v) => ((Person)o).Age = (int)v, 
+                        typeof(Person).GetProperty(nameof(Age), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((Person)o).Age,
+                        (o, v) => ((Person)o).Age = (int)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
@@ -218,16 +221,16 @@ namespace YourDefaultNamespace
 
         public override partial string Name
         {
-             get
+            get
             {
                 return GetPropertyValue<string>(nameof(Name), static (o) => ((Person)o)._Name);
             }
-             set
+            set
             {
                 var newValue = value;
                 var cancel = false;
                 OnNameChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Name), newValue, static (o) => ((Person)o)._Name, static (o, v) => ((Person)o)._Name = v))
+                if (!cancel && SetPropertyValue(nameof(Name), newValue, _Name, static (o, v) => ((Person)o)._Name = v))
                 {
                     OnNameChanged(_Name);
                     RaisePropertyChanged(nameof(Name));
@@ -243,16 +246,16 @@ namespace YourDefaultNamespace
 
         public virtual partial int Age
         {
-             get
+            get
             {
                 return GetPropertyValue<int>(nameof(Age), static (o) => ((Person)o)._Age);
             }
-             set
+            set
             {
                 var newValue = value;
                 var cancel = false;
                 OnAgeChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Age), newValue, static (o) => ((Person)o)._Age, static (o, v) => ((Person)o)._Age = v))
+                if (!cancel && SetPropertyValue(nameof(Age), newValue, _Age, static (o, v) => ((Person)o)._Age = v))
                 {
                     OnAgeChanged(_Age);
                     RaisePropertyChanged(nameof(Age));
@@ -271,7 +274,7 @@ namespace YourDefaultNamespace
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
+        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
         {
             if (_context is null)
             {
@@ -280,7 +283,7 @@ namespace YourDefaultNamespace
             }
             else
             {
-                return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
+                return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
             }
         }
 
@@ -318,8 +321,6 @@ namespace YourDefaultNamespace
 {
     public partial class Employee : IInterceptorSubject
     {
-        
-
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
 
@@ -337,20 +338,23 @@ namespace YourDefaultNamespace
 
         void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
         {
-            _properties = (_properties ?? DefaultProperties)
-                .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
-                .ToFrozenDictionary();
+            lock (((IInterceptorSubject)this).SyncRoot)
+            {
+                _properties = (_properties ?? DefaultProperties)
+                    .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+                    .ToFrozenDictionary();
+            }
         }
 
         public new static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
                 {
-                    "Age",       
+                    "Age",
                     new SubjectPropertyMetadata(
-                        typeof(Employee).GetProperty(nameof(Age), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
-                        (o) => ((Employee)o).Age, 
-                        (o, v) => ((Employee)o).Age = (int)v, 
+                        typeof(Employee).GetProperty(nameof(Age), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((Employee)o).Age,
+                        (o, v) => ((Employee)o).Age = (int)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
@@ -371,16 +375,16 @@ namespace YourDefaultNamespace
 
         public override partial int Age
         {
-             get
+            get
             {
                 return GetPropertyValue<int>(nameof(Age), static (o) => ((Employee)o)._Age);
             }
-             set
+            set
             {
                 var newValue = value;
                 var cancel = false;
                 OnAgeChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Age), newValue, static (o) => ((Employee)o)._Age, static (o, v) => ((Employee)o)._Age = v))
+                if (!cancel && SetPropertyValue(nameof(Age), newValue, _Age, static (o, v) => ((Employee)o)._Age = v))
                 {
                     OnAgeChanged(_Age);
                     RaisePropertyChanged(nameof(Age));
@@ -399,7 +403,7 @@ namespace YourDefaultNamespace
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
+        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
         {
             if (_context is null)
             {
@@ -408,7 +412,7 @@ namespace YourDefaultNamespace
             }
             else
             {
-                return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
+                return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
             }
         }
 

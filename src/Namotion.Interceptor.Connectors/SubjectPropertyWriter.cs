@@ -8,7 +8,7 @@ namespace Namotion.Interceptor.Connectors;
 /// Implements the buffer-load-replay pattern to ensure eventual consistency during source initialization.
 /// </summary>
 /// <remarks>
-/// During initialization, updates are buffered. Once <see cref="CompleteInitializationAsync"/> is called,
+/// During initialization, updates are buffered. Once <see cref="LoadInitialStateAndResumeAsync"/> is called,
 /// the initial state is loaded, buffered updates are replayed, and subsequent writes are applied immediately.
 /// This buffering behavior is transparent to sources - they simply call <see cref="Write{TState}"/>.
 /// </remarks>
@@ -16,7 +16,6 @@ public sealed class SubjectPropertyWriter
 {
     private readonly ISubjectSource _source;
     private readonly ILogger _logger;
-    private readonly Func<CancellationToken, ValueTask<bool>>? _flushRetryQueueAsync;
     private readonly Lock _lock = new();
 
     private List<Action>? _updates = [];
@@ -25,18 +24,16 @@ public sealed class SubjectPropertyWriter
     /// Initializes a new instance of the <see cref="SubjectPropertyWriter"/> class.
     /// </summary>
     /// <param name="source">The source associated with this writer.</param>
-    /// <param name="flushRetryQueueAsync">Optional callback to flush pending outbound writes from the retry queue.</param>
     /// <param name="logger">The logger.</param>
-    public SubjectPropertyWriter(ISubjectSource source, Func<CancellationToken, ValueTask<bool>>? flushRetryQueueAsync, ILogger logger)
+    public SubjectPropertyWriter(ISubjectSource source, ILogger logger)
     {
         _source = source;
         _logger = logger;
-        _flushRetryQueueAsync = flushRetryQueueAsync;
     }
 
     /// <summary>
     /// Starts buffering updates instead of applying them directly.
-    /// Buffered updates will be replayed when <see cref="CompleteInitializationAsync"/> is called.
+    /// Buffered updates will be replayed when <see cref="LoadInitialStateAndResumeAsync"/> is called.
     /// This method should be called before the source starts listening for changes.
     /// </summary>
     public void StartBuffering()
@@ -48,25 +45,17 @@ public sealed class SubjectPropertyWriter
     }
 
     /// <summary>
-    /// Completes initialization by flushing pending writes, loading initial state from the source,
+    /// Completes initialization by loading initial state from the source
     /// and replaying all buffered updates. This ensures zero data loss during the initialization period.
     /// </summary>
     /// <remarks>
-    /// The flush happens first so that the server has the latest local changes before we load state,
-    /// avoiding visible state toggles where the UI briefly shows old server values.
-    /// If the flush or load fails, the exception propagates to signal initialization failure
+    /// If the load fails, the exception propagates to signal initialization failure
     /// and trigger reconnection.
     /// </remarks>
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <returns>The task.</returns>
-    public async Task CompleteInitializationAsync(CancellationToken cancellationToken)
+    public async Task LoadInitialStateAndResumeAsync(CancellationToken cancellationToken)
     {
-        // Flush pending writes first (so server has latest before we load state)
-        if (_flushRetryQueueAsync is not null)
-        {
-            await _flushRetryQueueAsync(cancellationToken).ConfigureAwait(false);
-        }
-
         var applyAction = await _source.LoadInitialStateAsync(cancellationToken).ConfigureAwait(false);
         lock (_lock)
         {
@@ -78,11 +67,10 @@ public sealed class SubjectPropertyWriter
             {
                 // Already replayed by a concurrent/previous call (race between automatic and manual reconnection).
                 // This is safe - it means another reconnection cycle already loaded state and replayed updates.
-                _logger.LogDebug("CompleteInitializationAsync called but updates already replayed by concurrent reconnection.");
+                _logger.LogDebug("LoadInitialStateAndResumeAsync called but updates already replayed by concurrent reconnection.");
                 return;
             }
 
-            _updates = null;
             foreach (var action in updates)
             {
                 try
@@ -94,6 +82,9 @@ public sealed class SubjectPropertyWriter
                     _logger.LogError(e, "Failed to apply subject update.");
                 }
             }
+
+            // Must be after replay: Write() reads _updates without lock on the fast path.
+            _updates = null;
         }
     }
 

@@ -26,7 +26,7 @@ internal sealed class StorageHierarchyManager
     {
         var fileName = Path.GetFileName(fullPath);
         
-        if (subject is IConfigurableSubject &&
+        if (subject is IConfigurable &&
             Path.GetExtension(fullPath).Equals(FileExtensions.Json, StringComparison.OrdinalIgnoreCase))
         {
             return Path.GetFileNameWithoutExtension(fullPath);
@@ -35,21 +35,25 @@ internal sealed class StorageHierarchyManager
         return fileName;
     }
 
+    /// <summary>
+    /// Places a subject in the hierarchy, creating intermediate VirtualFolders as needed.
+    /// When subject is null, ensures the folder path exists without placing a leaf subject.
+    /// </summary>
     public void PlaceInHierarchy(
         string path,
-        IInterceptorSubject subject,
+        IInterceptorSubject? subject,
         Dictionary<string, IInterceptorSubject> children,
-        IInterceptorSubjectContext context,
         IStorageContainer storage)
     {
-        path = NormalizePath(path);
+        path = NormalizePath(path).TrimEnd('/');
         var segments = path.Split('/');
+        var folderDepth = subject != null ? segments.Length - 1 : segments.Length;
 
-        if (segments.Length == 1)
+        if (folderDepth == 0)
         {
-            var key = GetChildKey(path, subject);
+            var key = GetChildKey(path, subject!);
 
-            if (!children.TryAdd(key, subject))
+            if (!children.TryAdd(key, subject!))
             {
                 _logger?.LogWarning("Skipping '{Path}' - key \"{Key}\" already claimed", path, key);
             }
@@ -61,7 +65,7 @@ internal sealed class StorageHierarchyManager
         var foldersToUpdate = new List<(VirtualFolder folder, Dictionary<string, IInterceptorSubject> newChildren)>();
         var current = children;
 
-        for (int i = 0; i < segments.Length - 1; i++)
+        for (int i = 0; i < folderDepth; i++)
         {
             var folderName = segments[i];
 
@@ -90,12 +94,15 @@ internal sealed class StorageHierarchyManager
             }
         }
 
-        // Add the subject to the leaf folder's NEW children dict
-        var childKey = GetChildKey(path, subject);
-        if (!current.TryAdd(childKey, subject))
+        // Add the subject to the leaf folder (only for file blobs)
+        if (subject != null)
         {
-            _logger?.LogWarning("Skipping '{Path}' - key \"{Key}\" already claimed", path, childKey);
-            return;
+            var childKey = GetChildKey(path, subject);
+            if (!current.TryAdd(childKey, subject))
+            {
+                _logger?.LogWarning("Skipping '{Path}' - key \"{Key}\" already claimed", path, childKey);
+                return;
+            }
         }
 
         // Reassign Children for all traversed folders (triggers change tracking)

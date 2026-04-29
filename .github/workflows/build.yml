@@ -28,7 +28,10 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       homeblaze: ${{ github.event_name != 'pull_request' || steps.filter.outputs.homeblaze == 'true' }}
+      nugetplugins: ${{ github.event_name != 'pull_request' || steps.filter.outputs.nugetplugins == 'true' }}
       opcua: ${{ github.event_name != 'pull_request' || steps.filter.outputs.opcua == 'true' }}
+      websocket: ${{ github.event_name != 'pull_request' || steps.filter.outputs.websocket == 'true' }}
+      mqtt: ${{ github.event_name != 'pull_request' || steps.filter.outputs.mqtt == 'true' }}
     steps:
       - uses: actions/checkout@v3
         if: github.event_name == 'pull_request'
@@ -39,9 +42,20 @@ jobs:
           filters: |
             homeblaze:
               - 'src/HomeBlaze/**'
+            nugetplugins:
+              - 'src/HomeBlaze/Namotion.NuGet.Plugins/**'
+              - 'src/HomeBlaze/Namotion.NuGet.Plugins.Tests/**'
+              - 'src/HomeBlaze/MyCompany.Abstractions/**'
+              - 'src/HomeBlaze/MyCompany.SamplePlugin*/**'
+              - 'src/HomeBlaze/HomeBlaze.Plugins/**'
+              - 'src/HomeBlaze/HomeBlaze.Plugins.Tests/**'
             opcua:
               - 'src/Namotion.Interceptor.OpcUa*/**'
               - 'src/HomeBlaze/*OpcUa*/**'
+            websocket:
+              - 'src/Namotion.Interceptor.WebSocket*/**'
+            mqtt:
+              - 'src/Namotion.Interceptor.Mqtt*/**'
 
   test:
     timeout-minutes: 15
@@ -106,8 +120,13 @@ jobs:
       - name: Build
         run: dotnet build src/Namotion.Interceptor.slnx --configuration Release
 
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
       - name: Install Playwright browsers
-        run: pwsh src/HomeBlaze/HomeBlaze.E2E.Tests/bin/Release/net9.0/playwright.ps1 install --with-deps
+        run: pwsh src/HomeBlaze/HomeBlaze.E2E.Tests/bin/Release/net10.0/playwright.ps1 install --with-deps
 
       - name: Run HomeBlaze integration tests
         run: |
@@ -123,6 +142,44 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cobertura-coverage-homeblaze-integration
+          path: '**/TestResults/**/coverage.cobertura.xml'
+          if-no-files-found: warn
+
+  test-nugetplugins-integration:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.nugetplugins == 'true'
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build
+        run: dotnet build src/Namotion.Interceptor.slnx --configuration Release
+
+      - name: Run NuGet plugins integration tests
+        run: |
+          dotnet test src/HomeBlaze/Namotion.NuGet.Plugins.Tests `
+            --configuration Release `
+            --no-build `
+            --filter "Category=Integration" `
+            --results-directory ./TestResults `
+            --collect:"XPlat Code Coverage" `
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+
+      - name: Upload NuGet plugins integration test coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-coverage-nugetplugins-integration
           path: '**/TestResults/**/coverage.cobertura.xml'
           if-no-files-found: warn
 
@@ -159,6 +216,72 @@ jobs:
           path: '**/TestResults/**/coverage.cobertura.xml'
           if-no-files-found: warn
 
+  test-websocket-integration:
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.websocket == 'true'
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build
+        run: dotnet build src/Namotion.Interceptor.slnx --configuration Release
+
+      - name: Run WebSocket integration tests
+        run: |
+          dotnet test src/Namotion.Interceptor.WebSocket.Tests `
+            --configuration Release `
+            --no-build `
+            --filter "Category=Integration" `
+            --results-directory ./TestResults `
+            --collect:"XPlat Code Coverage" `
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+
+      - name: Upload integration test coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-coverage-websocket-integration
+          path: '**/TestResults/**/coverage.cobertura.xml'
+          if-no-files-found: warn
+
+  test-mqtt-integration:
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    needs: changes
+    if: needs.changes.outputs.mqtt == 'true'
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build
+        run: dotnet build src/Namotion.Interceptor.slnx --configuration Release
+
+      - name: Run MQTT integration tests
+        run: |
+          dotnet test src/Namotion.Interceptor.Mqtt.Tests `
+            --configuration Release `
+            --no-build `
+            --filter "Category=Integration" `
+            --results-directory ./TestResults `
+            --collect:"XPlat Code Coverage" `
+            -- DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=cobertura
+
+      - name: Upload MQTT integration test coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobertura-coverage-mqtt-integration
+          path: '**/TestResults/**/coverage.cobertura.xml'
+          if-no-files-found: warn
+
   pack:
     timeout-minutes: 15
     if: github.event_name == 'release'
@@ -166,14 +289,20 @@ jobs:
     steps:
       - uses: actions/checkout@v3
         with:
-          fetch-depth: 0 
+          fetch-depth: 0
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - run: dotnet pack src/Namotion.Interceptor.slnx --configuration Release --output ${{ env.NUGET_DIRECTORY }} -p:PackageVersion=${{ github.event.release.tag_name }}
+      - name: Extract version from tag
+        id: version
+        run: |
+          $version = "${{ github.event.release.tag_name }}" -replace '^v', ''
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+
+      - run: dotnet pack src/Namotion.Interceptor.slnx --configuration Release --output ${{ env.NUGET_DIRECTORY }} -p:PackageVersion=${{ steps.version.outputs.VERSION }}
 
       - uses: actions/upload-artifact@v4
         with:
@@ -199,7 +328,7 @@ jobs:
           path: ${{ env.NUGET_DIRECTORY }}
 
       - name: Install nuget validator
-        run: dotnet tool update Meziantou.Framework.NuGetPackageValidation.Tool --global
+        run: dotnet tool update Meziantou.Framework.NuGetPackageValidation.Tool --global --version 1.0.46
 
       - name: Validate package
         run: meziantou.validate-nuget-package --excluded-rules IconMustBeSet,ReadmeMustBeSet,Symbols,ProjectUrlMustBeSet (Get-ChildItem "${{ env.NUGET_DIRECTORY }}/*.nupkg")
@@ -208,7 +337,7 @@ jobs:
     timeout-minutes: 15
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
-    needs: [ validate, test, test-homeblaze-integration, test-opcua-integration ]
+    needs: [ validate, test, test-homeblaze-integration, test-nugetplugins-integration, test-opcua-integration, test-websocket-integration, test-mqtt-integration ]
     steps:
       - uses: actions/download-artifact@v4
         with:

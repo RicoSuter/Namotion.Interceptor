@@ -271,7 +271,7 @@ Properties without an associated source are applied directly in Stage 3.
 
 ## Error Handling
 
-### TransactionException
+### SubjectTransactionException
 
 Thrown when one or more changes fail during commit:
 
@@ -280,18 +280,18 @@ try
 {
     await transaction.CommitAsync(cancellationToken);
 }
-catch (TransactionException ex)
+catch (SubjectTransactionException ex)
 {
     Console.WriteLine($"Failed: {ex.FailedChanges.Count}, Applied: {ex.AppliedChanges.Count}");
 
-    foreach (var change in ex.FailedChanges)
+    foreach (var error in ex.Errors)
     {
-        Console.WriteLine($"  {change.Property.Name}: {change.Error?.Message}");
+        Console.WriteLine($"  {error.Message}");
     }
 }
 ```
 
-### TransactionConflictException
+### SubjectTransactionConflictException
 
 Thrown when optimistic locking detects concurrent modifications:
 
@@ -300,7 +300,7 @@ try
 {
     await transaction.CommitAsync(cancellationToken);
 }
-catch (TransactionConflictException ex)
+catch (SubjectTransactionConflictException ex)
 {
     Console.WriteLine($"Conflicts on: {string.Join(", ", ex.ConflictingProperties.Select(p => p.Name))}");
 }
@@ -367,12 +367,97 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
 }
 ```
 
+### Capture and Commit Replay
+
+Transactions buffer property writes in a pending dictionary instead of applying them immediately. Consider a motor with a configurable speed limit, where a validator rejects `MotorSpeed` values that exceed `MaxAllowedSpeed`:
+
+```csharp
+[InterceptorSubject]
+public partial class Motor
+{
+    public partial int MaxAllowedSpeed { get; set; } // Default: 100
+    public partial int MotorSpeed { get; set; }      // Validated: must be <= MaxAllowedSpeed
+}
+```
+
+**During the transaction (capture phase):**
+
+```
+motor.MaxAllowedSpeed = 200;
+    → ValidationInterceptor: validates 200 for MaxAllowedSpeed → OK
+    → TransactionInterceptor: captures in pending[MaxAllowedSpeed] = 200, stops chain
+    (no field write, no notifications)
+
+motor.MotorSpeed = 150;
+    → ValidationInterceptor: validates 150 for MotorSpeed
+        reads MaxAllowedSpeed → TransactionInterceptor returns pending value 200
+        150 <= 200 → OK
+    → TransactionInterceptor: captures in pending[MotorSpeed] = 150, stops chain
+    (no field write, no notifications)
+```
+
+**On commit (replay phase):**
+
+Changes are replayed in insertion order through the full interceptor chain against the real model:
+
+```
+await transaction.CommitAsync(cancellationToken);
+
+Apply pending[MaxAllowedSpeed] = 200:
+    → ValidationInterceptor: validates 200 → OK
+    → TransactionInterceptor: IsCommitting=true → calls next (no capture)
+    → Field write: MaxAllowedSpeed = 200
+    → Notifications fired
+
+Apply pending[MotorSpeed] = 150:
+    → ValidationInterceptor: validates 150
+        reads MaxAllowedSpeed from real model → 200 (already committed above)
+        150 <= 200 → OK
+    → TransactionInterceptor: IsCommitting=true → calls next (no capture)
+    → Field write: MotorSpeed = 150
+    → Notifications fired
+```
+
+**Why insertion order matters:** If `MotorSpeed` were committed before `MaxAllowedSpeed`, the validator would read `MaxAllowedSpeed = 100` from the real model and reject the write.
+
+**Write order limitation:** Only the final value per property is stored (last write wins), and the commit position is determined by the *first* write to each property. If a property is re-written with a value that has different dependency requirements than the initial value, the commit order (based on first-write positions) may no longer match the dependency order needed by the final values. This can cause commit-time validation to fail even though the final set of values is consistent. To avoid this, ensure that re-writes do not shift dependency requirements relative to the original insertion order. See [#192](https://github.com/RicoSuter/Namotion.Interceptor/issues/192) for details and potential solutions.
+
+### Retry After Conflict Detection
+
+When using `TransactionConflictBehavior.FailOnConflict`, a `SubjectTransactionConflictException` is thrown *before* any writes are applied. The pending changes remain intact, so you can modify them and retry:
+
+```csharp
+using var transaction = await context.BeginTransactionAsync(
+    TransactionFailureHandling.BestEffort,
+    conflictBehavior: TransactionConflictBehavior.FailOnConflict);
+
+motor.MaxAllowedSpeed = 200;
+motor.MotorSpeed = 150;
+
+try
+{
+    await transaction.CommitAsync(cancellationToken);
+}
+catch (SubjectTransactionConflictException ex)
+{
+    // Conflict detected before any writes — pending changes are still intact.
+    // Re-read current state, adjust, and retry.
+    motor.MaxAllowedSpeed = 250;
+    await transaction.CommitAsync(cancellationToken);
+}
+```
+
+Post-write failures (`SubjectTransactionException` from `BestEffort` or `Rollback`) clear the pending changes as part of the commit process, so retry is not possible — dispose the transaction and start a new one.
+
+Note that concurrent `CommitAsync` calls on the same transaction are rejected — only one commit attempt can be in progress at a time.
+
 ### Thread Safety
 
 - `BeginTransactionAsync()` uses `AsyncLocal<T>` to store the current transaction
 - Exclusive transactions use a per-context semaphore
 - Each async execution context has its own transaction scope
 - The transaction is automatically cleared on `Dispose()`
+- Concurrent `CommitAsync` calls on the same transaction instance are rejected
 
 ## Best Practices
 
@@ -387,7 +472,7 @@ using (var transaction = await context.BeginTransactionAsync(TransactionFailureH
 ### BeginTransactionAsync
 
 ```csharp
-Task<SubjectTransaction> BeginTransactionAsync(
+TransactionAwaitable BeginTransactionAsync(
     TransactionFailureHandling failureHandling,
     TransactionLocking locking = TransactionLocking.Exclusive,
     TransactionRequirement requirement = TransactionRequirement.None,

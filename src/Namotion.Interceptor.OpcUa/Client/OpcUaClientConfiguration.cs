@@ -1,6 +1,4 @@
-using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Mapping;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 using Opc.Ua.Client;
@@ -266,9 +264,10 @@ public class OpcUaClientConfiguration
     /// <summary>
     /// Gets or sets the OPC UA session timeout.
     /// This determines how long the server will maintain the session after losing communication.
-    /// Default is 60 seconds.
+    /// Should be greater than OperationTimeout to allow time for failure detection and reconnection.
+    /// Default is 120 seconds.
     /// </summary>
-    public TimeSpan SessionTimeout { get; set; } = TimeSpan.FromSeconds(60);
+    public TimeSpan SessionTimeout { get; set; } = TimeSpan.FromSeconds(120);
 
     /// <summary>
     /// Gets or sets the keep-alive interval for the OPC UA session.
@@ -282,9 +281,9 @@ public class OpcUaClientConfiguration
     /// Gets or sets the operation timeout for OPC UA requests.
     /// This determines how long to wait for a response before timing out.
     /// Shorter timeouts allow faster disconnection detection but may cause false positives on slow networks.
-    /// Default is 60 seconds.
+    /// Default is 30 seconds.
     /// </summary>
-    public TimeSpan OperationTimeout { get; set; } = TimeSpan.FromSeconds(60);
+    public TimeSpan OperationTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
     /// Gets or sets the maximum time the reconnect handler will attempt to reconnect before giving up.
@@ -308,6 +307,12 @@ public class OpcUaClientConfiguration
     public bool UseSecurity { get; set; } = false;
 
     /// <summary>
+    /// Gets or sets an async factory for creating the user identity used when connecting to the OPC UA server.
+    /// When null (default), anonymous authentication is used.
+    /// </summary>
+    public Func<CancellationToken, Task<UserIdentity>>? CreateUserIdentity { get; set; }
+
+    /// <summary>
     /// Gets or sets the telemetry context for OPC UA operations.
     /// Defaults to NullTelemetryContext for minimal overhead.
     /// For DI integration, use DefaultTelemetry.Create(builder => builder.Services.AddSingleton(loggerFactory)).
@@ -324,7 +329,7 @@ public class OpcUaClientConfiguration
     /// Maps C# properties to OPC UA nodes.
     /// Defaults to composite of PathProviderOpcUaNodeMapper (with "opc" source) and AttributeOpcUaNodeMapper.
     /// </summary>
-    public IOpcUaNodeMapper NodeMapper { get; init; } = DefaultNodeMapper;
+    public IOpcUaNodeMapper NodeMapper { get; set; } = DefaultNodeMapper;
 
     /// <summary>
     /// Gets or sets the timeout for session disposal during shutdown.
@@ -394,7 +399,7 @@ public class OpcUaClientConfiguration
             },
             ClientConfiguration = new ClientConfiguration
             {
-                DefaultSessionTimeout = 60000
+                DefaultSessionTimeout = (int)SessionTimeout.TotalMilliseconds
             },
             DisableHiResClock = true,
             TraceConfiguration = new TraceConfiguration

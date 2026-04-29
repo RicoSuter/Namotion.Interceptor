@@ -1,13 +1,12 @@
-@using HomeBlaze.Abstractions
-@using HomeBlaze.Abstractions.Services
+@using HomeBlaze.Abstractions.Attributes
+@using HomeBlaze.Abstractions.Metadata
 @using HomeBlaze.Host.Components.Dialogs
-@using HomeBlaze.Services
 @using HomeBlaze.Storage.Abstractions
 
 @inject IDialogService DialogService
 @inject SubjectComponentRegistry ComponentRegistry
 @inject DeveloperModeService DeveloperMode
-@inject ISubjectMethodInvoker MethodInvoker
+@inject SubjectPathResolver PathResolver
 @inject IServiceProvider ServiceProvider
 
 <TrackingScope Context="Subject?.Context" ShowDebugInfo="DeveloperMode.IsEnabled">
@@ -40,7 +39,7 @@
                            Size="Size.Small"
                            Class="mr-2" />
         }
-        @if (Subject is IStorageFile or IConfigurableSubject)
+        @if (Subject is IStorageFile or IConfigurable)
         {
             <MudIconButton OnClick="@(() => OnDelete.InvokeAsync())"
                            Icon="@Icons.Material.Filled.Delete"
@@ -68,10 +67,9 @@
                 <MudStack Class="pl-4 pr-4">
                     @foreach (var method in methods)
                     {
-                        var isQuery = method.Kind == SubjectMethodKind.Query;
+                        var isQuery = method.Kind == MethodKind.Query;
                         var defaultIcon = isQuery ? "Search" : "PlayArrow";
-                        var methodName = method.MethodInfo.Name.Replace("Async", string.Empty, StringComparison.OrdinalIgnoreCase);
-                        var methodProperty = _registeredSubject?.TryGetProperty(methodName);
+                        var methodProperty = _registeredSubject?.TryGetProperty(method.PropertyName);
                         var isEnabledAttribute = methodProperty?.TryGetAttribute(KnownAttributes.IsEnabled);
                         var isEnabled = isEnabledAttribute?.GetValue() as bool? ?? true;
                         <MudButton Variant="Variant.Filled"
@@ -79,9 +77,9 @@
                                    Size="Size.Small"
                                    FullWidth="true"
                                    StartIcon="@SubjectIconExtensions.ResolveMudBlazorIcon(method.Icon ?? defaultIcon)"
-                                   Disabled="@(_executingOperation == method || !isEnabled)"
+                                   Disabled="@(_executingMethod == method || !isEnabled)"
                                    OnClick="@(() => ExecuteMethodAsync(method))">
-                            @if (_executingOperation == method)
+                            @if (_executingMethod == method)
                             {
                                 <MudProgressCircular Size="Size.Small" Indeterminate="true" Class="mr-2" />
                             }
@@ -95,11 +93,11 @@
         @* Child Collections *@
         @foreach (var property in GetChildProperties())
         {
-            var children = property.Children;
-            @if (children.Length == 1)
+            var children = GetVisibleChildren(property);
+            @if (children.Length == 1 && property.IsSubjectReference)
             {
                 @* Single child - no expansion panel *@
-                <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Style="padding-top: 0; padding-bottom: 0">
+                <MudList T="object" SelectedValue="SelectedChild" Color="Color.Primary" Class="pt-4" Style="padding-top: 0; padding-bottom: 0">
                     @{
                         var child = children[0];
                         var isSelected = child.Subject == SelectedChild;
@@ -125,9 +123,9 @@
                     <MudDivider />
                 </MudList>
             }
-            else if (children.Length > 1)
+            else if (children.Length >= 1)
             {
-                <MudExpansionPanel Gutters="false" Dense="true" Expanded="true" Class="px-4">
+                <MudExpansionPanel Gutters="false" Dense="true" Expanded="true" HeaderClass="px-4">
                     <TitleContent>
                         @GetPropertyDisplayName(property)
                         <MudChip T="string" Size="Size.Small" Color="Color.Dark">@children.Length</MudChip>
@@ -153,7 +151,7 @@
                                     <span style="word-break: break-word;">@GetSubjectDisplayName(child)</span>
                                     @if (childCount > 0)
                                     {
-                                        <MudChip T="string" Size="Size.Small" Color="Color.Dark">@childCount</MudChip>
+                                        <MudChip T="string" Size="Size.Small" Color="Color.Dark" Class="ml-4">@childCount</MudChip>
                                     }
                                 </MudListItem>
                                 <MudDivider />
@@ -173,7 +171,7 @@
                 <ChildContent>
                     <div class="mb-4">
                         <small style="word-break: break-all;">
-                            <p class="my-1"><strong>ID:</strong> @GetObjectPath()</p>
+                            <p class="my-1"><strong>ID:</strong> @GetPath()</p>
                             <p class="my-1"><strong>Type:</strong> @Subject.GetType().FullName</p>
                         </small>
                     </div>
@@ -188,7 +186,7 @@
     private readonly HashSet<string> _expandedProperties = [];
 
     private RegisteredSubject? _registeredSubject;
-    private SubjectMethodInfo? _executingOperation;
+    private MethodMetadata? _executingMethod;
 
     [Parameter]
     public IInterceptorSubject? Subject { get; set; }
@@ -203,7 +201,7 @@
     public bool CanClose { get; set; }
 
     [Parameter]
-    public string? ObjectPath { get; set; }
+    public string? Path { get; set; }
 
     [Parameter]
     public EventCallback<PropertyClickEventArgs> OnPropertyClick { get; set; }
@@ -248,9 +246,14 @@
         return SubjectIconExtensions.ResolveMudBlazorColor(subject.GetIconColor());
     }
 
-    private string GetObjectPath()
+    private string GetPath()
     {
-        return ObjectPath ?? "Root";
+        if (Subject != null)
+        {
+            return PathResolver.GetPath(Subject, PathStyle.Canonical) ?? Path ?? "/";
+        }
+
+        return Path ?? "/";
     }
 
     private IEnumerable<RegisteredSubjectProperty> GetPrimitiveProperties()
@@ -259,7 +262,8 @@
             return [];
 
         return _registeredSubject.Properties
-            .Where(p => p.GetStateAttribute() != null && !HasChildSubjects(p))
+            .Where(p => p.GetStateMetadata() != null && !p.CanContainSubjects
+                     && p.GetConfigurationMetadata()?.IsSecret != true)
             .OrderBy(p => p.GetDisplayPosition());
     }
 
@@ -269,8 +273,15 @@
             return [];
 
         return _registeredSubject.Properties
-            .Where(p => !p.IsAttribute && HasChildSubjects(p))
+            .Where(p => p is { IsAttribute: false, CanContainSubjects: true })
             .OrderBy(p => p.GetDisplayPosition());
+    }
+
+    private static SubjectPropertyChild[] GetVisibleChildren(RegisteredSubjectProperty property)
+    {
+        return property.Children
+            .Where(child => !Attribute.IsDefined(child.Subject.GetType(), typeof(ExcludeFromBrowsingAttribute), true))
+            .ToArray();
     }
 
     private void TogglePropertyExpanded(string propertyName)
@@ -283,7 +294,10 @@
     {
         // Property reads are automatically recorded via the context-based ReadPropertyRecorder
         var value = prop.GetValue();
-        var attributes = prop.Attributes.ToArray();
+        var attributes = prop.Attributes
+            .Where(a => a.AttributeMetadata.AttributeName != KnownAttributes.State &&
+                        a.AttributeMetadata.AttributeName != KnownAttributes.Configuration)
+            .ToArray();
         var hasAttributes = attributes.Length > 0;
         var isExpanded = _expandedProperties.Contains(prop.Name);
         var marginLeft = depth * 24;
@@ -303,7 +317,18 @@
                 <span style="display: inline-block; width: 24px;"></span>
             }
             <strong>@displayName: </strong>
-            @prop.GetPropertyDisplayValue(value)
+            @{ var displayValue = prop.GetPropertyDisplayValue(value); }
+            @if (displayValue.Contains('\n'))
+            {
+                @foreach (var line in displayValue.Split('\n'))
+                {
+                    <span>@line</span><br />
+                }
+            }
+            else
+            {
+                @displayValue
+            }
         </MudText>
 
         @if (isExpanded)
@@ -318,11 +343,6 @@
     private string GetPropertyDisplayName(RegisteredSubjectProperty property)
     {
         return property.GetDisplayName();
-    }
-
-    private bool HasChildSubjects(RegisteredSubjectProperty property)
-    {
-        return property.HasChildSubjects;
     }
 
     private string GetSubjectDisplayName(SubjectPropertyChild child)
@@ -341,7 +361,7 @@
         if (registered == null) return 0;
 
         return registered.Properties
-            .Where(p => !p.IsAttribute && HasChildSubjects(p))
+            .Where(p => p is { IsAttribute: false, CanContainSubjects: true })
             .Sum(p => p.Children.Length);
     }
 
@@ -367,96 +387,60 @@
         await SubjectEditDialog.ShowAsync(DialogService, ComponentRegistry, Subject, $"Edit {title}");
     }
 
-    private IReadOnlyList<SubjectMethodInfo> GetMethods() =>
+    private IReadOnlyList<MethodMetadata> GetMethods() =>
         _registeredSubject?.GetAllMethods() ?? [];
 
-    private async Task ExecuteMethodAsync(SubjectMethodInfo operation)
+    private async Task ExecuteMethodAsync(MethodMetadata method)
     {
-        if (Subject == null || _executingOperation != null)
+        if (Subject == null || _executingMethod != null)
+        {
             return;
+        }
 
         try
         {
             object?[]? parameters = null;
 
-            // Pre-resolve auto-injected and [FromServices] parameters
-            var resolvedParameters = new Dictionary<string, object?>();
-            foreach (var parameter in operation.Parameters)
-            {
-                if (SubjectMethodInvoker.IsAutoInjectedParameter(parameter.Type))
-                {
-                    resolvedParameters[parameter.Name] = null; // Placeholder, invoker will provide actual value
-                    continue;
-                }
-
-                if (parameter.IsFromServices)
-                {
-                    resolvedParameters[parameter.Name] = ServiceProvider.GetService(parameter.Type);
-                }
-            }
-
             // Check if there are any parameters that need user input
-            var needsParameterDialog = operation.Parameters.Length > resolvedParameters.Count;
-
-            // If operation has parameters that need user input, show parameter dialog
-            if (needsParameterDialog)
+            if (method.Parameters.Any(p => p.RequiresInput))
             {
-                var parameterDialog = await MethodParameterDialog.ShowAsync(
-                    DialogService, operation, resolvedParameters);
+                var parameterDialog = await MethodParameterDialog.ShowAsync(DialogService, method);
                 var parameterResult = await parameterDialog.Result;
                 if (parameterResult == null || parameterResult.Canceled)
                     return;
 
                 parameters = parameterResult.Data as object?[];
             }
-            // If all parameters were DI-resolved, build parameters array
-            else if (resolvedParameters.Count > 0)
+            else if (method.RequiresConfirmation)
             {
-                parameters = new object?[operation.Parameters.Length];
-                for (var i = 0; i < operation.Parameters.Length; i++)
-                {
-                    var parameter = operation.Parameters[i];
-                    parameters[i] = resolvedParameters[parameter.Name];
-                }
-            }
-            // If operation requires confirmation, show confirmation dialog
-            else if (operation.RequiresConfirmation)
-            {
-                var confirmDialog = await MethodConfirmationDialog.ShowAsync(DialogService, operation);
+                var confirmDialog = await MethodConfirmationDialog.ShowAsync(DialogService, method);
                 var confirmResult = await confirmDialog.Result;
                 if (confirmResult == null || confirmResult.Canceled)
                     return;
             }
 
-            // Execute the operation
-            _executingOperation = operation;
+            // Execute the method
+            _executingMethod = method;
             StateHasChanged();
 
-            var result = await MethodInvoker.InvokeAsync(
-                Subject,
-                operation,
-                parameters ?? []);
+            var result = await method.InvokeAsync(parameters, ServiceProvider, CancellationToken.None);
 
-            _executingOperation = null;
+            _executingMethod = null;
             StateHasChanged();
 
-            // Show result or error dialog
-            if (result.Success)
+            if (result != null)
             {
-                if (result.Result != null)
-                {
-                    await MethodResultDialog.ShowAsync(DialogService, operation.Title, result.Result);
-                }
+                await MethodResultDialog.ShowAsync(DialogService, method.Title, result);
             }
-            else
-            {
-                await MethodErrorDialog.ShowAsync(DialogService, operation.Title, result.Exception!);
-            }
+        }
+        catch (OperationCanceledException)
+        {
+            _executingMethod = null;
         }
         catch (Exception ex)
         {
-            _executingOperation = null;
-            await MethodErrorDialog.ShowAsync(DialogService, operation.Title, ex);
+            _executingMethod = null;
+            await MethodErrorDialog.ShowAsync(DialogService, method.Title, ex);
         }
     }
 }

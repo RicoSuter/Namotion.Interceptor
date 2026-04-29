@@ -1,0 +1,5 @@
+{
+  "$type": "MyCompany.SamplePlugin1.SampleDevice1",
+  "name": "Sample Device 1",
+  "pollingIntervalMs": 2000
+}

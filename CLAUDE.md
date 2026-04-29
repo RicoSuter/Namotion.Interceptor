@@ -6,12 +6,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Namotion.Interceptor is a .NET library for creating trackable object models through automatic property interception using C# 13 partial properties and source generation. It enables property change tracking, derived property updates, and object graph management with zero runtime reflection.
 
+## Priorities
+
+When tradeoffs conflict, prefer in this order:
+
+1. **Correctness** — documented semantics, thread-safety (no data races, no torn reads/writes), quiescent consistency (state agrees once writes settle), existing invariants hold.
+2. **Performance** — minimize allocations and CPU time. Both matter; when they trade, allocations usually win (GC pressure compounds across the host).
+3. **Code style / idiom** — non-idiomatic API is fine when 1 or 2 demand it (e.g., `ImmutableArray<T>` in public API instead of `IEnumerable<T>`).
+
 ## Development Commands
 
 ### Build and Test
-- `dotnet test src/Namotion.Interceptor.slnx` - Run all unit tests
 - `dotnet build src/Namotion.Interceptor.slnx` - Build entire solution
+- `dotnet test src/Namotion.Interceptor.slnx --filter "Category!=Integration"` - Run unit tests (default)
+- `dotnet test src/Namotion.Interceptor.slnx` - Run all tests including integration
 - `dotnet pack src/Namotion.Interceptor.slnx` - Create NuGet packages
+
+Only run integration tests when changing connector implementations (OPC UA, MQTT, WebSocket, etc.) or HomeBlaze UI — run those targeted per project, e.g.:
+- `dotnet test src/Namotion.Interceptor.OpcUa.Tests`
+- `dotnet test src/HomeBlaze/HomeBlaze.E2E.Tests`
 
 ### Running Samples
 - `dotnet run --project src/Namotion.Interceptor.SampleConsole` - Run console sample
@@ -42,6 +55,8 @@ src/
 ├── Extensions/                     # Integration packages (AspNetCore, Blazor, etc.)
 ├── Samples/                        # Example applications
 └── Tests/                          # Unit test projects
+docs/                               # Feature and connector documentation
+├── design/                         # Internal design documents
 ```
 
 ## Language Requirements
@@ -107,3 +122,12 @@ The library has specialized support for:
 ## Coding Style
 
 - **Avoid abbreviations** in variable and parameter names unless the name is very long. Use descriptive names (e.g., `attribute` not `attr`).
+
+## Git Rules
+
+- Never include "Claude", "Co-Authored-By", or AI attribution in commit messages, PR descriptions, or GitHub comments.
+
+## Test Conventions
+
+- **Naming**: `When<Condition>_Then<ExpectedBehavior>` (e.g., `WhenDepthIsZero_ThenReturnsNoChildren`)
+- **Structure**: Explicit `// Arrange`, `// Act`, `// Assert` comments separating each phase (use `// Act & Assert` for exception tests)

@@ -1,0 +1,152 @@
+# OPC UA
+
+The `Namotion.Interceptor.OpcUa` package provides integration between Namotion.Interceptor and OPC UA (Open Platform Communications Unified Architecture), enabling bidirectional synchronization between C# objects and industrial automation systems. It supports both client and server modes.
+
+- [OPC UA Client](connectors-opcua-client.md) - Configuration, authentication, monitoring, resilience, extensibility
+- [OPC UA Server](connectors-opcua-server.md) - Configuration, security, companion specs, diagnostics
+- [OPC UA Mapping](connectors-opcua-mapping.md) - Attributes, fluent configuration, companion spec patterns
+
+## Key Features
+
+- Bidirectional synchronization between C# objects and OPC UA nodes
+- Dynamic property discovery from OPC UA servers
+- Attribute-based mapping for precise control
+- Subscription-based real-time updates
+- Arrays, nested objects, and collections support
+
+## Quick Start
+
+### Client
+
+Connect to an OPC UA server by configuring a client with `AddOpcUaSubjectClientSource`:
+
+```csharp
+[InterceptorSubject]
+public partial class Machine
+{
+    [Path("opc", "Temperature")]
+    public partial decimal Temperature { get; set; }
+
+    [Path("opc", "Speed")]
+    public partial decimal Speed { get; set; }
+}
+
+builder.Services.AddOpcUaSubjectClientSource<Machine>(
+    serverUrl: "opc.tcp://plc.factory.com:4840",
+    sourceName: "opc",
+    pathPrefix: null,
+    rootName: "MyMachine");
+
+var machine = serviceProvider.GetRequiredService<Machine>();
+await host.StartAsync();
+Console.WriteLine(machine.Temperature); // Synchronized with OPC UA server
+machine.Speed = 100; // Writes to OPC UA server
+```
+
+See [OPC UA Client](connectors-opcua-client.md) for configuration, authentication, monitoring, resilience, and extensibility.
+
+### Server
+
+Expose your C# objects as an OPC UA server with `AddOpcUaSubjectServer`:
+
+```csharp
+[InterceptorSubject]
+public partial class Sensor
+{
+    [Path("opc", "Value")]
+    public partial decimal Value { get; set; }
+}
+
+builder.Services.AddOpcUaSubjectServer<Sensor>(
+    sourceName: "opc",
+    pathPrefix: null,
+    rootName: "MySensor");
+
+var sensor = serviceProvider.GetRequiredService<Sensor>();
+sensor.Value = 42.5m;
+await host.StartAsync();
+```
+
+See [OPC UA Server](connectors-opcua-server.md) for configuration, security, companion specifications, and diagnostics.
+
+## Property Mapping
+
+Map C# properties to OPC UA nodes using attributes. For simple cases, use `[Path]`. For advanced OPC UA-specific configuration, use `[OpcUaNode]` and related attributes.
+
+```csharp
+[InterceptorSubject]
+[OpcUaNode("Machine", TypeDefinition = "MachineType")]  // Class-level type definition
+public partial class Machine
+{
+    // Simple property mapping
+    [Path("opc", "Status")]
+    public partial int Status { get; set; }
+
+    // OPC UA-specific mapping with monitoring config
+    [OpcUaNode("Temperature", SamplingInterval = 100, DeadbandType = DeadbandType.Absolute, DeadbandValue = 0.5)]
+    public partial double Temperature { get; set; }
+
+    // Child object with HasComponent reference
+    [OpcUaReference("HasComponent")]
+    [OpcUaNode("MainMotor")]
+    public partial Motor? Motor { get; set; }
+}
+```
+
+For comprehensive mapping documentation including companion spec support, VariableTypes, and fluent configuration, see [OPC UA Mapping Guide](connectors-opcua-mapping.md).
+
+### Node Mapper
+
+Both client and server configurations include a `NodeMapper` property (`IOpcUaNodeMapper`) that controls how C# properties map to OPC UA nodes. The default is a `CompositeNodeMapper` combining `PathProviderOpcUaNodeMapper` (maps `[Path]` attributes) and `AttributeOpcUaNodeMapper` (maps `[OpcUaNode]` attributes). For custom mapping strategies including fluent configuration and composite mappers, see [OPC UA Mapping Guide](connectors-opcua-mapping.md).
+
+## Type Conversions
+
+OPC UA doesn't natively support C# `decimal`, so automatic conversion is applied:
+
+- `decimal` <-> `double`
+- `decimal[]` <-> `double[]`
+
+All other C# primitive types map directly to OPC UA built-in types. For custom conversions, extend `OpcUaValueConverter` (see [Client Extensibility](connectors-opcua-client.md#custom-value-converter)).
+
+## Performance
+
+The library includes optimizations:
+
+- Batched read/write operations respecting server limits
+- Object pooling for change buffers
+- Fast data change callbacks bypassing caches
+- Buffered updates batching rapid changes
+
+## Benchmark Results
+
+Intel(R) Core(TM) Ultra 7 258V
+
+```
+Server Benchmark - 1 minute - [2026-04-08 21:20:22.783]
+
+Total received changes:          1192428
+Total published changes:         1197644
+Process memory:                  693.08 MB (429.11 MB in .NET heap)
+Avg allocations over last 60s:   514.93 MB/s
+
+Metric                               Avg        P50        P90        P95        P99      P99.9        Max        Min     StdDev      Count
+-------------------------------------------------------------------------------------------------------------------------------------------
+Received (changes/s)            19864.43   19854.86   20608.93   21045.00   24794.77   24794.77   24794.77   15362.84    1146.70          -
+Processing latency (ms)             0.03       0.00       0.02       0.06       0.29       5.97      18.52       0.00       0.35    1192428
+End-to-end latency (ms)            29.95      25.51      42.64      54.74     187.44     278.54     298.14       0.35      27.88    1192428
+```
+
+```
+Client Benchmark - 1 minute - [2026-04-08 21:17:23.974]
+
+Total received changes:          1197975
+Total published changes:         1188810
+Process memory:                  510.89 MB (258.39 MB in .NET heap)
+Avg allocations over last 60s:   27.25 MB/s
+
+Metric                               Avg        P50        P90        P95        P99      P99.9        Max        Min     StdDev      Count
+-------------------------------------------------------------------------------------------------------------------------------------------
+Received (changes/s)            19955.91   20037.53   20749.58   20854.92   21974.69   21974.69   21974.69   17305.18     673.79          -
+Processing latency (ms)             1.68       0.82       1.70       2.11      26.43      36.48      37.82       0.00       4.54    1197975
+End-to-end latency (ms)            52.77      50.21      81.95      90.78     134.55     219.26     277.27       0.99      24.47    1197975
+```

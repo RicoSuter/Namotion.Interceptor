@@ -47,43 +47,45 @@ namespace YourDefaultNamespace
 
         void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
         {
-            _properties = (_properties ?? DefaultProperties)
-                .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
-                .ToFrozenDictionary();
+            lock (((IInterceptorSubject)this).SyncRoot)
+            {
+                _properties = (_properties ?? DefaultProperties)
+                    .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+                    .ToFrozenDictionary();
+            }
         }
 
         public static IReadOnlyDictionary<string, SubjectPropertyMetadata> DefaultProperties { get; } =
             new Dictionary<string, SubjectPropertyMetadata>
             {
                 {
-                    "Value",       
+                    "Value",
                     new SubjectPropertyMetadata(
-                        typeof(SampleSubject).GetProperty(nameof(Value), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
-                        (o) => ((SampleSubject)o).Value, 
-                        (o, v) => ((SampleSubject)o).Value = (int)v, 
+                        typeof(SampleSubject).GetProperty(nameof(Value), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((SampleSubject)o).Value,
+                        (o, v) => ((SampleSubject)o).Value = (int)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
                 {
-                    "Name",       
+                    "Name",
                     new SubjectPropertyMetadata(
-                        typeof(SampleSubject).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
-                        (o) => ((SampleSubject)o).Name, 
-                        (o, v) => ((SampleSubject)o).Name = (string)v, 
+                        typeof(SampleSubject).GetProperty(nameof(Name), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((SampleSubject)o).Name,
+                        (o, v) => ((SampleSubject)o).Name = (string)v,
                         isIntercepted: true,
                         isDynamic: false)
                 },
                 {
-                    "Hidden",       
+                    "Hidden",
                     new SubjectPropertyMetadata(
-                        typeof(SampleSubject).GetProperty(nameof(Hidden), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!, 
-                        (o) => ((SampleSubject)o).Hidden, 
-                        (o, v) => ((SampleSubject)o).Hidden = (string)v, 
+                        typeof(SampleSubject).GetProperty(nameof(Hidden), BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+                        (o) => ((SampleSubject)o).Hidden,
+                        (o, v) => ((SampleSubject)o).Hidden = (string)v,
                         isIntercepted: false,
                         isDynamic: false)
                 },
             }
-            
             .ToFrozenDictionary();
 
         public SampleSubject()
@@ -99,16 +101,16 @@ namespace YourDefaultNamespace
 
         public partial int Value
         {
-             get
+            get
             {
                 return GetPropertyValue<int>(nameof(Value), static (o) => ((SampleSubject)o)._Value);
             }
-             set
+            set
             {
                 var newValue = value;
                 var cancel = false;
                 OnValueChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Value), newValue, static (o) => ((SampleSubject)o)._Value, static (o, v) => ((SampleSubject)o)._Value = v))
+                if (!cancel && SetPropertyValue(nameof(Value), newValue, _Value, static (o, v) => ((SampleSubject)o)._Value = v))
                 {
                     OnValueChanged(_Value);
                     RaisePropertyChanged(nameof(Value));
@@ -124,16 +126,16 @@ namespace YourDefaultNamespace
 
         public partial string Name
         {
-             get
+            get
             {
                 return GetPropertyValue<string>(nameof(Name), static (o) => ((SampleSubject)o)._Name);
             }
-             set
+            set
             {
                 var newValue = value;
                 var cancel = false;
                 OnNameChanging(ref newValue, ref cancel);
-                if (!cancel && SetPropertyValue(nameof(Name), newValue, static (o) => ((SampleSubject)o)._Name, static (o, v) => ((SampleSubject)o)._Name = v))
+                if (!cancel && SetPropertyValue(nameof(Name), newValue, _Name, static (o, v) => ((SampleSubject)o)._Name = v))
                 {
                     OnNameChanged(_Name);
                     RaisePropertyChanged(nameof(Name));
@@ -152,7 +154,7 @@ namespace YourDefaultNamespace
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, Func<IInterceptorSubject, TProperty> readValue, Action<IInterceptorSubject, TProperty> setValue)
+        private bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> setValue)
         {
             if (_context is null)
             {
@@ -161,7 +163,7 @@ namespace YourDefaultNamespace
             }
             else
             {
-                return _context.SetPropertyValue(propertyName, newValue, readValue, setValue);
+                return _context.SetPropertyValue(propertyName, newValue, currentValue, setValue);
             }
         }
 

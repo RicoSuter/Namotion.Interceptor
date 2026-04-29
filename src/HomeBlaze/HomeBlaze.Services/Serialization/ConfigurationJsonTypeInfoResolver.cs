@@ -1,15 +1,18 @@
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using HomeBlaze.Abstractions;
 using HomeBlaze.Abstractions.Attributes;
+using Namotion.Interceptor;
+using Namotion.Interceptor.Registry;
 
 namespace HomeBlaze.Services.Serialization;
 
 /// <summary>
 /// JSON type info resolver that:
-/// - Sets up polymorphism for IConfigurableSubject with $type discriminator
-/// - Filters properties to only [Configuration] for IConfigurableSubject types
+/// - Sets up polymorphism for IConfigurable with $type discriminator
+/// - Filters properties to only [Configuration] for IConfigurable types
 /// - Allows all properties for plain value objects
 /// </summary>
 public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
@@ -25,8 +28,8 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
     {
         var typeInfo = base.GetTypeInfo(type, options);
 
-        // Set up polymorphism on IConfigurableSubject base type
-        if (type == typeof(IConfigurableSubject))
+        // Set up polymorphism on IConfigurable and IInterceptorSubject base types
+        if (type == typeof(IConfigurable) || type == typeof(IInterceptorSubject))
         {
             typeInfo.PolymorphismOptions = new JsonPolymorphismOptions
             {
@@ -35,9 +38,9 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
                 UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization
             };
 
-            // Register all IConfigurableSubject implementations from TypeProvider
+            // Register all IConfigurable implementations from TypeProvider
             foreach (var derivedType in _typeProvider.Types
-                .Where(t => typeof(IConfigurableSubject).IsAssignableFrom(t)
+                .Where(t => typeof(IConfigurable).IsAssignableFrom(t)
                             && t is { IsAbstract: false, IsInterface: false }))
             {
                 typeInfo.PolymorphismOptions.DerivedTypes.Add(
@@ -50,14 +53,31 @@ public class ConfigurationJsonTypeInfoResolver : DefaultJsonTypeInfoResolver
         {
             foreach (var property in typeInfo.Properties)
             {
-                var hasConfigurationAttribute = property.AttributeProvider?
-                    .GetCustomAttributes(typeof(ConfigurationAttribute), true)
-                    .Any() ?? false;
-
-                if (!hasConfigurationAttribute)
+                var propertyName = (property.AttributeProvider as MemberInfo)?.Name ?? property.Name;
+                var ignoreNulls = options.DefaultIgnoreCondition == JsonIgnoreCondition.WhenWritingNull;
+                property.ShouldSerialize = (parent, value) =>
                 {
-                    property.ShouldSerialize = static (_, _) => false;
-                }
+                    // Respect WhenWritingNull since setting ShouldSerialize overrides default behavior
+                    if (ignoreNulls && value is null)
+                        return false;
+
+                    if (parent is IInterceptorSubject subject)
+                    {
+                        var registered = subject.TryGetRegisteredSubject();
+                        if (registered != null)
+                        {
+                            var registeredProperty = registered.TryGetProperty(propertyName);
+                            return registeredProperty?.TryGetAttribute(KnownAttributes.Configuration) != null;
+                        }
+                    }
+
+                    // For non-subject types (value objects) or subjects without registry, fall back to reflection
+                    var hasConfigurationAttribute = property.AttributeProvider?
+                        .GetCustomAttributes(typeof(ConfigurationAttribute), true)
+                        .Any() ?? false;
+
+                    return hasConfigurationAttribute;
+                };
             }
         }
 

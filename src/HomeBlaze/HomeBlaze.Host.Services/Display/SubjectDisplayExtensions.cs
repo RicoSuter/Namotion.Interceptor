@@ -28,8 +28,11 @@ public static class SubjectDisplayExtensions
     /// This returns the semantic name, not the MudBlazor icon string.
     /// Use SubjectIconExtensions.GetIcon() in HomeBlaze.Host for MudBlazor resolution.
     /// </summary>
-    public static string GetIconName(this IInterceptorSubject subject)
+    public static string GetNavigationIconName(this IInterceptorSubject subject)
     {
+        if (subject is IPage page && !string.IsNullOrEmpty(page.NavigationIconName))
+            return page.NavigationIconName;
+
         if (subject is IIconProvider iconProvider && !string.IsNullOrEmpty(iconProvider.IconName))
             return iconProvider.IconName;
 

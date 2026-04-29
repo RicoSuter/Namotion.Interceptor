@@ -12,27 +12,36 @@ public static class SubjectFactoryExtensions
 
     public static IInterceptorSubject CreateCollectionSubject(this ISubjectFactory subjectFactory, RegisteredSubjectProperty property, object? index)
     {
+        var serviceProvider = property.Parent.Subject.Context.TryGetService<IServiceProvider>();
+        return CreateCollectionSubject(subjectFactory, property.Type, index, serviceProvider);
+    }
+
+    /// <summary>
+    /// Creates a collection/dictionary item subject from a property type and optional index/key.
+    /// Uses the property type to derive the element type (array element, dict value, or list element).
+    /// </summary>
+    internal static IInterceptorSubject CreateCollectionSubject(this ISubjectFactory subjectFactory, Type propertyType, object? index, IServiceProvider? serviceProvider)
+    {
         Type? itemType;
         if (index is null)
         {
-            itemType = property.Type;
+            itemType = propertyType;
         }
-        else if (property.Type.IsArray)
+        else if (propertyType.IsArray)
         {
-            itemType = property.Type.GetElementType();
+            itemType = propertyType.GetElementType();
         }
-        else if (property.Type.GenericTypeArguments.Length == 2)
+        else if (propertyType.GenericTypeArguments.Length == 2)
         {
             // Dictionary<TKey, TValue> - use the value type (index 1)
-            itemType = property.Type.GenericTypeArguments[1];
+            itemType = propertyType.GenericTypeArguments[1];
         }
         else
         {
             // List<T>, ICollection<T>, etc. - use the element type (index 0)
-            itemType = property.Type.GenericTypeArguments[0];
+            itemType = propertyType.GenericTypeArguments[0];
         }
 
-        var serviceProvider = property.Parent.Subject.Context.TryGetService<IServiceProvider>();
         return subjectFactory.CreateSubject(
             itemType ?? throw new InvalidOperationException("Unknown collection element type"),
             serviceProvider);
