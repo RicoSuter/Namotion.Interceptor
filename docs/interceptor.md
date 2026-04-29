@@ -180,7 +180,7 @@ Each interceptor can:
 ```csharp
 public class LoggingInterceptor : IWriteInterceptor
 {
-    public void WriteProperty<T>(ref PropertyWriteContext<T> context, WritePropertyDelegate<T> next)
+    public void WriteProperty<T>(ref PropertyWriteContext<T> context, WriteInterceptionDelegate<T> next)
     {
         Console.WriteLine($"Before: Writing {context.Property.Name} = {context.NewValue}");
         next(ref context); // Call next interceptor or actual write

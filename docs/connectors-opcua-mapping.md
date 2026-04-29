@@ -570,7 +570,7 @@ public partial class Machine
 
 ```csharp
 [InterceptorSubject]
-[OpcUaNode(
+[OpcUaNode("AnalogSignalVariable",
     TypeDefinition = "AnalogSignalVariableType",
     TypeDefinitionNamespace = "http://opcfoundation.org/UA/PADIM/",
     NodeClass = OpcUaNodeClass.Variable)]
