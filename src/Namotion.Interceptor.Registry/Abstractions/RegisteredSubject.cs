@@ -357,12 +357,22 @@ public class RegisteredSubject
 
         if (!hasAttributes)
         {
+            // Single-pass with defensive `is RegisteredSubjectProperty` check
+            // instead of blind cast, so future RegisteredSubjectMember subclasses
+            // (e.g., methods) are skipped rather than crashing here. When every
+            // member is a property (the dominant case on the refactor branch),
+            // index reaches _members.Count and the trim is skipped — the cost
+            // collapses to `isinst` per member instead of `castclass`, which is
+            // roughly equivalent.
             var snapshot = new RegisteredSubjectProperty[_members.Count];
             var index = 0;
             foreach (var member in _members.Values)
             {
-                snapshot[index++] = (RegisteredSubjectProperty)member;
+                if (member is RegisteredSubjectProperty property)
+                    snapshot[index++] = property;
             }
+            if (index != snapshot.Length)
+                Array.Resize(ref snapshot, index);
             _propertiesSnapshot = snapshot;
             return;
         }
@@ -382,10 +392,12 @@ public class RegisteredSubject
                 }
                 list.Add(attribute);
             }
-            else
+            else if (member is RegisteredSubjectProperty property)
             {
-                properties.Add((RegisteredSubjectProperty)member);
+                properties.Add(property);
             }
+            // Other RegisteredSubjectMember subclasses are intentionally skipped
+            // from _propertiesSnapshot (it only holds property-kind members).
         }
 
         _propertiesSnapshot = properties.ToArray();
@@ -419,7 +431,7 @@ public class RegisteredSubject
                 result.Add(attribute);
             }
         }
-        return result is null ? Array.Empty<RegisteredSubjectAttribute>() : result.ToArray();
+        return result is null ? [] : result.ToArray();
     }
 
     /// <summary>
