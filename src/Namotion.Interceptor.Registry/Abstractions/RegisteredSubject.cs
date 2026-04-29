@@ -270,7 +270,9 @@ public class RegisteredSubject
 
             // Publish the new member's own AttributesCache. Scans _members for any
             // attributes whose MemberName targets this member (covers the rare case
-            // where an attribute was registered before its owner).
+            // where an attribute was registered before its owner). A reader that
+            // observes the new member via _members before this assignment lands
+            // sees the empty-array default from RegisteredSubjectMember, never null.
             subjectProperty.AttributesCache = ComputeAttributesFor(subjectProperty.Name);
 
             if (subjectProperty is RegisteredSubjectAttribute newAttribute)
@@ -322,6 +324,31 @@ public class RegisteredSubject
     /// </summary>
     private void PopulateInitialCaches()
     {
+        // Fast path: no attributes. Common case for attribute-free subjects.
+        // Skips the dictionary + per-member List<T> allocations, and lets the
+        // default empty AttributesCache from RegisteredSubjectMember stand.
+        var hasAttributes = false;
+        foreach (var member in _members.Values)
+        {
+            if (member is RegisteredSubjectAttribute)
+            {
+                hasAttributes = true;
+                break;
+            }
+        }
+
+        if (!hasAttributes)
+        {
+            var snapshot = new RegisteredSubjectProperty[_members.Count];
+            var index = 0;
+            foreach (var member in _members.Values)
+            {
+                snapshot[index++] = (RegisteredSubjectProperty)member;
+            }
+            _propertiesSnapshot = snapshot;
+            return;
+        }
+
         Dictionary<string, List<RegisteredSubjectAttribute>>? attributesByMember = null;
         var properties = new List<RegisteredSubjectProperty>(_members.Count);
 
@@ -337,21 +364,23 @@ public class RegisteredSubject
                 }
                 list.Add(attribute);
             }
-            else if (member is RegisteredSubjectProperty property)
+            else
             {
-                properties.Add(property);
+                properties.Add((RegisteredSubjectProperty)member);
             }
         }
 
         _propertiesSnapshot = properties.ToArray();
 
-        foreach (var member in _members.Values)
+        if (attributesByMember is null)
+            return;
+
+        foreach (var (memberName, list) in attributesByMember)
         {
-            member.AttributesCache =
-                attributesByMember is not null
-                && attributesByMember.TryGetValue(member.Name, out var list)
-                    ? list.ToArray()
-                    : Array.Empty<RegisteredSubjectAttribute>();
+            if (_members.TryGetValue(memberName, out var member))
+            {
+                member.AttributesCache = list.ToArray();
+            }
         }
     }
 

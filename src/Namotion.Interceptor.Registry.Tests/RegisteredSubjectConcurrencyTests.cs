@@ -132,4 +132,81 @@ public class RegisteredSubjectConcurrencyTests
         Assert.Equal(iterations, nameProperty!.Attributes.Length);
         Assert.True(readerIterationTotal > 0, "Readers did not observe any attribute snapshots.");
     }
+
+    [Fact]
+    public async Task WhenReadersAccessFreshlyPublishedMembers_ThenAttributesCacheIsNeverNull()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+        var host = new ConcurrencyHost(context);
+        var registered = host.TryGetRegisteredSubject();
+        Assert.NotNull(registered);
+
+        const int iterations = 500;
+        const int readerCount = 4;
+
+        var startBarrier = new Barrier(readerCount + 1);
+        var stop = false;
+        var readerException = null as Exception;
+        var readerIterationTotal = 0;
+
+        // Act - readers traverse Members (the raw dictionary view) and probe
+        // each member's Attributes/TryGetAttribute on the freshly published entry.
+        var readerTasks = Enumerable.Range(0, readerCount).Select(_ => Task.Run(() =>
+        {
+            startBarrier.SignalAndWait();
+            try
+            {
+                var localIterations = 0;
+                while (Volatile.Read(ref stop) == false)
+                {
+                    foreach (var (_, member) in registered!.Members)
+                    {
+                        var attributes = member.Attributes;
+                        Assert.NotNull(attributes);
+                        foreach (var attribute in attributes)
+                        {
+                            var lookedUp = member.TryGetAttribute(attribute.AttributeName);
+                            Assert.NotNull(lookedUp);
+                        }
+                    }
+                    localIterations++;
+                }
+                Interlocked.Add(ref readerIterationTotal, localIterations);
+            }
+            catch (Exception exception)
+            {
+                readerException = exception;
+            }
+        })).ToArray();
+
+        startBarrier.SignalAndWait();
+        for (var i = 0; i < iterations; i++)
+        {
+            // Mix property and attribute adds — both go through AddPropertyInternal
+            // and publish into _members in different orderings relative to AttributesCache.
+            if ((i & 1) == 0)
+            {
+                registered!.AddProperty<string>(
+                    $"Dynamic{i}",
+                    getValue: _ => string.Empty,
+                    setValue: null);
+            }
+            else
+            {
+                registered!.TryGetProperty(nameof(ConcurrencyHost.Name))!.AddAttribute(
+                    $"Attr{i}",
+                    typeof(int),
+                    _ => i,
+                    setValue: null);
+            }
+        }
+
+        Volatile.Write(ref stop, true);
+        await Task.WhenAll(readerTasks);
+
+        // Assert
+        Assert.Null(readerException);
+        Assert.True(readerIterationTotal > 0, "Readers did not observe any member snapshots.");
+    }
 }

@@ -5,12 +5,11 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public abstract class RegisteredSubjectMember
 {
-    // Populated under RegisteredSubject._lock at write time and never nulled after
-    // the member is published in _members. Readers perform a single volatile read.
-    // Publication order on the writer side: the _members volatile write happens
-    // before any AttributesCache write for members derived from that snapshot,
-    // ensuring readers always observe a cache consistent with the visible _members.
-    internal volatile RegisteredSubjectAttribute[]? AttributesCache;
+    // Initialized to an empty array so a freshly-constructed member is safe to
+    // observe even before the writer publishes the real cache. Subsequent
+    // assignments happen under RegisteredSubject._lock; the volatile write
+    // publishes the new array to readers on weak memory models.
+    internal volatile RegisteredSubjectAttribute[] AttributesCache = Array.Empty<RegisteredSubjectAttribute>();
 
     protected RegisteredSubjectMember(
         RegisteredSubject parent,
@@ -48,7 +47,7 @@ public abstract class RegisteredSubjectMember
     public RegisteredSubjectAttribute[] Attributes
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => AttributesCache!;
+        get => AttributesCache;
     }
 
     /// <summary>
@@ -59,7 +58,7 @@ public abstract class RegisteredSubjectMember
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubjectAttribute? TryGetAttribute(string attributeName)
     {
-        var attributes = AttributesCache!;
+        var attributes = AttributesCache;
         foreach (var attribute in attributes)
         {
             if (attribute.AttributeName == attributeName)
