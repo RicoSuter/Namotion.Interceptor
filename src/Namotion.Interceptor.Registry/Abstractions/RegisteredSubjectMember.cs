@@ -5,20 +5,11 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public abstract class RegisteredSubjectMember
 {
-    // Volatile: lock-free readers of member.Attributes must observe null-writes
-    // paired with the volatile _members writes on RegisteredSubject via acquire/release
-    // semantics. Without volatile, a reader could observe a stale cache after the
-    // new _members snapshot.
-    //
-    // Write ordering on the producer side matters: in AddPropertyInternal the
-    // null-write to this field happens AFTER the _members volatile write, both
-    // under _lock. This guarantees that any reader which subsequently observes
-    // cache == null and recomputes attributes from _members always computes
-    // from the updated snapshot. Swapping the order (null first, _members second)
-    // would introduce a wedging hazard: a reader racing between the two writes
-    // could cache the old attribute list derived from the old _members, with
-    // no further invalidation signal pending.
-    internal volatile RegisteredSubjectAttribute[]? AttributesCache;
+    // Initialized to an empty array so a freshly-constructed member is safe to
+    // observe even before the writer publishes the real cache. Subsequent
+    // assignments happen under RegisteredSubject._lock; the volatile write
+    // publishes the new array to readers on weak memory models.
+    internal volatile RegisteredSubjectAttribute[] AttributesCache = Array.Empty<RegisteredSubjectAttribute>();
 
     protected RegisteredSubjectMember(
         RegisteredSubject parent,
@@ -56,7 +47,7 @@ public abstract class RegisteredSubjectMember
     public RegisteredSubjectAttribute[] Attributes
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => AttributesCache ??= Parent.GetMemberAttributes(Name);
+        get => AttributesCache;
     }
 
     /// <summary>
@@ -67,7 +58,13 @@ public abstract class RegisteredSubjectMember
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public RegisteredSubjectAttribute? TryGetAttribute(string attributeName)
     {
-        return Parent.TryGetMemberAttribute(Name, attributeName);
+        var attributes = AttributesCache;
+        foreach (var attribute in attributes)
+        {
+            if (attribute.AttributeName == attributeName)
+                return attribute;
+        }
+        return null;
     }
 
     /// <summary>
@@ -86,13 +83,9 @@ public abstract class RegisteredSubjectMember
         params Attribute[] attributes)
     {
         var propertyName = $"{Name}@{name}";
+        var combined = RegisteredSubject.AppendAttribute(attributes, new PropertyAttributeAttribute(Name, name));
 
-        var attribute = Parent.AddProperty(
-            propertyName, type, getValue, setValue,
-            attributes
-                .Concat([new MemberAttributeAttribute(Name, name)])
-                .ToArray());
-
+        var attribute = Parent.AddProperty(propertyName, type, getValue, setValue, combined);
         return (RegisteredSubjectAttribute)attribute;
     }
 
@@ -112,13 +105,9 @@ public abstract class RegisteredSubjectMember
         params Attribute[] attributes)
     {
         var propertyName = $"{Name}@{name}";
+        var combined = RegisteredSubject.AppendAttribute(attributes, new PropertyAttributeAttribute(Name, name));
 
-        var attribute = Parent.AddDerivedProperty(
-            propertyName, type, getValue, setValue,
-            attributes
-                .Concat([new MemberAttributeAttribute(Name, name)])
-                .ToArray());
-
+        var attribute = Parent.AddDerivedProperty(propertyName, type, getValue, setValue, combined);
         return (RegisteredSubjectAttribute)attribute;
     }
 }

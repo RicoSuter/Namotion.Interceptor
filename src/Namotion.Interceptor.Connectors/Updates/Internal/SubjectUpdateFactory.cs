@@ -392,11 +392,18 @@ internal static class SubjectUpdateFactory
         Dictionary<string, SubjectPropertyUpdate> subjectProperties,
         SubjectUpdateBuilder builder)
     {
-        // Find the root property by walking up the attribute chain
-        var rootProperty = attributeProperty;
-        while (rootProperty is RegisteredSubjectAttribute rootAttribute)
+        // Find the root member by walking up the attribute chain.
+        // The terminal member may in future be a non-property kind (e.g. a method);
+        // in that case this update path cannot be applied — return cleanly.
+        RegisteredSubjectMember rootMember = attributeProperty;
+        while (rootMember is RegisteredSubjectAttribute rootAttribute)
         {
-            rootProperty = (RegisteredSubjectProperty)rootAttribute.GetAttributedMember();
+            rootMember = rootAttribute.GetAttributedMember();
+        }
+
+        if (rootMember is not RegisteredSubjectProperty rootProperty)
+        {
+            return;
         }
 
         if (!subjectProperties.TryGetValue(rootProperty.Name, out var rootUpdate))
@@ -408,11 +415,11 @@ internal static class SubjectUpdateFactory
         // Navigate/create an attribute chain (excluding the last one which we'll create from change)
         var currentUpdate = rootUpdate;
         var attributeChain = new List<RegisteredSubjectAttribute>();
-        var currentProperty = attributeProperty;
-        while (currentProperty is RegisteredSubjectAttribute currentAttr)
+        RegisteredSubjectMember currentMember = attributeProperty;
+        while (currentMember is RegisteredSubjectAttribute currentAttribute)
         {
-            attributeChain.Add(currentAttr);
-            currentProperty = (RegisteredSubjectProperty)currentAttr.GetAttributedMember();
+            attributeChain.Add(currentAttribute);
+            currentMember = currentAttribute.GetAttributedMember();
         }
         attributeChain.Reverse();
 

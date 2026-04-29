@@ -130,7 +130,7 @@ public class InheritancePathTests
         var registered = teacher.TryGetRegisteredSubject();
         var allPaths = registered is null
             ? []
-            : registered.GetAllMembers()
+            : registered.GetAllPropertiesAndAttributes()
                 .GetPaths(DefaultPathProvider.Instance, teacher)
                 .Select(p => p.path)
                 .Order()
@@ -206,5 +206,4 @@ public class InheritancePathTests
         Assert.Equal("Children[0].FirstName", inheritedPath);
         Assert.Equal("Children[0].MainCourse", ownPath);
     }
-
 }

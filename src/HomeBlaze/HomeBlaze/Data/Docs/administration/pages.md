@@ -65,7 +65,7 @@ Expressions resolve relative to the current page's embedded subjects first, then
 | `mymotor/Speed` | Inline subject named `mymotor` embedded in current page |
 | `/Demo/Conveyor/CurrentSpeed` | Absolute path from root |
 
-See [Configuration Guide - Path Syntax](../administration/configuration.md#path-syntax) for full path documentation including `./`, `../`, brackets for collection indices, and more.
+See [Paths](paths.md) for full path documentation including `./`, `../`, brackets for collection indices, and more.
 
 ### Expression Features
 
@@ -204,5 +204,6 @@ For more details, see [Motor Setup Guide](../samples/MotorSetup.md).
 
 ## Related Documentation
 
-- [Building Custom Subjects](building-subjects.md) - Create subject types for embedding
-- [Configuration Guide](../administration/configuration.md) - Configure storage and subjects
+- [Subjects, Storage & Files](subjects.md) - Configure subjects and file layout
+- [Paths](paths.md) - Path syntax reference
+- [Building Custom Subjects](../development/building-subjects.md) - Create subject types for embedding

@@ -29,14 +29,11 @@ public static class SubjectRegistryJsonExtensions
             var parent = new SubjectParent(property, null);
             do
             {
-                var attribute = registry
+                var registeredProperty = registry
                     .TryGetRegisteredSubject(parent.Property.Subject)?
-                    .TryGetProperty(parent.Property.Name)?
-                    .ReflectionAttributes
-                    .OfType<MemberAttributeAttribute>()
-                    .FirstOrDefault();
+                    .TryGetProperty(parent.Property.Name);
 
-                if (attribute is not null)
+                if (registeredProperty is RegisteredSubjectAttribute attribute)
                 {
                     return GetJsonPath(new PropertyReference(
                         parent.Property.Subject,
@@ -172,10 +169,10 @@ public static class SubjectRegistryJsonExtensions
 
     private static string GetJsonPropertyName(this RegisteredSubjectProperty property, JsonSerializerOptions jsonSerializerOptions)
     {
-        if (property is RegisteredSubjectAttribute attribute)
+        if (property is RegisteredSubjectAttribute attribute
+            && attribute.GetAttributedMember() is RegisteredSubjectProperty attributedPropertyOrAttribute)
         {
-            return ((RegisteredSubjectProperty)attribute.GetAttributedMember())
-                .GetJsonPropertyName(jsonSerializerOptions) + "@" + attribute.AttributeName;
+            return attributedPropertyOrAttribute.GetJsonPropertyName(jsonSerializerOptions) + "@" + attribute.AttributeName;
         }
 
         return jsonSerializerOptions.PropertyNamingPolicy?

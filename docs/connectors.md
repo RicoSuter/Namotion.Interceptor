@@ -193,19 +193,19 @@ public interface IPathProvider
     /// Get the path segment for a property.
     /// Returns null if no explicit mapping exists.
     /// </summary>
-    string? GetPropertySegment(RegisteredSubjectProperty property);
+    string? TryGetPropertySegment(RegisteredSubjectProperty property);
 
     /// <summary>
     /// Find a property by its path segment.
     /// </summary>
-    RegisteredSubjectProperty? GetPropertyFromSegment(RegisteredSubject subject, string segment);
+    RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment);
 }
 ```
 
 ### Built-in Providers
 
 - **DefaultPathProvider** - Uses property names exactly as defined
-- **JsonCamelCasePathProvider** - Converts property names to camelCase for JSON APIs
+- **CamelCasePathProvider** - Converts property names to camelCase for JSON APIs
 - **AttributeBasedPathProvider** - Uses `[Path]` attributes for custom mapping
 
 ### [Path] Attribute
@@ -271,14 +271,12 @@ For details on the update format, collection synchronization, and apply logic, s
 
 ```csharp
 // OPC UA Client Source
-builder.Services.AddOpcUaSubjectClient<Sensor>("opc.tcp://localhost:4840", "opc", rootName: "Root");
+builder.Services.AddOpcUaSubjectClientSource<Sensor>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 
 // MQTT Client Source
-builder.Services.AddMqttSubjectClient<Sensor>(config =>
-{
-    config.BrokerHost = "localhost";
-    config.BrokerPort = 1883;
-});
+builder.Services.AddMqttSubjectClientSource<Sensor>(
+    brokerHost: "localhost",
+    pathProviderName: "mqtt");
 ```
 
 ### Custom Source Implementation
@@ -324,7 +322,7 @@ public class DatabaseSource : ISubjectSource
         try
         {
             await WriteToDatabaseAsync(changes, cancellationToken);
-            return WriteResult.Success();
+            return WriteResult.Success;
         }
         catch (Exception ex)
         {
@@ -353,13 +351,13 @@ The `SourceOwnershipManager` class simplifies implementing custom sources by han
 
 To enumerate the members a source should claim, walk the registry with a nested loop: `subject.GetAllProperties()` yields properties across child subjects, and `property.GetAllAttributes()` yields the attributes attached to each one.
 
-Properties and attributes vary in value shape, and it is up to the source to decide how to handle each:
+Values on properties and attributes vary in shape. Sources decide per case:
 
-- **Scalar values** (strings, numbers, timestamps) serialize straightforwardly through the configured value converter.
-- **Complex value objects** (records, POCOs, arrays) may or may not be supported by the value converter. Register a custom converter or skip unsupported types.
-- **Trackable subjects** (`member.CanContainSubjects == true`) either need to be skipped or traversed explicitly via `member.Children`. The built-in MQTT and WebSocket connectors currently skip them (see [issue #266](https://github.com/RicoSuter/Namotion.Interceptor/issues/266)).
+- **Scalars** (strings, numbers, timestamps) — serialize directly.
+- **Complex objects** (records, POCOs, collections, dictionaries) — provide a custom serializer or skip.
+- **Trackable subjects** (`member.CanContainSubjects == true`) — either skip or recurse via `member.Children`.
 
-The example below skips all subject-containing members via `!CanContainSubjects` and leaves value serialization to the converter.
+The example below skips all subject-containing members via `!CanContainSubjects`.
 
 ```csharp
 public class DatabaseSource : ISubjectSource, IDisposable
@@ -383,8 +381,7 @@ public class DatabaseSource : ISubjectSource, IDisposable
                 // Called when a subject is detached from the object graph
                 // Use this to clean up caches or subscriptions for the subject
                 CleanupCachesForSubject(subject);
-            },
-            logger);
+            });
     }
 
     public IInterceptorSubject RootSubject => _root;

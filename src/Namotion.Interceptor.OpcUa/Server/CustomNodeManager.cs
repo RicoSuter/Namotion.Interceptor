@@ -84,6 +84,26 @@ internal class CustomNodeManager : CustomNodeManager2
         }
     }
 
+    /// <summary>
+    /// Deletes the OPC UA variable node backing this property (if any) and
+    /// recurses into its attributes. Mirrors the recursion in <see cref="CreateAttributeNodes"/>
+    /// so that nested attribute-of-attribute nodes are cleaned up on detach.
+    /// </summary>
+    private void DeleteVariableNodeAndAttributes(RegisteredSubjectProperty property)
+    {
+        if (property.Reference.TryGetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, out var node)
+            && node is BaseDataVariableState variableNode)
+        {
+            DeleteNode(SystemContext, variableNode.NodeId);
+            property.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
+        }
+
+        foreach (var attribute in property.Attributes)
+        {
+            DeleteVariableNodeAndAttributes(attribute);
+        }
+    }
+
     public override void CreateAddressSpace(IDictionary<NodeId, IList<IReference>> externalReferences)
     {
         base.CreateAddressSpace(externalReferences);
@@ -129,22 +149,7 @@ internal class CustomNodeManager : CustomNodeManager2
             {
                 foreach (var property in registeredSubject.Properties)
                 {
-                    if (property.Reference.TryGetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, out var node)
-                        && node is BaseDataVariableState variableNode)
-                    {
-                        DeleteNode(SystemContext, variableNode.NodeId);
-                        property.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
-                    }
-
-                    foreach (var attribute in property.Attributes)
-                    {
-                        if (attribute.Reference.TryGetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, out var attrNode)
-                            && attrNode is BaseDataVariableState attrVariableNode)
-                        {
-                            DeleteNode(SystemContext, attrVariableNode.NodeId);
-                            attribute.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
-                        }
-                    }
+                    DeleteVariableNodeAndAttributes(property);
                 }
             }
 

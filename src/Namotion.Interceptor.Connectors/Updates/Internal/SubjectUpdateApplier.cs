@@ -44,41 +44,38 @@ internal static class SubjectUpdateApplier
         SubjectUpdateApplyContext context)
     {
         var registry = subject.Context.GetService<ISubjectRegistry>();
+        var registeredSubject = registry.TryGetRegisteredSubject(subject);
 
         foreach (var (propertyName, propertyUpdate) in properties)
         {
             // Apply attributes first
             if (propertyUpdate.Attributes is not null)
             {
+                var registeredMember = registeredSubject?.TryGetMember(propertyName);
                 foreach (var (attributeName, attributeUpdate) in propertyUpdate.Attributes)
                 {
-                    var registeredAttribute = subject
-                        .TryGetRegisteredSubject()?
-                        .TryGetProperty(propertyName)?
-                        .TryGetAttribute(attributeName);
-
+                    var registeredAttribute = registeredMember?.TryGetAttribute(attributeName);
                     if (registeredAttribute is not null)
                     {
-                        ApplyPropertyUpdate(subject, registeredAttribute.Name, attributeUpdate, context, registry);
+                        ApplyPropertyUpdate(subject, registeredAttribute, attributeUpdate, context);
                     }
                 }
             }
 
-            ApplyPropertyUpdate(subject, propertyName, propertyUpdate, context, registry);
+            var registeredProperty = registeredSubject?.TryGetProperty(propertyName);
+            if (registeredProperty is not null)
+            {
+                ApplyPropertyUpdate(subject, registeredProperty, propertyUpdate, context);
+            }
         }
     }
 
     private static void ApplyPropertyUpdate(
         IInterceptorSubject subject,
-        string propertyName,
+        RegisteredSubjectProperty registeredProperty,
         SubjectPropertyUpdate propertyUpdate,
-        SubjectUpdateApplyContext context,
-        ISubjectRegistry? registry)
+        SubjectUpdateApplyContext context)
     {
-        var registeredProperty = subject.TryGetRegisteredProperty(propertyName, registry);
-        if (registeredProperty is null)
-            return;
-
         switch (propertyUpdate.Kind)
         {
             case SubjectPropertyUpdateKind.Value:

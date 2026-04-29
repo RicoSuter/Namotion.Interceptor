@@ -301,19 +301,11 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
         var pathProvider = _configuration.PathProvider;
         var count = 0;
 
-        foreach (var property in registeredSubject.GetAllProperties())
+        foreach (var member in registeredSubject.GetAllPropertiesAndAttributes())
         {
-            if (!property.CanContainSubjects && pathProvider.IsPropertyIncluded(property))
+            if (!member.CanContainSubjects && pathProvider.IsPropertyIncluded(member))
             {
-                if (TryAddSubscription(property, subscribeOptionsBuilder)) count++;
-            }
-
-            foreach (var attribute in property.GetAllAttributes())
-            {
-                if (!attribute.CanContainSubjects && pathProvider.IsPropertyIncluded(attribute))
-                {
-                    if (TryAddSubscription(attribute, subscribeOptionsBuilder)) count++;
-                }
+                if (TryAddSubscription(member, subscribeOptionsBuilder)) count++;
             }
         }
 

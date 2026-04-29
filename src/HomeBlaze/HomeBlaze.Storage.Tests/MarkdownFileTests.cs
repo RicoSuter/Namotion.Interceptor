@@ -293,6 +293,54 @@ public class MarkdownFileTests
         Assert.Equal("Second Title", markdown.Title);
     }
 
+    [Fact]
+    public async Task MarkdownFile_ReadEvaluatedContent_WithUnresolvableExpression_ReturnsEmptyForExpression()
+    {
+        // Arrange
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        await WriteFileAsync(storage, "test.md", "Missing: {{ does/not/exist }}");
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        // Act
+        var result = markdown.ReadEvaluatedContent();
+
+        // Assert
+        Assert.Equal("Missing: ", result);
+    }
+
+    [Fact]
+    public async Task MarkdownFile_ReadEvaluatedContent_WithoutExpressions_ReturnsContentUnchanged()
+    {
+        // Arrange
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        await WriteFileAsync(storage, "test.md", "# Heading\n\nPlain body, no expressions.");
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        // Act
+        var result = markdown.ReadEvaluatedContent();
+
+        // Assert
+        Assert.Equal("# Heading\n\nPlain body, no expressions.", result);
+    }
+
+    [Fact]
+    public async Task MarkdownFile_ReadEvaluatedContent_WithEmptyContent_ReturnsEmpty()
+    {
+        // Arrange
+        var (storage, serviceProvider) = await CreateInMemoryStorageAsync();
+        await WriteFileAsync(storage, "test.md", string.Empty);
+        var markdown = CreateMarkdownFile(serviceProvider, storage, "test.md");
+        await markdown.OnFileChangedAsync(CancellationToken.None);
+
+        // Act
+        var result = markdown.ReadEvaluatedContent();
+
+        // Assert
+        Assert.Equal(string.Empty, result);
+    }
+
     private static async Task<(FluentStorageContainer storage, IServiceProvider serviceProvider)> CreateInMemoryStorageAsync()
     {
         var typeProvider = new TypeProvider();

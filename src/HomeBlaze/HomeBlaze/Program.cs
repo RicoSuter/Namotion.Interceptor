@@ -32,15 +32,17 @@ builder.Services.AddHomeBlazeStorage();
 
 var pluginConfigPath = builder.Configuration.GetValue<string>("PluginConfigurationPath")
     ?? Path.Combine(AppContext.BaseDirectory, "Data", "Plugins.json");
+
 builder.Services.AddHomeBlazePlugins(pluginConfigPath);
 builder.Services.AddHotKeys2();
 
 // Optionally add the MCP subject server (default: false, enabled in Development)
-if (builder.Configuration.GetValue<bool>("UseMcpServer"))
+var mcpEnabled = builder.Configuration.GetValue("McpServer:Enabled", false);
+if (mcpEnabled)
 {
     builder.Services.AddMcpServer()
         .WithHttpTransport(options => options.Stateless = true)
-        .WithHomeBlazeMcpTools(isReadOnly: true);
+        .WithHomeBlazeMcpTools(isReadOnly: builder.Configuration.GetValue("McpServer:ReadOnly", true));
 }
 
 // Add services to the container.
@@ -108,7 +110,7 @@ if (!app.Environment.IsDevelopment())
 app.UseAntiforgery();
 
 // Map MCP server endpoint if enabled
-if (builder.Configuration.GetValue<bool>("UseMcpServer"))
+if (mcpEnabled)
 {
     app.MapMcp("/mcp");
 }

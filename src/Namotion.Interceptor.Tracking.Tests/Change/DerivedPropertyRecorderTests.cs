@@ -7,14 +7,19 @@ public class DerivedPropertyRecorderTests
 {
     private static DerivedPropertyRecorder CreateRecorder() => new();
 
+    private static PropertyReference CreateSelf(IInterceptorSubject subject) =>
+        new(subject, "__SelfUnderTest");
+
     [Fact]
     public void StartRecording_SetsIsRecordingTrue()
     {
         // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var person = new Person(context);
         var recorder = CreateRecorder();
 
         // Act
-        recorder.StartRecording();
+        recorder.StartRecording(CreateSelf(person));
 
         // Assert
         Assert.True(recorder.IsRecording);
@@ -24,8 +29,10 @@ public class DerivedPropertyRecorderTests
     public void FinishRecording_SetsIsRecordingFalse()
     {
         // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var person = new Person(context);
         var recorder = CreateRecorder();
-        recorder.StartRecording();
+        recorder.StartRecording(CreateSelf(person));
 
         // Act
         _ = recorder.FinishRecording();
@@ -43,7 +50,7 @@ public class DerivedPropertyRecorderTests
         var recorder = CreateRecorder();
         var property = new PropertyReference(person, nameof(Person.FirstName));
 
-        recorder.StartRecording();
+        recorder.StartRecording(CreateSelf(person));
 
         // Act
         recorder.TouchProperty(ref property);
@@ -63,7 +70,7 @@ public class DerivedPropertyRecorderTests
         var recorder = CreateRecorder();
         var property = new PropertyReference(person, nameof(Person.FirstName));
 
-        recorder.StartRecording();
+        recorder.StartRecording(CreateSelf(person));
 
         // Act - touch same property multiple times
         recorder.TouchProperty(ref property);
@@ -85,7 +92,7 @@ public class DerivedPropertyRecorderTests
         var firstNameProperty = new PropertyReference(person, nameof(Person.FirstName));
         var lastNameProperty = new PropertyReference(person, nameof(Person.LastName));
 
-        recorder.StartRecording();
+        recorder.StartRecording(CreateSelf(person));
 
         // Act
         recorder.TouchProperty(ref firstNameProperty);
@@ -96,6 +103,65 @@ public class DerivedPropertyRecorderTests
         Assert.Equal(2, recorded.Length);
         Assert.Contains(firstNameProperty, recorded.ToArray());
         Assert.Contains(lastNameProperty, recorded.ToArray());
+    }
+
+    [Fact]
+    public void TouchProperty_SkipsSelfReference()
+    {
+        // The derived property's outer interceptor-chain read fires ReadProperty on itself,
+        // which must not be recorded as a dependency.
+
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var person = new Person(context);
+        var recorder = CreateRecorder();
+        var selfProperty = new PropertyReference(person, nameof(Person.FullName));
+        var firstNameProperty = new PropertyReference(person, nameof(Person.FirstName));
+
+        recorder.StartRecording(selfProperty);
+
+        // Act - touch both the self-ref and a real dependency
+        recorder.TouchProperty(ref selfProperty);
+        recorder.TouchProperty(ref firstNameProperty);
+        var recorded = recorder.FinishRecording();
+
+        // Assert - only the real dependency is recorded
+        Assert.Single(recorded.ToArray());
+        Assert.Equal(firstNameProperty, recorded.ToArray()[0]);
+    }
+
+    [Fact]
+    public void NestedRecording_EachFrameSkipsOnlyItsOwnSelf()
+    {
+        // Nested recording: outer frame records inner's property; inner frame records its own deps.
+        // Each frame must exclude only its own self-ref, not the other's.
+
+        // Arrange
+        var context = InterceptorSubjectContext.Create();
+        var person = new Person(context);
+        var recorder = CreateRecorder();
+        var outerSelf = new PropertyReference(person, "OuterDerived");
+        var innerSelf = new PropertyReference(person, "InnerDerived");
+        var firstNameProperty = new PropertyReference(person, nameof(Person.FirstName));
+
+        // Act - outer frame touches inner's self-ref (legitimate dependency on the inner derived);
+        //       inner frame touches its own self-ref (must be filtered).
+        recorder.StartRecording(outerSelf);
+        recorder.TouchProperty(ref innerSelf);
+
+        recorder.StartRecording(innerSelf);
+        recorder.TouchProperty(ref innerSelf);       // filtered (inner's self)
+        recorder.TouchProperty(ref firstNameProperty);
+        var innerRecorded = recorder.FinishRecording();
+
+        var outerRecorded = recorder.FinishRecording();
+
+        // Assert
+        Assert.Single(innerRecorded.ToArray());
+        Assert.Equal(firstNameProperty, innerRecorded.ToArray()[0]);
+
+        Assert.Single(outerRecorded.ToArray());
+        Assert.Equal(innerSelf, outerRecorded.ToArray()[0]);
     }
 
     [Fact]
@@ -115,10 +181,10 @@ public class DerivedPropertyRecorderTests
         var fatherProperty = new PropertyReference(person, nameof(Person.Father));
 
         // Act - nested recording
-        recorder.StartRecording();
+        recorder.StartRecording(CreateSelf(person));
         recorder.TouchProperty(ref firstNameProperty);
 
-        recorder.StartRecording(); // Nested
+        recorder.StartRecording(CreateSelf(person)); // Nested
         recorder.TouchProperty(ref lastNameProperty);
         recorder.TouchProperty(ref fatherProperty);
         var innerRecorded = recorder.FinishRecording();
@@ -142,7 +208,7 @@ public class DerivedPropertyRecorderTests
         var person = new Person(context);
         var recorder = CreateRecorder();
 
-        recorder.StartRecording();
+        recorder.StartRecording(CreateSelf(person));
 
         // Act - add more properties than initial buffer size (8)
         var properties = new List<PropertyReference>();
@@ -174,7 +240,7 @@ public class DerivedPropertyRecorderTests
         // Act - multiple sessions
         for (var session = 0; session < 10; session++)
         {
-            recorder.StartRecording();
+            recorder.StartRecording(CreateSelf(person));
             for (var i = 0; i < 5; i++)
             {
                 var property = new PropertyReference(person, $"Prop{i}");
@@ -197,7 +263,7 @@ public class DerivedPropertyRecorderTests
         var recorder = CreateRecorder();
         var property = new PropertyReference(person, nameof(Person.FirstName));
 
-        recorder.StartRecording();
+        recorder.StartRecording(CreateSelf(person));
         recorder.TouchProperty(ref property);
         _ = recorder.FinishRecording();
 
@@ -205,7 +271,7 @@ public class DerivedPropertyRecorderTests
         recorder.ClearLastRecording();
 
         // Assert - next recording session should start fresh
-        recorder.StartRecording();
+        recorder.StartRecording(CreateSelf(person));
         var recorded = recorder.FinishRecording();
         Assert.Equal(0, recorded.Length);
     }
