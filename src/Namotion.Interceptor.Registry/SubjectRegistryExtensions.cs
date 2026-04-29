@@ -117,7 +117,7 @@ public static class SubjectRegistryExtensions
     }
 
     /// <summary>
-    /// Enumerates every attribute registered on the property, including
+    /// Enumerates every attribute registered on the member, including
     /// attributes-of-attributes, flattening the nested attribute hierarchy
     /// into a single sequence.
     /// </summary>
@@ -125,11 +125,11 @@ public static class SubjectRegistryExtensions
     /// Traversal is depth-first. Yields attributes in declared order; for each
     /// attribute, its nested attributes follow before the next sibling attribute.
     /// </remarks>
-    /// <param name="property">The property whose attributes to enumerate.</param>
-    /// <returns>All attributes declared on the property, flattened across nesting.</returns>
-    public static IEnumerable<RegisteredSubjectAttribute> GetAllAttributes(this RegisteredSubjectProperty property)
+    /// <param name="member">The member whose attributes to enumerate.</param>
+    /// <returns>All attributes declared on the member, flattened across nesting.</returns>
+    public static IEnumerable<RegisteredSubjectAttribute> GetAllAttributes(this RegisteredSubjectMember member)
     {
-        foreach (var attribute in property.Attributes)
+        foreach (var attribute in member.Attributes)
         {
             yield return attribute;
 
