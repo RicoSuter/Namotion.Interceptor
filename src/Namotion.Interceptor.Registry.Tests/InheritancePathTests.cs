@@ -206,5 +206,4 @@ public class InheritancePathTests
         Assert.Equal("Children[0].FirstName", inheritedPath);
         Assert.Equal("Children[0].MainCourse", ownPath);
     }
-
 }

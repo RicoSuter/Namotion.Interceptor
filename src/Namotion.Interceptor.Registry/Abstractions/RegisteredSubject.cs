@@ -55,12 +55,22 @@ public class RegisteredSubject
     /// <summary>
     /// Gets all registered members (properties, including attributes).
     /// </summary>
+    /// <remarks>
+    /// Each individual read returns a consistent snapshot, but reading <see cref="Members"/>
+    /// and <see cref="Properties"/> across concurrent writes may observe them at different
+    /// versions. The two views are quiescently consistent — they converge once writes settle.
+    /// </remarks>
     public IReadOnlyDictionary<string, RegisteredSubjectMember> Members => _members;
 
     /// <summary>
     /// Gets all registered properties (attributes are excluded; access via
     /// <see cref="RegisteredSubjectMember.Attributes"/>).
     /// </summary>
+    /// <remarks>
+    /// Each individual read returns a consistent snapshot, but reading <see cref="Properties"/>
+    /// and <see cref="Members"/> across concurrent writes may observe them at different
+    /// versions. The two views are quiescently consistent — they converge once writes settle.
+    /// </remarks>
     public ImmutableArray<RegisteredSubjectProperty> Properties
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -279,6 +289,13 @@ public class RegisteredSubject
             if (subjectProperty is RegisteredSubjectAttribute newAttribute)
             {
                 // Rebuild the target member's cache to include the new attribute.
+                // Cross-member visibility lag: between the _members publish above and
+                // this assignment, a reader can observe the new attribute via
+                // Members[name]/TryGetMember while parent.Attributes still returns the
+                // pre-add array. Both views are individually consistent (no nulls, no
+                // torn reads) and converge once this write lands — quiescent
+                // consistency, not strong consistency. Callers that need the two views
+                // to agree must serialize against AddAttribute externally.
                 if (_members.TryGetValue(newAttribute.MemberName, out var targetMember)
                     && !ReferenceEquals(targetMember, newAttribute))
                 {
@@ -388,6 +405,11 @@ public class RegisteredSubject
     /// </summary>
     private RegisteredSubjectAttribute[] ComputeAttributesFor(string memberName)
     {
+        // TODO(perf): O(M) scan over all members per call, invoked up to twice per
+        // AddPropertyInternal. For N sequential dynamic attribute adds against a single
+        // owner this is O(N²). Bounded in practice (attributes per property are typically
+        // ≤5), so we accept the cost. If profiling shows this as a hot path, maintain a
+        // per-target-name index alongside _members.
         List<RegisteredSubjectAttribute>? result = null;
         foreach (var member in _members.Values)
         {

@@ -5,11 +5,14 @@ namespace Namotion.Interceptor.Registry.Abstractions;
 
 public class RegisteredSubjectAttribute : RegisteredSubjectProperty
 {
-    // Memoized lookup of the attributed member. The ??= below is not atomic,
-    // but the race is benign: TryGetMember reads Parent._members (volatile),
-    // so once any thread has observed the target member every concurrent
-    // resolver computes the same reference. Duplicate writes are therefore
-    // idempotent — readers always see either null or the canonical member.
+    // Memoized lookup of the attributed member. The ??= below is not atomic.
+    // Two cases:
+    //   1. Pre-registration: target member not yet in Parent._members.
+    //      TryGetMember returns null, the ?? branch throws, and nothing is cached.
+    //   2. Post-registration: TryGetMember reads Parent._members (volatile) and
+    //      every concurrent resolver computes the same reference (each key in
+    //      _members maps to a single canonical member instance for its lifetime).
+    //      Racing writers therefore all assign the same value — idempotent, benign.
     private RegisteredSubjectMember? _attributedMemberCache;
 
     internal RegisteredSubjectAttribute(

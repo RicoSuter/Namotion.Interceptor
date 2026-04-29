@@ -12,6 +12,4 @@ public sealed class PropertyAttributeAttribute : MemberAttributeAttribute
         : base(propertyName, attributeName)
     {
     }
-
-    public string PropertyName => MemberName;
 }
