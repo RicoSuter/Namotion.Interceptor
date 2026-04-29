@@ -70,7 +70,7 @@ The core library defines the central abstractions: the **interceptor subject** (
 
 ### Interceptor Subjects
 
-An interceptor subject is any class marked with `[InterceptorSubject]` that uses C# 13 partial properties. Mark stored properties as `partial` and initialize them in the constructor:
+An **interceptor subject** is any class implementing `IInterceptorSubject`, the core contract that routes property access through the interception pipeline. The typical way to produce one is to mark a class with `[InterceptorSubject]` and declare stored properties as `partial`; the source generator then emits the interface implementation at compile time, so your class stays a clean POCO:
 
 ```csharp
 [InterceptorSubject]
@@ -138,7 +138,7 @@ partial void OnFirstNameChanging(ref string newValue, ref bool cancel)
 
 Because everything is generated at compile-time, there is no runtime reflection or proxy creation. See [Generator](docs/generator.md) for supported features (inheritance, init-only, virtual/override, partial-class spanning) and limitations.
 
-If partial properties aren't an option (for example, you need to add interfaces to a subject at runtime), the [Dynamic](docs/dynamic.md) package builds equivalent subjects from interfaces using Castle DynamicProxy.
+If partial properties aren't an option (for example, you need to add interfaces to a subject at runtime), the [Dynamic](docs/dynamic.md) package builds equivalent subjects from interfaces using Castle DynamicProxy. For advanced scenarios where neither path fits, `IInterceptorSubject` can also be implemented by hand.
 
 ### Interception Pipeline
 
@@ -374,7 +374,7 @@ Integrations expose subjects through .NET host frameworks. They reuse the tracki
 
 | Package | Description | Documentation |
 |---------|-------------|---------------|
-| **Namotion.Interceptor** | Property interception with compile-time source generation | [Interceptors](docs/interceptor.md) |
+| **Namotion.Interceptor** | Core interfaces and the read/write interceptor pipeline | [Interceptors](docs/interceptor.md) |
 | **Namotion.Interceptor.Generator** | Source generator for `[InterceptorSubject]` classes (add as analyzer) | [Generator](docs/generator.md) |
 | **Namotion.Interceptor.Dynamic** | Create subjects from interfaces at runtime | [Dynamic](docs/dynamic.md) |
 
