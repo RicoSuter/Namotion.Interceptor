@@ -29,18 +29,15 @@ public static class SubjectRegistryJsonExtensions
             var parent = new SubjectParent(property, null);
             do
             {
-                var attribute = registry
+                var registeredProperty = registry
                     .TryGetRegisteredSubject(parent.Property.Subject)?
-                    .TryGetProperty(parent.Property.Name)?
-                    .ReflectionAttributes
-                    .OfType<PropertyAttributeAttribute>()
-                    .FirstOrDefault();
+                    .TryGetProperty(parent.Property.Name);
 
-                if (attribute is not null)
+                if (registeredProperty is RegisteredSubjectAttribute attribute)
                 {
                     return GetJsonPath(new PropertyReference(
                         parent.Property.Subject,
-                        attribute.PropertyName), jsonSerializerOptions) +
+                        attribute.MemberName), jsonSerializerOptions) +
                         "@" + attribute.AttributeName;
                 }
 
@@ -66,14 +63,14 @@ public static class SubjectRegistryJsonExtensions
                 var attribute = parent.Property.Subject
                     .Properties[parent.Property.Name]
                     .Attributes
-                    .OfType<PropertyAttributeAttribute>()
+                    .OfType<MemberAttributeAttribute>()
                     .FirstOrDefault();
 
                 if (attribute is not null)
                 {
                     return GetJsonPath(new PropertyReference(
                         parent.Property.Subject,
-                        attribute.PropertyName), jsonSerializerOptions) +
+                        attribute.MemberName), jsonSerializerOptions) +
                         "@" + attribute.AttributeName;
                 }
 
@@ -158,12 +155,12 @@ public static class SubjectRegistryJsonExtensions
     {
         var attribute = property
             .Attributes
-            .OfType<PropertyAttributeAttribute>()
+            .OfType<MemberAttributeAttribute>()
             .FirstOrDefault();
 
         if (attribute is not null)
         {
-            var propertyName = GetJsonPropertyName(subject, subject.Properties[attribute.PropertyName], jsonSerializerOptions);
+            var propertyName = GetJsonPropertyName(subject, subject.Properties[attribute.MemberName], jsonSerializerOptions);
             return $"{propertyName}@{attribute.AttributeName}";
         }
 
@@ -172,11 +169,10 @@ public static class SubjectRegistryJsonExtensions
 
     private static string GetJsonPropertyName(this RegisteredSubjectProperty property, JsonSerializerOptions jsonSerializerOptions)
     {
-        if (property.IsAttribute)
+        if (property is RegisteredSubjectAttribute attribute
+            && attribute.GetAttributedMember() is RegisteredSubjectProperty attributedPropertyOrAttribute)
         {
-            return property
-                .GetAttributedProperty()
-                .GetJsonPropertyName(jsonSerializerOptions) + "@" + property.AttributeMetadata.AttributeName;
+            return attributedPropertyOrAttribute.GetJsonPropertyName(jsonSerializerOptions) + "@" + attribute.AttributeName;
         }
 
         return jsonSerializerOptions.PropertyNamingPolicy?

@@ -2,7 +2,6 @@ using System;
 using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Hosting;
@@ -298,41 +297,47 @@ internal sealed class MqttSubjectClientSource : BackgroundService, ISubjectSourc
             return;
         }
 
-        var properties = registeredSubject
-            .GetAllProperties()
-            .Where(p => !p.CanContainSubjects && _configuration.PathProvider.IsPropertyIncluded(p))
-            .ToList();
+        var subscribeOptionsBuilder = _factory.CreateSubscribeOptionsBuilder();
+        var pathProvider = _configuration.PathProvider;
+        var count = 0;
 
-        if (properties.Count == 0)
+        foreach (var member in registeredSubject.GetAllPropertiesAndAttributes())
+        {
+            if (!member.CanContainSubjects && pathProvider.IsPropertyIncluded(member))
+            {
+                if (TryAddSubscription(member, subscribeOptionsBuilder)) count++;
+            }
+        }
+
+        if (count == 0)
         {
             _logger.LogWarning("No MQTT properties found to subscribe.");
             return;
         }
 
-        var subscribeOptionsBuilder = _factory.CreateSubscribeOptionsBuilder();
-
-        foreach (var property in properties)
-        {
-            var topic = TryGetTopicForProperty(property.Reference, property);
-            if (topic is null) continue;
-
-            if (!_ownership.ClaimSource(property.Reference))
-            {
-                _logger.LogError(
-                    "Property {Subject}.{Property} already owned by another source. Skipping MQTT subscription.",
-                    property.Subject.GetType().Name, property.Name);
-                continue;
-            }
-
-            _topicToProperty[topic] = property.Reference;
-            subscribeOptionsBuilder.WithTopicFilter(f => f
-                .WithTopic(topic)
-                .WithQualityOfServiceLevel(_configuration.DefaultQualityOfService));
-        }
-
         await _client!.SubscribeAsync(subscribeOptionsBuilder.Build(), cancellationToken).ConfigureAwait(false);
 
-        _logger.LogInformation("Subscribed to {Count} MQTT topics.", properties.Count);
+        _logger.LogInformation("Subscribed to {Count} MQTT topics.", count);
+    }
+
+    private bool TryAddSubscription(RegisteredSubjectProperty property, MqttClientSubscribeOptionsBuilder subscribeOptionsBuilder)
+    {
+        var topic = TryGetTopicForProperty(property.Reference, property);
+        if (topic is null) return false;
+
+        if (!_ownership.ClaimSource(property.Reference))
+        {
+            _logger.LogError(
+                "Property {Subject}.{Property} already owned by another source. Skipping MQTT subscription.",
+                property.Subject.GetType().Name, property.Name);
+            return false;
+        }
+
+        _topicToProperty[topic] = property.Reference;
+        subscribeOptionsBuilder.WithTopicFilter(f => f
+            .WithTopic(topic)
+            .WithQualityOfServiceLevel(_configuration.DefaultQualityOfService));
+        return true;
     }
 
     private string? TryGetTopicForProperty(PropertyReference propertyReference, RegisteredSubjectProperty property)

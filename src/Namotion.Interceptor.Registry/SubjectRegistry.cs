@@ -137,11 +137,8 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                         Subject = change.Subject,
                     });
                 }
-
-                return;
             }
-
-            if (change.IsPropertyReferenceRemoved || change.IsContextDetach)
+            else if (change.IsPropertyReferenceRemoved || change.IsContextDetach)
             {
                 var registeredSubject = _knownSubjects.GetValueOrDefault(change.Subject);
                 if (registeredSubject is not null)

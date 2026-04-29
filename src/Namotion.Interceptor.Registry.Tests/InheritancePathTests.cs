@@ -1,3 +1,4 @@
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Registry.Tests.Models;
 
@@ -126,13 +127,14 @@ public class InheritancePathTests
         var teacher = new Teacher(context) { FirstName = "Alice", MainCourse = "Math" };
 
         // Act
-        var allPaths = teacher
-            .TryGetRegisteredSubject()?
-            .GetAllProperties()
-            .GetPaths(DefaultPathProvider.Instance, teacher)
-            .Select(p => p.path)
-            .Order()
-            .ToArray() ?? [];
+        var registered = teacher.TryGetRegisteredSubject();
+        var allPaths = registered is null
+            ? []
+            : registered.GetAllPropertiesAndAttributes()
+                .GetPaths(DefaultPathProvider.Instance, teacher)
+                .Select(p => p.path)
+                .Order()
+                .ToArray();
 
         // Assert
         Assert.Contains("FirstName", allPaths);
