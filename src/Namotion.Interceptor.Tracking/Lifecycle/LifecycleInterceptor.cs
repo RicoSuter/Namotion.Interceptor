@@ -1,12 +1,13 @@
 using System.Collections;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Namotion.Interceptor.Interceptors;
 
 namespace Namotion.Interceptor.Tracking.Lifecycle;
 
 public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
 {
-    private readonly Dictionary<IInterceptorSubject, HashSet<PropertyReference>> _attachedSubjects = [];
+    private readonly Dictionary<IInterceptorSubject, PropertyReferenceSet> _attachedSubjects = [];
     private readonly Dictionary<PropertyReference, object?> _lastProcessedValues = new(PropertyReference.Comparer);
 
     [ThreadStatic]
@@ -84,7 +85,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void AttachToContext(IInterceptorSubject subject, IInterceptorSubjectContext context)
     {
-        var isFirstAttach = _attachedSubjects.TryAdd(subject, []);
+        var isFirstAttach = _attachedSubjects.TryAdd(subject, default);
         if (!isFirstAttach)
         {
             return;
@@ -115,8 +116,9 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
     private void AttachToProperty(IInterceptorSubject subject, IInterceptorSubjectContext context,
         PropertyReference property, object? index)
     {
-        var isFirstAttach = _attachedSubjects.TryAdd(subject, []);
-        if (!_attachedSubjects[subject].Add(property))
+        ref var set = ref CollectionsMarshal.GetValueRefOrAddDefault(_attachedSubjects, subject, out var existed);
+        var isFirstAttach = !existed;
+        if (!set.Add(property))
         {
             return;
         }
@@ -201,12 +203,13 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         IInterceptorSubject subject, IInterceptorSubjectContext context,
         PropertyReference property, object? index)
     {
-        if (!_attachedSubjects.TryGetValue(subject, out var set) || !set.Remove(property))
+        ref var set = ref CollectionsMarshal.GetValueRefOrNullRef(_attachedSubjects, subject);
+        if (Unsafe.IsNullRef(ref set) || !set.Remove(property))
         {
             return;
         }
 
-        var isLastDetach = set.Count == 0;
+        var isLastDetach = set.IsEmpty;
 
         // Collect children and clean up in a single pass over properties
         List<(IInterceptorSubject subject, PropertyReference property, object? index)>? children = null;
