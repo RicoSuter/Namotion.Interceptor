@@ -244,14 +244,13 @@ internal static class SubjectCodeGenerator
 
     private static void EmitDefaultMethods(StringBuilder builder, SubjectMetadata metadata)
     {
-        var nonInterceptedMethods = metadata.Methods.Where(m => !m.IsIntercepted).ToList();
         var newModifier = metadata.BaseClassTypeName is not null ? "new " : "";
 
         builder.AppendLine($"        public {newModifier}static IReadOnlyDictionary<string, SubjectMethodMetadata> DefaultMethods {{ get; }} =");
         builder.AppendLine("            new Dictionary<string, SubjectMethodMetadata>");
         builder.AppendLine("            {");
 
-        foreach (var method in nonInterceptedMethods)
+        foreach (var method in metadata.Methods.Where(m => m.IsSubjectMethod))
         {
             var castTarget = method.IsFromInterface
                 ? method.InterfaceTypeName
@@ -271,9 +270,12 @@ internal static class SubjectCodeGenerator
             var parameterCasts = string.Join(", ", method.Parameters.Select((p, i) =>
                 $"({p.Type})p[{i}]!"));
 
+            // Intercepted methods dispatch via the generated wrapper (method.Name) so the
+            // interceptor chain runs; non-intercepted methods invoke the body directly.
+            var invokeTarget = method.IsIntercepted ? method.Name : method.FullMethodName;
             var invokeLambda = method.ReturnType == "void"
-                ? $"static (s, p) => {{ (({castTarget})s).{method.FullMethodName}({parameterCasts}); return null; }}"
-                : $"static (s, p) => (({castTarget})s).{method.FullMethodName}({parameterCasts})";
+                ? $"static (s, p) => {{ (({castTarget})s).{invokeTarget}({parameterCasts}); return null; }}"
+                : $"static (s, p) => (({castTarget})s).{invokeTarget}({parameterCasts})";
 
             builder.AppendLine("                {");
             builder.AppendLine($"                    \"{method.Name}\",");
@@ -419,6 +421,13 @@ internal static class SubjectCodeGenerator
         var invokeParameterCode = method.Parameters.Any()
             ? ", " + string.Join(", ", method.Parameters.Select(p => p.Name))
             : "";
+
+        // Propagate the user-written [SubjectMethod] (or derived) attribute syntax onto the
+        // generated public wrapper so reflection on the public API surface mirrors the source.
+        if (method.SubjectMethodAttributeSyntax is not null)
+        {
+            builder.AppendLine($"        [{method.SubjectMethodAttributeSyntax}]");
+        }
 
         if (method.ReturnType != "void")
         {

@@ -176,7 +176,10 @@ internal static class SubjectMetadataExtractor
         var discoveredNames = new HashSet<string>();
         var interfaceDiscoveredNames = new HashSet<string>();
 
-        // Pass 1: Existing WithoutInterceptor methods
+        // Pass 1: Existing WithoutInterceptor methods. Every entry produces a generated
+        // public wrapper (IsIntercepted=true). An optional [SubjectMethod] (or derived)
+        // attribute additionally opts the method into the registry (IsSubjectMethod=true)
+        // so connectors can dispatch through it via the wrapper.
         foreach (var syntaxReference in typeSymbol.DeclaringSyntaxReferences)
         {
             var declaration = syntaxReference.GetSyntax(cancellationToken);
@@ -194,10 +197,24 @@ internal static class SubjectMetadataExtractor
                     .Select(p => new ParameterMetadata(p.Identifier.ValueText, GetFullTypeName(p.Type, declarationModel) ?? "object"))
                     .ToList();
 
+                // The attribute syntax is preserved (fully qualified, with original argument list) so the
+                // generated wrapper carries the user's form including any custom-derived attributes.
+                var subjectMethodAttribute = SymbolExtensions.FindAttribute(method.AttributeLists, KnownTypes.SubjectMethodAttribute, declarationModel, cancellationToken);
+                string? subjectMethodAttributeSyntax = null;
+                if (subjectMethodAttribute is not null
+                    && declarationModel.GetTypeInfo(subjectMethodAttribute, cancellationToken).Type is INamedTypeSymbol attributeType)
+                {
+                    var fullyQualifiedName = attributeType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                    var argumentList = subjectMethodAttribute.ArgumentList?.ToString() ?? string.Empty;
+                    subjectMethodAttributeSyntax = fullyQualifiedName + argumentList;
+                }
+
                 // The generated wrapper is always emitted as public regardless of the underlying WithoutInterceptor method's accessibility.
                 methods.Add(new MethodMetadata(methodName, fullMethodName, returnType, parameters,
-                    IsIntercepted: true, IsFromInterface: false, InterfaceTypeName: null,
-                    ClassTypeName: null, IsPublic: true));
+                    IsIntercepted: true, IsSubjectMethod: subjectMethodAttribute is not null,
+                    IsFromInterface: false, InterfaceTypeName: null,
+                    ClassTypeName: null, IsPublic: true,
+                    SubjectMethodAttributeSyntax: subjectMethodAttributeSyntax));
                 discoveredNames.Add(methodName);
             }
         }
@@ -248,7 +265,8 @@ internal static class SubjectMetadataExtractor
                 var isPublic = methodSymbol?.DeclaredAccessibility == Accessibility.Public;
 
                 methods.Add(new MethodMetadata(methodName, fullMethodName, returnType, parameters,
-                    IsIntercepted: false, IsFromInterface: false, InterfaceTypeName: null,
+                    IsIntercepted: false, IsSubjectMethod: true,
+                    IsFromInterface: false, InterfaceTypeName: null,
                     ClassTypeName: null, IsPublic: isPublic));
                 discoveredNames.Add(methodName);
             }
@@ -301,7 +319,8 @@ internal static class SubjectMetadataExtractor
 
                 // Interface members are effectively public from the consumer's perspective.
                 methods.Add(new MethodMetadata(methodName, methodName, returnType, parameters,
-                    IsIntercepted: false, IsFromInterface: true, InterfaceTypeName: interfaceTypeName,
+                    IsIntercepted: false, IsSubjectMethod: true,
+                    IsFromInterface: true, InterfaceTypeName: interfaceTypeName,
                     ClassTypeName: null, IsPublic: true));
                 discoveredNames.Add(methodName);
                 interfaceDiscoveredNames.Add(methodName);

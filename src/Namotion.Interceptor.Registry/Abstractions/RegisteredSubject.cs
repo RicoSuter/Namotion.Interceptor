@@ -152,9 +152,14 @@ public class RegisteredSubject
                 this, property.Key, property.Value.Type, property.Value.Attributes);
         }
 
-        foreach (var method in subject.Methods)
+        // Skip iteration when no methods to avoid the boxed IReadOnlyDictionary
+        // enumerator allocation. Pay-as-you-go for method-less subjects.
+        if (subject.Methods.Count > 0)
         {
-            members[method.Key] = new RegisteredSubjectMethod(this, method.Key, method.Value);
+            foreach (var method in subject.Methods)
+            {
+                members[method.Key] = new RegisteredSubjectMethod(this, method.Key, method.Value);
+            }
         }
 
         _members = members.ToFrozenDictionary();

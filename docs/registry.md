@@ -218,6 +218,8 @@ inflate?.Invoke([0.2m]);
 
 `RegisteredSubjectMethod.Invoke` takes an `object?[]` of parameters in declared order. The subject instance is resolved automatically from `method.Parent.Subject`. It returns the method result, or `null` for void methods. Method-level .NET reflection attributes are available via `method.ReflectionAttributes`.
 
+When `[SubjectMethod]` is combined with the `WithoutInterceptor` pattern (see [Generator / Subject Methods](generator.md#subject-methods)), `Invoke` routes through the generated public wrapper, so any registered `IMethodInterceptor` runs on registry-driven invocations — not only on direct calls. `SubjectMethodMetadata.IsIntercepted` reports whether dispatch flows through the interceptor chain.
+
 ### Method initializers
 
 Implement `ISubjectMethodInitializer` on a .NET attribute to attach metadata to registered methods during subject attach. This is the parallel of `ISubjectPropertyInitializer`:

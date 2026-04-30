@@ -34,4 +34,19 @@ internal static class SymbolExtensions
         }
         return false;
     }
+
+    public static AttributeSyntax? FindAttribute(
+        SyntaxList<AttributeListSyntax> attributeLists,
+        string baseTypeName,
+        SemanticModel semanticModel,
+        CancellationToken cancellationToken)
+    {
+        return attributeLists
+            .SelectMany(al => al.Attributes)
+            .FirstOrDefault(attribute =>
+            {
+                var attributeType = semanticModel.GetTypeInfo(attribute, cancellationToken).Type as INamedTypeSymbol;
+                return attributeType is not null && IsTypeOrInheritsFrom(attributeType, baseTypeName);
+            });
+    }
 }

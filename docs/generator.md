@@ -207,6 +207,22 @@ See [Registry / Registered methods](registry.md#registered-methods) for how cons
 
 Subject methods must be instance methods and have unique names within the type. Non-public methods are supported (see `SubjectMethodMetadata.IsPublic`); connectors and protocol tooling filter by visibility when exposing methods externally. Violations are reported as [diagnostics](#diagnostics).
 
+`[SubjectMethod]` can also be applied to a `WithoutInterceptor` method to combine both patterns. The generated public wrapper carries the user's attribute (including any custom-derived attribute), and registry invocations dispatch through that wrapper — so interceptors run on calls made via `IInterceptorSubject.Methods` or `RegisteredSubjectMethod.Invoke`, not just on direct calls.
+
+```csharp
+[InterceptorSubject]
+public partial class Compressor
+{
+    [SubjectMethod]
+    private int StartWithoutInterceptor(int rampSeconds) => /* ... */ rampSeconds;
+}
+
+// Generator emits a public Start(int) wrapper carrying [SubjectMethod] and routing
+// through the interceptor chain. The registry entry for "Start" invokes that wrapper,
+// so an IMethodInterceptor sees both direct calls (compressor.Start(5)) and registry
+// dispatch (compressor.Methods["Start"].Invoke(compressor, [5])).
+```
+
 ### Virtual and Override Properties
 
 ```csharp

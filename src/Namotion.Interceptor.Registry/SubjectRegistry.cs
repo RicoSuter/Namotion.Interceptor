@@ -105,7 +105,11 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                 if (!_knownSubjects.TryGetValue(change.Subject, out var registeredSubject))
                 {
                     registeredSubject = RegisterSubject(change.Subject);
-                    (newlyRegistered ??= new List<RegisteredSubject>()).Add(registeredSubject);
+                    // Only track for post-lock initializer dispatch when the subject
+                    // actually has methods. Pay-as-you-go: avoids List<T> allocation
+                    // for every method-less subject attach.
+                    if (change.Subject.Methods.Count > 0)
+                        (newlyRegistered ??= new List<RegisteredSubject>()).Add(registeredSubject);
                 }
 
                 if (change.IsContextAttach)
@@ -128,7 +132,8 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
                     if (!_knownSubjects.TryGetValue(property.Subject, out var parentRegisteredSubject))
                     {
                         parentRegisteredSubject = RegisterSubject(property.Subject);
-                        (newlyRegistered ??= new List<RegisteredSubject>()).Add(parentRegisteredSubject);
+                        if (property.Subject.Methods.Count > 0)
+                            (newlyRegistered ??= new List<RegisteredSubject>()).Add(parentRegisteredSubject);
                     }
 
                     var registeredProperty = parentRegisteredSubject.TryGetProperty(property.Name) ??
