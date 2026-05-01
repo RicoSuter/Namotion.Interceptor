@@ -1,7 +1,6 @@
 ﻿using System.Linq;
 using BenchmarkDotNet.Attributes;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Benchmark;
@@ -11,13 +10,8 @@ namespace Namotion.Interceptor.Benchmark;
 [MemoryDiagnoser]
 public class RegistryBenchmark
 {
-    private IInterceptorSubjectContext? _context;
-
     private Car _object;
-
-    private MethodSubject _methodSubject;
-    private RegisteredSubjectMethod _registeredMethod;
-    private readonly object?[] _methodArguments = [42];
+    private IInterceptorSubjectContext? _context;
 
     [Params(
         // "regular",
@@ -32,7 +26,6 @@ public class RegistryBenchmark
         {
             case "regular":
                 _object = new Car();
-                _methodSubject = new MethodSubject();
                 break;
 
             case "interceptor":
@@ -43,9 +36,6 @@ public class RegistryBenchmark
 
                 _object = new Car(_context);
                 AddLotsOfPreviousCars();
-
-                _methodSubject = new MethodSubject(_context);
-                _registeredMethod = _methodSubject.TryGetRegisteredSubject()!.TryGetMethod("Method")!;
                 break;
         }
     }
@@ -120,19 +110,5 @@ public class RegistryBenchmark
     public string GenerateSubjectId()
     {
         return SubjectRegistryExtensions.GenerateSubjectId();
-    }
-
-    [Benchmark]
-    public void AddLotsOfMethodSubjects()
-    {
-        _methodSubject.Children = Enumerable.Range(0, 1000)
-            .Select(_ => new MethodSubject())
-            .ToArray();
-    }
-
-    [Benchmark]
-    public object? InvokeMethodViaRegistry()
-    {
-        return _registeredMethod.Invoke(_methodArguments);
     }
 }
