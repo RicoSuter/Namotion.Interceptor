@@ -149,7 +149,7 @@ public class SubjectTransactionLifecycleTests : TransactionTestBase
 
             // Act
             var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-                () => transaction.CommitAsync(CancellationToken.None));
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
 
             // Assert
             Assert.Contains("already been committed", exception.Message);
