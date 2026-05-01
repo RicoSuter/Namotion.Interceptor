@@ -29,4 +29,15 @@ public interface IInterceptorSubject
     /// </summary>
     /// <param name="properties">The additional properties.</param>
     void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties);
+
+    /// <summary>
+    /// Gets the reflected methods (should be cached).
+    /// </summary>
+    IReadOnlyDictionary<string, SubjectMethodMetadata> Methods { get; }
+
+    /// <summary>
+    /// Adds additional methods to this subject (e.g. from a dynamic context).
+    /// </summary>
+    /// <param name="methods">The additional methods.</param>
+    void AddMethods(params IEnumerable<SubjectMethodMetadata> methods);
 }

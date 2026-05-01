@@ -32,6 +32,7 @@ namespace YourDefaultNamespace
 
         private IInterceptorExecutor? _context;
         private IReadOnlyDictionary<string, SubjectPropertyMetadata>? _properties;
+        private IReadOnlyDictionary<string, SubjectMethodMetadata>? _methods;
 
         [JsonIgnore]
         IInterceptorSubjectContext IInterceptorSubject.Context => _context ??= new InterceptorExecutor(this);
@@ -43,6 +44,9 @@ namespace YourDefaultNamespace
         IReadOnlyDictionary<string, SubjectPropertyMetadata> IInterceptorSubject.Properties => _properties ?? DefaultProperties;
 
         [JsonIgnore]
+        IReadOnlyDictionary<string, SubjectMethodMetadata> IInterceptorSubject.Methods => _methods ?? DefaultMethods;
+
+        [JsonIgnore]
         object IInterceptorSubject.SyncRoot { get; } = new object();
 
         void IInterceptorSubject.AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
@@ -51,6 +55,16 @@ namespace YourDefaultNamespace
             {
                 _properties = (_properties ?? DefaultProperties)
                     .Concat(properties.Select(p => new KeyValuePair<string, SubjectPropertyMetadata>(p.Name, p)))
+                    .ToFrozenDictionary();
+            }
+        }
+
+        void IInterceptorSubject.AddMethods(params IEnumerable<SubjectMethodMetadata> methods)
+        {
+            lock (((IInterceptorSubject)this).SyncRoot)
+            {
+                _methods = (_methods ?? DefaultMethods)
+                    .Concat(methods.Select(m => new KeyValuePair<string, SubjectMethodMetadata>(m.Name, m)))
                     .ToFrozenDictionary();
             }
         }
@@ -76,6 +90,12 @@ namespace YourDefaultNamespace
                         isIntercepted: false,
                         isDynamic: false)
                 },
+            }
+            .ToFrozenDictionary();
+
+        public static IReadOnlyDictionary<string, SubjectMethodMetadata> DefaultMethods { get; } =
+            new Dictionary<string, SubjectMethodMetadata>
+            {
             }
             .ToFrozenDictionary();
 

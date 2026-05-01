@@ -239,22 +239,6 @@ public class MethodMetadataTests
     }
 
     [Fact]
-    public async Task InvokeAsync_WithMethodInfoConstructor_UnwrapsTargetInvocationException()
-    {
-        // Arrange
-        var context = CreateContext();
-        var subject = new MethodMetadataReflectionTestSubject(context);
-        var method = typeof(MethodMetadataReflectionTestSubject).GetMethod(nameof(MethodMetadataReflectionTestSubject.ThrowSync))!;
-
-        var metadata = new MethodMetadata(subject, method);
-
-        // Act & Assert
-        var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => metadata.InvokeAsync(null, null, CancellationToken.None));
-        Assert.Equal("sync reflection throw", exception.Message);
-    }
-
-    [Fact]
     public async Task InvokeAsync_DynamicMethodMetadata_AddedToRegistry_Works()
     {
         // Arrange
@@ -312,13 +296,4 @@ public class SimpleServiceProvider : IServiceProvider
 [InterceptorSubject]
 public partial class MetadataTestSubject
 {
-}
-
-[InterceptorSubject]
-public partial class MethodMetadataReflectionTestSubject
-{
-    public void ThrowSync()
-    {
-        throw new InvalidOperationException("sync reflection throw");
-    }
 }

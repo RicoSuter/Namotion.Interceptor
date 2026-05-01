@@ -79,6 +79,7 @@ public class InterceptorSubjectGenerator : IIncrementalGenerator
                     cls.TypeSymbol,
                     cls.ClassNode,
                     cls.Model,
+                    spc.ReportDiagnostic,
                     spc.CancellationToken);
 
                 fileName = SubjectCodeGenerator.GetFileName(metadata);

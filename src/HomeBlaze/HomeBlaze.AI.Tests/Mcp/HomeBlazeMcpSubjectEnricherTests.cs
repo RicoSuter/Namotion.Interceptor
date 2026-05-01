@@ -6,7 +6,6 @@ using Namotion.Interceptor.Mcp.Abstractions;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Lifecycle;
 using Xunit;
 
 namespace HomeBlaze.AI.Tests.Mcp;
@@ -133,13 +132,17 @@ public class HomeBlazeMcpSubjectEnricherTests
         var thing = new TestThing(context) { Name = "My Thing", Temperature = 20m };
         var registered = thing.TryGetRegisteredSubject()!;
 
-        registered.AddProperty<MethodMetadata>("Refresh", _ => new MethodMetadata(_ => null)
-        {
-            Kind = MethodKind.Query,
-            Title = "Refresh",
-            PropertyName = "Refresh",
-            Parameters = []
-        });
+        var method = registered.AddMethod("Refresh", typeof(void), [],
+            (s, p) => null);
+        method.AddAttribute("Metadata", typeof(MethodMetadata),
+            _ => new MethodMetadata(_ => null)
+            {
+                Kind = MethodKind.Query,
+                Title = "Refresh",
+                MethodName = "Refresh",
+                PropertyName = "Refresh",
+                Parameters = []
+            }, null);
 
         var enricher = CreateEnricher();
 
@@ -160,21 +163,29 @@ public class HomeBlazeMcpSubjectEnricherTests
         var thing = new TestThing(context) { Name = "My Thing", Temperature = 20m };
         var registered = thing.TryGetRegisteredSubject()!;
 
-        registered.AddProperty<MethodMetadata>("Refresh", _ => new MethodMetadata(_ => null)
-        {
-            Kind = MethodKind.Query,
-            Title = "Refresh",
-            PropertyName = "Refresh",
-            Parameters = []
-        });
+        var refreshMethod = registered.AddMethod("Refresh", typeof(void), [],
+            (s, p) => null);
+        refreshMethod.AddAttribute("Metadata", typeof(MethodMetadata),
+            _ => new MethodMetadata(_ => null)
+            {
+                Kind = MethodKind.Query,
+                Title = "Refresh",
+                MethodName = "Refresh",
+                PropertyName = "Refresh",
+                Parameters = []
+            }, null);
 
-        registered.AddProperty<MethodMetadata>("Reset", _ => new MethodMetadata(_ => null)
-        {
-            Kind = MethodKind.Operation,
-            Title = "Reset",
-            PropertyName = "Reset",
-            Parameters = []
-        });
+        var resetMethod = registered.AddMethod("Reset", typeof(void), [],
+            (s, p) => null);
+        resetMethod.AddAttribute("Metadata", typeof(MethodMetadata),
+            _ => new MethodMetadata(_ => null)
+            {
+                Kind = MethodKind.Operation,
+                Title = "Reset",
+                MethodName = "Reset",
+                PropertyName = "Reset",
+                Parameters = []
+            }, null);
 
         var enricher = CreateEnricher(isReadOnly: true);
 
@@ -208,11 +219,7 @@ public class HomeBlazeMcpSubjectEnricherTests
     {
         return InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
-            .WithRegistry()
-            .WithLifecycle()
-            .WithService<ILifecycleHandler>(
-                () => new PropertyAttributeInitializer(),
-                handler => handler is PropertyAttributeInitializer);
+            .WithRegistry();
     }
 
     private static HomeBlazeMcpSubjectEnricher CreateEnricher(bool isReadOnly = false)

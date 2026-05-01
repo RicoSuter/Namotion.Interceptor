@@ -27,7 +27,7 @@ var context = InterceptorSubjectContext
 
 - `IReadInterceptor` - Intercepts property reads
 - `IWriteInterceptor` - Intercepts property writes
-- `IMethodInterceptor` - Intercepts method invocations
+- `IMethodInterceptor` - Intercepts invocations of methods that use the `WithoutInterceptor` pattern. `[SubjectMethod]` is independent and exposes methods as discoverable members of the subject (see [Registry / Registered methods](registry.md#registered-methods)); the two can be combined on a single `WithoutInterceptor` method, in which case registry-driven invocations also flow through the interceptor chain.
 - `ILifecycleHandler` - Handles subject attach/detach events
 
 Extension methods like `WithFullPropertyTracking()` or `WithRegistry()` register multiple related services at once.

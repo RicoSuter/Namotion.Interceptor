@@ -24,7 +24,14 @@ public class DefaultSubjectFactoryTests
 
         public IReadOnlyDictionary<string, SubjectPropertyMetadata> Properties { get; } = null!;
 
+        public IReadOnlyDictionary<string, SubjectMethodMetadata> Methods { get; } = null!;
+
         public void AddProperties(params IEnumerable<SubjectPropertyMetadata> properties)
+        {
+            throw new NotImplementedException();
+        }
+
+        public void AddMethods(params IEnumerable<SubjectMethodMetadata> methods)
         {
             throw new NotImplementedException();
         }

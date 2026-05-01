@@ -4,8 +4,8 @@ using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services.Tests;
 
@@ -16,10 +16,9 @@ public class RegisteredSubjectMethodExtensionsTests
         return InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry()
-            .WithLifecycle()
-            .WithService<ILifecycleHandler>(
-                () => new MethodPropertyInitializer(),
-                handler => handler is MethodPropertyInitializer);
+            .WithService<ISubjectMethodInitializer>(
+                () => new MethodInitializer(),
+                handler => handler is MethodInitializer);
     }
 
     [Fact]
@@ -83,10 +82,14 @@ public class RegisteredSubjectMethodExtensionsTests
         {
             Title = "Dynamic",
             Kind = MethodKind.Operation,
+            MethodName = "DynamicOp",
             PropertyName = "DynamicOp",
             Position = 0,
         };
-        registered.AddProperty("DynamicOp", typeof(MethodMetadata), _ => dynamicMetadata, null);
+        var dynamicMethod = registered.AddMethod("DynamicOp", typeof(Task), [],
+            (s, p) => Task.CompletedTask);
+        dynamicMethod.AddAttribute("Metadata", typeof(MethodMetadata),
+            _ => dynamicMetadata, null);
 
         // Act
         var methods = registered.GetAllMethods();
@@ -108,9 +111,13 @@ public class RegisteredSubjectMethodExtensionsTests
         {
             Title = "DynamicOp",
             Kind = MethodKind.Operation,
+            MethodName = "DynamicOp",
             PropertyName = "DynamicOp",
         };
-        registered.AddProperty("DynamicOp", typeof(MethodMetadata), _ => dynamicMetadata, null);
+        var dynamicMethod = registered.AddMethod("DynamicOp", typeof(Task), [],
+            (s, p) => Task.CompletedTask);
+        dynamicMethod.AddAttribute("Metadata", typeof(MethodMetadata),
+            _ => dynamicMetadata, null);
 
         // Act
         var operations = registered.GetOperationMethods();

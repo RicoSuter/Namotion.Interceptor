@@ -12,7 +12,7 @@ public class RegistryBenchmark
 {
     private Car _object;
     private IInterceptorSubjectContext? _context;
-    
+
     [Params(
         // "regular",
         "interceptor"
@@ -27,7 +27,7 @@ public class RegistryBenchmark
             case "regular":
                 _object = new Car();
                 break;
-            
+
             case "interceptor":
                 _context = InterceptorSubjectContext
                     .Create()

@@ -2,8 +2,10 @@ namespace HomeBlaze.Abstractions.Attributes;
 
 /// <summary>
 /// Base class for method marker attributes ([Operation] and [Query]).
+/// Derives from Namotion.Interceptor's SubjectMethodAttribute so the source
+/// generator automatically collects methods marked with [Operation] or [Query].
 /// </summary>
-public abstract class SubjectMethodAttribute : Attribute
+public abstract class SubjectMethodAttribute : Namotion.Interceptor.Attributes.SubjectMethodAttribute
 {
     /// <summary>
     /// Display title (overrides method name).

@@ -4,26 +4,25 @@ using HomeBlaze.Services.Lifecycle;
 using Namotion.Interceptor;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
-using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace HomeBlaze.Services.Tests.Lifecycle;
 
-public class MethodPropertyInitializerTests
+public class MethodInitializerTests
 {
     private static IInterceptorSubjectContext CreateContext()
     {
         return InterceptorSubjectContext.Create()
             .WithFullPropertyTracking()
             .WithRegistry()
-            .WithLifecycle()
-            .WithService<ILifecycleHandler>(
-                () => new MethodPropertyInitializer(),
-                handler => handler is MethodPropertyInitializer);
+            .WithService<ISubjectMethodInitializer>(
+                () => new MethodInitializer(),
+                handler => handler is MethodInitializer);
     }
 
     [Fact]
-    public void OperationMethod_CreatesMethodMetadataProperty()
+    public void WhenOperationMethod_ThenMethodMetadataAttributeCreated()
     {
         // Arrange
         var context = CreateContext();
@@ -31,11 +30,13 @@ public class MethodPropertyInitializerTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var property = registered.TryGetProperty("Stop");
+        var method = registered.TryGetMethod("StopAsync");
 
         // Assert
-        Assert.NotNull(property);
-        var metadata = property.GetValue() as MethodMetadata;
+        Assert.NotNull(method);
+        var metadataAttribute = method.TryGetAttribute("Metadata");
+        Assert.NotNull(metadataAttribute);
+        var metadata = metadataAttribute.GetValue() as MethodMetadata;
         Assert.NotNull(metadata);
         Assert.Equal(MethodKind.Operation, metadata.Kind);
         Assert.Equal("Stop", metadata.Title);
@@ -43,7 +44,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void QueryMethod_CreatesMethodMetadataProperty()
+    public void WhenQueryMethod_ThenMethodMetadataAttributeCreated()
     {
         // Arrange
         var context = CreateContext();
@@ -51,11 +52,11 @@ public class MethodPropertyInitializerTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var property = registered.TryGetProperty("GetDiagnostics");
+        var method = registered.TryGetMethod("GetDiagnosticsAsync");
 
         // Assert
-        Assert.NotNull(property);
-        var metadata = property.GetValue() as MethodMetadata;
+        Assert.NotNull(method);
+        var metadata = method.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
         Assert.NotNull(metadata);
         Assert.Equal(MethodKind.Query, metadata.Kind);
         Assert.Equal("Diagnostics", metadata.Title);
@@ -64,7 +65,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void OperationMethod_HasCorrectParameters()
+    public void WhenOperationMethod_ThenHasCorrectParameters()
     {
         // Arrange
         var context = CreateContext();
@@ -72,11 +73,10 @@ public class MethodPropertyInitializerTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var property = registered.TryGetProperty("SetTarget");
+        var method = registered.TryGetMethod("SetTargetAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Assert
-        Assert.NotNull(property);
-        var metadata = property.GetValue() as MethodMetadata;
         Assert.NotNull(metadata);
         var userParameters = metadata.Parameters.Where(p => !p.IsFromServices).ToArray();
         Assert.Single(userParameters);
@@ -85,14 +85,14 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task OperationMethod_InvokeAsync_CallsUnderlyingMethod()
+    public async Task WhenOperationMethod_ThenInvokeAsyncCallsUnderlyingMethod()
     {
         // Arrange
         var context = CreateContext();
         var subject = new MethodTestSubject(context);
         var registered = subject.TryGetRegisteredSubject()!;
-        var property = registered.TryGetProperty("Stop");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("StopAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Act
         await metadata!.InvokeAsync(null, null, CancellationToken.None);
@@ -102,14 +102,14 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task AsyncMethod_InvokeAsync_ReturnsResult()
+    public async Task WhenAsyncMethod_ThenInvokeAsyncReturnsResult()
     {
         // Arrange
         var context = CreateContext();
         var subject = new MethodTestSubject(context);
         var registered = subject.TryGetRegisteredSubject()!;
-        var property = registered.TryGetProperty("GetDiagnostics");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("GetDiagnosticsAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Act
         var result = await metadata!.InvokeAsync(null, null, CancellationToken.None);
@@ -120,7 +120,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void MethodWithCustomTitle_UsesAttributeTitle()
+    public void WhenMethodWithCustomTitle_ThenUsesAttributeTitle()
     {
         // Arrange
         var context = CreateContext();
@@ -128,15 +128,15 @@ public class MethodPropertyInitializerTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var property = registered.TryGetProperty("Stop");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("StopAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Assert
         Assert.Equal("Stop", metadata!.Title);
     }
 
     [Fact]
-    public void MethodWithoutCustomTitle_UsesMethodNameWithoutAsync()
+    public void WhenMethodWithoutCustomTitle_ThenUsesMethodNameWithoutAsync()
     {
         // Arrange
         var context = CreateContext();
@@ -144,15 +144,15 @@ public class MethodPropertyInitializerTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var property = registered.TryGetProperty("SetTarget");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("SetTargetAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Assert
         Assert.Equal("SetTarget", metadata!.Title);
     }
 
     [Fact]
-    public void MethodFromInterface_IsDiscovered()
+    public void WhenMethodFromInterface_ThenIsDiscovered()
     {
         // Arrange
         var context = CreateContext();
@@ -160,17 +160,17 @@ public class MethodPropertyInitializerTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var property = registered.TryGetProperty("InterfaceOperation");
+        var method = registered.TryGetMethod("InterfaceOperationAsync");
 
         // Assert
-        Assert.NotNull(property);
-        var metadata = property.GetValue() as MethodMetadata;
+        Assert.NotNull(method);
+        var metadata = method.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
         Assert.NotNull(metadata);
         Assert.Equal(MethodKind.Operation, metadata.Kind);
     }
 
     [Fact]
-    public void CancellationTokenParameter_IsRuntimeProvided()
+    public void WhenCancellationTokenParameter_ThenIsRuntimeProvided()
     {
         // Arrange
         var context = CreateContext();
@@ -178,8 +178,8 @@ public class MethodPropertyInitializerTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var property = registered.TryGetProperty("DoWork");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("DoWorkAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Assert
         var ctParam = metadata!.Parameters.Single(p => p.Name == "cancellationToken");
@@ -188,7 +188,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void FromServicesParameter_IsFromServicesNotAutoInjected()
+    public void WhenFromServicesParameter_ThenIsFromServicesNotAutoInjected()
     {
         // Arrange
         var context = CreateContext();
@@ -196,8 +196,8 @@ public class MethodPropertyInitializerTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var property = registered.TryGetProperty("DoWork");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("DoWorkAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Assert
         var svcParam = metadata!.Parameters.Single(p => p.Name == "logger");
@@ -207,7 +207,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void NullableFromServicesParameter_IsNullable()
+    public void WhenNullableFromServicesParameter_ThenIsNullable()
     {
         // Arrange
         var context = CreateContext();
@@ -215,8 +215,8 @@ public class MethodPropertyInitializerTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var property = registered.TryGetProperty("DoWork");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("DoWorkAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Assert — ITestLogger? is nullable
         var svcParam = metadata!.Parameters.Single(p => p.Name == "logger");
@@ -224,7 +224,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void NonNullableFromServicesParameter_IsNotNullable()
+    public void WhenNonNullableFromServicesParameter_ThenIsNotNullable()
     {
         // Arrange
         var context = CreateContext();
@@ -232,8 +232,8 @@ public class MethodPropertyInitializerTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var property = registered.TryGetProperty("DoWork");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("DoWorkAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Assert — ITestLogger (non-nullable) is not nullable
         var svcParam = metadata!.Parameters.Single(p => p.Name == "logger");
@@ -242,7 +242,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void RegularParameter_RequiresInput()
+    public void WhenRegularParameter_ThenRequiresInput()
     {
         // Arrange
         var context = CreateContext();
@@ -250,8 +250,8 @@ public class MethodPropertyInitializerTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var property = registered.TryGetProperty("DoWork");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("DoWorkAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Assert
         var valueParam = metadata!.Parameters.Single(p => p.Name == "value");
@@ -261,14 +261,14 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task MethodWithCancellationToken_InvokeAsync_PassesTokenThrough()
+    public async Task WhenMethodWithCancellationToken_ThenInvokeAsyncPassesTokenThrough()
     {
         // Arrange
         var context = CreateContext();
         var subject = new MethodWithSpecialParamsSubject(context);
         var registered = subject.TryGetRegisteredSubject()!;
-        var property = registered.TryGetProperty("DoWork");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("DoWorkAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
         var cts = new CancellationTokenSource();
 
         // Act — only pass user parameters; CancellationToken is injected via the argument
@@ -280,7 +280,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void ParameterlessMethod_HasEmptyParameters()
+    public void WhenParameterlessMethod_ThenHasEmptyParameters()
     {
         // Arrange
         var context = CreateContext();
@@ -288,22 +288,22 @@ public class MethodPropertyInitializerTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var property = registered.TryGetProperty("Stop");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("StopAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Assert
         Assert.Empty(metadata!.Parameters);
     }
 
     [Fact]
-    public async Task ParameterlessMethod_InvokeAsync_WithNullParameters()
+    public async Task WhenParameterlessMethod_ThenInvokeAsyncWithNullParameters()
     {
         // Arrange
         var context = CreateContext();
         var subject = new MethodTestSubject(context);
         var registered = subject.TryGetRegisteredSubject()!;
-        var property = registered.TryGetProperty("Stop");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("StopAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Act
         await metadata!.InvokeAsync(null, null, CancellationToken.None);
@@ -313,14 +313,14 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task ParameterlessMethod_InvokeAsync_WithEmptyParameters()
+    public async Task WhenParameterlessMethod_ThenInvokeAsyncWithEmptyParameters()
     {
         // Arrange
         var context = CreateContext();
         var subject = new MethodTestSubject(context);
         var registered = subject.TryGetRegisteredSubject()!;
-        var property = registered.TryGetProperty("Stop");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("StopAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Act
         await metadata!.InvokeAsync([], null, CancellationToken.None);
@@ -330,7 +330,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void VoidMethod_HasNullResultType()
+    public void WhenVoidMethod_ThenHasNullResultType()
     {
         // Arrange
         var context = CreateContext();
@@ -338,22 +338,22 @@ public class MethodPropertyInitializerTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var property = registered.TryGetProperty("Reset");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("Reset");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Assert
         Assert.Null(metadata!.ResultType);
     }
 
     [Fact]
-    public async Task VoidMethod_InvokeAsync_ReturnsNull()
+    public async Task WhenVoidMethod_ThenInvokeAsyncReturnsNull()
     {
         // Arrange
         var context = CreateContext();
         var subject = new VoidMethodSubject(context);
         var registered = subject.TryGetRegisteredSubject()!;
-        var property = registered.TryGetProperty("Reset");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("Reset");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Act
         var result = await metadata!.InvokeAsync(null, null, CancellationToken.None);
@@ -364,7 +364,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task TaskMethod_WithNoGenericResult_HasNullResultType()
+    public void WhenTaskMethodWithNoGenericResult_ThenHasNullResultType()
     {
         // Arrange
         var context = CreateContext();
@@ -372,54 +372,54 @@ public class MethodPropertyInitializerTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var property = registered.TryGetProperty("Stop");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("StopAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Assert
         Assert.Null(metadata!.ResultType);
     }
 
     [Fact]
-    public async Task InvokeAsync_MethodThrows_ExceptionPropagates()
+    public async Task WhenInvokeAsync_MethodThrows_ThenExceptionPropagates()
     {
         // Arrange
         var context = CreateContext();
         var subject = new ThrowingMethodSubject(context);
         var registered = subject.TryGetRegisteredSubject()!;
-        var property = registered.TryGetProperty("Fail");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("Fail");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
-        // Act & Assert — TargetInvocationException is unwrapped to surface the original exception
+        // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => metadata!.InvokeAsync(null, null, CancellationToken.None));
         Assert.Equal("Something went wrong", exception.Message);
     }
 
     [Fact]
-    public async Task InvokeAsync_AsyncMethodThrows_ExceptionPropagates()
+    public async Task WhenInvokeAsync_AsyncMethodThrows_ThenExceptionPropagates()
     {
         // Arrange
         var context = CreateContext();
         var subject = new ThrowingMethodSubject(context);
         var registered = subject.TryGetRegisteredSubject()!;
-        var property = registered.TryGetProperty("FailAsync");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("FailAsyncAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
-        // Act & Assert — TargetInvocationException is unwrapped to surface the original exception
+        // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
             () => metadata!.InvokeAsync(null, null, CancellationToken.None));
         Assert.Equal("Async failure", exception.Message);
     }
 
     [Fact]
-    public async Task InvokeAsync_TooFewUserParameters_ThrowsArgumentException()
+    public async Task WhenInvokeAsync_TooFewUserParameters_ThenThrowsArgumentException()
     {
         // Arrange
         var context = CreateContext();
         var subject = new MethodWithSpecialParamsSubject(context);
         var registered = subject.TryGetRegisteredSubject()!;
-        var property = registered.TryGetProperty("DoWork");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("DoWorkAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<ArgumentException>(
@@ -428,14 +428,14 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public async Task InvokeAsync_TooManyUserParameters_ThrowsArgumentException()
+    public async Task WhenInvokeAsync_TooManyUserParameters_ThenThrowsArgumentException()
     {
         // Arrange
         var context = CreateContext();
         var subject = new MethodWithSpecialParamsSubject(context);
         var registered = subject.TryGetRegisteredSubject()!;
-        var property = registered.TryGetProperty("DoWork");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("DoWorkAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<ArgumentException>(
@@ -445,7 +445,7 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void MethodWithDescription_PreservesDescription()
+    public void WhenMethodWithDescription_ThenPreservesDescription()
     {
         // Arrange
         var context = CreateContext();
@@ -453,37 +453,37 @@ public class MethodPropertyInitializerTests
         var registered = subject.TryGetRegisteredSubject()!;
 
         // Act
-        var property = registered.TryGetProperty("Shutdown");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("ShutdownAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Assert
         Assert.Equal("Shuts down the system safely", metadata!.Description);
     }
 
     [Fact]
-    public void MethodWithoutAttributes_NotDiscovered()
+    public void WhenMethodWithoutAttributes_ThenNotDiscovered()
     {
         // Arrange
         var context = CreateContext();
         var subject = new MethodTestSubject(context);
         var registered = subject.TryGetRegisteredSubject()!;
 
-        // Act — InterfaceOperationAsync exists but "ToString" should not be a method property
-        var property = registered.TryGetProperty("ToString");
+        // Act — "ToString" should not be registered as a method
+        var method = registered.TryGetMethod("ToString");
 
         // Assert
-        Assert.Null(property);
+        Assert.Null(method);
     }
 
     [Fact]
-    public async Task TrulyAsyncMethod_InvokeAsync_PropagatesException()
+    public async Task WhenTrulyAsyncMethod_ThenInvokeAsyncPropagatesException()
     {
         // Arrange — tests that exceptions thrown after an await are correctly propagated
         var context = CreateContext();
         var subject = new TrulyAsyncThrowingSubject(context);
         var registered = subject.TryGetRegisteredSubject()!;
-        var property = registered.TryGetProperty("FailAfterAwait");
-        var metadata = property!.GetValue() as MethodMetadata;
+        var method = registered.TryGetMethod("FailAfterAwaitAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
         // Act & Assert
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
@@ -492,27 +492,26 @@ public class MethodPropertyInitializerTests
     }
 
     [Fact]
-    public void InterfaceMethodDiscovered_WhenConcreteMethodLacksAttribute()
+    public void WhenInterfaceMethodDiscovered_ThenConcreteMethodLacksAttribute()
     {
         // Arrange — when both type and interface have the same method name,
-        // the concrete type's version is registered (deduplication by name)
+        // the source generator deduplicates by name
         var context = CreateContext();
         var subject = new MethodTestSubject(context);
         var registered = subject.TryGetRegisteredSubject()!;
 
-        // Act — InterfaceOperationAsync is defined on both the interface and the type.
-        // The interface declares [Operation(Title = "Interface Op")] but the concrete
-        // implementation has no attribute, so the interface attribute is what gets discovered.
-        var property = registered.TryGetProperty("InterfaceOperation");
-        var metadata = property!.GetValue() as MethodMetadata;
+        // Act — InterfaceOperationAsync is defined on the interface with [Operation].
+        var method = registered.TryGetMethod("InterfaceOperationAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
 
-        // Assert — only one property registered for this method name
+        // Assert — only one method registered for this method name
+        Assert.NotNull(metadata);
         var allMethods = registered.GetAllMethods();
         Assert.Equal(1, allMethods.Count(m => m.Title == "Interface Op" || m.Title == "InterfaceOperation"));
     }
 
     [Fact]
-    public void SubjectWithNoMethods_HasNoMethodProperties()
+    public void WhenSubjectWithNoMethods_ThenHasNoMethodMetadata()
     {
         // Arrange
         var context = CreateContext();
@@ -524,6 +523,23 @@ public class MethodPropertyInitializerTests
 
         // Assert
         Assert.Empty(methods);
+    }
+
+    [Fact]
+    public void WhenMethodName_ThenStoresActualMethodName()
+    {
+        // Arrange
+        var context = CreateContext();
+        var subject = new MethodTestSubject(context);
+        var registered = subject.TryGetRegisteredSubject()!;
+
+        // Act
+        var method = registered.TryGetMethod("StopAsync");
+        var metadata = method!.TryGetAttribute("Metadata")?.GetValue() as MethodMetadata;
+
+        // Assert
+        Assert.Equal("StopAsync", metadata!.MethodName);
+        Assert.Equal("Stop", metadata.PropertyName);
     }
 }
 

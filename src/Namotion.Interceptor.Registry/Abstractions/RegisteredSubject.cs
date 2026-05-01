@@ -14,7 +14,7 @@ public class RegisteredSubject
 {
     private readonly Lock _lock = new();
 
-    // Primary storage for all registered members (properties and attributes).
+    // Primary storage for all registered members (properties, attributes, and methods).
     // Writers build a new FrozenDictionary under _lock and assign atomically;
     // readers observe a consistent snapshot via the volatile reference read.
     private volatile FrozenDictionary<string, RegisteredSubjectMember> _members;
@@ -53,7 +53,7 @@ public class RegisteredSubject
     }
 
     /// <summary>
-    /// Gets all registered members (properties, including attributes).
+    /// Gets all registered members (properties, attributes, and methods).
     /// </summary>
     /// <remarks>
     /// Each individual read returns a consistent snapshot, but reading <see cref="Members"/>
@@ -78,7 +78,31 @@ public class RegisteredSubject
     }
 
     /// <summary>
-    /// Gets a member by name (property or attribute).
+    /// Gets all registered methods.
+    /// </summary>
+    /// <remarks>
+    /// Returns a freshly computed snapshot on each access (filters the underlying
+    /// members dictionary). Callers on hot paths should cache the result in a local
+    /// rather than re-read the property in a tight loop.
+    /// </remarks>
+    public ImmutableArray<RegisteredSubjectMethod> Methods
+    {
+        get
+        {
+            var builder = ImmutableArray.CreateBuilder<RegisteredSubjectMethod>();
+            foreach (var member in _members.Values)
+            {
+                if (member is RegisteredSubjectMethod method)
+                {
+                    builder.Add(method);
+                }
+            }
+            return builder.ToImmutable();
+        }
+    }
+
+    /// <summary>
+    /// Gets a member by name (property, attribute, or method).
     /// </summary>
     /// <param name="memberName">The member name.</param>
     /// <returns>The member or null.</returns>
@@ -102,8 +126,19 @@ public class RegisteredSubject
     }
 
     /// <summary>
+    /// Gets the method with the given name.
+    /// </summary>
+    /// <param name="methodName">The method name.</param>
+    /// <returns>The method or null.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public RegisteredSubjectMethod? TryGetMethod(string methodName)
+    {
+        return _members.GetValueOrDefault(methodName) as RegisteredSubjectMethod;
+    }
+
+    /// <summary>
     /// Initializes a new <see cref="RegisteredSubject"/> and populates its members
-    /// from the subject's properties.
+    /// from the subject's properties and methods.
     /// </summary>
     /// <param name="subject">The subject to register.</param>
     public RegisteredSubject(IInterceptorSubject subject)
@@ -117,9 +152,59 @@ public class RegisteredSubject
                 this, property.Key, property.Value.Type, property.Value.Attributes);
         }
 
+        // Skip iteration when no methods to avoid the boxed IReadOnlyDictionary
+        // enumerator allocation. Pay-as-you-go for method-less subjects.
+        if (subject.Methods.Count > 0)
+        {
+            foreach (var method in subject.Methods)
+            {
+                members[method.Key] = new RegisteredSubjectMethod(this, method.Key, method.Value);
+            }
+        }
+
         _members = members.ToFrozenDictionary();
 
         PopulateInitialCaches();
+    }
+
+    /// <summary>
+    /// Adds a dynamic method to the subject.
+    /// </summary>
+    /// <param name="name">The method name.</param>
+    /// <param name="returnType">The return type.</param>
+    /// <param name="parameters">The parameter metadata.</param>
+    /// <param name="invoke">The invoke delegate.</param>
+    /// <param name="attributes">The .NET reflection attributes.</param>
+    /// <returns>The created method.</returns>
+    public RegisteredSubjectMethod AddMethod(
+        string name,
+        Type returnType,
+        IReadOnlyList<SubjectMethodParameterMetadata> parameters,
+        Func<IInterceptorSubject, object?[], object?> invoke,
+        params Attribute[] attributes)
+    {
+        var metadata = new SubjectMethodMetadata(
+            name, returnType, parameters, attributes, invoke,
+            isIntercepted: false, isDynamic: true, isPublic: true);
+
+        Subject.AddMethods([metadata]);
+
+        var method = new RegisteredSubjectMethod(this, name, metadata);
+
+        lock (_lock)
+        {
+            // Methods never carry MemberAttributeAttribute, so no AttributesCache
+            // on existing members needs to be invalidated here.
+            _members = _members
+                .Append(KeyValuePair.Create<string, RegisteredSubjectMember>(method.Name, method))
+                .ToFrozenDictionary();
+        }
+
+        // Run method initializers outside the lock so they can safely call back
+        // into the registry. Mirrors the attach-path behavior in SubjectRegistry.
+        method.RunInitializers();
+
+        return method;
     }
 
     internal void AddParent(RegisteredSubjectProperty parent, object? index)
