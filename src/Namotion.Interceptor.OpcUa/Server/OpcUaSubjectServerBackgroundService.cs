@@ -27,7 +27,6 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, IOpcUaSu
     private volatile bool _isForceKill;
     private volatile CancellationTokenSource? _forceKillCts;
     private int _consecutiveFailures;
-    private OpcUaServerDiagnostics? _diagnostics;
     private DateTimeOffset? _startTime;
     private Exception? _lastError;
 
@@ -46,7 +45,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, IOpcUaSu
     }
 
     /// <inheritdoc />
-    public OpcUaServerDiagnostics Diagnostics => _diagnostics ??= new OpcUaServerDiagnostics(this);
+    public OpcUaServerDiagnostics Diagnostics { get; }
 
     /// <inheritdoc />
     public StandardServer? CurrentServer => _server;
@@ -85,6 +84,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, IOpcUaSu
         _context = subject.Context;
         _logger = logger;
         _configuration = configuration;
+        Diagnostics = new OpcUaServerDiagnostics(this);
     }
 
     /// <inheritdoc />

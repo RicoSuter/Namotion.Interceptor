@@ -48,11 +48,17 @@ public interface IOpcUaSubjectClientSource : IHostedService
     /// when the session is swapped, since they have no inbound traffic that would otherwise
     /// surface a stale session as a failure.
     ///
+    /// The previous session's transport is still open while the handler runs; the connector closes
+    /// it after the handler returns. Synchronous local cleanup on <see cref="OpcUaCurrentSessionChangedEventArgs.PreviousSession"/>
+    /// is safe; new network operations on it will fail once the transport closes.
+    ///
     /// Raised synchronously on the connector's own thread, often from inside the reconnection
-    /// lock. Handlers must be fast and non-blocking; a slow handler stalls reconnection. The
-    /// connector wraps the invocation in a try/catch so a throwing handler cannot break its own
-    /// state, but per standard .NET event semantics a throwing subscriber will skip subsequent
-    /// subscribers in the invocation list.
+    /// lock. Handlers must be fast and non-blocking; a slow handler stalls reconnection. For async
+    /// work (e.g. recreating an A&amp;C subscription on the new session) use a fire-and-forget pattern
+    /// (<c>_ = Task.Run(...)</c>) inside the handler and tolerate the new session being swapped again
+    /// before the task completes. The connector wraps the invocation in a try/catch so a throwing
+    /// handler cannot break its own state, but per standard .NET event semantics a throwing
+    /// subscriber will skip subsequent subscribers in the invocation list.
     /// </remarks>
     event EventHandler<OpcUaCurrentSessionChangedEventArgs>? CurrentSessionChanged;
 

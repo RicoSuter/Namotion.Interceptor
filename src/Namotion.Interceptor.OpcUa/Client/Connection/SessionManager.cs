@@ -556,24 +556,34 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Queues the current session for deferred disposal and clears session state
-    /// so the health check loop will trigger a full reconnection.
+    /// so the health check loop will trigger a full reconnection. Counts as one
+    /// abandoned reconnection in diagnostics — every call site reaches this method
+    /// after an SDK or stall-reset attempt produced an unusable result.
     /// Must be called inside <see cref="_reconnectingLock"/>.
     /// </summary>
+    /// <remarks>
+    /// <see cref="SetSession"/> is called before the old session's transport is killed so that
+    /// <see cref="OpcUaSubjectClientSource.OnCurrentSessionChanged"/> handlers see the previous session
+    /// with its transport still open. This matches <see cref="CreateSessionAsync"/> ordering and lets
+    /// consumers perform synchronous local cleanup on the previous session reference.
+    /// </remarks>
     private void AbandonCurrentSession()
     {
         Debug.Assert(Monitor.IsEntered(_reconnectingLock), "AbandonCurrentSession must be called inside _reconnectingLock.");
 
-        var session = Volatile.Read(ref _session);
-        if (session is not null)
+        var oldSession = Volatile.Read(ref _session);
+        SetSession(null);
+
+        if (oldSession is not null)
         {
-            session.KeepAlive -= OnKeepAlive;
-            KillTransportChannel(session);
-            _sessionsToDispose.Enqueue(session);
+            oldSession.KeepAlive -= OnKeepAlive;
+            KillTransportChannel(oldSession);
+            _sessionsToDispose.Enqueue(oldSession);
         }
 
-        SetSession(null);
         Interlocked.Exchange(ref _needsFullStateSync, 0);
         ReadAfterWriteManager?.ClearPendingReads();
+        _source.RecordReconnectionAbandoned();
     }
 
     /// <summary>

@@ -18,7 +18,10 @@ public sealed class OpcUaCurrentSessionChangedEventArgs : EventArgs
 
     /// <summary>
     /// Gets the session that was active before this transition, or <c>null</c> if no session was active.
-    /// May already be disposed by the time the handler runs.
+    /// The transport is still open while the handler runs; the connector closes and disposes it after the
+    /// handler returns. Use <c>PreviousSession</c> only for synchronous local cleanup (unsubscribing event
+    /// handlers, dropping references, etc.). Do not start new operations on it — outstanding async work
+    /// will fail when the transport is closed.
     /// </summary>
     public ISession? PreviousSession { get; }
 

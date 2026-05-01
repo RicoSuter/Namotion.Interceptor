@@ -34,20 +34,21 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
     private long _reconnectStartedTimestamp; // 0 = not reconnecting, otherwise Stopwatch timestamp when reconnection started (for stall detection)
     private volatile CancellationTokenSource? _reconnectCts; // Cancelled by KillAsync to abort in-flight reconnection
 
-    // Diagnostics tracking - accessed from multiple threads via Diagnostics property
+    // Diagnostics tracking - accessed from multiple threads via Diagnostics property.
+    // Invariant: TotalReconnectionAttempts = SuccessfulReconnections + FailedReconnections + AbandonedReconnections
+    // once all in-flight attempts have resolved. Abandoned covers attempts that completed without exception
+    // but whose result was rejected (null session, transfer failure, preserved session, force reset, kill).
     private long _totalReconnectionAttempts;
     private long _successfulReconnections;
     private long _failedReconnections;
+    private long _abandonedReconnections;
     private long _lastConnectedAtTicks; // 0 = never connected, otherwise UTC ticks (thread-safe via Interlocked)
     private Exception? _lastError; // accessed via Volatile.Read/Write for cross-thread visibility
-    private OpcUaClientDiagnostics? _diagnostics;
 
     internal string OpcUaNodeIdKey { get; } = "OpcUaNodeId:" + Guid.NewGuid();
 
-    /// <summary>
-    /// Gets diagnostic information about the client connection state.
-    /// </summary>
-    public OpcUaClientDiagnostics Diagnostics => _diagnostics ??= new OpcUaClientDiagnostics(this);
+    /// <inheritdoc />
+    public OpcUaClientDiagnostics Diagnostics { get; }
 
     /// <inheritdoc />
     public ISession? CurrentSession => _sessionManager?.CurrentSession;
@@ -68,7 +69,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
     internal long SuccessfulReconnections => Interlocked.Read(ref _successfulReconnections);
     
     internal long FailedReconnections => Interlocked.Read(ref _failedReconnections);
-    
+
+    internal long AbandonedReconnections => Interlocked.Read(ref _abandonedReconnections);
+
     internal DateTimeOffset? LastConnectedAt
     {
         get
@@ -107,6 +110,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
             onSubjectDetaching: OnSubjectDetaching);
         _subjectLoader = new OpcUaSubjectLoader(configuration, _ownership, this, logger);
         _subscriptionHealthMonitor = new SubscriptionHealthMonitor(logger);
+        Diagnostics = new OpcUaClientDiagnostics(this);
     }
 
     private void OnSubjectDetaching(IInterceptorSubject subject)
@@ -485,7 +489,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
         catch (OperationCanceledException) when (reconnectCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
         {
             // Reconnection was cancelled by KillAsync, not by shutdown.
-            // Don't increment failed counter - this is expected during chaos testing.
+            // Counts as abandoned (started but result unusable) — distinct from the exception path
+            // which increments _failedReconnections.
+            Interlocked.Increment(ref _abandonedReconnections);
             _logger.LogInformation("Reconnection cancelled by kill. Will retry on next health check.");
 
             // Clear the session so health check can trigger a fresh reconnection attempt
@@ -861,6 +867,18 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
         Interlocked.Increment(ref _successfulReconnections);
         Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
         Volatile.Write(ref _lastError, null);
+    }
+
+    /// <summary>
+    /// Called when a reconnection attempt completes without exception but the result is unusable
+    /// (null reconnected session, subscription transfer failed, preserved session, stall reset, or kill cancellation).
+    /// Distinct from RecordReconnectionSuccess (which counts working sessions) and the failure path in
+    /// ReconnectSessionAsync (which counts exceptions). Sum of all three matches TotalReconnectionAttempts
+    /// once in-flight attempts resolve.
+    /// </summary>
+    internal void RecordReconnectionAbandoned()
+    {
+        Interlocked.Increment(ref _abandonedReconnections);
     }
 
     private void RemoveItemsForSubject(IInterceptorSubject subject)

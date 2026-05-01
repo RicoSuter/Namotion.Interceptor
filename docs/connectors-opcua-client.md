@@ -666,12 +666,20 @@ opcUaSource.CurrentSessionChanged += (_, args) =>
 {
     if (args.PreviousSession is not null)
     {
+        // Synchronous local cleanup on the previous session (drop refs, unsubscribe handlers).
+        // Transport is still open here, but it closes immediately after this handler returns.
         DisposeMyAlarmsSubscription(args.PreviousSession);
     }
 
     if (args.CurrentSession is not null)
     {
-        RecreateMyAlarmsSubscription(args.CurrentSession);
+        // Recreating an A&C subscription is async — fire-and-forget so we do not stall reconnection.
+        var newSession = args.CurrentSession;
+        _ = Task.Run(async () =>
+        {
+            try { await RecreateMyAlarmsSubscriptionAsync(newSession); }
+            catch (Exception ex) { _logger.LogError(ex, "Failed to recreate A&C subscription"); }
+        });
     }
 };
 ```
@@ -681,7 +689,9 @@ Method-call consumers (e.g. invoking an OPC UA Method on demand) typically do no
 Handler guidelines:
 
 - Handlers run synchronously on the connector's own thread, often from inside the reconnection lock. Keep them fast and non-blocking; a slow handler stalls reconnection.
-- Do not call back into blocking connector methods from a handler. Schedule any non-trivial work onto a separate task or queue.
+- `PreviousSession`'s transport is still open during the handler and closes after the handler returns. Use it only for synchronous local cleanup; do not start new network operations on it.
+- For async work on `CurrentSession` (e.g. recreating a subscription) use fire-and-forget (`_ = Task.Run(...)`) and tolerate the session being swapped again before the task completes — the next `CurrentSessionChanged` event will surface the new state.
+- Do not call back into blocking connector methods from a handler.
 - The connector wraps the invocation in a try/catch so a throwing handler cannot break its own state, but per standard .NET event semantics a throwing subscriber will skip later subscribers in the invocation list. If you have multiple subscribers that must all run, isolate exceptions in your own handler.
 
 ## Thread Safety

@@ -146,12 +146,18 @@ public class OpcUaReconnectionTests
                 Assert.True(client.Diagnostics.IsConnected);
                 Assert.NotNull(client.Source.CurrentSession);
 
-                // Session swap visible to consumers: at least one transition where the
-                // previous session was non-null (the original) and the current is non-null
-                // (the recreated one). The exact count varies with reconnect-vs-recreate paths.
+                // Session swap visible to consumers. The reconnect cycle takes one of two paths
+                // depending on timing and server behavior:
+                //   A) SDK transfer succeeds → single (HadPrevious=true, HasCurrent=true) swap
+                //   B) SDK transfer fails / preserved session / stall reset →
+                //      (HadPrevious=true, HasCurrent=false) abandon + (HadPrevious=false, HasCurrent=true) recreate
+                // Either way, the consumer must see at least one transition releasing a previous
+                // session AND at least one transition with a current session — which together prove
+                // the connector raises events for both sides of the swap, including null transitions.
                 lock (transitionsLock)
                 {
-                    Assert.Contains(sessionTransitions, t => t.HadPrevious && t.HasCurrent);
+                    Assert.Contains(sessionTransitions, t => t.HadPrevious);
+                    Assert.Contains(sessionTransitions, t => t.HasCurrent);
                 }
 
                 logger.Log("Test passed");

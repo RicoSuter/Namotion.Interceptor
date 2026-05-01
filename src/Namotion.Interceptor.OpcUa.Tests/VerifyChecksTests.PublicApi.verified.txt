@@ -115,6 +115,7 @@ namespace Namotion.Interceptor.OpcUa.Client
     }
     public class OpcUaClientDiagnostics
     {
+        public long AbandonedReconnections { get; }
         public long FailedReconnections { get; }
         public bool IsConnected { get; }
         public bool IsReconnecting { get; }
