@@ -47,6 +47,12 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
     /// </summary>
     public OpcUaClientDiagnostics Diagnostics => _diagnostics ??= new OpcUaClientDiagnostics(this);
 
+    /// <inheritdoc />
+    public ISession? CurrentSession => _sessionManager?.CurrentSession;
+
+    /// <inheritdoc />
+    public event Action<ISession?>? CurrentSessionChanged;
+
     /// <summary>
     /// Gets the session manager for internal diagnostics access.
     /// </summary>
@@ -685,6 +691,29 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
             {
                 manager.OnPropertyWritten(nodeId);
             }
+        }
+    }
+
+    /// <summary>
+    /// Raises <see cref="CurrentSessionChanged"/>. Called by <see cref="Connection.SessionManager"/>
+    /// after every transition of the underlying session reference. Handler exceptions are caught
+    /// and logged so a misbehaving handler cannot destabilize the connector.
+    /// </summary>
+    internal void OnCurrentSessionChanged(ISession? newSession)
+    {
+        var handler = CurrentSessionChanged;
+        if (handler is null)
+        {
+            return;
+        }
+
+        try
+        {
+            handler(newSession);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "OPC UA CurrentSessionChanged event handler threw an exception.");
         }
     }
 

@@ -614,6 +614,76 @@ The diagnostics object is a live facade — resolve it once and poll its propert
 
 All diagnostics properties are thread-safe for reading.
 
+## Direct Session Access
+
+For scenarios the connector does not cover natively, such as calling OPC UA **Methods** (e.g. operator commands, recipe execution, custom server-side procedures) or subscribing to **Alarms & Conditions** events, `IOpcUaSubjectClientSource` exposes the underlying `ISession`:
+
+```csharp
+ISession? session = source.CurrentSession;
+if (session is not null)
+{
+    var outputs = await session.CallAsync(
+        objectId: parentNodeId,
+        methodId: methodNodeId,
+        inputArguments: new[] { /* ... */ },
+        cancellationToken);
+}
+```
+
+There are two ways to get the source:
+
+**1. Via the registration handle** (recommended for application-level wiring):
+
+```csharp
+IOpcUaSubjectClientSource source = serviceProvider.GetOpcUaSubjectClientSource(registration);
+ISession? session = source.CurrentSession;
+```
+
+**2. From any property via `TryGetSource`** (useful when reaching a session from deep inside business code that holds a property reference but not the registration handle):
+
+```csharp
+if (property.TryGetSource(out var subjectSource) &&
+    subjectSource is IOpcUaSubjectClientSource opcUaSource)
+{
+    ISession? session = opcUaSource.CurrentSession;
+    // ... use session
+}
+```
+
+This works because `OpcUaSubjectClientSource` implements both `ISubjectSource` (returned by `TryGetSource`) and `IOpcUaSubjectClientSource`. The pattern lets any code path that already has a `PropertyReference` reach the OPC UA session without plumbing the registration through.
+
+**Lifecycle contract (read carefully):**
+
+- `CurrentSession` can return `null` at any time during reconnection. Always null-check.
+- The underlying `ISession` instance changes after a manual reconnect (Flow C), after a transferred-subscription failure (Flow B), or after stall detection forces a reset. Never cache the reference; never hold long-lived state keyed on a specific session instance.
+- Read `CurrentSession` immediately before each use. A reference captured a few seconds ago may already point to a disposed session.
+- For long-running operations (e.g. an A&C subscription you create on the session), be prepared to re-create your subscription after a session swap. Either subscribe to `CurrentSessionChanged` (see below) or recreate on demand when calls fail with `BadSessionIdInvalid` / `BadSessionNotActivated`.
+
+### Reacting to session swaps with `CurrentSessionChanged`
+
+For consumers that hold session-bound state (typically Alarms & Conditions subscriptions), the connector raises `CurrentSessionChanged` on every transition of the underlying session, including transitions to and from `null` during reconnection. The event argument is the new session (or `null`).
+
+```csharp
+opcUaSource.CurrentSessionChanged += newSession =>
+{
+    if (newSession is null)
+    {
+        DisposeMyAlarmsSubscription();
+        return;
+    }
+
+    RecreateMyAlarmsSubscription(newSession);
+};
+```
+
+Method-call consumers (e.g. invoking an OPC UA Method on demand) typically do not need this event: they read `CurrentSession` immediately before each call and tolerate transient nulls. The event is intended for consumers that have no inbound traffic that would otherwise surface a stale session as a failure.
+
+Handler guidelines:
+
+- Keep handlers fast and non-blocking. The event is raised on the connector's own thread, including from inside reconnection paths.
+- Do not call back into blocking connector methods from a handler. Schedule any non-trivial work onto a separate task or queue if needed.
+- Handler exceptions are caught and logged so a misbehaving handler cannot destabilize the connector.
+
 ## Thread Safety
 
 The library ensures thread-safe operations across all OPC UA interactions. Property operations are synchronized via `SyncRoot` when interceptors are present, subscription callbacks use thread-safe concurrent queues, and multiple OPC UA clients can connect concurrently.

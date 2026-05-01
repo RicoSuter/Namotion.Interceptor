@@ -229,7 +229,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 $"SessionId={newSession.SessionId}, Connected={newSession.Connected}.");
         }
 
-        Volatile.Write(ref _session, newSession);
+        SetSession(newSession);
 
         if (oldSession is not null)
         {
@@ -377,7 +377,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                         _sessionsToDispose.Enqueue(oldSession);
                     }
 
-                    Volatile.Write(ref _session, reconnectedSession);
+                    SetSession(reconnectedSession);
                     ConfigureSession(reconnectedSession);
 
                     SubscriptionManager.UpdateTransferredSubscriptions(transferredSubscriptions);
@@ -514,7 +514,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
             // Read and clear session inside lock to prevent race with OnReconnectComplete
             sessionToDispose = Volatile.Read(ref _session);
-            Volatile.Write(ref _session, null);
+            SetSession(null);
             ReadAfterWriteManager?.ClearPendingReads();
         }
 
@@ -571,7 +571,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             _sessionsToDispose.Enqueue(session);
         }
 
-        Volatile.Write(ref _session, null);
+        SetSession(null);
         Interlocked.Exchange(ref _needsFullStateSync, 0);
         ReadAfterWriteManager?.ClearPendingReads();
     }
@@ -712,7 +712,23 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 try { sessionToDispose.Dispose(); } catch (Exception ex) { _logger.LogDebug(ex, "Error force-disposing session."); }
             }
 
-            Volatile.Write(ref _session, null);
+            SetSession(null);
+        }
+    }
+
+    /// <summary>
+    /// Atomically updates the underlying session reference and notifies the source so that
+    /// <see cref="OpcUaSubjectClientSource.CurrentSessionChanged"/> is raised. The notification
+    /// only fires when the new value differs from the previous one by reference, so spurious
+    /// writes of the same instance do not raise the event.
+    /// </summary>
+    private void SetSession(Session? newSession)
+    {
+        var oldSession = Volatile.Read(ref _session);
+        Volatile.Write(ref _session, newSession);
+        if (!ReferenceEquals(oldSession, newSession))
+        {
+            _source.OnCurrentSessionChanged(newSession);
         }
     }
 
