@@ -617,8 +617,7 @@ All diagnostics properties are thread-safe for reading.
 For scenarios the connector does not cover natively, such as calling OPC UA **Methods** (operator commands, recipe execution, custom server-side procedures) or subscribing to **Alarms & Conditions** events, `IOpcUaSubjectClientSource` exposes the underlying `ISession`:
 
 ```csharp
-ISession? session = source.CurrentSession;
-if (session is not null)
+if (source.CurrentSession is ISession session)
 {
     var outputs = await session.CallAsync(
         objectId: parentNodeId,
@@ -633,17 +632,18 @@ There are two ways to get the source:
 **1. Via the registration handle** (recommended for application-level wiring):
 
 ```csharp
-IOpcUaSubjectClientSource source = registration.Resolve(serviceProvider);
-ISession? session = source.CurrentSession;
+ISession? session = registration
+   .Resolve(serviceProvider)
+   .CurrentSession;
 ```
 
 **2. From any property via `TryGetSource`** (useful when reaching a session from deep inside business code that holds a property reference but not the registration handle):
 
 ```csharp
 if (property.TryGetSource(out var subjectSource) &&
-    subjectSource is IOpcUaSubjectClientSource opcUaSource)
+    subjectSource is IOpcUaSubjectClientSource source)
 {
-    ISession? session = opcUaSource.CurrentSession;
+    ISession? session = source.CurrentSession;
     // ... use session
 }
 ```
