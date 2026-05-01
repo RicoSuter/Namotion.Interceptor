@@ -4,7 +4,9 @@ using Namotion.Interceptor;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Client;
+using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.OpcUa.Server;
+using Namotion.Interceptor.Registry.Paths;
 using Opc.Ua;
 
 // ReSharper disable once CheckNamespace
@@ -19,7 +21,7 @@ public static class OpcUaSubjectExtensions
     /// <param name="subject">The subject to expose via OPC UA.</param>
     /// <param name="configuration">The OPC UA server configuration.</param>
     /// <param name="logger">The logger instance.</param>
-    /// <returns>An <see cref="IOpcUaSubjectServer"/> that runs the OPC UA server.</returns>
+    /// <returns>An <see cref="IOpcUaSubjectServer"/> that runs the OPC UA server. Call <see cref="IHostedService.StartAsync"/> to start it.</returns>
     public static IOpcUaSubjectServer CreateOpcUaServer(
         this IInterceptorSubject subject,
         OpcUaServerConfiguration configuration,
@@ -35,7 +37,7 @@ public static class OpcUaSubjectExtensions
     /// <param name="subject">The subject to synchronize with OPC UA.</param>
     /// <param name="configuration">The OPC UA client configuration.</param>
     /// <param name="logger">The logger instance.</param>
-    /// <returns>An <see cref="IOpcUaSubjectClientSource"/> that runs the OPC UA client.</returns>
+    /// <returns>An <see cref="IOpcUaSubjectClientSource"/> that runs the OPC UA client. Call <see cref="IHostedService.StartAsync"/> to start it.</returns>
     public static IOpcUaSubjectClientSource CreateOpcUaClientSource(
         this IInterceptorSubject subject,
         OpcUaClientConfiguration configuration,
@@ -48,7 +50,6 @@ public static class OpcUaSubjectExtensions
         this IServiceCollection serviceCollection,
         string serverUrl,
         string sourceName,
-        string? pathPrefix = null,
         string? rootName = null)
         where TSubject : IInterceptorSubject
     {
@@ -56,7 +57,6 @@ public static class OpcUaSubjectExtensions
             serverUrl,
             sourceName,
             sp => sp.GetRequiredService<TSubject>(),
-            pathPrefix,
             rootName);
     }
 
@@ -65,7 +65,6 @@ public static class OpcUaSubjectExtensions
         string serverUrl,
         string sourceName,
         Func<IServiceProvider, IInterceptorSubject> subjectSelector,
-        string? pathPrefix = null,
         string? rootName = null)
     {
         return serviceCollection.AddOpcUaSubjectClientSource(subjectSelector, sp =>
@@ -81,7 +80,10 @@ public static class OpcUaSubjectExtensions
                 TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
                 ValueConverter = new OpcUaValueConverter(),
                 SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
-                TelemetryContext = telemetryContext
+                TelemetryContext = telemetryContext,
+                NodeMapper = new CompositeNodeMapper(
+                    new PathProviderOpcUaNodeMapper(new AttributeBasedPathProvider(sourceName)),
+                    new AttributeOpcUaNodeMapper())
             };
         });
     }
@@ -95,7 +97,7 @@ public static class OpcUaSubjectExtensions
         serviceCollection
             .AddKeyedSingleton(key, (sp, _) => configurationProvider(sp))
             .AddKeyedSingleton(key, (sp, _) => subjectSelector(sp))
-            .AddKeyedSingleton<IOpcUaSubjectClientSource>(key, (sp, _) =>
+            .AddKeyedSingleton(key, (sp, _) =>
             {
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
                 return new OpcUaSubjectClientSource(
@@ -103,14 +105,15 @@ public static class OpcUaSubjectExtensions
                     sp.GetRequiredKeyedService<OpcUaClientConfiguration>(key),
                     sp.GetRequiredService<ILogger<OpcUaSubjectClientSource>>());
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<IOpcUaSubjectClientSource>(key))
+            .AddKeyedSingleton<IOpcUaSubjectClientSource>(key, (sp, _) =>
+                sp.GetRequiredKeyedService<OpcUaSubjectClientSource>(key))
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaSubjectClientSource>(key))
             .AddSingleton<IHostedService>(sp =>
             {
                 var configuration = sp.GetRequiredKeyedService<OpcUaClientConfiguration>(key);
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                var clientSource = (OpcUaSubjectClientSource)sp.GetRequiredKeyedService<IOpcUaSubjectClientSource>(key);
                 return new SubjectSourceBackgroundService(
-                    clientSource,
+                    sp.GetRequiredKeyedService<OpcUaSubjectClientSource>(key),
                     subject.Context,
                     sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>(),
                     configuration.BufferTime,
@@ -124,14 +127,12 @@ public static class OpcUaSubjectExtensions
     public static OpcUaServerRegistration AddOpcUaSubjectServer<TSubject>(
         this IServiceCollection serviceCollection,
         string sourceName,
-        string? pathPrefix = null,
         string? rootName = null)
         where TSubject : IInterceptorSubject
     {
         return serviceCollection.AddOpcUaSubjectServer(
             sourceName,
             sp => sp.GetRequiredService<TSubject>(),
-            pathPrefix,
             rootName);
     }
 
@@ -139,7 +140,6 @@ public static class OpcUaSubjectExtensions
         this IServiceCollection serviceCollection,
         string sourceName,
         Func<IServiceProvider, IInterceptorSubject> subjectSelector,
-        string? pathPrefix = null,
         string? rootName = null)
     {
         return serviceCollection.AddOpcUaSubjectServer(subjectSelector, sp =>
@@ -152,7 +152,10 @@ public static class OpcUaSubjectExtensions
             {
                 RootName = rootName,
                 ValueConverter = new OpcUaValueConverter(),
-                TelemetryContext = telemetryContext
+                TelemetryContext = telemetryContext,
+                NodeMapper = new CompositeNodeMapper(
+                    new PathProviderOpcUaNodeMapper(new AttributeBasedPathProvider(sourceName)),
+                    new AttributeOpcUaNodeMapper())
             };
         });
     }
@@ -166,7 +169,7 @@ public static class OpcUaSubjectExtensions
         serviceCollection
             .AddKeyedSingleton(key, (sp, _) => configurationProvider(sp))
             .AddKeyedSingleton(key, (sp, _) => subjectSelector(sp))
-            .AddKeyedSingleton<IOpcUaSubjectServer>(key, (sp, _) =>
+            .AddKeyedSingleton(key, (sp, _) =>
             {
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
                 return new OpcUaSubjectServerBackgroundService(
@@ -174,7 +177,9 @@ public static class OpcUaSubjectExtensions
                     sp.GetRequiredKeyedService<OpcUaServerConfiguration>(key),
                     sp.GetRequiredService<ILogger<OpcUaSubjectServerBackgroundService>>());
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<IOpcUaSubjectServer>(key));
+            .AddKeyedSingleton<IOpcUaSubjectServer>(key, (sp, _) =>
+                sp.GetRequiredKeyedService<OpcUaSubjectServerBackgroundService>(key))
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaSubjectServerBackgroundService>(key));
 
         return new OpcUaServerRegistration(key);
     }

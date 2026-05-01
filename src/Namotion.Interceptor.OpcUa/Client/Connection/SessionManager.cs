@@ -720,15 +720,16 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// Atomically updates the underlying session reference and notifies the source so that
     /// <see cref="OpcUaSubjectClientSource.CurrentSessionChanged"/> is raised. The notification
     /// only fires when the new value differs from the previous one by reference, so spurious
-    /// writes of the same instance do not raise the event.
+    /// writes of the same instance do not raise the event. The notification is invoked
+    /// synchronously on the calling thread by <see cref="OpcUaSubjectClientSource.OnCurrentSessionChanged"/>,
+    /// so a slow handler stalls whichever lock the caller is holding (often the reconnection lock).
     /// </summary>
     private void SetSession(Session? newSession)
     {
-        var oldSession = Volatile.Read(ref _session);
-        Volatile.Write(ref _session, newSession);
+        var oldSession = Interlocked.Exchange(ref _session, newSession);
         if (!ReferenceEquals(oldSession, newSession))
         {
-            _source.OnCurrentSessionChanged(newSession);
+            _source.OnCurrentSessionChanged(oldSession, newSession);
         }
     }
 

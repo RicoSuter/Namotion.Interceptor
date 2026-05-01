@@ -45,7 +45,7 @@ public class OpcUaReconnectionTests
         var server = new OpcUaTestServer<TestRoot>(logger);
         await server.StartAsync(
             context => new TestRoot(context),
-            (context, root) =>
+            (_, root) =>
             {
                 root.Connected = true;
                 root.Name = "Initial";
@@ -72,60 +72,94 @@ public class OpcUaReconnectionTests
         OpcUaTestServer<TestRoot>? server = null;
         OpcUaTestClient<TestRoot>? client = null;
         PortLease? port = null;
-        TestLogger? logger = null;
 
         try
         {
-            (server, client, port, logger) = await StartServerAndClientAsync();
+            (server, client, port, var logger) = await StartServerAndClientAsync();
 
             Assert.NotNull(server.Root);
             Assert.NotNull(client.Root);
             Assert.NotNull(client.Diagnostics);
+            Assert.NotNull(client.Source);
 
-            // Verify initial sync
-            server.Root.Name = "Initial";
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => client.Root.Name == "Initial",
-                timeout: TimeSpan.FromSeconds(90),
-                message: "Initial sync should complete");
-            logger.Log("Initial sync verified");
+            // Track session swaps across the reconnection. Handler is sync per the event
+            // contract; lock keeps the captured pairs consistent if multiple swaps fire.
+            var sessionTransitions = new List<(bool HadPrevious, bool HasCurrent)>();
+            var transitionsLock = new object();
+            void OnSessionChanged(object? sender, OpcUaCurrentSessionChangedEventArgs args)
+            {
+                lock (transitionsLock)
+                {
+                    sessionTransitions.Add((args.PreviousSession is not null, args.CurrentSession is not null));
+                }
+            }
 
-            var initialAttempts = client.Diagnostics.TotalReconnectionAttempts;
+            client.Source!.CurrentSessionChanged += OnSessionChanged;
+            try
+            {
+                // Verify initial sync
+                server.Root.Name = "Initial";
+                await AsyncTestHelpers.WaitUntilAsync(
+                    () => client.Root.Name == "Initial",
+                    timeout: TimeSpan.FromSeconds(90),
+                    message: "Initial sync should complete");
+                logger.Log("Initial sync verified");
 
-            // Stop server and wait for client to detect disconnection
-            logger.Log("Stopping server...");
-            await server.StopAsync();
+                Assert.Null(client.Diagnostics.LastError);
 
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => !client.Diagnostics.IsConnected,
-                timeout: TimeSpan.FromSeconds(90),
-                message: "Client should detect disconnection");
-            logger.Log("Client detected disconnection");
+                var initialAttempts = client.Diagnostics.TotalReconnectionAttempts;
 
-            // Restart server
-            await server.RestartAsync();
+                // Stop server and wait for client to detect disconnection
+                logger.Log("Stopping server...");
+                await server.StopAsync();
 
-            // Verify data flows after reconnection
-            server.Root.Name = "AfterRestart";
-            await AsyncTestHelpers.WaitUntilAsync(
-                () => client.Root.Name == "AfterRestart",
-                timeout: TimeSpan.FromSeconds(180),
-                message: "Data should flow after restart");
-            logger.Log($"Client received: {client.Root.Name}");
+                await AsyncTestHelpers.WaitUntilAsync(
+                    () => !client.Diagnostics.IsConnected,
+                    timeout: TimeSpan.FromSeconds(90),
+                    message: "Client should detect disconnection");
+                logger.Log("Client detected disconnection");
 
-            // Verify metrics
-            var finalAttempts = client.Diagnostics.TotalReconnectionAttempts;
-            var successfulReconnections = client.Diagnostics.SuccessfulReconnections;
+                // Restart server
+                await server.RestartAsync();
 
-            logger.Log($"Reconnection attempts: {initialAttempts} -> {finalAttempts}");
-            logger.Log($"Successful reconnections: {successfulReconnections}");
+                // Verify data flows after reconnection
+                server.Root.Name = "AfterRestart";
+                await AsyncTestHelpers.WaitUntilAsync(
+                    () => client.Root.Name == "AfterRestart",
+                    timeout: TimeSpan.FromSeconds(180),
+                    message: "Data should flow after restart");
+                logger.Log($"Client received: {client.Root.Name}");
 
-            Assert.True(finalAttempts > initialAttempts,
-                $"Reconnection attempts should have increased (was {initialAttempts}, now {finalAttempts})");
-            Assert.True(successfulReconnections >= 1,
-                $"Should have at least 1 successful reconnection, had {successfulReconnections}");
+                // Verify metrics
+                var finalAttempts = client.Diagnostics.TotalReconnectionAttempts;
+                var successfulReconnections = client.Diagnostics.SuccessfulReconnections;
 
-            logger.Log("Test passed");
+                logger.Log($"Reconnection attempts: {initialAttempts} -> {finalAttempts}");
+                logger.Log($"Successful reconnections: {successfulReconnections}");
+
+                Assert.True(finalAttempts > initialAttempts,
+                    $"Reconnection attempts should have increased (was {initialAttempts}, now {finalAttempts})");
+                Assert.True(successfulReconnections >= 1,
+                    $"Should have at least 1 successful reconnection, had {successfulReconnections}");
+
+                // After a healthy reconnect the connector is connected again with a live session.
+                Assert.True(client.Diagnostics.IsConnected);
+                Assert.NotNull(client.Source.CurrentSession);
+
+                // Session swap visible to consumers: at least one transition where the
+                // previous session was non-null (the original) and the current is non-null
+                // (the recreated one). The exact count varies with reconnect-vs-recreate paths.
+                lock (transitionsLock)
+                {
+                    Assert.Contains(sessionTransitions, t => t.HadPrevious && t.HasCurrent);
+                }
+
+                logger.Log("Test passed");
+            }
+            finally
+            {
+                client.Source.CurrentSessionChanged -= OnSessionChanged;
+            }
         }
         finally
         {
@@ -144,11 +178,10 @@ public class OpcUaReconnectionTests
         OpcUaTestServer<TestRoot>? server = null;
         OpcUaTestClient<TestRoot>? client = null;
         PortLease? port = null;
-        TestLogger? logger = null;
 
         try
         {
-            (server, client, port, logger) = await StartServerAndClientAsync(InstantRestartConfig);
+            (server, client, port, var logger) = await StartServerAndClientAsync(InstantRestartConfig);
 
             Assert.NotNull(server.Root);
             Assert.NotNull(client.Root);

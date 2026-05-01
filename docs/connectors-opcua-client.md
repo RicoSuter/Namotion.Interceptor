@@ -20,7 +20,6 @@ public partial class Machine
 var registration = builder.Services.AddOpcUaSubjectClientSource<Machine>(
     serverUrl: "opc.tcp://plc.factory.com:4840",
     sourceName: "opc",
-    pathPrefix: null,
     rootName: "MyMachine");
 
 // Use in application
@@ -35,7 +34,6 @@ All `AddOpcUaSubjectClientSource` overloads return an `OpcUaClientRegistration` 
 **Parameters:**
 - `serverUrl` - The OPC UA server endpoint (e.g., `"opc.tcp://localhost:4840"`)
 - `sourceName` - The connector name used to match `[Path]` attributes (e.g., `"opc"` matches `[Path("opc", "Temperature")]`)
-- `pathPrefix` - Optional prefix prepended to property paths when mapping to OPC UA nodes. Use `null` for no prefix.
 - `rootName` - Optional root node name to start browsing from under the Objects folder
 
 Three DI overloads are available: the simple generic shown above, one with a custom subject selector, and a full configuration overload (shown below).
@@ -581,11 +579,11 @@ if (dynamicProperty != null)
 
 ## Write Error Handling
 
-When a batch write to the OPC UA server partially fails, the client throws an `OpcUaWriteException`. The exception distinguishes between transient failures (connectivity issues, timeouts — may succeed on retry) and permanent failures (invalid nodes, access denied — should not be retried). The write retry queue (see [Resilience](#write-retry-queue-during-disconnection)) handles transient failures automatically during disconnection, but writes that fail while connected surface this exception.
+When a batch write to the OPC UA server partially fails, the client throws an `OpcUaWriteException`. The exception distinguishes between transient failures (connectivity issues, timeouts that may succeed on retry) and permanent failures (invalid nodes, access denied; should not be retried). The write retry queue (see [Resilience](#write-retry-queue-during-disconnection)) handles transient failures automatically during disconnection, but writes that fail while connected surface this exception.
 
 ## Diagnostics
 
-Access client diagnostics through the `IOpcUaSubjectClientSource` interface. When using DI, the registration handle returned by `AddOpcUaSubjectClientSource` provides access:
+Access client diagnostics through the `IOpcUaSubjectClientSource` interface. When using DI, call `Resolve` on the registration handle returned by `AddOpcUaSubjectClientSource`:
 
 ```csharp
 var registration = builder.Services.AddOpcUaSubjectClientSource<Machine>(
@@ -593,7 +591,7 @@ var registration = builder.Services.AddOpcUaSubjectClientSource<Machine>(
     sourceName: "opc");
 
 // After building the host:
-IOpcUaSubjectClientSource source = serviceProvider.GetOpcUaSubjectClientSource(registration);
+IOpcUaSubjectClientSource source = registration.Resolve(serviceProvider);
 var diagnostics = source.Diagnostics;
 ```
 
@@ -604,7 +602,7 @@ IOpcUaSubjectClientSource source = subject.CreateOpcUaClientSource(configuration
 var diagnostics = source.Diagnostics;
 ```
 
-The diagnostics object is a live facade — resolve it once and poll its properties repeatedly. Categories available:
+The diagnostics object is a live facade. Resolve it once and poll its properties repeatedly. Categories available:
 
 - **Connection**: whether connected, whether reconnecting, session ID, last connected timestamp
 - **Subscriptions**: active subscription count, total monitored items
@@ -616,7 +614,7 @@ All diagnostics properties are thread-safe for reading.
 
 ## Direct Session Access
 
-For scenarios the connector does not cover natively, such as calling OPC UA **Methods** (e.g. operator commands, recipe execution, custom server-side procedures) or subscribing to **Alarms & Conditions** events, `IOpcUaSubjectClientSource` exposes the underlying `ISession`:
+For scenarios the connector does not cover natively, such as calling OPC UA **Methods** (operator commands, recipe execution, custom server-side procedures) or subscribing to **Alarms & Conditions** events, `IOpcUaSubjectClientSource` exposes the underlying `ISession`:
 
 ```csharp
 ISession? session = source.CurrentSession;
@@ -635,7 +633,7 @@ There are two ways to get the source:
 **1. Via the registration handle** (recommended for application-level wiring):
 
 ```csharp
-IOpcUaSubjectClientSource source = serviceProvider.GetOpcUaSubjectClientSource(registration);
+IOpcUaSubjectClientSource source = registration.Resolve(serviceProvider);
 ISession? session = source.CurrentSession;
 ```
 
@@ -661,18 +659,20 @@ This works because `OpcUaSubjectClientSource` implements both `ISubjectSource` (
 
 ### Reacting to session swaps with `CurrentSessionChanged`
 
-For consumers that hold session-bound state (typically Alarms & Conditions subscriptions), the connector raises `CurrentSessionChanged` on every transition of the underlying session, including transitions to and from `null` during reconnection. The event argument is the new session (or `null`).
+For consumers that hold session-bound state (typically Alarms & Conditions subscriptions), the connector raises `CurrentSessionChanged` on every transition of the underlying session, including transitions to and from `null` during reconnection. The event arguments carry both the previous session and the current one, so handlers can tear down state bound to the old session before recreating it on the new one.
 
 ```csharp
-opcUaSource.CurrentSessionChanged += newSession =>
+opcUaSource.CurrentSessionChanged += (_, args) =>
 {
-    if (newSession is null)
+    if (args.PreviousSession is not null)
     {
-        DisposeMyAlarmsSubscription();
-        return;
+        DisposeMyAlarmsSubscription(args.PreviousSession);
     }
 
-    RecreateMyAlarmsSubscription(newSession);
+    if (args.CurrentSession is not null)
+    {
+        RecreateMyAlarmsSubscription(args.CurrentSession);
+    }
 };
 ```
 
@@ -680,9 +680,9 @@ Method-call consumers (e.g. invoking an OPC UA Method on demand) typically do no
 
 Handler guidelines:
 
-- Keep handlers fast and non-blocking. The event is raised on the connector's own thread, including from inside reconnection paths.
-- Do not call back into blocking connector methods from a handler. Schedule any non-trivial work onto a separate task or queue if needed.
-- Handler exceptions are caught and logged so a misbehaving handler cannot destabilize the connector.
+- Handlers run synchronously on the connector's own thread, often from inside the reconnection lock. Keep them fast and non-blocking; a slow handler stalls reconnection.
+- Do not call back into blocking connector methods from a handler. Schedule any non-trivial work onto a separate task or queue.
+- The connector wraps the invocation in a try/catch so a throwing handler cannot break its own state, but per standard .NET event semantics a throwing subscriber will skip later subscribers in the invocation list. If you have multiple subscribers that must all run, isolate exceptions in your own handler.
 
 ## Thread Safety
 

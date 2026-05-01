@@ -1,15 +1,25 @@
+using Microsoft.Extensions.DependencyInjection;
+
 namespace Namotion.Interceptor.OpcUa.Client;
 
 /// <summary>
 /// Represents a registered OPC UA client source in the dependency injection container.
-/// Use with <c>GetOpcUaSubjectClientSource</c> extension method on <see cref="IServiceProvider"/> to access the client instance.
+/// Use <see cref="Resolve"/> to access the live <see cref="IOpcUaSubjectClientSource"/> after the host is built.
 /// </summary>
 public sealed class OpcUaClientRegistration
 {
-    internal string Key { get; }
+    private readonly string _key;
 
     internal OpcUaClientRegistration(string key)
     {
-        Key = key;
+        _key = key;
+    }
+
+    /// <summary>
+    /// Resolves the live <see cref="IOpcUaSubjectClientSource"/> for this registration from the given service provider.
+    /// </summary>
+    public IOpcUaSubjectClientSource Resolve(IServiceProvider serviceProvider)
+    {
+        return serviceProvider.GetRequiredKeyedService<IOpcUaSubjectClientSource>(_key);
     }
 }

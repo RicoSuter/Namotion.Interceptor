@@ -25,7 +25,9 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
     private int _disposed;
 
     public TRoot? Root { get; private set; }
-    public string BaseAddress => _baseAddress;
+
+    public IOpcUaSubjectServer? Server { get; private set; }
+
     public OpcUaServerDiagnostics? Diagnostics { get; private set; }
 
     public OpcUaTestServer(TestLogger logger)
@@ -101,7 +103,8 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
 
         _host = builder.Build();
 
-        Diagnostics = _host.Services.GetOpcUaSubjectServer(registration).Diagnostics;
+        Server = registration.Resolve(_host.Services);
+        Diagnostics = Server.Diagnostics;
 
         await _host.StartAsync();
         sw.Stop();

@@ -16,7 +16,6 @@ public partial class Sensor
 
 var registration = builder.Services.AddOpcUaSubjectServer<Sensor>(
     sourceName: "opc",
-    pathPrefix: null,
     rootName: "MySensor");
 
 var sensor = serviceProvider.GetRequiredService<Sensor>();
@@ -33,7 +32,6 @@ Three DI overloads are available with increasing control:
 ```csharp
 var registration = builder.Services.AddOpcUaSubjectServer<Machine>(
     sourceName: "opc",
-    pathPrefix: null,
     rootName: "MyMachine");
 ```
 
@@ -43,7 +41,6 @@ var registration = builder.Services.AddOpcUaSubjectServer<Machine>(
 var registration = builder.Services.AddOpcUaSubjectServer(
     sourceName: "opc",
     subjectSelector: sp => sp.GetRequiredService<Machine>(),
-    pathPrefix: null,
     rootName: "MyMachine");
 ```
 
@@ -66,7 +63,6 @@ var registration = builder.Services.AddOpcUaSubjectServer(
 
 **Parameters:**
 - `sourceName` - The connector name used to match `[Path]` attributes (e.g., `"opc"` matches `[Path("opc", "Temperature")]`)
-- `pathPrefix` - Optional prefix prepended to property paths when mapping to OPC UA nodes. Use `null` for no prefix.
 - `rootName` - Optional root folder name under the OPC UA ObjectsFolder
 
 Multiple servers can be registered in the same DI container. Each registration uses keyed singletons internally, so they operate independently.
@@ -222,7 +218,7 @@ The `LoadNodeSetFromEmbeddedResource<T>()` helper loads NodeSet XML files embedd
 
 ## Diagnostics
 
-Access server diagnostics through the `IOpcUaSubjectServer` interface. When using DI, the registration handle returned by `AddOpcUaSubjectServer` provides access:
+Access server diagnostics through the `IOpcUaSubjectServer` interface. When using DI, call `Resolve` on the registration handle returned by `AddOpcUaSubjectServer`:
 
 ```csharp
 var registration = builder.Services.AddOpcUaSubjectServer<Sensor>(
@@ -230,7 +226,7 @@ var registration = builder.Services.AddOpcUaSubjectServer<Sensor>(
     rootName: "MySensor");
 
 // After building the host:
-IOpcUaSubjectServer server = serviceProvider.GetOpcUaSubjectServer(registration);
+IOpcUaSubjectServer server = registration.Resolve(serviceProvider);
 var diagnostics = server.Diagnostics;
 ```
 
@@ -241,12 +237,30 @@ IOpcUaSubjectServer server = subject.CreateOpcUaServer(configuration, logger);
 var diagnostics = server.Diagnostics;
 ```
 
-The diagnostics object is a live facade — resolve it once and poll its properties repeatedly. Categories available:
+The diagnostics object is a live facade. Resolve it once and poll its properties repeatedly. Categories available:
 
 - **Running state**: whether the server is accepting connections
 - **Sessions**: number of currently connected clients
 - **Uptime**: when the server started and how long it has been running
 - **Errors**: most recent error and consecutive startup failure count (resets on success, see [Resilience](#resilience))
+
+## Direct Server Access
+
+For scenarios the connector does not cover natively, such as registering custom node managers, raising server events, or wiring up custom session handlers, `IOpcUaSubjectServer` exposes the underlying `StandardServer`:
+
+```csharp
+StandardServer? current = server.CurrentServer;
+if (current is not null)
+{
+    // ... advanced server interactions
+}
+```
+
+**Lifecycle contract:**
+
+- `CurrentServer` can return `null` when the server is not currently running (during startup, between restart attempts, or after a force-kill).
+- The instance is recreated on every server restart. Never cache the reference; never hold long-lived state keyed on a specific server instance.
+- Read `CurrentServer` immediately before each use.
 
 ## Resilience
 

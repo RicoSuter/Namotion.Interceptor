@@ -23,6 +23,24 @@ public class OpcUaReadWriteTests : SharedServerTestBase
         var serverArea = ServerFixture.ServerRoot.ReadWrite.BasicSync;
         var clientArea = Client!.Root!.ReadWrite.BasicSync;
 
+        // Assert - on a healthy connection the new diagnostic surface must be populated:
+        // session/server live, no captured error, and Name is bound on both sides.
+        Assert.NotNull(Client.Source);
+        Assert.NotNull(Client.Source!.CurrentSession);
+        Assert.Null(Client.Diagnostics!.LastError);
+        Assert.NotNull(ServerFixture.Server.CurrentServer);
+
+        // Each side owns its own subject tree, so the lookup must use that side's property reference.
+        Assert.True(
+            Client.Source.TryGetNodeId(clientArea.GetPropertyReference(nameof(BasicSyncArea.Name)), out var clientNodeId),
+            "Client must have resolved a NodeId for the bound BasicSync.Name property");
+        Assert.NotNull(clientNodeId);
+
+        Assert.True(
+            ServerFixture.Server.TryGetVariableNode(serverArea.GetPropertyReference(nameof(BasicSyncArea.Name)), out var serverVariable),
+            "Server must expose a BaseDataVariableState for the bound BasicSync.Name property");
+        Assert.NotNull(serverVariable);
+
         // Act & Assert - Test string property from server
         serverArea.Name = "Updated Server Name";
         await AsyncTestHelpers.WaitUntilAsync(

@@ -1,5 +1,5 @@
+using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.Registry;
-using Xunit;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 
@@ -35,12 +35,28 @@ public class SharedOpcUaServerFixture : IAsyncLifetime
     public SharedTestModel ServerRoot => _server?.Root ?? throw new InvalidOperationException("Server not started");
 
     /// <summary>
+    /// The resolved server instance backing the shared fixture.
+    /// </summary>
+    public IOpcUaSubjectServer Server => _server?.Server ?? throw new InvalidOperationException("Server not started");
+
+    /// <summary>
     /// The OPC UA server endpoint URL.
     /// </summary>
     public string ServerUrl => $"opc.tcp://localhost:{Port}";
 
     public async Task InitializeAsync()
     {
+        // Stale self-signed server certificates left in bin/ from a prior run can cause
+        // the SDK to reject the server on startup (no usable application certificate),
+        // which blocks every shared-server test. Wipe the assembly-scoped cert store
+        // before bringing the server up so each assembly run starts from a clean slate.
+        if (Directory.Exists(CertificateStorePath))
+        {
+            try { Directory.Delete(CertificateStorePath, true); }
+            catch (IOException) { /* best-effort: another fixture instance may be racing */ }
+            catch (UnauthorizedAccessException) { }
+        }
+
         _server = new OpcUaTestServer<SharedTestModel>(_logger);
         await _server.StartAsync(
             createRoot: context => new SharedTestModel(context),

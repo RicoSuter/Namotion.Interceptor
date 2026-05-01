@@ -134,4 +134,4 @@ The library has specialized support for:
 
 ## Public API Tracking
 
-The public API of three core libraries (`Namotion.Interceptor`, `Namotion.Interceptor.Registry`, `Namotion.Interceptor.Connectors`) is snapshot-tested via `PublicApiGenerator` + `Verify`. Each one's test project has a `VerifyChecksTests.PublicApi` test that compares the generated API against a checked-in `VerifyChecksTests.PublicApi.verified.txt`. When the API changes intentionally, accept the new snapshot by replacing `.verified.txt` with the test's `.received.txt` output.
+The public API for some libraries is snapshot-tested via `PublicApiGenerator` + `Verify`. Each one's test project has a `VerifyChecksTests.PublicApi` test that compares the generated API against a checked-in `VerifyChecksTests.PublicApi.verified.txt`. When the API changes intentionally, accept the new snapshot by replacing `.verified.txt` with the test's `.received.txt` output.

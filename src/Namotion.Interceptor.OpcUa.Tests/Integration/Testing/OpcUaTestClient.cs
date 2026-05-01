@@ -27,9 +27,8 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
 
     public IInterceptorSubjectContext Context => _context ?? throw new InvalidOperationException("Client not started.");
 
-    /// <summary>
-    /// Gets the client diagnostics, or null if not started.
-    /// </summary>
+    public IOpcUaSubjectClientSource? Source { get; private set; }
+
     public OpcUaClientDiagnostics? Diagnostics { get; private set; }
 
     public OpcUaTestClient(TestLogger logger, Action<OpcUaClientConfiguration>? configureClient = null)
@@ -112,7 +111,8 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
 
         _host = builder.Build();
 
-        Diagnostics = _host.Services.GetOpcUaSubjectClientSource(registration).Diagnostics;
+        Source = registration.Resolve(_host.Services);
+        Diagnostics = Source.Diagnostics;
 
         await _host.StartAsync();
         _logger.Log($"Client host started in {sw.ElapsedMilliseconds}ms");

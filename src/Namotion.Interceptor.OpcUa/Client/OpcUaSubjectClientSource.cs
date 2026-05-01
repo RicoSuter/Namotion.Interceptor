@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
@@ -38,6 +39,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
     private long _successfulReconnections;
     private long _failedReconnections;
     private long _lastConnectedAtTicks; // 0 = never connected, otherwise UTC ticks (thread-safe via Interlocked)
+    private Exception? _lastError; // accessed via Volatile.Read/Write for cross-thread visibility
     private OpcUaClientDiagnostics? _diagnostics;
 
     internal string OpcUaNodeIdKey { get; } = "OpcUaNodeId:" + Guid.NewGuid();
@@ -51,7 +53,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
     public ISession? CurrentSession => _sessionManager?.CurrentSession;
 
     /// <inheritdoc />
-    public event Action<ISession?>? CurrentSessionChanged;
+    public event EventHandler<OpcUaCurrentSessionChangedEventArgs>? CurrentSessionChanged;
 
     /// <summary>
     /// Gets the session manager for internal diagnostics access.
@@ -62,8 +64,11 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
 
     // Diagnostics accessors
     internal long TotalReconnectionAttempts => Interlocked.Read(ref _totalReconnectionAttempts);
+    
     internal long SuccessfulReconnections => Interlocked.Read(ref _successfulReconnections);
+    
     internal long FailedReconnections => Interlocked.Read(ref _failedReconnections);
+    
     internal DateTimeOffset? LastConnectedAt
     {
         get
@@ -73,39 +78,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
         }
     }
 
-    /// <summary>
-    /// Called by SessionManager when a reconnection attempt starts (via SDK's SessionReconnectHandler).
-    /// Updates diagnostics metrics to track the reconnection attempt.
-    /// </summary>
-    internal void RecordReconnectionAttemptStart()
-    {
-        Interlocked.Increment(ref _totalReconnectionAttempts);
-    }
-
-    /// <summary>
-    /// Called by SessionManager when SDK's SessionReconnectHandler successfully reconnects.
-    /// Updates diagnostics metrics to track the successful reconnection.
-    /// Note: Does not increment TotalReconnectionAttempts - that's done in RecordReconnectionAttemptStart.
-    /// </summary>
-    internal void RecordReconnectionSuccess()
-    {
-        Interlocked.Increment(ref _successfulReconnections);
-        Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
-    }
-
-    private void RemoveItemsForSubject(IInterceptorSubject subject)
-    {
-        _structureLock.Wait();
-        try
-        {
-            _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
-            _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
-        }
-        finally
-        {
-            _structureLock.Release();
-        }
-    }
+    internal Exception? LastError => Volatile.Read(ref _lastError);
 
     public OpcUaSubjectClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger logger)
     {
@@ -153,40 +126,54 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
 
         _sessionManager = new SessionManager(this, propertyWriter, _configuration, _logger);
 
-        var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
-        var session = await _sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
-
-        Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
-        _logger.LogInformation("Connected to OPC UA server successfully.");
-
-        await _structureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var rootNode = await TryGetRootNodeAsync(session, cancellationToken).ConfigureAwait(false);
-            if (rootNode is not null)
+            var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
+            var session = await _sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
+
+            Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
+            _logger.LogInformation("Connected to OPC UA server successfully.");
+
+            await _structureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                var monitoredItems = await _subjectLoader.LoadSubjectAsync(_subject, rootNode, session, cancellationToken).ConfigureAwait(false);
-                if (monitoredItems.Count > 0)
+                var rootNode = await TryGetRootNodeAsync(session, cancellationToken).ConfigureAwait(false);
+                if (rootNode is not null)
                 {
-                    await _sessionManager.CreateSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
+                    var monitoredItems = await _subjectLoader.LoadSubjectAsync(_subject, rootNode, session, cancellationToken).ConfigureAwait(false);
+                    if (monitoredItems.Count > 0)
+                    {
+                        await _sessionManager.CreateSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("No OPC UA monitored items found.");
+                    }
                 }
                 else
                 {
-                    _logger.LogWarning("No OPC UA monitored items found.");
+                    _logger.LogWarning("Connected to OPC UA server successfully but could not find root node.");
                 }
             }
-            else
+            finally
             {
-                _logger.LogWarning("Connected to OPC UA server successfully but could not find root node.");
+                _structureLock.Release();
             }
-        }
-        finally
-        {
-            _structureLock.Release();
-        }
 
-        _isStarted = true;
-        return _sessionManager;
+            _isStarted = true;
+            Volatile.Write(ref _lastError, null);
+            return _sessionManager;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Cancellation is the host shutting us down, not a failure to surface in diagnostics.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Volatile.Write(ref _lastError, ex);
+            throw;
+        }
     }
 
     public int WriteBatchSize => (int)(_sessionManager?.CurrentSession?.OperationLimits?.MaxNodesPerWrite ?? 0);
@@ -253,6 +240,19 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
 
             _logger.LogInformation("Updated {Count} properties with OPC UA node values.", itemCount);
         };
+    }
+
+    /// <inheritdoc />
+    public bool TryGetNodeId(PropertyReference property, [NotNullWhen(true)] out NodeId? nodeId)
+    {
+        if (property.TryGetPropertyData(OpcUaNodeIdKey, out var data) && data is NodeId resolved)
+        {
+            nodeId = resolved;
+            return true;
+        }
+
+        nodeId = null;
+        return false;
     }
 
     /// <summary>
@@ -496,6 +496,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
         catch (Exception ex)
         {
             Interlocked.Increment(ref _failedReconnections);
+            Volatile.Write(ref _lastError, ex);
             _logger.LogError(ex, "Failed to restart session. Will retry on next health check.");
 
             // Clear the session so health check can trigger a new reconnection attempt
@@ -695,11 +696,13 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
     }
 
     /// <summary>
-    /// Raises <see cref="CurrentSessionChanged"/>. Called by <see cref="Connection.SessionManager"/>
-    /// after every transition of the underlying session reference. Handler exceptions are caught
-    /// and logged so a misbehaving handler cannot destabilize the connector.
+    /// Raises <see cref="CurrentSessionChanged"/> synchronously on the calling thread. Called by
+    /// <see cref="Connection.SessionManager"/> after every transition of the underlying session
+    /// reference, often from inside the reconnection lock. A defensive try/catch protects the
+    /// connector's own state from a throwing handler; isolation between subscribers is the
+    /// caller's responsibility per standard .NET event semantics.
     /// </summary>
-    internal void OnCurrentSessionChanged(ISession? newSession)
+    internal void OnCurrentSessionChanged(ISession? previousSession, ISession? currentSession)
     {
         var handler = CurrentSessionChanged;
         if (handler is null)
@@ -709,7 +712,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
 
         try
         {
-            handler(newSession);
+            handler(this, new OpcUaCurrentSessionChangedEventArgs(previousSession, currentSession));
         }
         catch (Exception ex)
         {
@@ -837,6 +840,41 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
     {
         _isStarted = false;
         CleanupPropertyData();
+    }
+
+    /// <summary>
+    /// Called by SessionManager when a reconnection attempt starts (via SDK's SessionReconnectHandler).
+    /// Updates diagnostics metrics to track the reconnection attempt.
+    /// </summary>
+    internal void RecordReconnectionAttemptStart()
+    {
+        Interlocked.Increment(ref _totalReconnectionAttempts);
+    }
+
+    /// <summary>
+    /// Called by SessionManager when SDK's SessionReconnectHandler successfully reconnects.
+    /// Updates diagnostics metrics to track the successful reconnection.
+    /// Note: Does not increment TotalReconnectionAttempts - that's done in RecordReconnectionAttemptStart.
+    /// </summary>
+    internal void RecordReconnectionSuccess()
+    {
+        Interlocked.Increment(ref _successfulReconnections);
+        Interlocked.Exchange(ref _lastConnectedAtTicks, DateTimeOffset.UtcNow.UtcTicks);
+        Volatile.Write(ref _lastError, null);
+    }
+
+    private void RemoveItemsForSubject(IInterceptorSubject subject)
+    {
+        _structureLock.Wait();
+        try
+        {
+            _sessionManager?.SubscriptionManager.RemoveItemsForSubject(subject);
+            _sessionManager?.PollingManager?.RemoveItemsForSubject(subject);
+        }
+        finally
+        {
+            _structureLock.Release();
+        }
     }
 
     public async ValueTask DisposeAsync()

@@ -59,6 +59,13 @@ public class OpcUaClientDiagnostics
     public DateTimeOffset? LastConnectedAt => _source.LastConnectedAt;
 
     /// <summary>
+    /// Gets the most recent error that occurred while establishing or restoring the session,
+    /// or null if no error has occurred since the last successful (re)connection.
+    /// Cleared on every successful connection or reconnection.
+    /// </summary>
+    public Exception? LastError => _source.LastError;
+
+    /// <summary>
     /// Gets the number of items being polled (fallback for nodes without subscription support).
     /// </summary>
     public int PollingItemCount => _source.SessionManager?.PollingManager?.PollingItemCount ?? 0;
