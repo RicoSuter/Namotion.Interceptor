@@ -274,7 +274,7 @@ public class SubjectTransactionAsyncTests
 
         // Act
         // CommitAsync should throw because current value != captured OldValue
-        var ex = await Assert.ThrowsAsync<SubjectTransactionConflictException>(() => tx.CommitAsync(CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<SubjectTransactionConflictException>(() => tx.CommitAsync(CancellationToken.None).AsTask());
 
         // Assert
         Assert.Contains(nameof(Person.FirstName), ex.Message);
@@ -449,7 +449,7 @@ public class SubjectTransactionAsyncTests
 
         // Act: First commit fails due to conflict
         await Assert.ThrowsAsync<SubjectTransactionConflictException>(
-            () => tx.CommitAsync(CancellationToken.None));
+            () => tx.CommitAsync(CancellationToken.None).AsTask());
 
         // Pending changes are still intact after conflict failure
         Assert.Single(tx.GetPendingChanges());
@@ -516,7 +516,7 @@ public class SubjectTransactionAsyncTests
 
         // Act: Commit fails due to conflict on FirstName
         var ex = await Assert.ThrowsAsync<SubjectTransactionConflictException>(
-            () => tx.CommitAsync(CancellationToken.None));
+            () => tx.CommitAsync(CancellationToken.None).AsTask());
 
         // Assert: Both pending changes are still intact
         var pendingChanges = tx.GetPendingChanges();
@@ -545,6 +545,6 @@ public class SubjectTransactionAsyncTests
 
         // Act & Assert: Second commit on already-committed transaction throws
         await Assert.ThrowsAsync<InvalidOperationException>(
-            () => tx.CommitAsync(CancellationToken.None));
+            () => tx.CommitAsync(CancellationToken.None).AsTask());
     }
 }

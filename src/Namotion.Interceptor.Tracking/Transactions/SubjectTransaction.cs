@@ -242,7 +242,7 @@ public sealed class SubjectTransaction : IDisposable
     /// <param name="cancellationToken">The cancellation token.</param>
     /// <exception cref="ObjectDisposedException">Thrown when the transaction has been disposed.</exception>
     /// <exception cref="SubjectTransactionException">Thrown when one or more external source writes failed.</exception>
-    public async Task CommitAsync(CancellationToken cancellationToken)
+    public async ValueTask CommitAsync(CancellationToken cancellationToken)
     {
         ValidateCanCommit();
 
@@ -255,17 +255,39 @@ public sealed class SubjectTransaction : IDisposable
             }
         }
 
-        var commitLock = await AcquireOptimisticLockIfNeededAsync(cancellationToken);
+        var commitLock = await AcquireOptimisticLockIfNeededAsync(cancellationToken).ConfigureAwait(false);
         var (rentedArray, changes) = StartCommitAndSnapshotChanges();
 
         try
         {
             ThrowIfConflictsDetected(changes.Span);
 
+            var writeHandler = Context.TryGetService<ITransactionWriter>();
+            if (writeHandler is null)
+            {
+                // Fast path: in-memory only. No source writer, no async work, no CTS.
+                var failure = TryApplyChangesInMemory(changes.Span);
+
+                // Clear pending changes and mark committed BEFORE throwing so subsequent
+                // property reads do not return stale captured values via TryGetPendingValue.
+                lock (_pendingChangesLock)
+                {
+                    _pendingChanges.Clear();
+                }
+
+                _isCommitted = true;
+
+                if (failure is not null)
+                {
+                    throw failure;
+                }
+                return;
+            }
+
             using var timeoutCts = CreateCommitTimeoutCts();
             var commitToken = timeoutCts?.Token ?? CancellationToken.None;
 
-            var (successful, failed, errors) = await ExecuteWritesAsync(changes, commitToken);
+            var sourceFailure = await TryExecuteWritesWithSourceAsync(writeHandler, changes, commitToken).ConfigureAwait(false);
 
             lock (_pendingChangesLock)
             {
@@ -274,7 +296,10 @@ public sealed class SubjectTransaction : IDisposable
 
             _isCommitted = true;
 
-            ThrowIfFailed(successful, failed, errors);
+            if (sourceFailure is not null)
+            {
+                throw sourceFailure;
+            }
         }
         finally
         {
@@ -292,6 +317,80 @@ public sealed class SubjectTransaction : IDisposable
         }
     }
 
+    /// <summary>
+    /// Synchronous in-memory commit. Used when no <see cref="ITransactionWriter"/> is registered.
+    /// Avoids CTS allocation, state-machine boxing, and eagerly-allocated tracking lists.
+    /// </summary>
+    /// <summary>
+    /// Applies all changes in-process. Returns null on success, or a populated exception when one or more
+    /// changes (or their rollbacks) failed. The caller is responsible for clearing pending changes and
+    /// marking the transaction committed before re-throwing — otherwise, subsequent reads would return
+    /// stale pending values via <see cref="TryGetPendingValue"/>.
+    /// </summary>
+    private SubjectTransactionException? TryApplyChangesInMemory(ReadOnlySpan<SubjectPropertyChange> changes)
+    {
+        List<SubjectPropertyChange>? successful = null;
+        List<SubjectPropertyChange>? failed = null;
+        List<Exception>? errors = null;
+
+        foreach (var change in changes)
+        {
+            if (change.TryApplyChange(out var error))
+            {
+                // Track applied changes when rollback is possible (we may need to revert them)
+                // or when a failure has already occurred (we need them for the exception).
+                if (_failureHandling == TransactionFailureHandling.Rollback || failed is not null)
+                {
+                    (successful ??= new List<SubjectPropertyChange>(changes.Length)).Add(change);
+                }
+            }
+            else
+            {
+                (failed ??= []).Add(change);
+                if (error != null)
+                {
+                    (errors ??= []).Add(error);
+                }
+            }
+        }
+
+        if (failed is null) return null;
+
+        if (_failureHandling == TransactionFailureHandling.Rollback && successful is { Count: > 0 })
+        {
+            for (var i = successful.Count - 1; i >= 0; i--)
+            {
+                var applied = successful[i];
+                var rollback = SubjectPropertyChange.Create(
+                    applied.Property,
+                    source: applied.Source,
+                    changedTimestamp: applied.ChangedTimestamp,
+                    receivedTimestamp: applied.ReceivedTimestamp,
+                    oldValue: applied.GetNewValue<object?>(),
+                    newValue: applied.GetOldValue<object?>());
+
+                if (!rollback.TryApplyChange(out var revertError))
+                {
+                    failed.Add(rollback);
+                    if (revertError != null)
+                    {
+                        (errors ??= []).Add(revertError);
+                    }
+                }
+            }
+            successful.Clear();
+        }
+
+        var message = _failureHandling switch
+        {
+            TransactionFailureHandling.BestEffort => "One or more changes failed. Successfully written changes have been applied.",
+            TransactionFailureHandling.Rollback => "One or more changes failed. Rollback was attempted. No changes have been applied to the in-process model.",
+            _ => "One or more changes failed."
+        };
+
+        return new SubjectTransactionException(message, successful ?? [], failed, errors ?? []);
+    }
+
     private void ValidateCanCommit()
     {
         if (Volatile.Read(ref _isDisposed) != 0)
@@ -304,13 +403,20 @@ public sealed class SubjectTransaction : IDisposable
             throw new InvalidOperationException("CommitAsync is already in progress.");
     }
 
-    private async ValueTask<IDisposable?> AcquireOptimisticLockIfNeededAsync(CancellationToken cancellationToken)
+    private ValueTask<IDisposable?> AcquireOptimisticLockIfNeededAsync(CancellationToken cancellationToken)
     {
-        if (_locking == TransactionLocking.Optimistic)
+        // Sync fast path for the default (Exclusive) locking mode: lock was already
+        // acquired in BeginTransactionAsync, so commit needs no lock here.
+        if (_locking != TransactionLocking.Optimistic)
         {
-            return await Interceptor.AcquireTransactionLockAsync(cancellationToken).ConfigureAwait(false);
+            return default;
         }
-        return null;
+        return AcquireOptimisticLockSlowAsync(cancellationToken);
+    }
+
+    private async ValueTask<IDisposable?> AcquireOptimisticLockSlowAsync(CancellationToken cancellationToken)
+    {
+        return await Interceptor.AcquireTransactionLockAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private (SubjectPropertyChange[] RentedArray, Memory<SubjectPropertyChange> Changes) StartCommitAndSnapshotChanges()
@@ -353,43 +459,34 @@ public sealed class SubjectTransaction : IDisposable
             : new CancellationTokenSource(_commitTimeout);
     }
 
-    private async Task<(List<SubjectPropertyChange> Successful, List<SubjectPropertyChange> Failed, List<Exception> Errors)>
-        ExecuteWritesAsync(Memory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    private async ValueTask<SubjectTransactionException?> TryExecuteWritesWithSourceAsync(
+        ITransactionWriter writeHandler,
+        Memory<SubjectPropertyChange> changes,
+        CancellationToken cancellationToken)
     {
         var changeCount = changes.Length;
-        
+
         var allSuccessfulChanges = new List<SubjectPropertyChange>(changeCount);
-        var allFailedChanges = new List<SubjectPropertyChange>();  // Rare, keep small initial capacity
-        var allErrors = new List<Exception>();  // Rare, keep small initial capacity
+        var allFailedChanges = new List<SubjectPropertyChange>();
+        var allErrors = new List<Exception>();
 
         var localChangesToApply = new List<SubjectPropertyChange>(changeCount);
 
-        var writeHandler = Context.TryGetService<ITransactionWriter>();
-        if (writeHandler != null)
-        {
-            await WriteToSourcesAsync(
-                writeHandler, changes,
-                allSuccessfulChanges, allFailedChanges, allErrors, localChangesToApply, cancellationToken);
-        }
-        else
-        {
-            foreach (var change in changes.Span)
-            {
-                localChangesToApply.Add(change);
-            }
-        }
+        await WriteToSourcesAsync(
+            writeHandler, changes,
+            allSuccessfulChanges, allFailedChanges, allErrors, localChangesToApply, cancellationToken).ConfigureAwait(false);
 
         if (localChangesToApply.Count > 0)
         {
             await ApplyLocalChangesAsync(
                 writeHandler,
-                allSuccessfulChanges, allFailedChanges, allErrors, localChangesToApply, cancellationToken);
+                allSuccessfulChanges, allFailedChanges, allErrors, localChangesToApply, cancellationToken).ConfigureAwait(false);
         }
 
-        return (allSuccessfulChanges, allFailedChanges, allErrors);
+        return TryBuildFailureException(allSuccessfulChanges, allFailedChanges, allErrors);
     }
 
-    private async Task WriteToSourcesAsync(ITransactionWriter writeHandler,
+    private async ValueTask WriteToSourcesAsync(ITransactionWriter writeHandler,
         Memory<SubjectPropertyChange> changes,
         List<SubjectPropertyChange> allSuccessfulChanges,
         List<SubjectPropertyChange> allFailedChanges,
@@ -397,7 +494,7 @@ public sealed class SubjectTransaction : IDisposable
         List<SubjectPropertyChange> localChangesToApply,
         CancellationToken cancellationToken)
     {
-        var result = await writeHandler.WriteChangesAsync(changes, _failureHandling, _requirement, cancellationToken);
+        var result = await writeHandler.WriteChangesAsync(changes, _failureHandling, _requirement, cancellationToken).ConfigureAwait(false);
         allSuccessfulChanges.AddRange(result.SuccessfulChanges);
         allFailedChanges.AddRange(result.FailedChanges);
         allErrors.AddRange(result.Errors);
@@ -410,7 +507,7 @@ public sealed class SubjectTransaction : IDisposable
         }
     }
 
-    private async Task ApplyLocalChangesAsync(ITransactionWriter? writeHandler,
+    private async ValueTask ApplyLocalChangesAsync(ITransactionWriter? writeHandler,
         List<SubjectPropertyChange> allSuccessfulChanges,
         List<SubjectPropertyChange> allFailedChanges,
         List<Exception> allErrors,
@@ -426,11 +523,11 @@ public sealed class SubjectTransaction : IDisposable
         {
             await RollbackOnLocalFailureAsync(
                 writeHandler,
-                allSuccessfulChanges, allFailedChanges, allErrors, applied, cancellationToken);
+                allSuccessfulChanges, allFailedChanges, allErrors, applied, cancellationToken).ConfigureAwait(false);
         }
     }
 
-    private async Task RollbackOnLocalFailureAsync(ITransactionWriter? writeHandler,
+    private async ValueTask RollbackOnLocalFailureAsync(ITransactionWriter? writeHandler,
         List<SubjectPropertyChange> allSuccessfulChanges,
         List<SubjectPropertyChange> allFailedChanges,
         List<Exception> allErrors,
@@ -450,7 +547,7 @@ public sealed class SubjectTransaction : IDisposable
                 rollbackChanges.AsMemory(),
                 TransactionFailureHandling.BestEffort,
                 TransactionRequirement.None,
-                cancellationToken);
+                cancellationToken).ConfigureAwait(false);
 
             allFailedChanges.AddRange(rollbackResult.FailedChanges);
             allErrors.AddRange(rollbackResult.Errors);
@@ -459,22 +556,21 @@ public sealed class SubjectTransaction : IDisposable
         allSuccessfulChanges.Clear();
     }
 
-    private void ThrowIfFailed(
+    private SubjectTransactionException? TryBuildFailureException(
         List<SubjectPropertyChange> successful,
         List<SubjectPropertyChange> failed,
         List<Exception> errors)
     {
-        if (failed.Count > 0)
-        {
-            var message = _failureHandling switch
-            {
-                TransactionFailureHandling.BestEffort => "One or more changes failed. Successfully written changes have been applied.",
-                TransactionFailureHandling.Rollback => "One or more changes failed. Rollback was attempted. No changes have been applied to the in-process model.",
-                _ => "One or more changes failed."
-            };
+        if (failed.Count == 0) return null;
 
-            throw new SubjectTransactionException(message, successful, failed, errors);
-        }
+        var message = _failureHandling switch
+        {
+            TransactionFailureHandling.BestEffort => "One or more changes failed. Successfully written changes have been applied.",
+            TransactionFailureHandling.Rollback => "One or more changes failed. Rollback was attempted. No changes have been applied to the in-process model.",
+            _ => "One or more changes failed."
+        };
+
+        return new SubjectTransactionException(message, successful, failed, errors);
     }
 
     /// <summary>

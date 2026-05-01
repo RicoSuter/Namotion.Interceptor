@@ -168,7 +168,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
             person.FirstName = "John";
 
             var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
-                () => transaction.CommitAsync(CancellationToken.None));
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
 
             // Assert
             Assert.Single(exception.FailedChanges);
@@ -199,7 +199,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
             person.LastName = "Doe";
 
             var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
-                () => transaction.CommitAsync(CancellationToken.None));
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
 
             // Assert
             Assert.Single(exception.FailedChanges);
@@ -320,7 +320,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
             person.FirstName = "John";
 
             var exception = await Assert.ThrowsAsync<SubjectTransactionException>(
-                () => transaction.CommitAsync(CancellationToken.None));
+                () => transaction.CommitAsync(CancellationToken.None).AsTask());
 
             // Assert
             Assert.Single(exception.FailedChanges);
@@ -472,7 +472,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        var ex = await Assert.ThrowsAsync<SubjectTransactionException>(() => tx.CommitAsync(CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<SubjectTransactionException>(() => tx.CommitAsync(CancellationToken.None).AsTask());
 
         // Assert
         // Only FirstName should be in FailedChanges (partial failure)
@@ -527,7 +527,7 @@ public class SubjectTransactionSourceTests : TransactionTestBase
         person.FirstName = "John";
         person.LastName = "Doe";
 
-        var ex = await Assert.ThrowsAsync<SubjectTransactionException>(() => tx.CommitAsync(CancellationToken.None));
+        var ex = await Assert.ThrowsAsync<SubjectTransactionException>(() => tx.CommitAsync(CancellationToken.None).AsTask());
 
         // Assert
         // In Rollback mode, nothing should be applied when there's any failure
