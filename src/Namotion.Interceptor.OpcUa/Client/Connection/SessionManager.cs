@@ -38,6 +38,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     private readonly object _drainLock = new();
 
     private int _isReconnecting; // 0 = false, 1 = true (thread-safe via Interlocked)
+    private int _pendingSdkReconnection; // 1 = an SDK auto-reconnect started (Total incremented by OnKeepAlive) but not yet resolved
     private int _needsFullStateSync; // 0 = false, 1 = true (thread-safe via Interlocked)
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
     // Enqueued by SDK reconnection callbacks (sync), drained by health check loop via DisposePendingSessionsAsync (async).
@@ -315,6 +316,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 {
                     e.CancelKeepAlive = true;
                     _source.RecordReconnectionAttemptStart();
+                    Interlocked.Exchange(ref _pendingSdkReconnection, 1);
                 }
                 else
                 {
@@ -355,6 +357,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 {
                     return;
                 }
+
+                Interlocked.Exchange(ref _pendingSdkReconnection, 0);
 
                 var reconnectedSession = _reconnectHandler.Session as Session;
                 if (reconnectedSession is null)
@@ -478,6 +482,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                     (int)_configuration.ReconnectHandlerTimeout.TotalMilliseconds);
 
                 // Clear everything - health check will restart fresh
+                Interlocked.Exchange(ref _pendingSdkReconnection, 0);
                 AbandonCurrentSession();
                 Interlocked.Exchange(ref _isReconnecting, 0);
                 return true;
@@ -534,6 +539,12 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 (int)_configuration.ReconnectHandlerTimeout.TotalMilliseconds);
 
             Interlocked.Exchange(ref _isReconnecting, 0);
+
+            if (Interlocked.Exchange(ref _pendingSdkReconnection, 0) == 1)
+            {
+                _source.RecordReconnectionAbandoned();
+            }
+
             Interlocked.Exchange(ref _needsFullStateSync, 0);
 
             // Read and clear session inside lock to prevent race with OnReconnectComplete
