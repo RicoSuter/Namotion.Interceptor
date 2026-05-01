@@ -249,8 +249,7 @@ The diagnostics object is a live facade. Resolve it once and poll its properties
 For scenarios the connector does not cover natively, such as registering custom node managers, raising server events, or wiring up custom session handlers, `IOpcUaSubjectServer` exposes the underlying `StandardServer`:
 
 ```csharp
-StandardServer? current = server.CurrentServer;
-if (current is not null)
+if (server.CurrentServer StandardServer server)
 {
     // ... advanced server interactions
 }
