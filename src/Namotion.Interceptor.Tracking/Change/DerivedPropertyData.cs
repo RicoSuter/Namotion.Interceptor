@@ -68,21 +68,23 @@ internal sealed class DerivedPropertyData
     internal bool IsAttached = true;
 
     /// <summary>
+    /// True if this data belongs to a derived property (vs. a source property whose data exists only
+    /// because a derived depends on it). Lets WriteProperty identify derived-with-setter writes
+    /// without touching metadata on the hot path.
+    /// </summary>
+    /// <remarks>
+    /// Written via <c>Volatile.Write</c> in AttachProperty, read via <c>Volatile.Read</c> in
+    /// WriteProperty. Write-once; never reset (metadata.IsDerived is immutable).
+    /// </remarks>
+    internal bool IsDerived;
+
+    /// <summary>
     /// Read-only access to used-by properties for public API.
     /// </summary>
     internal PropertyReferenceCollection? UsedByDependencies
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => Volatile.Read(ref _usedByProperties);
-    }
-
-    /// <summary>
-    /// Whether this property has dependencies (has been evaluated as a derived property).
-    /// </summary>
-    internal bool HasRequiredProperties
-    {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => _requiredProperties is not null;
     }
 
     /// <summary>

@@ -298,7 +298,7 @@ public class LifecycleInterceptor : IWriteInterceptor, ILifecycleInterceptor
         lock (_attachedSubjects)
         {
             if (!_lastProcessedValues.TryGetValue(context.Property, out var lastProcessed))
-                lastProcessed = context.CurrentValue;
+                lastProcessed = null;
 
             // Read the actual backing store value to handle concurrent writes correctly.
             // context.NewValue may differ from the backing store if another thread

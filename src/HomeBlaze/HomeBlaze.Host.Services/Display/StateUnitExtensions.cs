@@ -99,6 +99,7 @@ public static class StateUnitExtensions
             DateTime dt => dt.ToString("g"),
             DateTimeOffset dto => $"{dto.ToLocalTime().ToString("g")} {dto.ToLocalTime():zzz}",
             Enum e => e.ToString(),
+            IEnumerable<string> strings => string.Join("\n", strings),
             _ => value.ToString() ?? ""
         };
     }

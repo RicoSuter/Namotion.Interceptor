@@ -4,6 +4,7 @@ using HomeBlaze.Host;
 using HomeBlaze.Samples;
 using HomeBlaze.Servers.OpcUa;
 using HomeBlaze.Servers.OpcUa.Blazor;
+using HomeBlaze.Plugins;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Blazor;
@@ -28,14 +29,20 @@ var builder = WebApplication.CreateBuilder(args);
 // This registers the singleton IInterceptorSubjectContext with HostedServiceHandler
 builder.Services.AddHomeBlazeHost();
 builder.Services.AddHomeBlazeStorage();
+
+var pluginConfigPath = builder.Configuration.GetValue<string>("PluginConfigurationPath")
+    ?? Path.Combine(AppContext.BaseDirectory, "Data", "Plugins.json");
+
+builder.Services.AddHomeBlazePlugins(pluginConfigPath);
 builder.Services.AddHotKeys2();
 
 // Optionally add the MCP subject server (default: false, enabled in Development)
-if (builder.Configuration.GetValue<bool>("UseMcpServer"))
+var mcpEnabled = builder.Configuration.GetValue("McpServer:Enabled", false);
+if (mcpEnabled)
 {
     builder.Services.AddMcpServer()
         .WithHttpTransport(options => options.Stateless = true)
-        .WithHomeBlazeMcpTools(isReadOnly: true);
+        .WithHomeBlazeMcpTools(isReadOnly: builder.Configuration.GetValue("McpServer:ReadOnly", true));
 }
 
 // Add services to the container.
@@ -71,6 +78,23 @@ typeProvider
     .AddAssembly(typeof(EcowittGateway).Assembly)
     .AddAssembly(typeof(EcowittGatewayWidget).Assembly);
 
+// Register HomeBlaze.Plugins subject types
+typeProvider.AddAssembly(typeof(PluginManager).Assembly);
+
+// Load runtime plugins
+var pluginLoader = app.Services.GetRequiredService<PluginLoader>();
+var pluginResult = await pluginLoader.LoadPluginsAsync(CancellationToken.None);
+if (pluginResult != null)
+{
+    foreach (var plugin in pluginResult.LoadedPlugins)
+    {
+        foreach (var assembly in plugin.Assemblies)
+        {
+            typeProvider.AddAssembly(assembly);
+        }
+    }
+}
+
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {
@@ -86,7 +110,7 @@ if (!app.Environment.IsDevelopment())
 app.UseAntiforgery();
 
 // Map MCP server endpoint if enabled
-if (builder.Configuration.GetValue<bool>("UseMcpServer"))
+if (mcpEnabled)
 {
     app.MapMcp("/mcp");
 }

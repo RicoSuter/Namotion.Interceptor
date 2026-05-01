@@ -85,7 +85,7 @@ For simple cases, use `[Path]`. For advanced OPC UA-specific configuration, use 
 
 ```csharp
 [InterceptorSubject]
-[OpcUaNode(TypeDefinition = "MachineType")]  // Class-level type definition
+[OpcUaNode("Machine", TypeDefinition = "MachineType")]  // Class-level type definition
 public partial class Machine
 {
     // Simple property mapping
@@ -98,7 +98,7 @@ public partial class Machine
 
     // Child object with HasComponent reference
     [OpcUaReference("HasComponent")]
-    [OpcUaNode(BrowseName = "MainMotor")]
+    [OpcUaNode("MainMotor")]
     public partial Motor? Motor { get; set; }
 }
 ```

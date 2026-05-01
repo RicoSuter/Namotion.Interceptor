@@ -193,19 +193,19 @@ public interface IPathProvider
     /// Get the path segment for a property.
     /// Returns null if no explicit mapping exists.
     /// </summary>
-    string? GetPropertySegment(RegisteredSubjectProperty property);
+    string? TryGetPropertySegment(RegisteredSubjectProperty property);
 
     /// <summary>
     /// Find a property by its path segment.
     /// </summary>
-    RegisteredSubjectProperty? GetPropertyFromSegment(RegisteredSubject subject, string segment);
+    RegisteredSubjectProperty? TryGetPropertyFromSegment(RegisteredSubject subject, string segment);
 }
 ```
 
 ### Built-in Providers
 
 - **DefaultPathProvider** - Uses property names exactly as defined
-- **JsonCamelCasePathProvider** - Converts property names to camelCase for JSON APIs
+- **CamelCasePathProvider** - Converts property names to camelCase for JSON APIs
 - **AttributeBasedPathProvider** - Uses `[Path]` attributes for custom mapping
 
 ### [Path] Attribute
@@ -271,14 +271,12 @@ For details on the update format, collection synchronization, and apply logic, s
 
 ```csharp
 // OPC UA Client Source
-builder.Services.AddOpcUaSubjectClient<Sensor>("opc.tcp://localhost:4840", "opc", rootName: "Root");
+builder.Services.AddOpcUaSubjectClientSource<Sensor>("opc.tcp://localhost:4840", "opc", rootName: "Root");
 
 // MQTT Client Source
-builder.Services.AddMqttSubjectClient<Sensor>(config =>
-{
-    config.BrokerHost = "localhost";
-    config.BrokerPort = 1883;
-});
+builder.Services.AddMqttSubjectClientSource<Sensor>(
+    brokerHost: "localhost",
+    pathProviderName: "mqtt");
 ```
 
 ### Custom Source Implementation
@@ -324,7 +322,7 @@ public class DatabaseSource : ISubjectSource
         try
         {
             await WriteToDatabaseAsync(changes, cancellationToken);
-            return WriteResult.Success();
+            return WriteResult.Success;
         }
         catch (Exception ex)
         {
@@ -373,8 +371,7 @@ public class DatabaseSource : ISubjectSource, IDisposable
                 // Called when a subject is detached from the object graph
                 // Use this to clean up caches or subscriptions for the subject
                 CleanupCachesForSubject(subject);
-            },
-            logger);
+            });
     }
 
     public IInterceptorSubject RootSubject => _root;

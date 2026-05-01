@@ -51,7 +51,7 @@ public partial class Widget : ITitleProvider, IConfigurable
 
         try
         {
-            return _pathResolver.ResolveSubject(Path, PathStyle.Canonical);
+            return _pathResolver.ResolveSubject(Path, PathStyle.Canonical, relativeTo: this);
         }
         catch
         {
