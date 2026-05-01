@@ -26,8 +26,8 @@ public class OpcUaReadWriteTests : SharedServerTestBase
         // Assert - on a healthy connection the new diagnostic surface must be populated:
         // session/server live, no captured error, and Name is bound on both sides.
         Assert.NotNull(Client.Source);
-        Assert.NotNull(Client.Source!.CurrentSession);
-        Assert.Null(Client.Diagnostics!.LastError);
+        Assert.NotNull(Client.Source.CurrentSession);
+        Assert.Null(Client.Source.Diagnostics.LastError);
         Assert.NotNull(ServerFixture.Server.CurrentServer);
 
         // Each side owns its own subject tree, so the lookup must use that side's property reference.

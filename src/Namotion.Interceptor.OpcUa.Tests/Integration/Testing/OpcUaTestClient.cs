@@ -29,8 +29,6 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
 
     public IOpcUaSubjectClientSource? Source { get; private set; }
 
-    public OpcUaClientDiagnostics? Diagnostics { get; private set; }
-
     public OpcUaTestClient(TestLogger logger, Action<OpcUaClientConfiguration>? configureClient = null)
     {
         _logger = logger;
@@ -112,7 +110,6 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         _host = builder.Build();
 
         Source = registration.Resolve(_host.Services);
-        Diagnostics = Source.Diagnostics;
 
         await _host.StartAsync();
         _logger.Log($"Client host started in {sw.ElapsedMilliseconds}ms");
@@ -120,7 +117,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         // First wait for OPC UA infrastructure (subscriptions set up) - this is reliable
         // because it's based on actual OPC UA state, not property propagation
         await AsyncTestHelpers.WaitUntilAsync(
-            () => Diagnostics?.MonitoredItemCount > 0,
+            () => Source.Diagnostics.MonitoredItemCount > 0,
             timeout: TimeSpan.FromSeconds(60),
             message: "Client failed to create subscriptions");
 

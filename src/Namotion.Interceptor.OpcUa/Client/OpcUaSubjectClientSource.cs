@@ -491,7 +491,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
             // Reconnection was cancelled by KillAsync, not by shutdown.
             // Counts as abandoned (started but result unusable) — distinct from the exception path
             // which increments _failedReconnections.
-            Interlocked.Increment(ref _abandonedReconnections);
+            RecordReconnectionAbandoned();
             _logger.LogInformation("Reconnection cancelled by kill. Will retry on next health check.");
 
             // Clear the session so health check can trigger a fresh reconnection attempt
@@ -702,10 +702,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
     }
 
     /// <summary>
-    /// Raises <see cref="CurrentSessionChanged"/> synchronously on the calling thread. Called by
-    /// <see cref="Connection.SessionManager"/> after every transition of the underlying session
-    /// reference, often from inside the reconnection lock. A defensive try/catch protects the
-    /// connector's own state from a throwing handler; isolation between subscribers is the
+    /// Raises <see cref="CurrentSessionChanged"/>. Invoked by <see cref="Connection.SessionManager"/>
+    /// from <c>DrainPendingSessionTransitions</c> after the reconnection lock has been released, so a
+    /// throwing or slow handler cannot deadlock or stall reconnection. A defensive try/catch protects
+    /// the connector's own state from a throwing handler; isolation between subscribers is the
     /// caller's responsibility per standard .NET event semantics.
     /// </summary>
     internal void OnCurrentSessionChanged(ISession? previousSession, ISession? currentSession)

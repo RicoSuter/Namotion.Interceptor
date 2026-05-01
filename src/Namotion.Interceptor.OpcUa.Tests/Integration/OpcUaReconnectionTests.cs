@@ -79,7 +79,6 @@ public class OpcUaReconnectionTests
 
             Assert.NotNull(server.Root);
             Assert.NotNull(client.Root);
-            Assert.NotNull(client.Diagnostics);
             Assert.NotNull(client.Source);
 
             // Track session swaps across the reconnection. Handler is sync per the event
@@ -94,7 +93,7 @@ public class OpcUaReconnectionTests
                 }
             }
 
-            client.Source!.CurrentSessionChanged += OnSessionChanged;
+            client.Source.CurrentSessionChanged += OnSessionChanged;
             try
             {
                 // Verify initial sync
@@ -105,16 +104,16 @@ public class OpcUaReconnectionTests
                     message: "Initial sync should complete");
                 logger.Log("Initial sync verified");
 
-                Assert.Null(client.Diagnostics.LastError);
+                Assert.Null(client.Source!.Diagnostics.LastError);
 
-                var initialAttempts = client.Diagnostics.TotalReconnectionAttempts;
+                var initialAttempts = client.Source!.Diagnostics.TotalReconnectionAttempts;
 
                 // Stop server and wait for client to detect disconnection
                 logger.Log("Stopping server...");
                 await server.StopAsync();
 
                 await AsyncTestHelpers.WaitUntilAsync(
-                    () => !client.Diagnostics.IsConnected,
+                    () => !client.Source!.Diagnostics.IsConnected,
                     timeout: TimeSpan.FromSeconds(90),
                     message: "Client should detect disconnection");
                 logger.Log("Client detected disconnection");
@@ -131,8 +130,8 @@ public class OpcUaReconnectionTests
                 logger.Log($"Client received: {client.Root.Name}");
 
                 // Verify metrics
-                var finalAttempts = client.Diagnostics.TotalReconnectionAttempts;
-                var successfulReconnections = client.Diagnostics.SuccessfulReconnections;
+                var finalAttempts = client.Source!.Diagnostics.TotalReconnectionAttempts;
+                var successfulReconnections = client.Source!.Diagnostics.SuccessfulReconnections;
 
                 logger.Log($"Reconnection attempts: {initialAttempts} -> {finalAttempts}");
                 logger.Log($"Successful reconnections: {successfulReconnections}");
@@ -143,7 +142,7 @@ public class OpcUaReconnectionTests
                     $"Should have at least 1 successful reconnection, had {successfulReconnections}");
 
                 // After a healthy reconnect the connector is connected again with a live session.
-                Assert.True(client.Diagnostics.IsConnected);
+                Assert.True(client.Source!.Diagnostics.IsConnected);
                 Assert.NotNull(client.Source.CurrentSession);
 
                 // Session swap visible to consumers. The reconnect cycle takes one of two paths
@@ -159,6 +158,15 @@ public class OpcUaReconnectionTests
                     Assert.Contains(sessionTransitions, t => t.HadPrevious);
                     Assert.Contains(sessionTransitions, t => t.HasCurrent);
                 }
+
+                // Reconnection counter invariant: once all in-flight attempts have resolved,
+                // Total == Successful + Failed + Abandoned. We are connected with a live session
+                // here, so no attempt is in flight. Capture once to avoid torn reads across counters.
+                var total = client.Source!.Diagnostics.TotalReconnectionAttempts;
+                var success = client.Source!.Diagnostics.SuccessfulReconnections;
+                var failed = client.Source!.Diagnostics.FailedReconnections;
+                var abandoned = client.Source!.Diagnostics.AbandonedReconnections;
+                Assert.Equal(total, success + failed + abandoned);
 
                 logger.Log("Test passed");
             }
@@ -191,7 +199,7 @@ public class OpcUaReconnectionTests
 
             Assert.NotNull(server.Root);
             Assert.NotNull(client.Root);
-            Assert.NotNull(client.Diagnostics);
+            Assert.NotNull(client.Source!.Diagnostics);
 
             // Verify initial sync
             server.Root.Name = "Initial";
@@ -278,14 +286,14 @@ public class OpcUaReconnectionTests
                 timeout: TimeSpan.FromSeconds(90),
                 message: "All people should sync");
 
-            var monitoredCount = client.Diagnostics!.MonitoredItemCount;
+            var monitoredCount = client.Source!.Diagnostics!.MonitoredItemCount;
             logger.Log($"Monitored items: {monitoredCount}");
 
             // Restart
             logger.Log("Stopping server...");
             await server.StopAsync();
             await AsyncTestHelpers.WaitUntilAsync(
-                () => !client.Diagnostics.IsConnected,
+                () => !client.Source!.Diagnostics.IsConnected,
                 timeout: TimeSpan.FromSeconds(90),
                 message: "Client should detect disconnection");
             logger.Log("Client detected disconnection");
@@ -304,7 +312,7 @@ public class OpcUaReconnectionTests
                 timeout: TimeSpan.FromSeconds(180),
                 message: "All properties should resync");
 
-            logger.Log($"All {client.Diagnostics.MonitoredItemCount} items resynced");
+            logger.Log($"All {client.Source!.Diagnostics.MonitoredItemCount} items resynced");
         }
         finally
         {

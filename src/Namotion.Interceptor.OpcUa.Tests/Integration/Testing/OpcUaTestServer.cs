@@ -28,8 +28,6 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
 
     public IOpcUaSubjectServer? Server { get; private set; }
 
-    public OpcUaServerDiagnostics? Diagnostics { get; private set; }
-
     public OpcUaTestServer(TestLogger logger)
     {
         _logger = logger;
@@ -104,7 +102,6 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         _host = builder.Build();
 
         Server = registration.Resolve(_host.Services);
-        Diagnostics = Server.Diagnostics;
 
         await _host.StartAsync();
         sw.Stop();

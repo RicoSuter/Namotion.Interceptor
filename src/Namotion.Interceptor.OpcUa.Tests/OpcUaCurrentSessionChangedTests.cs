@@ -1,8 +1,10 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.Tracking;
+using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Tests;
 
@@ -59,16 +61,17 @@ public partial class OpcUaCurrentSessionChangedTests
     {
         // Arrange
         var source = CreateSource();
+        var previous = new Mock<ISession>().Object;
+        var current = new Mock<ISession>().Object;
         OpcUaCurrentSessionChangedEventArgs? captured = null;
         source.CurrentSessionChanged += (_, args) => captured = args;
 
-        // Act - drive the event with both sides null; the contract is that the handler
-        // sees exactly the values the connector passed.
-        source.OnCurrentSessionChanged(null, null);
+        // Act - the contract is that the handler receives the exact session references the connector passed.
+        source.OnCurrentSessionChanged(previous, current);
 
         // Assert
         Assert.NotNull(captured);
-        Assert.Null(captured.PreviousSession);
-        Assert.Null(captured.CurrentSession);
+        Assert.Same(previous, captured.PreviousSession);
+        Assert.Same(current, captured.CurrentSession);
     }
 }
