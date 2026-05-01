@@ -5,7 +5,6 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.Polling;
 using Namotion.Interceptor.OpcUa.Client.ReadAfterWrite;
 using Opc.Ua;
-using Opc.Ua.Bindings;
 using Opc.Ua.Client;
 using Opc.Ua.Configuration;
 
@@ -33,6 +32,10 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     // user-supplied CurrentSessionChanged handlers from running with the reconnection lock held,
     // eliminating a class of deadlocks when handlers call back into the connector.
     private readonly ConcurrentQueue<(Session? Previous, Session? Current)> _pendingSessionTransitions = new();
+
+    // Serializes CurrentSessionChanged handler invocations across concurrent drainers.
+    // Never held together with _reconnectingLock (drains always run after that lock has been released).
+    private readonly object _drainLock = new();
 
     private int _isReconnecting; // 0 = false, 1 = true (thread-safe via Interlocked)
     private int _needsFullStateSync; // 0 = false, 1 = true (thread-safe via Interlocked)
@@ -637,19 +640,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     {
         try
         {
-            var channel = session.NullableTransportChannel;
-
-            // TODO: Remove socket close when https://github.com/OPCFoundation/UA-.NETStandard/pull/3560
-            // is released. The SDK will then close sockets in UaSCUaBinaryChannel.Dispose().
-            // The explicit close before Dispose ensures in-flight operations fail immediately
-            // (fast failover), but the leak prevention aspect becomes redundant with the SDK fix.
-            if (channel is IMessageSocketChannel socketChannel)
-            {
-                try { socketChannel.Socket?.Dispose(); }
-                catch { /* best effort - socket may already be closed */ }
-            }
-
-            channel?.Dispose();
+            session.NullableTransportChannel?.Dispose();
         }
         catch (Exception ex)
         {
@@ -765,15 +756,17 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
     /// <summary>
     /// Fires <see cref="OpcUaSubjectClientSource.OnCurrentSessionChanged"/> for every pending session
-    /// transition that <see cref="SetSession"/> has enqueued since the last drain. Must be called
-    /// outside <see cref="_reconnectingLock"/>; transitions enqueued under the lock are emitted in
-    /// the order they happened.
+    /// transition. Must be called outside <see cref="_reconnectingLock"/>. Concurrent drainers
+    /// serialize on <see cref="_drainLock"/>, preserving enqueue order in handler invocations.
     /// </summary>
     internal void DrainPendingSessionTransitions()
     {
-        while (_pendingSessionTransitions.TryDequeue(out var transition))
+        lock (_drainLock)
         {
-            _source.OnCurrentSessionChanged(transition.Previous, transition.Current);
+            while (_pendingSessionTransitions.TryDequeue(out var transition))
+            {
+                _source.OnCurrentSessionChanged(transition.Previous, transition.Current);
+            }
         }
     }
 
