@@ -218,48 +218,27 @@ The `LoadNodeSetFromEmbeddedResource<T>()` helper loads NodeSet XML files embedd
 
 ## Diagnostics
 
-Access server diagnostics through the `IOpcUaSubjectServer` interface. When using DI, call `Resolve` on the registration handle returned by `AddOpcUaSubjectServer`:
+`IOpcUaSubjectServer.Diagnostics` exposes a live facade — resolve it once and poll. From DI, use the registration handle; for direct instantiation, the return value is already the interface:
 
 ```csharp
-var registration = builder.Services.AddOpcUaSubjectServer<Sensor>(
-    sourceName: "opc",
-    rootName: "MySensor");
-
-// After building the host:
 IOpcUaSubjectServer server = registration.Resolve(serviceProvider);
 var diagnostics = server.Diagnostics;
 ```
 
-When using direct instantiation, the return value is already the interface:
-
-```csharp
-IOpcUaSubjectServer server = subject.CreateOpcUaServer(configuration, logger);
-var diagnostics = server.Diagnostics;
-```
-
-The diagnostics object is a live facade. Resolve it once and poll its properties repeatedly. Categories available:
-
-- **Running state**: whether the server is accepting connections
-- **Sessions**: number of currently connected clients
-- **Uptime**: when the server started and how long it has been running
-- **Errors**: most recent error and consecutive startup failure count (resets on success, see [Resilience](#resilience))
+Properties: `IsRunning`, `ActiveSessionCount`, `StartTime`, `Uptime`, `LastError`, `ConsecutiveFailures` (resets on successful start, see [Resilience](#resilience)).
 
 ## Direct Server Access
 
-For scenarios the connector does not cover natively, such as registering custom node managers, raising server events, or wiring up custom session handlers, `IOpcUaSubjectServer` exposes the underlying `StandardServer`:
+For scenarios the connector does not cover natively (custom node managers, server events, custom session handlers), `IOpcUaSubjectServer.CurrentServer` exposes the underlying `StandardServer`:
 
 ```csharp
 if (server.CurrentServer is { } current)
 {
-    // ... advanced server interactions on `current`
+    // ... advanced interactions on `current`
 }
 ```
 
-**Lifecycle contract:**
-
-- `CurrentServer` can return `null` when the server is not currently running (during startup, between restart attempts, or after a force-kill).
-- The instance is recreated on every server restart. Never cache the reference; never hold long-lived state keyed on a specific server instance.
-- Read `CurrentServer` immediately before each use.
+**Lifecycle contract:** read `CurrentServer` immediately before each use. It is `null` when the server is not running (startup, between restart attempts, or after a force-kill), and the instance is recreated on every restart. Never cache the reference.
 
 ## Resilience
 

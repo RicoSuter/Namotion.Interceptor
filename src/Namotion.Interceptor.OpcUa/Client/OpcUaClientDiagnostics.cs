@@ -56,7 +56,7 @@ public class OpcUaClientDiagnostics
 
     /// <summary>
     /// Gets the number of attempts that completed without an exception but produced an unusable result
-    /// (null session, subscription transfer failed, preserved session after server restart, stall reset, or kill cancellation).
+    /// (null session, transfer failed, preserved session after server restart, stall reset, or kill cancellation).
     /// </summary>
     public long AbandonedReconnections => _source.AbandonedReconnections;
 

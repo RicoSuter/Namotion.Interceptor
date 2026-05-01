@@ -583,97 +583,54 @@ When a batch write to the OPC UA server partially fails, the client throws an `O
 
 ## Diagnostics
 
-Access client diagnostics through the `IOpcUaSubjectClientSource` interface. When using DI, call `Resolve` on the registration handle returned by `AddOpcUaSubjectClientSource`:
+`IOpcUaSubjectClientSource.Diagnostics` exposes a live facade — resolve it once and poll. From DI, use the registration handle; for direct instantiation, the return value is already the interface:
 
 ```csharp
-var registration = builder.Services.AddOpcUaSubjectClientSource<Machine>(
-    serverUrl: "opc.tcp://plc.factory.com:4840",
-    sourceName: "opc");
-
-// After building the host:
 IOpcUaSubjectClientSource source = registration.Resolve(serviceProvider);
 var diagnostics = source.Diagnostics;
 ```
 
-When using direct instantiation, the return value is already the interface:
-
-```csharp
-IOpcUaSubjectClientSource source = subject.CreateOpcUaClientSource(configuration, logger);
-var diagnostics = source.Diagnostics;
-```
-
-The diagnostics object is a live facade. Resolve it once and poll its properties repeatedly. Categories available:
-
-- **Connection**: whether connected, whether reconnecting, session ID, last connected timestamp
-- **Subscriptions**: active subscription count, total monitored items
-- **Reconnection history**: total attempts, successes, and failures
-- **Polling fallback**: item count, read success/failure counts, value changes detected, slow polls, and circuit breaker state (see [Polling Fallback](#polling-fallback-for-unsupported-nodes))
-- **Read-after-write**: scheduled, executed, coalesced, and failed counts (see [Read After Write Fallback](#read-after-write-fallback))
-
-All diagnostics properties are thread-safe for reading.
+Categories: connection (`IsConnected`, `IsReconnecting`, `SessionId`, `LastConnectedAt`), subscriptions (`SubscriptionCount`, `MonitoredItemCount`), reconnection history (`TotalReconnectionAttempts`, `SuccessfulReconnections`, `FailedReconnections`, `AbandonedReconnections`, `LastError`), [polling fallback](#polling-fallback-for-unsupported-nodes), [read-after-write](#read-after-write-fallback). All properties are thread-safe for reading.
 
 ## Direct Session Access
 
-For scenarios the connector does not cover natively, such as calling OPC UA **Methods** (operator commands, recipe execution, custom server-side procedures) or subscribing to **Alarms & Conditions** events, `IOpcUaSubjectClientSource` exposes the underlying `ISession`:
+For scenarios the connector does not cover natively (OPC UA **Methods**, **Alarms & Conditions**), `IOpcUaSubjectClientSource.CurrentSession` exposes the underlying `ISession`:
 
 ```csharp
-if (source.CurrentSession is ISession session)
+if (source.CurrentSession is { } session)
 {
-    var outputs = await session.CallAsync(
-        objectId: parentNodeId,
-        methodId: methodNodeId,
-        inputArguments: new[] { /* ... */ },
-        cancellationToken);
+    var outputs = await session.CallAsync(parentNodeId, methodId, inputArgs, cancellationToken);
 }
 ```
 
-There are two ways to get the source:
-
-**1. Via the registration handle** (recommended for application-level wiring):
-
-```csharp
-ISession? session = registration
-   .Resolve(serviceProvider)
-   .CurrentSession;
-```
-
-**2. From any property via `TryGetSource`** (useful when reaching a session from deep inside business code that holds a property reference but not the registration handle):
+Get the source either via the registration handle (`registration.Resolve(serviceProvider)`) or, when you already hold a `PropertyReference` deep in business code, via `TryGetSource`:
 
 ```csharp
 if (property.TryGetSource(out var subjectSource) &&
     subjectSource is IOpcUaSubjectClientSource source)
 {
     ISession? session = source.CurrentSession;
-    // ... use session
 }
 ```
 
-This works because `OpcUaSubjectClientSource` implements both `ISubjectSource` (returned by `TryGetSource`) and `IOpcUaSubjectClientSource`. The pattern lets any code path that already has a `PropertyReference` reach the OPC UA session without plumbing the registration through.
-
-**Lifecycle contract (read carefully):**
-
-- `CurrentSession` can return `null` at any time during reconnection. Always null-check.
-- The underlying `ISession` instance changes after a manual reconnect (Flow C), after a transferred-subscription failure (Flow B), or after stall detection forces a reset. Never cache the reference; never hold long-lived state keyed on a specific session instance.
-- Read `CurrentSession` immediately before each use. A reference captured a few seconds ago may already point to a disposed session.
-- For long-running operations (e.g. an A&C subscription you create on the session), be prepared to re-create your subscription after a session swap. Either subscribe to `CurrentSessionChanged` (see below) or recreate on demand when calls fail with `BadSessionIdInvalid` / `BadSessionNotActivated`.
+**Lifecycle contract:** read `CurrentSession` immediately before each use. It may be `null` during reconnection and the instance changes after a manual reconnect (Flow C), a transferred-subscription failure (Flow B), or a stall reset. Never cache the reference. For long-running session-bound state (e.g. an A&C `Subscription`), subscribe to `CurrentSessionChanged` (below) or recreate on demand when calls fail with `BadSessionIdInvalid` / `BadSessionNotActivated`.
 
 ### Reacting to session swaps with `CurrentSessionChanged`
 
-For consumers that hold session-bound state (typically Alarms & Conditions subscriptions), the connector raises `CurrentSessionChanged` on every transition of the underlying session, including transitions to and from `null` during reconnection. The event arguments carry both the previous session and the current one, so handlers can tear down state bound to the old session before recreating it on the new one.
+For consumers holding session-bound state (typically A&C subscriptions), `CurrentSessionChanged` fires on every transition (including to/from `null`). Method-call consumers usually do not need it — they re-read `CurrentSession` per call and surface a stale session as a failure on the next call. The event is for consumers that have no such inbound traffic.
 
 ```csharp
 opcUaSource.CurrentSessionChanged += (_, args) =>
 {
     if (args.PreviousSession is not null)
     {
-        // Synchronous local cleanup on the previous session (drop refs, unsubscribe handlers).
-        // Do not start new network operations on PreviousSession — its transport may already be closed.
+        // Synchronous local cleanup only; transport may already be closed.
         DisposeMyAlarmsSubscription(args.PreviousSession);
     }
 
     if (args.CurrentSession is not null)
     {
-        // Recreating an A&C subscription is async — fire-and-forget so the handler returns quickly.
+        // Async work fire-and-forget so the handler returns quickly.
         var newSession = args.CurrentSession;
         _ = Task.Run(async () =>
         {
@@ -684,14 +641,7 @@ opcUaSource.CurrentSessionChanged += (_, args) =>
 };
 ```
 
-Method-call consumers (e.g. invoking an OPC UA Method on demand) typically do not need this event: they read `CurrentSession` immediately before each call and tolerate transient nulls. The event is intended for consumers that have no inbound traffic that would otherwise surface a stale session as a failure.
-
-Handler guidelines:
-
-- The event fires on the connector's own thread but **outside** the reconnection lock, so a slow handler will not stall reconnection or deadlock callers that re-enter the source. Transitions are emitted in the order they happened.
-- `PreviousSession`'s transport state is undefined inside the handler — for the abandon path it has already been closed by the time the event fires. Use it only for synchronous local cleanup; do not start new network operations on it.
-- For async work on `CurrentSession` (e.g. recreating a subscription) use fire-and-forget (`_ = Task.Run(...)`) and tolerate the session being swapped again before the task completes — the next `CurrentSessionChanged` event will surface the new state.
-- The connector wraps the invocation in a try/catch so a throwing handler cannot break its own state, but per standard .NET event semantics a throwing subscriber will skip later subscribers in the invocation list. If you have multiple subscribers that must all run, isolate exceptions in your own handler.
+The event fires on the connector's own thread but **outside** the reconnection lock, in transition order, so a slow handler will not stall reconnection. Use `PreviousSession` only for synchronous local cleanup (its transport may already be closed). For async work on `CurrentSession` use fire-and-forget (`_ = Task.Run(...)`) and tolerate the session being swapped again before the task completes — the next `CurrentSessionChanged` event will surface the new state. Handler exceptions are caught and logged, but per standard event semantics a throwing subscriber skips later subscribers — isolate exceptions in your own handler if multiple must run.
 
 ## Thread Safety
 
