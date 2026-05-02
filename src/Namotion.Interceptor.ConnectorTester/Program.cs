@@ -82,15 +82,18 @@ for (var i = 0; i < args.Length; i++)
     }
 }
 
+var participantCounter = 0;
+
 MutationEngine CreateMutationEngine(TestNode root, ParticipantConfiguration config, string logCategory)
 {
     var logger = sharedLoggerFactory.CreateLogger(logCategory);
+    var participantIndex = participantCounter++;
 
     if (configuration.BatchSize > 0)
     {
         return new BatchMutationEngine(
             root, config, coordinator, logger,
-            configuration.BatchSize, configuration.BatchIntervalMs);
+            configuration.BatchSize, configuration.BatchIntervalMs, participantIndex);
     }
 
     return new RandomMutationEngine(root, config, coordinator, logger);

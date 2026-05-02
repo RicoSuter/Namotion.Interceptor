@@ -11,6 +11,7 @@ public class BatchMutationEngine : MutationEngine
 {
     private readonly int _batchSize;
     private readonly int _batchIntervalMs;
+    private readonly int _participantIndex;
 
     public BatchMutationEngine(
         TestNode root,
@@ -18,11 +19,13 @@ public class BatchMutationEngine : MutationEngine
         TestCycleCoordinator coordinator,
         ILogger logger,
         int batchSize,
-        int batchIntervalMs)
+        int batchIntervalMs,
+        int participantIndex)
         : base(root, configuration, coordinator, logger)
     {
         _batchSize = batchSize;
         _batchIntervalMs = batchIntervalMs;
+        _participantIndex = participantIndex;
     }
 
     protected override async Task RunValueMutationsAsync(CancellationToken stoppingToken)
@@ -57,11 +60,12 @@ public class BatchMutationEngine : MutationEngine
 
             using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
             {
+                var property = _participantIndex % 3;
+
                 Parallel.For(startIndex, startIndex + count, i =>
                 {
                     var node = nodes[i];
                     var counter = NextGlobalCounter();
-                    var property = (int)(counter % 3);
 
                     switch (property)
                     {
