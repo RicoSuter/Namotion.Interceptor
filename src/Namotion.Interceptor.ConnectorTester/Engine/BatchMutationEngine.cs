@@ -11,7 +11,6 @@ namespace Namotion.Interceptor.ConnectorTester.Engine;
 public class BatchMutationEngine : MutationEngine
 {
     private readonly int _batchSize;
-    private readonly int _batchIntervalMs;
     private readonly int _participantIndex;
 
     public BatchMutationEngine(
@@ -20,12 +19,10 @@ public class BatchMutationEngine : MutationEngine
         TestCycleCoordinator coordinator,
         ILogger logger,
         int batchSize,
-        int batchIntervalMs,
         int participantIndex)
         : base(root, configuration, coordinator, logger)
     {
         _batchSize = batchSize;
-        _batchIntervalMs = batchIntervalMs;
         _participantIndex = participantIndex;
     }
 

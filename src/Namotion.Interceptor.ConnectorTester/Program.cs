@@ -93,7 +93,7 @@ MutationEngine CreateMutationEngine(TestNode root, ParticipantConfiguration conf
     {
         return new BatchMutationEngine(
             root, config, coordinator, logger,
-            configuration.BatchSize, configuration.BatchIntervalMs, participantIndex);
+            configuration.BatchSize, participantIndex);
     }
 
     return new RandomMutationEngine(root, config, coordinator, logger);

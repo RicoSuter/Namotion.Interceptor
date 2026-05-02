@@ -233,7 +233,6 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
     "Connector": "opcua",
     "ObjectCount": 20000,
     "BatchSize": 400,
-    "BatchIntervalMs": 20,
     "MutatePhaseDuration": "00:30:00",
     "ConvergenceTimeout": "00:05:00",
     "MetricsReportingInterval": "00:01:00",
@@ -258,7 +257,7 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
 | `Connector` | string | `"opcua"` | Protocol to test: `"opcua"`, `"mqtt"`, or `"websocket"` |
 | `ObjectCount` | int | `31` | Number of collection children in the test graph |
 | `BatchSize` | int | `0` | Objects per mutation batch. `0` = RandomMutationEngine, `> 0` = BatchMutationEngine |
-| `BatchIntervalMs` | int | `20` | Fallback interval when no nodes are available (when BatchSize > 0). Actual batch timing is calculated as `1000ms / (totalBatches * 1.1)`. |
+
 | `MetricsReportingInterval` | TimeSpan | `00:01:00` | How often performance metrics are logged |
 | `MutatePhaseDuration` | TimeSpan | `00:01:00` | How long mutations run before convergence check |
 | `ConvergenceTimeout` | TimeSpan | `00:01:00` | Max time to wait for all snapshots to match |

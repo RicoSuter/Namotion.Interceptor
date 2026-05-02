@@ -14,10 +14,7 @@ public class ConnectorTesterConfiguration
     /// </summary>
     public int BatchSize { get; set; } = 0;
 
-    /// <summary>Milliseconds between batches (when BatchSize > 0).</summary>
-    public int BatchIntervalMs { get; set; } = 20;
-
-    /// <summary>How often performance metrics are logged to console and performance-*.log.</summary>
+    /// <summary>How often performance metrics are logged to console and performance-*.csv.</summary>
     public TimeSpan MetricsReportingInterval { get; set; } = TimeSpan.FromMinutes(1);
 
     public TimeSpan MutatePhaseDuration { get; set; } = TimeSpan.FromMinutes(1);
