@@ -40,7 +40,7 @@ public class PerformanceProfiler : IDisposable
         _logFilePath = Path.Combine(LogDirectory, $"performance-{participantName}.csv");
 
         var header = string.Format(
-            "{0,12}, {1,12}, {2,12}, {3,12}, {4,12}, {5,12}, {6,12}, {7,12}, {8,12}, {9,12}, {10,12}, {11,12}, {12,12}, {13,12}, {14,12}, {15,12}",
+            "{0,24}, {1,12}, {2,12}, {3,12}, {4,12}, {5,12}, {6,12}, {7,12}, {8,12}, {9,12}, {10,12}, {11,12}, {12,12}, {13,12}, {14,12}, {15,12}",
             "Timestamp", "Participant", "Throughput", "E2E-Avg", "E2E-P50", "E2E-P90", "E2E-P95", "E2E-P99", "E2E-P99.9", "E2E-Max", "Proc-Avg", "Published", "Received", "ProcessMB", "HeapMB", "AllocMB/s");
         File.WriteAllText(_logFilePath, header + Environment.NewLine);
 
@@ -181,7 +181,7 @@ public class PerformanceProfiler : IDisposable
 
         var logLine = string.Format(
             CultureInfo.InvariantCulture,
-            "{0,12:yyyy-MM-ddTHH:mm:ss.fffZ}, {1,12}, {2,12:F0}, {3,12:F1}, {4,12:F1}, {5,12:F1}, {6,12:F1}, {7,12:F1}, {8,12:F1}, {9,12:F1}, {10,12:F1}, {11,12}, {12,12}, {13,12:F1}, {14,12:F1}, {15,12:F2}",
+            "{0,24:yyyy-MM-ddTHH:mm:ss.fffZ}, {1,12}, {2,12:F0}, {3,12:F1}, {4,12:F1}, {5,12:F1}, {6,12:F1}, {7,12:F1}, {8,12:F1}, {9,12:F1}, {10,12:F1}, {11,12}, {12,12}, {13,12:F1}, {14,12:F1}, {15,12:F2}",
             now, _participantName, avgThroughput,
             avgChangedLatency, p50ChangedLatency, p90ChangedLatency, p95ChangedLatency,
             p99ChangedLatency, p999ChangedLatency, maxChangedLatency,
