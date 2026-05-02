@@ -6,11 +6,15 @@ namespace Namotion.Interceptor.ConnectorTester.Engine;
 
 /// <summary>
 /// Value mutation strategy: cycles through all nodes in parallel batches.
-/// Used for load profiles (BatchSize > 0).
+/// Used for load profiles (NumberOfBatches > 0).
+/// Mutates ValueMutationRate nodes per second, spread across NumberOfBatches
+/// batches with even distribution via a PeriodicTimer at 110% tick rate.
+/// Each participant mutates a single fixed property (participantIndex % 3)
+/// to avoid OPC UA subscription coalescing.
 /// </summary>
 public class BatchMutationEngine : MutationEngine
 {
-    private readonly int _batchSize;
+    private readonly int _numberOfBatches;
     private readonly int _participantIndex;
 
     public BatchMutationEngine(
@@ -18,11 +22,11 @@ public class BatchMutationEngine : MutationEngine
         ParticipantConfiguration configuration,
         TestCycleCoordinator coordinator,
         ILogger logger,
-        int batchSize,
+        int numberOfBatches,
         int participantIndex)
         : base(root, configuration, coordinator, logger)
     {
-        _batchSize = batchSize;
+        _numberOfBatches = numberOfBatches;
         _participantIndex = participantIndex;
     }
 
@@ -39,11 +43,12 @@ public class BatchMutationEngine : MutationEngine
             return;
         }
 
-        var totalBatches = (int)Math.Ceiling((double)nodeCount / _batchSize);
-        var timerIntervalMs = 1000.0 / (totalBatches * 1.1);
+        var nodesPerBatch = (int)Math.Ceiling((double)ValueMutationRate / _numberOfBatches);
+        var timerIntervalMs = 1000.0 / (_numberOfBatches * 1.1);
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(timerIntervalMs));
 
-        var batchIndex = 0;
+        var nodeIndex = 0;
+        var batchesThisSecond = 0;
         var cycleStart = Stopwatch.GetTimestamp();
         var property = _participantIndex % 3;
 
@@ -51,22 +56,19 @@ public class BatchMutationEngine : MutationEngine
         {
             Coordinator.WaitIfPaused(stoppingToken);
 
-            if (batchIndex >= totalBatches)
+            if (batchesThisSecond >= _numberOfBatches)
             {
-                // All batches done for this second — check if next second started
                 var elapsed = Stopwatch.GetElapsedTime(cycleStart);
                 if (elapsed < TimeSpan.FromSeconds(1))
                 {
                     continue;
                 }
 
-                batchIndex = 0;
+                batchesThisSecond = 0;
                 cycleStart = Stopwatch.GetTimestamp();
             }
 
             List<TestNode> nodes;
-            int startIndex;
-            int count;
             lock (NodeLock)
             {
                 nodes = KnownNodes;
@@ -75,10 +77,10 @@ public class BatchMutationEngine : MutationEngine
                 {
                     continue;
                 }
-
-                startIndex = (batchIndex * _batchSize) % nodeCount;
-                count = Math.Min(_batchSize, nodeCount - startIndex);
             }
+
+            var startIndex = nodeIndex % nodeCount;
+            var count = Math.Min(nodesPerBatch, nodeCount - startIndex);
 
             using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
             {
@@ -104,7 +106,8 @@ public class BatchMutationEngine : MutationEngine
                 });
             }
 
-            batchIndex++;
+            nodeIndex = (startIndex + count) % nodeCount;
+            batchesThisSecond++;
         }
     }
 }

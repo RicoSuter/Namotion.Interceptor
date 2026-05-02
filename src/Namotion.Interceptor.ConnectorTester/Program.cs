@@ -89,11 +89,11 @@ MutationEngine CreateMutationEngine(TestNode root, ParticipantConfiguration conf
     var logger = sharedLoggerFactory.CreateLogger(logCategory);
     var participantIndex = participantCounter++;
 
-    if (configuration.BatchSize > 0)
+    if (configuration.NumberOfBatches > 0)
     {
         return new BatchMutationEngine(
             root, config, coordinator, logger,
-            configuration.BatchSize, participantIndex);
+            configuration.NumberOfBatches, participantIndex);
     }
 
     return new RandomMutationEngine(root, config, coordinator, logger);

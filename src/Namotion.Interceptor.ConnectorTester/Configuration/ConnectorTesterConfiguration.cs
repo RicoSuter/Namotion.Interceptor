@@ -9,10 +9,12 @@ public class ConnectorTesterConfiguration
     public int ObjectCount { get; set; } = 31;
 
     /// <summary>
-    /// Objects per mutation batch. 0 = use RandomMutationEngine (single random mutations).
+    /// Number of batches per second for BatchMutationEngine.
+    /// 0 = use RandomMutationEngine (single random mutations).
     /// Greater than 0 = use BatchMutationEngine (parallel batched updates).
+    /// Each batch mutates ceil(ValueMutationRate / NumberOfBatches) nodes.
     /// </summary>
-    public int BatchSize { get; set; } = 0;
+    public int NumberOfBatches { get; set; } = 0;
 
     /// <summary>How often performance metrics are logged to console and performance-*.csv.</summary>
     public TimeSpan MetricsReportingInterval { get; set; } = TimeSpan.FromMinutes(1);

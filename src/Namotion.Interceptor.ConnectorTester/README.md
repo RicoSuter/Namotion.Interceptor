@@ -37,7 +37,7 @@ Each test cycle has two phases:
 
    - **RandomMutationEngine** (chaos profiles, `BatchSize = 0`): Picks a random node and random property, one at a time, at the configured `ValueMutationRate`.
 
-   - **BatchMutationEngine** (load profiles, `BatchSize > 0`): Cycles through all nodes in parallel batches within 1-second windows. Uses a `PeriodicTimer` at 110% of the required tick rate (e.g., 50 batches → 55 ticks/sec → ~18ms interval) to guarantee all batches complete within each second with 10% headroom for scheduling jitter. Each participant mutates a single fixed property (`participantIndex % 3`) to avoid OPC UA subscription coalescing — server always mutates `StringValue`, first client always mutates `DecimalValue`, etc.
+   - **BatchMutationEngine** (load profiles, `NumberOfBatches > 0`): Mutates `ValueMutationRate` nodes per second, spread across `NumberOfBatches` parallel batches within 1-second windows. Uses a `PeriodicTimer` at 110% of the required tick rate (e.g., 50 batches → 55 ticks/sec → ~18ms interval) to guarantee all batches complete within each second with 10% headroom for scheduling jitter. Each participant mutates a single fixed property (`participantIndex % 3`) to avoid OPC UA subscription coalescing — server always mutates `StringValue`, first client always mutates `DecimalValue`, etc.
 
 2. **Converge phase**: The VerificationEngine pauses all engines via the TestCycleCoordinator, recovers any active chaos disruptions, waits a grace period (20s for OPC UA) for reconnection, then polls snapshots every 5 seconds. Each snapshot serializes the full object graph using `SubjectUpdate.CreateCompleteUpdate()`. Structural property timestamps (Collection, Dictionary, Object) are stripped since they represent local creation time, not synced state. Value property timestamps are preserved and must converge.
 
@@ -232,7 +232,7 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
   "ConnectorTester": {
     "Connector": "opcua",
     "ObjectCount": 20000,
-    "BatchSize": 400,
+    "NumberOfBatches": 50,
     "MutatePhaseDuration": "00:30:00",
     "ConvergenceTimeout": "00:05:00",
     "MetricsReportingInterval": "00:01:00",
@@ -256,7 +256,7 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
 |-----|------|---------|-------------|
 | `Connector` | string | `"opcua"` | Protocol to test: `"opcua"`, `"mqtt"`, or `"websocket"` |
 | `ObjectCount` | int | `31` | Number of collection children in the test graph |
-| `BatchSize` | int | `0` | Objects per mutation batch. `0` = RandomMutationEngine, `> 0` = BatchMutationEngine |
+| `NumberOfBatches` | int | `0` | Batches per second. `0` = RandomMutationEngine, `> 0` = BatchMutationEngine. Each batch mutates `ceil(ValueMutationRate / NumberOfBatches)` nodes. |
 
 | `MetricsReportingInterval` | TimeSpan | `00:01:00` | How often performance metrics are logged |
 | `MutatePhaseDuration` | TimeSpan | `00:01:00` | How long mutations run before convergence check |
