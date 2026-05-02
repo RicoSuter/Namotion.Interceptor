@@ -39,9 +39,10 @@ public class PerformanceProfiler : IDisposable
         Directory.CreateDirectory(LogDirectory);
         _logFilePath = Path.Combine(LogDirectory, $"performance-{participantName}.csv");
 
-        File.WriteAllText(_logFilePath,
-            "Timestamp, Participant, Throughput, E2E-Avg, E2E-P50, E2E-P90, E2E-P95, E2E-P99, E2E-P99.9, E2E-Max, Proc-Avg, Published, Received, ProcessMB, HeapMB, AllocMB/s" +
-            Environment.NewLine);
+        var header = string.Format(
+            "{0,-28}, {1,-11}, {2,10}, {3,7}, {4,7}, {5,7}, {6,7}, {7,7}, {8,9}, {9,7}, {10,8}, {11,9}, {12,8}, {13,9}, {14,6}, {15,9}",
+            "Timestamp", "Participant", "Throughput", "E2E-Avg", "E2E-P50", "E2E-P90", "E2E-P95", "E2E-P99", "E2E-P99.9", "E2E-Max", "Proc-Avg", "Published", "Received", "ProcessMB", "HeapMB", "AllocMB/s");
+        File.WriteAllText(_logFilePath, header + Environment.NewLine);
 
         _subscription = context.CreatePropertyChangeQueueSubscription();
 
@@ -180,7 +181,7 @@ public class PerformanceProfiler : IDisposable
 
         var logLine = string.Format(
             CultureInfo.InvariantCulture,
-            "{0:yyyy-MM-ddTHH:mm:ss.fffZ}, {1}, {2:F0}, {3:F1}, {4:F1}, {5:F1}, {6:F1}, {7:F1}, {8:F1}, {9:F1}, {10:F1}, {11}, {12}, {13:F1}, {14:F1}, {15:F2}",
+            "{0:yyyy-MM-ddTHH:mm:ss.fffZ}, {1,-11}, {2,10:F0}, {3,7:F1}, {4,7:F1}, {5,7:F1}, {6,7:F1}, {7,7:F1}, {8,9:F1}, {9,7:F1}, {10,8:F1}, {11,9}, {12,8}, {13,9:F1}, {14,6:F1}, {15,9:F2}",
             now, _participantName, avgThroughput,
             avgChangedLatency, p50ChangedLatency, p90ChangedLatency, p95ChangedLatency,
             p99ChangedLatency, p999ChangedLatency, maxChangedLatency,
