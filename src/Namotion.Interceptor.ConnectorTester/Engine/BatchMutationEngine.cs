@@ -36,23 +36,32 @@ public class BatchMutationEngine : MutationEngine
                 Coordinator.WaitIfPaused(stoppingToken);
 
                 List<TestNode> batch;
+                bool empty;
                 lock (NodeLock)
                 {
-                    if (KnownNodes.Count == 0)
+                    empty = KnownNodes.Count == 0;
+                    if (!empty)
                     {
-                        await Task.Delay(_batchIntervalMs, stoppingToken);
-                        continue;
+                        var startIndex = (batchIndex * _batchSize) % KnownNodes.Count;
+                        var count = Math.Min(_batchSize, KnownNodes.Count - startIndex);
+                        batch = KnownNodes.GetRange(startIndex, count);
+                        batchIndex++;
+
+                        if (startIndex + count >= KnownNodes.Count)
+                        {
+                            batchIndex = 0;
+                        }
                     }
-
-                    var startIndex = (batchIndex * _batchSize) % KnownNodes.Count;
-                    var count = Math.Min(_batchSize, KnownNodes.Count - startIndex);
-                    batch = KnownNodes.GetRange(startIndex, count);
-                    batchIndex++;
-
-                    if (startIndex + count >= KnownNodes.Count)
+                    else
                     {
-                        batchIndex = 0;
+                        batch = [];
                     }
+                }
+
+                if (empty)
+                {
+                    await Task.Delay(_batchIntervalMs, stoppingToken);
+                    continue;
                 }
 
                 using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
