@@ -33,7 +33,11 @@ An in-process integration test that validates **eventual consistency** across Na
 
 Each test cycle has two phases:
 
-1. **Mutate phase**: All MutationEngines and ChaosEngines run concurrently. Engines mutate value properties (`StringValue`, `DecimalValue`, `IntValue`) on TestNode objects across the graph. `RandomMutationEngine` picks a random node and property one at a time (chaos profiles). `BatchMutationEngine` cycles through all nodes in parallel batches (load profiles).
+1. **Mutate phase**: All MutationEngines and ChaosEngines run concurrently. Engines mutate value properties (`StringValue`, `DecimalValue`, `IntValue`) on TestNode objects across the graph.
+
+   - **RandomMutationEngine** (chaos profiles, `BatchSize = 0`): Picks a random node and random property, one at a time, at the configured `ValueMutationRate`.
+
+   - **BatchMutationEngine** (load profiles, `BatchSize > 0`): Cycles through all nodes in parallel batches within 1-second windows. Uses a `PeriodicTimer` at 110% of the required tick rate (e.g., 50 batches → 55 ticks/sec → ~18ms interval) to guarantee all batches complete within each second with 10% headroom for scheduling jitter. Each participant mutates a single fixed property (`participantIndex % 3`) to avoid OPC UA subscription coalescing — server always mutates `StringValue`, first client always mutates `DecimalValue`, etc.
 
 2. **Converge phase**: The VerificationEngine pauses all engines via the TestCycleCoordinator, recovers any active chaos disruptions, waits a grace period (20s for OPC UA) for reconnection, then polls snapshots every 5 seconds. Each snapshot serializes the full object graph using `SubjectUpdate.CreateCompleteUpdate()`. Structural property timestamps (Collection, Dictionary, Object) are stripped since they represent local creation time, not synced state. Value property timestamps are preserved and must converge.
 
@@ -254,7 +258,7 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
 | `Connector` | string | `"opcua"` | Protocol to test: `"opcua"`, `"mqtt"`, or `"websocket"` |
 | `ObjectCount` | int | `31` | Number of collection children in the test graph |
 | `BatchSize` | int | `0` | Objects per mutation batch. `0` = RandomMutationEngine, `> 0` = BatchMutationEngine |
-| `BatchIntervalMs` | int | `20` | Milliseconds between batches (when BatchSize > 0) |
+| `BatchIntervalMs` | int | `20` | Fallback interval when no nodes are available (when BatchSize > 0). Actual batch timing is calculated as `1000ms / (totalBatches * 1.1)`. |
 | `MetricsReportingInterval` | TimeSpan | `00:01:00` | How often performance metrics are logged |
 | `MutatePhaseDuration` | TimeSpan | `00:01:00` | How long mutations run before convergence check |
 | `ConvergenceTimeout` | TimeSpan | `00:01:00` | Max time to wait for all snapshots to match |

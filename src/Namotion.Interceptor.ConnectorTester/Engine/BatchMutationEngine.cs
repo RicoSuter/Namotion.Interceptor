@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Model;
 
@@ -30,38 +31,60 @@ public class BatchMutationEngine : MutationEngine
 
     protected override async Task RunValueMutationsAsync(CancellationToken stoppingToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(_batchIntervalMs));
+        int nodeCount;
+        lock (NodeLock)
+        {
+            nodeCount = KnownNodes.Count;
+        }
+
+        if (nodeCount == 0)
+        {
+            return;
+        }
+
+        var totalBatches = (int)Math.Ceiling((double)nodeCount / _batchSize);
+        var timerIntervalMs = 1000.0 / (totalBatches * 1.1);
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(timerIntervalMs));
+
         var batchIndex = 0;
+        var cycleStart = Stopwatch.GetTimestamp();
+        var property = _participantIndex % 3;
 
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
             Coordinator.WaitIfPaused(stoppingToken);
 
-            int startIndex;
-            int count;
-            List<TestNode> nodes;
-            lock (NodeLock)
+            if (batchIndex >= totalBatches)
             {
-                nodes = KnownNodes;
-                if (nodes.Count == 0)
+                // All batches done for this second — check if next second started
+                var elapsed = Stopwatch.GetElapsedTime(cycleStart);
+                if (elapsed < TimeSpan.FromSeconds(1))
                 {
                     continue;
                 }
 
-                startIndex = (batchIndex * _batchSize) % nodes.Count;
-                count = Math.Min(_batchSize, nodes.Count - startIndex);
-                batchIndex++;
+                batchIndex = 0;
+                cycleStart = Stopwatch.GetTimestamp();
+            }
 
-                if (startIndex + count >= nodes.Count)
+            List<TestNode> nodes;
+            int startIndex;
+            int count;
+            lock (NodeLock)
+            {
+                nodes = KnownNodes;
+                nodeCount = nodes.Count;
+                if (nodeCount == 0)
                 {
-                    batchIndex = 0;
+                    continue;
                 }
+
+                startIndex = (batchIndex * _batchSize) % nodeCount;
+                count = Math.Min(_batchSize, nodeCount - startIndex);
             }
 
             using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
             {
-                var property = _participantIndex % 3;
-
                 Parallel.For(startIndex, startIndex + count, i =>
                 {
                     var node = nodes[i];
@@ -83,6 +106,8 @@ public class BatchMutationEngine : MutationEngine
                     IncrementValueMutationCount();
                 });
             }
+
+            batchIndex++;
         }
     }
 }
