@@ -8,6 +8,7 @@ namespace Namotion.Interceptor.ConnectorTester.Engine;
 public class PerformanceProfiler : IDisposable
 {
     private const string LogDirectory = "logs";
+    private static readonly Lock ConsoleLock = new();
 
     private readonly PropertyChangeQueueSubscription _subscription;
     private readonly Thread _consumerThread;
@@ -140,32 +141,35 @@ public class PerformanceProfiler : IDisposable
         var allocatedDelta = Math.Max(0, GC.GetTotalAllocatedBytes(precise: true) - windowStartAllocatedBytes);
         var allocRateMbPerSec = allocatedDelta / elapsedSec / (1024.0 * 1024.0);
 
-        Console.WriteLine();
-        Console.WriteLine(new string('=', 139));
-        Console.WriteLine($"[{_participantName}] Performance Report - [{now:yyyy-MM-dd HH:mm:ss.fff}]");
-        Console.WriteLine();
-        Console.WriteLine($"Total received changes:          {changedLatencies.Count}");
-        Console.WriteLine($"Total published changes:         {publishedCount}");
-        Console.WriteLine($"Process memory:                  {Math.Round(workingSetMb, 2)} MB ({Math.Round(heapMb, 2)} MB in .NET heap)");
-        Console.WriteLine($"Avg allocations over last {elapsedSec}s:   {Math.Round(allocRateMbPerSec, 2)} MB/s");
-        Console.WriteLine();
-
-        Console.WriteLine($"{"Metric",-29} {"Avg",10} {"P50",10} {"P90",10} {"P95",10} {"P99",10} {"P99.9",10} {"Max",10} {"Min",10} {"StdDev",10} {"Count",10}");
-        Console.WriteLine(new string('-', 139));
-
-        if (throughputSamples.Count > 0)
+        lock (ConsoleLock)
         {
-            PrintPercentileLine("Received (changes/s)", throughputSamples);
-        }
+            Console.WriteLine();
+            Console.WriteLine(new string('=', 139));
+            Console.WriteLine($"[{_participantName}] Performance Report - [{now:yyyy-MM-dd HH:mm:ss.fff}]");
+            Console.WriteLine();
+            Console.WriteLine($"Total received changes:          {changedLatencies.Count}");
+            Console.WriteLine($"Total published changes:         {publishedCount}");
+            Console.WriteLine($"Process memory:                  {Math.Round(workingSetMb, 2)} MB ({Math.Round(heapMb, 2)} MB in .NET heap)");
+            Console.WriteLine($"Avg allocations over last {elapsedSec}s:   {Math.Round(allocRateMbPerSec, 2)} MB/s");
+            Console.WriteLine();
 
-        if (receivedLatencies.Count > 0)
-        {
-            PrintPercentileLine("Processing latency (ms)", receivedLatencies);
-        }
+            Console.WriteLine($"{"Metric",-29} {"Avg",10} {"P50",10} {"P90",10} {"P95",10} {"P99",10} {"P99.9",10} {"Max",10} {"Min",10} {"StdDev",10} {"Count",10}");
+            Console.WriteLine(new string('-', 139));
 
-        if (changedLatencies.Count > 0)
-        {
-            PrintPercentileLine("End-to-end latency (ms)", changedLatencies);
+            if (throughputSamples.Count > 0)
+            {
+                PrintPercentileLine("Received (changes/s)", throughputSamples);
+            }
+
+            if (receivedLatencies.Count > 0)
+            {
+                PrintPercentileLine("Processing latency (ms)", receivedLatencies);
+            }
+
+            if (changedLatencies.Count > 0)
+            {
+                PrintPercentileLine("End-to-end latency (ms)", changedLatencies);
+            }
         }
 
         List<double> sortedChanged = changedLatencies.Count > 0 ? [.. changedLatencies.Order()] : [];
