@@ -1,8 +1,26 @@
 # Connector Tester
 
-An in-process integration test that validates **eventual consistency** across Namotion.Interceptor connectors under chaos conditions and high-throughput load. It hosts a server and multiple clients in a single process, mutates their object models concurrently, injects disruptions via `IFaultInjectable` (kill and disconnect), and verifies that all participants eventually reach identical state. Exits with code 1 on failure for CI/CD integration.
+The Connector Tester verifies connector correctness and performance. Run it after any connector change to confirm that **eventual consistency holds under chaos** and that **throughput meets expectations under load**.
 
-## Architecture
+## Quick Start
+
+```bash
+# Chaos test: correctness under kill/disconnect disruptions (exits with code 1 on failure)
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua -c Release
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt -c Release
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket -c Release
+
+# Load test: throughput and latency at 20k changes/sec
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-load -c Release
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt-load -c Release
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-load -c Release
+```
+
+**Chaos profiles** inject kill/disconnect faults and verify all participants converge to identical state. **Load profiles** push high throughput (configurable via `ValueMutationRate`) and report latency percentiles, memory, and allocation rate. Both modes use the same verification cycle: mutate, pause, compare snapshots. Both should pass before merging connector changes.
+
+## How It Works
+
+The tester hosts a server and one or more clients in a single process, connected via the selected connector (OPC UA, MQTT, or WebSocket). Each participant has its own `TestNode` object graph and `MutationEngine` that continuously modifies properties. A `VerificationEngine` orchestrates repeating mutate/converge cycles: mutations run for a configured duration, then all engines pause and snapshots are compared. If all participants have identical state, the cycle passes. If not, the process logs the diff and exits with code 1.
 
 ```
                          +------------------+
@@ -29,15 +47,17 @@ An in-process integration test that validates **eventual consistency** across Na
     PerformanceProfiler collects latency/throughput/memory metrics
 ```
 
+### Mutation Engines
+
+- **RandomMutationEngine** (chaos profiles, `NumberOfBatches = 0`): Picks a random node and random property, one at a time, at the configured `ValueMutationRate`. Good for chaos testing where mutation patterns should be unpredictable.
+
+- **BatchMutationEngine** (load profiles, `NumberOfBatches > 0`): Mutates `ValueMutationRate` nodes per second, spread across `NumberOfBatches` parallel batches within 1-second windows. Uses a `PeriodicTimer` at 110% of the required tick rate (e.g., 50 batches → 55 ticks/sec → ~18ms interval) to guarantee all batches complete within each second with 10% headroom for scheduling jitter. Each participant mutates a single fixed property (`participantIndex % 3`) to avoid OPC UA subscription coalescing — server always mutates `StringValue`, first client always mutates `DecimalValue`, etc.
+
 ### Mutate/Converge Cycle
 
 Each test cycle has two phases:
 
-1. **Mutate phase**: All MutationEngines and ChaosEngines run concurrently. Engines mutate value properties (`StringValue`, `DecimalValue`, `IntValue`) on TestNode objects across the graph.
-
-   - **RandomMutationEngine** (chaos profiles, `BatchSize = 0`): Picks a random node and random property, one at a time, at the configured `ValueMutationRate`.
-
-   - **BatchMutationEngine** (load profiles, `NumberOfBatches > 0`): Mutates `ValueMutationRate` nodes per second, spread across `NumberOfBatches` parallel batches within 1-second windows. Uses a `PeriodicTimer` at 110% of the required tick rate (e.g., 50 batches → 55 ticks/sec → ~18ms interval) to guarantee all batches complete within each second with 10% headroom for scheduling jitter. Each participant mutates a single fixed property (`participantIndex % 3`) to avoid OPC UA subscription coalescing — server always mutates `StringValue`, first client always mutates `DecimalValue`, etc.
+1. **Mutate phase**: All MutationEngines and ChaosEngines run concurrently for `MutatePhaseDuration`.
 
 2. **Converge phase**: The VerificationEngine pauses all engines via the TestCycleCoordinator, recovers any active chaos disruptions, waits a grace period (20s for OPC UA) for reconnection, then polls snapshots every 5 seconds. Each snapshot serializes the full object graph using `SubjectUpdate.CreateCompleteUpdate()`. Structural property timestamps (Collection, Dictionary, Object) are stripped since they represent local creation time, not synced state. Value property timestamps are preserved and must converge.
 
@@ -81,34 +101,6 @@ The ChaosEngine picks an action based on the configured `Mode` ("kill", "disconn
 **MQTT**: Uses server-authoritative relay pattern where client publishes are intercepted, applied to the server model, and re-published to all clients. Ticks-based timestamp serialization (`UtcTicks`) for full precision. QoS=AtLeastOnce with retained messages.
 
 ## Running
-
-### Chaos Profiles
-
-Run with a launch profile to select the connector:
-
-```bash
-# OPC UA (Release mode recommended for performance)
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua -c Release
-
-# MQTT
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt -c Release
-
-# WebSocket
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket -c Release
-```
-
-Launch profiles set the `DOTNET_ENVIRONMENT` variable, which loads the corresponding `appsettings.{environment}.json` file.
-
-### Load Testing
-
-Run with a load profile for high-throughput testing:
-
-```bash
-# Single-process load test (with verification)
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-load -c Release
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-load -c Release
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt-load -c Release
-```
 
 ### Multi-Process Mode
 
@@ -170,7 +162,7 @@ Performance metrics are written to `logs/performance-{participant}.csv` for ever
 
 ## Configuration
 
-Configuration is loaded from `appsettings.json` with environment-specific overrides (e.g., `appsettings.opcua.json`). The root section is `"ConnectorTester"`.
+Configuration is loaded from `appsettings.json` with environment-specific overrides (e.g., `appsettings.opcua.json`). The root section is `"ConnectorTester"`. Launch profiles set the `DOTNET_ENVIRONMENT` variable, which loads the corresponding `appsettings.{environment}.json` file.
 
 ### Chaos Profile Example (appsettings.opcua.json)
 
@@ -257,7 +249,6 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
 | `Connector` | string | `"opcua"` | Protocol to test: `"opcua"`, `"mqtt"`, or `"websocket"` |
 | `ObjectCount` | int | `31` | Number of collection children in the test graph |
 | `NumberOfBatches` | int | `0` | Batches per second. `0` = RandomMutationEngine, `> 0` = BatchMutationEngine. Each batch mutates `ceil(ValueMutationRate / NumberOfBatches)` nodes. |
-
 | `MetricsReportingInterval` | TimeSpan | `00:01:00` | How often performance metrics are logged |
 | `MutatePhaseDuration` | TimeSpan | `00:01:00` | How long mutations run before convergence check |
 | `ConvergenceTimeout` | TimeSpan | `00:01:00` | Max time to wait for all snapshots to match |
@@ -434,37 +425,3 @@ OPC UA maps `decimal` through `double`, which has ~15-17 significant digits. The
 ### Wrong Connector Running
 
 If the test appears to run the wrong connector, verify you're using `--launch-profile` (not `--environment`). The launch profile sets `DOTNET_ENVIRONMENT` which controls appsettings loading.
-
-## Project Structure
-
-```
-Namotion.Interceptor.ConnectorTester/
-  Program.cs                             # Entry point, server/client wiring
-  GlobalUsings.cs                        # Global using directives
-  Configuration/
-    ConnectorTesterConfiguration.cs      # Top-level config
-    ParticipantConfiguration.cs          # Per-participant config
-    ChaosConfiguration.cs               # Chaos timing config
-    ChaosProfileConfiguration.cs        # Chaos profile config
-  Model/
-    TestNode.cs                          # Test data model with path annotations
-  Engine/
-    TestCycleCoordinator.cs             # Pause/resume synchronization
-    MutationEngine.cs                   # Abstract base class with structural mutations
-    RandomMutationEngine.cs             # Random single-property value mutations (chaos)
-    BatchMutationEngine.cs              # Batched parallel value mutations (load)
-    PerformanceProfiler.cs              # Latency/throughput/memory metrics
-    ChaosEngine.cs                      # Kill/disconnect disruptions
-    VerificationEngine.cs               # Cycle orchestration and snapshot comparison
-  Logging/
-    CycleLoggerProvider.cs              # Per-cycle log file writer
-  Properties/
-    launchSettings.json                 # Launch profiles (opcua, mqtt, websocket, *-load)
-  appsettings.json                      # Base configuration
-  appsettings.opcua.json                # OPC UA chaos profile
-  appsettings.mqtt.json                 # MQTT chaos profile
-  appsettings.websocket.json            # WebSocket chaos profile
-  appsettings.opcua-load.json           # OPC UA load profile
-  appsettings.mqtt-load.json            # MQTT load profile
-  appsettings.websocket-load.json       # WebSocket load profile
-```
