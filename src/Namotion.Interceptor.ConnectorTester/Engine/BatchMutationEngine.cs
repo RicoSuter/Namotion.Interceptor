@@ -79,14 +79,11 @@ public class BatchMutationEngine : MutationEngine
                 }
             }
 
-            var startIndex = nodeIndex % nodeCount;
-            var count = Math.Min(nodesPerBatch, nodeCount - startIndex);
-
             using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
             {
-                Parallel.For(startIndex, startIndex + count, i =>
+                Parallel.For(0, nodesPerBatch, j =>
                 {
-                    var node = nodes[i];
+                    var node = nodes[(nodeIndex + j) % nodeCount];
                     var counter = NextGlobalCounter();
 
                     switch (property)
@@ -106,7 +103,7 @@ public class BatchMutationEngine : MutationEngine
                 });
             }
 
-            nodeIndex = (startIndex + count) % nodeCount;
+            nodeIndex = (nodeIndex + nodesPerBatch) % nodeCount;
             batchesThisSecond++;
         }
     }
