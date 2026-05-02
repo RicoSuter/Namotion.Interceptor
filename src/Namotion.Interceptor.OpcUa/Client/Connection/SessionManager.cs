@@ -315,7 +315,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 if (newState is SessionReconnectHandler.ReconnectState.Triggered or SessionReconnectHandler.ReconnectState.Reconnecting)
                 {
                     e.CancelKeepAlive = true;
-                    _source.RecordReconnectionAttemptStart();
+                    _source.ReconnectionMetrics.RecordAttemptStart();
                     Interlocked.Exchange(ref _pendingSdkReconnection, 1);
                 }
                 else
@@ -404,7 +404,8 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                         // creation and ChangeQueueProcessor subscription on the server).
                         Interlocked.Exchange(ref _needsFullStateSync, 1);
 
-                        _source.RecordReconnectionSuccess();
+                        _source.ReconnectionMetrics.RecordSuccess();
+                        _source.ClearLastError();
 
                         _logger.LogInformation(
                             "OPC UA session reconnected: Transferred {Count} subscriptions. Full state sync pending.",
@@ -542,7 +543,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
             if (Interlocked.Exchange(ref _pendingSdkReconnection, 0) == 1)
             {
-                _source.RecordReconnectionAbandoned();
+                _source.ReconnectionMetrics.RecordAbandoned();
             }
 
             Interlocked.Exchange(ref _needsFullStateSync, 0);
@@ -616,7 +617,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         SetSession(null);
         Interlocked.Exchange(ref _needsFullStateSync, 0);
         ReadAfterWriteManager?.ClearPendingReads();
-        _source.RecordReconnectionAbandoned();
+        _source.ReconnectionMetrics.RecordAbandoned();
     }
 
     /// <summary>

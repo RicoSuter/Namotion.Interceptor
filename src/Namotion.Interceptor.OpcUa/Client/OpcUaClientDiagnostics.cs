@@ -42,28 +42,43 @@ public class OpcUaClientDiagnostics
     /// Gets the total number of reconnection attempts started. Once all in-flight attempts have resolved,
     /// this equals <see cref="SuccessfulReconnections"/> + <see cref="FailedReconnections"/> + <see cref="AbandonedReconnections"/>.
     /// </summary>
-    public long TotalReconnectionAttempts => _source.TotalReconnectionAttempts;
+    public long TotalReconnectionAttempts => _source.ReconnectionMetrics.TotalAttempts;
 
     /// <summary>
     /// Gets the number of attempts that produced a usable session.
     /// </summary>
-    public long SuccessfulReconnections => _source.SuccessfulReconnections;
+    public long SuccessfulReconnections => _source.ReconnectionMetrics.Successful;
 
     /// <summary>
     /// Gets the number of attempts that ended with an exception.
     /// </summary>
-    public long FailedReconnections => _source.FailedReconnections;
+    public long FailedReconnections => _source.ReconnectionMetrics.Failed;
 
     /// <summary>
     /// Gets the number of attempts that completed without an exception but produced an unusable result
     /// (null session, transfer failed, preserved session after server restart, stall reset, or kill cancellation).
     /// </summary>
-    public long AbandonedReconnections => _source.AbandonedReconnections;
+    public long AbandonedReconnections => _source.ReconnectionMetrics.Abandoned;
 
     /// <summary>
     /// Gets the timestamp of the last successful connection, or null if never connected.
     /// </summary>
-    public DateTimeOffset? LastConnectedAt => _source.LastConnectedAt;
+    public DateTimeOffset? LastConnectedAt => _source.ReconnectionMetrics.LastConnectedAt;
+
+    /// <summary>
+    /// Gets the average incoming changes per second over the last 60 seconds.
+    /// </summary>
+    public double IncomingChangesPerSecond => _source.IncomingThroughput.GetRate();
+
+    /// <summary>
+    /// Gets the average outgoing changes per second over the last 60 seconds.
+    /// </summary>
+    public double OutgoingChangesPerSecond => _source.OutgoingThroughput.GetRate();
+
+    /// <summary>
+    /// Gets the number of pending read-after-write operations, or null if disabled.
+    /// </summary>
+    public int? PendingReadAfterWrites => _source.SessionManager?.ReadAfterWriteManager?.PendingReadCount;
 
     /// <summary>
     /// Gets the most recent error that occurred while establishing or restoring the session,
