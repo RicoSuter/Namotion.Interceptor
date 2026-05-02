@@ -22,12 +22,13 @@ public class OpcUaReadWriteTests : SharedServerTestBase
         // Arrange - use dedicated test area
         var serverArea = ServerFixture.ServerRoot.ReadWrite.BasicSync;
         var clientArea = Client!.Root!.ReadWrite.BasicSync;
+        var diagnostics = Client!.Source!.Diagnostics;
 
         // Assert - on a healthy connection the new diagnostic surface must be populated:
         // session/server live, no captured error, and Name is bound on both sides.
         Assert.NotNull(Client.Source);
         Assert.NotNull(Client.Source.CurrentSession);
-        Assert.Null(Client.Source.Diagnostics.LastError);
+        Assert.Null(diagnostics.LastError);
         Assert.NotNull(ServerFixture.Server.CurrentServer);
 
         // Each side owns its own subject tree, so the lookup must use that side's property reference.
@@ -68,6 +69,12 @@ public class OpcUaReadWriteTests : SharedServerTestBase
             () => serverArea.Number == 54.321m,
             timeout: TimeSpan.FromSeconds(90),
             message: "Server should receive client's number update");
+
+        // Verify throughput diagnostics after bidirectional writes
+        Assert.True(diagnostics.IncomingChangesPerSecond > 0.0,
+            $"IncomingChangesPerSecond should be positive after receiving updates, was {diagnostics.IncomingChangesPerSecond}");
+        Assert.True(diagnostics.OutgoingChangesPerSecond > 0.0,
+            $"OutgoingChangesPerSecond should be positive after writing changes, was {diagnostics.OutgoingChangesPerSecond}");
     }
 
     [Fact]

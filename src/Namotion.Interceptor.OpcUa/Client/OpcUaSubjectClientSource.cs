@@ -27,16 +27,30 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
 
     private volatile SessionManager? _sessionManager;
     private SubjectPropertyWriter? _propertyWriter;
+    private OutboundWriter? _writer;
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
+    private volatile CancellationTokenSource? _reconnectCts; // Cancelled by KillAsync to abort in-flight reconnection
     private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
+
     private volatile bool _isStarted;
     private long _reconnectStartedTimestamp; // 0 = not reconnecting, otherwise Stopwatch timestamp when reconnection started (for stall detection)
-    private volatile CancellationTokenSource? _reconnectCts; // Cancelled by KillAsync to abort in-flight reconnection
-
     private Exception? _lastError;
 
     internal string OpcUaNodeIdKey { get; } = "OpcUaNodeId:" + Guid.NewGuid();
+
+    internal SessionManager? SessionManager => _sessionManager;
+    internal SourceOwnershipManager Ownership => _ownership;
+
+    internal ReconnectionMetrics ReconnectionMetrics { get; } = new();
+    internal ThroughputCounter IncomingThroughput { get; } = new();
+    internal ThroughputCounter OutgoingThroughput { get; } = new();
+    internal Exception? LastError => Volatile.Read(ref _lastError);
+
+    internal void ClearLastError() => Volatile.Write(ref _lastError, null);
+
+    /// <inheritdoc />
+    public int WriteBatchSize => _writer?.WriteBatchSize ?? 0;
 
     /// <inheritdoc />
     public OpcUaClientDiagnostics Diagnostics { get; }
@@ -46,19 +60,6 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
 
     /// <inheritdoc />
     public event EventHandler<OpcUaCurrentSessionChangedEventArgs>? CurrentSessionChanged;
-
-    /// <summary>
-    /// Gets the session manager for internal diagnostics access.
-    /// </summary>
-    internal SessionManager? SessionManager => _sessionManager;
-
-    internal SourceOwnershipManager Ownership => _ownership;
-
-    internal ReconnectionMetrics ReconnectionMetrics { get; } = new();
-
-    internal Exception? LastError => Volatile.Read(ref _lastError);
-
-    internal void ClearLastError() => Volatile.Write(ref _lastError, null);
 
     public OpcUaSubjectClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger logger)
     {
@@ -85,8 +86,10 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
                 property.RemovePropertyData(OpcUaNodeIdKey);
             },
             onSubjectDetaching: OnSubjectDetaching);
+
         _subjectLoader = new OpcUaSubjectLoader(configuration, _ownership, this, logger);
         _subscriptionHealthMonitor = new SubscriptionHealthMonitor(logger);
+
         Diagnostics = new OpcUaClientDiagnostics(this);
     }
 
@@ -106,7 +109,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
         _logger.LogInformation("Connecting to OPC UA server at {ServerUrl}.", _configuration.ServerUrl);
 
         _sessionManager = new SessionManager(this, propertyWriter, _configuration, _logger);
-        _writer = new OpcUaClientWriter(_sessionManager, _configuration, OpcUaNodeIdKey, OutgoingThroughput, _logger);
+        _writer = new OutboundWriter(_sessionManager, _configuration, OpcUaNodeIdKey, OutgoingThroughput, _logger);
 
         try
         {
@@ -158,13 +161,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
         }
     }
 
-    private OpcUaClientWriter? _writer;
-
-    internal ThroughputCounter IncomingThroughput { get; } = new();
-    internal ThroughputCounter OutgoingThroughput { get; } = new();
-
-    public int WriteBatchSize => _writer?.WriteBatchSize ?? 0;
-
+    /// <inheritdoc />
     public async Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
     {
         var ownedProperties = GetOwnedPropertiesWithNodeIds();
@@ -545,7 +542,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
         }
     }
 
-    internal static bool IsTransientWriteError(StatusCode statusCode) => OpcUaClientWriter.IsTransientWriteError(statusCode);
+    internal static bool IsTransientWriteError(StatusCode statusCode) => OutboundWriter.IsTransientWriteError(statusCode);
 
     /// <inheritdoc />
     async Task IFaultInjectable.InjectFaultAsync(FaultType faultType, CancellationToken cancellationToken)

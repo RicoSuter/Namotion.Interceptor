@@ -8,7 +8,7 @@ using Opc.Ua;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
-internal sealed class OpcUaClientWriter
+internal sealed class OutboundWriter
 {
     private readonly SessionManager _sessionManager;
     private readonly OpcUaClientConfiguration _configuration;
@@ -16,7 +16,7 @@ internal sealed class OpcUaClientWriter
     private readonly ThroughputCounter _outgoingThroughput;
     private readonly ILogger _logger;
 
-    public OpcUaClientWriter(
+    public OutboundWriter(
         SessionManager sessionManager,
         OpcUaClientConfiguration configuration,
         string opcUaNodeIdKey,
