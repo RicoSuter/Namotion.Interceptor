@@ -39,7 +39,7 @@ internal sealed class ThroughputCounter
             long total = 0;
             for (var i = 0; i < WindowSeconds; i++)
             {
-                var packed = Volatile.Read(ref _buckets[i]);
+                var packed = Interlocked.Read(ref _buckets[i]);
                 var epoch = (uint)(packed >>> 32);
                 var count = (uint)(packed & 0xFFFFFFFF);
 
