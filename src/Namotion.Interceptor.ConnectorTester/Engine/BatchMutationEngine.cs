@@ -27,72 +27,57 @@ public class BatchMutationEngine : MutationEngine
 
     protected override async Task RunValueMutationsAsync(CancellationToken stoppingToken)
     {
+        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(_batchIntervalMs));
         var batchIndex = 0;
 
-        while (!stoppingToken.IsCancellationRequested)
+        while (await timer.WaitForNextTickAsync(stoppingToken))
         {
-            try
+            Coordinator.WaitIfPaused(stoppingToken);
+
+            int startIndex;
+            int count;
+            List<TestNode> nodes;
+            lock (NodeLock)
             {
-                Coordinator.WaitIfPaused(stoppingToken);
-
-                List<TestNode> batch;
-                bool empty;
-                lock (NodeLock)
+                nodes = KnownNodes;
+                if (nodes.Count == 0)
                 {
-                    empty = KnownNodes.Count == 0;
-                    if (!empty)
-                    {
-                        var startIndex = (batchIndex * _batchSize) % KnownNodes.Count;
-                        var count = Math.Min(_batchSize, KnownNodes.Count - startIndex);
-                        batch = KnownNodes.GetRange(startIndex, count);
-                        batchIndex++;
-
-                        if (startIndex + count >= KnownNodes.Count)
-                        {
-                            batchIndex = 0;
-                        }
-                    }
-                    else
-                    {
-                        batch = [];
-                    }
-                }
-
-                if (empty)
-                {
-                    await Task.Delay(_batchIntervalMs, stoppingToken);
                     continue;
                 }
 
-                using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
+                startIndex = (batchIndex * _batchSize) % nodes.Count;
+                count = Math.Min(_batchSize, nodes.Count - startIndex);
+                batchIndex++;
+
+                if (startIndex + count >= nodes.Count)
                 {
-                    Parallel.ForEach(batch, node =>
-                    {
-                        var counter = NextGlobalCounter();
-                        var property = (int)(counter % 3);
-
-                        switch (property)
-                        {
-                            case 0:
-                                node.StringValue = counter.ToString("x8");
-                                break;
-                            case 1:
-                                node.DecimalValue = counter / 100m;
-                                break;
-                            case 2:
-                                node.IntValue = (int)(counter % int.MaxValue);
-                                break;
-                        }
-
-                        IncrementValueMutationCount();
-                    });
+                    batchIndex = 0;
                 }
-
-                await Task.Delay(_batchIntervalMs, stoppingToken);
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+
+            using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
             {
-                break;
+                Parallel.For(startIndex, startIndex + count, i =>
+                {
+                    var node = nodes[i];
+                    var counter = NextGlobalCounter();
+                    var property = (int)(counter % 3);
+
+                    switch (property)
+                    {
+                        case 0:
+                            node.StringValue = counter.ToString("x8");
+                            break;
+                        case 1:
+                            node.DecimalValue = counter / 100m;
+                            break;
+                        case 2:
+                            node.IntValue = (int)(counter % int.MaxValue);
+                            break;
+                    }
+
+                    IncrementValueMutationCount();
+                });
             }
         }
     }
