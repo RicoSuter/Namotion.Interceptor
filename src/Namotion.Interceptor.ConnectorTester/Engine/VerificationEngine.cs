@@ -86,7 +86,8 @@ public class VerificationEngine : BackgroundService
             string.Join(", ", _participants.Select(p => p.Key)));
         foreach (var engine in _mutationEngines)
         {
-            _logger.LogInformation("  {Name}: {Rate} mutations/sec", engine.Name, engine.MutationRate);
+            _logger.LogInformation("  {Name}: {Rate} value mutations/sec, {StructuralRate} structural mutations/sec",
+                engine.Name, engine.ValueMutationRate, engine.StructuralMutationRate);
         }
 
         if (_configuration.ChaosProfiles.Count > 0)
@@ -271,8 +272,8 @@ public class VerificationEngine : BackgroundService
         // Per-participant breakdown
         foreach (var engine in _mutationEngines)
         {
-            _logger.LogInformation("  {Name}: {Values:N0} value mutations",
-                engine.Name, engine.ValueMutationCount);
+            _logger.LogInformation("  {Name}: {Values:N0} value mutations, {Structural:N0} structural mutations",
+                engine.Name, engine.ValueMutationCount, engine.StructuralMutationCount);
         }
 
         // Chaos event timeline
