@@ -179,7 +179,8 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
     switch (configuration.Connector.ToLowerInvariant())
     {
         case "opcua":
-            builder.Services.AddOpcUaSubjectClientSource(
+            builder.Services.AddKeyedOpcUaSubjectClientSource(
+                clientConfig.Name,
                 _ => clientRoot,
                 sp =>
                 {
