@@ -11,7 +11,7 @@ using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.Registry.Attributes;
 
-namespace HomeBlaze.Servers.OpcUa;
+namespace HomeBlaze.OpcUa;
 
 /// <summary>
 /// OPC UA server subject that exposes other subjects via OPC UA protocol.

@@ -22,7 +22,7 @@ Tracks the implementation status of building blocks described in [Architecture O
 |---|---|---|
 | WebSocket sync (SubjectUpdate) | Implemented | Including Welcome/Hello, structural sync |
 | OPC UA client/server (core) | Implemented | `Namotion.Interceptor.OpcUa` |
-| OPC UA server subject (HomeBlaze) | Implemented | `HomeBlaze.Servers.OpcUa` |
+| OPC UA server subject (HomeBlaze) | Implemented | `HomeBlaze.OpcUa` |
 | OPC UA client subject (HomeBlaze) | Planned | Auto-discovery of remote subjects |
 | MQTT client/server (core) | Implemented | `Namotion.Interceptor.Mqtt` |
 | MQTT server subject (HomeBlaze) | Planned | |

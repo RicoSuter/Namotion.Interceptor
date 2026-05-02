@@ -2,8 +2,8 @@ using HomeBlaze.AI;
 using HomeBlaze.Components;
 using HomeBlaze.Host;
 using HomeBlaze.Samples;
-using HomeBlaze.Servers.OpcUa;
-using HomeBlaze.Servers.OpcUa.Blazor;
+using HomeBlaze.OpcUa;
+using HomeBlaze.OpcUa.Blazor;
 using HomeBlaze.Plugins;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
@@ -63,8 +63,8 @@ typeProvider
     .AddAssembly(typeof(MarkdownFilePageComponent).Assembly)   // HomeBlaze.Storage.Blazor
     .AddAssembly(typeof(Widget).Assembly)                      // HomeBlaze.Components
     .AddAssembly(typeof(Motor).Assembly)                       // HomeBlaze.Samples
-    .AddAssembly(typeof(OpcUaServer).Assembly)                 // HomeBlaze.Servers.OpcUa
-    .AddAssembly(typeof(OpcUaServerEditComponent).Assembly)    // HomeBlaze.Servers.OpcUa.Blazor
+    .AddAssembly(typeof(OpcUaServer).Assembly)                 // HomeBlaze.OpcUa
+    .AddAssembly(typeof(OpcUaServerEditComponent).Assembly)    // HomeBlaze.OpcUa.Blazor
     .AddAssembly(typeof(GpioSubject).Assembly)
     .AddAssembly(typeof(GpioSubjectEditComponent).Assembly)
     .AddAssembly(typeof(HueBridge).Assembly)
