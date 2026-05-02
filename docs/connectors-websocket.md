@@ -402,6 +402,30 @@ configuration.HeartbeatInterval = TimeSpan.Zero;              // Disable heartbe
 - If a transient send failure occurs during heartbeat broadcast, the error is logged and the loop continues.
 - Zombie connections (repeated send failures) are cleaned up during heartbeat broadcast, using the same logic as update broadcasts.
 
+### Structural Divergence Detection
+
+Every broadcast update includes a per-connection structural hash (`UpdatePayload.StructuralHash`) computed from the sent-state model — a lightweight dictionary tracking the structural state implied by all updates sent to that specific client. Each `WebSocketClientConnection` on the server maintains its own `SentStructuralState`, initialized from the Welcome it was sent and updated from each broadcast under `_applyUpdateLock`. The client maintains an identical model, updated from received updates.
+
+All `SentStructuralState` access on the server — both update (broadcast path) and hash computation (heartbeat path) — happens under `_applyUpdateLock`. There is no unsynchronized access. The hash is pre-computed under the lock and passed as a per-connection dictionary to the broadcast method, which runs outside the lock. This ensures hash consistency without holding the lock during I/O.
+
+After applying each update, the client compares its hash against the server's. A mismatch indicates structural divergence (dropped update, failed apply, or pipeline bug) and triggers reconnection via the existing recovery flow (Welcome with complete state).
+
+**Why per-connection state:**
+A single global sent state on the server would get re-initialized on each new client Welcome, breaking the hash tracking for other connected clients. Per-connection state ensures each client's hash reflects only the data that client has been sent.
+
+**Per-instance isolation:**
+The CQP filter's PathProvider cache uses a per-instance prefix (`_filterCachePrefix` = GUID) to isolate cache entries between server instances. Multiple `WebSocketSubjectHandler` instances sharing the same subject graph have independent caches, preventing stale cache hits or cross-instance interference.
+
+**Why sent-state hash instead of live graph hash:**
+The live graph contains mutations from the mutation engine that haven't been flushed by the change queue processor yet. Hashing the live graph produces false-positive mismatches during concurrent structural mutations. The sent-state hash only reflects what was actually sent/received, eliminating false positives regardless of mutation rate.
+
+**Idle heartbeat:** When no updates are broadcast for 10 seconds, the server sends a heartbeat carrying the same per-connection sent-state hash. This covers the edge case where the last update is lost and the system goes idle. During active operation, the heartbeat is suppressed — updates already carry the hash.
+
+**What the hash covers:**
+- Subject IDs (sorted lexicographically)
+- Structural property content: collection items (order-preserving), dictionary entries (sorted by key), object references
+- Does NOT hash value properties — structural divergence is the critical detection target. Value divergence self-heals via continued mutations or is fixed as a side effect of structural resync.
+
 ### Echo Behavior
 
 The server broadcasts every update to **all** connected clients, including the client that sent the change. This is intentional:
@@ -445,6 +469,8 @@ Unlike MQTT and OPC UA connectors which maintain per-property topic/node caches 
 - **Snapshot lock during client connection**: When a new client connects, the server builds a full state snapshot under the same lock used for applying updates. This blocks incoming updates for the duration of the snapshot, which is proportional to graph size. This is acceptable because new-client connections are infrequent relative to the update rate, but could become a concern with very large subject graphs and frequent client reconnections.
 
 - **Broadcast timeout**: A slow client can delay broadcast completion for other clients. Broadcasts have a 10-second timeout to mitigate this — sends that haven't completed continue in the background, and zombie detection cleans up persistently slow connections. However, very slow clients may still cause temporary backpressure before being removed. This should be revisited if it becomes a bottleneck in high-throughput scenarios.
+
+- **No server acknowledgment for client writes**: When a client sends an update to the server, `WriteChangesAsync` returns success as soon as the WebSocket send completes — it does not wait for the server to acknowledge or apply the change. This means transactions committed over WebSocket confirm only that the message was sent, not that the server accepted it. This differs from OPC UA and MQTT sources, where the external system provides real write confirmation. If the server fails to apply the update (e.g., validation error, concurrent conflict), the client is not notified. See [#231](https://github.com/RicoSuter/Namotion.Interceptor/issues/231) for planned server-ack support.
 
 ## Future Extensibility
 

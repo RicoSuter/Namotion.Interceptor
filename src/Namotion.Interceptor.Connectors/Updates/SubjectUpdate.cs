@@ -1,6 +1,5 @@
 using System.Text.Json.Serialization;
 using Namotion.Interceptor.Connectors.Updates.Internal;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Updates;
@@ -15,8 +14,9 @@ public class SubjectUpdate
     /// <summary>
     /// The ID of the root subject in the <see cref="Subjects"/> dictionary.
     /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     [JsonPropertyName("root")]
-    public string Root { get; init; } = string.Empty;
+    public string? Root { get; init; }
 
     /// <summary>
     /// Dictionary of all subjects keyed by their string ID.
@@ -24,6 +24,18 @@ public class SubjectUpdate
     /// </summary>
     [JsonPropertyName("subjects")]
     public Dictionary<string, Dictionary<string, SubjectPropertyUpdate>> Subjects { get; init; } = new();
+
+    /// <summary>
+    /// Set of subject IDs that contain complete state in this update.
+    /// <c>null</c> means ALL subjects are complete (e.g., a full initial-state update).
+    /// Non-null means only the listed IDs have complete state; others are references
+    /// to subjects that should already exist on the receiver. The applier must not
+    /// create new subject instances for IDs not in this set — doing so would produce
+    /// subjects with default values that corrupt state.
+    /// </summary>
+    [JsonPropertyName("completeSubjectIds")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public HashSet<string>? CompleteSubjectIds { get; init; }
 
     /// <summary>
     /// Creates a complete update with all objects and properties for the given subject as root.

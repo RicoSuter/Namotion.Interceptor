@@ -590,7 +590,8 @@ public class SubjectUpdateTests
         var update = SubjectUpdate.CreateCompleteUpdate(person, [processor]);
 
         // Assert
-        var firstNameUpdate = update.Subjects!["1"]["FirstName"];
+        var subjectId = person.GetOrAddSubjectId();
+        var firstNameUpdate = update.Subjects![subjectId]["FirstName"];
         Assert.NotNull(firstNameUpdate.Attributes);
         Assert.Contains("Included", firstNameUpdate.Attributes.Keys);
         Assert.DoesNotContain("Excluded", firstNameUpdate.Attributes.Keys);
@@ -627,7 +628,8 @@ public class SubjectUpdateTests
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(person, changes, [processor]);
 
         // Assert
-        var firstNameUpdate = update.Subjects!["1"]["FirstName"];
+        var subjectId = person.GetOrAddSubjectId();
+        var firstNameUpdate = update.Subjects![subjectId]["FirstName"];
         Assert.NotNull(firstNameUpdate.Attributes);
         Assert.Contains("Included", firstNameUpdate.Attributes.Keys);
         Assert.DoesNotContain("Excluded", firstNameUpdate.Attributes.Keys);
