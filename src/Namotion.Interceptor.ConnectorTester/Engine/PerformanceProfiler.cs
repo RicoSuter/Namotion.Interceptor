@@ -39,6 +39,11 @@ public class PerformanceProfiler : IDisposable
         Directory.CreateDirectory(LogDirectory);
         _logFilePath = Path.Combine(LogDirectory, $"performance-{participantName}.log");
 
+        if (File.Exists(_logFilePath))
+        {
+            File.Delete(_logFilePath);
+        }
+
         _subscription = context.CreatePropertyChangeQueueSubscription();
 
         _consumerThread = new Thread(ConsumeChanges)
