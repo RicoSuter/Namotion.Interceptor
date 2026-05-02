@@ -45,7 +45,7 @@ public interface IOpcUaSubjectClientSource : IHostedService
 
     /// <summary>
     /// Tries to get the OPC UA <see cref="NodeId"/> bound to <paramref name="property"/>. Returns <c>false</c>
-    /// if the property is not owned by this source, not yet resolved, or unbound during reconnection.
+    /// if the property is not owned by this source or not yet resolved.
     /// Useful when a raw <see cref="ISession"/> call needs the NodeId of a tracked property.
     /// </summary>
     bool TryGetNodeId(PropertyReference property, [NotNullWhen(true)] out NodeId? nodeId);
