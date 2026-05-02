@@ -28,6 +28,26 @@ For multiple servers, use `AddKeyedOpcUaSubjectServer` with a name and resolve v
 
 Two DI overloads are available with increasing control:
 
+## Resolving the Server
+
+After registration, resolve `IOpcUaSubjectServer` to access diagnostics, the underlying server, and variable node lookups.
+
+**DI (unnamed registration):**
+
+```csharp
+var server = serviceProvider.GetRequiredService<IOpcUaSubjectServer>();
+```
+
+**DI (keyed registration):**
+
+```csharp
+var server = serviceProvider.GetRequiredKeyedService<IOpcUaSubjectServer>("server1");
+```
+
+For direct instantiation (without DI), `CreateOpcUaServer` returns `IOpcUaSubjectServer` directly.
+
+## DI Overloads
+
 **Simple generic** - resolves the subject from DI automatically (subject must be registered as a singleton):
 
 ```csharp
@@ -211,22 +231,13 @@ The `LoadNodeSetFromEmbeddedResource<T>()` helper loads NodeSet XML files embedd
 
 ## Diagnostics
 
-`IOpcUaSubjectServer.Diagnostics` exposes a live facade. Resolve it once and poll. From DI, inject `IOpcUaSubjectServer` directly (unnamed) or via `[FromKeyedServices]` (named); for direct instantiation, the return value is already the interface:
-
-```csharp
-// Unnamed (singleton) registration:
-var server = serviceProvider.GetRequiredService<IOpcUaSubjectServer>();
-var diagnostics = server.Diagnostics;
-
-// Named (keyed) registration:
-var server = serviceProvider.GetRequiredKeyedService<IOpcUaSubjectServer>("server1");
-```
+`IOpcUaSubjectServer.Diagnostics` exposes a live facade. Resolve it once and poll (see [Resolving the Server](#resolving-the-server)).
 
 Properties: `IsRunning`, `ActiveSessionCount`, `StartTime`, `Uptime`, `LastError`, `ConsecutiveFailures` (resets on successful start, see [Resilience](#resilience)).
 
 ## Direct Server Access
 
-For scenarios the connector does not cover natively (custom node managers, server events, custom session handlers), `IOpcUaSubjectServer.CurrentServer` exposes the underlying `StandardServer`:
+For scenarios the connector does not cover natively (custom node managers, server events, custom session handlers), `IOpcUaSubjectServer.CurrentServer` exposes the underlying `StandardServer` (see [Resolving the Server](#resolving-the-server) for how to obtain the server):
 
 ```csharp
 if (server.CurrentServer is { } current)
@@ -236,6 +247,19 @@ if (server.CurrentServer is { } current)
 ```
 
 **Lifecycle contract:** read `CurrentServer` immediately before each use. It is `null` when the server is not running (startup, between restart attempts, or after a force-kill), and the instance is recreated on every restart. Never cache the reference.
+
+## Variable Node Resolution
+
+`IOpcUaSubjectServer.TryGetVariableNode` resolves the OPC UA `BaseDataVariableState` created for a tracked property. This is useful for raising server-side events or performing advanced operations on a specific node:
+
+```csharp
+if (server.TryGetVariableNode(sensor.GetPropertyReference(nameof(Sensor.Value)), out var variable))
+{
+    // Use variable for direct OPC UA node operations
+}
+```
+
+Returns `false` if the property is not exposed by this server, not yet created, or was removed during a server restart.
 
 ## Resilience
 

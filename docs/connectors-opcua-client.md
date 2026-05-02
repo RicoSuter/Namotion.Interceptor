@@ -39,6 +39,34 @@ For multiple client sources, use `AddKeyedOpcUaSubjectClientSource` with a name 
 
 Two DI overloads are available: the simple generic shown above and a full configuration overload (shown below).
 
+## Resolving the Client Source
+
+After registration, resolve `IOpcUaSubjectClientSource` to access diagnostics, the underlying session, and node ID lookups.
+
+**DI (unnamed registration):**
+
+```csharp
+var source = serviceProvider.GetRequiredService<IOpcUaSubjectClientSource>();
+```
+
+**DI (keyed registration):**
+
+```csharp
+var source = serviceProvider.GetRequiredKeyedService<IOpcUaSubjectClientSource>("server1");
+```
+
+**From a property reference** (useful deep in business code where you hold a `PropertyReference` but not the DI container):
+
+```csharp
+if (property.TryGetSource(out var subjectSource) &&
+    subjectSource is IOpcUaSubjectClientSource source)
+{
+    // use source.Diagnostics, source.CurrentSession, etc.
+}
+```
+
+For direct instantiation (without DI), `CreateOpcUaClientSource` returns `IOpcUaSubjectClientSource` directly.
+
 ## Configuration
 
 For advanced scenarios, use the full configuration API to customize connection behavior, subscription settings, and dynamic property discovery.
@@ -584,37 +612,18 @@ When a batch write to the OPC UA server partially fails, the client throws an `O
 
 ## Diagnostics
 
-`IOpcUaSubjectClientSource.Diagnostics` exposes a live facade. Resolve it once and poll. From DI, inject `IOpcUaSubjectClientSource` directly (unnamed) or via `[FromKeyedServices]` (named); for direct instantiation, the return value is already the interface:
-
-```csharp
-// Unnamed (singleton) registration:
-var source = serviceProvider.GetRequiredService<IOpcUaSubjectClientSource>();
-var diagnostics = source.Diagnostics;
-
-// Named (keyed) registration:
-var source = serviceProvider.GetRequiredKeyedService<IOpcUaSubjectClientSource>("server1");
-```
+`IOpcUaSubjectClientSource.Diagnostics` exposes a live facade. Resolve it once and poll (see [Resolving the Client Source](#resolving-the-client-source)).
 
 Categories: connection (`IsConnected`, `IsReconnecting`, `SessionId`, `LastConnectedAt`), subscriptions (`SubscriptionCount`, `MonitoredItemCount`), reconnection history (`TotalReconnectionAttempts`, `SuccessfulReconnections`, `FailedReconnections`, `AbandonedReconnections`, `LastError`), [polling fallback](#polling-fallback-for-unsupported-nodes), [read-after-write](#read-after-write-fallback). All properties are thread-safe for reading.
 
 ## Direct Session Access
 
-For scenarios the connector does not cover natively (OPC UA **Methods**, **Alarms & Conditions**), `IOpcUaSubjectClientSource.CurrentSession` exposes the underlying `ISession`:
+For scenarios the connector does not cover natively (OPC UA **Methods**, **Alarms & Conditions**), `IOpcUaSubjectClientSource.CurrentSession` exposes the underlying `ISession` (see [Resolving the Client Source](#resolving-the-client-source) for how to obtain the source):
 
 ```csharp
 if (source.CurrentSession is { } session)
 {
     var outputs = await session.CallAsync(parentNodeId, methodId, inputArgs, cancellationToken);
-}
-```
-
-Get the source either via DI injection or, when you already hold a `PropertyReference` deep in business code, via `TryGetSource`:
-
-```csharp
-if (property.TryGetSource(out var subjectSource) &&
-    subjectSource is IOpcUaSubjectClientSource source)
-{
-    ISession? session = source.CurrentSession;
 }
 ```
 
@@ -647,6 +656,19 @@ opcUaSource.CurrentSessionChanged += (_, args) =>
 ```
 
 The event fires on the connector's own thread but **outside** the reconnection lock, in transition order, so a slow handler will not stall reconnection. Use `PreviousSession` only for synchronous local cleanup (its transport may already be closed). For async work on `CurrentSession` use fire-and-forget (`_ = Task.Run(...)`) and tolerate the session being swapped again before the task completes — the next `CurrentSessionChanged` event will surface the new state. Handler exceptions are caught and logged, but per standard event semantics a throwing subscriber skips later subscribers — isolate exceptions in your own handler if multiple must run.
+
+## Node ID Resolution
+
+`IOpcUaSubjectClientSource.TryGetNodeId` resolves the OPC UA `NodeId` bound to a tracked property. This is useful when making raw `ISession` calls that require a `NodeId`:
+
+```csharp
+if (source.TryGetNodeId(machine.GetPropertyReference(nameof(Machine.Temperature)), out var nodeId))
+{
+    // Use nodeId with source.CurrentSession for direct OPC UA operations
+}
+```
+
+Returns `false` if the property is not owned by this source or has not been resolved yet (e.g. before initial connection).
 
 ## Thread Safety
 
