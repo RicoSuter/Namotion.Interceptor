@@ -4,57 +4,53 @@ internal sealed class ThroughputCounter
 {
     private const int WindowSeconds = 60;
 
+    // Each element packs [epoch (high 32 bits) | count (low 32 bits)].
     private readonly long[] _buckets = new long[WindowSeconds];
-    private long _currentSecond;
 
     public void Add(int count)
     {
-        var nowSecond = Environment.TickCount64 / 1000;
-        var bucketIndex = (int)(nowSecond % WindowSeconds);
+        var nowEpoch = (uint)(Environment.TickCount64 / 1000);
+        var bucketIndex = (int)(nowEpoch % WindowSeconds);
 
-        var lastSecond = Interlocked.Read(ref _currentSecond);
-        if (nowSecond != lastSecond)
+        SpinWait spin = default;
+        while (true)
         {
-            if (Interlocked.CompareExchange(ref _currentSecond, nowSecond, lastSecond) == lastSecond)
-            {
-                ClearStaleBuckets(lastSecond, nowSecond);
-            }
-        }
+            var current = Interlocked.Read(ref _buckets[bucketIndex]);
+            var epoch = (uint)(current >>> 32);
+            var existingCount = (uint)(current & 0xFFFFFFFF);
 
-        Interlocked.Add(ref _buckets[bucketIndex], count);
+            var newValue = epoch == nowEpoch
+                ? Pack(nowEpoch, existingCount + (uint)count)
+                : Pack(nowEpoch, (uint)count);
+
+            if (Interlocked.CompareExchange(ref _buckets[bucketIndex], newValue, current) == current)
+            {
+                return;
+            }
+
+            spin.SpinOnce();
+        }
     }
 
     public double GetRate()
     {
-        var nowSecond = Environment.TickCount64 / 1000;
-        var lastSecond = Interlocked.Read(ref _currentSecond);
-
-        if (lastSecond == 0 && Volatile.Read(ref _buckets[0]) == 0)
-        {
-            return 0.0;
-        }
-
-        if (nowSecond - lastSecond >= WindowSeconds)
-        {
-            return 0.0;
-        }
+        var nowEpoch = (uint)(Environment.TickCount64 / 1000);
 
         long total = 0;
         for (var i = 0; i < WindowSeconds; i++)
         {
-            total += Interlocked.Read(ref _buckets[i]);
+            var packed = Interlocked.Read(ref _buckets[i]);
+            var epoch = (uint)(packed >>> 32);
+            var count = (uint)(packed & 0xFFFFFFFF);
+
+            if (nowEpoch - epoch < WindowSeconds)
+            {
+                total += count;
+            }
         }
 
-        return (double)total / WindowSeconds;
+        return total == 0 ? 0.0 : (double)total / WindowSeconds;
     }
 
-    private void ClearStaleBuckets(long fromSecond, long toSecond)
-    {
-        var clearCount = Math.Min(toSecond - fromSecond, WindowSeconds);
-        for (long s = fromSecond + 1; s <= fromSecond + clearCount; s++)
-        {
-            var index = (int)(s % WindowSeconds);
-            Interlocked.Exchange(ref _buckets[index], 0);
-        }
-    }
+    private static long Pack(uint epoch, uint count) => ((long)epoch << 32) | count;
 }
