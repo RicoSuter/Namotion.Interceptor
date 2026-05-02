@@ -614,7 +614,7 @@ When a batch write to the OPC UA server partially fails, the client throws an `O
 
 `IOpcUaSubjectClientSource.Diagnostics` exposes a live facade. Resolve it once and poll (see [Resolving the Client Source](#resolving-the-client-source)).
 
-Categories: connection (`IsConnected`, `IsReconnecting`, `SessionId`, `LastConnectedAt`), subscriptions (`SubscriptionCount`, `MonitoredItemCount`), reconnection history (`TotalReconnectionAttempts`, `SuccessfulReconnections`, `FailedReconnections`, `AbandonedReconnections`, `LastError`), [polling fallback](#polling-fallback-for-unsupported-nodes), [read-after-write](#read-after-write-fallback). All properties are thread-safe for reading.
+Categories: connection (`IsConnected`, `IsReconnecting`, `SessionId`, `LastConnectedAt`), subscriptions (`SubscriptionCount`, `MonitoredItemCount`), throughput (`IncomingChangesPerSecond`, `OutgoingChangesPerSecond`), reconnection history (`TotalReconnectionAttempts`, `SuccessfulReconnections`, `FailedReconnections`, `AbandonedReconnections`, `LastError`), [polling fallback](#polling-fallback-for-unsupported-nodes) (`PollingItemCount`), [read-after-write](#read-after-write-fallback) (`PendingReadAfterWrites`). All properties are thread-safe for reading.
 
 ## Direct Session Access
 
@@ -701,3 +701,50 @@ The OPC UA client hooks into the interceptor lifecycle system (see [Subject Life
 - Cleanup is skipped during reconnection to avoid interfering with subscription transfer
 
 See also [Lifecycle Limitations](connectors-opcua.md#lifecycle-limitations) that apply to both client and server.
+
+## Internal Design
+
+### Class Dependency Graph
+
+```
+OpcUaSubjectClientSource (orchestrator, BackgroundService)
+ ├── owns ReconnectionMetrics              (standalone, thread-safe counters)
+ ├── owns IncomingThroughput               (standalone, ThroughputCounter)
+ ├── owns OutgoingThroughput               (standalone, ThroughputCounter)
+ ├── owns SubscriptionHealthMonitor        (standalone)
+ ├── owns OpcUaSubjectLoader               (back-ref to source)
+ ├── owns OpcUaClientDiagnostics           (back-ref to source, read-only facade)
+ ├── creates SessionManager                (back-ref to source)
+ │    ├── creates SubscriptionManager      (back-ref to source)
+ │    │    ├── uses PollingManager
+ │    │    └── uses ReadAfterWriteManager
+ │    ├── creates PollingManager           (back-ref to source)
+ │    └── creates ReadAfterWriteManager
+ └── creates OutboundWriter
+      ├── receives SessionManager
+      └── receives ThroughputCounter
+```
+
+### Responsibilities
+
+| Class | Role |
+|-------|------|
+| `OpcUaSubjectClientSource` | Orchestrator. Owns the lifecycle, health check loop, reconnection logic, and the `ISubjectSource` contract. |
+| `SessionManager` | Manages the OPC UA session lifecycle (create, reconnect, dispose). Owns `SubscriptionManager`, `PollingManager`, and `ReadAfterWriteManager`. |
+| `SubscriptionManager` | Creates and manages OPC UA subscriptions and monitored items. Routes incoming data change notifications. |
+| `OutboundWriter` | Writes property changes to the OPC UA server. Tracks outgoing throughput. |
+| `PollingManager` | Polling fallback for nodes that don't support subscriptions. Includes a circuit breaker. |
+| `ReadAfterWriteManager` | Schedules read-backs after writes for nodes where exception-based monitoring was revised to sampling. |
+| `SubscriptionHealthMonitor` | Retries failed monitored items that may succeed later (transient server errors). |
+| `OpcUaSubjectLoader` | Browses the OPC UA address space and maps nodes to C# properties. |
+| `OpcUaClientDiagnostics` | Read-only public facade that aggregates diagnostics from all internal components. |
+| `ReconnectionMetrics` | Thread-safe counters for reconnection tracking (attempts, successes, failures, abandoned). |
+| `ThroughputCounter` | Lock-free 60-second sliding window rate counter for incoming/outgoing changes per second. |
+
+### Key Design Decisions
+
+**Single-threaded health loop.** `OpcUaSubjectClientSource.ExecuteAsync` runs a single loop that checks session health, triggers reconnection, and detects stalls. All reconnection coordination flows through this loop.
+
+**Back-reference pattern.** Several classes (`SessionManager`, `SubscriptionManager`, `PollingManager`) receive a reference to `OpcUaSubjectClientSource` to access shared state (metrics, throughput counters, error tracking). `OutboundWriter` demonstrates the preferred alternative: receiving only the specific dependencies it needs via constructor parameters.
+
+**Diagnostics as a facade.** `OpcUaClientDiagnostics` navigates through `OpcUaSubjectClientSource` and `SessionManager` to expose a flat public API. It allocates `PollingDiagnostics` and `ReadAfterWriteDiagnostics` wrappers on demand to avoid exposing internal types.

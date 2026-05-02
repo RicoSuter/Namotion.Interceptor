@@ -137,11 +137,14 @@ namespace Namotion.Interceptor.OpcUa.Client
     {
         public long AbandonedReconnections { get; }
         public long FailedReconnections { get; }
+        public double IncomingChangesPerSecond { get; }
         public bool IsConnected { get; }
         public bool IsReconnecting { get; }
         public System.DateTimeOffset? LastConnectedAt { get; }
         public System.Exception? LastError { get; }
         public int MonitoredItemCount { get; }
+        public double OutgoingChangesPerSecond { get; }
+        public int? PendingReadAfterWrites { get; }
         public Namotion.Interceptor.OpcUa.Client.PollingDiagnostics? Polling { get; }
         public int PollingItemCount { get; }
         public Namotion.Interceptor.OpcUa.Client.ReadAfterWriteDiagnostics? ReadAfterWrite { get; }
