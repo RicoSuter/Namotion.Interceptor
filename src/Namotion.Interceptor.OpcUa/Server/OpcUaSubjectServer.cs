@@ -1,22 +1,11 @@
-using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Opc.Ua;
-using Opc.Ua.Bindings;
 using Opc.Ua.Server;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
 internal class OpcUaSubjectServer : StandardServer
 {
-    // TODO: Remove when https://github.com/OPCFoundation/UA-.NETStandard/pull/3560 is released.
-    // Workaround: UaSCUaBinaryChannel.Dispose() doesn't close its Socket, so lingering sockets
-    // (held by SocketAsyncEngine) retain the chain: Socket → Channel → Listener → m_callback → Server.
-    // We null m_callback via reflection to break this chain. Once the SDK disposes sockets in
-    // channel Dispose, SocketAsyncEngine releases its references and this becomes unnecessary.
-    private static readonly FieldInfo? TransportListenerCallbackField =
-        typeof(TcpTransportListener)
-            .GetField("m_callback", BindingFlags.NonPublic | BindingFlags.Instance);
-
     private readonly ILogger _logger;
     private readonly CustomNodeManagerFactory _nodeManagerFactory;
 
@@ -70,21 +59,10 @@ internal class OpcUaSubjectServer : StandardServer
             return;
         }
 
-        if (TransportListenerCallbackField is null)
-        {
-            _logger.LogWarning(
-                "TcpTransportListener.m_callback field not found. " +
-                "The OPC UA SDK may have changed its internals — transport listener memory leak workaround is inactive.");
-        }
-
         foreach (var listener in _savedTransportListeners)
         {
             try { (listener as IDisposable)?.Dispose(); }
             catch (Exception ex) { _logger.LogDebug(ex, "Error disposing transport listener."); }
-
-            // TODO: Remove when https://github.com/OPCFoundation/UA-.NETStandard/pull/3560 is released.
-            try { TransportListenerCallbackField?.SetValue(listener, null); }
-            catch (Exception ex) { _logger.LogDebug(ex, "Error clearing transport listener callback."); }
         }
 
         _savedTransportListeners = null;
@@ -138,16 +116,6 @@ internal class OpcUaSubjectServer : StandardServer
     {
         if (disposing)
         {
-            // TODO: Remove when https://github.com/OPCFoundation/UA-.NETStandard/pull/3560 is released.
-            // Workaround: StandardServer.OnServerStarted subscribes CertificateValidator.CertificateUpdate
-            // but never unsubscribes. The shared CertificateValidator outlives the server, retaining every
-            // disposed server instance. Once the SDK unsubscribes in StandardServer.Dispose, this is redundant
-            // (double-unsubscribe is harmless but unnecessary).
-            if (CertificateValidator is not null)
-            {
-                CertificateValidator.CertificateUpdate -= OnCertificateUpdateAsync;
-            }
-
             if (_server is not null)
             {
                 if (_sessionCreatedHandler is not null)

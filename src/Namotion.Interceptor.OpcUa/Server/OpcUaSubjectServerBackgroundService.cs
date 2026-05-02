@@ -1,18 +1,21 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Configuration;
+using Opc.Ua.Server;
 
 namespace Namotion.Interceptor.OpcUa.Server;
 
-internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubjectConnector, IFaultInjectable
+internal class OpcUaSubjectServerBackgroundService : BackgroundService, IOpcUaSubjectServer, ISubjectConnector, IFaultInjectable
 {
-    internal const string OpcVariableKey = "OpcVariable";
+    // Per-instance key so multiple servers can expose the same property tree without
+    // overwriting each other's BaseDataVariableState reference on shared properties.
+    internal string OpcUaVariableKey { get; } = "OpcUaVariable:" + Guid.NewGuid();
 
     private readonly IInterceptorSubject _subject;
     private readonly IInterceptorSubjectContext _context;
@@ -24,7 +27,6 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
     private volatile bool _isForceKill;
     private volatile CancellationTokenSource? _forceKillCts;
     private int _consecutiveFailures;
-    private OpcUaServerDiagnostics? _diagnostics;
     private DateTimeOffset? _startTime;
     private Exception? _lastError;
 
@@ -42,10 +44,11 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
         return Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Gets diagnostic information about the server state.
-    /// </summary>
-    public OpcUaServerDiagnostics Diagnostics => _diagnostics ??= new OpcUaServerDiagnostics(this);
+    /// <inheritdoc />
+    public OpcUaServerDiagnostics Diagnostics { get; }
+
+    /// <inheritdoc />
+    public StandardServer? CurrentServer => _server;
 
     /// <summary>
     /// Gets a value indicating whether the server is running.
@@ -81,6 +84,20 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
         _context = subject.Context;
         _logger = logger;
         _configuration = configuration;
+        Diagnostics = new OpcUaServerDiagnostics(this);
+    }
+
+    /// <inheritdoc />
+    public bool TryGetVariableNode(PropertyReference property, [NotNullWhen(true)] out BaseDataVariableState? variable)
+    {
+        if (property.TryGetPropertyData(OpcUaVariableKey, out var data) && data is BaseDataVariableState resolved)
+        {
+            variable = resolved;
+            return true;
+        }
+
+        variable = null;
+        return false;
     }
 
     private bool IsPropertyIncluded(PropertyReference propertyReference)
@@ -114,7 +131,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, ISubject
             for (var i = 0; i < span.Length; i++)
             {
                 var change = span[i];
-                if (change.Property.TryGetPropertyData(OpcVariableKey, out var data) &&
+                if (change.Property.TryGetPropertyData(OpcUaVariableKey, out var data) &&
                     data is BaseDataVariableState node &&
                     change.Property.TryGetRegisteredProperty() is { } registeredProperty)
                 {

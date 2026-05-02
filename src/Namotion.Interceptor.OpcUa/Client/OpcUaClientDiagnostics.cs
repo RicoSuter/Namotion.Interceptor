@@ -39,24 +39,38 @@ public class OpcUaClientDiagnostics
     public int MonitoredItemCount => _source.SessionManager?.SubscriptionManager.MonitoredItems.Count ?? 0;
 
     /// <summary>
-    /// Gets the total number of reconnection attempts (both successful and failed).
+    /// Gets the total number of reconnection attempts started. Once all in-flight attempts have resolved,
+    /// this equals <see cref="SuccessfulReconnections"/> + <see cref="FailedReconnections"/> + <see cref="AbandonedReconnections"/>.
     /// </summary>
     public long TotalReconnectionAttempts => _source.TotalReconnectionAttempts;
 
     /// <summary>
-    /// Gets the number of successful reconnections.
+    /// Gets the number of attempts that produced a usable session.
     /// </summary>
     public long SuccessfulReconnections => _source.SuccessfulReconnections;
 
     /// <summary>
-    /// Gets the number of failed reconnection attempts.
+    /// Gets the number of attempts that ended with an exception.
     /// </summary>
     public long FailedReconnections => _source.FailedReconnections;
+
+    /// <summary>
+    /// Gets the number of attempts that completed without an exception but produced an unusable result
+    /// (null session, transfer failed, preserved session after server restart, stall reset, or kill cancellation).
+    /// </summary>
+    public long AbandonedReconnections => _source.AbandonedReconnections;
 
     /// <summary>
     /// Gets the timestamp of the last successful connection, or null if never connected.
     /// </summary>
     public DateTimeOffset? LastConnectedAt => _source.LastConnectedAt;
+
+    /// <summary>
+    /// Gets the most recent error that occurred while establishing or restoring the session,
+    /// or null if no error has occurred since the last successful (re)connection.
+    /// Cleared on every successful connection or reconnection.
+    /// </summary>
+    public Exception? LastError => _source.LastError;
 
     /// <summary>
     /// Gets the number of items being polled (fallback for nodes without subscription support).

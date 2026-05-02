@@ -14,34 +14,46 @@ public partial class Sensor
     public partial decimal Value { get; set; }
 }
 
+builder.Services.AddSingleton(sensor);
 builder.Services.AddOpcUaSubjectServer<Sensor>(
     sourceName: "opc",
-    pathPrefix: null,
     rootName: "MySensor");
 
-var sensor = serviceProvider.GetRequiredService<Sensor>();
+// ...
 sensor.Value = 42.5m;
 await host.StartAsync();
 ```
 
-Three DI overloads are available with increasing control:
+For multiple servers, use `AddKeyedOpcUaSubjectServer` with a name and resolve via `[FromKeyedServices("name")]` (see [Diagnostics](#diagnostics)).
 
-**Simple generic** - resolves the subject from DI automatically:
+Two DI overloads are available with increasing control:
+
+## Resolving the Server
+
+After registration, resolve `IOpcUaSubjectServer` to access diagnostics, the underlying server, and variable node lookups.
+
+**DI (unnamed registration):**
 
 ```csharp
-builder.Services.AddOpcUaSubjectServer<Machine>(
-    sourceName: "opc",
-    pathPrefix: null,
-    rootName: "MyMachine");
+var server = serviceProvider.GetRequiredService<IOpcUaSubjectServer>();
 ```
 
-**With subject selector** - custom subject resolution:
+**DI (keyed registration):**
 
 ```csharp
-builder.Services.AddOpcUaSubjectServer(
+var server = serviceProvider.GetRequiredKeyedService<IOpcUaSubjectServer>("server1");
+```
+
+For direct instantiation (without DI), `CreateOpcUaServer` returns `IOpcUaSubjectServer` directly.
+
+## DI Overloads
+
+**Simple generic** - resolves the subject from DI automatically (subject must be registered as a singleton):
+
+```csharp
+builder.Services.AddSingleton(machine);
+builder.Services.AddOpcUaSubjectServer<Machine>(
     sourceName: "opc",
-    subjectSelector: sp => sp.GetRequiredService<Machine>(),
-    pathPrefix: null,
     rootName: "MyMachine");
 ```
 
@@ -64,7 +76,6 @@ builder.Services.AddOpcUaSubjectServer(
 
 **Parameters:**
 - `sourceName` - The connector name used to match `[Path]` attributes (e.g., `"opc"` matches `[Path("opc", "Temperature")]`)
-- `pathPrefix` - Optional prefix prepended to property paths when mapping to OPC UA nodes. Use `null` for no prefix.
 - `rootName` - Optional root folder name under the OPC UA ObjectsFolder
 
 Multiple servers can be registered in the same DI container. Each registration uses keyed singletons internally, so they operate independently.
@@ -74,7 +85,7 @@ Multiple servers can be registered in the same DI container. Each registration u
 For scenarios without DI, create a server directly from a subject:
 
 ```csharp
-var server = subject.CreateOpcUaServer(configuration, logger);
+IOpcUaSubjectServer server = subject.CreateOpcUaServer(configuration, logger);
 await server.StartAsync(cancellationToken);
 ```
 
@@ -220,16 +231,35 @@ The `LoadNodeSetFromEmbeddedResource<T>()` helper loads NodeSet XML files embedd
 
 ## Diagnostics
 
-The server runs as a [hosted service](hosting.md). Monitor its health in production via the `Diagnostics` property on `OpcUaSubjectServerBackgroundService`.
+`IOpcUaSubjectServer.Diagnostics` exposes a live facade. Resolve it once and poll (see [Resolving the Server](#resolving-the-server)).
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `IsRunning` | `bool` | Whether the server is accepting connections |
-| `ActiveSessionCount` | `int` | Number of currently connected clients |
-| `StartTime` | `DateTimeOffset?` | When the server started (null if not running) |
-| `Uptime` | `TimeSpan?` | Time since server started (null if not running) |
-| `LastError` | `Exception?` | Most recent error (null if no errors) |
-| `ConsecutiveFailures` | `int` | Number of consecutive startup failures (resets on success) |
+Properties: `IsRunning`, `ActiveSessionCount`, `StartTime`, `Uptime`, `LastError`, `ConsecutiveFailures` (resets on successful start, see [Resilience](#resilience)).
+
+## Direct Server Access
+
+For scenarios the connector does not cover natively (custom node managers, server events, custom session handlers), `IOpcUaSubjectServer.CurrentServer` exposes the underlying `StandardServer` (see [Resolving the Server](#resolving-the-server) for how to obtain the server):
+
+```csharp
+if (server.CurrentServer is { } current)
+{
+    // ... advanced interactions on `current`
+}
+```
+
+**Lifecycle contract:** read `CurrentServer` immediately before each use. It is `null` when the server is not running (startup, between restart attempts, or after a force-kill), and the instance is recreated on every restart. Never cache the reference.
+
+## Variable Node Resolution
+
+`IOpcUaSubjectServer.TryGetVariableNode` resolves the OPC UA `BaseDataVariableState` created for a tracked property. This is useful for raising server-side events or performing advanced operations on a specific node:
+
+```csharp
+if (server.TryGetVariableNode(sensor.GetPropertyReference(nameof(Sensor.Value)), out var variable))
+{
+    // Use variable for direct OPC UA node operations
+}
+```
+
+Returns `false` if the property is not exposed by this server, not yet created, or was removed during a server restart.
 
 ## Resilience
 
@@ -254,7 +284,4 @@ The OPC UA server hooks into the interceptor lifecycle system (see [Subject Life
 - The OPC UA node remains in the address space until server restart (OPC UA SDK limitation)
 - Local tracking is cleaned up immediately to prevent memory leaks
 
-**Limitations:**
-- Does NOT dynamically add new subjects to OPC UA after initialization
-- Does NOT update the OPC UA address space when subjects are attached
-- New subjects added after startup require a restart to appear in OPC UA
+See also [Lifecycle Limitations](connectors-opcua.md#lifecycle-limitations) that apply to both client and server.

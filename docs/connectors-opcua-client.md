@@ -17,26 +17,55 @@ public partial class Machine
     public partial decimal Speed { get; set; }
 }
 
+builder.Services.AddSingleton(machine);
 builder.Services.AddOpcUaSubjectClientSource<Machine>(
     serverUrl: "opc.tcp://plc.factory.com:4840",
     sourceName: "opc",
-    pathPrefix: null,
     rootName: "MyMachine");
 
-// Use in application
-var machine = serviceProvider.GetRequiredService<Machine>();
+// ...
+var host = builder.Build();
 await host.StartAsync();
 Console.WriteLine(machine.Temperature); // Read property which is synchronized with OPC UA server
 machine.Speed = 100; // Writes to OPC UA server
 ```
 
+For multiple client sources, use `AddKeyedOpcUaSubjectClientSource` with a name and resolve via `[FromKeyedServices("name")]` (see [Diagnostics](#diagnostics)).
+
 **Parameters:**
 - `serverUrl` - The OPC UA server endpoint (e.g., `"opc.tcp://localhost:4840"`)
 - `sourceName` - The connector name used to match `[Path]` attributes (e.g., `"opc"` matches `[Path("opc", "Temperature")]`)
-- `pathPrefix` - Optional prefix prepended to property paths when mapping to OPC UA nodes. Use `null` for no prefix.
 - `rootName` - Optional root node name to start browsing from under the Objects folder
 
-Three DI overloads are available: the simple generic shown above, one with a custom subject selector, and a full configuration overload (shown below).
+Two DI overloads are available: the simple generic shown above and a full configuration overload (shown below).
+
+## Resolving the Client Source
+
+After registration, resolve `IOpcUaSubjectClientSource` to access diagnostics, the underlying session, and node ID lookups.
+
+**DI (unnamed registration):**
+
+```csharp
+var source = serviceProvider.GetRequiredService<IOpcUaSubjectClientSource>();
+```
+
+**DI (keyed registration):**
+
+```csharp
+var source = serviceProvider.GetRequiredKeyedService<IOpcUaSubjectClientSource>("server1");
+```
+
+**From a property reference** (useful deep in business code where you hold a `PropertyReference` but not the DI container):
+
+```csharp
+if (property.TryGetSource(out var subjectSource) &&
+    subjectSource is IOpcUaSubjectClientSource source)
+{
+    // use source.Diagnostics, source.CurrentSession, etc.
+}
+```
+
+For direct instantiation (without DI), `CreateOpcUaClientSource` returns `IOpcUaSubjectClientSource` directly.
 
 ## Configuration
 
@@ -499,30 +528,7 @@ For 24/7 production use, the default configuration provides robust resilience:
 
 ## Extensibility
 
-### Custom Value Converter
-
-Extend `OpcUaValueConverter` to implement custom type conversions between OPC UA and C# types. Override `ConvertToPropertyValue` for OPC UA -> C# conversions and `ConvertToNodeValue` for C# -> OPC UA conversions.
-
-```csharp
-public class CustomValueConverter : OpcUaValueConverter
-{
-    public override object? ConvertToPropertyValue(
-        object? nodeValue, RegisteredSubjectProperty property)
-    {
-        if (property.Type == typeof(MyCustomType) && nodeValue is string str)
-            return MyCustomType.Parse(str);
-        return base.ConvertToPropertyValue(nodeValue, property);
-    }
-
-    public override object? ConvertToNodeValue(
-        object? propertyValue, RegisteredSubjectProperty property)
-    {
-        if (propertyValue is MyCustomType custom)
-            return custom.ToString();
-        return base.ConvertToNodeValue(propertyValue, property);
-    }
-}
-```
+For custom type conversions (used by both client and server), see [Custom Value Converter](connectors-opcua.md#custom-value-converter).
 
 ### Custom Type Resolver
 
@@ -600,11 +606,69 @@ if (dynamicProperty != null)
 }
 ```
 
+## Write Error Handling
+
+When a batch write to the OPC UA server partially fails, the client throws an `OpcUaWriteException`. The exception distinguishes between transient failures (connectivity issues, timeouts that may succeed on retry) and permanent failures (invalid nodes, access denied; should not be retried). The write retry queue (see [Resilience](#write-retry-queue-during-disconnection)) handles transient failures automatically during disconnection, but writes that fail while connected surface this exception.
+
 ## Diagnostics
 
-Monitor client health in production via the `Diagnostics` property on `OpcUaSubjectClientSource`.
+`IOpcUaSubjectClientSource.Diagnostics` exposes a live facade. Resolve it once and poll (see [Resolving the Client Source](#resolving-the-client-source)).
 
-`OpcUaClientDiagnostics` provides: connection state, session ID, subscription/monitored item counts, reconnection metrics, and polling statistics.
+Categories: connection (`IsConnected`, `IsReconnecting`, `SessionId`, `LastConnectedAt`), subscriptions (`SubscriptionCount`, `MonitoredItemCount`), reconnection history (`TotalReconnectionAttempts`, `SuccessfulReconnections`, `FailedReconnections`, `AbandonedReconnections`, `LastError`), [polling fallback](#polling-fallback-for-unsupported-nodes), [read-after-write](#read-after-write-fallback). All properties are thread-safe for reading.
+
+## Direct Session Access
+
+For scenarios the connector does not cover natively (OPC UA **Methods**, **Alarms & Conditions**), `IOpcUaSubjectClientSource.CurrentSession` exposes the underlying `ISession` (see [Resolving the Client Source](#resolving-the-client-source) for how to obtain the source):
+
+```csharp
+if (source.CurrentSession is { } session)
+{
+    var outputs = await session.CallAsync(parentNodeId, methodId, inputArgs, cancellationToken);
+}
+```
+
+**Lifecycle contract:** read `CurrentSession` immediately before each use. It may be `null` during reconnection and the instance changes after a manual reconnect (Flow C), a transferred-subscription failure (Flow B), or a stall reset. Never cache the reference. For long-running session-bound state (e.g. an A&C `Subscription`), subscribe to `CurrentSessionChanged` (below) or recreate on demand when calls fail with `BadSessionIdInvalid` / `BadSessionNotActivated`.
+
+### Reacting to session swaps with `CurrentSessionChanged`
+
+For consumers holding session-bound state (typically A&C subscriptions), `CurrentSessionChanged` fires on every transition (including to/from `null`). Method-call consumers usually do not need it — they re-read `CurrentSession` per call and surface a stale session as a failure on the next call. The event is for consumers that have no such inbound traffic.
+
+```csharp
+opcUaSource.CurrentSessionChanged += (_, args) =>
+{
+    if (args.PreviousSession is not null)
+    {
+        // Synchronous local cleanup only; transport may already be closed.
+        DisposeMyAlarmsSubscription(args.PreviousSession);
+    }
+
+    if (args.CurrentSession is not null)
+    {
+        // Async work fire-and-forget so the handler returns quickly.
+        var newSession = args.CurrentSession;
+        _ = Task.Run(async () =>
+        {
+            try { await RecreateMyAlarmsSubscriptionAsync(newSession); }
+            catch (Exception ex) { _logger.LogError(ex, "Failed to recreate A&C subscription"); }
+        });
+    }
+};
+```
+
+The event fires on the connector's own thread but **outside** the reconnection lock, in transition order, so a slow handler will not stall reconnection. Use `PreviousSession` only for synchronous local cleanup (its transport may already be closed). For async work on `CurrentSession` use fire-and-forget (`_ = Task.Run(...)`) and tolerate the session being swapped again before the task completes — the next `CurrentSessionChanged` event will surface the new state. Handler exceptions are caught and logged, but per standard event semantics a throwing subscriber skips later subscribers — isolate exceptions in your own handler if multiple must run.
+
+## Node ID Resolution
+
+`IOpcUaSubjectClientSource.TryGetNodeId` resolves the OPC UA `NodeId` bound to a tracked property. This is useful when making raw `ISession` calls that require a `NodeId`:
+
+```csharp
+if (source.TryGetNodeId(machine.GetPropertyReference(nameof(Machine.Temperature)), out var nodeId))
+{
+    // Use nodeId with source.CurrentSession for direct OPC UA operations
+}
+```
+
+Returns `false` if the property is not owned by this source or has not been resolved yet (e.g. before initial connection).
 
 ## Thread Safety
 
@@ -636,7 +700,4 @@ The OPC UA client hooks into the interceptor lifecycle system (see [Subject Life
 - OPC UA subscription items remain on the server until session ends
 - Cleanup is skipped during reconnection to avoid interfering with subscription transfer
 
-**Limitations:**
-- Does NOT dynamically add new subjects to OPC UA after initialization
-- Does NOT update the OPC UA address space when subjects are attached
-- New subjects added after startup require a restart to appear in OPC UA
+See also [Lifecycle Limitations](connectors-opcua.md#lifecycle-limitations) that apply to both client and server.
