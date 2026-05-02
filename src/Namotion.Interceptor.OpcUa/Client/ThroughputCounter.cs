@@ -15,7 +15,7 @@ internal sealed class ThroughputCounter
         SpinWait spin = default;
         while (true)
         {
-            var current = Interlocked.Read(ref _buckets[bucketIndex]);
+            var current = Volatile.Read(ref _buckets[bucketIndex]);
             var epoch = (uint)(current >>> 32);
             var existingCount = (uint)(current & 0xFFFFFFFF);
 
@@ -24,32 +24,33 @@ internal sealed class ThroughputCounter
                 : Pack(nowEpoch, (uint)count);
 
             if (Interlocked.CompareExchange(ref _buckets[bucketIndex], newValue, current) == current)
-            {
                 return;
-            }
 
             spin.SpinOnce();
         }
     }
 
-    public double GetRate()
+    public double CurrentRate
     {
-        var nowEpoch = (uint)(Environment.TickCount64 / 1000);
-
-        long total = 0;
-        for (var i = 0; i < WindowSeconds; i++)
+        get
         {
-            var packed = Interlocked.Read(ref _buckets[i]);
-            var epoch = (uint)(packed >>> 32);
-            var count = (uint)(packed & 0xFFFFFFFF);
+            var nowEpoch = (uint)(Environment.TickCount64 / 1000);
 
-            if (nowEpoch - epoch < WindowSeconds)
+            long total = 0;
+            for (var i = 0; i < WindowSeconds; i++)
             {
-                total += count;
-            }
-        }
+                var packed = Volatile.Read(ref _buckets[i]);
+                var epoch = (uint)(packed >>> 32);
+                var count = (uint)(packed & 0xFFFFFFFF);
 
-        return total == 0 ? 0.0 : (double)total / WindowSeconds;
+                if (nowEpoch - epoch < WindowSeconds)
+                {
+                    total += count;
+                }
+            }
+
+            return total == 0 ? 0.0 : (double)total / WindowSeconds;
+        }
     }
 
     private static long Pack(uint epoch, uint count) => ((long)epoch << 32) | count;

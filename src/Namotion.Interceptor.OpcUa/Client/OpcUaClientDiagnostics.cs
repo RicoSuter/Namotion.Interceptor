@@ -68,12 +68,12 @@ public class OpcUaClientDiagnostics
     /// <summary>
     /// Gets the average incoming changes per second over the last 60 seconds.
     /// </summary>
-    public double IncomingChangesPerSecond => _source.IncomingThroughput.GetRate();
+    public double IncomingChangesPerSecond => _source.IncomingThroughput.CurrentRate;
 
     /// <summary>
     /// Gets the average outgoing changes per second over the last 60 seconds.
     /// </summary>
-    public double OutgoingChangesPerSecond => _source.OutgoingThroughput.GetRate();
+    public double OutgoingChangesPerSecond => _source.OutgoingThroughput.CurrentRate;
 
     /// <summary>
     /// Gets the number of pending read-after-write operations, or null if disabled.

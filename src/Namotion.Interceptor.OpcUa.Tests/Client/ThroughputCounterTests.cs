@@ -11,7 +11,7 @@ public class ThroughputCounterTests
         var counter = new ThroughputCounter();
 
         // Act
-        var rate = counter.GetRate();
+        var rate = counter.CurrentRate;
 
         // Assert
         Assert.Equal(0.0, rate);
@@ -25,7 +25,7 @@ public class ThroughputCounterTests
 
         // Act
         counter.Add(100);
-        var rate = counter.GetRate();
+        var rate = counter.CurrentRate;
 
         // Assert
         Assert.True(rate > 0.0);
@@ -40,7 +40,7 @@ public class ThroughputCounterTests
         // Act
         counter.Add(50);
         counter.Add(50);
-        var rate = counter.GetRate();
+        var rate = counter.CurrentRate;
 
         // Assert
         Assert.True(rate > 0.0);
@@ -68,7 +68,7 @@ public class ThroughputCounterTests
         await Task.WhenAll(tasks);
 
         // Assert
-        var rate = counter.GetRate();
+        var rate = counter.CurrentRate;
         Assert.True(rate > 0.0);
     }
 }
