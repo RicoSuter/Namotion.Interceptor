@@ -48,7 +48,7 @@ public class BatchMutationEngine : MutationEngine
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(timerIntervalMs));
 
         var nodeIndex = 0;
-        var batchesThisSecond = 0;
+        var mutationsThisSecond = 0;
         var cycleStart = Stopwatch.GetTimestamp();
         var property = _participantIndex % 3;
 
@@ -56,7 +56,7 @@ public class BatchMutationEngine : MutationEngine
         {
             Coordinator.WaitIfPaused(stoppingToken);
 
-            if (batchesThisSecond >= _numberOfBatches)
+            if (mutationsThisSecond >= ValueMutationRate)
             {
                 var elapsed = Stopwatch.GetElapsedTime(cycleStart);
                 if (elapsed < TimeSpan.FromSeconds(1))
@@ -64,7 +64,7 @@ public class BatchMutationEngine : MutationEngine
                     continue;
                 }
 
-                batchesThisSecond = 0;
+                mutationsThisSecond = 0;
                 cycleStart = Stopwatch.GetTimestamp();
             }
 
@@ -79,9 +79,11 @@ public class BatchMutationEngine : MutationEngine
                 }
             }
 
+            var count = Math.Min(nodesPerBatch, ValueMutationRate - mutationsThisSecond);
+
             using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
             {
-                Parallel.For(0, nodesPerBatch, j =>
+                Parallel.For(0, count, j =>
                 {
                     var node = nodes[(nodeIndex + j) % nodeCount];
                     var counter = NextGlobalCounter();
@@ -103,8 +105,8 @@ public class BatchMutationEngine : MutationEngine
                 });
             }
 
-            nodeIndex = (nodeIndex + nodesPerBatch) % nodeCount;
-            batchesThisSecond++;
+            nodeIndex = (nodeIndex + count) % nodeCount;
+            mutationsThisSecond += count;
         }
     }
 }
