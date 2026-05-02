@@ -14,40 +14,33 @@ public partial class Sensor
     public partial decimal Value { get; set; }
 }
 
-var registration = builder.Services.AddOpcUaSubjectServer<Sensor>(
+builder.Services.AddSingleton(sensor);
+builder.Services.AddOpcUaSubjectServer<Sensor>(
     sourceName: "opc",
     rootName: "MySensor");
 
-var sensor = serviceProvider.GetRequiredService<Sensor>();
+// ...
 sensor.Value = 42.5m;
 await host.StartAsync();
 ```
 
-All `AddOpcUaSubjectServer` overloads return an `OpcUaServerRegistration` handle for accessing the server instance and diagnostics later (see [Diagnostics](#diagnostics)).
+For multiple servers, use `AddKeyedOpcUaSubjectServer` with a name and resolve via `[FromKeyedServices("name")]` (see [Diagnostics](#diagnostics)).
 
-Three DI overloads are available with increasing control:
+Two DI overloads are available with increasing control:
 
-**Simple generic** - resolves the subject from DI automatically:
-
-```csharp
-var registration = builder.Services.AddOpcUaSubjectServer<Machine>(
-    sourceName: "opc",
-    rootName: "MyMachine");
-```
-
-**With subject selector** - custom subject resolution:
+**Simple generic** - resolves the subject from DI automatically (subject must be registered as a singleton):
 
 ```csharp
-var registration = builder.Services.AddOpcUaSubjectServer(
+builder.Services.AddSingleton(machine);
+builder.Services.AddOpcUaSubjectServer<Machine>(
     sourceName: "opc",
-    subjectSelector: sp => sp.GetRequiredService<Machine>(),
     rootName: "MyMachine");
 ```
 
 **Full configuration** - complete control over all settings:
 
 ```csharp
-var registration = builder.Services.AddOpcUaSubjectServer(
+builder.Services.AddOpcUaSubjectServer(
     subjectSelector: sp => sp.GetRequiredService<MyRoot>(),
     configurationProvider: sp => new OpcUaServerConfiguration
     {
@@ -218,11 +211,15 @@ The `LoadNodeSetFromEmbeddedResource<T>()` helper loads NodeSet XML files embedd
 
 ## Diagnostics
 
-`IOpcUaSubjectServer.Diagnostics` exposes a live facade — resolve it once and poll. From DI, use the registration handle; for direct instantiation, the return value is already the interface:
+`IOpcUaSubjectServer.Diagnostics` exposes a live facade. Resolve it once and poll. From DI, inject `IOpcUaSubjectServer` directly (unnamed) or via `[FromKeyedServices]` (named); for direct instantiation, the return value is already the interface:
 
 ```csharp
-IOpcUaSubjectServer server = registration.Resolve(serviceProvider);
+// Unnamed (singleton) registration:
+var server = serviceProvider.GetRequiredService<IOpcUaSubjectServer>();
 var diagnostics = server.Diagnostics;
+
+// Named (keyed) registration:
+var server = serviceProvider.GetRequiredKeyedService<IOpcUaSubjectServer>("server1");
 ```
 
 Properties: `IsRunning`, `ActiveSessionCount`, `StartTime`, `Uptime`, `LastError`, `ConsecutiveFailures` (resets on successful start, see [Resilience](#resilience)).

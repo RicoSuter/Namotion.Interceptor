@@ -17,33 +17,34 @@ public partial class Machine
     public partial decimal Speed { get; set; }
 }
 
-var registration = builder.Services.AddOpcUaSubjectClientSource<Machine>(
+builder.Services.AddSingleton(machine);
+builder.Services.AddOpcUaSubjectClientSource<Machine>(
     serverUrl: "opc.tcp://plc.factory.com:4840",
     sourceName: "opc",
     rootName: "MyMachine");
 
-// Use in application
-var machine = serviceProvider.GetRequiredService<Machine>();
+// ...
+var host = builder.Build();
 await host.StartAsync();
 Console.WriteLine(machine.Temperature); // Read property which is synchronized with OPC UA server
 machine.Speed = 100; // Writes to OPC UA server
 ```
 
-All `AddOpcUaSubjectClientSource` overloads return an `OpcUaClientRegistration` handle for accessing the client instance and diagnostics later (see [Diagnostics](#diagnostics)).
+For multiple client sources, use `AddKeyedOpcUaSubjectClientSource` with a name and resolve via `[FromKeyedServices("name")]` (see [Diagnostics](#diagnostics)).
 
 **Parameters:**
 - `serverUrl` - The OPC UA server endpoint (e.g., `"opc.tcp://localhost:4840"`)
 - `sourceName` - The connector name used to match `[Path]` attributes (e.g., `"opc"` matches `[Path("opc", "Temperature")]`)
 - `rootName` - Optional root node name to start browsing from under the Objects folder
 
-Three DI overloads are available: the simple generic shown above, one with a custom subject selector, and a full configuration overload (shown below).
+Two DI overloads are available: the simple generic shown above and a full configuration overload (shown below).
 
 ## Configuration
 
 For advanced scenarios, use the full configuration API to customize connection behavior, subscription settings, and dynamic property discovery.
 
 ```csharp
-var registration = builder.Services.AddOpcUaSubjectClientSource(
+builder.Services.AddOpcUaSubjectClientSource(
     subjectSelector: sp => sp.GetRequiredService<MyRoot>(),
     configurationProvider: sp => new OpcUaClientConfiguration
     {
@@ -583,11 +584,15 @@ When a batch write to the OPC UA server partially fails, the client throws an `O
 
 ## Diagnostics
 
-`IOpcUaSubjectClientSource.Diagnostics` exposes a live facade — resolve it once and poll. From DI, use the registration handle; for direct instantiation, the return value is already the interface:
+`IOpcUaSubjectClientSource.Diagnostics` exposes a live facade. Resolve it once and poll. From DI, inject `IOpcUaSubjectClientSource` directly (unnamed) or via `[FromKeyedServices]` (named); for direct instantiation, the return value is already the interface:
 
 ```csharp
-IOpcUaSubjectClientSource source = registration.Resolve(serviceProvider);
+// Unnamed (singleton) registration:
+var source = serviceProvider.GetRequiredService<IOpcUaSubjectClientSource>();
 var diagnostics = source.Diagnostics;
+
+// Named (keyed) registration:
+var source = serviceProvider.GetRequiredKeyedService<IOpcUaSubjectClientSource>("server1");
 ```
 
 Categories: connection (`IsConnected`, `IsReconnecting`, `SessionId`, `LastConnectedAt`), subscriptions (`SubscriptionCount`, `MonitoredItemCount`), reconnection history (`TotalReconnectionAttempts`, `SuccessfulReconnections`, `FailedReconnections`, `AbandonedReconnections`, `LastError`), [polling fallback](#polling-fallback-for-unsupported-nodes), [read-after-write](#read-after-write-fallback). All properties are thread-safe for reading.
@@ -603,7 +608,7 @@ if (source.CurrentSession is { } session)
 }
 ```
 
-Get the source either via the registration handle (`registration.Resolve(serviceProvider)`) or, when you already hold a `PropertyReference` deep in business code, via `TryGetSource`:
+Get the source either via DI injection or, when you already hold a `PropertyReference` deep in business code, via `TryGetSource`:
 
 ```csharp
 if (property.TryGetSource(out var subjectSource) &&

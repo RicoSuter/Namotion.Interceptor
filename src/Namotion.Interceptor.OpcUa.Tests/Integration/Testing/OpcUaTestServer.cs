@@ -77,7 +77,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
         _initializeDefaults?.Invoke(_context, Root);
 
         builder.Services.AddSingleton(Root);
-        var registration = builder.Services.AddOpcUaSubjectServer(
+        builder.Services.AddOpcUaSubjectServer(
             sp => sp.GetRequiredService<TRoot>(),
             sp =>
             {
@@ -101,7 +101,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
 
         _host = builder.Build();
 
-        Server = registration.Resolve(_host.Services);
+        Server = _host.Services.GetRequiredService<IOpcUaSubjectServer>();
 
         await _host.StartAsync();
         sw.Stop();

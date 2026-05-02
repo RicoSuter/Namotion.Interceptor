@@ -31,18 +31,20 @@ public partial class Machine
     public partial decimal Speed { get; set; }
 }
 
-var clientRegistration = builder.Services.AddOpcUaSubjectClientSource<Machine>(
+builder.Services.AddSingleton(machine);
+builder.Services.AddOpcUaSubjectClientSource<Machine>(
     serverUrl: "opc.tcp://plc.factory.com:4840",
     sourceName: "opc",
     rootName: "MyMachine");
 
-var machine = serviceProvider.GetRequiredService<Machine>();
+// ...
+var host = builder.Build();
 await host.StartAsync();
 Console.WriteLine(machine.Temperature); // Synchronized with OPC UA server
 machine.Speed = 100; // Writes to OPC UA server
 
-// Access diagnostics via registration handle
-IOpcUaSubjectClientSource source = clientRegistration.Resolve(serviceProvider);
+// Access diagnostics via DI (unnamed singleton)
+var source = serviceProvider.GetRequiredService<IOpcUaSubjectClientSource>();
 Console.WriteLine(source.Diagnostics.IsConnected);
 ```
 
@@ -60,16 +62,17 @@ public partial class Sensor
     public partial decimal Value { get; set; }
 }
 
-var serverRegistration = builder.Services.AddOpcUaSubjectServer<Sensor>(
+builder.Services.AddSingleton(sensor);
+builder.Services.AddOpcUaSubjectServer<Sensor>(
     sourceName: "opc",
     rootName: "MySensor");
 
-var sensor = serviceProvider.GetRequiredService<Sensor>();
+// ...
 sensor.Value = 42.5m;
 await host.StartAsync();
 
-// Access diagnostics via registration handle
-IOpcUaSubjectServer server = serverRegistration.Resolve(serviceProvider);
+// Access diagnostics via DI (unnamed singleton)
+var server = serviceProvider.GetRequiredService<IOpcUaSubjectServer>();
 Console.WriteLine(server.Diagnostics.IsRunning);
 ```
 

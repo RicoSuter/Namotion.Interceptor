@@ -1,6 +1,26 @@
 ﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
 [assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.OpcUa.Tests")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v9.0", FrameworkDisplayName=".NET 9.0")]
+namespace Microsoft.Extensions.DependencyInjection
+{
+    public static class OpcUaSubjectExtensions
+    {
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedOpcUaSubjectClientSource(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.OpcUa.Client.OpcUaClientConfiguration> configurationProvider) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedOpcUaSubjectClientSource<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, string serverUrl, string sourceName, string? rootName = null)
+            where TSubject : Namotion.Interceptor.IInterceptorSubject { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedOpcUaSubjectServer(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.OpcUa.Server.OpcUaServerConfiguration> configurationProvider) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedOpcUaSubjectServer<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, string sourceName, string? rootName = null)
+            where TSubject : Namotion.Interceptor.IInterceptorSubject { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectClientSource(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.OpcUa.Client.OpcUaClientConfiguration> configurationProvider) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectClientSource<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string serverUrl, string sourceName, string? rootName = null)
+            where TSubject : Namotion.Interceptor.IInterceptorSubject { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectServer(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.OpcUa.Server.OpcUaServerConfiguration> configurationProvider) { }
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectServer<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string sourceName, string? rootName = null)
+            where TSubject : Namotion.Interceptor.IInterceptorSubject { }
+        public static Namotion.Interceptor.OpcUa.Client.IOpcUaSubjectClientSource CreateOpcUaClientSource(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.OpcUa.Client.OpcUaClientConfiguration configuration, Microsoft.Extensions.Logging.ILogger logger) { }
+        public static Namotion.Interceptor.OpcUa.Server.IOpcUaSubjectServer CreateOpcUaServer(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.OpcUa.Server.OpcUaServerConfiguration configuration, Microsoft.Extensions.Logging.ILogger logger) { }
+    }
+}
 namespace Namotion.Interceptor.OpcUa.Attributes
 {
     public enum DiscardOldestMode
@@ -129,10 +149,6 @@ namespace Namotion.Interceptor.OpcUa.Client
         public int SubscriptionCount { get; }
         public long SuccessfulReconnections { get; }
         public long TotalReconnectionAttempts { get; }
-    }
-    public sealed class OpcUaClientRegistration
-    {
-        public Namotion.Interceptor.OpcUa.Client.IOpcUaSubjectClientSource Resolve(System.IServiceProvider serviceProvider) { }
     }
     public sealed class OpcUaCurrentSessionChangedEventArgs : System.EventArgs
     {
@@ -345,9 +361,5 @@ namespace Namotion.Interceptor.OpcUa.Server
         public System.Exception? LastError { get; }
         public System.DateTimeOffset? StartTime { get; }
         public System.TimeSpan? Uptime { get; }
-    }
-    public sealed class OpcUaServerRegistration
-    {
-        public Namotion.Interceptor.OpcUa.Server.IOpcUaSubjectServer Resolve(System.IServiceProvider serviceProvider) { }
     }
 }

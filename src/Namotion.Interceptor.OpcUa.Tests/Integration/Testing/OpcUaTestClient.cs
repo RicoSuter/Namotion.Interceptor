@@ -69,7 +69,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         Root = createRoot(_context);
 
         builder.Services.AddSingleton(Root);
-        var registration = builder.Services.AddOpcUaSubjectClientSource(
+        builder.Services.AddOpcUaSubjectClientSource(
             sp => sp.GetRequiredService<TRoot>(),
             sp =>
             {
@@ -109,7 +109,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
 
         _host = builder.Build();
 
-        Source = registration.Resolve(_host.Services);
+        Source = _host.Services.GetRequiredService<IOpcUaSubjectClientSource>();
 
         await _host.StartAsync();
         _logger.Log($"Client host started in {sw.ElapsedMilliseconds}ms");
