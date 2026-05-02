@@ -162,11 +162,7 @@ Files are created as `pending` and renamed to `pass` or `FAIL` on cycle completi
 
 ### Performance Logs
 
-Performance metrics are written to `logs/performance-{participant}.log` for every profile (chaos and load). Each line is one reporting interval with: timestamp, participant name, throughput, latency percentiles, memory, and allocation rate.
-
-```
-2026-05-02T10:01:00.000Z, server, Throughput: 19850/s, E2E-Avg: 12.3ms, E2E-P99: 45.2ms, ...
-```
+Performance metrics are written to `logs/performance-{participant}.csv` for every profile (chaos and load). Each file has a header row and one data row per reporting interval with: timestamp, participant name, throughput, latency percentiles (P50-P99.9), memory, and allocation rate. Files are reset on each run.
 
 ## Configuration
 
