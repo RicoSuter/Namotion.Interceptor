@@ -44,4 +44,14 @@ public class OpcUaServerDiagnostics
     /// Gets the number of consecutive startup failures.
     /// </summary>
     public int ConsecutiveFailures => _service.ConsecutiveFailures;
+
+    /// <summary>
+    /// Gets the average incoming changes per second over the last 60 seconds (client writes to server).
+    /// </summary>
+    public double IncomingChangesPerSecond => _service.IncomingThroughput.CurrentRate;
+
+    /// <summary>
+    /// Gets the average outgoing changes per second over the last 60 seconds (subject changes pushed to OPC UA nodes).
+    /// </summary>
+    public double OutgoingChangesPerSecond => _service.OutgoingThroughput.CurrentRate;
 }
