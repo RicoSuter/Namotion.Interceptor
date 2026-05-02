@@ -37,12 +37,11 @@ public class PerformanceProfiler : IDisposable
         _windowStartTotalAllocatedBytes = GC.GetTotalAllocatedBytes(precise: true);
 
         Directory.CreateDirectory(LogDirectory);
-        _logFilePath = Path.Combine(LogDirectory, $"performance-{participantName}.log");
+        _logFilePath = Path.Combine(LogDirectory, $"performance-{participantName}.csv");
 
-        if (File.Exists(_logFilePath))
-        {
-            File.Delete(_logFilePath);
-        }
+        File.WriteAllText(_logFilePath,
+            "Timestamp, Participant, Throughput, E2E-Avg, E2E-P50, E2E-P90, E2E-P95, E2E-P99, E2E-P99.9, E2E-Max, Proc-Avg, Published, Received, ProcessMB, HeapMB, AllocMB/s" +
+            Environment.NewLine);
 
         _subscription = context.CreatePropertyChangeQueueSubscription();
 
@@ -168,16 +167,25 @@ public class PerformanceProfiler : IDisposable
             PrintPercentileLine("End-to-end latency (ms)", changedLatencies);
         }
 
+        List<double> sortedChanged = changedLatencies.Count > 0 ? [.. changedLatencies.Order()] : [];
         var avgThroughput = throughputSamples.Count > 0 ? throughputSamples.Average() : 0;
-        var avgChangedLatency = changedLatencies.Count > 0 ? changedLatencies.Average() : 0;
-        var p99ChangedLatency = changedLatencies.Count > 0 ? Percentile([.. changedLatencies.Order()], 0.99) : 0;
+        var avgChangedLatency = sortedChanged.Count > 0 ? sortedChanged.Average() : 0;
+        var p50ChangedLatency = sortedChanged.Count > 0 ? Percentile(sortedChanged, 0.50) : 0;
+        var p90ChangedLatency = sortedChanged.Count > 0 ? Percentile(sortedChanged, 0.90) : 0;
+        var p95ChangedLatency = sortedChanged.Count > 0 ? Percentile(sortedChanged, 0.95) : 0;
+        var p99ChangedLatency = sortedChanged.Count > 0 ? Percentile(sortedChanged, 0.99) : 0;
+        var p999ChangedLatency = sortedChanged.Count > 0 ? Percentile(sortedChanged, 0.999) : 0;
+        var maxChangedLatency = sortedChanged.Count > 0 ? sortedChanged[^1] : 0;
         var avgReceivedLatency = receivedLatencies.Count > 0 ? receivedLatencies.Average() : 0;
 
         var logLine = string.Format(
             CultureInfo.InvariantCulture,
-            "{0:yyyy-MM-ddTHH:mm:ss.fffZ}, {1}, Throughput: {2:F0}/s, E2E-Avg: {3:F1}ms, E2E-P99: {4:F1}ms, Proc-Avg: {5:F1}ms, Published: {6}, Received: {7}, ProcessMB: {8:F1}, HeapMB: {9:F1}, AllocMB/s: {10:F2}",
-            now, _participantName, avgThroughput, avgChangedLatency, p99ChangedLatency, avgReceivedLatency,
-            publishedCount, changedLatencies.Count, workingSetMb, heapMb, allocRateMbPerSec);
+            "{0:yyyy-MM-ddTHH:mm:ss.fffZ}, {1}, {2:F0}, {3:F1}, {4:F1}, {5:F1}, {6:F1}, {7:F1}, {8:F1}, {9:F1}, {10:F1}, {11}, {12}, {13:F1}, {14:F1}, {15:F2}",
+            now, _participantName, avgThroughput,
+            avgChangedLatency, p50ChangedLatency, p90ChangedLatency, p95ChangedLatency,
+            p99ChangedLatency, p999ChangedLatency, maxChangedLatency,
+            avgReceivedLatency, publishedCount, changedLatencies.Count,
+            workingSetMb, heapMb, allocRateMbPerSec);
 
         try
         {
