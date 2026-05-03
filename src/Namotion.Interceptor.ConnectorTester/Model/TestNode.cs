@@ -21,6 +21,11 @@ public partial class TestNode
     [Path("ws", "IntValue")]
     public partial int IntValue { get; set; }
 
+    [Path("opc", "LongValue")]
+    [Path("mqtt", "LongValue")]
+    [Path("ws", "LongValue")]
+    public partial long LongValue { get; set; }
+
     [Path("opc", "ObjectRef")]
     [Path("mqtt", "ObjectRef")]
     [Path("ws", "ObjectRef")]
@@ -41,26 +46,37 @@ public partial class TestNode
         StringValue = string.Empty;
         DecimalValue = 0;
         IntValue = 0;
+        LongValue = 0;
         ObjectRef = null;
         Collection = [];
         Items = new Dictionary<string, TestNode>();
     }
 
     /// <summary>
-    /// Creates a TestNode root with initial graph: 20 collection children + 10 dictionary entries.
+    /// Creates a TestNode root with a configurable number of children.
+    /// Default (31): 20 collection + 10 dictionary (chaos profile).
+    /// Custom count: all collection children (load profile).
     /// </summary>
-    public static TestNode CreateWithGraph(IInterceptorSubjectContext context)
+    public static TestNode CreateWithGraph(IInterceptorSubjectContext context, int objectCount = 31)
     {
-        var root = new TestNode(context)
+        if (objectCount == 31)
         {
-            Collection = Enumerable.Range(0, 20)
-                .Select(_ => new TestNode(context))
+            return new TestNode(context)
+            {
+                Collection = Enumerable.Range(0, 20)
+                    .Select(_ => new TestNode())
+                    .ToArray(),
+                Items = Enumerable.Range(0, 10)
+                    .ToDictionary(i => $"item-{i}", _ => new TestNode())
+            };
+        }
+
+        return new TestNode(context)
+        {
+            Collection = Enumerable.Range(0, objectCount)
+                .Select(_ => new TestNode())
                 .ToArray(),
-
-            Items = Enumerable.Range(0, 10)
-                .ToDictionary(i => $"item-{i}", i => new TestNode(context))
+            Items = new Dictionary<string, TestNode>()
         };
-
-        return root;
     }
 }

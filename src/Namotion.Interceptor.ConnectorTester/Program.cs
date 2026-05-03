@@ -71,6 +71,38 @@ var configuration = builder.Configuration
     .GetSection("ConnectorTester")
     .Get<ConnectorTesterConfiguration>() ?? new ConnectorTesterConfiguration();
 
+// Assign stable participant indices from config position
+configuration.Server.Index = 0;
+for (var i = 0; i < configuration.Clients.Count; i++)
+{
+    configuration.Clients[i].Index = i + 1;
+}
+
+// Parse --participant CLI arg for multi-process mode
+string? participantFilter = null;
+for (var i = 0; i < args.Length; i++)
+{
+    if (args[i] == "--participant" && i + 1 < args.Length)
+    {
+        participantFilter = args[i + 1];
+        break;
+    }
+}
+
+MutationEngine CreateMutationEngine(TestNode root, ParticipantConfiguration config, string logCategory)
+{
+    var logger = sharedLoggerFactory.CreateLogger(logCategory);
+
+    if (configuration.NumberOfBatches > 0)
+    {
+        return new BatchMutationEngine(
+            root, config, coordinator, logger,
+            configuration.NumberOfBatches, config.Index);
+    }
+
+    return new RandomMutationEngine(root, config, coordinator, logger);
+}
+
 // Determine server port based on connector type
 int serverPort = configuration.Connector.ToLowerInvariant() switch
 {
@@ -81,80 +113,104 @@ int serverPort = configuration.Connector.ToLowerInvariant() switch
 };
 
 // --- Server Setup ---
-var serverContext = InterceptorSubjectContext
-    .Create()
-    .WithFullPropertyTracking()
-    .WithRegistry()
-    .WithParents()
-    .WithLifecycle()
-    .WithHostedServices(builder.Services);
+var skipServer = participantFilter != null && participantFilter != configuration.Server.Name;
 
-var serverRoot = TestNode.CreateWithGraph(serverContext);
-participants[configuration.Server.Name] = serverRoot;
-
-var serverMutationEngine = new MutationEngine(
-    serverRoot, configuration.Server, coordinator,
-    sharedLoggerFactory.CreateLogger($"MutationEngine.{configuration.Server.Name}"));
-
-mutationEngines.Add(serverMutationEngine);
-
-builder.Services.AddSingleton<IHostedService>(serverMutationEngine);
-
-// Server-side connector wiring
-switch (configuration.Connector.ToLowerInvariant())
+if (!skipServer)
 {
-    case "opcua":
-        builder.Services.AddSingleton(serverRoot);
-        builder.Services.AddOpcUaSubjectServer(
-            _ => serverRoot,
-            sp =>
-            {
-                var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
-                var telemetryContext = DefaultTelemetry.Create(b =>
-                    b.Services.AddSingleton(loggerFactory));
+    var serverContext = InterceptorSubjectContext
+        .Create()
+        .WithFullPropertyTracking()
+        .WithRegistry()
+        .WithParents()
+        .WithLifecycle()
+        .WithTransactions()
+        .WithSourceTransactions()
+        .WithHostedServices(builder.Services);
 
-                return new OpcUaServerConfiguration
+    var serverRoot = TestNode.CreateWithGraph(serverContext, configuration.ObjectCount);
+    participants[configuration.Server.Name] = serverRoot;
+
+    var serverMutationEngine = CreateMutationEngine(
+        serverRoot, configuration.Server, $"MutationEngine.{configuration.Server.Name}");
+    mutationEngines.Add(serverMutationEngine);
+    builder.Services.AddSingleton<IHostedService>(serverMutationEngine);
+
+    // Server-side connector wiring
+    switch (configuration.Connector.ToLowerInvariant())
+    {
+        case "opcua":
+            builder.Services.AddSingleton(serverRoot);
+            builder.Services.AddOpcUaSubjectServer(
+                _ => serverRoot,
+                sp =>
                 {
-                    RootName = "Root",
-                    ValueConverter = new OpcUaValueConverter(),
-                    TelemetryContext = telemetryContext,
-                    AutoAcceptUntrustedCertificates = true,
-                    CleanCertificateStore = false,
-                };
-            });
-        break;
+                    var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
+                    var telemetryContext = DefaultTelemetry.Create(b =>
+                        b.Services.AddSingleton(loggerFactory));
 
-    case "mqtt":
-        builder.Services.AddSingleton(serverRoot);
-        builder.Services.AddMqttSubjectServer(
-            _ => serverRoot,
-            _ => new MqttServerConfiguration
-            {
-                BrokerPort = 1883,
-                PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
-                DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
-                UseRetainedMessages = true,
-                SourceTimestampSerializer = SerializeTickTimestamp,
-                SourceTimestampDeserializer = DeserializeTickTimestamp
-            });
-        break;
+                    return new OpcUaServerConfiguration
+                    {
+                        RootName = "Root",
+                        ValueConverter = new OpcUaValueConverter(),
+                        TelemetryContext = telemetryContext,
+                        AutoAcceptUntrustedCertificates = true,
+                        CleanCertificateStore = false,
+                    };
+                });
+            break;
 
-    case "websocket":
-        builder.Services.AddSingleton(serverRoot);
-        builder.Services.AddWebSocketSubjectServer(
-            _ => serverRoot,
-            config =>
-            {
-                config.Port = serverPort;
-                config.PathProvider = new AttributeBasedPathProvider("ws");
-            });
-        break;
+        case "mqtt":
+            builder.Services.AddSingleton(serverRoot);
+            builder.Services.AddMqttSubjectServer(
+                _ => serverRoot,
+                _ => new MqttServerConfiguration
+                {
+                    BrokerPort = 1883,
+                    PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
+                    DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
+                    UseRetainedMessages = true,
+                    SourceTimestampSerializer = SerializeTickTimestamp,
+                    SourceTimestampDeserializer = DeserializeTickTimestamp
+                });
+            break;
+
+        case "websocket":
+            builder.Services.AddSingleton(serverRoot);
+            builder.Services.AddWebSocketSubjectServer(
+                _ => serverRoot,
+                config =>
+                {
+                    config.Port = serverPort;
+                    config.PathProvider = new AttributeBasedPathProvider("ws");
+                });
+            break;
+    }
+
+    // Server chaos engine (if configured)
+    if (configuration.Server.Chaos != null)
+    {
+        var serverChaosEngine = new ChaosEngine(
+            configuration.Server.Name,
+            configuration.Server.Chaos,
+            coordinator,
+            target: null, // resolved after build
+            sharedLoggerFactory.CreateLogger($"ChaosEngine.{configuration.Server.Name}"));
+
+        chaosEngines.Add(serverChaosEngine);
+        builder.Services.AddSingleton<IHostedService>(serverChaosEngine);
+    }
 }
 
 // --- Client Setup ---
 for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex++)
 {
     var clientConfig = configuration.Clients[clientIndex];
+    var skipClient = participantFilter != null && participantFilter != clientConfig.Name;
+
+    if (skipClient)
+    {
+        continue;
+    }
 
     var clientContext = InterceptorSubjectContext
         .Create()
@@ -162,16 +218,15 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
         .WithRegistry()
         .WithParents()
         .WithLifecycle()
-            .WithSourceTransactions()
+        .WithTransactions()
+        .WithSourceTransactions()
         .WithHostedServices(builder.Services);
 
-    var clientRoot = TestNode.CreateWithGraph(clientContext);
+    var clientRoot = TestNode.CreateWithGraph(clientContext, configuration.ObjectCount);
     participants[clientConfig.Name] = clientRoot;
 
-    // Client mutation engine
-    var clientMutationEngine = new MutationEngine(
-        clientRoot, clientConfig, coordinator,
-        sharedLoggerFactory.CreateLogger($"MutationEngine.{clientConfig.Name}"));
+    var clientMutationEngine = CreateMutationEngine(
+        clientRoot, clientConfig, $"MutationEngine.{clientConfig.Name}");
     mutationEngines.Add(clientMutationEngine);
     builder.Services.AddSingleton<IHostedService>(clientMutationEngine);
 
@@ -210,14 +265,8 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
                     PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
                     DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
                     UseRetainedMessages = true,
-                    SourceTimestampSerializer = static ts =>
-                    {
-                        Span<byte> buffer = stackalloc byte[20];
-                        System.Buffers.Text.Utf8Formatter.TryFormat(ts.UtcTicks, buffer, out var bytesWritten);
-                        return buffer[..bytesWritten].ToArray();
-                    },
-                    SourceTimestampDeserializer = static value => System.Buffers.Text.Utf8Parser.TryParse(value.Span, out long ticks, out int _bytesConsumed)
-                        ? new DateTimeOffset(ticks, TimeSpan.Zero) : null,
+                    SourceTimestampSerializer = SerializeTickTimestamp,
+                    SourceTimestampDeserializer = DeserializeTickTimestamp,
                     ReconnectDelay = TimeSpan.FromSeconds(1),
                     MaximumReconnectDelay = TimeSpan.FromSeconds(10),
                     HealthCheckInterval = TimeSpan.FromSeconds(5),
@@ -254,32 +303,21 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
     }
 }
 
-// Server chaos engine (if configured)
-if (configuration.Server.Chaos != null)
+// --- Verification Engine (single-process only) ---
+if (participantFilter == null)
 {
-    var serverChaosEngine = new ChaosEngine(
-        configuration.Server.Name,
-        configuration.Server.Chaos,
+    builder.Services.AddSingleton(sp => new VerificationEngine(
+        configuration,
         coordinator,
-        target: null, // resolved after build
-        sharedLoggerFactory.CreateLogger($"ChaosEngine.{configuration.Server.Name}"));
+        participants,
+        mutationEngines,
+        chaosEngines,
+        cycleLoggerProvider,
+        sp.GetRequiredService<IHostApplicationLifetime>(),
+        sp.GetRequiredService<ILogger<VerificationEngine>>()));
 
-    chaosEngines.Add(serverChaosEngine);
-    builder.Services.AddSingleton<IHostedService>(serverChaosEngine);
+    builder.Services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<VerificationEngine>());
 }
-
-// --- Verification Engine ---
-builder.Services.AddSingleton(sp => new VerificationEngine(
-    configuration,
-    coordinator,
-    participants,
-    mutationEngines,
-    chaosEngines,
-    cycleLoggerProvider,
-    sp.GetRequiredService<IHostApplicationLifetime>(),
-    sp.GetRequiredService<ILogger<VerificationEngine>>()));
-
-builder.Services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<VerificationEngine>());
 
 // Build and wire up connectors for chaos engines
 var host = builder.Build();
@@ -288,7 +326,8 @@ var allConnectors = host.Services.GetServices<IHostedService>()
     .OfType<ISubjectConnector>()
     .ToList();
 
-var startupLogger = host.Services.GetRequiredService<ILogger<VerificationEngine>>();
+var startupLogger = host.Services.GetRequiredService<ILoggerFactory>()
+    .CreateLogger("Startup");
 
 foreach (var chaosEngine in chaosEngines)
 {
@@ -307,12 +346,31 @@ foreach (var chaosEngine in chaosEngines)
     }
 }
 
-var verificationEngine = host.Services.GetRequiredService<VerificationEngine>();
+// Create performance profilers for all participants
+var profilers = new List<PerformanceProfiler>();
+foreach (var (name, root) in participants)
+{
+    var profiler = new PerformanceProfiler(
+        ((IInterceptorSubject)root).Context,
+        name,
+        configuration.MetricsReportingInterval);
+    profilers.Add(profiler);
+}
 
 await host.RunAsync();
 
-// Set non-zero exit code on convergence failure
-if (verificationEngine.Failed)
+// Dispose profilers on shutdown
+foreach (var profiler in profilers)
 {
-    Environment.ExitCode = 1;
+    profiler.Dispose();
+}
+
+// Set non-zero exit code on convergence failure (single-process only)
+if (participantFilter == null)
+{
+    var verificationEngine = host.Services.GetRequiredService<VerificationEngine>();
+    if (verificationEngine.Failed)
+    {
+        Environment.ExitCode = 1;
+    }
 }

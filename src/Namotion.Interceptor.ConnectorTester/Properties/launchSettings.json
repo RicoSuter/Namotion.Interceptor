@@ -11,6 +11,18 @@
     "websocket": {
       "commandName": "Project",
       "environmentVariables": { "DOTNET_ENVIRONMENT": "websocket" }
+    },
+    "opcua-load": {
+      "commandName": "Project",
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "opcua-load" }
+    },
+    "mqtt-load": {
+      "commandName": "Project",
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "mqtt-load" }
+    },
+    "websocket-load": {
+      "commandName": "Project",
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "websocket-load" }
     }
   }
 }

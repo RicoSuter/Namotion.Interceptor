@@ -1,6 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
-using System.Runtime;
 using System.Text.Json;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.ConnectorTester.Configuration;
@@ -16,7 +14,6 @@ namespace Namotion.Interceptor.ConnectorTester.Engine;
 public class VerificationEngine : BackgroundService
 {
     private static readonly TimeSpan SnapshotPollInterval = TimeSpan.FromSeconds(5);
-    private const string MemoryLogPath = "logs/memory.log";
 
     private static readonly JsonSerializerOptions SnapshotJsonOptions = new()
     {
@@ -62,13 +59,6 @@ public class VerificationEngine : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Reset memory log for this run
-        Directory.CreateDirectory(Path.GetDirectoryName(MemoryLogPath)!);
-        if (File.Exists(MemoryLogPath))
-        {
-            File.Delete(MemoryLogPath);
-        }
-
         // Brief startup delay to let connectors initialize
         await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
 
@@ -86,7 +76,8 @@ public class VerificationEngine : BackgroundService
             string.Join(", ", _participants.Select(p => p.Key)));
         foreach (var engine in _mutationEngines)
         {
-            _logger.LogInformation("  {Name}: {Rate} mutations/sec", engine.Name, engine.MutationRate);
+            _logger.LogInformation("  {Name}: {Rate} value mutations/sec, {StructuralRate} structural mutations/sec",
+                engine.Name, engine.ValueMutationRate, engine.StructuralMutationRate);
         }
 
         if (_configuration.ChaosProfiles.Count > 0)
@@ -169,7 +160,6 @@ public class VerificationEngine : BackgroundService
                     cycleStopwatch.Stop();
 
                     WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, "PASS");
-                    AppendMemoryLog(activeProfileName, "PASS");
                     _logger.LogInformation(
                         "=== Cycle {Cycle}: PASS (converged in {ConvergeTime:F1}s, cycle {CycleTime:F0}s) ===",
                         _cycleNumber, convergeStopwatch.Elapsed.TotalSeconds, cycleStopwatch.Elapsed.TotalSeconds);
@@ -215,7 +205,6 @@ public class VerificationEngine : BackgroundService
                 }
 
                 WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, "FAIL");
-                AppendMemoryLog(activeProfileName, "FAIL");
                 _cycleLoggerProvider?.FinishCycle(_cycleNumber, false);
 
                 _failed = true;
@@ -271,8 +260,8 @@ public class VerificationEngine : BackgroundService
         // Per-participant breakdown
         foreach (var engine in _mutationEngines)
         {
-            _logger.LogInformation("  {Name}: {Values:N0} value mutations",
-                engine.Name, engine.ValueMutationCount);
+            _logger.LogInformation("  {Name}: {Values:N0} value mutations, {Structural:N0} structural mutations",
+                engine.Name, engine.ValueMutationCount, engine.StructuralMutationCount);
         }
 
         // Chaos event timeline
@@ -284,28 +273,6 @@ public class VerificationEngine : BackgroundService
                     engine.TargetName, record.FaultType, record.DisruptedAt.LocalDateTime, record.Duration.TotalSeconds);
             }
         }
-    }
-
-    private void AppendMemoryLog(string? profileName, string result)
-    {
-        // Compact LOH to prevent fragmentation from large temporary objects
-        // created during server restart cycles (NodeSet XML, serialization buffers).
-        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
-        GC.WaitForPendingFinalizers();
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
-
-        using var process = Process.GetCurrentProcess();
-        var workingSetMb = process.WorkingSet64 / (1024.0 * 1024.0);
-        var heapMb = GC.GetTotalMemory(forceFullCollection: false) / (1024.0 * 1024.0);
-        var profile = profileName != null ? $"profile: {profileName}" : "no profile";
-
-        var line = string.Format(
-            CultureInfo.InvariantCulture,
-            "{0:yyyy-MM-ddTHH:mm:ss.fffZ}, Cycle {1}, {2}, {3}, ProcessMB: {4:F1}, HeapMB: {5:F1}",
-            DateTimeOffset.UtcNow, _cycleNumber, profile, result, workingSetMb, heapMb);
-
-        File.AppendAllText(MemoryLogPath, line + Environment.NewLine);
     }
 
     private string? ApplyChaosProfile()
