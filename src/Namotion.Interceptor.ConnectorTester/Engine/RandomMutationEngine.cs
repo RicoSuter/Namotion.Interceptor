@@ -25,8 +25,8 @@ public class RandomMutationEngine : MutationEngine
 
     protected override async Task RunValueMutationsAsync(CancellationToken stoppingToken)
     {
-        var mutationsPerMs = Math.Max(1, ValueMutationRate) / 1000.0;
-        var batchSize = Math.Max(1, (int)Math.Ceiling(mutationsPerMs));
+        var batchSize = Math.Max(1, (int)Math.Ceiling(ValueMutationRate / 1000.0));
+        var delayMs = Math.Max(1, (int)Math.Round(1000.0 * batchSize / ValueMutationRate));
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -56,7 +56,7 @@ public class RandomMutationEngine : MutationEngine
                     }
                 }
 
-                await Task.Delay(1, stoppingToken);
+                await Task.Delay(delayMs, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

@@ -94,8 +94,8 @@ public abstract class MutationEngine : BackgroundService
 
     private async Task RunStructuralMutationsAsync(CancellationToken stoppingToken)
     {
-        var mutationsPerMs = Math.Max(1, _configuration.StructuralMutationRate) / 1000.0;
-        var batchSize = Math.Max(1, (int)Math.Ceiling(mutationsPerMs));
+        var batchSize = Math.Max(1, (int)Math.Ceiling(_configuration.StructuralMutationRate / 1000.0));
+        var delayMs = Math.Max(1, (int)Math.Round(1000.0 * batchSize / _configuration.StructuralMutationRate));
         var rebuildCounter = 0;
 
         while (!stoppingToken.IsCancellationRequested)
@@ -117,7 +117,7 @@ public abstract class MutationEngine : BackgroundService
                     rebuildCounter = 0;
                 }
 
-                await Task.Delay(1, stoppingToken);
+                await Task.Delay(delayMs, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
