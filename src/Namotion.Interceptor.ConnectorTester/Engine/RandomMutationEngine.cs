@@ -1,11 +1,14 @@
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Model;
+using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.ConnectorTester.Engine;
 
 /// <summary>
 /// Value mutation strategy: picks a random node and random property, one at a time.
 /// Used for chaos profiles (BatchSize = 0).
+/// When UseTransactions is enabled, each tick's batch of mutations is wrapped
+/// in a single transaction.
 /// </summary>
 public class RandomMutationEngine : MutationEngine
 {
@@ -31,10 +34,26 @@ public class RandomMutationEngine : MutationEngine
             {
                 Coordinator.WaitIfPaused(stoppingToken);
 
-                for (var i = 0; i < batchSize; i++)
+                if (UseTransactions)
                 {
-                    PerformValueMutation();
-                    IncrementValueMutationCount();
+                    using var transaction = await Context.BeginTransactionAsync(
+                        TransactionFailureHandling.BestEffort);
+
+                    for (var i = 0; i < batchSize; i++)
+                    {
+                        PerformValueMutation();
+                        IncrementValueMutationCount();
+                    }
+
+                    await transaction.CommitAsync(stoppingToken);
+                }
+                else
+                {
+                    for (var i = 0; i < batchSize; i++)
+                    {
+                        PerformValueMutation();
+                        IncrementValueMutationCount();
+                    }
                 }
 
                 await Task.Delay(1, stoppingToken);

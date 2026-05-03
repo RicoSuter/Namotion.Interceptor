@@ -40,6 +40,8 @@ public abstract class MutationEngine : BackgroundService
     public long StructuralMutationCount => Interlocked.Read(ref _structuralMutationCount);
 
     protected TestNode Root => _root;
+    protected IInterceptorSubjectContext Context => ((IInterceptorSubject)_root).Context;
+    protected bool UseTransactions => _configuration.UseTransactions;
     protected TestCycleCoordinator Coordinator => _coordinator;
 
     protected MutationEngine(

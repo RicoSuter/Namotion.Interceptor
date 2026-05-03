@@ -13,6 +13,9 @@ public class ParticipantConfiguration
     /// <summary>Structural mutations per second (0 = disabled).</summary>
     public int StructuralMutationRate { get; set; } = 0;
 
+    /// <summary>Whether the mutation engine wraps writes in transactions (requires WithSourceTransactions on context).</summary>
+    public bool UseTransactions { get; set; } = false;
+
     /// <summary>Null means no chaos for this participant.</summary>
     public ChaosConfiguration? Chaos { get; set; }
 }

@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Model;
+using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.ConnectorTester.Engine;
 
@@ -11,6 +12,8 @@ namespace Namotion.Interceptor.ConnectorTester.Engine;
 /// batches with even distribution via a PeriodicTimer at 110% tick rate.
 /// Each participant mutates a single fixed property (participantIndex % 4)
 /// to avoid OPC UA subscription coalescing.
+/// When UseTransactions is enabled, each batch is wrapped in a transaction
+/// (sequential, since transactions are not thread-safe with Parallel.For).
 /// </summary>
 public class BatchMutationEngine : MutationEngine
 {
@@ -81,35 +84,70 @@ public class BatchMutationEngine : MutationEngine
 
             var count = Math.Min(Math.Min(nodesPerBatch, ValueMutationRate - mutationsThisSecond), nodeCount);
 
-            using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
+            if (UseTransactions)
             {
-                Parallel.For(0, count, j =>
-                {
-                    var node = nodes[(nodeIndex + j) % nodeCount];
-                    var counter = NextGlobalCounter();
-
-                    switch (property)
-                    {
-                        case 0:
-                            node.StringValue = counter.ToString("x8");
-                            break;
-                        case 1:
-                            node.DecimalValue = counter / 100m;
-                            break;
-                        case 2:
-                            node.IntValue = (int)(counter % int.MaxValue);
-                            break;
-                        case 3:
-                            node.LongValue = counter;
-                            break;
-                    }
-
-                    IncrementValueMutationCount();
-                });
+                await MutateBatchWithTransactionAsync(nodes, nodeCount, nodeIndex, count, property, stoppingToken);
+            }
+            else
+            {
+                MutateBatchParallel(nodes, nodeCount, nodeIndex, count, property);
             }
 
             nodeIndex = (nodeIndex + count) % nodeCount;
             mutationsThisSecond += count;
         }
+    }
+
+    private async Task MutateBatchWithTransactionAsync(
+        List<TestNode> nodes, int nodeCount, int nodeIndex, int count, int property,
+        CancellationToken stoppingToken)
+    {
+        using var transaction = await Context.BeginTransactionAsync(
+            TransactionFailureHandling.BestEffort);
+
+        using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
+        {
+            for (var j = 0; j < count; j++)
+            {
+                MutateNode(nodes[(nodeIndex + j) % nodeCount], property);
+            }
+        }
+
+        await transaction.CommitAsync(stoppingToken);
+    }
+
+    private void MutateBatchParallel(
+        List<TestNode> nodes, int nodeCount, int nodeIndex, int count, int property)
+    {
+        using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
+        {
+            Parallel.For(0, count, j =>
+            {
+                MutateNode(nodes[(nodeIndex + j) % nodeCount], property);
+            });
+        }
+    }
+
+    private void MutateNode(TestNode node, int property)
+    {
+        var counter = NextGlobalCounter();
+
+        switch (property)
+        {
+            case 0:
+                node.StringValue = counter.ToString("x8");
+                break;
+            case 1:
+                node.DecimalValue = counter / 100m;
+                break;
+            case 2:
+                node.IntValue = (int)(counter % int.MaxValue);
+                break;
+            case 3:
+                node.LongValue = counter;
+                break;
+        }
+
+        IncrementValueMutationCount();
     }
 }

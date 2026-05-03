@@ -123,6 +123,8 @@ if (!skipServer)
         .WithRegistry()
         .WithParents()
         .WithLifecycle()
+        .WithTransactions()
+        .WithSourceTransactions()
         .WithHostedServices(builder.Services);
 
     var serverRoot = TestNode.CreateWithGraph(serverContext, configuration.ObjectCount);
@@ -216,7 +218,8 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
         .WithRegistry()
         .WithParents()
         .WithLifecycle()
-            .WithSourceTransactions()
+        .WithTransactions()
+        .WithSourceTransactions()
         .WithHostedServices(builder.Services);
 
     var clientRoot = TestNode.CreateWithGraph(clientContext, configuration.ObjectCount);
