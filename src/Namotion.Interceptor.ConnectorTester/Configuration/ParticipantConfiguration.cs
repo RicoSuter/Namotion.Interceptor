@@ -4,6 +4,9 @@ public class ParticipantConfiguration
 {
     public string Name { get; set; } = string.Empty;
 
+    /// <summary>Assigned at startup from config position (server=0, clients=1,2,...). Determines which property to mutate in batch mode.</summary>
+    public int Index { get; set; }
+
     /// <summary>Value mutations per second.</summary>
     public int ValueMutationRate { get; set; } = 50;
 

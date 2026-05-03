@@ -71,6 +71,13 @@ var configuration = builder.Configuration
     .GetSection("ConnectorTester")
     .Get<ConnectorTesterConfiguration>() ?? new ConnectorTesterConfiguration();
 
+// Assign stable participant indices from config position
+configuration.Server.Index = 0;
+for (var i = 0; i < configuration.Clients.Count; i++)
+{
+    configuration.Clients[i].Index = i + 1;
+}
+
 // Parse --participant CLI arg for multi-process mode
 string? participantFilter = null;
 for (var i = 0; i < args.Length; i++)
@@ -82,7 +89,7 @@ for (var i = 0; i < args.Length; i++)
     }
 }
 
-MutationEngine CreateMutationEngine(TestNode root, ParticipantConfiguration config, int participantIndex, string logCategory)
+MutationEngine CreateMutationEngine(TestNode root, ParticipantConfiguration config, string logCategory)
 {
     var logger = sharedLoggerFactory.CreateLogger(logCategory);
 
@@ -90,7 +97,7 @@ MutationEngine CreateMutationEngine(TestNode root, ParticipantConfiguration conf
     {
         return new BatchMutationEngine(
             root, config, coordinator, logger,
-            configuration.NumberOfBatches, participantIndex);
+            configuration.NumberOfBatches, config.Index);
     }
 
     return new RandomMutationEngine(root, config, coordinator, logger);
@@ -122,7 +129,7 @@ if (!skipServer)
     participants[configuration.Server.Name] = serverRoot;
 
     var serverMutationEngine = CreateMutationEngine(
-        serverRoot, configuration.Server, 0, $"MutationEngine.{configuration.Server.Name}");
+        serverRoot, configuration.Server, $"MutationEngine.{configuration.Server.Name}");
     mutationEngines.Add(serverMutationEngine);
     builder.Services.AddSingleton<IHostedService>(serverMutationEngine);
 
@@ -215,9 +222,8 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
     var clientRoot = TestNode.CreateWithGraph(clientContext, configuration.ObjectCount);
     participants[clientConfig.Name] = clientRoot;
 
-    // Client mutation engine (participantIndex: server=0, clients=1,2,...)
     var clientMutationEngine = CreateMutationEngine(
-        clientRoot, clientConfig, clientIndex + 1, $"MutationEngine.{clientConfig.Name}");
+        clientRoot, clientConfig, $"MutationEngine.{clientConfig.Name}");
     mutationEngines.Add(clientMutationEngine);
     builder.Services.AddSingleton<IHostedService>(clientMutationEngine);
 
