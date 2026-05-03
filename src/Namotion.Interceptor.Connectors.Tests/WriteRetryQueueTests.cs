@@ -319,6 +319,37 @@ public class WriteRetryQueueTests
         Assert.True(queue.IsEmpty);
     }
     
+    [Fact]
+    public void WhenDrainForLocalReapply_ThenReturnsAllItemsAndClearsQueue()
+    {
+        // Arrange
+        var queue = new WriteRetryQueue(100, NullLogger.Instance);
+        queue.Enqueue(CreateChanges(5));
+        Assert.Equal(5, queue.PendingWriteCount);
+
+        // Act
+        var drained = queue.DrainForLocalReapply();
+
+        // Assert
+        Assert.Equal(5, drained.Length);
+        Assert.True(queue.IsEmpty);
+        Assert.Equal(0, queue.PendingWriteCount);
+    }
+
+    [Fact]
+    public void WhenDrainForLocalReapplyOnEmptyQueue_ThenReturnsEmptyArray()
+    {
+        // Arrange
+        var queue = new WriteRetryQueue(100, NullLogger.Instance);
+
+        // Act
+        var drained = queue.DrainForLocalReapply();
+
+        // Assert
+        Assert.Empty(drained);
+        Assert.True(queue.IsEmpty);
+    }
+
     private static SubjectPropertyChange CreateChange(int id)
     {
         var subjectMock = new Mock<IInterceptorSubject>();

@@ -1,6 +1,5 @@
 using Namotion.Interceptor.OpcUa.Tests.Integration.Testing;
 using Namotion.Interceptor.Testing;
-using Namotion.Interceptor.Tracking.Transactions;
 using Xunit.Abstractions;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Integration;
@@ -131,5 +130,60 @@ public class OpcUaDataTypesTests : SharedServerTestBase
         Logger.Log("ByteArray client→server sync verified");
     }
 
-    // Note: Guid type test removed - OPC UA Guid mapping needs further investigation
+    [Fact]
+    public async Task GuidType_ShouldSyncBothDirections()
+    {
+        var serverArea = ServerFixture.ServerRoot.DataTypes;
+        var clientArea = Client!.Root!.DataTypes;
+
+        // Client to server
+        var clientGuid = Guid.NewGuid();
+        clientArea.GuidValue = clientGuid;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverArea.GuidValue == clientGuid,
+            timeout: TimeSpan.FromSeconds(90),
+            message: $"Server should receive client's Guid update. Expected: {clientGuid}, Actual: {serverArea.GuidValue}");
+
+        // Server to client
+        var serverGuid = Guid.NewGuid();
+        serverArea.GuidValue = serverGuid;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => clientArea.GuidValue == serverGuid,
+            timeout: TimeSpan.FromSeconds(90),
+            message: $"Client should receive server's Guid update. Expected: {serverGuid}, Actual: {clientArea.GuidValue}");
+
+        Logger.Log("Guid bidirectional sync verified");
+    }
+
+    [Fact]
+    public async Task NullableGuidType_ShouldSyncBothDirections()
+    {
+        var serverArea = ServerFixture.ServerRoot.DataTypes;
+        var clientArea = Client!.Root!.DataTypes;
+
+        // Client to server
+        var clientGuid = Guid.NewGuid();
+        clientArea.NullableGuidValue = clientGuid;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverArea.NullableGuidValue == clientGuid,
+            timeout: TimeSpan.FromSeconds(90),
+            message: $"Server should receive client's nullable Guid update. Expected: {clientGuid}, Actual: {serverArea.NullableGuidValue}");
+
+        // Server to client
+        var serverGuid = Guid.NewGuid();
+        serverArea.NullableGuidValue = serverGuid;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => clientArea.NullableGuidValue == serverGuid,
+            timeout: TimeSpan.FromSeconds(90),
+            message: $"Client should receive server's nullable Guid update. Expected: {serverGuid}, Actual: {clientArea.NullableGuidValue}");
+
+        // Client sets null (OPC UA maps null to Guid.Empty since Guid is a value type)
+        clientArea.NullableGuidValue = null;
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => serverArea.NullableGuidValue == Guid.Empty,
+            timeout: TimeSpan.FromSeconds(90),
+            message: $"Server should receive client's null→Empty Guid update. Actual: {serverArea.NullableGuidValue}");
+
+        Logger.Log("Nullable Guid bidirectional sync verified");
+    }
 }

@@ -1,8 +1,13 @@
+using System.ComponentModel;
+using HomeBlaze.Abstractions.Attributes;
+
 namespace HomeBlaze.Abstractions;
 
 /// <summary>
 /// Interface for subjects that provide an icon.
 /// </summary>
+[SubjectAbstraction]
+[Description("Subject that provides an icon name and color for UI display.")]
 public interface IIconProvider
 {
     /// <summary>

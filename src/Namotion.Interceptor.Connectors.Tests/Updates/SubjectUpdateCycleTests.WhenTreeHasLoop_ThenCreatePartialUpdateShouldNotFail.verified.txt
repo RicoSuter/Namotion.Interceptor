@@ -43,6 +43,9 @@
       },
       mother: {
         Kind: Object
+      },
+      relationships: {
+        Kind: Value
       }
     }
   }

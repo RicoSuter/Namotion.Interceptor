@@ -13,8 +13,8 @@ using MQTTnet.Server;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Paths;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 
@@ -84,7 +84,8 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
         configuration.Validate();
     }
 
-    private bool IsPropertyIncluded(RegisteredSubjectProperty property) =>
+    private bool IsPropertyIncluded(PropertyReference propertyReference) =>
+        propertyReference.TryGetRegisteredProperty() is { } property &&
         _configuration.PathProvider.IsPropertyIncluded(property);
 
     /// <inheritdoc />
@@ -231,7 +232,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
             {
                 var change = changesSpan[i];
                 var registeredProperty = change.Property.TryGetRegisteredProperty();
-                if (registeredProperty is not { HasChildSubjects: false })
+                if (registeredProperty is not { CanContainSubjects: false })
                 {
                     continue;
                 }
@@ -396,7 +397,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
             var properties = _subject
                 .TryGetRegisteredSubject()?
                 .GetAllProperties()
-                .Where(p => !p.HasChildSubjects)
+                .Where(p => !p.CanContainSubjects)
                 .GetPaths(_configuration.PathProvider, _subject);
 
             if (properties is null) return;
@@ -555,7 +556,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
         }
 
         // Cancel any in-progress initial state tasks (e.g. Task.Delay) before waiting
-        _shutdownCts.Cancel();
+        await _shutdownCts.CancelAsync();
 
         var server = _mqttServer;
         if (server is not null)

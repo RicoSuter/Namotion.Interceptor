@@ -1,0 +1,243 @@
+﻿[assembly: System.Reflection.AssemblyMetadata("RepositoryUrl", "https://github.com/RicoSuter/Namotion.Interceptor")]
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("Namotion.Interceptor.Connectors.Tests")]
+[assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v9.0", FrameworkDisplayName=".NET 9.0")]
+namespace Namotion.Interceptor.Connectors
+{
+    public class ChangeQueueProcessor : System.IDisposable
+    {
+        public ChangeQueueProcessor(object? source, Namotion.Interceptor.IInterceptorSubjectContext context, System.Func<Namotion.Interceptor.PropertyReference, bool> propertyFilter, System.Func<System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask> writeHandler, System.TimeSpan? bufferTime, Microsoft.Extensions.Logging.ILogger logger) { }
+        public void Dispose() { }
+        public System.Threading.Tasks.Task ProcessAsync(System.Threading.CancellationToken cancellationToken) { }
+    }
+    public class DefaultSubjectFactory : Namotion.Interceptor.Connectors.ISubjectFactory
+    {
+        public DefaultSubjectFactory() { }
+        public static Namotion.Interceptor.Connectors.DefaultSubjectFactory Instance { get; }
+        public virtual Namotion.Interceptor.IInterceptorSubject CreateSubject(System.Type itemType, System.IServiceProvider? serviceProvider) { }
+        public System.Collections.Generic.IEnumerable<Namotion.Interceptor.IInterceptorSubject?> CreateSubjectCollection(System.Type propertyType, [System.Runtime.CompilerServices.ParamCollection] System.Collections.Generic.IEnumerable<Namotion.Interceptor.IInterceptorSubject?> children) { }
+        public System.Collections.IDictionary CreateSubjectDictionary(System.Type propertyType, System.Collections.Generic.IDictionary<object, Namotion.Interceptor.IInterceptorSubject> entries) { }
+    }
+    public enum FaultType
+    {
+        Kill = 0,
+        Disconnect = 1,
+    }
+    public interface IFaultInjectable
+    {
+        System.Threading.Tasks.Task InjectFaultAsync(Namotion.Interceptor.Connectors.FaultType faultType, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface ISubjectConnector
+    {
+        Namotion.Interceptor.IInterceptorSubject RootSubject { get; }
+    }
+    public interface ISubjectFactory
+    {
+        Namotion.Interceptor.IInterceptorSubject CreateSubject(System.Type type, System.IServiceProvider? serviceProvider);
+        System.Collections.Generic.IEnumerable<Namotion.Interceptor.IInterceptorSubject?> CreateSubjectCollection(System.Type propertyType, [System.Runtime.CompilerServices.ParamCollection] System.Collections.Generic.IEnumerable<Namotion.Interceptor.IInterceptorSubject?> children);
+        System.Collections.IDictionary CreateSubjectDictionary(System.Type propertyType, System.Collections.Generic.IDictionary<object, Namotion.Interceptor.IInterceptorSubject> entries);
+    }
+    public interface ISubjectSource : Namotion.Interceptor.Connectors.ISubjectConnector
+    {
+        int WriteBatchSize { get; }
+        System.Threading.Tasks.Task<System.Action?> LoadInitialStateAsync(System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.Task<System.IDisposable?> StartListeningAsync(Namotion.Interceptor.Connectors.SubjectPropertyWriter propertyWriter, System.Threading.CancellationToken cancellationToken);
+        System.Threading.Tasks.ValueTask<Namotion.Interceptor.Connectors.WriteResult> WriteChangesAsync(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes, System.Threading.CancellationToken cancellationToken);
+    }
+    public interface ISupportsConcurrentWrites { }
+    public static class InterceptorSubjectContextExtensions
+    {
+        public static Namotion.Interceptor.IInterceptorSubjectContext WithSourceTransactions(this Namotion.Interceptor.IInterceptorSubjectContext context) { }
+    }
+    public static class RegisteredSubjectPropertyExtensions
+    {
+        public static void SetValueFromSource(this Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, object source, System.DateTimeOffset? changedTimestamp, System.DateTimeOffset? receivedTimestamp, object? value) { }
+    }
+    public class SourceOwnershipManager : System.IDisposable
+    {
+        public SourceOwnershipManager(Namotion.Interceptor.Connectors.ISubjectSource source, System.Action<Namotion.Interceptor.PropertyReference>? onReleasing = null, System.Action<Namotion.Interceptor.IInterceptorSubject>? onSubjectDetaching = null) { }
+        public System.Collections.Generic.IReadOnlyCollection<Namotion.Interceptor.PropertyReference> Properties { get; }
+        public bool ClaimSource(Namotion.Interceptor.PropertyReference property) { }
+        public void Dispose() { }
+        public void ReleaseSource(Namotion.Interceptor.PropertyReference property) { }
+    }
+    public static class SourcePropertyExtensions
+    {
+        public static bool RemoveSource(this Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.Connectors.ISubjectSource expectedSource) { }
+        public static bool SetSource(this Namotion.Interceptor.PropertyReference property, Namotion.Interceptor.Connectors.ISubjectSource source) { }
+        public static bool TryGetSource(this Namotion.Interceptor.PropertyReference property, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out Namotion.Interceptor.Connectors.ISubjectSource? source) { }
+    }
+    public static class SubjectFactoryExtensions
+    {
+        public static Namotion.Interceptor.IInterceptorSubject CreateCollectionSubject(this Namotion.Interceptor.Connectors.ISubjectFactory subjectFactory, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, object? index) { }
+        public static Namotion.Interceptor.IInterceptorSubject CreateSubject(this Namotion.Interceptor.Connectors.ISubjectFactory subjectFactory, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+    }
+    public sealed class SubjectPropertyWriter
+    {
+        public SubjectPropertyWriter(Namotion.Interceptor.Connectors.ISubjectSource source, Microsoft.Extensions.Logging.ILogger logger) { }
+        public System.Threading.Tasks.Task LoadInitialStateAndResumeAsync(System.Threading.CancellationToken cancellationToken) { }
+        public void StartBuffering() { }
+        public void Write<TState>(TState state, System.Action<TState> update) { }
+    }
+    public class SubjectSourceBackgroundService : Microsoft.Extensions.Hosting.BackgroundService
+    {
+        public SubjectSourceBackgroundService(Namotion.Interceptor.Connectors.ISubjectSource source, Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger logger, System.TimeSpan? bufferTime = default, System.TimeSpan? retryTime = default, int writeRetryQueueSize = 1000) { }
+        public override void Dispose() { }
+        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+    }
+    public static class SubjectSourceExtensions
+    {
+        [System.Runtime.CompilerServices.AsyncMethodBuilder(typeof(System.Runtime.CompilerServices.PoolingAsyncValueTaskMethodBuilder<!0>))]
+        public static System.Threading.Tasks.ValueTask<Namotion.Interceptor.Connectors.WriteResult> WriteChangesInBatchesAsync(this Namotion.Interceptor.Connectors.ISubjectSource source, System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes, System.Threading.CancellationToken cancellationToken) { }
+    }
+    public readonly struct WriteResult
+    {
+        public System.Exception? Error { get; }
+        public System.Collections.Immutable.ImmutableArray<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> FailedChanges { get; }
+        public bool IsFullySuccessful { get; }
+        public bool IsPartialFailure { get; }
+        public static Namotion.Interceptor.Connectors.WriteResult Success { get; }
+        public static Namotion.Interceptor.Connectors.WriteResult Failure(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> failedChanges, System.Exception error) { }
+        public static Namotion.Interceptor.Connectors.WriteResult PartialFailure(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> failedChanges, System.Exception error) { }
+    }
+}
+namespace Namotion.Interceptor.Connectors.Paths
+{
+    public class JsonCamelCasePathProcessor : Namotion.Interceptor.Connectors.Updates.ISubjectUpdateProcessor
+    {
+        public JsonCamelCasePathProcessor() { }
+        public static Namotion.Interceptor.Connectors.Paths.JsonCamelCasePathProcessor Instance { get; }
+        public bool IsIncluded(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property) { }
+        public Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdate TransformSubjectPropertyUpdate(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdate update) { }
+        public Namotion.Interceptor.Connectors.Updates.SubjectUpdate TransformSubjectUpdate(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Connectors.Updates.SubjectUpdate update) { }
+    }
+    public static class PathExtensions
+    {
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "path",
+                "property",
+                "index"})]
+        public static System.Collections.Generic.IEnumerable<System.ValueTuple<string, Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?, object?>> GetPropertiesFromPaths(this Namotion.Interceptor.IInterceptorSubject rootSubject, System.Collections.Generic.IEnumerable<string> paths, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.Connectors.ISubjectFactory? subjectFactory = null, bool useCache = true) { }
+        [return: System.Runtime.CompilerServices.TupleElementNames(new string[] {
+                "property",
+                "index"})]
+        public static System.ValueTuple<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty?, object?> TryGetPropertyFromPath(this Namotion.Interceptor.IInterceptorSubject subject, string path, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.Connectors.ISubjectFactory? subjectFactory = null) { }
+        public static bool UpdatePropertyValueFromPath(this Namotion.Interceptor.IInterceptorSubject subject, string path, System.DateTimeOffset timestamp, System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, string, object?> getPropertyValue, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, object? source) { }
+        public static bool UpdatePropertyValueFromPath(this Namotion.Interceptor.IInterceptorSubject subject, string path, System.DateTimeOffset timestamp, object? value, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, object? source) { }
+        public static System.Collections.Generic.IEnumerable<string> UpdatePropertyValuesFromPaths(this Namotion.Interceptor.IInterceptorSubject subject, System.Collections.Generic.IReadOnlyDictionary<string, object?> pathsAndValues, System.DateTimeOffset timestamp, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, object? source) { }
+        public static System.Collections.Generic.IEnumerable<string> UpdatePropertyValuesFromPaths(this Namotion.Interceptor.IInterceptorSubject subject, System.Collections.Generic.IEnumerable<string> paths, System.DateTimeOffset timestamp, System.Func<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, string, object?> getPropertyValue, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, object? source) { }
+        public static System.Collections.Generic.IReadOnlyCollection<string> VisitPropertiesFromPaths(this Namotion.Interceptor.IInterceptorSubject subject, System.Collections.Generic.IEnumerable<string> paths, System.Action<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, string, object?> visitProperty, Namotion.Interceptor.Registry.Paths.PathProviderBase pathProvider, Namotion.Interceptor.Connectors.ISubjectFactory? subjectFactory = null) { }
+    }
+}
+namespace Namotion.Interceptor.Connectors.Resilience
+{
+    public sealed class CircuitBreaker
+    {
+        public CircuitBreaker(int failureThreshold, System.TimeSpan cooldownPeriod) { }
+        public bool IsOpen { get; }
+        public long TripCount { get; }
+        public System.TimeSpan GetCooldownRemaining() { }
+        public bool RecordFailure() { }
+        public void RecordSuccess() { }
+        public void Reset() { }
+        public bool ShouldAttempt() { }
+    }
+}
+namespace Namotion.Interceptor.Connectors.Transactions
+{
+    public class SourceTransactionWriteException : System.Exception
+    {
+        public SourceTransactionWriteException(Namotion.Interceptor.Connectors.ISubjectSource source, System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> failedChanges, System.Exception inner) { }
+        public System.Collections.Generic.IReadOnlyList<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> FailedChanges { get; }
+        public Namotion.Interceptor.Connectors.ISubjectSource FailedSource { get; }
+    }
+}
+namespace Namotion.Interceptor.Connectors.Updates
+{
+    public interface ISubjectUpdateProcessor
+    {
+        bool IsIncluded(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property);
+        Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdate TransformSubjectPropertyUpdate(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdate update);
+        Namotion.Interceptor.Connectors.Updates.SubjectUpdate TransformSubjectUpdate(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Connectors.Updates.SubjectUpdate update);
+    }
+    public class SubjectCollectionOperation
+    {
+        public SubjectCollectionOperation() { }
+        [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter))]
+        [System.Text.Json.Serialization.JsonPropertyName("action")]
+        public Namotion.Interceptor.Connectors.Updates.SubjectCollectionOperationType Action { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("fromIndex")]
+        public int? FromIndex { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("id")]
+        public string? Id { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("index")]
+        public required object Index { get; init; }
+    }
+    public enum SubjectCollectionOperationType
+    {
+        Remove = 0,
+        Insert = 1,
+        Move = 2,
+    }
+    public readonly struct SubjectPropertyItemUpdate
+    {
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("id")]
+        public string? Id { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("index")]
+        public required object Index { get; init; }
+    }
+    public class SubjectPropertyUpdate
+    {
+        public SubjectPropertyUpdate() { }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("attributes")]
+        public System.Collections.Generic.Dictionary<string, Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdate>? Attributes { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("count")]
+        public int? Count { get; set; }
+        [System.Text.Json.Serialization.JsonExtensionData]
+        public System.Collections.Generic.Dictionary<string, object>? ExtensionData { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("id")]
+        public string? Id { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("items")]
+        public System.Collections.Generic.List<Namotion.Interceptor.Connectors.Updates.SubjectPropertyItemUpdate>? Items { get; set; }
+        [System.Text.Json.Serialization.JsonConverter(typeof(System.Text.Json.Serialization.JsonStringEnumConverter?))]
+        [System.Text.Json.Serialization.JsonPropertyName("kind")]
+        public Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdateKind Kind { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("operations")]
+        public System.Collections.Generic.List<Namotion.Interceptor.Connectors.Updates.SubjectCollectionOperation>? Operations { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("timestamp")]
+        public System.DateTimeOffset? Timestamp { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition=System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        [System.Text.Json.Serialization.JsonPropertyName("value")]
+        public object? Value { get; set; }
+    }
+    public enum SubjectPropertyUpdateKind
+    {
+        None = 0,
+        Value = 1,
+        Object = 2,
+        Collection = 3,
+        Dictionary = 4,
+    }
+    public class SubjectUpdate
+    {
+        public SubjectUpdate() { }
+        [System.Text.Json.Serialization.JsonPropertyName("root")]
+        public string Root { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("subjects")]
+        public System.Collections.Generic.Dictionary<string, System.Collections.Generic.Dictionary<string, Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdate>> Subjects { get; init; }
+        public static Namotion.Interceptor.Connectors.Updates.SubjectUpdate CreateCompleteUpdate(Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Connectors.Updates.ISubjectUpdateProcessor[] processors) { }
+        public static Namotion.Interceptor.Connectors.Updates.SubjectUpdate CreatePartialUpdateFromChanges(Namotion.Interceptor.IInterceptorSubject subject, System.ReadOnlySpan<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> propertyChanges, Namotion.Interceptor.Connectors.Updates.ISubjectUpdateProcessor[] processors) { }
+    }
+    public static class SubjectUpdateExtensions
+    {
+        public static void ApplySubjectUpdate(this Namotion.Interceptor.IInterceptorSubject subject, Namotion.Interceptor.Connectors.Updates.SubjectUpdate update, Namotion.Interceptor.Connectors.ISubjectFactory? subjectFactory, System.Action<Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty, Namotion.Interceptor.Connectors.Updates.SubjectPropertyUpdate>? transformValueBeforeApply = null) { }
+    }
+}

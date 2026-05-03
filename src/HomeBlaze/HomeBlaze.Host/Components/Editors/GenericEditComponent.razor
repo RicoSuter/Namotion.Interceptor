@@ -3,7 +3,7 @@
 @using HomeBlaze.Components.Abstractions.Attributes
 @using Namotion.Interceptor
 
-@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(IConfigurableSubject))]
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(IConfigurable))]
 @implements ISubjectEditComponent
 
 <ConfigurationPropertiesEditor @ref="_editor" Subject="Subject" IsValidChanged="OnEditorValidChanged" />

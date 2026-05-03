@@ -187,6 +187,8 @@ person.LastName = "Doe";
 - When a dependency changes, the derived property is recalculated
 - If the derived value changes, a change event is triggered with `Source = null` (indicating local calculation)
 
+> **Internal design:** For details on the dependency graph, concurrency model, and correctness guarantees, see [Derived Property Design](design/tracking-derived-properties.md).
+
 ## Context Inheritance
 
 Automatically assigns the parent context to child subjects, ensuring they participate in the same tracking and interception pipeline:
@@ -304,6 +306,12 @@ Events are useful for:
 - Dynamic subscribers that register/unregister at runtime (unlike `ILifecycleHandler` which is registered at startup)
 - Integration packages (MQTT, OPC UA) that need to clean up internal state
 
+### Thread Safety
+
+The lifecycle interceptor is fully thread-safe. Multiple threads can concurrently write to the same structural property — reference counts remain consistent, no subjects are orphaned, and all attach/detach callbacks fire exactly once per transition.
+
+> **Internal design:** For details on the concurrency model and correctness guarantees, see [Lifecycle Interceptor Design](design/tracking-lifecycle.md).
+
 ### Handler Requirements
 
 > **Important**: Both `ILifecycleHandler` methods and lifecycle events are invoked **synchronously inside a lock**. Handlers must follow these requirements:
@@ -350,14 +358,14 @@ var referenceCount = subject.GetReferenceCount();
 The `SubjectLifecycleChange` includes `ReferenceCount` after the operation. Use the flags to determine the event type:
 
 ```csharp
-handler.HandleLifecycleChange = change =>
+public void HandleLifecycleChange(SubjectLifecycleChange change)
 {
     if (change.IsContextDetach)
     {
         // Subject leaving graph - safe to clean up
         CleanupResources(change.Subject);
     }
-};
+}
 ```
 
 This enables proper cleanup when subjects are removed from all parent references, even when referenced by multiple properties or collections.

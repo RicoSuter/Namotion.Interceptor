@@ -54,6 +54,9 @@
         Kind: Object,
         Timestamp: {Scrubbed},
         Id: 3
+      },
+      relationships: {
+        Kind: Value
       }
     },
     2: {
@@ -89,6 +92,9 @@
       },
       mother: {
         Kind: Object
+      },
+      relationships: {
+        Kind: Value
       }
     },
     3: {
@@ -124,6 +130,9 @@
       },
       mother: {
         Kind: Object
+      },
+      relationships: {
+        Kind: Value
       }
     },
     4: {
@@ -159,6 +168,9 @@
       },
       mother: {
         Kind: Object
+      },
+      relationships: {
+        Kind: Value
       }
     },
     5: {
@@ -194,6 +206,9 @@
       },
       mother: {
         Kind: Object
+      },
+      relationships: {
+        Kind: Value
       }
     },
     6: {
@@ -229,6 +244,9 @@
       },
       mother: {
         Kind: Object
+      },
+      relationships: {
+        Kind: Value
       }
     }
   }

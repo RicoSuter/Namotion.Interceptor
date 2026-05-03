@@ -1,0 +1,146 @@
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(WallboxCharger))]
+@implements ISubjectEditComponent
+
+<MudForm>
+    <MudTextField @bind-Value="_name"
+                  Label="Name"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged" />
+
+    <MudTextField @bind-Value="_email"
+                  Label="Email"
+                  Required="true"
+                  RequiredError="Email is required"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged"
+                  Class="mt-4" />
+
+    <MudTextField @bind-Value="_password"
+                  Label="Password"
+                  Required="true"
+                  RequiredError="Password is required"
+                  InputType="InputType.Password"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged"
+                  Class="mt-4" />
+
+    <MudTextField @bind-Value="_serialNumber"
+                  Label="Serial Number"
+                  Required="true"
+                  RequiredError="Serial number is required"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged"
+                  Class="mt-4" />
+
+    <MudNumericField @bind-Value="_pollingIntervalSeconds"
+                     Label="Polling Interval (seconds)"
+                     Min="60"
+                     Max="600"
+                     Class="mt-4" />
+
+    @if (!IsCreating)
+    {
+        <MudDivider Class="my-4" />
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Current State</MudText>
+        <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+            <MudText>Connection:</MudText>
+            <MudChip T="string"
+                     Size="Size.Small"
+                     Color="@(Charger?.IsConnected == true ? Color.Success : Color.Error)"
+                     Variant="Variant.Filled">
+                @(Charger?.IsConnected == true ? "Connected" : "Disconnected")
+            </MudChip>
+        </MudStack>
+        @if (Charger?.SoftwareVersion != null)
+        {
+            <MudText Class="mt-1">Firmware: @Charger.SoftwareVersion</MudText>
+        }
+        @if (Charger?.Model != null)
+        {
+            <MudText>Model: @Charger.Model</MudText>
+        }
+    }
+</MudForm>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private WallboxCharger? Charger => Subject as WallboxCharger;
+
+    private string _name = string.Empty;
+    private string _email = string.Empty;
+    private string _password = string.Empty;
+    private string _serialNumber = string.Empty;
+    private int _pollingIntervalSeconds = 90;
+
+    private string _originalName = string.Empty;
+    private string _originalEmail = string.Empty;
+    private string _originalPassword = string.Empty;
+    private string _originalSerialNumber = string.Empty;
+    private int _originalPollingIntervalSeconds = 90;
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(_email) &&
+                           !string.IsNullOrWhiteSpace(_password) &&
+                           !string.IsNullOrWhiteSpace(_serialNumber);
+
+    public bool IsDirty => _name != _originalName ||
+                           _email != _originalEmail ||
+                           _password != _originalPassword ||
+                           _serialNumber != _originalSerialNumber ||
+                           _pollingIntervalSeconds != _originalPollingIntervalSeconds;
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        if (Charger != null)
+        {
+            _name = Charger.Name;
+            _email = Charger.Email;
+            _password = Charger.Password;
+            _serialNumber = Charger.SerialNumber;
+            _pollingIntervalSeconds = (int)Charger.PollingInterval.TotalSeconds;
+
+            _originalName = _name;
+            _originalEmail = _email;
+            _originalPassword = _password;
+            _originalSerialNumber = _serialNumber;
+            _originalPollingIntervalSeconds = _pollingIntervalSeconds;
+        }
+    }
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (Charger != null && IsValid)
+        {
+            Charger.Name = _name;
+            Charger.Email = _email;
+            Charger.Password = _password;
+            Charger.SerialNumber = _serialNumber;
+            Charger.PollingInterval = TimeSpan.FromSeconds(_pollingIntervalSeconds);
+
+            _originalName = _name;
+            _originalEmail = _email;
+            _originalPassword = _password;
+            _originalSerialNumber = _serialNumber;
+            _originalPollingIntervalSeconds = _pollingIntervalSeconds;
+
+            IsDirtyChanged?.Invoke(false);
+        }
+
+        return Task.CompletedTask;
+    }
+}

@@ -37,6 +37,9 @@
       },
       Mother: {
         Kind: Object
+      },
+      Relationships: {
+        Kind: Value
       }
     },
     2: {
@@ -73,6 +76,9 @@
       },
       Mother: {
         Kind: Object
+      },
+      Relationships: {
+        Kind: Value
       }
     }
   }

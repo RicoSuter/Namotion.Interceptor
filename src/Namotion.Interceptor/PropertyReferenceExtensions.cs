@@ -9,10 +9,10 @@ public static class PropertyReferenceExtensions
         return new PropertyReference(subject, propertyName);
     }
 
-    public static void SetPropertyValueWithInterception(this PropertyReference property, object? newValue, 
-        Func<IInterceptorSubject, object?>? readValue, Action<IInterceptorSubject, object?> writeValue)
+    public static void SetPropertyValueWithInterception(this PropertyReference property, object? newValue,
+        object? currentValue, Action<IInterceptorSubject, object?> writeValue)
     {
         var executor = property.Subject.Context as IInterceptorExecutor;
-        executor?.SetPropertyValue(property.Name, newValue, readValue, writeValue);
+        executor?.SetPropertyValue(property.Name, newValue, currentValue, writeValue);
     }
 }

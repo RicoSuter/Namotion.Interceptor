@@ -1,0 +1,11 @@
+﻿# path [Type] $key=value | prop: value | type | @attr: value | Collection/ (Nx Type)
+# Use get_property for exact values or browse with format=json for structured data.
+
+/Device [MyApp.Device]
+  Speed: 1500 | integer, writable
+    @Minimum: 0
+    @Maximum: 3000
+    @State: {"Title":"Speed","Unit":0}
+  Name: Motor | string
+  IsActive: true | boolean
+[1 subject]

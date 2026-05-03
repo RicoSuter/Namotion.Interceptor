@@ -5,7 +5,6 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.OpcUa.Client;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Validation;
@@ -28,10 +27,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
 
     public IInterceptorSubjectContext Context => _context ?? throw new InvalidOperationException("Client not started.");
 
-    /// <summary>
-    /// Gets the client diagnostics, or null if not started.
-    /// </summary>
-    public OpcUaClientDiagnostics? Diagnostics { get; private set; }
+    public IOpcUaSubjectClientSource? Source { get; private set; }
 
     public OpcUaTestClient(TestLogger logger, Action<OpcUaClientConfiguration>? configureClient = null)
     {
@@ -94,12 +90,12 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
                     ReconnectHandlerTimeout = TimeSpan.FromSeconds(5),
                     MaxReconnectDuration = TimeSpan.FromSeconds(15),
                     SubscriptionHealthCheckInterval = TimeSpan.FromSeconds(5),
-                    
+
                     // SessionTimeout must be >= server's MinSessionTimeout (10s), use 30s for margin
                     SessionTimeout = TimeSpan.FromSeconds(30),
                     KeepAliveInterval = TimeSpan.FromSeconds(5),
                     OperationTimeout = TimeSpan.FromSeconds(30),
-                    
+
                     BufferTime = TimeSpan.FromMilliseconds(100),
 
                     CertificateStoreBasePath = certificateStoreBasePath ?? "pki"
@@ -113,16 +109,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
 
         _host = builder.Build();
 
-        // Get diagnostics from the client source
-        var clientSource = _host.Services
-            .GetServices<IHostedService>()
-            .OfType<OpcUaSubjectClientSource>()
-            .FirstOrDefault();
-
-        if (clientSource != null)
-        {
-            Diagnostics = clientSource.Diagnostics;
-        }
+        Source = _host.Services.GetRequiredService<IOpcUaSubjectClientSource>();
 
         await _host.StartAsync();
         _logger.Log($"Client host started in {sw.ElapsedMilliseconds}ms");
@@ -130,7 +117,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
         // First wait for OPC UA infrastructure (subscriptions set up) - this is reliable
         // because it's based on actual OPC UA state, not property propagation
         await AsyncTestHelpers.WaitUntilAsync(
-            () => Diagnostics?.MonitoredItemCount > 0,
+            () => Source.Diagnostics.MonitoredItemCount > 0,
             timeout: TimeSpan.FromSeconds(60),
             message: "Client failed to create subscriptions");
 

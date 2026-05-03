@@ -9,6 +9,7 @@
 #   pwsh scripts/benchmark.ps1 -Short               # Quick benchmark (fewer iterations)
 #   pwsh scripts/benchmark.ps1 -LocalOnly           # Run on current branch only (no comparison)
 #   pwsh scripts/benchmark.ps1 -LaunchCount 3       # Run 3 process launches per benchmark (more stable)
+#   pwsh scripts/benchmark.ps1 -BaseBranch performance/foo  # Compare against a non-master base
 #   pwsh scripts/benchmark.ps1 -Filter "*Write*" -Stash -Short
 #
 # Output: benchmark_YYYY-MM-DD_HHmmss.md in current directory
@@ -18,12 +19,12 @@ param(
     [switch]$Stash,
     [switch]$Short,
     [switch]$LocalOnly,
-    [int]$LaunchCount = 1
+    [int]$LaunchCount = 1,
+    [string]$BaseBranch = "master"
 )
 
 # ============ CONFIGURATION ============
 $BenchmarkProject = "src/Namotion.Interceptor.Benchmark/Namotion.Interceptor.Benchmark.csproj"
-$BaseBranch = "master"
 # =======================================
 
 $ErrorActionPreference = "Stop"

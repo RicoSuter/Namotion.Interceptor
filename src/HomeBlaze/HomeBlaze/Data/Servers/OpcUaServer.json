@@ -1,7 +1,7 @@
 {
   "$type": "HomeBlaze.Servers.OpcUa.OpcUaServer",
   "name": "My OPC UA Server",
-  "path": "Root",
+  "path": "/",
   "applicationName": null,
   "namespaceUri": null,
   "rootName": "Root",

@@ -209,6 +209,26 @@ public class WriteTimestampTests
     }
 
     [Fact]
+    public void WriteTimestamp_WithNullTimestamp_ShouldReturnNull()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+
+        // Act
+        using (SubjectChangeContext.WithChangedTimestamp(null))
+        {
+            person.FirstName = "John";
+        }
+
+        // Assert
+        Assert.Null(person.GetPropertyReference("FirstName").TryGetWriteTimestamp());
+    }
+
+    [Fact]
     public void WriteTimestamp_AfterScopeEnds_ShouldUseCurrentTime()
     {
         // Arrange

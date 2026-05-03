@@ -1,0 +1,48 @@
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Widget, typeof(MyStromSwitch))]
+@implements ISubjectComponent
+
+<MudPaper Class="pa-4">
+    <MudStack Spacing="2">
+        <MudStack Row="true" AlignItems="AlignItems.Center">
+            <MudIcon Icon="@Icons.Material.Filled.Power" Class="mr-2" />
+            <MudText Typo="Typo.h6">@(SwitchSubject?.Title ?? "myStrom Switch")</MudText>
+            <MudSpacer />
+            <MudChip T="string"
+                     Size="Size.Small"
+                     Color="@(SwitchSubject?.IsConnected == true ? Color.Success : Color.Error)"
+                     Variant="Variant.Filled">
+                @(SwitchSubject?.IsConnected == true ? "Connected" : "Disconnected")
+            </MudChip>
+        </MudStack>
+
+        <MudDivider />
+
+        <MudStack Row="true" Spacing="4">
+            <MudStack>
+                <MudText Typo="Typo.caption">Power</MudText>
+                <MudText Typo="Typo.h5">@(SwitchSubject?.MeasuredPower?.ToString("F1") ?? "—") W</MudText>
+            </MudStack>
+
+            <MudStack>
+                <MudText Typo="Typo.caption">Temperature</MudText>
+                <MudText Typo="Typo.h5">@(SwitchSubject?.Temperature?.ToString("F1") ?? "—") °C</MudText>
+            </MudStack>
+
+            <MudStack>
+                <MudText Typo="Typo.caption">Relay</MudText>
+                <MudText Typo="Typo.h5" Color="@(SwitchSubject?.IsOn == true ? Color.Success : Color.Default)">
+                    @(SwitchSubject?.IsOn == true ? "On" : SwitchSubject?.IsOn == false ? "Off" : "—")
+                </MudText>
+            </MudStack>
+        </MudStack>
+    </MudStack>
+</MudPaper>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    private MyStromSwitch? SwitchSubject => Subject as MyStromSwitch;
+}

@@ -46,7 +46,7 @@ public class SubjectComponentRegistry
             baseType = baseType.BaseType;
         }
 
-        // Try interfaces (for IConfigurableSubject fallback)
+        // Try interfaces (for IConfigurable fallback)
         foreach (var iface in subjectType.GetInterfaces())
         {
             var ifaceMatch = _components.Value.GetValueOrDefault((iface, type, name));

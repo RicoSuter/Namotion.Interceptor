@@ -564,6 +564,89 @@ public class SubjectUpdateTests
             Update3 = partialSubjectUpdate3
         });
     }
+
+    [Fact]
+    public void WhenProcessorExcludesAttribute_ThenCompleteUpdateOmitsAttribute()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var person = new Person(context) { FirstName = "Test" };
+
+        var firstNameProperty = person.TryGetRegisteredSubject()!
+            .TryGetProperty("FirstName")!;
+
+        firstNameProperty
+            .AddAttribute("Included", typeof(int), _ => 42, null);
+
+        var excludedAttribute = firstNameProperty
+            .AddAttribute("Excluded", typeof(int), _ => 99, null);
+
+        var processor = new AttributeExclusionProcessor(excludedAttribute);
+
+        // Act
+        var update = SubjectUpdate.CreateCompleteUpdate(person, [processor]);
+
+        // Assert
+        var firstNameUpdate = update.Subjects!["1"]["FirstName"];
+        Assert.NotNull(firstNameUpdate.Attributes);
+        Assert.Contains("Included", firstNameUpdate.Attributes.Keys);
+        Assert.DoesNotContain("Excluded", firstNameUpdate.Attributes.Keys);
+    }
+
+    [Fact]
+    public void WhenProcessorExcludesAttribute_ThenPartialUpdateOmitsAttribute()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var person = new Person(context) { FirstName = "Test" };
+
+        var firstNameProperty = person.TryGetRegisteredSubject()!
+            .TryGetProperty("FirstName")!;
+
+        var includedAttribute = firstNameProperty
+            .AddAttribute("Included", typeof(int), _ => 42, null);
+
+        var excludedAttribute = firstNameProperty
+            .AddAttribute("Excluded", typeof(int), _ => 99, null);
+
+        var processor = new AttributeExclusionProcessor(excludedAttribute);
+
+        var changes = new[]
+        {
+            SubjectPropertyChange.Create(includedAttribute, null, DateTimeOffset.UtcNow, null, 40, 42),
+            SubjectPropertyChange.Create(excludedAttribute, null, DateTimeOffset.UtcNow, null, 90, 99),
+        };
+
+        // Act
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(person, changes, [processor]);
+
+        // Assert
+        var firstNameUpdate = update.Subjects!["1"]["FirstName"];
+        Assert.NotNull(firstNameUpdate.Attributes);
+        Assert.Contains("Included", firstNameUpdate.Attributes.Keys);
+        Assert.DoesNotContain("Excluded", firstNameUpdate.Attributes.Keys);
+    }
+}
+
+public class AttributeExclusionProcessor : ISubjectUpdateProcessor
+{
+    private readonly RegisteredSubjectProperty _excludedAttribute;
+
+    public AttributeExclusionProcessor(RegisteredSubjectProperty excludedAttribute)
+    {
+        _excludedAttribute = excludedAttribute;
+    }
+
+    public bool IsIncluded(RegisteredSubjectProperty property)
+    {
+        return property != _excludedAttribute;
+    }
 }
 
 public class TransformCounter : ISubjectUpdateProcessor

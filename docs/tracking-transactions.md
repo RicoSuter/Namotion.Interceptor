@@ -271,7 +271,7 @@ Properties without an associated source are applied directly in Stage 3.
 
 ## Error Handling
 
-### TransactionException
+### SubjectTransactionException
 
 Thrown when one or more changes fail during commit:
 
@@ -280,18 +280,18 @@ try
 {
     await transaction.CommitAsync(cancellationToken);
 }
-catch (TransactionException ex)
+catch (SubjectTransactionException ex)
 {
     Console.WriteLine($"Failed: {ex.FailedChanges.Count}, Applied: {ex.AppliedChanges.Count}");
 
-    foreach (var change in ex.FailedChanges)
+    foreach (var error in ex.Errors)
     {
-        Console.WriteLine($"  {change.Property.Name}: {change.Error?.Message}");
+        Console.WriteLine($"  {error.Message}");
     }
 }
 ```
 
-### TransactionConflictException
+### SubjectTransactionConflictException
 
 Thrown when optimistic locking detects concurrent modifications:
 
@@ -300,7 +300,7 @@ try
 {
     await transaction.CommitAsync(cancellationToken);
 }
-catch (TransactionConflictException ex)
+catch (SubjectTransactionConflictException ex)
 {
     Console.WriteLine($"Conflicts on: {string.Join(", ", ex.ConflictingProperties.Select(p => p.Name))}");
 }
@@ -472,7 +472,7 @@ Note that concurrent `CommitAsync` calls on the same transaction are rejected â€
 ### BeginTransactionAsync
 
 ```csharp
-Task<SubjectTransaction> BeginTransactionAsync(
+TransactionAwaitable BeginTransactionAsync(
     TransactionFailureHandling failureHandling,
     TransactionLocking locking = TransactionLocking.Exclusive,
     TransactionRequirement requirement = TransactionRequirement.None,

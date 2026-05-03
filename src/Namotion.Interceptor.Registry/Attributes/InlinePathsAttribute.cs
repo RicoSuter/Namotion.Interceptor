@@ -23,9 +23,21 @@ public sealed class InlinePathsAttribute : Attribute
     public static string? GetInlinePathsPropertyName(Type type)
     {
         return Cache.GetOrAdd(type, t =>
-            t.GetProperties()
-                .FirstOrDefault(p => p.GetCustomAttribute<InlinePathsAttribute>() != null)
-                ?.Name);
+        {
+            var matches = t.GetProperties()
+                .Where(p => p.GetCustomAttribute<InlinePathsAttribute>() != null)
+                .ToList();
+
+            if (matches.Count > 1)
+            {
+                throw new InvalidOperationException(
+                    $"Type '{t.FullName}' has multiple [InlinePaths] properties " +
+                    $"({string.Join(", ", matches.Select(p => p.Name))}). " +
+                    $"Only one property per type may be marked with [InlinePaths].");
+            }
+
+            return matches.FirstOrDefault()?.Name;
+        });
     }
 
     /// <summary>

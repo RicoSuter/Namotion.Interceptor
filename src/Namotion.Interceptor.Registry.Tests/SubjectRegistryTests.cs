@@ -238,4 +238,153 @@ public class SubjectRegistryTests
         // Assert
         await Verify(properties.Select(p => p.Name));
     }
+
+    [Fact]
+    public void WhenRemovingMultipleCollectionItems_ThenNoChildrenAreLost()
+    {
+        // Regression test for memory leak: forward-order removal in recursive detach
+        // caused IndexOf to fail because renumbered indices didn't match the lifecycle event indices.
+
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var children = Enumerable.Range(0, 10)
+            .Select(i => new Person { FirstName = $"Child{i}" })
+            .ToArray();
+
+        var person = new Person(context) { Children = children };
+
+        // Act
+        person.Children = children[8..];
+
+        // Assert
+        var registeredChildren = person
+            .TryGetRegisteredSubject()?
+            .TryGetProperty(nameof(Person.Children))?
+            .Children;
+
+        Assert.NotNull(registeredChildren);
+        Assert.Equal(2, registeredChildren.Value.Length);
+        Assert.Equal("Child8", ((Person)registeredChildren.Value[0].Subject).FirstName);
+        Assert.Equal(0, registeredChildren.Value[0].Index);
+        Assert.Equal("Child9", ((Person)registeredChildren.Value[1].Subject).FirstName);
+        Assert.Equal(1, registeredChildren.Value[1].Index);
+    }
+
+    [Fact]
+    public void WhenRemovingCollectionItems_ThenParentsAndChildrenIndicesAreConsistent()
+    {
+        // Regression test: old code renumbered Children indices but never updated Parents,
+        // causing path resolution mismatches.
+
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var child1 = new Person { FirstName = "A" };
+        var child2 = new Person { FirstName = "B" };
+        var child3 = new Person { FirstName = "C" };
+
+        var person = new Person(context)
+        {
+            Children = [child1, child2, child3]
+        };
+
+        // Act
+        person.Children = [child1, child3];
+
+        // Assert
+        var childrenProp = person.TryGetRegisteredSubject()!
+            .TryGetProperty(nameof(Person.Children))!;
+
+        Assert.Same(child1, childrenProp.Children[0].Subject);
+        Assert.Equal(0, childrenProp.Children[0].Index);
+        Assert.Same(child3, childrenProp.Children[1].Subject);
+        Assert.Equal(1, childrenProp.Children[1].Index);
+
+        var child1Parents = child1.TryGetRegisteredSubject()!.Parents;
+        Assert.Single(child1Parents);
+        Assert.Equal(0, child1Parents[0].Index); // position 0 in [A, C]
+
+        var child3Parents = child3.TryGetRegisteredSubject()!.Parents;
+        Assert.Single(child3Parents);
+        Assert.Equal(1, child3Parents[0].Index); // position 1 in [A, C]
+    }
+
+    [Fact]
+    public void WhenReorderingCollection_ThenIndicesMatchLiveCollection()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var child1 = new Person { FirstName = "A" };
+        var child2 = new Person { FirstName = "B" };
+        var child3 = new Person { FirstName = "C" };
+
+        var person = new Person(context)
+        {
+            Children = [child1, child2, child3]
+        };
+
+        // Act
+        person.Children = [child3, child2, child1];
+
+        // Assert
+        var childrenProp = person.TryGetRegisteredSubject()!
+            .TryGetProperty(nameof(Person.Children))!;
+
+        Assert.Equal(3, childrenProp.Children.Length);
+
+        var childBySubject = childrenProp.Children.ToDictionary(c => ((Person)c.Subject).FirstName!, c => c.Index);
+        Assert.Equal(0, childBySubject["C"]); // child3 now at position 0
+        Assert.Equal(1, childBySubject["B"]); // child2 still at position 1
+        Assert.Equal(2, childBySubject["A"]); // child1 now at position 2
+
+        // Parents should also match
+        Assert.Equal(2, child1.TryGetRegisteredSubject()!.Parents[0].Index);
+        Assert.Equal(1, child2.TryGetRegisteredSubject()!.Parents[0].Index);
+        Assert.Equal(0, child3.TryGetRegisteredSubject()!.Parents[0].Index);
+    }
+
+    [Fact]
+    public void WhenInsertingInMiddleOfCollection_ThenIndicesAreCorrect()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var child1 = new Person { FirstName = "A" };
+        var child3 = new Person { FirstName = "C" };
+
+        var person = new Person(context)
+        {
+            Children = [child1, child3]
+        };
+
+        // Act
+        var child2 = new Person { FirstName = "B" };
+        person.Children = [child1, child2, child3];
+
+        // Assert
+        var childrenProp = person.TryGetRegisteredSubject()!
+            .TryGetProperty(nameof(Person.Children))!;
+
+        Assert.Equal(3, childrenProp.Children.Length);
+
+        var childBySubject = childrenProp.Children.ToDictionary(c => ((Person)c.Subject).FirstName!, c => c.Index);
+        Assert.Equal(0, childBySubject["A"]);
+        Assert.Equal(1, childBySubject["B"]);
+        Assert.Equal(2, childBySubject["C"]);
+
+        // All parent indices should match live positions
+        Assert.Equal(0, child1.TryGetRegisteredSubject()!.Parents[0].Index);
+        Assert.Equal(1, child2.TryGetRegisteredSubject()!.Parents[0].Index);
+        Assert.Equal(2, child3.TryGetRegisteredSubject()!.Parents[0].Index); // updated from 1 to 2
+    }
 }

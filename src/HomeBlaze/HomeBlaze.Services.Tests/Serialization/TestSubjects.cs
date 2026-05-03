@@ -5,7 +5,7 @@ using Namotion.Interceptor.Attributes;
 namespace HomeBlaze.Services.Tests.Serialization;
 
 [InterceptorSubject]
-public partial class TestSubject : IConfigurableSubject
+public partial class TestSubject : IConfigurable
 {
     [Configuration]
     public partial string ConfigProperty { get; set; }
@@ -40,7 +40,7 @@ public class NestedValueObject
 }
 
 [InterceptorSubject]
-public partial class ParentSubject : IConfigurableSubject
+public partial class ParentSubject : IConfigurable
 {
     [Configuration]
     public partial string Name { get; set; }
@@ -57,7 +57,7 @@ public partial class ParentSubject : IConfigurableSubject
 }
 
 [InterceptorSubject]
-public partial class ParentWithChildSubject : IConfigurableSubject
+public partial class ParentWithChildSubject : IConfigurable
 {
     [Configuration]
     public partial string Name { get; set; }
@@ -74,7 +74,7 @@ public partial class ParentWithChildSubject : IConfigurableSubject
 }
 
 [InterceptorSubject]
-public partial class ChildSubject : IConfigurableSubject
+public partial class ChildSubject : IConfigurable
 {
     [Configuration]
     public partial string ChildConfig { get; set; }
@@ -91,7 +91,7 @@ public partial class ChildSubject : IConfigurableSubject
 }
 
 [InterceptorSubject]
-public partial class SubjectWithList : IConfigurableSubject
+public partial class SubjectWithList : IConfigurable
 {
     [Configuration]
     public partial List<ChildSubject> Items { get; set; }
@@ -105,7 +105,7 @@ public partial class SubjectWithList : IConfigurableSubject
 }
 
 [InterceptorSubject]
-public partial class SubjectWithDictionary : IConfigurableSubject
+public partial class SubjectWithDictionary : IConfigurable
 {
     [Configuration]
     public partial Dictionary<string, ChildSubject> Items { get; set; }
@@ -119,7 +119,7 @@ public partial class SubjectWithDictionary : IConfigurableSubject
 }
 
 [InterceptorSubject]
-public partial class SubjectWithValueObjectList : IConfigurableSubject
+public partial class SubjectWithValueObjectList : IConfigurable
 {
     [Configuration]
     public partial List<NestedValueObject> Configs { get; set; }
@@ -138,7 +138,7 @@ public partial class SubjectWithValueObjectList : IConfigurableSubject
 /// Subject with int-key dictionary (like Dictionary&lt;int, GpioPin&gt;)
 /// </summary>
 [InterceptorSubject]
-public partial class SubjectWithIntKeyDictionary : IConfigurableSubject
+public partial class SubjectWithIntKeyDictionary : IConfigurable
 {
     [Configuration]
     public partial Dictionary<int, ChildSubject> Items { get; set; }
@@ -155,7 +155,7 @@ public partial class SubjectWithIntKeyDictionary : IConfigurableSubject
 /// Deep nested subject for testing 3+ levels
 /// </summary>
 [InterceptorSubject]
-public partial class Level1Subject : IConfigurableSubject
+public partial class Level1Subject : IConfigurable
 {
     [Configuration]
     public partial string Level1Config { get; set; }
@@ -172,7 +172,7 @@ public partial class Level1Subject : IConfigurableSubject
 }
 
 [InterceptorSubject]
-public partial class Level2Subject : IConfigurableSubject
+public partial class Level2Subject : IConfigurable
 {
     [Configuration]
     public partial string Level2Config { get; set; }
@@ -189,7 +189,7 @@ public partial class Level2Subject : IConfigurableSubject
 }
 
 [InterceptorSubject]
-public partial class Level3Subject : IConfigurableSubject
+public partial class Level3Subject : IConfigurable
 {
     [Configuration]
     public partial string Level3Config { get; set; }
@@ -206,7 +206,7 @@ public partial class Level3Subject : IConfigurableSubject
 /// Subject with mixed Configuration and State properties
 /// </summary>
 [InterceptorSubject]
-public partial class SubjectWithMixedProperties : IConfigurableSubject
+public partial class SubjectWithMixedProperties : IConfigurable
 {
     [Configuration]
     public partial string ConfigOne { get; set; }

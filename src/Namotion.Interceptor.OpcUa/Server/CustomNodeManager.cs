@@ -14,7 +14,7 @@ internal class CustomNodeManager : CustomNodeManager2
     private const string PathDelimiter = ".";
 
     private readonly IInterceptorSubject _subject;
-    private readonly OpcUaSubjectServerBackgroundService _source;
+    private readonly OpcUaSubjectServerBackgroundService _serverService;
     private readonly OpcUaServerConfiguration _configuration;
     private readonly IOpcUaNodeMapper _nodeMapper;
     private readonly ILogger _logger;
@@ -25,7 +25,7 @@ internal class CustomNodeManager : CustomNodeManager2
 
     public CustomNodeManager(
         IInterceptorSubject subject,
-        OpcUaSubjectServerBackgroundService source,
+        OpcUaSubjectServerBackgroundService serverService,
         IServerInternal server,
         ApplicationConfiguration applicationConfiguration,
         OpcUaServerConfiguration configuration,
@@ -33,7 +33,7 @@ internal class CustomNodeManager : CustomNodeManager2
         base(server, applicationConfiguration, configuration.GetNamespaceUris())
     {
         _subject = subject;
-        _source = source;
+        _serverService = serverService;
         _configuration = configuration;
         _nodeMapper = configuration.NodeMapper;
         _logger = logger;
@@ -60,7 +60,7 @@ internal class CustomNodeManager : CustomNodeManager2
         {
             foreach (var property in rootSubject.Properties)
             {
-                property.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
+                property.Reference.RemovePropertyData(_serverService.OpcUaVariableKey);
                 ClearAttributePropertyData(property);
             }
         }
@@ -69,7 +69,7 @@ internal class CustomNodeManager : CustomNodeManager2
         {
             foreach (var property in subject.Properties)
             {
-                property.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
+                property.Reference.RemovePropertyData(_serverService.OpcUaVariableKey);
                 ClearAttributePropertyData(property);
             }
         }
@@ -79,7 +79,7 @@ internal class CustomNodeManager : CustomNodeManager2
     {
         foreach (var attribute in property.Attributes)
         {
-            attribute.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
+            attribute.Reference.RemovePropertyData(_serverService.OpcUaVariableKey);
             ClearAttributePropertyData(attribute);
         }
     }
@@ -129,11 +129,11 @@ internal class CustomNodeManager : CustomNodeManager2
             {
                 foreach (var property in registeredSubject.Properties)
                 {
-                    if (property.Reference.TryGetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, out var node)
+                    if (property.Reference.TryGetPropertyData(_serverService.OpcUaVariableKey, out var node)
                         && node is BaseDataVariableState variableNode)
                     {
                         DeleteNode(SystemContext, variableNode.NodeId);
-                        property.Reference.RemovePropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey);
+                        property.Reference.RemovePropertyData(_serverService.OpcUaVariableKey);
                     }
                 }
             }
@@ -282,7 +282,7 @@ internal class CustomNodeManager : CustomNodeManager2
 
         var variableNode = ConfigureVariableNode(property, parentNodeId, nodeId, browseName, referenceTypeId, dataTypeOverride, nodeConfiguration);
 
-        property.Reference.SetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, variableNode);
+        property.Reference.SetPropertyData(_serverService.OpcUaVariableKey, variableNode);
 
         CreateAttributeNodes(variableNode, property, parentPath + propertyName);
         return variableNode;
@@ -327,7 +327,7 @@ internal class CustomNodeManager : CustomNodeManager2
 
         var variableNode = ConfigureVariableNode(attribute, parentNodeId, nodeId, browseName, referenceTypeId, dataTypeOverride, nodeConfiguration);
 
-        attribute.Reference.SetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, variableNode);
+        attribute.Reference.SetPropertyData(_serverService.OpcUaVariableKey, variableNode);
 
         return variableNode;
     }
@@ -386,7 +386,7 @@ internal class CustomNodeManager : CustomNodeManager2
             {
                 // No lock needed: StateChanged fires from ClearChangeMasks which is always
                 // called under NodeManager.Lock (from WriteChangesAsync or SDK write handling).
-                _source.UpdateProperty(property.Reference, variableNode.Timestamp, variableNode.Value);
+                _serverService.UpdateProperty(property.Reference, variableNode.Timestamp, variableNode.Value);
             }
         };
 

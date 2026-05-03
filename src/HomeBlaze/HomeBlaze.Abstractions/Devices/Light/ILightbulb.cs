@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Devices.Light;
@@ -7,6 +9,8 @@ namespace HomeBlaze.Abstractions.Devices.Light;
 /// For dimmable lights, also implement IBrightnessState + IBrightnessController.
 /// For color lights, also implement IColorState + IColorController.
 /// </summary>
+[SubjectAbstraction]
+[Description("Lightbulb device with on/off control and lumen output.")]
 public interface ILightbulb : ISwitchDevice
 {
     /// <summary>

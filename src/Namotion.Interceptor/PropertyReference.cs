@@ -28,8 +28,10 @@ public struct PropertyReference : IEquatable<PropertyReference>
             }
 
             _metadata = Subject.Properties
-                .TryGetValue(Name, out var metadata) ? metadata : 
-                throw new InvalidOperationException("No metadata found.");
+                .TryGetValue(Name, out var metadata) ? metadata :
+                throw new InvalidOperationException(
+                    $"No metadata found for property '{Name}' on {Subject.GetType().Name}. " +
+                    $"Available properties ({Subject.Properties.Count}): [{string.Join(", ", Subject.Properties.Keys)}]");
 
             return _metadata!.Value;
         }
@@ -45,6 +47,7 @@ public struct PropertyReference : IEquatable<PropertyReference>
         Subject.Data.TryRemove((Name, key), out _);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryGetPropertyData(string key, out object? value)
     {
         return Subject.Data.TryGetValue((Name, key), out value);

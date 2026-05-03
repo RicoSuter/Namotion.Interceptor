@@ -8,7 +8,9 @@ public interface IReadInterceptor
     /// <summary>
     /// Intercepts a property read operation.
     /// </summary>
-    /// <typeparam name="TProperty">The type of the property.</typeparam>
+    /// <typeparam name="TProperty">A hint for the property type. May be <c>object</c> when
+    /// values are boxed through non-generic paths. Use <c>context.Property.Metadata.Type</c>
+    /// for the actual declared property type.</typeparam>
     /// <param name="context">The read context containing the property reference.</param>
     /// <param name="next">The next interceptor in the chain to call.</param>
     /// <returns>The property value.</returns>

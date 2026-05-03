@@ -1,0 +1,203 @@
+@using Namotion.Interceptor
+
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(EcowittGateway))]
+@implements ISubjectEditComponent
+
+<MudForm>
+    <MudTextField @bind-Value="_name"
+                  Label="Name"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged" />
+
+    <MudTextField @bind-Value="_hostAddress"
+                  Label="Host Address (IP or hostname)"
+                  Required="true"
+                  RequiredError="Host address is required"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged"
+                  Class="mt-4" />
+
+    <MudNumericField Value="_pollingIntervalSeconds"
+                     ValueChanged="@((int val) => { _pollingIntervalSeconds = val; OnFieldChanged(); })"
+                     Label="Polling Interval (seconds)"
+                     Min="5"
+                     Max="300"
+                     Class="mt-4" />
+
+    <MudNumericField Value="_retryIntervalSeconds"
+                     ValueChanged="@((int val) => { _retryIntervalSeconds = val; OnFieldChanged(); })"
+                     Label="Retry Interval (seconds)"
+                     Min="10"
+                     Max="600"
+                     Class="mt-4" />
+
+    @if (!IsCreating)
+    {
+        <MudDivider Class="my-4" />
+
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Current State</MudText>
+        <MudStack Row="true" Spacing="2" AlignItems="AlignItems.Center">
+            <MudText>Connection:</MudText>
+            <MudChip T="string"
+                     Size="Size.Small"
+                     Color="@(GatewaySubject?.IsConnected == true ? Color.Success : Color.Error)"
+                     Variant="Variant.Filled">
+                @(GatewaySubject?.IsConnected == true ? "Connected" : "Disconnected")
+            </MudChip>
+        </MudStack>
+        @if (GatewaySubject?.SoftwareVersion != null)
+        {
+            <MudText Class="mt-1">Firmware: @GatewaySubject.SoftwareVersion</MudText>
+        }
+        @if (GatewaySubject?.MacAddress != null)
+        {
+            <MudText>MAC: @GatewaySubject.MacAddress</MudText>
+        }
+
+        @if (_allSensorKeys.Length > 0)
+        {
+            <MudDivider Class="my-4" />
+            <MudText Typo="Typo.subtitle2" Class="mb-2">Hidden Sensors</MudText>
+            <MudText Typo="Typo.body2" Class="mb-2">Toggle sensors to hide them from the dashboard.</MudText>
+            @foreach (var key in _allSensorKeys)
+            {
+                var isHidden = _hiddenSensors.Contains(key);
+                <MudSwitch T="bool"
+                           Value="!isHidden"
+                           ValueChanged="@((bool visible) => ToggleSensor(key, !visible))"
+                           Label="@key"
+                           Color="Color.Primary" />
+            }
+        }
+    }
+</MudForm>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private EcowittGateway? GatewaySubject => Subject as EcowittGateway;
+
+    private string _name = string.Empty;
+    private string? _hostAddress;
+    private int _pollingIntervalSeconds = 30;
+    private int _retryIntervalSeconds = 60;
+    private HashSet<string> _hiddenSensors = new(StringComparer.OrdinalIgnoreCase);
+    private string[] _allSensorKeys = [];
+
+    private string _originalName = string.Empty;
+    private string? _originalHostAddress;
+    private int _originalPollingIntervalSeconds = 30;
+    private int _originalRetryIntervalSeconds = 60;
+    private HashSet<string> _originalHiddenSensors = new(StringComparer.OrdinalIgnoreCase);
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(_hostAddress);
+    public bool IsDirty => _name != _originalName ||
+                           _hostAddress != _originalHostAddress ||
+                           _pollingIntervalSeconds != _originalPollingIntervalSeconds ||
+                           _retryIntervalSeconds != _originalRetryIntervalSeconds ||
+                           !_hiddenSensors.SetEquals(_originalHiddenSensors);
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        if (GatewaySubject != null)
+        {
+            _name = GatewaySubject.Name;
+            _hostAddress = GatewaySubject.HostAddress;
+            _pollingIntervalSeconds = (int)GatewaySubject.PollingInterval.TotalSeconds;
+            _retryIntervalSeconds = (int)GatewaySubject.RetryInterval.TotalSeconds;
+            _hiddenSensors = new HashSet<string>(GatewaySubject.HiddenSensors, StringComparer.OrdinalIgnoreCase);
+
+            _originalName = _name;
+            _originalHostAddress = _hostAddress;
+            _originalPollingIntervalSeconds = _pollingIntervalSeconds;
+            _originalRetryIntervalSeconds = _retryIntervalSeconds;
+            _originalHiddenSensors = new HashSet<string>(_hiddenSensors, StringComparer.OrdinalIgnoreCase);
+
+            _allSensorKeys = GetAllSensorKeys();
+        }
+    }
+
+    private string[] GetAllSensorKeys()
+    {
+        var keys = new List<string>();
+
+        if (GatewaySubject == null)
+            return [];
+
+        if (GatewaySubject.RainGauge != null)
+            keys.Add("rain");
+        if (GatewaySubject.PiezoRainGauge != null)
+            keys.Add("piezo");
+        if (GatewaySubject.LightningSensor != null)
+            keys.Add("lightning");
+
+        foreach (var ch in GatewaySubject.ChannelSensors)
+            keys.Add($"ch:{ch.Channel}");
+        foreach (var s in GatewaySubject.SoilMoistureSensors)
+            keys.Add($"soil:{s.Channel}");
+        foreach (var l in GatewaySubject.LeafWetnessSensors)
+            keys.Add($"leaf:{l.Channel}");
+        foreach (var t in GatewaySubject.TemperatureSensors)
+            keys.Add($"temp:{t.Channel}");
+        foreach (var p in GatewaySubject.Pm25Sensors)
+            keys.Add($"pm25:{p.Channel}");
+        foreach (var c in GatewaySubject.Co2Sensors)
+            keys.Add($"co2:{c.Channel}");
+        foreach (var l in GatewaySubject.LeakSensors)
+            keys.Add($"leak:{l.Channel}");
+
+        // Also include currently hidden ones so they show in the list
+        foreach (var hidden in GatewaySubject.HiddenSensors)
+        {
+            if (!keys.Contains(hidden, StringComparer.OrdinalIgnoreCase))
+                keys.Add(hidden);
+        }
+
+        return keys.ToArray();
+    }
+
+    private void ToggleSensor(string key, bool hidden)
+    {
+        if (hidden)
+            _hiddenSensors.Add(key);
+        else
+            _hiddenSensors.Remove(key);
+
+        OnFieldChanged();
+    }
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (GatewaySubject != null && IsValid)
+        {
+            GatewaySubject.Name = _name;
+            GatewaySubject.HostAddress = _hostAddress;
+            GatewaySubject.PollingInterval = TimeSpan.FromSeconds(_pollingIntervalSeconds);
+            GatewaySubject.RetryInterval = TimeSpan.FromSeconds(_retryIntervalSeconds);
+            GatewaySubject.HiddenSensors = _hiddenSensors.ToArray();
+
+            _originalName = _name;
+            _originalHostAddress = _hostAddress;
+            _originalPollingIntervalSeconds = _pollingIntervalSeconds;
+            _originalRetryIntervalSeconds = _retryIntervalSeconds;
+            _originalHiddenSensors = new HashSet<string>(_hiddenSensors, StringComparer.OrdinalIgnoreCase);
+
+            IsDirtyChanged?.Invoke(false);
+        }
+
+        return Task.CompletedTask;
+    }
+}

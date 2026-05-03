@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 using HomeBlaze.Abstractions.Attributes;
 
 namespace HomeBlaze.Abstractions.Devices.Locks;
@@ -5,18 +7,20 @@ namespace HomeBlaze.Abstractions.Devices.Locks;
 /// <summary>
 /// State interface for door locks.
 /// </summary>
+[SubjectAbstraction]
+[Description("Reports door lock state (locked, unlocked).")]
 public interface IDoorLockState
 {
     /// <summary>
     /// The current lock state.
     /// </summary>
-    [State]
+    [State(Position = 130)]
     DoorLockState? LockState { get; }
 
     /// <summary>
     /// Whether the lock is locked.
     /// </summary>
-    [State]
+    [State(Position = 131)]
     bool? IsLocked => LockState switch
     {
         Locks.DoorLockState.Locked => true,

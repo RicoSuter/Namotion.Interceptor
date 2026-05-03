@@ -1,10 +1,10 @@
-@using HomeBlaze.Abstractions.Services
+@using HomeBlaze.Abstractions.Metadata
 
 <MudDialog>
     <DialogContent>
-        @if (!string.IsNullOrEmpty(Operation?.Description))
+        @if (!string.IsNullOrEmpty(Method?.Description))
         {
-            <MudText Typo="Typo.body1">@Operation.Description</MudText>
+            <MudText Typo="Typo.body1">@Method.Description</MudText>
         }
         else
         {
@@ -20,17 +20,17 @@
 @code {
     [CascadingParameter] private IMudDialogInstance? MudDialog { get; set; }
 
-    [Parameter] public SubjectMethodInfo? Operation { get; set; }
+    [Parameter] public MethodMetadata? Method { get; set; }
 
     private void Cancel() => MudDialog?.Cancel();
 
     private void Execute() => MudDialog?.Close(DialogResult.Ok(true));
 
-    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, SubjectMethodInfo operation)
+    public static Task<IDialogReference> ShowAsync(IDialogService dialogService, MethodMetadata method)
     {
         var parameters = new DialogParameters<MethodConfirmationDialog>
         {
-            { x => x.Operation, operation }
+            { x => x.Method, method }
         };
 
         var options = new DialogOptions
@@ -39,6 +39,6 @@
             FullWidth = true
         };
 
-        return dialogService.ShowAsync<MethodConfirmationDialog>($"Confirm: {operation.Title}", parameters, options);
+        return dialogService.ShowAsync<MethodConfirmationDialog>($"Confirm: {method.Title}", parameters, options);
     }
 }

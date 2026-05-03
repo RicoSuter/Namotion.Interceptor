@@ -5,9 +5,10 @@ using Namotion.Interceptor.Tracking.Lifecycle;
 
 namespace Namotion.Interceptor.Registry;
 
-public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLifecycleHandler
+public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdRegistryWriter, ILifecycleHandler, IPropertyLifecycleHandler
 {
     private readonly Dictionary<IInterceptorSubject, RegisteredSubject> _knownSubjects = new();
+    private readonly Dictionary<string, IInterceptorSubject> _subjectIdToSubject = new();
     
     /// <inheritdoc />
     public IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> KnownSubjects
@@ -30,6 +31,69 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
     }
 
     /// <inheritdoc />
+    string ISubjectIdRegistryWriter.GetOrAddSubjectId(IInterceptorSubject subject)
+    {
+        lock (_knownSubjects)
+        {
+            var existing = subject.TryGetSubjectId();
+            if (existing is not null)
+                return existing;
+
+            var id = SubjectRegistryExtensions.GenerateSubjectId();
+            SubjectRegistryExtensions.HasSubjectIds = true;
+            subject.Data[(null, SubjectRegistryExtensions.SubjectIdKey)] = id;
+
+            // Only populate reverse index for attached subjects; the lifecycle
+            // attach handler will register IDs from Data for unattached subjects.
+            if (_knownSubjects.ContainsKey(subject))
+            {
+                _subjectIdToSubject[id] = subject;
+            }
+
+            return id;
+        }
+    }
+
+    /// <inheritdoc />
+    void ISubjectIdRegistryWriter.SetSubjectId(IInterceptorSubject subject, string id)
+    {
+        lock (_knownSubjects)
+        {
+            if (_subjectIdToSubject.TryGetValue(id, out var existing) && !ReferenceEquals(existing, subject))
+            {
+                throw new InvalidOperationException(
+                    $"Subject ID '{id}' is already in use by a different subject.");
+            }
+
+            var oldId = subject.TryGetSubjectId();
+            if (oldId is not null && oldId != id)
+            {
+                throw new InvalidOperationException(
+                    $"Subject already has ID '{oldId}'; cannot reassign to '{id}'.");
+            }
+
+            SubjectRegistryExtensions.HasSubjectIds = true;
+            subject.Data[(null, SubjectRegistryExtensions.SubjectIdKey)] = id;
+
+            // Only populate reverse index for attached subjects; the lifecycle
+            // attach handler will register IDs from Data for unattached subjects.
+            if (_knownSubjects.ContainsKey(subject))
+            {
+                _subjectIdToSubject[id] = subject;
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public bool TryGetSubjectById(string subjectId, out IInterceptorSubject subject)
+    {
+        lock (_knownSubjects)
+        {
+            return _subjectIdToSubject.TryGetValue(subjectId, out subject!);
+        }
+    }
+
+    /// <inheritdoc />
     void ILifecycleHandler.HandleLifecycleChange(SubjectLifecycleChange change)
     {
         lock (_knownSubjects)
@@ -39,6 +103,21 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                 if (!_knownSubjects.TryGetValue(change.Subject, out var registeredSubject))
                 {
                     registeredSubject = RegisterSubject(change.Subject);
+                }
+
+                if (change.IsContextAttach)
+                {
+                    // Auto-register pre-assigned subject ID in reverse index;
+                    // skip silently on conflict to avoid aborting the lifecycle.
+                    var subjectId = change.Subject.TryGetSubjectId();
+                    if (subjectId is not null)
+                    {
+                        if (!_subjectIdToSubject.TryGetValue(subjectId, out var existingSubject)
+                            || ReferenceEquals(existingSubject, change.Subject))
+                        {
+                            _subjectIdToSubject[subjectId] = change.Subject;
+                        }
+                    }
                 }
 
                 if (change is { IsPropertyReferenceAdded: true, Property: { } property })
@@ -87,7 +166,33 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
                     
                     if (change.IsContextDetach)
                     {
+                        // Remove stale parent references from children and clear
+                        // children lists before this subject leaves _knownSubjects.
+                        foreach (var property in registeredSubject.Properties)
+                        {
+                            if (!property.CanContainSubjects)
+                                continue;
+
+                            foreach (var child in property.Children)
+                            {
+                                var childRegistered = _knownSubjects.GetValueOrDefault(child.Subject);
+                                childRegistered?.RemoveParentsByProperty(property);
+                            }
+
+                            property.ClearChildren();
+                        }
+
                         _knownSubjects.Remove(change.Subject);
+
+                        // Clean up subject ID reverse index
+                        if (_subjectIdToSubject.Count > 0)
+                        {
+                            var subjectId = change.Subject.TryGetSubjectId();
+                            if (subjectId is not null)
+                            {
+                                _subjectIdToSubject.Remove(subjectId);
+                            }
+                        }
                     }
                 }
             }
@@ -122,6 +227,21 @@ public class SubjectRegistry : ISubjectRegistry, ILifecycleHandler, IPropertyLif
 
     void IPropertyLifecycleHandler.DetachProperty(SubjectPropertyLifecycleChange change)
     {
+    }
+
+    void IPropertyLifecycleHandler.RefreshCollectionProperty(PropertyReference property, object? value)
+    {
+        RegisteredSubjectProperty? registeredProperty;
+        lock (_knownSubjects)
+        {
+            registeredProperty = _knownSubjects
+                .GetValueOrDefault(property.Subject)?
+                .TryGetProperty(property.Name);
+        }
+
+        // Call outside lock — RefreshCollectionIndices updates parent entries;
+        // holding _knownSubjects would risk deadlock.
+        registeredProperty?.RefreshCollectionIndices(value, registry: this);
     }
     
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

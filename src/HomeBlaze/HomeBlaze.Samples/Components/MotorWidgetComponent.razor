@@ -55,7 +55,7 @@
                      Size="Size.Small"
                      Color="@GetTemperatureColor()"
                      Class="mr-1" />
-            <strong>@MotorSubject?.Temperature.ToString("F1")</strong> °C
+            <strong>@MotorSubject?.Temperature?.ToString("F1")</strong> °C
         </MudText>
     </div>
 

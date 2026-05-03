@@ -10,7 +10,6 @@ using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.Registry.Attributes;
-using Namotion.Interceptor.Registry.Paths;
 
 namespace HomeBlaze.Servers.OpcUa;
 
@@ -20,12 +19,12 @@ namespace HomeBlaze.Servers.OpcUa;
 [Category("Servers")]
 [Description("Exposes subjects via OPC UA protocol")]
 [InterceptorSubject]
-public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITitleProvider, IIconProvider, IServerSubject
+public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvider, IIconProvider, IServerSubject
 {
     private readonly RootManager _rootManager;
     private readonly SubjectPathResolver _pathResolver;
     private readonly ILogger<OpcUaServer> _logger;
-    private IHostedService? _serverService;
+    private IOpcUaSubjectServer? _serverService;
 
     // Configuration properties (persisted to JSON)
 
@@ -36,7 +35,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
     public partial string Name { get; set; }
 
     /// <summary>
-    /// Subject path to expose via OPC UA (e.g., "Root" or "Root.Children[demo]").
+    /// Subject path to expose via OPC UA (e.g., "/" or "/Children[demo]").
     /// </summary>
     [Configuration]
     public partial string Path { get; set; }
@@ -82,7 +81,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
     /// When stopped manually, this is set to false to prevent auto-restart.
     /// </summary>
     [Configuration]
-    [State]
+    [State(Position = 0)]
     public partial bool IsEnabled { get; set; }
 
     // State properties (runtime only)
@@ -131,17 +130,15 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
 
     // Interface implementations
 
+    [Derived]
+    public bool IsServerRunning => Status == ServiceStatus.Running;
+
     public string? Title => Name;
 
     public string? IconName => "Dns";
 
     [Derived]
-    public string? IconColor => Status switch
-    {
-        ServiceStatus.Running => "Success",
-        ServiceStatus.Error => "Error",
-        _ => "Warning"
-    };
+    public string? IconColor => Status == ServiceStatus.Running ? "Success" : null;
 
     public OpcUaServer(
         RootManager rootManager,
@@ -212,9 +209,7 @@ public partial class OpcUaServer : BackgroundService, IConfigurableSubject, ITit
             }
 
             // Resolve the target subject from path
-            var targetSubject = Path == "Root"
-                ? _rootManager.Root
-                : _pathResolver.ResolveSubject(Path);
+            var targetSubject = _pathResolver.ResolveSubject(Path, PathStyle.Canonical);
             if (targetSubject == null)
             {
                 Status = ServiceStatus.Error;

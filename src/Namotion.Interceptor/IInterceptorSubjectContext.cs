@@ -43,7 +43,7 @@ public interface IInterceptorSubjectContext
     /// <summary>
     /// Executes a property read operation through the interceptor chain.
     /// </summary>
-    /// <typeparam name="TProperty">The type of the property being read.</typeparam>
+    /// <typeparam name="TProperty">A hint for the property type (may be <c>object</c> when boxed).</typeparam>
     /// <param name="context">The property read context containing metadata about the operation.</param>
     /// <param name="readValue">The delegate to read the actual property value.</param>
     /// <returns>The property value, potentially modified by interceptors.</returns>
@@ -52,7 +52,7 @@ public interface IInterceptorSubjectContext
     /// <summary>
     /// Executes a property write operation through the interceptor chain.
     /// </summary>
-    /// <typeparam name="TProperty">The type of the property being written.</typeparam>
+    /// <typeparam name="TProperty">A hint for the property type (may be <c>object</c> when boxed).</typeparam>
     /// <param name="context">The property write context containing metadata and the new value.</param>
     /// <param name="writeValue">The delegate to write the actual property value.</param>
     void ExecuteInterceptedWrite<TProperty>(ref PropertyWriteContext<TProperty> context, Action<IInterceptorSubject, TProperty> writeValue);

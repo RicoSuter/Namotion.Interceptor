@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Concurrent;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor.Connectors.Updates.Internal;
 
@@ -10,6 +11,9 @@ namespace Namotion.Interceptor.Connectors;
 public class DefaultSubjectFactory : ISubjectFactory
 {
     public static DefaultSubjectFactory Instance { get; } = new();
+
+    private static readonly ConcurrentDictionary<Type, Type> ListTypeCache = new();
+    private static readonly ConcurrentDictionary<Type, Type> DictionaryTypeCache = new();
 
     /// <inheritdoc />
     public virtual IInterceptorSubject CreateSubject(Type itemType, IServiceProvider? serviceProvider)
@@ -39,7 +43,7 @@ public class DefaultSubjectFactory : ISubjectFactory
         }
 
         var itemType = propertyType.GenericTypeArguments[0];
-        var collectionType = typeof(List<>).MakeGenericType(itemType);
+        var collectionType = ListTypeCache.GetOrAdd(itemType, static t => typeof(List<>).MakeGenericType(t));
 
         var collection = (IList)Activator.CreateInstance(collectionType)!;
         foreach (var subject in children)
@@ -53,11 +57,14 @@ public class DefaultSubjectFactory : ISubjectFactory
     /// <inheritdoc />
     public IDictionary CreateSubjectDictionary(Type propertyType, IDictionary<object, IInterceptorSubject> entries)
     {
-        // Get key and value types from the dictionary generic type arguments
-        var keyType = propertyType.GenericTypeArguments[0];
-        var valueType = propertyType.GenericTypeArguments[1];
-        var dictionaryType = typeof(Dictionary<,>).MakeGenericType(keyType, valueType);
+        var dictionaryType = DictionaryTypeCache.GetOrAdd(propertyType, static t =>
+        {
+            var keyType = t.GenericTypeArguments[0];
+            var valueType = t.GenericTypeArguments[1];
+            return typeof(Dictionary<,>).MakeGenericType(keyType, valueType);
+        });
 
+        var keyType = propertyType.GenericTypeArguments[0];
         var dictionary = (IDictionary)Activator.CreateInstance(dictionaryType)!;
         foreach (var entry in entries)
         {

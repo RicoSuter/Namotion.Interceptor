@@ -191,6 +191,8 @@ internal class SubscriptionManager : IAsyncDisposable
 
         if (changes.Count > 0)
         {
+            _source.IncomingThroughput.Add(changes.Count);
+
             // Pool item returned inside callback. Safe because ApplyUpdate never throws:
             // It wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
             var state = (source: _source, subscription, receivedTimestamp, changes, logger: _logger);

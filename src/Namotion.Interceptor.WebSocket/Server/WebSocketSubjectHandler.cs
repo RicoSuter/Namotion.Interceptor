@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Updates;
-using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.WebSocket.Protocol;
 using Namotion.Interceptor.WebSocket.Serialization;
@@ -366,7 +366,10 @@ public sealed class WebSocketSubjectHandler
     }
 
     public ChangeQueueProcessor CreateChangeQueueProcessor(ILogger logger) =>
-        new(source: this, Context, propertyFilter: property => _configuration.PathProvider?.IsPropertyIncluded(property) ?? true,
+        new(source: this, Context,
+            propertyFilter: propertyReference =>
+                propertyReference.TryGetRegisteredProperty() is { } property &&
+                (_configuration.PathProvider?.IsPropertyIncluded(property) ?? true),
             writeHandler: BroadcastChangesAsync, BufferTime, logger);
 
     public async ValueTask CloseAllConnectionsAsync()

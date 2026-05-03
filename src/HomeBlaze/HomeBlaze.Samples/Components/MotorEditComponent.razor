@@ -29,7 +29,7 @@
 
     <MudText Typo="Typo.subtitle2" Class="mb-2">Current State (Read-only)</MudText>
     <MudText>Current Speed: @MotorSubject?.CurrentSpeed RPM</MudText>
-    <MudText>Temperature: @MotorSubject?.Temperature.ToString("F1")°C</MudText>
+    <MudText>Temperature: @MotorSubject?.Temperature?.ToString("F1")°C</MudText>
     <MudText>Status: @MotorSubject?.Status</MudText>
 </MudForm>
 

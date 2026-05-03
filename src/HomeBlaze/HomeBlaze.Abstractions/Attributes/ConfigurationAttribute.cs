@@ -7,4 +7,9 @@ namespace HomeBlaze.Abstractions.Attributes;
 [AttributeUsage(AttributeTargets.Property)]
 public class ConfigurationAttribute : Attribute
 {
+    /// <summary>
+    /// Gets or sets a value indicating whether this configuration
+    /// stores a secret value (e.g., API key, password) so it is not shown in the UI.
+    /// </summary>
+    public bool IsSecret { get; set; }
 }
