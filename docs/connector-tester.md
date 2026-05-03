@@ -55,7 +55,7 @@ The tester hosts a server and one or more clients in a single process, connected
 
 - **RandomMutationEngine** (chaos profiles, `NumberOfBatches = 0`): Picks a random node and random property, one at a time, at the configured `ValueMutationRate`. Good for chaos testing where mutation patterns should be unpredictable.
 
-- **BatchMutationEngine** (load profiles, `NumberOfBatches > 0`): Mutates `ValueMutationRate` nodes per second, spread across `NumberOfBatches` parallel batches within 1-second windows. Uses a `PeriodicTimer` at 110% of the required tick rate (e.g., 50 batches → 55 ticks/sec → ~18ms interval) to guarantee all batches complete within each second with 10% headroom for scheduling jitter. Each participant mutates a single fixed property (`participantIndex % 3`) to avoid OPC UA subscription coalescing — server always mutates `StringValue`, first client always mutates `DecimalValue`, etc.
+- **BatchMutationEngine** (load profiles, `NumberOfBatches > 0`): Mutates `ValueMutationRate` nodes per second, spread across `NumberOfBatches` parallel batches within 1-second windows. Uses a `PeriodicTimer` at 110% of the required tick rate (e.g., 50 batches → 55 ticks/sec → ~18ms interval) to guarantee all batches complete within each second with 10% headroom for scheduling jitter. Each participant mutates a single fixed property (`participantIndex % 4`) to avoid OPC UA subscription coalescing — server always mutates `StringValue`, first client always mutates `DecimalValue`, etc.
 
 ### Mutate/Converge Cycle
 

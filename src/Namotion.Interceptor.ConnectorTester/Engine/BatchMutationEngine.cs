@@ -9,7 +9,7 @@ namespace Namotion.Interceptor.ConnectorTester.Engine;
 /// Used for load profiles (NumberOfBatches > 0).
 /// Mutates ValueMutationRate nodes per second, spread across NumberOfBatches
 /// batches with even distribution via a PeriodicTimer at 110% tick rate.
-/// Each participant mutates a single fixed property (participantIndex % 3)
+/// Each participant mutates a single fixed property (participantIndex % 4)
 /// to avoid OPC UA subscription coalescing.
 /// </summary>
 public class BatchMutationEngine : MutationEngine
@@ -79,7 +79,7 @@ public class BatchMutationEngine : MutationEngine
                 }
             }
 
-            var count = Math.Min(nodesPerBatch, ValueMutationRate - mutationsThisSecond);
+            var count = Math.Min(Math.Min(nodesPerBatch, ValueMutationRate - mutationsThisSecond), nodeCount);
 
             using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
             {

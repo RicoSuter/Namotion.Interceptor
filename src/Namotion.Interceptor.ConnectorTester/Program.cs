@@ -262,14 +262,8 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
                     PathProvider = new AttributeBasedPathProvider("mqtt", '/'),
                     DefaultQualityOfService = MqttQualityOfServiceLevel.AtLeastOnce,
                     UseRetainedMessages = true,
-                    SourceTimestampSerializer = static ts =>
-                    {
-                        Span<byte> buffer = stackalloc byte[20];
-                        System.Buffers.Text.Utf8Formatter.TryFormat(ts.UtcTicks, buffer, out var bytesWritten);
-                        return buffer[..bytesWritten].ToArray();
-                    },
-                    SourceTimestampDeserializer = static value => System.Buffers.Text.Utf8Parser.TryParse(value.Span, out long ticks, out int _bytesConsumed)
-                        ? new DateTimeOffset(ticks, TimeSpan.Zero) : null,
+                    SourceTimestampSerializer = SerializeTickTimestamp,
+                    SourceTimestampDeserializer = DeserializeTickTimestamp,
                     ReconnectDelay = TimeSpan.FromSeconds(1),
                     MaximumReconnectDelay = TimeSpan.FromSeconds(10),
                     HealthCheckInterval = TimeSpan.FromSeconds(5),
