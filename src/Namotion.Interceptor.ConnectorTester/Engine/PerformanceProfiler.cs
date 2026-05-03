@@ -162,7 +162,8 @@ public class PerformanceProfiler : IDisposable
             Console.WriteLine();
             Console.WriteLine($"Total received changes:          {changedLatencies.Count}");
             Console.WriteLine($"Total published changes:         {publishedCount}");
-            Console.WriteLine($"Process CPU:                     {Math.Round(cpuPercent, 1)}%");
+            var cpuCores = cpuPercent / 100.0 * Environment.ProcessorCount;
+            Console.WriteLine($"Process CPU:                     {Math.Round(cpuPercent, 1)}% ({Math.Round(cpuCores, 1)} cores)");
             Console.WriteLine($"Process memory:                  {Math.Round(workingSetMb, 2)} MB ({Math.Round(heapMb, 2)} MB in .NET heap)");
             Console.WriteLine($"Avg allocations over last {elapsedSec}s:   {Math.Round(allocRateMbPerSec, 2)} MB/s");
             Console.WriteLine();
