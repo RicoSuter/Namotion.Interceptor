@@ -162,11 +162,11 @@ Files are created as `pending` and renamed to `pass` or `FAIL` on cycle completi
 
 ### Performance Logs
 
-Performance metrics are written to `logs/performance-{participant}.csv` for every profile (chaos and load). Each file has a header row and one data row per reporting interval with: timestamp, participant name, throughput, latency percentiles (P50-P99.9), memory, and allocation rate. Files are reset on each run.
+Performance metrics are written to `logs/performance-{participant}.csv` for every profile (chaos and load). Each file has a header row and one data row per reporting interval. Columns: Timestamp, Participant, Recv/s, Recv-E2E-Avg, Recv-E2E-P50, Recv-E2E-P90, Recv-E2E-P95, Recv-E2E-P99, Recv-E2E-P999, Recv-E2E-Max, Recv-Proc, Published, Received, CPU%, ProcessMB, HeapMB, AllocMB/s. Files are reset on each run.
 
 ## Configuration
 
-Configuration is loaded from `appsettings.json` with environment-specific overrides (e.g., `appsettings.opcua.json`). The root section is `"ConnectorTester"`. Launch profiles set the `DOTNET_ENVIRONMENT` variable, which loads the corresponding `appsettings.{environment}.json` file.
+Configuration is loaded from `appsettings.json` with environment-specific overrides (e.g., `appsettings.opcua.json`). The root section is `"ConnectorTester"`. Use `--launch-profile` to select a profile (e.g., `--launch-profile opcua`), which sets `DOTNET_ENVIRONMENT` and loads the corresponding `appsettings.{environment}.json` file.
 
 ### Chaos Profile Example (appsettings.opcua.json)
 
