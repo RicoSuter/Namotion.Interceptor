@@ -227,7 +227,8 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
 {
   "ConnectorTester": {
     "Connector": "opcua",
-    "ObjectCount": 20000,
+    "CollectionCount": 20000,
+    "DictionaryCount": 0,
     "NumberOfBatches": 50,
     "MutatePhaseDuration": "00:30:00",
     "ConvergenceTimeout": "00:05:00",
@@ -251,7 +252,8 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `Connector` | string | `"opcua"` | Protocol to test: `"opcua"`, `"mqtt"`, or `"websocket"` |
-| `ObjectCount` | int | `31` | Number of collection children in the test graph |
+| `CollectionCount` | int | `20` | Number of collection children in the test graph |
+| `DictionaryCount` | int | `10` | Number of dictionary entries in the test graph |
 | `NumberOfBatches` | int | `0` | Batches per second. `0` = RandomMutationEngine, `> 0` = BatchMutationEngine. Each batch mutates `ceil(ValueMutationRate / NumberOfBatches)` nodes. |
 | `MetricsReportingInterval` | TimeSpan | `00:01:00` | How often performance metrics are logged |
 | `MutatePhaseDuration` | TimeSpan | `00:01:00` | How long mutations run before convergence check |

@@ -6,7 +6,10 @@ public class ConnectorTesterConfiguration
     public string Connector { get; set; } = "opcua";
 
     /// <summary>Number of collection children in the test graph.</summary>
-    public int ObjectCount { get; set; } = 31;
+    public int CollectionCount { get; set; } = 20;
+
+    /// <summary>Number of dictionary entries in the test graph.</summary>
+    public int DictionaryCount { get; set; } = 10;
 
     /// <summary>
     /// Number of batches per second for BatchMutationEngine.

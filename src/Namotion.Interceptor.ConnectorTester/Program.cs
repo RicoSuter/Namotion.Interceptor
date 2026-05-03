@@ -127,7 +127,7 @@ if (!skipServer)
         .WithSourceTransactions()
         .WithHostedServices(builder.Services);
 
-    var serverRoot = TestNode.CreateWithGraph(serverContext, configuration.ObjectCount);
+    var serverRoot = TestNode.CreateWithGraph(serverContext, configuration.CollectionCount, configuration.DictionaryCount);
     participants[configuration.Server.Name] = serverRoot;
 
     var serverMutationEngine = CreateMutationEngine(
@@ -222,7 +222,7 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
         .WithSourceTransactions()
         .WithHostedServices(builder.Services);
 
-    var clientRoot = TestNode.CreateWithGraph(clientContext, configuration.ObjectCount);
+    var clientRoot = TestNode.CreateWithGraph(clientContext, configuration.CollectionCount, configuration.DictionaryCount);
     participants[clientConfig.Name] = clientRoot;
 
     var clientMutationEngine = CreateMutationEngine(

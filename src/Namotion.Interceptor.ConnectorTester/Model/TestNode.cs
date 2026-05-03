@@ -54,29 +54,19 @@ public partial class TestNode
 
     /// <summary>
     /// Creates a TestNode root with a configurable number of children.
-    /// Default (31): 20 collection + 10 dictionary (chaos profile).
-    /// Custom count: all collection children (load profile).
     /// </summary>
-    public static TestNode CreateWithGraph(IInterceptorSubjectContext context, int objectCount = 31)
+    /// <param name="context">Interceptor context for the root node.</param>
+    /// <param name="collectionCount">Number of collection children.</param>
+    /// <param name="dictionaryCount">Number of dictionary entries.</param>
+    public static TestNode CreateWithGraph(IInterceptorSubjectContext context, int collectionCount = 20, int dictionaryCount = 10)
     {
-        if (objectCount == 31)
-        {
-            return new TestNode(context)
-            {
-                Collection = Enumerable.Range(0, 20)
-                    .Select(_ => new TestNode())
-                    .ToArray(),
-                Items = Enumerable.Range(0, 10)
-                    .ToDictionary(i => $"item-{i}", _ => new TestNode())
-            };
-        }
-
         return new TestNode(context)
         {
-            Collection = Enumerable.Range(0, objectCount)
+            Collection = Enumerable.Range(0, collectionCount)
                 .Select(_ => new TestNode())
                 .ToArray(),
-            Items = new Dictionary<string, TestNode>()
+            Items = Enumerable.Range(0, dictionaryCount)
+                .ToDictionary(i => $"item-{i}", _ => new TestNode())
         };
     }
 }

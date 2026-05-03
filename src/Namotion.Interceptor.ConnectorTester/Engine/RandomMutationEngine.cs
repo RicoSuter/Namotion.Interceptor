@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.ConnectorTester.Engine;
 
 /// <summary>
 /// Value mutation strategy: picks a random node and random property, one at a time.
-/// Used for chaos profiles (BatchSize = 0).
+/// Used for chaos profiles (NumberOfBatches = 0).
 /// When UseTransactions is enabled, each tick's batch of mutations is wrapped
 /// in a single transaction.
 /// </summary>

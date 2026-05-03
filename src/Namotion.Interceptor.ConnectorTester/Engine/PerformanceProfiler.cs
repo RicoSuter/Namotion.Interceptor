@@ -173,29 +173,31 @@ public class PerformanceProfiler : IDisposable
 
             if (throughputSamples.Count > 0)
             {
+                throughputSamples.Sort();
                 PrintPercentileLine("Received changes/s", throughputSamples);
             }
 
             if (receivedLatencies.Count > 0)
             {
+                receivedLatencies.Sort();
                 PrintPercentileLine("Received processing (ms)", receivedLatencies);
             }
 
             if (changedLatencies.Count > 0)
             {
+                changedLatencies.Sort();
                 PrintPercentileLine("Received E2E latency (ms)", changedLatencies);
             }
         }
 
-        List<double> sortedChanged = changedLatencies.Count > 0 ? [.. changedLatencies.Order()] : [];
         var avgThroughput = throughputSamples.Count > 0 ? throughputSamples.Average() : 0;
-        var avgChangedLatency = sortedChanged.Count > 0 ? sortedChanged.Average() : 0;
-        var p50ChangedLatency = sortedChanged.Count > 0 ? Percentile(sortedChanged, 0.50) : 0;
-        var p90ChangedLatency = sortedChanged.Count > 0 ? Percentile(sortedChanged, 0.90) : 0;
-        var p95ChangedLatency = sortedChanged.Count > 0 ? Percentile(sortedChanged, 0.95) : 0;
-        var p99ChangedLatency = sortedChanged.Count > 0 ? Percentile(sortedChanged, 0.99) : 0;
-        var p999ChangedLatency = sortedChanged.Count > 0 ? Percentile(sortedChanged, 0.999) : 0;
-        var maxChangedLatency = sortedChanged.Count > 0 ? sortedChanged[^1] : 0;
+        var avgChangedLatency = changedLatencies.Count > 0 ? changedLatencies.Average() : 0;
+        var p50ChangedLatency = changedLatencies.Count > 0 ? Percentile(changedLatencies, 0.50) : 0;
+        var p90ChangedLatency = changedLatencies.Count > 0 ? Percentile(changedLatencies, 0.90) : 0;
+        var p95ChangedLatency = changedLatencies.Count > 0 ? Percentile(changedLatencies, 0.95) : 0;
+        var p99ChangedLatency = changedLatencies.Count > 0 ? Percentile(changedLatencies, 0.99) : 0;
+        var p999ChangedLatency = changedLatencies.Count > 0 ? Percentile(changedLatencies, 0.999) : 0;
+        var maxChangedLatency = changedLatencies.Count > 0 ? changedLatencies[^1] : 0;
         var avgReceivedLatency = receivedLatencies.Count > 0 ? receivedLatencies.Average() : 0;
 
         var logLine = string.Format(
@@ -218,11 +220,10 @@ public class PerformanceProfiler : IDisposable
         }
     }
 
-    private static void PrintPercentileLine(string label, List<double> values)
+    private static void PrintPercentileLine(string label, List<double> sortedValues)
     {
-        var sorted = values.OrderBy(v => v).ToArray();
-        var avg = sorted.Average();
-        Console.WriteLine($"{label,-29} {avg,10:F2} {Percentile(sorted, 0.50),10:F2} {Percentile(sorted, 0.90),10:F2} {Percentile(sorted, 0.95),10:F2} {Percentile(sorted, 0.99),10:F2} {Percentile(sorted, 0.999),10:F2} {sorted[^1],10:F2} {sorted[0],10:F2} {StdDev(sorted, avg),10:F2} {sorted.Length,10}");
+        var avg = sortedValues.Average();
+        Console.WriteLine($"{label,-29} {avg,10:F2} {Percentile(sortedValues, 0.50),10:F2} {Percentile(sortedValues, 0.90),10:F2} {Percentile(sortedValues, 0.95),10:F2} {Percentile(sortedValues, 0.99),10:F2} {Percentile(sortedValues, 0.999),10:F2} {sortedValues[^1],10:F2} {sortedValues[0],10:F2} {StdDev(sortedValues, avg),10:F2} {sortedValues.Count,10}");
     }
 
     private static double Percentile(IReadOnlyList<double> sortedAsc, double p)
