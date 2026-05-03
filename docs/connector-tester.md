@@ -4,9 +4,11 @@ The Connector Tester verifies connector correctness and performance. Run it afte
 
 ## Quick Start
 
-Run all commands from the repository root:
+Run all commands from the repository root. Clear previous logs before each run:
 
 ```bash
+rm -rf logs/
+
 # Chaos test: correctness under kill/disconnect disruptions (exits with code 1 on failure)
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua --configuration Release
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt --configuration Release
@@ -141,7 +143,7 @@ Mismatch between server and client-b
 
 ### Log Files
 
-Per-cycle log files are written to a `logs/` directory (relative to working directory):
+All log files are written to `logs/` in the repository root (the working directory):
 
 ```
 logs/
