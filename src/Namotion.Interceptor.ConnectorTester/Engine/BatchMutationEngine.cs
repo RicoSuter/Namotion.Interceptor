@@ -65,7 +65,7 @@ public class BatchMutationEngine : MutationEngine
                 }
 
                 mutationsThisSecond = 0;
-                cycleStart = Stopwatch.GetTimestamp();
+                cycleStart += Stopwatch.Frequency;
             }
 
             List<TestNode> nodes;
