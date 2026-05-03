@@ -5,7 +5,9 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
 using Microsoft.Extensions.DependencyInjection;
+using Namotion.Interceptor;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Dynamic;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Client;
@@ -23,6 +25,7 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
 {
     private readonly ILogger<OpcUaClient> _logger;
     private IOpcUaSubjectClientSource? _clientSource;
+    private SubjectSourceBackgroundService? _sourceService;
 
     // Configuration properties
 
@@ -82,6 +85,13 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     /// </summary>
     [State]
     public partial double? OutgoingChangesPerSecond { get; set; }
+
+    /// <summary>
+    /// Dynamic root subject containing discovered OPC UA properties.
+    /// Recreated on each connection to provide a clean slate.
+    /// </summary>
+    [State]
+    public partial DynamicSubject? Root { get; set; }
 
     // Operations
 
@@ -181,17 +191,29 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
                 return;
             }
 
+            var root = new DynamicSubject(((IInterceptorSubject)this).Context);
+            Root = root;
+
             var configuration = new OpcUaClientConfiguration
             {
                 ServerUrl = ServerUrl,
                 RootName = RootName,
-                TypeResolver = new OpcUaTypeResolver(_logger),
+                TypeResolver = new HomeBlazeOpcUaTypeResolver(_logger),
                 ValueConverter = new OpcUaValueConverter(),
                 SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
             };
 
-            _clientSource = this.CreateOpcUaClientSource(configuration, _logger);
+            _clientSource = root.CreateOpcUaClientSource(configuration, _logger);
+            _sourceService = new SubjectSourceBackgroundService(
+                (ISubjectSource)_clientSource,
+                ((IInterceptorSubject)root).Context,
+                _logger,
+                configuration.BufferTime,
+                configuration.RetryTime,
+                configuration.WriteRetryQueueSize);
+
             await this.AttachHostedServiceAsync(_clientSource, cancellationToken);
+            await this.AttachHostedServiceAsync(_sourceService, cancellationToken);
 
             Status = ServiceStatus.Running;
             _logger.LogInformation("OPC UA client started for server: {ServerUrl}", ServerUrl);
@@ -211,6 +233,10 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
             try
             {
                 Status = ServiceStatus.Stopping;
+                if (_sourceService != null)
+                {
+                    await this.DetachHostedServiceAsync(_sourceService, cancellationToken);
+                }
                 await this.DetachHostedServiceAsync(_clientSource, cancellationToken);
                 _logger.LogInformation("OPC UA client stopped");
             }
@@ -221,6 +247,8 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
             finally
             {
                 _clientSource = null;
+                _sourceService = null;
+                Root = null;
                 Status = ServiceStatus.Stopped;
                 IsConnected = null;
                 IncomingChangesPerSecond = null;

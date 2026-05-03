@@ -1,6 +1,7 @@
 ﻿using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Dynamic;
+using Namotion.Interceptor.OpcUa.Attributes;
 using Opc.Ua;
 using Opc.Ua.Client;
 
@@ -14,6 +15,19 @@ public class OpcUaTypeResolver
     public OpcUaTypeResolver(ILogger logger)
     {
         _logger = logger;
+    }
+
+    public virtual Attribute[] GetDynamicPropertyAttributes(ReferenceDescription reference, ISession session)
+    {
+        var namespaceUri = reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex);
+        return
+        [
+            new OpcUaNodeAttribute(reference.BrowseName.Name, namespaceUri)
+            {
+                NodeIdentifier = reference.NodeId.Identifier.ToString(),
+                NodeNamespaceUri = namespaceUri
+            }
+        ];
     }
 
     public virtual async Task<Type?> TryGetTypeForNodeAsync(ISession session, ReferenceDescription reference, CancellationToken cancellationToken)

@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.OpcUa;
+using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.Registry.Attributes;
 
@@ -252,6 +253,9 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
             var configuration = new OpcUaServerConfiguration
             {
                 ValueConverter = new OpcUaValueConverter(),
+                NodeMapper = new CompositeNodeMapper(
+                    new PathProviderOpcUaNodeMapper(new StateAttributeOpcUaPathProvider()),
+                    new AttributeOpcUaNodeMapper()),
                 ApplicationName = ApplicationName ?? defaults.ApplicationName,
                 NamespaceUri = NamespaceUri ?? defaults.NamespaceUri,
                 RootName = RootName,
