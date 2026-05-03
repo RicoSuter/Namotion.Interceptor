@@ -233,7 +233,7 @@ The `LoadNodeSetFromEmbeddedResource<T>()` helper loads NodeSet XML files embedd
 
 `IOpcUaSubjectServer.Diagnostics` exposes a live facade. Resolve it once and poll (see [Resolving the Server](#resolving-the-server)).
 
-Properties: `IsRunning`, `ActiveSessionCount`, `StartTime`, `Uptime`, `LastError`, `ConsecutiveFailures` (resets on successful start, see [Resilience](#resilience)).
+Properties: `IsRunning`, `ActiveSessionCount`, `StartTime`, `Uptime`, `LastError`, `ConsecutiveFailures` (resets on successful start, see [Resilience](#resilience)), `IncomingChangesPerSecond` (client writes to server, 60-second sliding window), `OutgoingChangesPerSecond` (subject changes pushed to OPC UA nodes, 60-second sliding window).
 
 ## Direct Server Access
 
