@@ -47,7 +47,7 @@ public class PerformanceProfiler : IDisposable
 
         var header = string.Format(
             "{0,24}, {1,12}, {2,12}, {3,12}, {4,12}, {5,12}, {6,12}, {7,12}, {8,12}, {9,12}, {10,12}, {11,12}, {12,12}, {13,12}, {14,12}, {15,12}, {16,12}",
-            "Timestamp", "Participant", "Throughput", "E2E-Avg", "E2E-P50", "E2E-P90", "E2E-P95", "E2E-P99", "E2E-P99.9", "E2E-Max", "Proc-Avg", "Published", "Received", "CPU%", "ProcessMB", "HeapMB", "AllocMB/s");
+            "Timestamp", "Participant", "Recv/s", "Recv-E2E-Avg", "Recv-E2E-P50", "Recv-E2E-P90", "Recv-E2E-P95", "Recv-E2E-P99", "Recv-E2E-P999", "Recv-E2E-Max", "Recv-Proc", "Published", "Received", "CPU%", "ProcessMB", "HeapMB", "AllocMB/s");
         File.WriteAllText(_logFilePath, header + Environment.NewLine);
 
         _subscription = context.CreatePropertyChangeQueueSubscription();
@@ -172,17 +172,17 @@ public class PerformanceProfiler : IDisposable
 
             if (throughputSamples.Count > 0)
             {
-                PrintPercentileLine("Received (changes/s)", throughputSamples);
+                PrintPercentileLine("Received changes/s", throughputSamples);
             }
 
             if (receivedLatencies.Count > 0)
             {
-                PrintPercentileLine("Processing latency (ms)", receivedLatencies);
+                PrintPercentileLine("Received processing (ms)", receivedLatencies);
             }
 
             if (changedLatencies.Count > 0)
             {
-                PrintPercentileLine("End-to-end latency (ms)", changedLatencies);
+                PrintPercentileLine("Received E2E latency (ms)", changedLatencies);
             }
         }
 
