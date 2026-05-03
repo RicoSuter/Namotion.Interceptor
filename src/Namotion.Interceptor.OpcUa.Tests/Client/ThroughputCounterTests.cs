@@ -1,4 +1,4 @@
-using Namotion.Interceptor.OpcUa.Client;
+using Namotion.Interceptor.OpcUa;
 
 namespace Namotion.Interceptor.OpcUa.Tests.Client;
 

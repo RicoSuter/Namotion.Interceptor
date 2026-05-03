@@ -30,6 +30,9 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, IOpcUaSu
     private DateTimeOffset? _startTime;
     private Exception? _lastError;
 
+    internal ThroughputCounter IncomingThroughput { get; } = new();
+    internal ThroughputCounter OutgoingThroughput { get; } = new();
+
     /// <inheritdoc />
     public IInterceptorSubject RootSubject => _subject;
 
@@ -146,6 +149,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, IOpcUaSu
             }
         }
 
+        OutgoingThroughput.Add(span.Length);
         return ValueTask.CompletedTask;
     }
 
@@ -363,6 +367,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, IOpcUaSu
 
     internal void UpdateProperty(PropertyReference property, DateTimeOffset changedTimestamp, object? value)
     {
+        IncomingThroughput.Add(1);
         var receivedTimestamp = DateTimeOffset.UtcNow;
 
         var registeredProperty = property.TryGetRegisteredProperty();

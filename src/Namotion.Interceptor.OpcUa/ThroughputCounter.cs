@@ -1,4 +1,4 @@
-namespace Namotion.Interceptor.OpcUa.Client;
+namespace Namotion.Interceptor.OpcUa;
 
 internal sealed class ThroughputCounter
 {

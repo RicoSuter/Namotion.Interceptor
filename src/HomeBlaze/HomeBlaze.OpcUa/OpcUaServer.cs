@@ -11,7 +11,7 @@ using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Server;
 using Namotion.Interceptor.Registry.Attributes;
 
-namespace HomeBlaze.Servers.OpcUa;
+namespace HomeBlaze.OpcUa;
 
 /// <summary>
 /// OPC UA server subject that exposes other subjects via OPC UA protocol.
@@ -98,6 +98,24 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
     [State]
     public partial string? StatusMessage { get; set; }
 
+    /// <summary>
+    /// Average incoming changes per second (client writes to server). Null when not running.
+    /// </summary>
+    [State]
+    public partial double? IncomingChangesPerSecond { get; set; }
+
+    /// <summary>
+    /// Average outgoing changes per second (subject changes pushed to OPC UA nodes). Null when not running.
+    /// </summary>
+    [State]
+    public partial double? OutgoingChangesPerSecond { get; set; }
+
+    /// <summary>
+    /// Number of active OPC UA client sessions. Null when not running.
+    /// </summary>
+    [State]
+    public partial int? ActiveSessionCount { get; set; }
+
     // Operations
 
     /// <summary>
@@ -157,20 +175,28 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // Only auto-start if enabled (respects last persisted state)
         if (IsEnabled)
         {
             await StartServerAsync(stoppingToken);
         }
 
-        // Keep running until cancelled
         try
         {
-            await Task.Delay(Timeout.Infinite, stoppingToken);
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                if (_serverService is { } service)
+                {
+                    var diagnostics = service.Diagnostics;
+                    IncomingChangesPerSecond = diagnostics.IncomingChangesPerSecond;
+                    OutgoingChangesPerSecond = diagnostics.OutgoingChangesPerSecond;
+                    ActiveSessionCount = diagnostics.ActiveSessionCount;
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(60), stoppingToken);
+            }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            // Normal shutdown
         }
 
         await StopServerAsync(CancellationToken.None);
@@ -266,6 +292,9 @@ public partial class OpcUaServer : BackgroundService, IConfigurable, ITitleProvi
             {
                 _serverService = null;
                 Status = ServiceStatus.Stopped;
+                IncomingChangesPerSecond = null;
+                OutgoingChangesPerSecond = null;
+                ActiveSessionCount = null;
             }
         }
     }

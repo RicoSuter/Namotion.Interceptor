@@ -360,8 +360,10 @@ namespace Namotion.Interceptor.OpcUa.Server
     {
         public int ActiveSessionCount { get; }
         public int ConsecutiveFailures { get; }
+        public double IncomingChangesPerSecond { get; }
         public bool IsRunning { get; }
         public System.Exception? LastError { get; }
+        public double OutgoingChangesPerSecond { get; }
         public System.DateTimeOffset? StartTime { get; }
         public System.TimeSpan? Uptime { get; }
     }
