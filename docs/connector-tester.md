@@ -4,16 +4,18 @@ The Connector Tester verifies connector correctness and performance. Run it afte
 
 ## Quick Start
 
+Run all commands from the repository root:
+
 ```bash
 # Chaos test: correctness under kill/disconnect disruptions (exits with code 1 on failure)
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua -c Release
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt -c Release
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket -c Release
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua --configuration Release
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt --configuration Release
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket --configuration Release
 
 # Load test: throughput and latency at 20k changes/sec
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-load -c Release
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt-load -c Release
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-load -c Release
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-load --configuration Release
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt-load --configuration Release
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-load --configuration Release
 ```
 
 **Chaos profiles** inject kill/disconnect faults and verify all participants converge to identical state. **Load profiles** push high throughput (configurable via `ValueMutationRate`) and report latency percentiles, memory, and allocation rate. Both modes use the same verification cycle: mutate, pause, compare snapshots. Both should pass before merging connector changes.
@@ -108,10 +110,10 @@ Run server and client in separate processes for isolated load testing:
 
 ```bash
 # Terminal 1: Run server only
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-load -c Release -- --participant server
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-load --configuration Release -- --participant server
 
 # Terminal 2: Run client only
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-load -c Release -- --participant client
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-load --configuration Release -- --participant client
 ```
 
 When `--participant` is specified, only the named participant starts and the verification engine is skipped. Mutations run continuously with performance metrics.
