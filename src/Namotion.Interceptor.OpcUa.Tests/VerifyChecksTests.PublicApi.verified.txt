@@ -162,6 +162,7 @@ namespace Namotion.Interceptor.OpcUa.Client
     public class OpcUaTypeResolver
     {
         public OpcUaTypeResolver(Microsoft.Extensions.Logging.ILogger logger) { }
+        public virtual System.Attribute[] GetDynamicPropertyAttributes(Opc.Ua.ReferenceDescription reference, Opc.Ua.Client.ISession session) { }
         public virtual System.Threading.Tasks.Task<System.Type?> TryGetTypeForNodeAsync(Opc.Ua.Client.ISession session, Opc.Ua.ReferenceDescription reference, System.Threading.CancellationToken cancellationToken) { }
     }
     public sealed class OpcUaWriteException : System.InvalidOperationException
@@ -360,8 +361,10 @@ namespace Namotion.Interceptor.OpcUa.Server
     {
         public int ActiveSessionCount { get; }
         public int ConsecutiveFailures { get; }
+        public double IncomingChangesPerSecond { get; }
         public bool IsRunning { get; }
         public System.Exception? LastError { get; }
+        public double OutgoingChangesPerSecond { get; }
         public System.DateTimeOffset? StartTime { get; }
         public System.TimeSpan? Uptime { get; }
     }
