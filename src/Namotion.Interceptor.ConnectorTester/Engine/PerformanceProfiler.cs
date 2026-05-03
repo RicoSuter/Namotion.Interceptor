@@ -26,6 +26,7 @@ public class PerformanceProfiler : IDisposable
     private DateTimeOffset _windowStartTime;
     private DateTimeOffset _lastThroughputTime;
     private long _windowStartTotalAllocatedBytes;
+    private TimeSpan _windowStartCpuTime;
 
     public PerformanceProfiler(
         IInterceptorSubjectContext context,
@@ -36,13 +37,17 @@ public class PerformanceProfiler : IDisposable
         _windowStartTime = DateTimeOffset.UtcNow;
         _lastThroughputTime = _windowStartTime;
         _windowStartTotalAllocatedBytes = GC.GetTotalAllocatedBytes(precise: true);
+        using (var process = Process.GetCurrentProcess())
+        {
+            _windowStartCpuTime = process.TotalProcessorTime;
+        }
 
         Directory.CreateDirectory(LogDirectory);
         _logFilePath = Path.Combine(LogDirectory, $"performance-{participantName}.csv");
 
         var header = string.Format(
-            "{0,24}, {1,12}, {2,12}, {3,12}, {4,12}, {5,12}, {6,12}, {7,12}, {8,12}, {9,12}, {10,12}, {11,12}, {12,12}, {13,12}, {14,12}, {15,12}",
-            "Timestamp", "Participant", "Throughput", "E2E-Avg", "E2E-P50", "E2E-P90", "E2E-P95", "E2E-P99", "E2E-P99.9", "E2E-Max", "Proc-Avg", "Published", "Received", "ProcessMB", "HeapMB", "AllocMB/s");
+            "{0,24}, {1,12}, {2,12}, {3,12}, {4,12}, {5,12}, {6,12}, {7,12}, {8,12}, {9,12}, {10,12}, {11,12}, {12,12}, {13,12}, {14,12}, {15,12}, {16,12}",
+            "Timestamp", "Participant", "Throughput", "E2E-Avg", "E2E-P50", "E2E-P90", "E2E-P95", "E2E-P99", "E2E-P99.9", "E2E-Max", "Proc-Avg", "Published", "Received", "CPU%", "ProcessMB", "HeapMB", "AllocMB/s");
         File.WriteAllText(_logFilePath, header + Environment.NewLine);
 
         _subscription = context.CreatePropertyChangeQueueSubscription();
@@ -103,6 +108,7 @@ public class PerformanceProfiler : IDisposable
         DateTimeOffset windowStartCopy;
         int publishedCount;
         long windowStartAllocatedBytes;
+        TimeSpan windowStartCpuTime;
 
         lock (_syncLock)
         {
@@ -112,6 +118,7 @@ public class PerformanceProfiler : IDisposable
             windowStartCopy = _windowStartTime;
             publishedCount = _totalPublishedChanges;
             windowStartAllocatedBytes = _windowStartTotalAllocatedBytes;
+            windowStartCpuTime = _windowStartCpuTime;
 
             _changedLatencies.Clear();
             _receivedLatencies.Clear();
@@ -122,14 +129,18 @@ public class PerformanceProfiler : IDisposable
             _windowStartTime = DateTimeOffset.UtcNow;
             _lastThroughputTime = _windowStartTime;
             _windowStartTotalAllocatedBytes = GC.GetTotalAllocatedBytes(precise: true);
+            using (var p = Process.GetCurrentProcess())
+            {
+                _windowStartCpuTime = p.TotalProcessorTime;
+            }
         }
 
-        PrintAndLogStats(windowStartCopy, windowStartAllocatedBytes,
+        PrintAndLogStats(windowStartCopy, windowStartAllocatedBytes, windowStartCpuTime,
             changedLatenciesCopy, receivedLatenciesCopy, throughputSamplesCopy, publishedCount);
     }
 
     private void PrintAndLogStats(
-        DateTimeOffset windowStart, long windowStartAllocatedBytes,
+        DateTimeOffset windowStart, long windowStartAllocatedBytes, TimeSpan windowStartCpuTime,
         List<double> changedLatencies, List<double> receivedLatencies,
         List<double> throughputSamples, int publishedCount)
     {
@@ -140,6 +151,8 @@ public class PerformanceProfiler : IDisposable
         var elapsedSec = Math.Max(1.0, Math.Round((now - windowStart).TotalSeconds, 0));
         var allocatedDelta = Math.Max(0, GC.GetTotalAllocatedBytes(precise: true) - windowStartAllocatedBytes);
         var allocRateMbPerSec = allocatedDelta / elapsedSec / (1024.0 * 1024.0);
+        var cpuDelta = process.TotalProcessorTime - windowStartCpuTime;
+        var cpuPercent = cpuDelta.TotalSeconds / (elapsedSec * Environment.ProcessorCount) * 100.0;
 
         lock (ConsoleLock)
         {
@@ -149,6 +162,7 @@ public class PerformanceProfiler : IDisposable
             Console.WriteLine();
             Console.WriteLine($"Total received changes:          {changedLatencies.Count}");
             Console.WriteLine($"Total published changes:         {publishedCount}");
+            Console.WriteLine($"Process CPU:                     {Math.Round(cpuPercent, 1)}%");
             Console.WriteLine($"Process memory:                  {Math.Round(workingSetMb, 2)} MB ({Math.Round(heapMb, 2)} MB in .NET heap)");
             Console.WriteLine($"Avg allocations over last {elapsedSec}s:   {Math.Round(allocRateMbPerSec, 2)} MB/s");
             Console.WriteLine();
@@ -185,11 +199,12 @@ public class PerformanceProfiler : IDisposable
 
         var logLine = string.Format(
             CultureInfo.InvariantCulture,
-            "{0,24:yyyy-MM-ddTHH:mm:ss.fffZ}, {1,12}, {2,12:F0}, {3,12:F1}, {4,12:F1}, {5,12:F1}, {6,12:F1}, {7,12:F1}, {8,12:F1}, {9,12:F1}, {10,12:F1}, {11,12}, {12,12}, {13,12:F1}, {14,12:F1}, {15,12:F2}",
+            "{0,24:yyyy-MM-ddTHH:mm:ss.fffZ}, {1,12}, {2,12:F0}, {3,12:F1}, {4,12:F1}, {5,12:F1}, {6,12:F1}, {7,12:F1}, {8,12:F1}, {9,12:F1}, {10,12:F1}, {11,12}, {12,12}, {13,12:F1}, {14,12:F1}, {15,12:F1}, {16,12:F2}",
             now, _participantName, avgThroughput,
             avgChangedLatency, p50ChangedLatency, p90ChangedLatency, p95ChangedLatency,
             p99ChangedLatency, p999ChangedLatency, maxChangedLatency,
             avgReceivedLatency, publishedCount, changedLatencies.Count,
+            cpuPercent,
             workingSetMb, heapMb, allocRateMbPerSec);
 
         try
