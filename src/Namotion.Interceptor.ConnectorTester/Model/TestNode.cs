@@ -21,6 +21,11 @@ public partial class TestNode
     [Path("ws", "IntValue")]
     public partial int IntValue { get; set; }
 
+    [Path("opc", "LongValue")]
+    [Path("mqtt", "LongValue")]
+    [Path("ws", "LongValue")]
+    public partial long LongValue { get; set; }
+
     [Path("opc", "ObjectRef")]
     [Path("mqtt", "ObjectRef")]
     [Path("ws", "ObjectRef")]
@@ -41,6 +46,7 @@ public partial class TestNode
         StringValue = string.Empty;
         DecimalValue = 0;
         IntValue = 0;
+        LongValue = 0;
         ObjectRef = null;
         Collection = [];
         Items = new Dictionary<string, TestNode>();

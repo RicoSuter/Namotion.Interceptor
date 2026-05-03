@@ -50,7 +50,7 @@ public class BatchMutationEngine : MutationEngine
         var nodeIndex = 0;
         var mutationsThisSecond = 0;
         var cycleStart = Stopwatch.GetTimestamp();
-        var property = _participantIndex % 3;
+        var property = _participantIndex % 4;
 
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
@@ -98,6 +98,9 @@ public class BatchMutationEngine : MutationEngine
                             break;
                         case 2:
                             node.IntValue = (int)(counter % int.MaxValue);
+                            break;
+                        case 3:
+                            node.LongValue = counter;
                             break;
                     }
 

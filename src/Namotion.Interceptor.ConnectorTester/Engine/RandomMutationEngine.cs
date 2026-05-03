@@ -54,7 +54,7 @@ public class RandomMutationEngine : MutationEngine
             node = KnownNodes[_valueMutationRandom.Next(KnownNodes.Count)];
         }
 
-        var property = _valueMutationRandom.Next(3);
+        var property = _valueMutationRandom.Next(4);
         var counter = NextGlobalCounter();
 
         using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
@@ -69,6 +69,9 @@ public class RandomMutationEngine : MutationEngine
                     break;
                 case 2:
                     node.IntValue = (int)(counter % int.MaxValue);
+                    break;
+                case 3:
+                    node.LongValue = counter;
                     break;
             }
         }
