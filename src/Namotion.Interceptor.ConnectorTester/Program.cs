@@ -82,12 +82,9 @@ for (var i = 0; i < args.Length; i++)
     }
 }
 
-var participantCounter = 0;
-
-MutationEngine CreateMutationEngine(TestNode root, ParticipantConfiguration config, string logCategory)
+MutationEngine CreateMutationEngine(TestNode root, ParticipantConfiguration config, int participantIndex, string logCategory)
 {
     var logger = sharedLoggerFactory.CreateLogger(logCategory);
-    var participantIndex = participantCounter++;
 
     if (configuration.NumberOfBatches > 0)
     {
@@ -125,7 +122,7 @@ if (!skipServer)
     participants[configuration.Server.Name] = serverRoot;
 
     var serverMutationEngine = CreateMutationEngine(
-        serverRoot, configuration.Server, $"MutationEngine.{configuration.Server.Name}");
+        serverRoot, configuration.Server, 0, $"MutationEngine.{configuration.Server.Name}");
     mutationEngines.Add(serverMutationEngine);
     builder.Services.AddSingleton<IHostedService>(serverMutationEngine);
 
@@ -218,9 +215,9 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
     var clientRoot = TestNode.CreateWithGraph(clientContext, configuration.ObjectCount);
     participants[clientConfig.Name] = clientRoot;
 
-    // Client mutation engine
+    // Client mutation engine (participantIndex: server=0, clients=1,2,...)
     var clientMutationEngine = CreateMutationEngine(
-        clientRoot, clientConfig, $"MutationEngine.{clientConfig.Name}");
+        clientRoot, clientConfig, clientIndex + 1, $"MutationEngine.{clientConfig.Name}");
     mutationEngines.Add(clientMutationEngine);
     builder.Services.AddSingleton<IHostedService>(clientMutationEngine);
 
