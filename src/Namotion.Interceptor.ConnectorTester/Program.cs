@@ -346,6 +346,11 @@ foreach (var chaosEngine in chaosEngines)
     }
 }
 
+// Resolve verification engine before RunAsync (service provider is disposed after)
+VerificationEngine? verificationEngine = participantFilter == null
+    ? host.Services.GetRequiredService<VerificationEngine>()
+    : null;
+
 // Create performance profilers for all participants
 var profilers = new List<PerformanceProfiler>();
 foreach (var (name, root) in participants)
@@ -366,11 +371,7 @@ foreach (var profiler in profilers)
 }
 
 // Set non-zero exit code on convergence failure (single-process only)
-if (participantFilter == null)
+if (verificationEngine is { Failed: true })
 {
-    var verificationEngine = host.Services.GetRequiredService<VerificationEngine>();
-    if (verificationEngine.Failed)
-    {
-        Environment.ExitCode = 1;
-    }
+    Environment.ExitCode = 1;
 }
