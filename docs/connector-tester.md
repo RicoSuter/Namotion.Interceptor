@@ -164,6 +164,10 @@ Files are created as `pending` and renamed to `pass` or `FAIL` on cycle completi
 
 Performance metrics are written to `logs/performance-{participant}.csv` for every profile (chaos and load). Each file has a header row and one data row per reporting interval. Columns: Timestamp, Participant, Recv/s, Recv-E2E-Avg, Recv-E2E-P50, Recv-E2E-P90, Recv-E2E-P95, Recv-E2E-P99, Recv-E2E-P999, Recv-E2E-Max, Recv-Proc, Published, Received, CPU%, ProcessMB, HeapMB, AllocMB/s. Files are reset on each run.
 
+### Cycle Logs
+
+`logs/cycles.csv` records one row per verification cycle with post-GC memory measurements. Columns: Timestamp, Cycle, Result, Profile, CycleSec, ConvergeSec, ValueMutations, StructuralMutations, ChaosEvents, HeapMB, ProcessMB. Memory is measured after a full GC + LOH compaction, giving a stable baseline for leak detection. The file is reset on each run.
+
 ## Configuration
 
 Configuration is loaded from `appsettings.json` with environment-specific overrides (e.g., `appsettings.opcua-chaos.json`). The root section is `"ConnectorTester"`. Use `--launch-profile` to select a profile (e.g., `--launch-profile opcua-chaos`), which sets `DOTNET_ENVIRONMENT` and loads the corresponding `appsettings.{environment}.json` file.
