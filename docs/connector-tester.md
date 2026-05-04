@@ -10,9 +10,9 @@ Run all commands from the repository root. Clear previous logs before each run:
 rm -rf logs/
 
 # Chaos test: correctness under kill/disconnect disruptions (exits with code 1 on failure)
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua --configuration Release
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt --configuration Release
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket --configuration Release
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-chaos --configuration Release
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt-chaos --configuration Release
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-chaos --configuration Release
 
 # Load test: throughput and latency at 20k changes/sec
 dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-load --configuration Release
@@ -166,9 +166,9 @@ Performance metrics are written to `logs/performance-{participant}.csv` for ever
 
 ## Configuration
 
-Configuration is loaded from `appsettings.json` with environment-specific overrides (e.g., `appsettings.opcua.json`). The root section is `"ConnectorTester"`. Use `--launch-profile` to select a profile (e.g., `--launch-profile opcua`), which sets `DOTNET_ENVIRONMENT` and loads the corresponding `appsettings.{environment}.json` file.
+Configuration is loaded from `appsettings.json` with environment-specific overrides (e.g., `appsettings.opcua-chaos.json`). The root section is `"ConnectorTester"`. Use `--launch-profile` to select a profile (e.g., `--launch-profile opcua-chaos`), which sets `DOTNET_ENVIRONMENT` and loads the corresponding `appsettings.{environment}.json` file.
 
-### Chaos Profile Example (appsettings.opcua.json)
+### Chaos Profile Example (appsettings.opcua-chaos.json)
 
 ```json
 {
