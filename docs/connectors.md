@@ -167,8 +167,8 @@ This differs from outbound changes (writing from local model to external system)
 Servers expose subject properties to external systems. Unlike sources, they don't synchronize FROM an external system - the C# object IS the source of truth.
 
 **Examples**:
-- `OpcUaSubjectServerBackgroundService` - Exposes subjects as OPC UA nodes
-- `MqttSubjectServerBackgroundService` - Publishes subject changes to MQTT topics
+- `OpcUaSubjectServer` - Exposes subjects as OPC UA nodes
+- `MqttSubjectServer` - Publishes subject changes to MQTT topics
 
 Servers typically:
 - Are `BackgroundService` implementations

@@ -27,7 +27,7 @@ public static class OpcUaSubjectExtensions
         OpcUaServerConfiguration configuration,
         ILogger logger)
     {
-        return new OpcUaSubjectServerBackgroundService(subject, configuration, logger);
+        return new OpcUaSubjectServer(subject, configuration, logger);
     }
 
     /// <summary>
@@ -119,7 +119,7 @@ public static class OpcUaSubjectExtensions
         var key = Guid.NewGuid().ToString();
         RegisterServerCore(services, key, subjectSelector, configurationProvider);
         services.AddSingleton<IOpcUaSubjectServer>(sp =>
-            sp.GetRequiredKeyedService<OpcUaSubjectServerBackgroundService>(key));
+            sp.GetRequiredKeyedService<OpcUaSubjectServer>(key));
         return services;
     }
 
@@ -146,7 +146,7 @@ public static class OpcUaSubjectExtensions
         var key = Guid.NewGuid().ToString();
         RegisterServerCore(services, key, subjectSelector, configurationProvider);
         services.AddKeyedSingleton<IOpcUaSubjectServer>(name, (sp, _) =>
-            sp.GetRequiredKeyedService<OpcUaSubjectServerBackgroundService>(key));
+            sp.GetRequiredKeyedService<OpcUaSubjectServer>(key));
         return services;
     }
 
@@ -194,12 +194,12 @@ public static class OpcUaSubjectExtensions
             .AddKeyedSingleton(key, (sp, _) =>
             {
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                return new OpcUaSubjectServerBackgroundService(
+                return new OpcUaSubjectServer(
                     subject,
                     sp.GetRequiredKeyedService<OpcUaServerConfiguration>(key),
-                    sp.GetRequiredService<ILogger<OpcUaSubjectServerBackgroundService>>());
+                    sp.GetRequiredService<ILogger<OpcUaSubjectServer>>());
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaSubjectServerBackgroundService>(key));
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaSubjectServer>(key));
     }
 
     private static OpcUaClientConfiguration CreateDefaultClientConfiguration(

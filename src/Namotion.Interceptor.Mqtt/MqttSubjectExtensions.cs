@@ -116,11 +116,11 @@ public static class MqttSubjectExtensions
             .AddKeyedSingleton(key, (sp, _) =>
             {
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                return new MqttSubjectServerBackgroundService(
+                return new MqttSubjectServer(
                     subject,
                     sp.GetRequiredKeyedService<MqttServerConfiguration>(key),
-                    sp.GetRequiredService<ILogger<MqttSubjectServerBackgroundService>>());
+                    sp.GetRequiredService<ILogger<MqttSubjectServer>>());
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<MqttSubjectServerBackgroundService>(key));
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<MqttSubjectServer>(key));
     }
 }

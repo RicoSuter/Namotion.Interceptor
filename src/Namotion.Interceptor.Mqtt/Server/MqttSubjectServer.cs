@@ -23,7 +23,7 @@ namespace Namotion.Interceptor.Mqtt.Server;
 /// <summary>
 /// Background service that hosts an MQTT broker and publishes property changes.
 /// </summary>
-public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectConnector, IFaultInjectable, IAsyncDisposable
+public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInjectable, IAsyncDisposable
 {
     // NOTE: We cannot pool UserProperties here because InjectApplicationMessages queues messages
     // asynchronously. The server may still be serializing packets after this method returns,
@@ -70,10 +70,10 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
     /// </summary>
     public int NumberOfClients => Volatile.Read(ref _numberOfClients);
 
-    public MqttSubjectServerBackgroundService(
+    public MqttSubjectServer(
         IInterceptorSubject subject,
         MqttServerConfiguration configuration,
-        ILogger<MqttSubjectServerBackgroundService> logger)
+        ILogger<MqttSubjectServer> logger)
     {
         _subject = subject ?? throw new ArgumentNullException(nameof(subject));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
