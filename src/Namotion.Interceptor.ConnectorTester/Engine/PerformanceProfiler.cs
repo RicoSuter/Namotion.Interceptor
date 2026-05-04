@@ -8,6 +8,7 @@ namespace Namotion.Interceptor.ConnectorTester.Engine;
 public class PerformanceProfiler : IDisposable
 {
     private const string LogDirectory = "logs";
+    private const int MaxLatencySamples = 10_000;
     private static readonly Lock ConsoleLock = new();
 
     private readonly PropertyChangeQueueSubscription _subscription;
@@ -16,6 +17,7 @@ public class PerformanceProfiler : IDisposable
     private readonly string _participantName;
     private readonly string _logFilePath;
     private readonly CancellationTokenSource _cts = new();
+    private readonly Random _samplingRandom = new();
 
     private readonly Lock _syncLock = new();
     private readonly List<double> _changedLatencies = [];
@@ -23,6 +25,11 @@ public class PerformanceProfiler : IDisposable
     private readonly List<double> _throughputSamples = [];
     private int _updatesSinceLastSample;
     private int _totalPublishedChanges;
+    private int _totalReceivedChanges;
+    private double _changedLatencySum;
+    private double _changedLatencyMax;
+    private double _receivedLatencySum;
+    private double _receivedLatencyMax;
     private DateTimeOffset _windowStartTime;
     private DateTimeOffset _lastThroughputTime;
     private long _windowStartTotalAllocatedBytes;
@@ -79,14 +86,19 @@ public class PerformanceProfiler : IDisposable
                 }
 
                 _updatesSinceLastSample++;
+                _totalReceivedChanges++;
 
                 var changedLatencyMs = (now - change.ChangedTimestamp).TotalMilliseconds;
-                _changedLatencies.Add(changedLatencyMs);
+                _changedLatencySum += changedLatencyMs;
+                if (changedLatencyMs > _changedLatencyMax) _changedLatencyMax = changedLatencyMs;
+                ReservoirAdd(_changedLatencies, changedLatencyMs, _totalReceivedChanges);
 
                 if (change.ReceivedTimestamp is not null)
                 {
                     var receivedLatencyMs = (now - change.ReceivedTimestamp.Value).TotalMilliseconds;
-                    _receivedLatencies.Add(receivedLatencyMs);
+                    _receivedLatencySum += receivedLatencyMs;
+                    if (receivedLatencyMs > _receivedLatencyMax) _receivedLatencyMax = receivedLatencyMs;
+                    ReservoirAdd(_receivedLatencies, receivedLatencyMs, _totalReceivedChanges);
                 }
 
                 var timeSinceLastSample = (now - _lastThroughputTime).TotalSeconds;
@@ -100,6 +112,22 @@ public class PerformanceProfiler : IDisposable
         }
     }
 
+    private void ReservoirAdd(List<double> reservoir, double value, int totalSeen)
+    {
+        if (reservoir.Count < MaxLatencySamples)
+        {
+            reservoir.Add(value);
+        }
+        else
+        {
+            var index = _samplingRandom.Next(totalSeen);
+            if (index < MaxLatencySamples)
+            {
+                reservoir[index] = value;
+            }
+        }
+    }
+
     private void OnTimer(object? state)
     {
         List<double> changedLatenciesCopy;
@@ -107,6 +135,11 @@ public class PerformanceProfiler : IDisposable
         List<double> throughputSamplesCopy;
         DateTimeOffset windowStartCopy;
         int publishedCount;
+        int receivedCount;
+        double changedLatencySum;
+        double changedLatencyMax;
+        double receivedLatencySum;
+        double receivedLatencyMax;
         long windowStartAllocatedBytes;
         TimeSpan windowStartCpuTime;
 
@@ -117,6 +150,11 @@ public class PerformanceProfiler : IDisposable
             throughputSamplesCopy = [.. _throughputSamples];
             windowStartCopy = _windowStartTime;
             publishedCount = _totalPublishedChanges;
+            receivedCount = _totalReceivedChanges;
+            changedLatencySum = _changedLatencySum;
+            changedLatencyMax = _changedLatencyMax;
+            receivedLatencySum = _receivedLatencySum;
+            receivedLatencyMax = _receivedLatencyMax;
             windowStartAllocatedBytes = _windowStartTotalAllocatedBytes;
             windowStartCpuTime = _windowStartCpuTime;
 
@@ -125,6 +163,11 @@ public class PerformanceProfiler : IDisposable
             _throughputSamples.Clear();
             _updatesSinceLastSample = 0;
             _totalPublishedChanges = 0;
+            _totalReceivedChanges = 0;
+            _changedLatencySum = 0;
+            _changedLatencyMax = 0;
+            _receivedLatencySum = 0;
+            _receivedLatencyMax = 0;
 
             _windowStartTime = DateTimeOffset.UtcNow;
             _lastThroughputTime = _windowStartTime;
@@ -136,13 +179,18 @@ public class PerformanceProfiler : IDisposable
         }
 
         PrintAndLogStats(windowStartCopy, windowStartAllocatedBytes, windowStartCpuTime,
-            changedLatenciesCopy, receivedLatenciesCopy, throughputSamplesCopy, publishedCount);
+            changedLatenciesCopy, receivedLatenciesCopy, throughputSamplesCopy,
+            publishedCount, receivedCount,
+            changedLatencySum, changedLatencyMax, receivedLatencySum, receivedLatencyMax);
     }
 
     private void PrintAndLogStats(
         DateTimeOffset windowStart, long windowStartAllocatedBytes, TimeSpan windowStartCpuTime,
         List<double> changedLatencies, List<double> receivedLatencies,
-        List<double> throughputSamples, int publishedCount)
+        List<double> throughputSamples,
+        int publishedCount, int receivedCount,
+        double changedLatencySum, double changedLatencyMax,
+        double receivedLatencySum, double receivedLatencyMax)
     {
         using var process = Process.GetCurrentProcess();
         var workingSetMb = process.WorkingSet64 / (1024.0 * 1024.0);
@@ -154,13 +202,16 @@ public class PerformanceProfiler : IDisposable
         var cpuDelta = process.TotalProcessorTime - windowStartCpuTime;
         var cpuPercent = cpuDelta.TotalSeconds / (elapsedSec * Environment.ProcessorCount) * 100.0;
 
+        var avgChangedLatency = receivedCount > 0 ? changedLatencySum / receivedCount : 0;
+        var avgReceivedLatency = receivedCount > 0 ? receivedLatencySum / receivedCount : 0;
+
         lock (ConsoleLock)
         {
             Console.WriteLine();
-            Console.WriteLine(new string('=', 139));
+            Console.WriteLine(new string('=', 129));
             Console.WriteLine($"[{_participantName}] Performance Report - [{now:yyyy-MM-dd HH:mm:ss.fff}]");
             Console.WriteLine();
-            Console.WriteLine($"Total received changes:          {changedLatencies.Count}");
+            Console.WriteLine($"Total received changes:          {receivedCount}");
             Console.WriteLine($"Total published changes:         {publishedCount}");
             var cpuCores = cpuPercent / 100.0 * Environment.ProcessorCount;
             Console.WriteLine($"Process CPU:                     {Math.Round(cpuPercent, 1)}% ({Math.Round(cpuCores, 1)} cores)");
@@ -168,8 +219,8 @@ public class PerformanceProfiler : IDisposable
             Console.WriteLine($"Avg allocations over last {elapsedSec}s:   {Math.Round(allocRateMbPerSec, 2)} MB/s");
             Console.WriteLine();
 
-            Console.WriteLine($"{"Metric",-29} {"Avg",10} {"P50",10} {"P90",10} {"P95",10} {"P99",10} {"P99.9",10} {"Max",10} {"Min",10} {"StdDev",10} {"Count",10}");
-            Console.WriteLine(new string('-', 139));
+            Console.WriteLine($"{"Metric",-29} {"Avg",10} {"P50",10} {"P90",10} {"P95",10} {"P99",10} {"P99.9",10} {"Max",10} {"StdDev",10} {"Count",10}");
+            Console.WriteLine(new string('-', 129));
 
             if (throughputSamples.Count > 0)
             {
@@ -180,33 +231,30 @@ public class PerformanceProfiler : IDisposable
             if (receivedLatencies.Count > 0)
             {
                 receivedLatencies.Sort();
-                PrintPercentileLine("Received processing (ms)", receivedLatencies);
+                PrintPercentileLine("Received processing (ms)", receivedLatencies, avgReceivedLatency, receivedCount, receivedLatencyMax);
             }
 
             if (changedLatencies.Count > 0)
             {
                 changedLatencies.Sort();
-                PrintPercentileLine("Received E2E latency (ms)", changedLatencies);
+                PrintPercentileLine("Received E2E latency (ms)", changedLatencies, avgChangedLatency, receivedCount, changedLatencyMax);
             }
         }
 
         var avgThroughput = throughputSamples.Count > 0 ? throughputSamples.Average() : 0;
-        var avgChangedLatency = changedLatencies.Count > 0 ? changedLatencies.Average() : 0;
         var p50ChangedLatency = changedLatencies.Count > 0 ? Percentile(changedLatencies, 0.50) : 0;
         var p90ChangedLatency = changedLatencies.Count > 0 ? Percentile(changedLatencies, 0.90) : 0;
         var p95ChangedLatency = changedLatencies.Count > 0 ? Percentile(changedLatencies, 0.95) : 0;
         var p99ChangedLatency = changedLatencies.Count > 0 ? Percentile(changedLatencies, 0.99) : 0;
         var p999ChangedLatency = changedLatencies.Count > 0 ? Percentile(changedLatencies, 0.999) : 0;
-        var maxChangedLatency = changedLatencies.Count > 0 ? changedLatencies[^1] : 0;
-        var avgReceivedLatency = receivedLatencies.Count > 0 ? receivedLatencies.Average() : 0;
 
         var logLine = string.Format(
             CultureInfo.InvariantCulture,
             "{0,24:yyyy-MM-ddTHH:mm:ss.fffZ}, {1,12}, {2,12:F0}, {3,12:F1}, {4,12:F1}, {5,12:F1}, {6,12:F1}, {7,12:F1}, {8,12:F1}, {9,12:F1}, {10,12:F1}, {11,12}, {12,12}, {13,12:F1}, {14,12:F1}, {15,12:F1}, {16,12:F2}",
             now, _participantName, avgThroughput,
             avgChangedLatency, p50ChangedLatency, p90ChangedLatency, p95ChangedLatency,
-            p99ChangedLatency, p999ChangedLatency, maxChangedLatency,
-            avgReceivedLatency, publishedCount, changedLatencies.Count,
+            p99ChangedLatency, p999ChangedLatency, changedLatencyMax,
+            avgReceivedLatency, publishedCount, receivedCount,
             cpuPercent,
             workingSetMb, heapMb, allocRateMbPerSec);
 
@@ -220,10 +268,12 @@ public class PerformanceProfiler : IDisposable
         }
     }
 
-    private static void PrintPercentileLine(string label, List<double> sortedValues)
+    private static void PrintPercentileLine(string label, List<double> sortedValues, double? exactAvg = null, int? exactCount = null, double? exactMax = null)
     {
-        var avg = sortedValues.Average();
-        Console.WriteLine($"{label,-29} {avg,10:F2} {Percentile(sortedValues, 0.50),10:F2} {Percentile(sortedValues, 0.90),10:F2} {Percentile(sortedValues, 0.95),10:F2} {Percentile(sortedValues, 0.99),10:F2} {Percentile(sortedValues, 0.999),10:F2} {sortedValues[^1],10:F2} {sortedValues[0],10:F2} {StdDev(sortedValues, avg),10:F2} {sortedValues.Count,10}");
+        var avg = exactAvg ?? sortedValues.Average();
+        var count = exactCount ?? sortedValues.Count;
+        var max = exactMax ?? sortedValues[^1];
+        Console.WriteLine($"{label,-29} {avg,10:F2} {Percentile(sortedValues, 0.50),10:F2} {Percentile(sortedValues, 0.90),10:F2} {Percentile(sortedValues, 0.95),10:F2} {Percentile(sortedValues, 0.99),10:F2} {Percentile(sortedValues, 0.999),10:F2} {max,10:F2} {StdDev(sortedValues, avg),10:F2} {count,10}");
     }
 
     private static double Percentile(IReadOnlyList<double> sortedAsc, double p)
