@@ -11,7 +11,9 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Resilience;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking.Change;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Namotion.Interceptor.WebSocket.Internal;
 using Namotion.Interceptor.WebSocket.Protocol;
 using Namotion.Interceptor.WebSocket.Serialization;
@@ -44,6 +46,15 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
 
     private readonly ClientSequenceTracker _sequenceTracker = new();
+    private readonly SentStructuralState _clientState = new();
+    private long _lastUpdateReceivedTicks;
+
+    /// <summary>
+    /// Gets the last successfully received sequence number from the server.
+    /// Returns the Welcome sequence if no updates have been received yet, or -1 if not connected.
+    /// </summary>
+    public long LastReceivedSequence => _sequenceTracker.ExpectedNextSequence - 1;
+
     private volatile bool _isStarted;
     private volatile bool _isForceKill;
     private volatile CancellationTokenSource? _forceKillCts;
@@ -212,6 +223,10 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
             _initialState = welcome.State;
             _sequenceTracker.InitializeFromWelcome(welcome.Sequence);
+            if (welcome.State is not null)
+            {
+                _clientState.InitializeFromSnapshot(welcome.State);
+            }
 
             _logger.LogInformation("Connected to WebSocket server (sequence: {Sequence})", welcome.Sequence);
 
@@ -251,6 +266,16 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             // Claim ownership of all properties matching the path provider
             ClaimPropertyOwnership();
 
+            // Auto-claim properties of new subjects when they appear via structural mutations.
+            // This ensures value changes on dynamically added collection/dictionary items
+            // are forwarded to the server.
+            var lifecycle = _subject.Context.TryGetLifecycleInterceptor();
+            if (lifecycle is not null)
+            {
+                lifecycle.SubjectAttached -= OnSubjectAttached;
+                lifecycle.SubjectAttached += OnSubjectAttached;
+            }
+
             _initialState = null;
         });
     }
@@ -266,10 +291,12 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
             return;
         }
 
-        // Get all leaf properties, filtered by PathProvider if configured
+        // Get all properties (including structural), filtered by PathProvider if configured.
+        // Structural properties (Collection, Dictionary, ObjectRef) must be claimed so that
+        // client-side structural mutations are forwarded to the server.
         var properties = registeredSubject
             .GetAllProperties()
-            .Where(p => !p.CanContainSubjects && (pathProvider is null || pathProvider.IsPropertyIncluded(p)))
+            .Where(p => pathProvider is null || pathProvider.IsPropertyIncluded(p))
             .ToList();
 
         var claimedCount = 0;
@@ -288,6 +315,22 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         }
 
         _logger.LogInformation("Claimed ownership of {Count} properties for WebSocket sync.", claimedCount);
+    }
+
+    private void OnSubjectAttached(SubjectLifecycleChange change)
+    {
+        var pathProvider = _configuration.PathProvider;
+        var registeredSubject = change.Subject.TryGetRegisteredSubject();
+        if (registeredSubject is null)
+            return;
+
+        foreach (var property in registeredSubject.Properties)
+        {
+            if (pathProvider is not null && !pathProvider.IsPropertyIncluded(property))
+                continue;
+
+            _ownership.ClaimSource(property.Reference);
+        }
     }
 
     public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
@@ -414,7 +457,10 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                                         _sequenceTracker.ExpectedNextSequence, update.Sequence);
                                     return; // Exit receive loop -> triggers reconnection
                                 }
-                                HandleUpdate(update);
+                                if (!HandleUpdate(update))
+                                {
+                                    return; // Hash mismatch -> triggers reconnection
+                                }
                                 break;
 
                             case MessageType.Heartbeat:
@@ -424,6 +470,22 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                                     _logger.LogWarning(
                                         "Heartbeat sequence gap: server at {ServerSequence}, client expects {Expected}. Triggering reconnection.",
                                         heartbeat.Sequence, _sequenceTracker.ExpectedNextSequence);
+                                    return; // Exit receive loop -> triggers reconnection
+                                }
+
+                                // Idle heartbeat: compare structural hash (server only sends
+                                // heartbeat when no updates were broadcast recently)
+                                if (HasStructuralHashMismatch(heartbeat.StateHash))
+                                {
+                                    return; // Exit receive loop -> triggers reconnection
+                                }
+
+                                // Client-side divergence check: compare sent-state against
+                                // actual registry. Catches CQP-dropped mutations where the
+                                // client's graph changed but the server was never notified.
+                                // Only runs when client CQP is idle (all mutations flushed).
+                                if (HasRegistryDivergence())
+                                {
                                     return; // Exit receive loop -> triggers reconnection
                                 }
                                 break;
@@ -478,10 +540,14 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
         }
     }
 
-    private void HandleUpdate(SubjectUpdate update)
+    /// <summary>
+    /// Returns true if the update was applied successfully and hashes match (or no hash present).
+    /// Returns false if a structural hash mismatch was detected (caller should trigger reconnection).
+    /// </summary>
+    private bool HandleUpdate(UpdatePayload update)
     {
         var propertyWriter = _propertyWriter;
-        if (propertyWriter is null) return;
+        if (propertyWriter is null) return true;
 
         propertyWriter.Write(
             (update, subject: _subject, source: this, factory: _configuration.SubjectFactory ?? DefaultSubjectFactory.Instance),
@@ -492,6 +558,68 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
                     state.subject.ApplySubjectUpdate(state.update, state.factory);
                 }
             });
+
+        // Update client-side sent state from received update content
+        _clientState.UpdateFromBroadcast(update);
+        Volatile.Write(ref _lastUpdateReceivedTicks, Environment.TickCount64);
+
+        return !HasStructuralHashMismatch(update.StructuralHash);
+    }
+
+    /// <summary>
+    /// Compares the server's structural hash against the client's sent-state hash.
+    /// Returns true if a mismatch was detected (caller should trigger reconnection).
+    /// Returns false if hashes match or server hash is null.
+    /// </summary>
+    private bool HasStructuralHashMismatch(string? serverHash)
+    {
+        if (serverHash is null)
+            return false;
+
+        var clientHash = _clientState.ComputeHash();
+        if (clientHash is not null && clientHash != serverHash)
+        {
+            _logger.LogWarning(
+                "Structural hash mismatch: server={ServerHash}, client={ClientHash}. Triggering reconnection.",
+                serverHash[..Math.Min(8, serverHash.Length)],
+                clientHash[..Math.Min(8, clientHash.Length)]);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Compares the client's SentStructuralState against the actual registry.
+    /// Returns true if divergence is detected (CQP dropped a mutation).
+    /// Only runs when the client has been idle (no updates received for HeartbeatInterval).
+    /// </summary>
+    private bool HasRegistryDivergence()
+    {
+        // Only check when client is idle (no updates received recently).
+        // The server heartbeat only fires during server idle, so receiving a heartbeat
+        // means the server has been quiet. We additionally require the client to be quiet
+        // (no updates received for 5 seconds) to avoid false positives from in-flight updates.
+        const long clientIdleThresholdMs = 5000;
+        var timeSinceLastUpdate = Environment.TickCount64 - Volatile.Read(ref _lastUpdateReceivedTicks);
+        if (timeSinceLastUpdate < clientIdleThresholdMs)
+            return false;
+
+        var idRegistry = _subject.Context.TryGetService<ISubjectIdRegistry>();
+        var registry = _subject.Context.TryGetService<ISubjectRegistry>();
+        if (idRegistry is null || registry is null)
+            return false;
+
+        var registryCount = registry.KnownSubjects.Count;
+        if (!_clientState.MatchesRegistry(idRegistry, registryCount))
+        {
+            _logger.LogWarning(
+                "Client registry divergence: SentStructuralState has {SentCount} subjects, registry has {RegistryCount}. Triggering reconnection.",
+                _clientState.TrackedSubjectCount, registryCount);
+            return true;
+        }
+
+        return false;
     }
 
     /// <inheritdoc />
@@ -694,6 +822,11 @@ public sealed class WebSocketSubjectClientSource : BackgroundService, ISubjectSo
 
             _receiveCts.Dispose();
         }
+
+        // Unsubscribe from lifecycle events
+        var lifecycle = _subject.Context.TryGetLifecycleInterceptor();
+        if (lifecycle is not null)
+            lifecycle.SubjectAttached -= OnSubjectAttached;
 
         // Clean up resources
         _ownership.Dispose();

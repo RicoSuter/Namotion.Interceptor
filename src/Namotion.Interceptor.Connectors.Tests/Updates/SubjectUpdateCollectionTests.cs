@@ -14,7 +14,7 @@ namespace Namotion.Interceptor.Connectors.Tests.Updates;
 public class SubjectUpdateCollectionTests
 {
     [Fact]
-    public async Task WhenItemInsertedAtEnd_ThenInsertOperationIsCreated()
+    public async Task WhenItemInsertedAtEnd_ThenCompleteStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -35,7 +35,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenItemInsertedAtBeginning_ThenInsertOperationIsCreated()
+    public async Task WhenItemInsertedAtBeginning_ThenCompleteStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -56,7 +56,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenItemRemoved_ThenRemoveOperationIsCreated()
+    public async Task WhenItemRemoved_ThenCompleteStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -78,7 +78,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenItemMoved_ThenMoveOperationWithoutItemDataIsCreated()
+    public async Task WhenItemMoved_ThenCompleteStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -117,7 +117,7 @@ public class SubjectUpdateCollectionTests
 
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
 
-        // Assert - should have Collection update at index 1, not Operations
+        // Assert - should have Collection update at index 1
         await Verify(update);
     }
 
@@ -145,11 +145,10 @@ public class SubjectUpdateCollectionTests
     }
 
     /// <summary>
-    /// Regression test for BuildPathToRoot bug where only the first item's path was included
-    /// when multiple items in the same collection had property changes in the same batch.
-    /// Previously, after the first item was processed, subsequent items were skipped because
-    /// the parent property already existed in the update - but we should APPEND to the
-    /// collection update, not skip entirely.
+    /// When many collection items have property changes in a single batch,
+    /// each changed item should have its own subject entry in the partial update.
+    /// The applier uses stable ID lookup to find and update each target item.
+    /// (No parent collection update is created because the collection structure did not change.)
     /// </summary>
     [Fact]
     public void WhenManyCollectionItemsHavePropertyChanges_ThenAllAreReferencedInParentCollection()
@@ -170,26 +169,34 @@ public class SubjectUpdateCollectionTests
 
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
 
-        // Assert - ALL 100 items should be referenced in the parent's collection update
+        // Assert - each changed item should have its own subject entry keyed by stable ID.
+        // With stable IDs, property-only changes on items do not create a parent collection update;
+        // instead, each item is referenced directly by its stable ID in the Subjects dictionary.
         Assert.NotNull(update.Subjects);
-        Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
-        Assert.True(rootProperties!.TryGetValue("Items", out var itemsUpdate));
-        Assert.Equal(SubjectPropertyUpdateKind.Collection, itemsUpdate!.Kind);
-        Assert.NotNull(itemsUpdate.Items);
 
-        // This was the bug: only 1 item was included instead of all 100
-        Assert.Equal(100, itemsUpdate.Items.Count);
+        // All 100 items should have subject entries (plus root)
+        // Root may or may not have properties, but it should be referenced
+        Assert.True(update.Subjects.Count >= 100); // at least 100 item entries
 
-        // Verify all indices are present
-        var indices = itemsUpdate.Items.Select(c => (int)c.Index!).OrderBy(i => i).ToList();
-        Assert.Equal(Enumerable.Range(0, 100).ToList(), indices);
+        // Collect all subject IDs that have a "Name" property update (i.e., the changed items)
+        var itemSubjectIds = update.Subjects
+            .Where(kvp => kvp.Value.ContainsKey("Name"))
+            .Select(kvp => kvp.Key)
+            .ToList();
+        Assert.Equal(100, itemSubjectIds.Count);
 
-        // Verify all items have their property updates
-        Assert.Equal(101, update.Subjects.Count); // 1 root + 100 items
+        // Verify all IDs are unique 22-char base62 strings
+        var ids = itemSubjectIds.ToHashSet();
+        Assert.Equal(100, ids.Count);
+        Assert.All(ids, id =>
+        {
+            Assert.Equal(22, id.Length);
+            Assert.All(id.ToCharArray(), c => Assert.True(char.IsLetterOrDigit(c)));
+        });
     }
 
     [Fact]
-    public async Task WhenRemoveAndInsertCombined_ThenBothOperationsAreCreated()
+    public async Task WhenRemoveAndInsertCombined_ThenCompleteStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -211,7 +218,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenMoveWithPropertyUpdate_ThenMoveOperationAndSparseUpdateAreCreated()
+    public async Task WhenMoveWithPropertyUpdate_ThenCompleteStateAndSparseUpdateAreCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -256,7 +263,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenCollectionBecomesEmpty_ThenRemoveOperationsAreCreated()
+    public async Task WhenCollectionBecomesEmpty_ThenEmptyStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -277,7 +284,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenCollectionPopulatedFromEmpty_ThenInsertOperationsAreCreated()
+    public async Task WhenCollectionPopulatedFromEmpty_ThenCompleteStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -314,7 +321,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenEmptyCollectionRemainsEmpty_ThenNoOperationsAreCreated()
+    public async Task WhenEmptyCollectionRemainsEmpty_ThenNoUpdateIsCreated()
     {
         // Arrange - both old and new collections are empty
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -353,7 +360,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenSingleItemRemoved_ThenRemoveOperationAtIndexZero()
+    public async Task WhenSingleItemRemoved_ThenCompleteStateAtIndexZero()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -394,7 +401,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenFirstItemRemoved_ThenRemoveAtIndexZero()
+    public async Task WhenFirstItemRemoved_ThenCompleteStateAtIndexZero()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -415,7 +422,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenInsertAtIndexZero_ThenInsertOperationAtZero()
+    public async Task WhenInsertAtIndexZero_ThenCompleteStateAtZero()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -436,7 +443,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public void WhenRemoveAndMoveCombined_ThenMoveIndicesAccountForRemovals()
+    public void WhenRemoveAndMoveCombined_ThenCompleteStateIsProduced()
     {
         // Arrange: [A, B, C] where we'll remove A and reorder B,C to C,B
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -453,27 +460,12 @@ public class SubjectUpdateCollectionTests
 
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
 
-        // Assert - operations should use intermediate indices
+        // Assert - complete state, items list contains final ordering
         Assert.NotNull(update.Subjects);
         Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
-        Assert.True(rootProperties!.TryGetValue("Items", out var itemsUpdate));
-        Assert.NotNull(itemsUpdate!.Operations);
-
-        var removes = itemsUpdate.Operations.Where(op => op.Action == SubjectCollectionOperationType.Remove).ToList();
-        var moves = itemsUpdate.Operations.Where(op => op.Action == SubjectCollectionOperationType.Move).ToList();
-
-        Assert.Single(removes);
-        Assert.Equal(0, removes[0].Index); // A was at index 0
-
-        // Key assertion: Move indices must be valid AFTER the remove
-        // After removing A at index 0, array is [B, C] with indices [0, 1]
-        // Move indices should reference this intermediate state
-        foreach (var move in moves)
-        {
-            var fromIndex = move.FromIndex!.Value;
-            // After remove, max valid index is 1 (array has 2 items)
-            Assert.True(fromIndex <= 1, $"Move fromIndex {fromIndex} should be <= 1 after remove");
-        }
+        Assert.True(rootProperties.TryGetValue("Items", out var itemsUpdate));
+        Assert.NotNull(itemsUpdate.Items);
+        Assert.Equal(2, itemsUpdate.Items.Count);
     }
 
     [Fact]
@@ -486,19 +478,17 @@ public class SubjectUpdateCollectionTests
         var childC = new CycleTestNode { Name = "ChildC" };
         var source = new CycleTestNode(sourceContext) { Name = "Root", Items = [childA, childB, childC] };
 
+        // Create target by applying a complete update (so stable IDs match for operations)
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new CycleTestNode(targetContext);
+        target.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(source, []), DefaultSubjectFactory.Instance);
+
         var changes = new List<SubjectPropertyChange>();
         sourceContext.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
 
         // Act - remove A and reorder to [C, B]
         source.Items = [childC, childB];
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
-
-        // Create target with same initial state
-        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
-        var targetA = new CycleTestNode { Name = "ChildA" };
-        var targetB = new CycleTestNode { Name = "ChildB" };
-        var targetC = new CycleTestNode { Name = "ChildC" };
-        var target = new CycleTestNode(targetContext) { Name = "Root", Items = [targetA, targetB, targetC] };
 
         // Apply update
         target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
@@ -513,36 +503,28 @@ public class SubjectUpdateCollectionTests
     public void WhenMultipleRemovesAndMove_ThenIndicesAccountForAllRemovals()
     {
         // Arrange: [A, B, C, D, E] -> remove A and C, reorder remaining to [E, B, D]
-        var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
+        var sourceContext = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
         var childA = new CycleTestNode { Name = "A" };
         var childB = new CycleTestNode { Name = "B" };
         var childC = new CycleTestNode { Name = "C" };
         var childD = new CycleTestNode { Name = "D" };
         var childE = new CycleTestNode { Name = "E" };
-        var node = new CycleTestNode(context) { Name = "Root", Items = [childA, childB, childC, childD, childE] };
+        var source = new CycleTestNode(sourceContext) { Name = "Root", Items = [childA, childB, childC, childD, childE] };
+
+        // Create target by applying a complete update (so stable IDs match for operations)
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new CycleTestNode(targetContext);
+        target.ApplySubjectUpdate(SubjectUpdate.CreateCompleteUpdate(source, []), DefaultSubjectFactory.Instance);
 
         var changes = new List<SubjectPropertyChange>();
-        context.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
+        sourceContext.GetPropertyChangeObservable(ImmediateScheduler.Instance).Subscribe(c => changes.Add(c));
 
         // Act - remove A, C and reorder to [E, B, D]
-        node.Items = [childE, childB, childD];
+        source.Items = [childE, childB, childD];
 
-        var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
+        var update = SubjectUpdate.CreatePartialUpdateFromChanges(source, changes.ToArray(), []);
 
-        // Create target and apply
-        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
-        var target = new CycleTestNode(targetContext)
-        {
-            Name = "Root",
-            Items = [
-                new CycleTestNode { Name = "A" },
-                new CycleTestNode { Name = "B" },
-                new CycleTestNode { Name = "C" },
-                new CycleTestNode { Name = "D" },
-                new CycleTestNode { Name = "E" }
-            ]
-        };
-
+        // Apply to target
         target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
 
         // Assert
@@ -553,7 +535,7 @@ public class SubjectUpdateCollectionTests
     }
 
     [Fact]
-    public async Task WhenCollectionSetToNull_ThenCompleteUpdateHasValueKindWithNull()
+    public async Task WhenCollectionSetToNull_ThenCompleteUpdateHasCollectionKindWithNullItems()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
@@ -562,18 +544,18 @@ public class SubjectUpdateCollectionTests
         // Act
         var update = SubjectUpdate.CreateCompleteUpdate(node, []);
 
-        // Assert - Items should be Value kind with null, not Collection kind
+        // Assert - Items should be Collection kind with null items
         Assert.NotNull(update.Subjects);
         Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
-        Assert.True(rootProperties!.TryGetValue("Items", out var itemsUpdate));
-        Assert.Equal(SubjectPropertyUpdateKind.Value, itemsUpdate!.Kind);
-        Assert.Null(itemsUpdate.Value);
+        Assert.True(rootProperties.TryGetValue("Items", out var itemsUpdate));
+        Assert.Equal(SubjectPropertyUpdateKind.Collection, itemsUpdate.Kind);
+        Assert.Null(itemsUpdate.Items);
 
         await Verify(update);
     }
 
     [Fact]
-    public void WhenCollectionSetToNull_ThenPartialUpdateHasValueKindWithNull()
+    public void WhenCollectionSetToNull_ThenPartialUpdateHasCollectionKindWithNullItems()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -588,12 +570,12 @@ public class SubjectUpdateCollectionTests
 
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
 
-        // Assert - Items should be Value kind with null
+        // Assert - Items should be Collection kind with null items
         Assert.NotNull(update.Subjects);
         Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
-        Assert.True(rootProperties!.TryGetValue("Items", out var itemsUpdate));
-        Assert.Equal(SubjectPropertyUpdateKind.Value, itemsUpdate!.Kind);
-        Assert.Null(itemsUpdate.Value);
+        Assert.True(rootProperties.TryGetValue("Items", out var itemsUpdate));
+        Assert.Equal(SubjectPropertyUpdateKind.Collection, itemsUpdate.Kind);
+        Assert.Null(itemsUpdate.Items);
     }
 
     [Fact]
@@ -619,5 +601,121 @@ public class SubjectUpdateCollectionTests
 
         // Assert
         Assert.Null(target.Items);
+    }
+
+    /// <summary>
+    /// Regression test: When a complete update (e.g., Welcome after reconnect) declares fewer
+    /// items than the target currently has, the excess items must be trimmed.
+    /// Bug scenario: Server reconnects with a new ObjectRef whose Collection has 1 item,
+    /// but the client still has the old ObjectRef with 3 items. Without trimming, the
+    /// client would keep the stale extra items.
+    /// </summary>
+    [Fact]
+    public void WhenCompleteUpdateHasFewerItems_ThenTargetCollectionIsTrimmed()
+    {
+        // Arrange - source has 1 item
+        var sourceContext = InterceptorSubjectContext.Create().WithRegistry();
+        var sourceChild = new CycleTestNode(sourceContext) { Name = "SourceChild1" };
+        var source = new CycleTestNode(sourceContext) { Name = "Root", Items = [sourceChild] };
+
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+
+        // Arrange - target has 3 items (stale state from before reconnect)
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new CycleTestNode(targetContext)
+        {
+            Name = "Root",
+            Items =
+            [
+                new CycleTestNode { Name = "StaleChild1" },
+                new CycleTestNode { Name = "StaleChild2" },
+                new CycleTestNode { Name = "StaleChild3" }
+            ]
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert - target should have exactly 1 item matching the source
+        var singleItem = Assert.Single(target.Items);
+        Assert.Equal("SourceChild1", singleItem.Name);
+    }
+
+    /// <summary>
+    /// Regression test: When a complete update declares count=0 (empty collection),
+    /// the target's existing items must all be removed.
+    /// Bug scenario: Server's ObjectRef points to a new TestNode with empty Collection (count=0),
+    /// but client's ObjectRef still has the old TestNode with 3 children. The Welcome sends
+    /// count=0 for Collection, but without the fix the client never trims its items.
+    /// </summary>
+    [Fact]
+    public void WhenCompleteUpdateHasEmptyCollection_ThenTargetCollectionIsCleared()
+    {
+        // Arrange - source has empty collection
+        var sourceContext = InterceptorSubjectContext.Create().WithRegistry();
+        var source = new CycleTestNode(sourceContext) { Name = "Root", Items = [] };
+
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+
+        // Arrange - target has 3 items (stale state)
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new CycleTestNode(targetContext)
+        {
+            Name = "Root",
+            Items =
+            [
+                new CycleTestNode { Name = "StaleChild1" },
+                new CycleTestNode { Name = "StaleChild2" },
+                new CycleTestNode { Name = "StaleChild3" }
+            ]
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert - target collection should be completely empty
+        Assert.NotNull(target.Items);
+        Assert.Empty(target.Items);
+    }
+
+    /// <summary>
+    /// Regression test (inverse case): When a complete update declares more items than
+    /// the target currently has, the target collection should be extended.
+    /// This should already work without the trimming fix - this test guards against regressions.
+    /// </summary>
+    [Fact]
+    public void WhenCompleteUpdateHasMoreItems_ThenTargetCollectionIsExtended()
+    {
+        // Arrange - source has 3 items
+        var sourceContext = InterceptorSubjectContext.Create().WithRegistry();
+        var source = new CycleTestNode(sourceContext)
+        {
+            Name = "Root",
+            Items =
+            [
+                new CycleTestNode(sourceContext) { Name = "Child1" },
+                new CycleTestNode(sourceContext) { Name = "Child2" },
+                new CycleTestNode(sourceContext) { Name = "Child3" }
+            ]
+        };
+
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+
+        // Arrange - target has only 1 item
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new CycleTestNode(targetContext)
+        {
+            Name = "Root",
+            Items = [new CycleTestNode { Name = "ExistingChild" }]
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert - target should have all 3 items from source
+        Assert.Equal(3, target.Items.Count);
+        Assert.Equal("Child1", target.Items[0].Name);
+        Assert.Equal("Child2", target.Items[1].Name);
+        Assert.Equal("Child3", target.Items[2].Name);
     }
 }

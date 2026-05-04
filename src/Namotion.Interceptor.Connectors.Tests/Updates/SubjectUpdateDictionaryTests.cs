@@ -8,14 +8,13 @@ using Namotion.Interceptor.Tracking.Change;
 namespace Namotion.Interceptor.Connectors.Tests.Updates;
 
 /// <summary>
-/// Tests for dictionary diff operations in SubjectUpdate.
-/// Tests Insert (add key), Remove (delete key) operations and sparse property updates.
-/// Note: Move is not applicable for dictionaries.
+/// Tests for dictionary updates in SubjectUpdate.
+/// Tests adding keys, removing keys, and property updates on dictionary items.
 /// </summary>
 public class SubjectUpdateDictionaryTests
 {
     [Fact]
-    public async Task WhenKeyAdded_ThenInsertOperationIsCreated()
+    public async Task WhenKeyAdded_ThenCompleteStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -40,7 +39,7 @@ public class SubjectUpdateDictionaryTests
     }
 
     [Fact]
-    public async Task WhenKeyRemoved_ThenRemoveOperationIsCreated()
+    public async Task WhenKeyRemoved_ThenCompleteStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -85,7 +84,7 @@ public class SubjectUpdateDictionaryTests
 
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
 
-        // Assert - should have Collection update at key1, not Operations
+        // Assert - should have Collection update at key1
         await Verify(update);
     }
 
@@ -122,7 +121,7 @@ public class SubjectUpdateDictionaryTests
     }
 
     [Fact]
-    public async Task WhenAddAndRemoveCombined_ThenBothOperationsAreCreated()
+    public async Task WhenAddAndRemoveCombined_ThenCompleteStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -174,7 +173,7 @@ public class SubjectUpdateDictionaryTests
     }
 
     [Fact]
-    public async Task WhenDictionaryBecomesEmpty_ThenRemoveOperationsAreCreated()
+    public async Task WhenDictionaryBecomesEmpty_ThenEmptyStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -199,7 +198,7 @@ public class SubjectUpdateDictionaryTests
     }
 
     [Fact]
-    public async Task WhenDictionaryPopulatedFromEmpty_ThenInsertOperationsAreCreated()
+    public async Task WhenDictionaryPopulatedFromEmpty_ThenCompleteStateIsCreated()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -244,7 +243,7 @@ public class SubjectUpdateDictionaryTests
     }
 
     [Fact]
-    public async Task WhenValueReplacedAtSameKey_ThenInsertAndRemoveOperationsAreCreated()
+    public async Task WhenValueReplacedAtSameKey_ThenCompleteStateIsCreated()
     {
         // Arrange
         // This tests replacing the VALUE at an existing key with a DIFFERENT object.
@@ -272,7 +271,7 @@ public class SubjectUpdateDictionaryTests
     }
 
     [Fact]
-    public async Task WhenDictionarySetToNull_ThenCompleteUpdateHasValueKindWithNull()
+    public async Task WhenDictionarySetToNull_ThenCompleteUpdateHasDictionaryKindWithNullItems()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithRegistry();
@@ -281,18 +280,18 @@ public class SubjectUpdateDictionaryTests
         // Act
         var update = SubjectUpdate.CreateCompleteUpdate(node, []);
 
-        // Assert - Lookup should be Value kind with null, not Dictionary kind
+        // Assert - Lookup should be Dictionary kind with null items
         Assert.NotNull(update.Subjects);
         Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
-        Assert.True(rootProperties!.TryGetValue("Lookup", out var lookupUpdate));
-        Assert.Equal(SubjectPropertyUpdateKind.Value, lookupUpdate!.Kind);
-        Assert.Null(lookupUpdate.Value);
+        Assert.True(rootProperties.TryGetValue("Lookup", out var lookupUpdate));
+        Assert.Equal(SubjectPropertyUpdateKind.Dictionary, lookupUpdate!.Kind);
+        Assert.Null(lookupUpdate.Items);
 
         await Verify(update);
     }
 
     [Fact]
-    public void WhenDictionarySetToNull_ThenPartialUpdateHasValueKindWithNull()
+    public void WhenDictionarySetToNull_ThenPartialUpdateHasDictionaryKindWithNullItems()
     {
         // Arrange
         var context = InterceptorSubjectContext.Create().WithPropertyChangeObservable().WithRegistry();
@@ -311,12 +310,12 @@ public class SubjectUpdateDictionaryTests
 
         var update = SubjectUpdate.CreatePartialUpdateFromChanges(node, changes.ToArray(), []);
 
-        // Assert - Lookup should be Value kind with null
+        // Assert - Lookup should be Dictionary kind with null items
         Assert.NotNull(update.Subjects);
         Assert.True(update.Subjects.TryGetValue(update.Root!, out var rootProperties));
-        Assert.True(rootProperties!.TryGetValue("Lookup", out var lookupUpdate));
-        Assert.Equal(SubjectPropertyUpdateKind.Value, lookupUpdate!.Kind);
-        Assert.Null(lookupUpdate.Value);
+        Assert.True(rootProperties.TryGetValue("Lookup", out var lookupUpdate));
+        Assert.Equal(SubjectPropertyUpdateKind.Dictionary, lookupUpdate!.Kind);
+        Assert.Null(lookupUpdate.Items);
     }
 
     [Fact]
@@ -342,7 +341,7 @@ public class SubjectUpdateDictionaryTests
         var target = new CycleTestNode(targetContext)
         {
             Name = "Root",
-            Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = new CycleTestNode { Name = "Item1" } }
+            Lookup = new Dictionary<string, CycleTestNode> { ["key1"] = new() { Name = "Item1" } }
         };
 
         // Act
@@ -350,5 +349,138 @@ public class SubjectUpdateDictionaryTests
 
         // Assert
         Assert.Null(target.Lookup);
+    }
+
+    /// <summary>
+    /// Regression test: When a complete update (e.g., Welcome after reconnect) declares fewer
+    /// dictionary entries than the target currently has, entries not mentioned in the update
+    /// must be removed.
+    /// Bug scenario: Server reconnects with a new ObjectRef whose dictionary has 1 entry,
+    /// but the client still has 3 entries. Without trimming, the client keeps stale entries.
+    /// </summary>
+    [Fact]
+    public void WhenCompleteUpdateHasFewerEntries_ThenTargetDictionaryIsTrimmed()
+    {
+        // Arrange - source has only key1
+        var sourceContext = InterceptorSubjectContext.Create().WithRegistry();
+        var source = new CycleTestNode(sourceContext)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode>
+            {
+                ["key1"] = new(sourceContext) { Name = "Item1" }
+            }
+        };
+
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+
+        // Arrange - target has key1, key2, key3 (stale state from before reconnect)
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new CycleTestNode(targetContext)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode>
+            {
+                ["key1"] = new() { Name = "OldItem1" },
+                ["key2"] = new() { Name = "OldItem2" },
+                ["key3"] = new() { Name = "OldItem3" }
+            }
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert - target should have only key1 with source's value
+        Assert.Single(target.Lookup);
+        Assert.True(target.Lookup.ContainsKey("key1"));
+        Assert.Equal("Item1", target.Lookup["key1"].Name);
+        Assert.False(target.Lookup.ContainsKey("key2"));
+        Assert.False(target.Lookup.ContainsKey("key3"));
+    }
+
+    /// <summary>
+    /// Regression test: When a complete update declares count=0 (empty dictionary),
+    /// all target entries must be removed.
+    /// Bug scenario: Server's ObjectRef points to a new TestNode with empty dictionary (count=0),
+    /// but client's ObjectRef still has the old TestNode with 2 entries. The Welcome sends
+    /// count=0, but without the fix the client never removes its stale entries.
+    /// </summary>
+    [Fact]
+    public void WhenCompleteUpdateHasEmptyDictionary_ThenTargetDictionaryIsCleared()
+    {
+        // Arrange - source has empty dictionary
+        var sourceContext = InterceptorSubjectContext.Create().WithRegistry();
+        var source = new CycleTestNode(sourceContext)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode>()
+        };
+
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+
+        // Arrange - target has 2 entries (stale state)
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new CycleTestNode(targetContext)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode>
+            {
+                ["key1"] = new() { Name = "StaleItem1" },
+                ["key2"] = new() { Name = "StaleItem2" }
+            }
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert - target dictionary should be completely empty
+        Assert.NotNull(target.Lookup);
+        Assert.Empty(target.Lookup);
+    }
+
+    /// <summary>
+    /// Regression test: When a complete update has different keys than the target,
+    /// keys not in the update should be removed and new keys should be added.
+    /// This tests both trimming of stale keys and addition of new keys in a single update.
+    /// </summary>
+    [Fact]
+    public void WhenCompleteUpdateHasDifferentKeys_ThenTargetDictionaryMatchesSource()
+    {
+        // Arrange - source has key2 and key3 (no key1)
+        var sourceContext = InterceptorSubjectContext.Create().WithRegistry();
+        var source = new CycleTestNode(sourceContext)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode>
+            {
+                ["key2"] = new(sourceContext) { Name = "Item2" },
+                ["key3"] = new(sourceContext) { Name = "Item3" }
+            }
+        };
+
+        var update = SubjectUpdate.CreateCompleteUpdate(source, []);
+
+        // Arrange - target has key1 and key2 (no key3)
+        var targetContext = InterceptorSubjectContext.Create().WithRegistry();
+        var target = new CycleTestNode(targetContext)
+        {
+            Name = "Root",
+            Lookup = new Dictionary<string, CycleTestNode>
+            {
+                ["key1"] = new() { Name = "OldItem1" },
+                ["key2"] = new() { Name = "OldItem2" }
+            }
+        };
+
+        // Act
+        target.ApplySubjectUpdate(update, DefaultSubjectFactory.Instance);
+
+        // Assert - target should have key2 and key3, key1 removed
+        Assert.Equal(2, target.Lookup.Count);
+        Assert.False(target.Lookup.ContainsKey("key1"));
+        Assert.True(target.Lookup.ContainsKey("key2"));
+        Assert.True(target.Lookup.ContainsKey("key3"));
+        Assert.Equal("Item2", target.Lookup["key2"].Name);
+        Assert.Equal("Item3", target.Lookup["key3"].Name);
     }
 }

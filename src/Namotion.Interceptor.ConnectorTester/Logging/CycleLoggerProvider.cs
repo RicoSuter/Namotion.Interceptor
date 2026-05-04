@@ -84,6 +84,25 @@ public sealed class CycleLoggerProvider : ILoggerProvider
         }
     }
 
+    /// <summary>
+    /// Checks the current cycle log for structural hash mismatch warnings.
+    /// Returns the matching log lines, or empty if none found.
+    /// </summary>
+    public List<string> GetHashMismatchWarnings()
+    {
+        lock (_fileLock)
+        {
+            _currentWriter?.Flush();
+
+            if (_currentFilePath is null || !File.Exists(_currentFilePath))
+                return [];
+
+            return File.ReadAllLines(_currentFilePath)
+                .Where(line => line.Contains("Structural hash mismatch", StringComparison.Ordinal))
+                .ToList();
+        }
+    }
+
     internal void WriteToFile(string message)
     {
         lock (_fileLock)

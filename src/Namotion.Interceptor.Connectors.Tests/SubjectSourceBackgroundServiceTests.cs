@@ -17,10 +17,14 @@ public class SubjectSourceBackgroundServiceTests
     public async Task WhenStartingSourceAndPushingChanges_ThenUpdatesAreInCorrectOrder()
     {
         // Arrange
+        var propertyChangeQueue = new PropertyChangeQueue();
         var subjectContextMock = new Mock<IInterceptorSubjectContext>();
         subjectContextMock
             .Setup(s => s.TryGetService<ISubjectRegistry>())
             .Returns(new SubjectRegistry());
+        subjectContextMock
+            .Setup(s => s.TryGetService<PropertyChangeQueue>())
+            .Returns(propertyChangeQueue);
 
         var subjectMock = new Mock<IInterceptorSubject>();
         subjectMock

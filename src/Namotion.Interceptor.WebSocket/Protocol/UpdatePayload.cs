@@ -12,4 +12,13 @@ public class UpdatePayload : SubjectUpdate
     [JsonPropertyName("sequence")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public long? Sequence { get; set; }
+
+    /// <summary>
+    /// Structural hash of the server's graph at the time this update was created.
+    /// Clients compare against their own hash after applying to detect divergence.
+    /// Null when sent by clients or when hashing is not supported.
+    /// </summary>
+    [JsonPropertyName("structuralHash")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? StructuralHash { get; set; }
 }

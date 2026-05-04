@@ -1,23 +1,10 @@
 ﻿{
-  Root: 1,
   Subjects: {
-    1: {
-      Father: {
-        Kind: Object,
-        Id: 3
-      }
-    },
-    2: {
+    SubjectId_1: {
       FirstName: {
         Kind: Value,
         Value: NewB,
         Timestamp: {Scrubbed}
-      }
-    },
-    3: {
-      Father: {
-        Kind: Object,
-        Id: 2
       }
     }
   }
