@@ -1,0 +1,124 @@
+@using HomeBlaze.Components.Abstractions
+@using HomeBlaze.Components.Abstractions.Attributes
+@using HomeBlaze.Components.Inputs
+@using Namotion.Interceptor
+@using Namotion.Interceptor.Registry.Abstractions
+
+@attribute [SubjectComponent(SubjectComponentType.Edit, typeof(OpcUaClient))]
+@implements ISubjectEditComponent
+
+<MudForm>
+    <MudTextField @bind-Value="_name"
+                  Label="Name"
+                  Required="true"
+                  RequiredError="Name is required"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged" />
+
+    <MudTextField @bind-Value="_serverUrl"
+                  Label="Server URL"
+                  Required="true"
+                  RequiredError="Server URL is required"
+                  HelperText="e.g., opc.tcp://localhost:4840"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged"
+                  Class="mt-4" />
+
+    <MudTextField @bind-Value="_rootName"
+                  Label="Root Name"
+                  HelperText="Optional OPC UA root node name under Objects folder"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged"
+                  Class="mt-4" />
+
+    <MudCheckBox @bind-Value="_isEnabled"
+                 @bind-Value:after="OnFieldChanged"
+                 Label="Enabled (auto-start on application startup)"
+                 Class="mt-4" />
+
+    <br />
+    <br />
+    <MudText Typo="Typo.subtitle2" Class="mb-2">Client Status</MudText>
+    <MudText>Status: <strong>@ClientSubject?.Status</strong></MudText>
+    @if (ClientSubject?.IsConnected is { } isConnected)
+    {
+        <MudText>Connected: <strong>@isConnected</strong></MudText>
+    }
+    @if (!string.IsNullOrEmpty(ClientSubject?.StatusMessage))
+    {
+        <MudAlert Severity="Severity.Error" Class="mt-2">@ClientSubject.StatusMessage</MudAlert>
+    }
+</MudForm>
+
+@code {
+    [Parameter]
+    public IInterceptorSubject? Subject { get; set; }
+
+    [Parameter]
+    public bool IsCreating { get; set; }
+
+    private OpcUaClient? ClientSubject => Subject as OpcUaClient;
+
+    private string _name = string.Empty;
+    private string _serverUrl = string.Empty;
+    private string? _rootName;
+    private bool _isEnabled = true;
+
+    private string _originalName = string.Empty;
+    private string _originalServerUrl = string.Empty;
+    private string? _originalRootName;
+    private bool _originalIsEnabled = true;
+
+    public bool IsValid => !string.IsNullOrWhiteSpace(_name) && !string.IsNullOrWhiteSpace(_serverUrl);
+
+    public bool IsDirty => _name != _originalName ||
+                           _serverUrl != _originalServerUrl ||
+                           _rootName != _originalRootName ||
+                           _isEnabled != _originalIsEnabled;
+
+    public string PreferredDialogSize => "Medium";
+
+    public event Action<bool>? IsValidChanged;
+    public event Action<bool>? IsDirtyChanged;
+
+    protected override void OnInitialized()
+    {
+        if (ClientSubject != null)
+        {
+            _name = ClientSubject.Name ?? string.Empty;
+            _serverUrl = ClientSubject.ServerUrl ?? string.Empty;
+            _rootName = ClientSubject.RootName;
+            _isEnabled = ClientSubject.IsEnabled;
+
+            _originalName = _name;
+            _originalServerUrl = _serverUrl;
+            _originalRootName = _rootName;
+            _originalIsEnabled = _isEnabled;
+        }
+    }
+
+    private void OnFieldChanged()
+    {
+        IsValidChanged?.Invoke(IsValid);
+        IsDirtyChanged?.Invoke(IsDirty);
+    }
+
+    public Task SaveAsync(CancellationToken cancellationToken)
+    {
+        if (ClientSubject != null && IsValid)
+        {
+            ClientSubject.Name = _name;
+            ClientSubject.ServerUrl = _serverUrl;
+            ClientSubject.RootName = _rootName;
+            ClientSubject.IsEnabled = _isEnabled;
+
+            _originalName = _name;
+            _originalServerUrl = _serverUrl;
+            _originalRootName = _rootName;
+            _originalIsEnabled = _isEnabled;
+
+            IsDirtyChanged?.Invoke(false);
+        }
+        return Task.CompletedTask;
+    }
+}

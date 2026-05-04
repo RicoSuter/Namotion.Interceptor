@@ -1,6 +1,5 @@
 ﻿using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
@@ -110,7 +109,7 @@ internal class OpcUaSubjectLoader
                     inferredType,
                     _ => value,
                     (_, o) => value = o,
-                    CreateDynamicNodeAttribute(nodeReference, session));
+                    _configuration.TypeResolver.GetDynamicPropertyAttributes(nodeReference, session));
             }
 
             var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
@@ -225,7 +224,7 @@ internal class OpcUaSubjectLoader
                 inferredType,
                 _ => value,
                 (_, o) => value = o,
-                CreateDynamicNodeAttribute(childNode, session));
+                _configuration.TypeResolver.GetDynamicPropertyAttributes(childNode, session));
 
             var attributeNodeId = ExpandedNodeId.ToNodeId(childNode.NodeId, session.NamespaceUris);
             MonitorValueNode(attributeNodeId, dynamicAttribute, monitoredItems);
@@ -233,16 +232,6 @@ internal class OpcUaSubjectLoader
             // Recursive with cycle detection
             await LoadAttributeNodesAsync(dynamicAttribute, attributeNodeId, session, monitoredItems, visitedNodes, cancellationToken).ConfigureAwait(false);
         }
-    }
-
-    private static OpcUaNodeAttribute CreateDynamicNodeAttribute(ReferenceDescription nodeReference, ISession session)
-    {
-        var namespaceUri = nodeReference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(nodeReference.NodeId.NamespaceIndex);
-        return new OpcUaNodeAttribute(nodeReference.BrowseName.Name, namespaceUri)
-        {
-            NodeIdentifier = nodeReference.NodeId.Identifier.ToString(),
-            NodeNamespaceUri = namespaceUri
-        };
     }
 
     private async Task LoadSubjectReferenceAsync(RegisteredSubjectProperty property,
