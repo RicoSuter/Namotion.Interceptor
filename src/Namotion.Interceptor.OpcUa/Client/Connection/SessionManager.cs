@@ -376,53 +376,21 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
 
                 if (!ReferenceEquals(oldSession, reconnectedSession))
                 {
+                    // New session object — the SDK created a fresh session (server restarted).
+                    // Transferred subscriptions on a restarted server are unreliable: the SDK's
+                    // response dispatcher can confuse PublishResponse with WriteResponse, causing
+                    // silent notification loss and write failures. Abandon the transferred session
+                    // and let the health check trigger a full manual reconnection with fresh
+                    // subscriptions that are guaranteed to work correctly.
                     _logger.LogInformation(
-                        "Reconnect created new OPC UA session (id={SessionId}, connected={Connected}).",
+                        "Reconnect created new OPC UA session (id={SessionId}, connected={Connected}). " +
+                        "Abandoning to trigger full reconnection with fresh subscriptions.",
                         reconnectedSession.SessionId,
                         reconnectedSession.Connected);
 
-                    // Check if subscriptions transferred BEFORE accepting the new session,
-                    // to avoid having two sessions that need disposal with only one pending slot.
-                    var transferredSubscriptions = reconnectedSession.Subscriptions.ToList();
-                    if (transferredSubscriptions.Count > 0)
-                    {
-                        // Transfer succeeded - accept new session, defer old session disposal
-                        if (oldSession is not null)
-                        {
-                            oldSession.KeepAlive -= OnKeepAlive;
-                            _sessionsToDispose.Enqueue(oldSession);
-                        }
-
-                        SetSession(reconnectedSession);
-                        ConfigureSession(reconnectedSession);
-
-                        SubscriptionManager.UpdateTransferredSubscriptions(transferredSubscriptions);
-
-                        // Signal the health check loop to perform a full state read.
-                        // We don't rely on subscription notifications alone because they can be
-                        // incomplete (notification queue overflow, timing gaps between address space
-                        // creation and ChangeQueueProcessor subscription on the server).
-                        Interlocked.Exchange(ref _needsFullStateSync, 1);
-
-                        _source.ReconnectionMetrics.RecordSuccess();
-                        _source.ClearLastError();
-
-                        _logger.LogInformation(
-                            "OPC UA session reconnected: Transferred {Count} subscriptions. Full state sync pending.",
-                            transferredSubscriptions.Count);
-                    }
-                    else
-                    {
-                        // Transfer failed - reject new session, abandon old session.
-                        // The reconnected session has a live TCP connection so it must be disposed.
-                        // The old session's connection is already dead (server restarted) and will be GC'd.
-                        _logger.LogWarning(
-                            "OPC UA session reconnected but subscription transfer failed (server restart). " +
-                            "Clearing session to trigger full reconnection via health check.");
-                        AbandonCurrentSession();
-                        reconnectedSession.KeepAlive -= OnKeepAlive;
-                        _sessionsToDispose.Enqueue(reconnectedSession);
-                    }
+                    AbandonCurrentSession();
+                    reconnectedSession.KeepAlive -= OnKeepAlive;
+                    _sessionsToDispose.Enqueue(reconnectedSession);
                 }
                 else
                 {

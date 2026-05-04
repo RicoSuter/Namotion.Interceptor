@@ -129,6 +129,14 @@ public class OpcUaReconnectionTests
                     message: "Data should flow after restart");
                 logger.Log($"Client received: {client.Root.Name}");
 
+                // Wait for the manual reconnection to complete. The SDK reconnection
+                // is abandoned (transferred sessions are unreliable after server restart),
+                // and the health check triggers a fresh manual reconnection within ~5s.
+                await AsyncTestHelpers.WaitUntilAsync(
+                    () => client.Source!.Diagnostics.SuccessfulReconnections >= 1,
+                    timeout: TimeSpan.FromSeconds(30),
+                    message: "Manual reconnection should complete");
+
                 // Verify metrics
                 var finalAttempts = client.Source!.Diagnostics.TotalReconnectionAttempts;
                 var successfulReconnections = client.Source!.Diagnostics.SuccessfulReconnections;
@@ -145,14 +153,11 @@ public class OpcUaReconnectionTests
                 Assert.True(client.Source!.Diagnostics.IsConnected);
                 Assert.NotNull(client.Source.CurrentSession);
 
-                // Session swap visible to consumers. The reconnect cycle takes one of two paths
-                // depending on timing and server behavior:
-                //   A) SDK transfer succeeds → single (HadPrevious=true, HasCurrent=true) swap
-                //   B) SDK transfer fails / preserved session / stall reset →
-                //      (HadPrevious=true, HasCurrent=false) abandon + (HadPrevious=false, HasCurrent=true) recreate
-                // Either way, the consumer must see at least one transition releasing a previous
-                // session AND at least one transition with a current session — which together prove
-                // the connector raises events for both sides of the swap, including null transitions.
+                // Session swap visible to consumers. The SDK reconnection is always abandoned
+                // (transferred sessions are unreliable after server restart), so the cycle is:
+                //   (HadPrevious=true, HasCurrent=false) abandon + (HadPrevious=false, HasCurrent=true) recreate
+                // The consumer must see at least one transition releasing a previous session AND
+                // at least one transition with a current session.
                 lock (transitionsLock)
                 {
                     Assert.Contains(sessionTransitions, t => t.HadPrevious);
