@@ -848,4 +848,98 @@ public class SubjectSourceBaseTests
 
         queue.Enqueue(new[] { change });
     }
+
+    [Fact]
+    public async Task WhenStartListeningOverrideSpawnsTaskAndThrows_ThenSpawnedTaskIsCleanedUpBeforeRethrow()
+    {
+        // Spec section 11 R2: per-connector StartListeningAsync overrides must own their
+        // spawned background tasks (OPC UA session-health, MQTT connection-monitor,
+        // WebSocket receive+monitor) and clean them up if the override throws after
+        // the task is spawned. This is a guard test for the cleanup-before-rethrow
+        // pattern at the abstraction level all three connectors share.
+
+        // Arrange
+        var subjectContextMock = new Mock<IInterceptorSubjectContext>();
+        subjectContextMock
+            .Setup(s => s.TryGetService<ISubjectRegistry>())
+            .Returns(new SubjectRegistry());
+
+        var subjectMock = new Mock<IInterceptorSubject>();
+        subjectMock
+            .Setup(s => s.Context)
+            .Returns(subjectContextMock.Object);
+
+        var spawnCount = 0;
+        var spawnedTaskCancelled = false;
+        var spawnedTaskCompleted = false;
+        var cleanupRan = false;
+
+        var source = new TestSubjectSource(
+            subjectMock.Object,
+            subjectContextMock.Object,
+            NullLogger.Instance,
+            retryTime: TimeSpan.FromMilliseconds(50))
+        {
+            StartListeningOverride = async (_, listenToken) =>
+            {
+                CancellationTokenSource? spawnCts = null;
+                Task? spawnedTask = null;
+                try
+                {
+                    spawnCts = CancellationTokenSource.CreateLinkedTokenSource(listenToken);
+                    var cts = spawnCts;
+                    spawnedTask = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await Task.Delay(Timeout.Infinite, cts.Token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            spawnedTaskCancelled = true;
+                        }
+                        finally
+                        {
+                            spawnedTaskCompleted = true;
+                        }
+                    });
+
+                    Interlocked.Increment(ref spawnCount);
+                    throw new InvalidOperationException("simulated post-spawn failure");
+                }
+                catch
+                {
+                    cleanupRan = true;
+                    if (spawnCts is not null)
+                    {
+                        try { await spawnCts.CancelAsync().ConfigureAwait(false); } catch { /* best effort */ }
+                    }
+                    if (spawnedTask is not null)
+                    {
+                        try { await spawnedTask.ConfigureAwait(false); } catch { /* expected */ }
+                    }
+                    if (spawnCts is not null)
+                    {
+                        try { spawnCts.Dispose(); } catch { /* best effort */ }
+                    }
+                    throw;
+                }
+            },
+        };
+
+        var cancellationTokenSource = new CancellationTokenSource();
+
+        // Act
+        await source.StartAsync(cancellationTokenSource.Token);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Volatile.Read(ref spawnCount) >= 1 && cleanupRan && spawnedTaskCompleted,
+            message: "Expected the override to have spawned a task, thrown, and cleaned up.");
+        await source.StopAsync(cancellationTokenSource.Token);
+        await cancellationTokenSource.CancelAsync();
+
+        // Assert
+        Assert.True(cleanupRan, "Cleanup-on-failure block should run before re-throwing.");
+        Assert.True(spawnedTaskCancelled, "Spawned task should observe cancellation from the cleanup helper.");
+        Assert.True(spawnedTaskCompleted, "Spawned task should run to completion (cancelled), not be left dangling.");
+    }
 }
