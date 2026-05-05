@@ -2,7 +2,6 @@ using System;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Mqtt.Client;
 using Namotion.Interceptor.Mqtt.Server;
 using Namotion.Interceptor.Registry.Paths;
@@ -59,19 +58,7 @@ public static class MqttSubjectExtensions
                     sp.GetRequiredKeyedService<MqttClientConfiguration>(key),
                     sp.GetRequiredService<ILogger<MqttSubjectClientSource>>());
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<MqttSubjectClientSource>(key))
-            .AddSingleton<IHostedService>(sp =>
-            {
-                var configuration = sp.GetRequiredKeyedService<MqttClientConfiguration>(key);
-                var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                return new SubjectSourceBackgroundService(
-                    sp.GetRequiredKeyedService<MqttSubjectClientSource>(key),
-                    subject.Context,
-                    sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>(),
-                    configuration.BufferTime,
-                    configuration.RetryTime,
-                    configuration.WriteRetryQueueSize);
-            });
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<MqttSubjectClientSource>(key));
     }
 
     /// <summary>
