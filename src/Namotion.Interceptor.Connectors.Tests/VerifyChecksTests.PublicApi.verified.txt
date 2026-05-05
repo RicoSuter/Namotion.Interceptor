@@ -74,6 +74,7 @@ namespace Namotion.Interceptor.Connectors
     public sealed class SubjectPropertyWriter
     {
         public SubjectPropertyWriter(Namotion.Interceptor.Connectors.ISubjectSource source, Microsoft.Extensions.Logging.ILogger logger) { }
+        public void ApplyInitialStateAndResume(System.Action? applyAction) { }
         public System.Threading.Tasks.Task LoadInitialStateAndResumeAsync(System.Threading.CancellationToken cancellationToken) { }
         public void StartBuffering() { }
         public void Write<TState>(TState state, System.Action<TState> update) { }
@@ -83,6 +84,17 @@ namespace Namotion.Interceptor.Connectors
         public SubjectSourceBackgroundService(Namotion.Interceptor.Connectors.ISubjectSource source, Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger logger, System.TimeSpan? bufferTime = default, System.TimeSpan? retryTime = default, int writeRetryQueueSize = 1000) { }
         public override void Dispose() { }
         protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+    }
+    public abstract class SubjectSourceBase : Microsoft.Extensions.Hosting.BackgroundService, Namotion.Interceptor.Connectors.ISubjectConnector, Namotion.Interceptor.Connectors.ISubjectSource
+    {
+        protected SubjectSourceBase(Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger logger, System.TimeSpan? bufferTime = default, System.TimeSpan? retryTime = default, int writeRetryQueueSize = 1000) { }
+        public abstract Namotion.Interceptor.IInterceptorSubject RootSubject { get; }
+        public virtual int WriteBatchSize { get; }
+        public override void Dispose() { }
+        protected override sealed System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected abstract System.Threading.Tasks.Task<System.Action?> LoadInitialStateAsync(System.Threading.CancellationToken cancellationToken);
+        protected abstract System.Threading.Tasks.Task<System.IAsyncDisposable?> StartListeningAsync(Namotion.Interceptor.Connectors.SubjectPropertyWriter propertyWriter, System.Threading.CancellationToken cancellationToken);
+        protected abstract System.Threading.Tasks.ValueTask<Namotion.Interceptor.Connectors.WriteResult> WriteChangesToSourceAsync(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes, System.Threading.CancellationToken cancellationToken);
     }
     public static class SubjectSourceExtensions
     {
