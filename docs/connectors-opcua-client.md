@@ -707,7 +707,7 @@ See also [Lifecycle Limitations](connectors-opcua.md#lifecycle-limitations) that
 ### Class Dependency Graph
 
 ```
-OpcUaSubjectClientSource (orchestrator, BackgroundService)
+OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
  ├── owns ReconnectionMetrics              (standalone, thread-safe counters)
  ├── owns IncomingThroughput               (standalone, ThroughputCounter)
  ├── owns OutgoingThroughput               (standalone, ThroughputCounter)
@@ -729,7 +729,7 @@ OpcUaSubjectClientSource (orchestrator, BackgroundService)
 
 | Class | Role |
 |-------|------|
-| `OpcUaSubjectClientSource` | Orchestrator. Owns the lifecycle, health check loop, reconnection logic, and the `ISubjectSource` contract. |
+| `OpcUaSubjectClientSource` | Orchestrator. Inherits `SubjectSourceBase` (which owns the pump skeleton: buffer, listen, load initial state, run change queue, retry on failure). Adds the OPC UA-specific health check loop, reconnection logic, and the `ISubjectSource` contract. |
 | `SessionManager` | Manages the OPC UA session lifecycle (create, reconnect, dispose). Owns `SubscriptionManager`, `PollingManager`, and `ReadAfterWriteManager`. |
 | `SubscriptionManager` | Creates and manages OPC UA subscriptions and monitored items. Routes incoming data change notifications. |
 | `OutboundWriter` | Writes property changes to the OPC UA server. Tracks outgoing throughput. |
@@ -743,7 +743,7 @@ OpcUaSubjectClientSource (orchestrator, BackgroundService)
 
 ### Key Design Decisions
 
-**Single-threaded health loop.** `OpcUaSubjectClientSource.ExecuteAsync` runs a single loop that checks session health, triggers reconnection, and detects stalls. All reconnection coordination flows through this loop.
+**Single-threaded health loop.** `OpcUaSubjectClientSource` runs a single `RunHealthCheckLoopAsync` task that checks session health, triggers reconnection, and detects stalls. The loop is spawned from `StartListeningAsync` and tied to an `OpcUaListenLifetime`, so it is started and stopped together with the listener — the pump skeleton itself lives in `SubjectSourceBase`. All reconnection coordination flows through this loop.
 
 **Back-reference pattern.** Several classes (`SessionManager`, `SubscriptionManager`, `PollingManager`) receive a reference to `OpcUaSubjectClientSource` to access shared state (metrics, throughput counters, error tracking). `OutboundWriter` demonstrates the preferred alternative: receiving only the specific dependencies it needs via constructor parameters.
 
