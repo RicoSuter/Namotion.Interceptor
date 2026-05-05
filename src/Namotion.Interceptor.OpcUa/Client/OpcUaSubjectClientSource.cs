@@ -191,7 +191,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         var sessionManager = _sessionManager;
         if (sessionManager is not null)
         {
-            await sessionManager.DisposeAsync().ConfigureAwait(false);
+            try { await sessionManager.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogWarning(ex, "OPC UA session manager threw during listen-failure cleanup."); }
             _sessionManager = null;
         }
     }
@@ -752,7 +753,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             catch (OperationCanceledException) { /* expected */ }
             catch (Exception ex) { _logger.LogWarning(ex, "OPC UA health task threw during disposal."); }
             try { _healthCts.Dispose(); } catch { /* ignore */ }
-            await _sessionManager.DisposeAsync().ConfigureAwait(false);
+            try { await _sessionManager.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogWarning(ex, "OPC UA session manager threw during listen-lifetime disposal."); }
         }
     }
 }
