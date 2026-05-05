@@ -149,7 +149,7 @@ internal class SubscriptionManager : IAsyncDisposable
         }
     }
 
-    private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, IList<string> stringTable)
+    private void OnFastDataChange(Subscription subscription, DataChangeNotification notification, ArrayOf<string> stringTable)
     {
         if (_shuttingDown)
         {
@@ -175,8 +175,8 @@ internal class SubscriptionManager : IAsyncDisposable
                     changes.Add(new PropertyUpdate
                     {
                         Property = property,
-                        Value = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, property),
-                        Timestamp = item.Value.SourceTimestamp
+                        Value = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.WrappedValue.AsBoxedObject(), property),
+                        Timestamp = item.Value.SourceTimestamp.ToDateTimeOffset()
                     });
                 }
             }

@@ -4,8 +4,9 @@
     <TargetFramework>net9.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <LangVersion>preview</LangVersion>
     <!-- Set to true to use local OPC UA project references (development), false for NuGet packages (production) -->
-    <UseLocalOpcUaProjects>false</UseLocalOpcUaProjects>
+    <UseLocalOpcUaProjects>true</UseLocalOpcUaProjects>
   </PropertyGroup>
 
   <!-- Define compiler constant when using local OPC UA projects -->

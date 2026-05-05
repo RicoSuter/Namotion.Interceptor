@@ -11,7 +11,7 @@ internal class CustomNodeManagerFactory : INodeManagerFactory
     private readonly OpcUaServerConfiguration _configuration;
     private readonly ILogger _logger;
 
-    public StringCollection NamespacesUris => new(_configuration.GetNamespaceUris());
+    public ArrayOf<string> NamespacesUris => _configuration.GetNamespaceUris().ToArrayOf();
 
     public CustomNodeManager? NodeManager { get; private set; }
 

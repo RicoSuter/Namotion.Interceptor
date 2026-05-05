@@ -95,7 +95,7 @@ public class OpcUaServerConfiguration
         var host = System.Net.Dns.GetHostName();
         var applicationUri = $"urn:{host}:Namotion.Interceptor:{ApplicationName}";
 
-        var config = new ApplicationConfiguration
+        var config = new ApplicationConfiguration(TelemetryContext)
         {
             ApplicationName = ApplicationName,
             ApplicationType = ApplicationType.Server,
@@ -144,7 +144,7 @@ public class OpcUaServerConfiguration
             ServerConfiguration = new ServerConfiguration
             {
                 // Base addresses kept minimal (tcp only). Add https if required later.
-                BaseAddresses = { BaseAddress },
+                BaseAddresses = [BaseAddress],
                 SecurityPolicies =
                 [
                     new ServerSecurityPolicy { SecurityMode = MessageSecurityMode.Sign, SecurityPolicyUri = SecurityPolicies.Basic256Sha256 },

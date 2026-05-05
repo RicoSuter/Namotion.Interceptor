@@ -395,13 +395,13 @@ internal class OpcUaSubjectLoader
         }
     }
 
-    private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
+    private async Task<List<ReferenceDescription>> BrowseNodeAsync(
         NodeId nodeId,
         ISession session,
         CancellationToken cancellationToken)
     {
-        var browseDescriptions = new BrowseDescriptionCollection
-        {
+        ArrayOf<BrowseDescription> browseDescriptions =
+        [
             new BrowseDescription
             {
                 NodeId = nodeId,
@@ -411,9 +411,9 @@ internal class OpcUaSubjectLoader
                 NodeClassMask = NodeClassMask,
                 ResultMask = (uint)BrowseResultMask.All
             }
-        };
+        ];
 
-        var results = new ReferenceDescriptionCollection();
+        var results = new List<ReferenceDescription>();
 
         var response = await session.BrowseAsync(
             null,
@@ -424,7 +424,10 @@ internal class OpcUaSubjectLoader
 
         if (response.Results.Count > 0 && StatusCode.IsGood(response.Results[0].StatusCode))
         {
-            results.AddRange(response.Results[0].References);
+            foreach (var reference in response.Results[0].References)
+            {
+                results.Add(reference);
+            }
 
             var continuationPoint = response.Results[0].ContinuationPoint;
             while (continuationPoint is { Length: > 0 })
@@ -436,9 +439,9 @@ internal class OpcUaSubjectLoader
                 if (nextResponse.Results.Count > 0 && StatusCode.IsGood(nextResponse.Results[0].StatusCode))
                 {
                     var r0 = nextResponse.Results[0];
-                    if (r0.References is { Count: > 0 } nextReferences)
+                    if (r0.References.Count > 0)
                     {
-                        foreach (var reference in nextReferences)
+                        foreach (var reference in r0.References)
                         {
                             results.Add(reference);
                         }

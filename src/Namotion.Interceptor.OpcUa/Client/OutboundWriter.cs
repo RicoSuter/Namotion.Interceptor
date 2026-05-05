@@ -79,7 +79,7 @@ internal sealed class OutboundWriter
         return StatusCode.IsBad(statusCode);
     }
 
-    private WriteResult ProcessWriteResults(StatusCodeCollection results, ReadOnlyMemory<SubjectPropertyChange> allChanges)
+    private WriteResult ProcessWriteResults(ArrayOf<StatusCode> results, ReadOnlyMemory<SubjectPropertyChange> allChanges)
     {
         var failureCount = 0;
         for (var i = 0; i < results.Count; i++)
@@ -129,7 +129,7 @@ internal sealed class OutboundWriter
 
     private bool TryGetWritableNodeId(SubjectPropertyChange change, out NodeId nodeId, out RegisteredSubjectProperty registeredProperty)
     {
-        nodeId = null!;
+        nodeId = default;
         registeredProperty = null!;
 
         if (!change.Property.TryGetPropertyData(_opcUaNodeIdKey, out var value) || value is not NodeId id)
@@ -147,10 +147,10 @@ internal sealed class OutboundWriter
         return true;
     }
 
-    private WriteValueCollection CreateWriteValuesCollection(ReadOnlyMemory<SubjectPropertyChange> changes)
+    private ArrayOf<WriteValue> CreateWriteValuesCollection(ReadOnlyMemory<SubjectPropertyChange> changes)
     {
         var span = changes.Span;
-        var writeValues = new WriteValueCollection(span.Length);
+        var writeValues = new List<WriteValue>(span.Length);
 
         for (var i = 0; i < span.Length; i++)
         {
@@ -171,14 +171,16 @@ internal sealed class OutboundWriter
                 AttributeId = Opc.Ua.Attributes.Value,
                 Value = new DataValue
                 {
-                    Value = convertedValue,
+#pragma warning disable CS0618 // Variant(object) is obsolete but required for dynamic typing
+                    WrappedValue = new Variant(convertedValue),
+#pragma warning restore CS0618
                     StatusCode = StatusCodes.Good,
                     SourceTimestamp = change.ChangedTimestamp.UtcDateTime
                 }
             });
         }
 
-        return writeValues;
+        return writeValues.ToArrayOf();
     }
 
     private void NotifyPropertiesWritten(ReadOnlyMemory<SubjectPropertyChange> changes)

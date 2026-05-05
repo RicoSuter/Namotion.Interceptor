@@ -26,7 +26,7 @@ public class OpcUaClientDiagnostics
     /// <summary>
     /// Gets the current session identifier, or null if not connected.
     /// </summary>
-    public string? SessionId => _source.SessionManager?.CurrentSession?.SessionId?.ToString();
+    public string? SessionId => _source.SessionManager?.CurrentSession?.SessionId.ToString();
 
     /// <summary>
     /// Gets the number of active OPC UA subscriptions.

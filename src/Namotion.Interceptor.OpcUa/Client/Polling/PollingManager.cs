@@ -326,15 +326,16 @@ internal sealed class PollingManager : IAsyncDisposable
         try
         {
             // Build read request - pre-size to avoid resizing
-            var nodesToRead = new ReadValueIdCollection(batch.Count);
+            var nodesToReadList = new List<ReadValueId>(batch.Count);
             foreach (var item in batch)
             {
-                nodesToRead.Add(new ReadValueId
+                nodesToReadList.Add(new ReadValueId
                 {
                     NodeId = item.NodeId,
                     AttributeId = Opc.Ua.Attributes.Value
                 });
             }
+            var nodesToRead = nodesToReadList.ToArrayOf();
 
             // Execute read
             var response = await session.ReadAsync(
@@ -378,7 +379,7 @@ internal sealed class PollingManager : IAsyncDisposable
 
     private void ProcessValueChange(PollingItem pollingItem, DataValue dataValue, DateTimeOffset receivedTimestamp)
     {
-        var newValue = dataValue.Value;
+        var newValue = dataValue.WrappedValue.AsBoxedObject();
         var oldValue = pollingItem.LastValue;
 
         // Only notify on actual change (same as subscription behavior)
@@ -401,7 +402,7 @@ internal sealed class PollingManager : IAsyncDisposable
             {
                 Property = pollingItem.Property,
                 Value = newValue,
-                Timestamp = dataValue.SourceTimestamp
+                Timestamp = dataValue.SourceTimestamp.ToDateTimeOffset()
             };
 
             // Queue update using same pattern as subscriptions

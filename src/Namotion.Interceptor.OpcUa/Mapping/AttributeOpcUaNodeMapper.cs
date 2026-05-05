@@ -101,7 +101,7 @@ public class AttributeOpcUaNodeMapper : IOpcUaNodeMapper
         ISession session,
         CancellationToken cancellationToken)
     {
-        var nodeIdString = nodeReference.NodeId.Identifier.ToString();
+        var nodeIdString = nodeReference.NodeId.IdentifierAsString;
         var nodeNamespaceUri = nodeReference.NodeId.NamespaceUri
             ?? session.NamespaceUris.GetString(nodeReference.NodeId.NamespaceIndex);
 
