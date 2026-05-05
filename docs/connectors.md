@@ -66,7 +66,7 @@ A **source** represents an external authoritative system where the data originat
 - Loads initial state FROM the external system
 - Writes changes TO the external system (which may fail)
 - Provides write retry queue to buffer changes during disconnection
-- Uses `SubjectSourceBackgroundService` for lifecycle management
+- Inherits from `SubjectSourceBase` (a `BackgroundService`) for lifecycle management
 
 **Cardinality**: Each property can have at most one source (single source of truth)
 
@@ -77,12 +77,6 @@ A **source** represents an external authoritative system where the data originat
 ```csharp
 public interface ISubjectSource : ISubjectConnector
 {
-    /// <summary>
-    /// Checks whether the property is handled by this source.
-    /// Implementations typically delegate to an internal IPathProvider.
-    /// </summary>
-    bool IsPropertyIncluded(RegisteredSubjectProperty property);
-
     /// <summary>
     /// Maximum batch size for write operations (0 = no limit).
     /// </summary>
@@ -108,6 +102,8 @@ public interface ISubjectSource : ISubjectConnector
     Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken);
 }
 ```
+
+> **Note**: Most source implementations inherit from `SubjectSourceBase` rather than implementing `ISubjectSource` directly. `SubjectSourceBase` is a `BackgroundService` that owns the pump lifecycle (buffer, listen, load initial state, run change queue, retry on failure) and exposes the same three operations as protected hooks: `StartListeningAsync`, `LoadInitialStateAsync`, and `WriteChangesToSourceAsync`. Direct interface implementation remains supported for advanced scenarios.
 
 ### Data Flow
 
@@ -444,23 +440,25 @@ if (property.TryGetSource(out var source))
 
 ## Write Retry Queue
 
-The `SubjectSourceBackgroundService` provides an optional write retry queue that buffers writes during disconnection:
+`SubjectSourceBase` provides an optional write retry queue that buffers writes during disconnection. Each connector exposes the queue size through its own configuration (for example, `OpcUaClientConfiguration.WriteRetryQueueSize`); when implementing a custom source, pass `writeRetryQueueSize` to the `SubjectSourceBase` constructor:
 
 ```csharp
-services.AddHostedService(sp =>
+public sealed class DatabaseSource : SubjectSourceBase
 {
-    var source = sp.GetRequiredService<ISubjectSource>();
-    var context = sp.GetRequiredService<IInterceptorSubjectContext>();
-    var logger = sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>();
+    public DatabaseSource(
+        IInterceptorSubjectContext context,
+        ILogger<DatabaseSource> logger)
+        : base(
+            context,
+            logger,
+            bufferTime: TimeSpan.FromMilliseconds(8),
+            retryTime: TimeSpan.FromSeconds(10),
+            writeRetryQueueSize: 1000) // Enable write retry queue (0 to disable)
+    {
+    }
 
-    return new SubjectSourceBackgroundService(
-        source,
-        context,
-        logger,
-        bufferTime: TimeSpan.FromMilliseconds(8),
-        retryTime: TimeSpan.FromSeconds(10),
-        writeRetryQueueSize: 1000); // Enable write retry queue
-});
+    // ... overrides
+}
 ```
 
 **Behavior:**

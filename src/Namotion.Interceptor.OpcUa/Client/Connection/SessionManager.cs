@@ -785,7 +785,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
     /// <summary>
     /// Satisfies IDisposable for interface compatibility.
     /// Delegates to DisposeAsync() via fire-and-forget to ensure cleanup.
-    /// SubjectSourceBackgroundService checks for IAsyncDisposable first, so this is never called in normal operation.
+    /// SubjectSourceBase awaits IAsyncDisposable directly via 'await using', so this is never called in normal operation.
     /// </summary>
     void IDisposable.Dispose()
     {

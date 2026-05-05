@@ -273,8 +273,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     /// Adapts an <see cref="IAsyncDisposable"/> to <see cref="IDisposable"/> for the
     /// <see cref="ISubjectSource.StartListeningAsync"/> bridge. The base's own
     /// <see cref="ExecuteAsync"/> uses <c>await using</c> on the protected hook directly,
-    /// so this adapter only fires for external callers that go through the interface
-    /// (notably <c>SubjectSourceBackgroundService</c> while it still exists).
+    /// so this adapter only fires for external callers that go through the interface.
     /// Sync-over-async via <c>GetAwaiter().GetResult()</c> is safe here because such
     /// callers run inside <see cref="BackgroundService"/> contexts with no captured
     /// <see cref="SynchronizationContext"/>.

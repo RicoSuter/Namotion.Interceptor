@@ -383,7 +383,7 @@ All settings can be overridden per-property using `[OpcUaNode]` attribute.
 
 ### Write Retry Queue During Disconnection
 
-The library automatically queues write operations when the connection is lost, preventing data loss during brief network interruptions. On reconnection, queued writes are optimistically re-applied: after loading the server's current state, each queued change is compared against the current property value and only re-applied if the server hasn't changed it (source wins on conflict). This feature is provided by the `SubjectSourceBackgroundService` (see [Connectors — Write Retry Queue](connectors.md#write-retry-queue)).
+The library automatically queues write operations when the connection is lost, preventing data loss during brief network interruptions. On reconnection, queued writes are optimistically re-applied: after loading the server's current state, each queued change is compared against the current property value and only re-applied if the server hasn't changed it (source wins on conflict). This feature is provided by `SubjectSourceBase` (see [Connectors — Write Retry Queue](connectors.md#write-retry-queue)).
 
 ```csharp
 builder.Services.AddOpcUaSubjectClientSource(

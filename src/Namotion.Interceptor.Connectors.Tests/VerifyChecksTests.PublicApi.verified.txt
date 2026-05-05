@@ -79,12 +79,6 @@ namespace Namotion.Interceptor.Connectors
         public void StartBuffering() { }
         public void Write<TState>(TState state, System.Action<TState> update) { }
     }
-    public class SubjectSourceBackgroundService : Microsoft.Extensions.Hosting.BackgroundService
-    {
-        public SubjectSourceBackgroundService(Namotion.Interceptor.Connectors.ISubjectSource source, Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger logger, System.TimeSpan? bufferTime = default, System.TimeSpan? retryTime = default, int writeRetryQueueSize = 1000) { }
-        public override void Dispose() { }
-        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
-    }
     public abstract class SubjectSourceBase : Microsoft.Extensions.Hosting.BackgroundService, Namotion.Interceptor.Connectors.ISubjectConnector, Namotion.Interceptor.Connectors.ISubjectSource
     {
         protected SubjectSourceBase(Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger logger, System.TimeSpan? bufferTime = default, System.TimeSpan? retryTime = default, int writeRetryQueueSize = 1000) { }
