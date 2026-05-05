@@ -58,6 +58,11 @@ internal sealed class OutboundWriter
 
             return result;
         }
+        catch (InvalidCastException ex)
+        {
+            _logger.LogError(ex, "OPC UA WriteAsync returned unexpected response type (issue #287).");
+            return WriteResult.Failure(changes, ex);
+        }
         catch (Exception ex)
         {
             return WriteResult.Failure(changes, ex);
