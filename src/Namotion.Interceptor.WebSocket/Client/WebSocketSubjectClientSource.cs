@@ -84,44 +84,43 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     {
         _propertyWriter = propertyWriter;
 
-        CancellationTokenSource? monitorCts = null;
-        Task? monitorTask = null;
         try
         {
             await ConnectAsync(cancellationToken).ConfigureAwait(false);
 
-            // Spawn the monitor + reconnect loop tied to listen lifetime.
-            // Disposing the returned lifetime cancels and awaits this task.
-            // Kill faults cancel the inner forceKillCts so the monitor body
-            // re-enters reconnect (preserving the previous BackgroundService.ExecuteAsync behavior).
-            monitorCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            monitorTask = Task.Run(() => RunMonitorLoopAsync(monitorCts.Token), CancellationToken.None);
-
-            return new ConnectionLifetime(this, monitorCts, monitorTask, _logger);
+            return BackgroundTaskLifetime.Start(
+                cancellationToken,
+                RunMonitorLoopAsync,
+                _logger,
+                DisposeWebSocketConnectionAsync);
         }
         catch
         {
-            await CleanupOnListenFailureAsync(monitorCts, monitorTask).ConfigureAwait(false);
+            await StopReceiveLoopAndDisposeSocketAsync().ConfigureAwait(false);
             throw;
         }
     }
 
-    private async Task CleanupOnListenFailureAsync(CancellationTokenSource? monitorCts, Task? monitorTask)
+    private async ValueTask DisposeWebSocketConnectionAsync()
     {
-        if (monitorCts is not null)
+        var currentSocket = _webSocket;
+        if (currentSocket?.State == WebSocketState.Open)
         {
-            try { await monitorCts.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
-        }
-        if (monitorTask is not null)
-        {
-            try { await monitorTask.ConfigureAwait(false); } catch { /* logged elsewhere or ignored on cleanup path */ }
-        }
-        if (monitorCts is not null)
-        {
-            try { monitorCts.Dispose(); } catch { /* ignore */ }
+            try
+            {
+                using var closeCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                await currentSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Client closing", closeCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                currentSocket.Abort();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error while closing WebSocket connection");
+            }
         }
 
-        // Cancel and await the receive loop, then dispose the socket.
         await StopReceiveLoopAndDisposeSocketAsync().ConfigureAwait(false);
     }
 
@@ -569,9 +568,9 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
     /// <summary>
     /// Monitor connection and handle reconnection with exponential backoff.
-    /// Spawned as a Task by <see cref="StartListeningAsync"/> and owned by the returned
-    /// <see cref="ConnectionLifetime"/>. Cancellation of <paramref name="stoppingToken"/>
-    /// (via lifetime disposal or host shutdown) breaks the outer loop.
+    /// Spawned by <see cref="StartListeningAsync"/> via <see cref="BackgroundTaskLifetime.Start"/>.
+    /// Cancellation of <paramref name="stoppingToken"/> (via lifetime disposal or host shutdown)
+    /// breaks the outer loop.
     /// </summary>
     private async Task RunMonitorLoopAsync(CancellationToken stoppingToken)
     {
@@ -728,59 +727,4 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         }
     }
 
-    /// <summary>
-    /// Owns the listen-time resources spawned by <see cref="StartListeningAsync"/>:
-    /// the monitor loop's cancellation source, its task, and the WebSocket itself.
-    /// Disposed by the base loop on retry or shutdown.
-    /// </summary>
-    private sealed class ConnectionLifetime : IAsyncDisposable
-    {
-        private readonly WebSocketSubjectClientSource _owner;
-        private readonly CancellationTokenSource _monitorCts;
-        private readonly Task _monitorTask;
-        private readonly ILogger _logger;
-        private int _disposed;
-
-        public ConnectionLifetime(WebSocketSubjectClientSource owner, CancellationTokenSource monitorCts, Task monitorTask, ILogger logger)
-        {
-            _owner = owner;
-            _monitorCts = monitorCts;
-            _monitorTask = monitorTask;
-            _logger = logger;
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
-
-            // Cancel and await the monitor task before tearing down the connection,
-            // so the monitor doesn't observe a half-disposed state.
-            try { await _monitorCts.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
-            try { await _monitorTask.ConfigureAwait(false); }
-            catch (OperationCanceledException) { /* expected */ }
-            catch (Exception ex) { _logger.LogWarning(ex, "WebSocket monitor task threw during disposal."); }
-            try { _monitorCts.Dispose(); } catch { /* ignore */ }
-
-            // Close the active WebSocket gracefully (if open), then cancel/await the receive loop and dispose the socket.
-            var currentSocket = _owner._webSocket;
-            if (currentSocket?.State == WebSocketState.Open)
-            {
-                try
-                {
-                    using var closeCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                    await currentSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "Client closing", closeCts.Token).ConfigureAwait(false);
-                }
-                catch (OperationCanceledException)
-                {
-                    currentSocket.Abort();
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Error while closing WebSocket connection");
-                }
-            }
-
-            await _owner.StopReceiveLoopAndDisposeSocketAsync().ConfigureAwait(false);
-        }
-    }
 }

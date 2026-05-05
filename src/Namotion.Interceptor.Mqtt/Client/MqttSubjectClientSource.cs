@@ -104,8 +104,6 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
 
         IMqttClient? client = null;
         MqttConnectionMonitor? connectionMonitor = null;
-        CancellationTokenSource? monitorCts = null;
-        Task? monitorTask = null;
         try
         {
             client = _factory.CreateMqttClient();
@@ -130,21 +128,17 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                 }, _logger);
             _connectionMonitor = connectionMonitor;
 
-            // Spawn the connection-monitor loop tied to listen lifetime.
-            // Disposing the returned lifetime cancels and awaits this task.
-            // Kill faults cancel the inner forceKillCts so the monitor exits and
-            // the kill-restart wrapper re-enters MonitorConnectionAsync (preserving
-            // the previous BackgroundService.ExecuteAsync behavior).
-            monitorCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            var monitorForLifetime = connectionMonitor;
             var clientForLifetime = client;
-            monitorTask = Task.Run(() => RunMonitorWithKillRestartAsync(monitorForLifetime, monitorCts.Token), CancellationToken.None);
-
-            return new MqttConnectionLifetime(this, clientForLifetime, monitorForLifetime, monitorCts, monitorTask, _logger);
+            var monitorForLifetime = connectionMonitor;
+            return BackgroundTaskLifetime.Start(
+                cancellationToken,
+                ct => RunMonitorWithKillRestartAsync(monitorForLifetime, ct),
+                _logger,
+                () => DisposeMqttConnectionAsync(clientForLifetime, monitorForLifetime));
         }
         catch
         {
-            await CleanupOnListenFailureAsync(client, connectionMonitor, monitorCts, monitorTask).ConfigureAwait(false);
+            await DisposeMqttConnectionAsync(client, connectionMonitor).ConfigureAwait(false);
             throw;
         }
     }
@@ -182,33 +176,19 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         }
     }
 
-    private async Task CleanupOnListenFailureAsync(
-        IMqttClient? client,
-        MqttConnectionMonitor? connectionMonitor,
-        CancellationTokenSource? monitorCts,
-        Task? monitorTask)
+    private async ValueTask DisposeMqttConnectionAsync(IMqttClient? client, MqttConnectionMonitor? connectionMonitor)
     {
-        if (monitorCts is not null)
-        {
-            try { await monitorCts.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
-        }
-        if (monitorTask is not null)
-        {
-            try { await monitorTask.ConfigureAwait(false); } catch { /* logged elsewhere or ignored on cleanup path */ }
-        }
-        if (monitorCts is not null)
-        {
-            try { monitorCts.Dispose(); } catch { /* ignore */ }
-        }
         if (connectionMonitor is not null)
         {
-            try { await connectionMonitor.DisposeAsync().ConfigureAwait(false); } catch { /* ignore */ }
-            _connectionMonitor = null;
+            try { await connectionMonitor.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogWarning(ex, "MQTT connection monitor threw during disposal."); }
         }
+
         if (client is not null)
         {
             client.ApplicationMessageReceivedAsync -= OnMessageReceivedAsync;
             client.DisconnectedAsync -= OnDisconnectedAsync;
+
             try
             {
                 if (client.IsConnected)
@@ -216,10 +196,16 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
                     await client.DisconnectAsync().ConfigureAwait(false);
                 }
             }
-            catch { /* ignore on cleanup */ }
+            catch (Exception ex) { _logger.LogWarning(ex, "Error disconnecting MQTT client during disposal."); }
+
             try { client.Dispose(); } catch { /* ignore */ }
-            _client = null;
         }
+
+        _client = null;
+        _connectionMonitor = null;
+        _propertyWriter = null;
+        _isForceKill = false;
+        _forceKillCts = null;
     }
 
     /// <inheritdoc />
@@ -593,20 +579,6 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
         clientOptions.AcknowledgeQoS1OnReceive = true;
 #endif
         return clientOptions;
-    }
-
-    /// <summary>
-    /// Called by <see cref="MqttConnectionLifetime.DisposeAsync"/> after it has fully torn down
-    /// the listen-time resources (monitor task, monitor, client). Resets source-level fields so
-    /// the next listen iteration starts clean.
-    /// </summary>
-    internal void OnListenLifetimeDisposed()
-    {
-        _client = null;
-        _connectionMonitor = null;
-        _propertyWriter = null;
-        _isForceKill = false;
-        _forceKillCts = null;
     }
 
     /// <inheritdoc />

@@ -3,6 +3,11 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v9.0", FrameworkDisplayName=".NET 9.0")]
 namespace Namotion.Interceptor.Connectors
 {
+    public sealed class BackgroundTaskLifetime : System.IAsyncDisposable
+    {
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        public static Namotion.Interceptor.Connectors.BackgroundTaskLifetime Start(System.Threading.CancellationToken parentToken, System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task> monitorBody, Microsoft.Extensions.Logging.ILogger logger, System.Func<System.Threading.Tasks.ValueTask>? disposeConnectionAsync = null) { }
+    }
     public class ChangeQueueProcessor : System.IDisposable
     {
         public ChangeQueueProcessor(object? source, Namotion.Interceptor.IInterceptorSubjectContext context, System.Func<Namotion.Interceptor.PropertyReference, bool> propertyFilter, System.Func<System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask> writeHandler, System.TimeSpan? bufferTime, Microsoft.Extensions.Logging.ILogger logger) { }

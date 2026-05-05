@@ -111,8 +111,6 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         _sessionManager = new SessionManager(this, propertyWriter, _configuration, _logger);
         _writer = new OutboundWriter(_sessionManager, _configuration, OpcUaNodeIdKey, OutgoingThroughput, _logger);
 
-        CancellationTokenSource? healthCts = null;
-        Task? healthTask = null;
         try
         {
             var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
@@ -150,44 +148,32 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             _isStarted = true;
             Volatile.Write(ref _lastError, null);
 
-            // Spawn health-check loop tied to listen lifetime. The base loop's stoppingToken
-            // is linked into healthCts so a host shutdown also cancels the health loop;
-            // disposing the returned lifetime independently cancels and awaits it.
-            healthCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             var sessionManagerForLifetime = _sessionManager;
-            healthTask = Task.Run(() => RunHealthCheckLoopAsync(healthCts.Token), CancellationToken.None);
-
-            return new OpcUaListenLifetime(sessionManagerForLifetime, healthCts, healthTask, _logger);
+            return BackgroundTaskLifetime.Start(
+                cancellationToken,
+                RunHealthCheckLoopAsync,
+                _logger,
+                async () =>
+                {
+                    try { await sessionManagerForLifetime.DisposeAsync().ConfigureAwait(false); }
+                    catch (Exception ex) { _logger.LogWarning(ex, "OPC UA session manager threw during listen-lifetime disposal."); }
+                });
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Cancellation is the host shutting us down, not a failure to surface in diagnostics.
-            await CleanupOnListenFailureAsync(healthCts, healthTask).ConfigureAwait(false);
+            await CleanupSessionManagerAsync().ConfigureAwait(false);
             throw;
         }
         catch (Exception ex)
         {
             Volatile.Write(ref _lastError, ex);
-            await CleanupOnListenFailureAsync(healthCts, healthTask).ConfigureAwait(false);
+            await CleanupSessionManagerAsync().ConfigureAwait(false);
             throw;
         }
     }
 
-    private async Task CleanupOnListenFailureAsync(CancellationTokenSource? healthCts, Task? healthTask)
+    private async Task CleanupSessionManagerAsync()
     {
-        if (healthCts is not null)
-        {
-            try { await healthCts.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
-        }
-        if (healthTask is not null)
-        {
-            try { await healthTask.ConfigureAwait(false); } catch { /* logged elsewhere or ignored on cleanup path */ }
-        }
-        if (healthCts is not null)
-        {
-            try { healthCts.Dispose(); } catch { /* ignore */ }
-        }
-
         var sessionManager = _sessionManager;
         if (sessionManager is not null)
         {
@@ -726,35 +712,4 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         }
     }
 
-    /// <summary>
-    /// Owns the listen-time resources spawned by <see cref="StartListeningAsync"/>:
-    /// the session manager, the health-check loop's cancellation source, and its task.
-    /// Disposed by the base loop on retry or shutdown.
-    /// </summary>
-    private sealed class OpcUaListenLifetime : IAsyncDisposable
-    {
-        private readonly SessionManager _sessionManager;
-        private readonly CancellationTokenSource _healthCts;
-        private readonly Task _healthTask;
-        private readonly ILogger _logger;
-
-        public OpcUaListenLifetime(SessionManager sessionManager, CancellationTokenSource healthCts, Task healthTask, ILogger logger)
-        {
-            _sessionManager = sessionManager;
-            _healthCts = healthCts;
-            _healthTask = healthTask;
-            _logger = logger;
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            try { await _healthCts.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
-            try { await _healthTask.ConfigureAwait(false); }
-            catch (OperationCanceledException) { /* expected */ }
-            catch (Exception ex) { _logger.LogWarning(ex, "OPC UA health task threw during disposal."); }
-            try { _healthCts.Dispose(); } catch { /* ignore */ }
-            try { await _sessionManager.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception ex) { _logger.LogWarning(ex, "OPC UA session manager threw during listen-lifetime disposal."); }
-        }
-    }
 }

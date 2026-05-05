@@ -743,7 +743,7 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
 
 ### Key Design Decisions
 
-**Single-threaded health loop.** `OpcUaSubjectClientSource` runs a single `RunHealthCheckLoopAsync` task that checks session health, triggers reconnection, and detects stalls. The loop is spawned from `StartListeningAsync` and tied to an `OpcUaListenLifetime`, so it is started and stopped together with the listener — the pump skeleton itself lives in `SubjectSourceBase`. All reconnection coordination flows through this loop.
+**Single-threaded health loop.** `OpcUaSubjectClientSource` runs a single `RunHealthCheckLoopAsync` task that checks session health, triggers reconnection, and detects stalls. The loop is spawned from `StartListeningAsync` via `BackgroundTaskLifetime.Start`, so it is started and stopped together with the listener. The pump skeleton itself lives in `SubjectSourceBase`. All reconnection coordination flows through this loop.
 
 **Back-reference pattern.** Several classes (`SessionManager`, `SubscriptionManager`, `PollingManager`) receive a reference to `OpcUaSubjectClientSource` to access shared state (metrics, throughput counters, error tracking). `OutboundWriter` demonstrates the preferred alternative: receiving only the specific dependencies it needs via constructor parameters.
 

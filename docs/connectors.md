@@ -293,9 +293,15 @@ public sealed class DatabaseSource : SubjectSourceBase
         SubjectPropertyWriter propertyWriter,
         CancellationToken cancellationToken)
     {
-        // Set up change notifications from the database.
-        // Use propertyWriter.Write() to apply inbound updates.
-        return subscription;
+        var connection = await OpenDatabaseConnectionAsync(cancellationToken);
+
+        // BackgroundTaskLifetime spawns a background task linked to cancellationToken
+        // and disposes the connection when the listen lifetime ends.
+        return BackgroundTaskLifetime.Start(
+            cancellationToken,
+            ct => ListenForChangesAsync(propertyWriter, connection, ct),
+            _logger,
+            () => connection.DisposeAsync());
     }
 
     public override async Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
@@ -335,6 +341,20 @@ foreach (var property in registeredSubject.GetAllProperties())
     property.Reference.SetSource(databaseSource);
 }
 ```
+
+### BackgroundTaskLifetime
+
+`BackgroundTaskLifetime` manages a background task tied to the listen lifetime. It creates a linked `CancellationTokenSource`, spawns the task, and on disposal cancels the token, awaits the task, and then invokes an optional cleanup callback. All built-in sources (OPC UA, MQTT, WebSocket) use it for their monitor/health-check loops.
+
+```csharp
+return BackgroundTaskLifetime.Start(
+    cancellationToken,               // parent token from StartListeningAsync
+    ct => RunMyBackgroundLoop(ct),   // the task body
+    _logger,
+    () => connection.DisposeAsync()); // optional: cleanup when disposed
+```
+
+Return the `BackgroundTaskLifetime` from `StartListeningAsync`. The base class disposes it automatically on retry or shutdown.
 
 ## Source Ownership
 
