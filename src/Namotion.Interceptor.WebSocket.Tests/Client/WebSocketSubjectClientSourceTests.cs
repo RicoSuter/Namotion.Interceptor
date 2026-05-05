@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
@@ -53,7 +54,9 @@ public class WebSocketSubjectClientSourceTests
         var changes = ReadOnlyMemory<SubjectPropertyChange>.Empty;
 
         // Act
-        var result = await source.WriteChangesAsync(changes, CancellationToken.None);
+        // After the SubjectSourceBase migration, WriteChangesToSourceAsync is protected.
+        // Reach it through the ISubjectSource interface, which the base bridges to the protected hook.
+        var result = await ((ISubjectSource)source).WriteChangesAsync(changes, CancellationToken.None);
 
         // Assert
         Assert.NotNull(result.Error);
