@@ -55,7 +55,7 @@ This interface is:
 - **Required** for sources (`ISubjectSource : ISubjectConnector`)
 - **Optional** for servers (they can implement it for type consistency)
 
-> **Note**: Path providers are implementation details. Sources expose `IsPropertyIncluded()` which internally delegates to their path provider. A source/server might not use a path provider at all.
+> **Note**: Path providers are implementation details. A source/server may use a path provider internally to decide which properties to include and how to map them, or it may not use one at all.
 
 ## Sources (ISubjectSource)
 
@@ -277,41 +277,42 @@ builder.Services.AddMqttSubjectClientSource<Sensor>(
 
 ### Custom Source Implementation
 
+Derive from `SubjectSourceBase` and override the three protected hooks. The base class owns the pump lifecycle (buffer, listen, load initial state, run change queue, retry on failure) and bridges its `ISubjectSource` surface to your hooks.
+
 ```csharp
-public class DatabaseSource : ISubjectSource
+public sealed class DatabaseSource : SubjectSourceBase
 {
     private readonly IInterceptorSubject _root;
-    private readonly IPathProvider _pathProvider;  // Internal - not on interface
 
-    public DatabaseSource(IInterceptorSubject root, IPathProvider pathProvider)
+    public DatabaseSource(
+        IInterceptorSubject root,
+        IInterceptorSubjectContext context,
+        ILogger<DatabaseSource> logger)
+        : base(context, logger)
     {
         _root = root;
-        _pathProvider = pathProvider;
     }
 
-    public IInterceptorSubject RootSubject => _root;
-    public int WriteBatchSize => 100;
+    public override IInterceptorSubject RootSubject => _root;
 
-    // IsPropertyIncluded delegates to internal path provider
-    public bool IsPropertyIncluded(RegisteredSubjectProperty property)
-        => _pathProvider.IsPropertyIncluded(property);
+    public override int WriteBatchSize => 100;
 
-    public async Task<IDisposable?> StartListeningAsync(
+    protected override async Task<IAsyncDisposable?> StartListeningAsync(
         SubjectPropertyWriter propertyWriter,
         CancellationToken cancellationToken)
     {
-        // Set up change notifications from database
-        // Use propertyWriter.Write() to apply inbound updates
+        // Set up change notifications from the database.
+        // Use propertyWriter.Write() to apply inbound updates.
         return subscription;
     }
 
-    public async Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
+    protected override async Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
     {
         var data = await LoadFromDatabaseAsync(cancellationToken);
         return () => ApplyToSubject(_root, data);
     }
 
-    public async ValueTask<WriteResult> WriteChangesAsync(
+    protected override async ValueTask<WriteResult> WriteChangesToSourceAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken)
     {
@@ -328,10 +329,19 @@ public class DatabaseSource : ISubjectSource
 }
 ```
 
-Register your custom source:
+Register your custom source so the host starts its `BackgroundService` and attach it to the properties it owns:
 
 ```csharp
-builder.Services.AddSingleton<ISubjectSource, DatabaseSource>();
+builder.Services.AddSingleton<DatabaseSource>();
+builder.Services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<DatabaseSource>());
+
+// Attach the source to its properties (typically during your app's initialization).
+// SubjectSourceBase only filters changes whose source equals this instance, so each
+// property must call SetSource(databaseSource) to be picked up by the change queue.
+foreach (var property in registeredSubject.GetAllProperties())
+{
+    property.Reference.SetSource(databaseSource);
+}
 ```
 
 ## Source Ownership
@@ -346,12 +356,16 @@ The `SourceOwnershipManager` class simplifies implementing custom sources by han
 - Safe ownership claims that prevent conflicts with other sources
 
 ```csharp
-public class DatabaseSource : ISubjectSource, IDisposable
+public sealed class DatabaseSource : SubjectSourceBase
 {
     private readonly IInterceptorSubject _root;
     private readonly SourceOwnershipManager _ownership;
 
-    public DatabaseSource(IInterceptorSubject root, ILogger<DatabaseSource> logger)
+    public DatabaseSource(
+        IInterceptorSubject root,
+        IInterceptorSubjectContext context,
+        ILogger<DatabaseSource> logger)
+        : base(context, logger)
     {
         _root = root;
         // SourceOwnershipManager requires WithLifecycle() on context - throws if not configured
@@ -370,9 +384,9 @@ public class DatabaseSource : ISubjectSource, IDisposable
             });
     }
 
-    public IInterceptorSubject RootSubject => _root;
+    public override IInterceptorSubject RootSubject => _root;
 
-    public async Task<IDisposable?> StartListeningAsync(
+    protected override async Task<IAsyncDisposable?> StartListeningAsync(
         SubjectPropertyWriter propertyWriter,
         CancellationToken cancellationToken)
     {
@@ -397,10 +411,19 @@ public class DatabaseSource : ISubjectSource, IDisposable
         return subscription;
     }
 
-    public void Dispose()
+    protected override Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
+        => Task.FromResult<Action?>(null);
+
+    protected override ValueTask<WriteResult> WriteChangesToSourceAsync(
+        ReadOnlyMemory<SubjectPropertyChange> changes,
+        CancellationToken cancellationToken)
+        => new(WriteResult.Success);
+
+    public override void Dispose()
     {
         // Releases all owned properties and unsubscribes from lifecycle events
         _ownership.Dispose();
+        base.Dispose();
     }
 }
 ```
