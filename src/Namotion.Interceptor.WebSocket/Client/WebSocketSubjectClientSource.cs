@@ -283,7 +283,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     }
 
     /// <inheritdoc />
-    protected override Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
+    public override Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
     {
         if (_initialState is null)
         {
@@ -341,7 +341,7 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
     }
 
     /// <inheritdoc />
-    protected override async ValueTask<WriteResult> WriteChangesToSourceAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public override async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         _logger.LogDebug("WriteChangesAsync called with {Count} changes", changes.Length);
 

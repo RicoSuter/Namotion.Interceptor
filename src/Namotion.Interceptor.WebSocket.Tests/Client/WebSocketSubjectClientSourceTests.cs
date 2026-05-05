@@ -54,9 +54,7 @@ public class WebSocketSubjectClientSourceTests
         var changes = ReadOnlyMemory<SubjectPropertyChange>.Empty;
 
         // Act
-        // After the SubjectSourceBase migration, WriteChangesToSourceAsync is protected.
-        // Reach it through the ISubjectSource interface, which the base bridges to the protected hook.
-        var result = await ((ISubjectSource)source).WriteChangesAsync(changes, CancellationToken.None);
+        var result = await source.WriteChangesAsync(changes, CancellationToken.None);
 
         // Assert
         Assert.NotNull(result.Error);

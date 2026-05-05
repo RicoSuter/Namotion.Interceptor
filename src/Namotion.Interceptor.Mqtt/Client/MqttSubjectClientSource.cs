@@ -223,14 +223,14 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
     }
 
     /// <inheritdoc />
-    protected override Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
+    public override Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
     {
         // Retained messages are received through the normal message handler: No separate initial load needed/possible
         return Task.FromResult<Action?>(null);
     }
 
     /// <inheritdoc />
-    protected override async ValueTask<WriteResult> WriteChangesToSourceAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public override async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         try
         {

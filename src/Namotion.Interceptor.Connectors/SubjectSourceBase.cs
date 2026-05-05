@@ -8,13 +8,10 @@ namespace Namotion.Interceptor.Connectors;
 /// <summary>
 /// Abstract base for source classes that owns the entire pump lifecycle
 /// (buffer -> listen -> load initial state -> run change queue processor -> retry on failure).
-/// Derived classes override three protected hooks to plug in protocol-specific behavior.
+/// Derived classes override three hooks to plug in protocol-specific behavior:
+/// <see cref="StartListeningAsync"/> (protected), <see cref="LoadInitialStateAsync"/> (public),
+/// and <see cref="WriteChangesAsync"/> (public).
 /// </summary>
-/// <remarks>
-/// This base implements <see cref="ISubjectSource"/> by bridging its members to the protected hooks,
-/// so existing consumers (transaction writer, retry queue, extension methods) continue to work
-/// unchanged through the interface surface.
-/// </remarks>
 public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
 {
     private readonly IInterceptorSubjectContext _context;
@@ -63,42 +60,12 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     protected abstract Task<IAsyncDisposable?> StartListeningAsync(
         SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken);
 
-    /// <summary>
-    /// Loads the initial state from the external authoritative system and returns a delegate that applies it.
-    /// </summary>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>A delegate that applies the initial state to the subject, or <c>null</c> if there is no state to apply.</returns>
-    protected abstract Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken);
+    /// <inheritdoc />
+    public abstract Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken);
 
-    /// <summary>
-    /// Applies a set of property changes to the source.
-    /// </summary>
-    /// <param name="changes">The changes to apply.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>A <see cref="WriteResult"/> describing which changes succeeded.</returns>
-    protected abstract ValueTask<WriteResult> WriteChangesToSourceAsync(
+    /// <inheritdoc />
+    public abstract ValueTask<WriteResult> WriteChangesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken);
-
-    // --- ISubjectSource bridge ---
-    // Existing consumers (SourceTransactionWriter, WriteRetryQueue.FlushAsync, the
-    // SubjectSourceExtensions.WriteChangesInBatchesAsync extension) continue to work
-    // through the interface. We adapt the protected hooks to the interface signatures.
-
-    async Task<IDisposable?> ISubjectSource.StartListeningAsync(
-        SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
-    {
-        var lifetime = await StartListeningAsync(propertyWriter, cancellationToken).ConfigureAwait(false);
-        return lifetime is null ? null : new AsyncDisposableAdapter(lifetime);
-    }
-
-    Task<Action?> ISubjectSource.LoadInitialStateAsync(CancellationToken cancellationToken)
-        => LoadInitialStateAsync(cancellationToken);
-
-    ValueTask<WriteResult> ISubjectSource.WriteChangesAsync(
-        ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
-        => WriteChangesToSourceAsync(changes, cancellationToken);
-
-    int ISubjectSource.WriteBatchSize => WriteBatchSize;
 
     /// <inheritdoc />
     protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -110,8 +77,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                 _propertyWriter.StartBuffering();
                 await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
 
-                var applyAction = await LoadInitialStateAsync(stoppingToken).ConfigureAwait(false);
-                _propertyWriter.ApplyInitialStateAndResume(applyAction);
+                await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
 
                 using var processor = new ChangeQueueProcessor(
                     this,
@@ -150,17 +116,12 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
     private async ValueTask WriteChangesViaRetryQueueAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
-        // The base type implements ISubjectSource; route through the interface so that the existing
-        // SubjectSourceExtensions.WriteChangesInBatchesAsync extension (which handles batching and the
-        // per-source semaphore) and WriteRetryQueue.FlushAsync(ISubjectSource, ...) keep working.
-        ISubjectSource self = this;
-
         if (WriteRetryQueue is null)
         {
             // No retry queue - write directly
             try
             {
-                var result = await self.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
+                var result = await this.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
                 if (!result.IsFullySuccessful)
                 {
                     _logger.LogError(result.Error, "Failed to write {Count} changes to source.",
@@ -179,7 +140,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         }
 
         // First flush any queued changes
-        var succeeded = await WriteRetryQueue.FlushAsync(self, cancellationToken).ConfigureAwait(false);
+        var succeeded = await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
         if (!succeeded)
         {
             WriteRetryQueue.Enqueue(changes);
@@ -189,7 +150,7 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
         // Write current changes
         try
         {
-            var result = await self.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
+            var result = await this.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
             if (result is { IsFullySuccessful: false, FailedChanges.IsEmpty: false })
             {
                 _logger.LogWarning(result.Error, "Failed to write {Count} changes to source, queuing for retry.",
@@ -267,24 +228,5 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     {
         WriteRetryQueue?.Dispose();
         base.Dispose();
-    }
-
-    /// <summary>
-    /// Adapts an <see cref="IAsyncDisposable"/> to <see cref="IDisposable"/> for the
-    /// <see cref="ISubjectSource.StartListeningAsync"/> bridge. The base's own
-    /// <see cref="ExecuteAsync"/> uses <c>await using</c> on the protected hook directly,
-    /// so this adapter only fires for external callers that go through the interface.
-    /// Sync-over-async via <c>GetAwaiter().GetResult()</c> is safe here because such
-    /// callers run inside <see cref="BackgroundService"/> contexts with no captured
-    /// <see cref="SynchronizationContext"/>.
-    /// </summary>
-    private sealed class AsyncDisposableAdapter : IDisposable
-    {
-        private readonly IAsyncDisposable _inner;
-
-        public AsyncDisposableAdapter(IAsyncDisposable inner) => _inner = inner;
-
-        public void Dispose()
-            => _inner.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 }

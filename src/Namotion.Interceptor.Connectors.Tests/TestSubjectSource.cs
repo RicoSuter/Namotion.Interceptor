@@ -39,13 +39,11 @@ public sealed class TestSubjectSource : SubjectSourceBase
             ? StartListeningOverride(propertyWriter, cancellationToken)
             : Task.FromResult<IAsyncDisposable?>(null);
 
-    protected override Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
+    public override Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
         => LoadInitialStateOverride is not null
             ? LoadInitialStateOverride(cancellationToken)
             : Task.FromResult<Action?>(null);
 
-    protected override ValueTask<WriteResult> WriteChangesToSourceAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
-        => WriteChangesOverride is not null
-            ? WriteChangesOverride(changes, cancellationToken)
-            : ValueTask.FromResult(WriteResult.Success);
+    public override ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+        => WriteChangesOverride?.Invoke(changes, cancellationToken) ?? ValueTask.FromResult(WriteResult.Success);
 }

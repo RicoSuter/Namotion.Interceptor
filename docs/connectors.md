@@ -27,7 +27,6 @@ The `Namotion.Interceptor.Connectors` package provides infrastructure for connec
 | Method | Direction | Description |
 |--------|-----------|-------------|
 | `LoadInitialStateAsync()` | External → Subject | Fetches complete state from external system |
-| `StartListeningAsync()` | External → Subject | Subscribes to real-time updates |
 | `WriteChangesAsync()` | Subject → External | Sends local changes to external system |
 
 ### Server Operations
@@ -83,13 +82,6 @@ public interface ISubjectSource : ISubjectConnector
     int WriteBatchSize { get; }
 
     /// <summary>
-    /// Start listening for external changes.
-    /// </summary>
-    Task<IDisposable?> StartListeningAsync(
-        SubjectPropertyWriter propertyWriter,
-        CancellationToken cancellationToken);
-
-    /// <summary>
     /// Write property changes back to the external system.
     /// </summary>
     ValueTask<WriteResult> WriteChangesAsync(
@@ -103,7 +95,7 @@ public interface ISubjectSource : ISubjectConnector
 }
 ```
 
-> **Note**: Most source implementations inherit from `SubjectSourceBase` rather than implementing `ISubjectSource` directly. `SubjectSourceBase` is a `BackgroundService` that owns the pump lifecycle (buffer, listen, load initial state, run change queue, retry on failure) and exposes the same three operations as protected hooks: `StartListeningAsync`, `LoadInitialStateAsync`, and `WriteChangesToSourceAsync`. Direct interface implementation remains supported for advanced scenarios.
+> **Note**: Most source implementations inherit from `SubjectSourceBase` rather than implementing `ISubjectSource` directly. `SubjectSourceBase` is a `BackgroundService` that owns the pump lifecycle (buffer, listen, load initial state, run change queue, retry on failure). It adds one base-only protected hook for protocol-specific listening (`StartListeningAsync`); the public `LoadInitialStateAsync` and `WriteChangesAsync` are abstract on the base and satisfy the corresponding `ISubjectSource` members directly. Direct interface implementation remains supported for advanced scenarios; in that case, the implementer is responsible for its own listening loop and outbound dispatch.
 
 ### Data Flow
 
@@ -137,7 +129,7 @@ If you need the external source to accept the change *before* updating the local
 
 Sources use a buffer-load-replay pattern during initialization and reconnection:
 
-1. **Buffer**: During `StartListeningAsync()`, inbound updates are buffered
+1. **Buffer**: During source startup (the base calls `StartListeningAsync` on the source after `StartBuffering`), inbound updates are buffered
 2. **Load**: `LoadInitialStateAsync()` fetches complete state from external system
 3. **Replay**: Buffered updates are replayed in order after initial state is applied
 4. **Optimistic retry re-apply**: Queued writes from the retry queue are compared against current property values and re-applied locally if the source hasn't changed them (see [Write Retry Queue](#write-retry-queue))
@@ -277,7 +269,7 @@ builder.Services.AddMqttSubjectClientSource<Sensor>(
 
 ### Custom Source Implementation
 
-Derive from `SubjectSourceBase` and override the three protected hooks. The base class owns the pump lifecycle (buffer, listen, load initial state, run change queue, retry on failure) and bridges its `ISubjectSource` surface to your hooks.
+Derive from `SubjectSourceBase` and override the three hooks. The base owns the pump lifecycle (buffer, listen, load initial state, run change queue, retry on failure) and satisfies `ISubjectSource` directly through its public abstract members.
 
 ```csharp
 public sealed class DatabaseSource : SubjectSourceBase
@@ -306,13 +298,13 @@ public sealed class DatabaseSource : SubjectSourceBase
         return subscription;
     }
 
-    protected override async Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
+    public override async Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
     {
         var data = await LoadFromDatabaseAsync(cancellationToken);
         return () => ApplyToSubject(_root, data);
     }
 
-    protected override async ValueTask<WriteResult> WriteChangesToSourceAsync(
+    public override async ValueTask<WriteResult> WriteChangesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken)
     {
@@ -411,10 +403,10 @@ public sealed class DatabaseSource : SubjectSourceBase
         return subscription;
     }
 
-    protected override Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
+    public override Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
         => Task.FromResult<Action?>(null);
 
-    protected override ValueTask<WriteResult> WriteChangesToSourceAsync(
+    public override ValueTask<WriteResult> WriteChangesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken)
         => new(WriteResult.Success);

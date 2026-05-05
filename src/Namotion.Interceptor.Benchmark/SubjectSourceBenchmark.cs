@@ -8,7 +8,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -158,12 +157,12 @@ public class SubjectSourceBenchmark
             return Task.FromResult<IAsyncDisposable?>(null);
         }
 
-        protected override Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
+        public override Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
         {
             return Task.FromResult<Action?>(null);
         }
 
-        protected override ValueTask<WriteResult> WriteChangesToSourceAsync(
+        public override ValueTask<WriteResult> WriteChangesAsync(
             ReadOnlyMemory<SubjectPropertyChange> changes,
             CancellationToken cancellationToken)
         {

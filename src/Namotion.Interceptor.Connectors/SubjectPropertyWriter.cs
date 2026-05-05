@@ -45,42 +45,6 @@ public sealed class SubjectPropertyWriter
     }
 
     /// <summary>
-    /// Replays buffered updates after the caller has loaded initial state. The base class
-    /// resolves the apply delegate via its <c>LoadInitialStateAsync</c> hook and passes it here.
-    /// </summary>
-    /// <param name="applyAction">Action that applies the loaded initial state, or <c>null</c> if no state to apply.</param>
-    public void ApplyInitialStateAndResume(Action? applyAction)
-    {
-        lock (_lock)
-        {
-            applyAction?.Invoke();
-
-            var updates = _updates;
-            if (updates is null)
-            {
-                // Already replayed by a concurrent/previous call (race between automatic and manual reconnection).
-                _logger.LogDebug("ApplyInitialStateAndResume called but updates already replayed by concurrent reconnection.");
-                return;
-            }
-
-            foreach (var action in updates)
-            {
-                try
-                {
-                    action();
-                }
-                catch (Exception e)
-                {
-                    _logger.LogError(e, "Failed to apply subject update.");
-                }
-            }
-
-            // Must be after replay: Write() reads _updates without lock on the fast path.
-            _updates = null;
-        }
-    }
-
-    /// <summary>
     /// Completes initialization by loading initial state from the source
     /// and replaying all buffered updates. This ensures zero data loss during the initialization period.
     /// </summary>
