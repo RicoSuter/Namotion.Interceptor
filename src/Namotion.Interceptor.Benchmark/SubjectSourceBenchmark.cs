@@ -59,6 +59,7 @@ public class SubjectSourceBenchmark
 
         _cts = new CancellationTokenSource();
         await _source.StartAsync(_cts.Token);
+        _source.WaitForInitialization();
 
         _propertyWriter = _source.PropertyWriter!;
 
@@ -117,6 +118,7 @@ public class SubjectSourceBenchmark
         private readonly IInterceptorSubject _subject;
         private readonly int _targetCount;
         private readonly AutoResetEvent _signal = new(false);
+        private readonly ManualResetEventSlim _initialized = new(false);
         private SubjectPropertyWriter? _propertyWriter;
         private int _count;
 
@@ -159,8 +161,11 @@ public class SubjectSourceBenchmark
 
         public override Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
         {
+            _initialized.Set();
             return Task.FromResult<Action?>(null);
         }
+
+        public void WaitForInitialization() => _initialized.Wait();
 
         public override ValueTask<WriteResult> WriteChangesAsync(
             ReadOnlyMemory<SubjectPropertyChange> changes,

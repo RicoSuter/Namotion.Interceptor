@@ -711,5 +711,4 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             property.RemovePropertyData(OpcUaNodeIdKey);
         }
     }
-
 }
