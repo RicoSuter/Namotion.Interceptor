@@ -361,7 +361,7 @@ public class OpcUaClientConfiguration
         var host = System.Net.Dns.GetHostName();
         var applicationUri = $"urn:{host}:Namotion.Interceptor:{ApplicationName}";
 
-        var config = new ApplicationConfiguration
+        var config = new ApplicationConfiguration(TelemetryContext)
         {
             ApplicationName = ApplicationName,
             ApplicationType = ApplicationType.Client,

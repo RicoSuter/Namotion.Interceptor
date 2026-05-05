@@ -15,6 +15,7 @@ internal class OpcUaSubjectServer : StandardServer
     private List<ITransportListener>? _savedTransportListeners;
 
     public OpcUaSubjectServer(IInterceptorSubject subject, OpcUaSubjectServerBackgroundService source, OpcUaServerConfiguration configuration, ILogger logger)
+        : base(configuration.TelemetryContext)
     {
         _logger = logger;
         _nodeManagerFactory = new CustomNodeManagerFactory(subject, source, configuration, logger);

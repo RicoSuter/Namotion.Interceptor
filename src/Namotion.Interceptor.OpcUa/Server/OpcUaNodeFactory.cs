@@ -134,7 +134,7 @@ internal sealed class OpcUaNodeFactory
             DisplayName = new LocalizedText(nodeConfiguration?.DisplayName ?? browseName.Name),
             Description = nodeConfiguration?.Description is not null
                 ? new LocalizedText(nodeConfiguration.Description)
-                : null,
+                : default,
             TypeDefinitionId = typeDefinition ?? ObjectTypeIds.FolderType,
             WriteMask = AttributeWriteMask.None,
             UserWriteMask = AttributeWriteMask.None,
@@ -167,7 +167,7 @@ internal sealed class OpcUaNodeFactory
             DisplayName = new LocalizedText(nodeConfiguration?.DisplayName ?? browseName.Name),
             Description = nodeConfiguration?.Description is not null
                 ? new LocalizedText(nodeConfiguration.Description)
-                : null,
+                : default,
             TypeDefinitionId = typeDefinition ?? ObjectTypeIds.BaseObjectType,
             WriteMask = AttributeWriteMask.None,
             UserWriteMask = AttributeWriteMask.None,
@@ -203,7 +203,7 @@ internal sealed class OpcUaNodeFactory
             DisplayName = new LocalizedText(nodeConfiguration?.DisplayName ?? browseName.Name),
             Description = nodeConfiguration?.Description is not null
                 ? new LocalizedText(nodeConfiguration.Description)
-                : null,
+                : default,
 
             TypeDefinitionId = VariableTypeIds.BaseDataVariableType,
             DataType = dataTypeOverride ?? Opc.Ua.TypeInfo.GetDataTypeId(dataType),
@@ -253,7 +253,7 @@ internal sealed class OpcUaNodeFactory
                 ? NodeId.Create(reference.TargetNodeId, reference.TargetNamespaceUri, manager.GetSystemContext().NamespaceUris)
                 : new NodeId(reference.TargetNodeId, namespaceIndex);
 
-            node.AddReference(referenceTypeId, reference.IsForward, targetNodeId);
+            node.AddReference(referenceTypeId.Value, reference.IsForward, targetNodeId);
         }
     }
 
@@ -265,13 +265,13 @@ internal sealed class OpcUaNodeFactory
         }
 
         var modellingRuleNodeId = GetModellingRuleNodeId(nodeConfiguration.ModellingRule.Value);
-        if (modellingRuleNodeId is not null)
+        if (!modellingRuleNodeId.IsNull)
         {
             node.AddReference(ReferenceTypeIds.HasModellingRule, false, modellingRuleNodeId);
         }
     }
 
-    private static NodeId? GetModellingRuleNodeId(ModellingRule modellingRule)
+    private static NodeId GetModellingRuleNodeId(ModellingRule modellingRule)
     {
         return modellingRule switch
         {
@@ -280,7 +280,7 @@ internal sealed class OpcUaNodeFactory
             ModellingRule.MandatoryPlaceholder => ObjectIds.ModellingRule_MandatoryPlaceholder,
             ModellingRule.OptionalPlaceholder => ObjectIds.ModellingRule_OptionalPlaceholder,
             ModellingRule.ExposesItsArray => ObjectIds.ModellingRule_ExposesItsArray,
-            _ => null
+            _ => NodeId.Null
         };
     }
 }

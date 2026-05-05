@@ -91,8 +91,9 @@ internal sealed class OpcUaNodeIdResolver
         if (ExpandedNodeId.TryParse(identifier, out var expandedNodeId) &&
             !string.IsNullOrEmpty(expandedNodeId.NamespaceUri))
         {
-            var namespaceIndex = context.NamespaceUris.GetIndexOrAppend(expandedNodeId.NamespaceUri);
-            return new NodeId(expandedNodeId.Identifier, namespaceIndex);
+            context.NamespaceUris.GetIndexOrAppend(expandedNodeId.NamespaceUri);
+            var resolved = ExpandedNodeId.ToNodeId(expandedNodeId, context.NamespaceUris, updateNamespaceTable: true);
+            return !resolved.IsNull ? resolved : (NodeId?)null;
         }
 
         // Strategy 4: Standard type lookup by category

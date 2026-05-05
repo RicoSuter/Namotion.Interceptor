@@ -173,7 +173,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
         var endpointConfiguration = EndpointConfiguration.Create(application.ApplicationConfiguration);
         var serverUri = new Uri(configuration.ServerUrl);
 
-        EndpointDescriptionCollection endpoints;
+        ArrayOf<EndpointDescription> endpoints;
         try
         {
             using var discoveryClient = await DiscoveryClient.CreateAsync(
@@ -181,7 +181,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
                 serverUri,
                 endpointConfiguration, ct: cancellationToken).ConfigureAwait(false);
 
-            endpoints = await discoveryClient.GetEndpointsAsync(null, cancellationToken).ConfigureAwait(false);
+            endpoints = await discoveryClient.GetEndpointsAsync(default, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -212,7 +212,7 @@ internal sealed class SessionManager : IAsyncDisposable, IDisposable
             identity: configuration.CreateUserIdentity != null
                 ? await configuration.CreateUserIdentity(cancellationToken).ConfigureAwait(false)
                 : new UserIdentity(),
-            preferredLocales: null,
+            preferredLocales: default,
             cancellationToken).ConfigureAwait(false);
 
         var newSession = sessionResult as Session

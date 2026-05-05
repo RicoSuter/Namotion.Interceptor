@@ -142,7 +142,9 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, IOpcUaSu
                     var convertedValue = _configuration.ValueConverter
                         .ConvertToNodeValue(value, registeredProperty);
 
-                    node.Value = convertedValue;
+#pragma warning disable CS0618 // Variant(object) is obsolete but required for dynamic typing
+                    node.Value = new Variant(convertedValue);
+#pragma warning restore CS0618
                     node.Timestamp = change.ChangedTimestamp.UtcDateTime;
                     node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
                 }
@@ -315,7 +317,7 @@ internal class OpcUaSubjectServerBackgroundService : BackgroundService, IOpcUaSu
                     var sessions = sessionManager.GetSessions();
                     foreach (var session in sessions)
                     {
-                        try { session.Close(); } catch (Exception ex) { _logger.LogDebug(ex, "Error closing session during shutdown."); }
+                        try { session.CloseAsync().AsTask().GetAwaiter().GetResult(); } catch (Exception ex) { _logger.LogDebug(ex, "Error closing session during shutdown."); }
                     }
                 }
             }

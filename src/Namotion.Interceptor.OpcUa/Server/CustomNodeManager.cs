@@ -43,7 +43,10 @@ internal class CustomNodeManager : CustomNodeManager2
     // Expose protected members for OpcUaNodeFactory
     internal ISystemContext GetSystemContext() => SystemContext;
     internal NodeIdDictionary<NodeState> GetPredefinedNodes() => PredefinedNodes;
-    internal NodeState FindNode(NodeId nodeId) => FindNodeInAddressSpace(nodeId);
+    internal NodeState FindNode(NodeId nodeId) =>
+#pragma warning disable CS0618 // Type or member is obsolete
+        FindNodeInAddressSpace(nodeId);
+#pragma warning restore CS0618 // Type or member is obsolete
     internal void AddNode(NodeState node) => AddPredefinedNode(SystemContext, node);
 
     protected override NodeStateCollection LoadPredefinedNodes(ISystemContext context)
@@ -366,13 +369,14 @@ internal class CustomNodeManager : CustomNodeManager2
         // Set array dimensions (works for 1D and multi-D)
         if (value is Array arrayValue)
         {
-            variableNode.ArrayDimensions = new ReadOnlyList<uint>(
-                Enumerable.Range(0, arrayValue.Rank)
-                    .Select(i => (uint)arrayValue.GetLength(i))
-                    .ToArray());
+            variableNode.ArrayDimensions = Enumerable.Range(0, arrayValue.Rank)
+                .Select(i => (uint)arrayValue.GetLength(i))
+                .ToArrayOf();
         }
 
-        variableNode.Value = value;
+#pragma warning disable CS0618 // Variant(object) is obsolete but required for dynamic typing
+        variableNode.Value = new Variant(value);
+#pragma warning restore CS0618
 
         var writeTimestamp = property.Reference.TryGetWriteTimestamp();
         if (writeTimestamp.HasValue)
@@ -386,7 +390,7 @@ internal class CustomNodeManager : CustomNodeManager2
             {
                 // No lock needed: StateChanged fires from ClearChangeMasks which is always
                 // called under NodeManager.Lock (from WriteChangesAsync or SDK write handling).
-                _serverService.UpdateProperty(property.Reference, variableNode.Timestamp, variableNode.Value);
+                _serverService.UpdateProperty(property.Reference, variableNode.Timestamp.ToDateTimeOffset(), variableNode.Value.AsBoxedObject());
             }
         };
 
@@ -439,7 +443,9 @@ internal class CustomNodeManager : CustomNodeManager2
         if (_subjects.TryGetValue(registeredSubject, out var existingNode))
         {
             // Subject already created, add reference to existing node
+#pragma warning disable CS0618 // Type or member is obsolete
             var parentNode = FindNodeInAddressSpace(parentNodeId);
+#pragma warning restore CS0618 // Type or member is obsolete
             parentNode.AddReference(referenceTypeId ?? ReferenceTypeIds.HasComponent, false, existingNode.NodeId);
         }
         else

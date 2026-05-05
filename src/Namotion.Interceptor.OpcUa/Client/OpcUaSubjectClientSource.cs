@@ -184,16 +184,18 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
         for (var offset = 0; offset < itemCount; offset += batchSize)
         {
             var take = Math.Min(batchSize, itemCount - offset);
-            var readValues = new ReadValueIdCollection(take);
+            var readValuesList = new List<ReadValueId>(take);
 
             for (var i = 0; i < take; i++)
             {
-                readValues.Add(new ReadValueId
+                readValuesList.Add(new ReadValueId
                 {
                     NodeId = ownedProperties[offset + i].NodeId,
                     AttributeId = Opc.Ua.Attributes.Value
                 });
             }
+
+            var readValues = readValuesList.ToArrayOf();
 
             var readResponse = await session.ReadAsync(
                 requestHeader: null,
@@ -218,8 +220,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
         {
             foreach (var (property, dataValue) in result)
             {
-                var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
-                property.SetValueFromSource(this, dataValue.SourceTimestamp, null, value);
+                var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.WrappedValue.AsBoxedObject(), property);
+                property.SetValueFromSource(this, dataValue.SourceTimestamp.ToDateTimeOffset(), null, value);
             }
 
             _logger.LogInformation("Updated {Count} properties with OPC UA node values.", itemCount);
@@ -504,7 +506,14 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
         if (_configuration.RootName is not null)
         {
             var references = await BrowseNodeAsync(session, ObjectIds.ObjectsFolder, cancellationToken).ConfigureAwait(false);
-            return references.FirstOrDefault(reference => reference.BrowseName.Name == _configuration.RootName);
+            foreach (var reference in references)
+            {
+                if (reference.BrowseName.Name == _configuration.RootName)
+                {
+                    return reference;
+                }
+            }
+            return null;
         }
 
         return new ReferenceDescription
@@ -618,7 +627,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
         }
     }
 
-    private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
+    private async Task<ArrayOf<ReferenceDescription>> BrowseNodeAsync(
         Session session,
         NodeId nodeId,
         CancellationToken cancellationToken)

@@ -296,15 +296,16 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
 
         try
         {
-            var readValues = new ReadValueIdCollection(dueCount);
+            var readValuesList = new List<ReadValueId>(dueCount);
             for (var i = 0; i < dueCount; i++)
             {
-                readValues.Add(new ReadValueId
+                readValuesList.Add(new ReadValueId
                 {
                     NodeId = _dueReadsList[i].NodeId,
                     AttributeId = Opc.Ua.Attributes.Value
                 });
             }
+            var readValues = readValuesList.ToArrayOf();
 
             var response = await session.ReadAsync(
                 requestHeader: null,
@@ -326,7 +327,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                 }
 
                 var (_, property) = _dueReadsList[i];
-                var sourceTimestamp = (DateTimeOffset)result.SourceTimestamp;
+                var sourceTimestamp = result.SourceTimestamp.ToDateTimeOffset();
 
                 // Skip if property already has a newer value from subscription notification
                 var currentWriteTimestamp = property.Reference.TryGetWriteTimestamp();
@@ -336,7 +337,7 @@ internal sealed class ReadAfterWriteManager : IAsyncDisposable
                     continue;
                 }
 
-                var value = _configuration.ValueConverter.ConvertToPropertyValue(result.Value, property);
+                var value = _configuration.ValueConverter.ConvertToPropertyValue(result.WrappedValue.AsBoxedObject(), property);
                 property.SetValueFromSource(_source, sourceTimestamp, receivedTimestamp, value);
                 successCount++;
             }
