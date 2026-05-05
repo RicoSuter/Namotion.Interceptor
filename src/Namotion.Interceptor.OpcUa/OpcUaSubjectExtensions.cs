@@ -167,19 +167,7 @@ public static class OpcUaSubjectExtensions
                     sp.GetRequiredKeyedService<OpcUaClientConfiguration>(key),
                     sp.GetRequiredService<ILogger<OpcUaSubjectClientSource>>());
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaSubjectClientSource>(key))
-            .AddSingleton<IHostedService>(sp =>
-            {
-                var configuration = sp.GetRequiredKeyedService<OpcUaClientConfiguration>(key);
-                var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                return new SubjectSourceBackgroundService(
-                    sp.GetRequiredKeyedService<OpcUaSubjectClientSource>(key),
-                    subject.Context,
-                    sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>(),
-                    configuration.BufferTime,
-                    configuration.RetryTime,
-                    configuration.WriteRetryQueueSize);
-            });
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<OpcUaSubjectClientSource>(key));
     }
 
     private static void RegisterServerCore(

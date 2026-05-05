@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.Connection;
@@ -13,7 +12,7 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
-internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjectClientSource, ISubjectSource, IFaultInjectable, IAsyncDisposable
+internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjectClientSource, IFaultInjectable, IAsyncDisposable
 {
     private const int DefaultChunkSize = 512;
 
@@ -26,7 +25,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
     private readonly SubscriptionHealthMonitor _subscriptionHealthMonitor;
 
     private volatile SessionManager? _sessionManager;
-    private SubjectPropertyWriter? _propertyWriter;
+    private volatile SubjectPropertyWriter? _propertyWriter;
     private OutboundWriter? _writer;
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
@@ -50,7 +49,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
     internal void ClearLastError() => Volatile.Write(ref _lastError, null);
 
     /// <inheritdoc />
-    public int WriteBatchSize => _writer?.WriteBatchSize ?? 0;
+    public override int WriteBatchSize => _writer?.WriteBatchSize ?? 0;
 
     /// <inheritdoc />
     public OpcUaClientDiagnostics Diagnostics { get; }
@@ -62,6 +61,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
     public event EventHandler<OpcUaCurrentSessionChangedEventArgs>? CurrentSessionChanged;
 
     public OpcUaSubjectClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger logger)
+        : base(subject.Context, logger, configuration.BufferTime, configuration.RetryTime, configuration.WriteRetryQueueSize)
     {
         ArgumentNullException.ThrowIfNull(subject);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -99,9 +99,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
     }
 
     /// <inheritdoc />
-    public IInterceptorSubject RootSubject => _subject;
+    public override IInterceptorSubject RootSubject => _subject;
 
-    public async Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
+    protected override async Task<IAsyncDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
     {
         Reset();
 
@@ -111,6 +111,8 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
         _sessionManager = new SessionManager(this, propertyWriter, _configuration, _logger);
         _writer = new OutboundWriter(_sessionManager, _configuration, OpcUaNodeIdKey, OutgoingThroughput, _logger);
 
+        CancellationTokenSource? healthCts = null;
+        Task? healthTask = null;
         try
         {
             var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
@@ -147,22 +149,55 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
 
             _isStarted = true;
             Volatile.Write(ref _lastError, null);
-            return _sessionManager;
+
+            // Spawn health-check loop tied to listen lifetime. The base loop's stoppingToken
+            // is linked into healthCts so a host shutdown also cancels the health loop;
+            // disposing the returned lifetime independently cancels and awaits it.
+            healthCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            var sessionManagerForLifetime = _sessionManager;
+            healthTask = Task.Run(() => RunHealthCheckLoopAsync(healthCts.Token), CancellationToken.None);
+
+            return new OpcUaListenLifetime(sessionManagerForLifetime, healthCts, healthTask, _logger);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             // Cancellation is the host shutting us down, not a failure to surface in diagnostics.
+            await CleanupOnListenFailureAsync(healthCts, healthTask).ConfigureAwait(false);
             throw;
         }
         catch (Exception ex)
         {
             Volatile.Write(ref _lastError, ex);
+            await CleanupOnListenFailureAsync(healthCts, healthTask).ConfigureAwait(false);
             throw;
         }
     }
 
+    private async Task CleanupOnListenFailureAsync(CancellationTokenSource? healthCts, Task? healthTask)
+    {
+        if (healthCts is not null)
+        {
+            try { await healthCts.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
+        }
+        if (healthTask is not null)
+        {
+            try { await healthTask.ConfigureAwait(false); } catch { /* logged elsewhere or ignored on cleanup path */ }
+        }
+        if (healthCts is not null)
+        {
+            try { healthCts.Dispose(); } catch { /* ignore */ }
+        }
+
+        var sessionManager = _sessionManager;
+        if (sessionManager is not null)
+        {
+            await sessionManager.DisposeAsync().ConfigureAwait(false);
+            _sessionManager = null;
+        }
+    }
+
     /// <inheritdoc />
-    public async Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
+    protected override async Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
     {
         var ownedProperties = GetOwnedPropertiesWithNodeIds();
         if (ownedProperties.Count == 0)
@@ -277,7 +312,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
         return monitoredItems;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    private async Task RunHealthCheckLoopAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -321,11 +356,12 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error during health check or session restart. Retrying after delay.");
-                await Task.Delay(_configuration.SubscriptionHealthCheckInterval, stoppingToken).ConfigureAwait(false);
+                try { await Task.Delay(_configuration.SubscriptionHealthCheckInterval, stoppingToken).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
             }
         }
 
-        _logger.LogInformation("OPC UA client has stopped.");
+        _logger.LogInformation("OPC UA client health loop has stopped.");
     }
 
     private async Task<bool> HandleHealthySessionAsync(SessionManager sessionManager, CancellationToken cancellationToken)
@@ -514,7 +550,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
         };
     }
 
-    public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    protected override async ValueTask<WriteResult> WriteChangesToSourceAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         if (_writer is null)
         {
@@ -686,6 +722,37 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
         foreach (var property in _ownership.Properties)
         {
             property.RemovePropertyData(OpcUaNodeIdKey);
+        }
+    }
+
+    /// <summary>
+    /// Owns the listen-time resources spawned by <see cref="StartListeningAsync"/>:
+    /// the session manager, the health-check loop's cancellation source, and its task.
+    /// Disposed by the base loop on retry or shutdown.
+    /// </summary>
+    private sealed class OpcUaListenLifetime : IAsyncDisposable
+    {
+        private readonly SessionManager _sessionManager;
+        private readonly CancellationTokenSource _healthCts;
+        private readonly Task _healthTask;
+        private readonly ILogger _logger;
+
+        public OpcUaListenLifetime(SessionManager sessionManager, CancellationTokenSource healthCts, Task healthTask, ILogger logger)
+        {
+            _sessionManager = sessionManager;
+            _healthCts = healthCts;
+            _healthTask = healthTask;
+            _logger = logger;
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            try { await _healthCts.CancelAsync().ConfigureAwait(false); } catch { /* ignore */ }
+            try { await _healthTask.ConfigureAwait(false); }
+            catch (OperationCanceledException) { /* expected */ }
+            catch (Exception ex) { _logger.LogWarning(ex, "OPC UA health task threw during disposal."); }
+            try { _healthCts.Dispose(); } catch { /* ignore */ }
+            await _sessionManager.DisposeAsync().ConfigureAwait(false);
         }
     }
 }
