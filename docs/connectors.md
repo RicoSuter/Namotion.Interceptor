@@ -230,22 +230,38 @@ public sealed class DatabaseSource : SubjectSourceBase
 
 #### Registering a Source
 
-Sources are `BackgroundService` implementations, so they need to be registered both as a singleton and as `IHostedService` so the host starts them. The recommended pattern is to provide an extension method that encapsulates this:
+Sources are `BackgroundService` implementations, so they need to be registered both as a singleton and as `IHostedService` so the host starts them. The recommended pattern is to provide extension methods that encapsulate this. Use a convenience overload that resolves the subject by type, and a flexible overload with a `subjectSelector` for custom resolution:
 
 ```csharp
+// Convenience: resolves subject by type from DI
 public static IServiceCollection AddDatabaseSource<TSubject>(
     this IServiceCollection services,
     string connectionString)
     where TSubject : IInterceptorSubject
 {
-    services.AddSingleton(sp => new DatabaseSource(
-        sp.GetRequiredService<TSubject>(),
+    return services.AddDatabaseSource(
+        sp => sp.GetRequiredService<TSubject>(),
+        connectionString);
+}
+
+// Flexible: caller controls subject resolution
+public static IServiceCollection AddDatabaseSource(
+    this IServiceCollection services,
+    Func<IServiceProvider, IInterceptorSubject> subjectSelector,
+    string connectionString)
+{
+    var key = Guid.NewGuid().ToString();
+    services.AddKeyedSingleton(key, (sp, _) => new DatabaseSource(
+        subjectSelector(sp),
         sp.GetRequiredService<IInterceptorSubjectContext>(),
         sp.GetRequiredService<ILogger<DatabaseSource>>()));
-    services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<DatabaseSource>());
+    services.AddSingleton<IHostedService>(sp =>
+        sp.GetRequiredKeyedService<DatabaseSource>(key));
     return services;
 }
 ```
+
+Using a unique keyed registration internally allows multiple sources of the same type to be registered independently (e.g., two `DatabaseSource` instances pointing at different databases for different subject trees).
 
 The built-in connectors follow the same pattern:
 
@@ -558,7 +574,7 @@ With `[InlinePaths]`:
 
 ### Updates
 
-The `Updates/` folder contains serialization infrastructure for subject state:
+The `Namotion.Interceptor.Connectors.Updates` namespace contains serialization infrastructure for subject state:
 
 - **SubjectUpdate** - Serializable representation of a subject's state
 - **SubjectPropertyUpdate** - Serializable representation of a property change
