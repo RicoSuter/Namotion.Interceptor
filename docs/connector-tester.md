@@ -69,17 +69,22 @@ A cycle **passes** when all participant snapshots are identical JSON. It **fails
 
 ### Chaos via IFaultInjectable
 
-Each connector implements `IFaultInjectable` (separate from the production `ISubjectConnector` interface) with two chaos modes:
+Each connector implements `IFaultInjectable` (separate from the production `ISubjectConnector` interface) with a single `InjectFaultAsync(FaultType, CancellationToken)` method supporting two chaos modes:
 
-- **Kill** (`KillAsync`): Hard kill — stops the connector entirely. The background service loop auto-restarts.
+- **Kill** (`FaultType.Kill`): Hard kill — stops the connector entirely. The background service loop auto-restarts.
   - *OPC UA Server*: Cancels the server loop token, closes transport listeners (TCP RST to all clients), disposes without graceful shutdown.
-  - *OPC UA Client*: Clears the session without sending `CloseSession` to the server (disposes local socket). Health check detects missing session and triggers full reconnection.
-  - *MQTT*: Stops the underlying service and lets the background loop restart it.
+  - *OPC UA Client*: Attempts graceful session close, then kills the transport channel. Health check detects missing session and triggers full reconnection.
+  - *MQTT*: Cancels the force-kill CTS, causing the processing loop to exit and restart.
+  - *WebSocket Server*: Cancels the force-kill CTS, triggering full teardown and rebuild of the Kestrel HTTP listener.
+  - *WebSocket Client*: Sets force-kill flag and cancels the force-kill CTS; the monitor loop catch block aborts the WebSocket and reconnects.
 
-- **Disconnect** (`DisconnectAsync`): Soft kill — breaks the transport connection without stopping the connector. Lets the SDK's built-in reconnection logic detect the failure and recover.
-  - *OPC UA Server*: Delegates to `KillAsync` (no meaningful "soft disconnect" for a multi-connection server).
+- **Disconnect** (`FaultType.Disconnect`): Soft kill — breaks the transport connection without stopping the connector. Lets the connector's built-in reconnection logic detect the failure and recover.
+  - *OPC UA Server*: Delegates to Kill (no meaningful "soft disconnect" for a multi-connection server).
   - *OPC UA Client*: Disposes the transport channel. Keep-alive failure triggers `SessionReconnectHandler.BeginReconnect`, exercising the session preservation/transfer path.
-  - *MQTT*: Delegates to `KillAsync`.
+  - *MQTT Server*: Enumerates connected clients and disconnects each one individually.
+  - *MQTT Client*: Calls `DisconnectAsync()` on the MQTT client for a graceful disconnect.
+  - *WebSocket Server*: Closes all client connections via `CloseAllConnectionsAsync()`.
+  - *WebSocket Client*: Aborts the underlying `ClientWebSocket`, triggering reconnection.
 
 The ChaosEngine picks an action based on the configured `Mode` ("kill", "disconnect", or "both"). In "both" mode, each event randomly chooses between kill and disconnect. After the action, the engine holds a "disruption window" for a random duration (representing the outage period for verification purposes).
 
@@ -87,7 +92,7 @@ The ChaosEngine picks an action based on the configured `Mode` ("kill", "disconn
 
 - **Global mutation counter**: A static `Interlocked.Increment` counter ensures every mutation produces a globally unique value, preventing the equality interceptor from dropping duplicate changes.
 - **Explicit timestamp scoping**: Mutations use `SubjectChangeContext.WithChangedTimestamp()` so all interceptors and change queue observers see the same timestamp.
-- **IFaultInjectable separation**: Chaos testing uses a dedicated `IFaultInjectable` interface (separate from production `ISubjectConnector`). Two modes: `KillAsync` (hard kill with auto-restart) and `DisconnectAsync` (transport disconnect with SDK reconnection).
+- **IFaultInjectable separation**: Chaos testing uses a dedicated `IFaultInjectable` interface (separate from production `ISubjectConnector`) with `InjectFaultAsync(FaultType)`. Two modes: `FaultType.Kill` (hard kill with auto-restart) and `FaultType.Disconnect` (transport disconnect with reconnection).
 - **Shutdown timeout**: The OPC UA server's `ShutdownServerAsync` wraps `application.StopAsync()` with a 10s timeout to prevent hang when clients keep reconnecting during graceful shutdown.
 
 ## Supported Connectors
@@ -96,13 +101,15 @@ The ChaosEngine picks an action based on the configured `Mode` ("kill", "disconn
 |-----------|--------|-------|
 | OPC UA | Working | Server kill drops TCP connections, client kill abandons session. 1 min convergence timeout. `decimal` round-trips through `double`. |
 | MQTT | Working | Server and client kill/disconnect. 2 min convergence timeout. |
-| WebSocket | Planned | Config exists but no wiring in Program.cs yet. |
+| WebSocket | Working | Server kill cancels background loop, client kill aborts socket. Sequence gap detection triggers reconnection. |
 
 ### Connector-Specific Behaviors
 
 **OPC UA**: Uses `OpcUaValueConverter` for type mapping. `decimal` values lose precision beyond ~15 significant digits due to `decimal` -> `double` -> `decimal` round-trip. `BufferTime=100ms` batches changes. Server chaos closes transport listeners before dispose, so clients get an immediate TCP RST rather than waiting for keep-alive timeout. Client chaos disposes the session without `CloseAsync`, simulating an abrupt disconnection.
 
 **MQTT**: Uses server-authoritative relay pattern where client publishes are intercepted, applied to the server model, and re-published to all clients. Ticks-based timestamp serialization (`UtcTicks`) for full precision. QoS=AtLeastOnce with retained messages.
+
+**WebSocket**: Uses Hello/Welcome handshake for initial state delivery. Server broadcasts all changes to all clients (including originator) with monotonic sequence numbers. Client tracks sequences and triggers reconnection on gap detection. Server kill cancels the background loop CTS; client kill aborts the underlying `ClientWebSocket`. Disconnect mode closes all server connections or aborts the client socket respectively. Circuit breaker (5 failures, 60s cooldown) pauses reconnection during prolonged outages.
 
 ## Running
 
@@ -336,6 +343,17 @@ Each profile lists which participants have chaos active for that cycle. Profiles
 | Resource exhaustion (polling) | N/A | N/A | Circuit breaker (5 failures, 60s cooldown) |
 | Concurrent server + client chaos | Both engines run independently, overlapping disruptions possible | Same | Each connector recovers independently |
 | Bidirectional mutations during chaos | Server and clients mutate concurrently during disruptions | Same | WriteRetryQueue buffers outbound writes, full state sync on reconnect |
+
+### Covered (WebSocket)
+
+| Scenario | Kill | Disconnect | Recovery Mechanism |
+|----------|------|------------|-------------------|
+| Abrupt server crash | Background loop CTS cancelled, lets loop restart | All client connections closed | Background loop auto-restarts |
+| Abrupt client crash | Force-kill CTS cancelled, monitor loop reconnects | Socket aborted, receive loop exits | Monitor loop reconnects with exponential backoff |
+| Sequence gap detection | N/A | N/A | Client detects missed sequence number, exits receive loop, reconnects with full state via Welcome |
+| Heartbeat timeout | N/A | N/A | Receive timeout fires, client exits receive loop and reconnects |
+| Concurrent server + client chaos | Both engines run independently | Same | Each side recovers independently, Welcome handshake re-syncs state |
+| Bidirectional mutations during chaos | Server and clients mutate concurrently | Same | WriteRetryQueue buffers outbound writes, Welcome snapshot on reconnect |
 
 ### Not Covered
 

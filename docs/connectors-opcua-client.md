@@ -383,7 +383,7 @@ All settings can be overridden per-property using `[OpcUaNode]` attribute.
 
 ### Write Retry Queue During Disconnection
 
-The library automatically queues write operations when the connection is lost, preventing data loss during brief network interruptions. On reconnection, queued writes are optimistically re-applied: after loading the server's current state, each queued change is compared against the current property value and only re-applied if the server hasn't changed it (source wins on conflict). This feature is provided by `SubjectSourceBase` (see [Connectors — Write Retry Queue](connectors.md#write-retry-queue)).
+Write retry queue behavior (ring buffer, optimistic re-apply on reconnection, source wins on conflict) is provided by `SubjectSourceBase`. See [Connectors — Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
 
 ```csharp
 builder.Services.AddOpcUaSubjectClientSource(
@@ -391,17 +391,12 @@ builder.Services.AddOpcUaSubjectClientSource(
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        WriteRetryQueueSize = 1000 // Buffer up to 1000 writes (default)
+        WriteRetryQueueSize = 1000 // Buffer up to 1000 writes (default, 0 to disable)
     });
 
 // Writes are automatically queued during disconnection
 machine.Speed = 100; // Queued if disconnected, written immediately if connected
 ```
-
-**Configuration:**
-- `WriteRetryQueueSize`: Maximum writes to buffer (default: 1000, set to 0 to disable)
-- Ring buffer semantics: drops oldest when full, keeps latest values
-- Optimistic re-apply after reconnection (source wins on conflict)
 
 ### Polling Fallback for Unsupported Nodes
 
