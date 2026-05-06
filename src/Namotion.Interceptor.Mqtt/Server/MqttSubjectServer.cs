@@ -53,6 +53,7 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
 
     private readonly CancellationTokenSource _shutdownCts = new();
 
+    // Serializes WriteChangesAsync and PublishInitialStateAsync so initial state reads+publishes can't interleave with CQP flushes.
     private readonly SemaphoreSlim _publishSemaphore = new(1, 1);
 
     private int _numberOfClients;
