@@ -17,21 +17,22 @@ The `Namotion.Interceptor.Connectors` package provides infrastructure for connec
 
 ### Connector Types
 
-| Type | Interface | Direction | Description |
-|------|-----------|-----------|-------------|
-| **Source** | `ISubjectSource` | Bidirectional | Synchronizes FROM an external system (the external system is the source of truth) |
-| **Server** | `ISubjectConnector` | Outbound | Exposes subjects TO external systems (the C# object is the source of truth) |
+| Type | Role | Source of Truth | Implements |
+|------|------|-----------------|------------|
+| **Source** | Client connecting to an external system | External system | `SubjectSourceBase` (`ISubjectSource`) |
+| **Server** | Exposes subjects to external clients | Local model | `BackgroundService` (optionally `ISubjectConnector`) |
 
-### ISubjectSource Operations
+### Source Operations (SubjectSourceBase hooks)
 
-| Method | Direction | Description |
-|--------|-----------|-------------|
-| `LoadInitialStateAsync()` | External → Subject | Fetches complete state from external system |
-| `WriteChangesAsync()` | Subject → External | Sends local changes to external system |
+| Hook | Data Flow | Description |
+|------|-----------|-------------|
+| `StartListeningAsync` | External → Subject | Connect and receive changes via `propertyWriter.Write()` |
+| `LoadInitialStateAsync` | External → Subject | Fetch complete state snapshot |
+| `WriteChangesAsync` | Subject → External | Send local changes to external system |
 
 ### Server Operations
 
-| Operation | Direction | Description |
+| Operation | Data Flow | Description |
 |-----------|-----------|-------------|
 | Publish changes | Subject → External | Broadcasts property updates to connected clients |
 | Receive commands | External → Subject | Handles write requests from external clients |
@@ -58,7 +59,7 @@ This interface is:
 
 ## Sources
 
-A **source** represents an external authoritative system where the data originates. The C# object is a **replica** that synchronizes with this external source of truth.
+A **source** represents an external authoritative system where the data originates. The local model is a **replica** that synchronizes with this external source of truth.
 
 **Cardinality**: Each property can have at most one source (single source of truth).
 
@@ -161,7 +162,7 @@ This differs from outbound changes (writing from local model to external system)
 
 ## Servers
 
-Servers expose subject properties to external systems. Unlike sources, they don't synchronize FROM an external system - the C# object IS the source of truth.
+Servers expose subject properties to external systems. Unlike sources, they don't synchronize FROM an external system — the local model is the source of truth.
 
 **Examples**:
 - `OpcUaSubjectServer` - Exposes subjects as OPC UA nodes
