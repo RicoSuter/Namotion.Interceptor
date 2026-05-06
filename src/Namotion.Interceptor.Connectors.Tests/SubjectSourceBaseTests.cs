@@ -850,6 +850,44 @@ public class SubjectSourceBaseTests
     }
 
     [Fact]
+    public async Task WhenStartListeningAsyncFails_ThenRetriesAndEventuallySucceeds()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context);
+
+        var callCount = 0;
+        var source = new TestSubjectSource(subject, context, NullLogger.Instance,
+            retryTime: TimeSpan.FromMilliseconds(50))
+        {
+            StartListeningOverride = (_, _) =>
+            {
+                var current = Interlocked.Increment(ref callCount);
+                if (current <= 2)
+                {
+                    throw new InvalidOperationException($"Simulated failure #{current}");
+                }
+                return Task.FromResult<IAsyncDisposable?>(null);
+            },
+            LoadInitialStateOverride = _ =>
+                Task.FromResult<Action?>(() => { subject.FirstName = "Loaded"; }),
+            WriteChangesOverride = (_, _) => ValueTask.FromResult(WriteResult.Success),
+        };
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => subject.FirstName == "Loaded",
+            message: "Expected source to retry and eventually load initial state");
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(callCount >= 3, $"Expected at least 3 calls (2 failures + 1 success), got {callCount}");
+        Assert.Equal("Loaded", subject.FirstName);
+    }
+
+    [Fact]
     public async Task WhenStartListeningOverrideSpawnsTaskAndThrows_ThenSpawnedTaskIsCleanedUpBeforeRethrow()
     {
         // Spec section 11 R2: per-connector StartListeningAsync overrides must own their

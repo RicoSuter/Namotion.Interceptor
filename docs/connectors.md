@@ -56,46 +56,55 @@ This interface is:
 
 > **Note**: Path providers are implementation details. A source/server may use a path provider internally to decide which properties to include and how to map them, or it may not use one at all.
 
-## Sources (ISubjectSource)
+## Sources
 
 A **source** represents an external authoritative system where the data originates. The C# object is a **replica** that synchronizes with this external source of truth.
 
-### Key Characteristics
+**Cardinality**: Each property can have at most one source (single source of truth).
 
-- Loads initial state FROM the external system
-- Writes changes TO the external system (which may fail)
-- Provides write retry queue to buffer changes during disconnection
-- Inherits from `SubjectSourceBase` (a `BackgroundService`) for lifecycle management
+**Examples**: OPC UA client connecting to a PLC, MQTT client, database client, REST API consumer
 
-**Cardinality**: Each property can have at most one source (single source of truth)
+### SubjectSourceBase
 
-**Examples**: OPC UA client connecting to a PLC, database client, REST API consumer
+All sources inherit from `SubjectSourceBase`, a `BackgroundService` that owns the full pump lifecycle. You override three hooks:
+
+| Hook | Data Flow | Description |
+|------|-----------|-------------|
+| `StartListeningAsync` | External → Subject | Connect to the external system and start receiving changes via `propertyWriter.Write()` |
+| `LoadInitialStateAsync` | External → Subject | Fetch complete state snapshot for initialization |
+| `WriteChangesAsync` | Subject → External | Send local property changes to the external system |
+
+The base class handles everything else: retry loop with backoff, buffering during initialization, change queue processing, write batching, and the write retry queue.
+
+### Pump Lifecycle
+
+Each iteration of the sealed `ExecuteAsync` runs the following sequence. On failure, the base disposes the listen lifetime, waits `retryTime` (default 10s), and restarts from the top. Only `OperationCanceledException` when the host stopping token is cancelled exits the loop — all other exceptions (including internal protocol timeouts) trigger a retry.
+
+```
+ExecuteAsync (retry loop)
+ ├── StartBuffering()
+ ├── StartListeningAsync()        ← your hook: connect + spawn monitor
+ ├── LoadInitialStateAndResume()   ← calls your LoadInitialStateAsync, then replays buffer
+ ├── ReapplyRetryQueue()           ← optimistic re-apply of queued writes
+ └── ProcessAsync()                ← runs ChangeQueueProcessor, calls your WriteChangesAsync
+```
 
 ### ISubjectSource Interface
+
+`SubjectSourceBase` implements `ISubjectSource`; its abstract `WriteChangesAsync` and `LoadInitialStateAsync` satisfy the interface members directly.
 
 ```csharp
 public interface ISubjectSource : ISubjectConnector
 {
-    /// <summary>
-    /// Maximum batch size for write operations (0 = no limit).
-    /// </summary>
     int WriteBatchSize { get; }
-
-    /// <summary>
-    /// Write property changes back to the external system.
-    /// </summary>
     ValueTask<WriteResult> WriteChangesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes,
         CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Load initial state from the external system.
-    /// </summary>
     Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken);
 }
 ```
 
-> **Note**: Most source implementations inherit from `SubjectSourceBase` rather than implementing `ISubjectSource` directly. `SubjectSourceBase` is a `BackgroundService` that owns the pump lifecycle (buffer, listen, load initial state, run change queue, retry on failure). It adds one base-only protected hook for protocol-specific listening (`StartListeningAsync`); the public `LoadInitialStateAsync` and `WriteChangesAsync` are abstract on the base and satisfy the corresponding `ISubjectSource` members directly. Direct interface implementation remains supported for advanced scenarios; in that case, the implementer is responsible for its own listening loop and outbound dispatch.
+Direct interface implementation without the base class is supported for advanced scenarios, but the implementer is then responsible for its own listening loop, buffering, and outbound dispatch.
 
 ### Data Flow
 
@@ -327,6 +336,10 @@ public sealed class DatabaseSource : SubjectSourceBase
 }
 ```
 
+**Constructor parameters**: `bufferTime` (default 8ms) controls the change queue batching window — changes within this window are coalesced into a single `WriteChangesAsync` call. `retryTime` (default 10s) controls the delay between retry attempts when `StartListeningAsync` or the pump loop fails.
+
+**WriteResult**: Return `WriteResult.Success` when all changes were written. Return `WriteResult.Failure(changes, exception)` for partial or full failure — the base class enqueues the failed changes into the write retry queue automatically.
+
 Register your custom source so the host starts its `BackgroundService` and attach it to the properties it owns:
 
 ```csharp
@@ -548,4 +561,4 @@ Properties can receive concurrent writes from multiple origins:
 
 Individual property updates are atomic and thread-safe without requiring additional synchronization.
 
-When implementing `ISubjectSource`, use the provided `SubjectPropertyWriter` to write inbound updates. This handles buffering during initialization and ensures correct ordering.
+When overriding `StartListeningAsync`, use the provided `SubjectPropertyWriter` to write inbound updates. This handles buffering during initialization and ensures correct ordering.
