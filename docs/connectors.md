@@ -196,8 +196,8 @@ public sealed class DatabaseSource : SubjectSourceBase
 
         return BackgroundTaskLifetime.Start(
             cancellationToken,
-            ct => ListenForChangesAsync(propertyWriter, connection, ct),
             _logger,
+            ct => ListenForChangesAsync(propertyWriter, connection, ct),
             () => connection.DisposeAsync());
     }
 
@@ -282,8 +282,8 @@ builder.Services.AddMqttSubjectClientSource<Sensor>(
 ```csharp
 return BackgroundTaskLifetime.Start(
     cancellationToken,               // parent token from StartListeningAsync
-    ct => RunMyBackgroundLoop(ct),   // the task body
     _logger,
+    ct => RunMyBackgroundLoop(ct),   // the task body
     () => connection.DisposeAsync()); // optional: cleanup when disposed
 ```
 

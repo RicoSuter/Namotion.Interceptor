@@ -151,8 +151,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             var sessionManagerForLifetime = _sessionManager;
             return BackgroundTaskLifetime.Start(
                 cancellationToken,
-                RunHealthCheckLoopAsync,
                 _logger,
+                RunHealthCheckLoopAsync,
                 async () =>
                 {
                     try { await sessionManagerForLifetime.DisposeAsync().ConfigureAwait(false); }

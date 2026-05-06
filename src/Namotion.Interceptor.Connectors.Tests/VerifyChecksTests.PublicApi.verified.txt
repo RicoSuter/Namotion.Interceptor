@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.Connectors
     public sealed class BackgroundTaskLifetime : System.IAsyncDisposable
     {
         public System.Threading.Tasks.ValueTask DisposeAsync() { }
-        public static Namotion.Interceptor.Connectors.BackgroundTaskLifetime Start(System.Threading.CancellationToken parentToken, System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task> monitorBody, Microsoft.Extensions.Logging.ILogger logger, System.Func<System.Threading.Tasks.ValueTask>? disposeConnectionAsync = null) { }
+        public static Namotion.Interceptor.Connectors.BackgroundTaskLifetime Start(System.Threading.CancellationToken parentToken, Microsoft.Extensions.Logging.ILogger logger, System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task> executeAsyncFunc, System.Func<System.Threading.Tasks.ValueTask>? disposeAsyncFunc = null) { }
     }
     public class ChangeQueueProcessor : System.IDisposable
     {

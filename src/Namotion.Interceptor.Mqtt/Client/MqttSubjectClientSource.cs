@@ -132,8 +132,8 @@ internal sealed class MqttSubjectClientSource : SubjectSourceBase, IFaultInjecta
             var monitorForLifetime = connectionMonitor;
             return BackgroundTaskLifetime.Start(
                 cancellationToken,
-                ct => RunMonitorWithKillRestartAsync(monitorForLifetime, ct),
                 _logger,
+                ct => RunMonitorWithKillRestartAsync(monitorForLifetime, ct),
                 () => DisposeMqttConnectionAsync(clientForLifetime, monitorForLifetime));
         }
         catch

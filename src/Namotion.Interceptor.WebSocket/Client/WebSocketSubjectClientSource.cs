@@ -57,12 +57,13 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
         IInterceptorSubject subject,
         WebSocketClientConfiguration configuration,
         ILogger<WebSocketSubjectClientSource> logger)
-        : base(subject?.Context!, logger!, configuration?.BufferTime, configuration?.RetryTime, configuration?.WriteRetryQueueSize ?? 1000)
+        : base(
+            (subject ?? throw new ArgumentNullException(nameof(subject))).Context,
+            logger ?? throw new ArgumentNullException(nameof(logger)),
+            (configuration ?? throw new ArgumentNullException(nameof(configuration))).BufferTime,
+            configuration.RetryTime,
+            configuration.WriteRetryQueueSize)
     {
-        ArgumentNullException.ThrowIfNull(subject);
-        ArgumentNullException.ThrowIfNull(configuration);
-        ArgumentNullException.ThrowIfNull(logger);
-
         _subject = subject;
         _configuration = configuration;
         _logger = logger;
@@ -90,8 +91,8 @@ public sealed class WebSocketSubjectClientSource : SubjectSourceBase, IFaultInje
 
             return BackgroundTaskLifetime.Start(
                 cancellationToken,
-                RunMonitorLoopAsync,
                 _logger,
+                RunMonitorLoopAsync,
                 DisposeWebSocketConnectionAsync);
         }
         catch

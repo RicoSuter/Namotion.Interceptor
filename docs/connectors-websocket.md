@@ -353,7 +353,7 @@ configuration.ReconnectDelay = TimeSpan.FromSeconds(5);      // Initial delay
 configuration.MaxReconnectDelay = TimeSpan.FromSeconds(60);  // Maximum delay
 ```
 
-On reconnection, the client performs the Hello/Welcome handshake to obtain a state snapshot from the server. The base class then handles loading initial state, replaying buffered updates, and optimistic retry re-apply (see [Connectors — Initialization Sequence](connectors.md#initialization-sequence)).
+On reconnection, the client performs the Hello/Welcome handshake to obtain a state snapshot from the server. The base class then handles loading initial state, replaying buffered updates, and optimistic retry re-apply (see [Connectors — Initialization Sequence](connectors.md#initialization)).
 
 The circuit breaker pauses reconnection attempts after repeated failures:
 

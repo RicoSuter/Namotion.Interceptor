@@ -12,6 +12,7 @@ public class BackgroundTaskLifetimeTests
         var monitorStarted = new TaskCompletionSource();
         var lifetime = BackgroundTaskLifetime.Start(
             CancellationToken.None,
+            NullLogger.Instance,
             async token =>
             {
                 monitorStarted.SetResult();
@@ -24,8 +25,7 @@ public class BackgroundTaskLifetimeTests
                     order.Add("monitor-exited");
                 }
             },
-            NullLogger.Instance,
-            disposeConnectionAsync: () =>
+            disposeAsyncFunc: () =>
             {
                 order.Add("cleanup");
                 return ValueTask.CompletedTask;
@@ -47,9 +47,9 @@ public class BackgroundTaskLifetimeTests
         var cleanupCount = 0;
         var lifetime = BackgroundTaskLifetime.Start(
             CancellationToken.None,
-            async token => await Task.Delay(Timeout.Infinite, token),
             NullLogger.Instance,
-            disposeConnectionAsync: () =>
+            async token => await Task.Delay(Timeout.Infinite, token),
+            disposeAsyncFunc: () =>
             {
                 Interlocked.Increment(ref cleanupCount);
                 return ValueTask.CompletedTask;
@@ -69,8 +69,8 @@ public class BackgroundTaskLifetimeTests
         // Arrange
         var lifetime = BackgroundTaskLifetime.Start(
             CancellationToken.None,
-            _ => throw new InvalidOperationException("monitor failed"),
-            NullLogger.Instance);
+            NullLogger.Instance,
+            _ => throw new InvalidOperationException("monitor failed"));
 
         await Task.Delay(50);
 
@@ -84,9 +84,9 @@ public class BackgroundTaskLifetimeTests
         // Arrange
         var lifetime = BackgroundTaskLifetime.Start(
             CancellationToken.None,
-            async token => await Task.Delay(Timeout.Infinite, token),
             NullLogger.Instance,
-            disposeConnectionAsync: () => throw new InvalidOperationException("cleanup failed"));
+            async token => await Task.Delay(Timeout.Infinite, token),
+            disposeAsyncFunc: () => throw new InvalidOperationException("cleanup failed"));
 
         // Act & Assert
         await lifetime.DisposeAsync();
@@ -100,6 +100,7 @@ public class BackgroundTaskLifetimeTests
         var monitorExited = new TaskCompletionSource();
         var lifetime = BackgroundTaskLifetime.Start(
             parentCts.Token,
+            NullLogger.Instance,
             async token =>
             {
                 try
@@ -110,8 +111,7 @@ public class BackgroundTaskLifetimeTests
                 {
                     monitorExited.SetResult();
                 }
-            },
-            NullLogger.Instance);
+            });
 
         // Act
         await parentCts.CancelAsync();
@@ -127,9 +127,9 @@ public class BackgroundTaskLifetimeTests
         // Arrange
         var lifetime = BackgroundTaskLifetime.Start(
             CancellationToken.None,
-            async token => await Task.Delay(Timeout.Infinite, token),
             NullLogger.Instance,
-            disposeConnectionAsync: null);
+            async token => await Task.Delay(Timeout.Infinite, token),
+            disposeAsyncFunc: null);
 
         // Act & Assert
         await lifetime.DisposeAsync();
@@ -141,8 +141,8 @@ public class BackgroundTaskLifetimeTests
         // Arrange
         var lifetime = BackgroundTaskLifetime.Start(
             CancellationToken.None,
-            _ => Task.CompletedTask,
-            NullLogger.Instance);
+            NullLogger.Instance,
+            _ => Task.CompletedTask);
 
         await Task.Delay(50);
 

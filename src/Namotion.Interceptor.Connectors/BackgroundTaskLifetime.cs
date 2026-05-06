@@ -11,7 +11,7 @@ public sealed class BackgroundTaskLifetime : IAsyncDisposable
 {
     private readonly CancellationTokenSource _monitorCts;
     private readonly Task _monitorTask;
-    private readonly Func<ValueTask>? _disposeConnectionAsync;
+    private readonly Func<ValueTask>? _disposeAsyncFunc;
     private readonly ILogger _logger;
     private int _disposed;
 
@@ -19,28 +19,28 @@ public sealed class BackgroundTaskLifetime : IAsyncDisposable
         CancellationTokenSource monitorCts,
         Task monitorTask,
         ILogger logger,
-        Func<ValueTask>? disposeConnectionAsync)
+        Func<ValueTask>? disposeAsyncFunc)
     {
         _monitorCts = monitorCts;
         _monitorTask = monitorTask;
         _logger = logger;
-        _disposeConnectionAsync = disposeConnectionAsync;
+        _disposeAsyncFunc = disposeAsyncFunc;
     }
 
     /// <summary>
-    /// Creates a linked CTS, spawns the monitor body as a background task, and returns
+    /// Creates a linked CTS, spawns the body as a background task, and returns
     /// the lifetime that owns both. On disposal the CTS is cancelled, the task awaited,
-    /// and the optional connection cleanup invoked.
+    /// and the optional cleanup callback invoked.
     /// </summary>
     public static BackgroundTaskLifetime Start(
         CancellationToken parentToken,
-        Func<CancellationToken, Task> monitorBody,
         ILogger logger,
-        Func<ValueTask>? disposeConnectionAsync = null)
+        Func<CancellationToken, Task> executeAsyncFunc,
+        Func<ValueTask>? disposeAsyncFunc = null)
     {
         var cts = CancellationTokenSource.CreateLinkedTokenSource(parentToken);
-        var task = Task.Run(() => monitorBody(cts.Token), CancellationToken.None);
-        return new BackgroundTaskLifetime(cts, task, logger, disposeConnectionAsync);
+        var task = Task.Run(() => executeAsyncFunc(cts.Token), CancellationToken.None);
+        return new BackgroundTaskLifetime(cts, task, logger, disposeAsyncFunc);
     }
 
     public async ValueTask DisposeAsync()
@@ -56,10 +56,10 @@ public sealed class BackgroundTaskLifetime : IAsyncDisposable
         catch (Exception ex) { _logger.LogWarning(ex, "Monitor task threw during disposal."); }
         try { _monitorCts.Dispose(); } catch { /* ignore */ }
 
-        if (_disposeConnectionAsync is not null)
+        if (_disposeAsyncFunc is not null)
         {
-            try { await _disposeConnectionAsync().ConfigureAwait(false); }
-            catch (Exception ex) { _logger.LogWarning(ex, "Connection cleanup threw during disposal."); }
+            try { await _disposeAsyncFunc().ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogWarning(ex, "Cleanup callback threw during disposal."); }
         }
     }
 }
