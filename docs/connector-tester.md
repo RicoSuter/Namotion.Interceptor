@@ -92,7 +92,7 @@ The ChaosEngine picks an action based on the configured `Mode` ("kill", "disconn
 
 - **Global mutation counter**: A static `Interlocked.Increment` counter ensures every mutation produces a globally unique value, preventing the equality interceptor from dropping duplicate changes.
 - **Explicit timestamp scoping**: Mutations use `SubjectChangeContext.WithChangedTimestamp()` so all interceptors and change queue observers see the same timestamp.
-- **IFaultInjectable separation**: Chaos testing uses a dedicated `IFaultInjectable` interface (separate from production `ISubjectConnector`) with `InjectFaultAsync(FaultType)`. Two modes: `FaultType.Kill` (hard kill with auto-restart) and `FaultType.Disconnect` (transport disconnect with reconnection).
+- **IFaultInjectable separation**: Chaos testing uses a dedicated `IFaultInjectable` interface (separate from production `ISubjectConnector`) with `InjectFaultAsync(FaultType, CancellationToken)`. Two modes: `FaultType.Kill` (hard kill with auto-restart) and `FaultType.Disconnect` (transport disconnect with reconnection).
 - **Shutdown timeout**: The OPC UA server's `ShutdownServerAsync` wraps `application.StopAsync()` with a 10s timeout to prevent hang when clients keep reconnecting during graceful shutdown.
 
 ## Supported Connectors
@@ -348,8 +348,8 @@ Each profile lists which participants have chaos active for that cycle. Profiles
 
 | Scenario | Kill | Disconnect | Recovery Mechanism |
 |----------|------|------------|-------------------|
-| Abrupt server crash | Background loop CTS cancelled, lets loop restart | All client connections closed | Background loop auto-restarts |
-| Abrupt client crash | Force-kill CTS cancelled, monitor loop reconnects | Socket aborted, receive loop exits | Monitor loop reconnects with exponential backoff |
+| Abrupt server crash | Force-kill CTS cancelled, full Kestrel teardown and rebuild | All client connections closed | Background loop rebuilds HTTP listener and restarts |
+| Abrupt client crash | Force-kill CTS cancelled, WebSocket aborted, monitor loop reconnects | Socket aborted, receive loop exits | Monitor loop reconnects with exponential backoff |
 | Sequence gap detection | N/A | N/A | Client detects missed sequence number, exits receive loop, reconnects with full state via Welcome |
 | Heartbeat timeout | N/A | N/A | Receive timeout fires, client exits receive loop and reconnects |
 | Concurrent server + client chaos | Both engines run independently | Same | Each side recovers independently, Welcome handshake re-syncs state |
