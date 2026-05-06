@@ -22,7 +22,7 @@ A **source** represents an external authoritative system where the data originat
 
 **Examples**: OPC UA client connecting to a PLC, MQTT client subscribing to a broker, database client, REST API consumer
 
-**Single-owner rule**: Each property can be associated with at most one source. Sources claim and release properties dynamically. You can retrieve the source that currently owns a property with `TryGetSource()`, for example to check connection status or access protocol-specific features.
+**Single-owner rule**: Each property can be associated with at most one source. Sources are responsible for claiming and releasing ownership of the properties they manage. This happens initially by scanning the subject graph during startup, and dynamically when the model changes structurally (subjects attached or detached via lifecycle events). Dynamic ownership changes require the external system to support adding and removing subscriptions at runtime. You can retrieve the source that currently owns a property with `TryGetSource()`, for example to check connection status or access protocol-specific features.
 
 ### Data Flow
 
@@ -230,22 +230,24 @@ public sealed class DatabaseSource : SubjectSourceBase
 
 #### Registering a Source
 
-Register your custom source so the host starts its `BackgroundService` and attach it to the properties it owns:
+Sources are `BackgroundService` implementations, so they need to be registered both as a singleton and as `IHostedService` so the host starts them. The recommended pattern is to provide an extension method that encapsulates this:
 
 ```csharp
-builder.Services.AddSingleton<DatabaseSource>();
-builder.Services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<DatabaseSource>());
-
-// Attach the source to its properties (typically during your app's initialization).
-// SubjectSourceBase only filters changes whose source equals this instance, so each
-// property must call SetSource(databaseSource) to be picked up by the change queue.
-foreach (var property in registeredSubject.GetAllProperties())
+public static IServiceCollection AddDatabaseSource<TSubject>(
+    this IServiceCollection services,
+    string connectionString)
+    where TSubject : IInterceptorSubject
 {
-    property.Reference.SetSource(databaseSource);
+    services.AddSingleton(sp => new DatabaseSource(
+        sp.GetRequiredService<TSubject>(),
+        sp.GetRequiredService<IInterceptorSubjectContext>(),
+        sp.GetRequiredService<ILogger<DatabaseSource>>()));
+    services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<DatabaseSource>());
+    return services;
 }
 ```
 
-The built-in connectors provide extension methods for registration:
+The built-in connectors follow the same pattern:
 
 ```csharp
 // OPC UA Client Source
@@ -296,7 +298,7 @@ public sealed class DatabaseSource : SubjectSourceBase
 
 #### SourceOwnershipManager
 
-The `SourceOwnershipManager` class simplifies implementing custom sources by handling:
+Sources claim ownership of properties in two phases: initially inside `StartListeningAsync` by scanning the subject graph (e.g., using a path provider to determine which properties to include), and dynamically at runtime when subjects are attached to or detached from the object graph. The `SourceOwnershipManager` class simplifies this by handling:
 - Property ownership tracking (which properties this source is responsible for)
 - Automatic cleanup when subjects are detached from the object graph
 - Safe ownership claims that prevent conflicts with other sources
@@ -427,7 +429,8 @@ All built-in servers (OPC UA, MQTT, WebSocket) follow the same structure:
 1. Extend `BackgroundService` for hosting lifecycle
 2. Implement `ISubjectConnector` for type consistency and connector enumeration
 3. Create a `ChangeQueueProcessor` in `ExecuteAsync` to subscribe to property changes before the protocol server starts accepting clients
-4. Use a retry/restart loop in `ExecuteAsync` to recover from protocol failures
+4. Accept incoming client connections and route write requests to the local model via `SetValueFromSource()`
+5. Use a retry/restart loop in `ExecuteAsync` to recover from protocol failures
 
 The built-in server implementations serve as reference for building custom servers. See the protocol-specific documentation for details:
 - [OPC UA Server](connectors-opcua-server.md)
@@ -436,7 +439,7 @@ The built-in server implementations serve as reference for building custom serve
 
 ### Registering a Server
 
-The built-in connectors provide extension methods:
+Servers follow the same registration pattern as sources: register as singleton + `IHostedService`, typically via an extension method. The built-in connectors provide these:
 
 ```csharp
 // OPC UA Server
