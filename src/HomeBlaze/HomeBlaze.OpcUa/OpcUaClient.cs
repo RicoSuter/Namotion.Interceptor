@@ -25,7 +25,6 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
 {
     private readonly ILogger<OpcUaClient> _logger;
     private IOpcUaSubjectClientSource? _clientSource;
-    private SubjectSourceBackgroundService? _sourceService;
 
     // Configuration properties
 
@@ -204,16 +203,7 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
             };
 
             _clientSource = root.CreateOpcUaClientSource(configuration, _logger);
-            _sourceService = new SubjectSourceBackgroundService(
-                (ISubjectSource)_clientSource,
-                ((IInterceptorSubject)root).Context,
-                _logger,
-                configuration.BufferTime,
-                configuration.RetryTime,
-                configuration.WriteRetryQueueSize);
-
             await this.AttachHostedServiceAsync(_clientSource, cancellationToken);
-            await this.AttachHostedServiceAsync(_sourceService, cancellationToken);
 
             Status = ServiceStatus.Running;
             _logger.LogInformation("OPC UA client started for server: {ServerUrl}", ServerUrl);
@@ -233,10 +223,6 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
             try
             {
                 Status = ServiceStatus.Stopping;
-                if (_sourceService != null)
-                {
-                    await this.DetachHostedServiceAsync(_sourceService, cancellationToken);
-                }
                 await this.DetachHostedServiceAsync(_clientSource, cancellationToken);
                 _logger.LogInformation("OPC UA client stopped");
             }
@@ -247,7 +233,6 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
             finally
             {
                 _clientSource = null;
-                _sourceService = null;
                 Root = null;
                 Status = ServiceStatus.Stopped;
                 IsConnected = null;

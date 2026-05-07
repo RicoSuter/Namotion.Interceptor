@@ -2,7 +2,6 @@ using System;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Mqtt.Client;
 using Namotion.Interceptor.Mqtt.Server;
 using Namotion.Interceptor.Registry.Paths;
@@ -59,19 +58,7 @@ public static class MqttSubjectExtensions
                     sp.GetRequiredKeyedService<MqttClientConfiguration>(key),
                     sp.GetRequiredService<ILogger<MqttSubjectClientSource>>());
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<MqttSubjectClientSource>(key))
-            .AddSingleton<IHostedService>(sp =>
-            {
-                var configuration = sp.GetRequiredKeyedService<MqttClientConfiguration>(key);
-                var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                return new SubjectSourceBackgroundService(
-                    sp.GetRequiredKeyedService<MqttSubjectClientSource>(key),
-                    subject.Context,
-                    sp.GetRequiredService<ILogger<SubjectSourceBackgroundService>>(),
-                    configuration.BufferTime,
-                    configuration.RetryTime,
-                    configuration.WriteRetryQueueSize);
-            });
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<MqttSubjectClientSource>(key));
     }
 
     /// <summary>
@@ -116,11 +103,11 @@ public static class MqttSubjectExtensions
             .AddKeyedSingleton(key, (sp, _) =>
             {
                 var subject = sp.GetRequiredKeyedService<IInterceptorSubject>(key);
-                return new MqttSubjectServerBackgroundService(
+                return new MqttSubjectServer(
                     subject,
                     sp.GetRequiredKeyedService<MqttServerConfiguration>(key),
-                    sp.GetRequiredService<ILogger<MqttSubjectServerBackgroundService>>());
+                    sp.GetRequiredService<ILogger<MqttSubjectServer>>());
             })
-            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<MqttSubjectServerBackgroundService>(key));
+            .AddSingleton<IHostedService>(sp => sp.GetRequiredKeyedService<MqttSubjectServer>(key));
     }
 }

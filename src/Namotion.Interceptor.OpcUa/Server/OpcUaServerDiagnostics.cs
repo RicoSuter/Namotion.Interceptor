@@ -6,9 +6,9 @@ namespace Namotion.Interceptor.OpcUa.Server;
 /// </summary>
 public class OpcUaServerDiagnostics
 {
-    private readonly OpcUaSubjectServerBackgroundService _service;
+    private readonly OpcUaSubjectServer _service;
 
-    internal OpcUaServerDiagnostics(OpcUaSubjectServerBackgroundService service)
+    internal OpcUaServerDiagnostics(OpcUaSubjectServer service)
     {
         _service = service;
     }

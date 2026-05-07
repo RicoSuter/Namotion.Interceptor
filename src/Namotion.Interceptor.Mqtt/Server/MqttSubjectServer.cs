@@ -23,7 +23,7 @@ namespace Namotion.Interceptor.Mqtt.Server;
 /// <summary>
 /// Background service that hosts an MQTT broker and publishes property changes.
 /// </summary>
-public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectConnector, IFaultInjectable, IAsyncDisposable
+public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInjectable, IAsyncDisposable
 {
     // NOTE: We cannot pool UserProperties here because InjectApplicationMessages queues messages
     // asynchronously. The server may still be serializing packets after this method returns,
@@ -53,6 +53,9 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
 
     private readonly CancellationTokenSource _shutdownCts = new();
 
+    // Serializes WriteChangesAsync and PublishInitialStateAsync so initial state reads+publishes can't interleave with CQP flushes.
+    private readonly SemaphoreSlim _publishSemaphore = new(1, 1);
+
     private int _numberOfClients;
     private int _disposed;
     private int _isListening;
@@ -70,10 +73,10 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
     /// </summary>
     public int NumberOfClients => Volatile.Read(ref _numberOfClients);
 
-    public MqttSubjectServerBackgroundService(
+    public MqttSubjectServer(
         IInterceptorSubject subject,
         MqttServerConfiguration configuration,
-        ILogger<MqttSubjectServerBackgroundService> logger)
+        ILogger<MqttSubjectServer> logger)
     {
         _subject = subject ?? throw new ArgumentNullException(nameof(subject));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
@@ -218,84 +221,90 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
         var server = _mqttServer;
         if (server is null) return;
 
-        var messagesPool = ArrayPool<InjectedMqttApplicationMessage>.Shared;
-        var messages = messagesPool.Rent(length);
-        var messageCount = 0;
-
+        await _publishSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            var changesSpan = changes.Span;
-            var timestampPropertyName = _configuration.SourceTimestampPropertyName;
+            var messagesPool = ArrayPool<InjectedMqttApplicationMessage>.Shared;
+            var messages = messagesPool.Rent(length);
+            var messageCount = 0;
 
-            // Build all messages first
-            for (var i = 0; i < length; i++)
+            try
             {
-                var change = changesSpan[i];
-                var registeredProperty = change.Property.TryGetRegisteredProperty();
-                if (registeredProperty is not { CanContainSubjects: false })
+                var changesSpan = changes.Span;
+                var timestampPropertyName = _configuration.SourceTimestampPropertyName;
+
+                // Build all messages first
+                for (var i = 0; i < length; i++)
                 {
-                    continue;
+                    var change = changesSpan[i];
+                    var registeredProperty = change.Property.TryGetRegisteredProperty();
+                    if (registeredProperty is not { CanContainSubjects: false })
+                    {
+                        continue;
+                    }
+
+                    var topic = TryGetTopicForProperty(change.Property, registeredProperty);
+                    if (topic is null) continue;
+
+                    byte[] payload;
+                    try
+                    {
+                        payload = _configuration.ValueConverter.Serialize(
+                            change.GetNewValue<object?>(),
+                            registeredProperty.Type);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to serialize value for topic {Topic}.", topic);
+                        continue;
+                    }
+
+                    var message = new MqttApplicationMessage
+                    {
+                        Topic = topic,
+                        PayloadSegment = new ArraySegment<byte>(payload),
+                        QualityOfServiceLevel = _configuration.DefaultQualityOfService,
+                        Retain = _configuration.UseRetainedMessages
+                    };
+
+                    if (timestampPropertyName is not null)
+                    {
+                        message.UserProperties =
+                        [
+                            new MqttUserProperty(
+                                timestampPropertyName,
+                                _configuration.SourceTimestampSerializer(change.ChangedTimestamp))
+                        ];
+                    }
+
+                    messages[messageCount++] = new InjectedMqttApplicationMessage(message)
+                    {
+                        SenderClientId = _serverClientId
+                    };
                 }
 
-                var topic = TryGetTopicForProperty(change.Property, registeredProperty);
-                if (topic is null) continue;
-
-                byte[] payload;
-                try
+                if (messageCount > 0)
                 {
-                    payload = _configuration.ValueConverter.Serialize(
-                        change.GetNewValue<object?>(),
-                        registeredProperty.Type);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to serialize value for topic {Topic}.", topic);
-                    continue;
-                }
-
-                // Create message directly without builder to reduce allocations
-                var message = new MqttApplicationMessage
-                {
-                    Topic = topic,
-                    PayloadSegment = new ArraySegment<byte>(payload),
-                    QualityOfServiceLevel = _configuration.DefaultQualityOfService,
-                    Retain = _configuration.UseRetainedMessages
-                };
-
-                // Create new list for each message - cannot pool because server queues messages asynchronously
-                if (timestampPropertyName is not null)
-                {
-                    message.UserProperties =
-                    [
-                        new MqttUserProperty(
-                            timestampPropertyName,
-                            _configuration.SourceTimestampSerializer(change.ChangedTimestamp))
-                    ];
-                }
-
-                messages[messageCount++] = new InjectedMqttApplicationMessage(message)
-                {
-                    SenderClientId = _serverClientId
-                };
-            }
-
-            if (messageCount > 0)
-            {
 #if USE_LOCAL_MQTTNET
-                await server.InjectApplicationMessagesAsync(
-                    new ArraySegment<InjectedMqttApplicationMessage>(messages, 0, messageCount),
-                    cancellationToken).ConfigureAwait(false);
+                    await server.InjectApplicationMessagesAsync(
+                        new ArraySegment<InjectedMqttApplicationMessage>(messages, 0, messageCount),
+                        cancellationToken).ConfigureAwait(false);
 #else
-                for (var i = 0; i < messageCount; i++)
-                {
-                    await server.InjectApplicationMessage(messages[i], cancellationToken).ConfigureAwait(false);
-                }
+                    for (var i = 0; i < messageCount; i++)
+                    {
+                        await server.InjectApplicationMessage(messages[i], cancellationToken).ConfigureAwait(false);
+                    }
 #endif
+                }
+            }
+            finally
+            {
+                messagesPool.Return(messages);
             }
         }
         finally
         {
-            messagesPool.Return(messages);
+            _publishSemaphore.Release();
         }
     }
 
@@ -405,52 +414,60 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
             var server = _mqttServer;
             if (server is null) return;
 
-            var timestampPropertyName = _configuration.SourceTimestampPropertyName;
-
-            foreach (var (path, property) in properties)
+            await _publishSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                var timestampPropertyName = _configuration.SourceTimestampPropertyName;
 
-                var topic = MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
+                foreach (var (path, property) in properties)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
 
-                byte[] payload;
-                try
-                {
-                    payload = _configuration.ValueConverter.Serialize(
-                        property.GetValue(),
-                        property.Type);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex, "Failed to serialize initial value for topic {Topic}.", topic);
-                    continue;
-                }
+                    var topic = MqttHelper.BuildTopic(path, _configuration.TopicPrefix);
 
-                var message = new MqttApplicationMessage
-                {
-                    Topic = topic,
-                    PayloadSegment = new ArraySegment<byte>(payload),
-                    QualityOfServiceLevel = _configuration.DefaultQualityOfService,
-                    Retain = _configuration.UseRetainedMessages
-                };
-
-                if (timestampPropertyName is not null)
-                {
-                    var writeTimestamp = property.Reference.TryGetWriteTimestamp();
-                    if (writeTimestamp.HasValue)
+                    byte[] payload;
+                    try
                     {
-                        message.UserProperties =
-                        [
-                            new MqttUserProperty(
-                                timestampPropertyName,
-                                _configuration.SourceTimestampSerializer(writeTimestamp.Value))
-                        ];
+                        payload = _configuration.ValueConverter.Serialize(
+                            property.GetValue(),
+                            property.Type);
                     }
-                }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed to serialize initial value for topic {Topic}.", topic);
+                        continue;
+                    }
 
-                await server.InjectApplicationMessage(
-                    new InjectedMqttApplicationMessage(message) { SenderClientId = _serverClientId },
-                    cancellationToken).ConfigureAwait(false);
+                    var message = new MqttApplicationMessage
+                    {
+                        Topic = topic,
+                        PayloadSegment = new ArraySegment<byte>(payload),
+                        QualityOfServiceLevel = _configuration.DefaultQualityOfService,
+                        Retain = _configuration.UseRetainedMessages
+                    };
+
+                    if (timestampPropertyName is not null)
+                    {
+                        var writeTimestamp = property.Reference.TryGetWriteTimestamp();
+                        if (writeTimestamp.HasValue)
+                        {
+                            message.UserProperties =
+                            [
+                                new MqttUserProperty(
+                                    timestampPropertyName,
+                                    _configuration.SourceTimestampSerializer(writeTimestamp.Value))
+                            ];
+                        }
+                    }
+
+                    await server.InjectApplicationMessage(
+                        new InjectedMqttApplicationMessage(message) { SenderClientId = _serverClientId },
+                        cancellationToken).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                _publishSemaphore.Release();
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -602,6 +619,7 @@ public class MqttSubjectServerBackgroundService : BackgroundService, ISubjectCon
 
         Volatile.Write(ref _isListening, 0);
         _shutdownCts.Dispose();
+        _publishSemaphore.Dispose();
         Dispose();
     }
 }

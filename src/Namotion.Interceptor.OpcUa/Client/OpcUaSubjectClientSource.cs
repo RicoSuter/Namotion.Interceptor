@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.Connection;
@@ -13,7 +12,7 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
-internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjectClientSource, ISubjectSource, IFaultInjectable, IAsyncDisposable
+internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjectClientSource, IFaultInjectable, IAsyncDisposable
 {
     private const int DefaultChunkSize = 512;
 
@@ -26,7 +25,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
     private readonly SubscriptionHealthMonitor _subscriptionHealthMonitor;
 
     private volatile SessionManager? _sessionManager;
-    private SubjectPropertyWriter? _propertyWriter;
+    private volatile SubjectPropertyWriter? _propertyWriter;
     private OutboundWriter? _writer;
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
@@ -50,7 +49,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
     internal void ClearLastError() => Volatile.Write(ref _lastError, null);
 
     /// <inheritdoc />
-    public int WriteBatchSize => _writer?.WriteBatchSize ?? 0;
+    public override int WriteBatchSize => _writer?.WriteBatchSize ?? 0;
 
     /// <inheritdoc />
     public OpcUaClientDiagnostics Diagnostics { get; }
@@ -62,6 +61,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
     public event EventHandler<OpcUaCurrentSessionChangedEventArgs>? CurrentSessionChanged;
 
     public OpcUaSubjectClientSource(IInterceptorSubject subject, OpcUaClientConfiguration configuration, ILogger logger)
+        : base(subject.Context, logger, configuration.BufferTime, configuration.RetryTime, configuration.WriteRetryQueueSize)
     {
         ArgumentNullException.ThrowIfNull(subject);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -99,9 +99,9 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
     }
 
     /// <inheritdoc />
-    public IInterceptorSubject RootSubject => _subject;
+    public override IInterceptorSubject RootSubject => _subject;
 
-    public async Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
+    protected override async Task<IAsyncDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
     {
         Reset();
 
@@ -147,22 +147,44 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
 
             _isStarted = true;
             Volatile.Write(ref _lastError, null);
-            return _sessionManager;
+
+            var sessionManagerForLifetime = _sessionManager;
+            return BackgroundTaskLifetime.Start(
+                cancellationToken,
+                _logger,
+                RunHealthCheckLoopAsync,
+                async () =>
+                {
+                    try { await sessionManagerForLifetime.DisposeAsync().ConfigureAwait(false); }
+                    catch (Exception ex) { _logger.LogWarning(ex, "OPC UA session manager threw during listen-lifetime disposal."); }
+                });
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // Cancellation is the host shutting us down, not a failure to surface in diagnostics.
+            await CleanupSessionManagerAsync().ConfigureAwait(false);
             throw;
         }
         catch (Exception ex)
         {
             Volatile.Write(ref _lastError, ex);
+            await CleanupSessionManagerAsync().ConfigureAwait(false);
             throw;
         }
     }
 
+    private async Task CleanupSessionManagerAsync()
+    {
+        var sessionManager = _sessionManager;
+        if (sessionManager is not null)
+        {
+            try { await sessionManager.DisposeAsync().ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogWarning(ex, "OPC UA session manager threw during listen-failure cleanup."); }
+            _sessionManager = null;
+        }
+    }
+
     /// <inheritdoc />
-    public async Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
+    public override async Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
     {
         var ownedProperties = GetOwnedPropertiesWithNodeIds();
         if (ownedProperties.Count == 0)
@@ -277,7 +299,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
         return monitoredItems;
     }
 
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    private async Task RunHealthCheckLoopAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -321,11 +343,12 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error during health check or session restart. Retrying after delay.");
-                await Task.Delay(_configuration.SubscriptionHealthCheckInterval, stoppingToken).ConfigureAwait(false);
+                try { await Task.Delay(_configuration.SubscriptionHealthCheckInterval, stoppingToken).ConfigureAwait(false); }
+                catch (OperationCanceledException) { return; }
             }
         }
 
-        _logger.LogInformation("OPC UA client has stopped.");
+        _logger.LogInformation("OPC UA client health loop has stopped.");
     }
 
     private async Task<bool> HandleHealthySessionAsync(SessionManager sessionManager, CancellationToken cancellationToken)
@@ -514,7 +537,7 @@ internal sealed class OpcUaSubjectClientSource : BackgroundService, IOpcUaSubjec
         };
     }
 
-    public async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    public override async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         if (_writer is null)
         {

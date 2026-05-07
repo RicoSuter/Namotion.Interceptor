@@ -3,11 +3,11 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Registry;
-using Namotion.Interceptor.Registry.Abstractions;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -19,7 +19,6 @@ namespace Namotion.Interceptor.Benchmark;
 public class SubjectSourceBenchmark
 {
     private TestSubjectSource _source;
-    private SubjectSourceBackgroundService _service;
     private IInterceptorSubjectContext _context;
     private CancellationTokenSource _cts;
     private Car _car;
@@ -43,11 +42,11 @@ public class SubjectSourceBenchmark
             .ToArray();
 
         _car = new Car(_context);
-        _source = new TestSubjectSource(_propertyNames.Length) { RootSubject = _car };
-        _service = new SubjectSourceBackgroundService(
-            _source,
+        _source = new TestSubjectSource(
+            _car,
             _context,
             NullLogger.Instance,
+            _propertyNames.Length,
             bufferTime: TimeSpan.FromMilliseconds(1),
             retryTime: TimeSpan.FromSeconds(1));
 
@@ -59,10 +58,10 @@ public class SubjectSourceBenchmark
         }
 
         _cts = new CancellationTokenSource();
-        await _service.StartAsync(_cts.Token);
+        await _source.StartAsync(_cts.Token);
+        _source.WaitForInitialization();
 
-        _propertyWriter = _source.PropertyWriter;
-        await _propertyWriter.LoadInitialStateAndResumeAsync(_cts.Token);
+        _propertyWriter = _source.PropertyWriter!;
 
         _updates = Enumerable
             .Range(1, 1000000)
@@ -109,25 +108,38 @@ public class SubjectSourceBenchmark
     public async Task Cleanup()
     {
         await _cts.CancelAsync();
-        await _service.StopAsync(CancellationToken.None);
+        await _source.StopAsync(CancellationToken.None);
         _cts.Dispose();
-        _service.Dispose();
+        _source.Dispose();
     }
 
-    private class TestSubjectSource : ISubjectSource
+    private class TestSubjectSource : SubjectSourceBase
     {
-        private int _count;
+        private readonly IInterceptorSubject _subject;
         private readonly int _targetCount;
         private readonly AutoResetEvent _signal = new(false);
+        private readonly ManualResetEventSlim _initialized = new(false);
+        private SubjectPropertyWriter? _propertyWriter;
+        private int _count;
 
-        public SubjectPropertyWriter PropertyWriter { get; private set; }
-
-        public IInterceptorSubject RootSubject { get; set; }
-
-        public TestSubjectSource(int targetCount)
+        public TestSubjectSource(
+            IInterceptorSubject subject,
+            IInterceptorSubjectContext context,
+            ILogger logger,
+            int targetCount,
+            TimeSpan? bufferTime = null,
+            TimeSpan? retryTime = null)
+            : base(context, logger, bufferTime, retryTime, writeRetryQueueSize: 0)
         {
+            _subject = subject;
             _targetCount = targetCount;
         }
+
+        public override IInterceptorSubject RootSubject => _subject;
+
+        public override int WriteBatchSize => int.MaxValue;
+
+        internal SubjectPropertyWriter? PropertyWriter => _propertyWriter;
 
         public void Reset()
         {
@@ -139,20 +151,25 @@ public class SubjectSourceBenchmark
             _signal.WaitOne();
         }
 
-        public Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken)
+        protected override Task<IAsyncDisposable?> StartListeningAsync(
+            SubjectPropertyWriter propertyWriter,
+            CancellationToken cancellationToken)
         {
-            PropertyWriter = propertyWriter;
-            return Task.FromResult<IDisposable?>(null);
+            _propertyWriter = propertyWriter;
+            return Task.FromResult<IAsyncDisposable?>(null);
         }
 
-        public Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
+        public override Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
         {
+            _initialized.Set();
             return Task.FromResult<Action?>(null);
         }
 
-        public int WriteBatchSize => int.MaxValue;
+        public void WaitForInitialization() => _initialized.Wait();
 
-        public ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+        public override ValueTask<WriteResult> WriteChangesAsync(
+            ReadOnlyMemory<SubjectPropertyChange> changes,
+            CancellationToken cancellationToken)
         {
             _count += changes.Length;
 

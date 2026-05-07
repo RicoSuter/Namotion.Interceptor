@@ -3,6 +3,11 @@
 [assembly: System.Runtime.Versioning.TargetFramework(".NETCoreApp,Version=v9.0", FrameworkDisplayName=".NET 9.0")]
 namespace Namotion.Interceptor.Connectors
 {
+    public sealed class BackgroundTaskLifetime : System.IAsyncDisposable
+    {
+        public System.Threading.Tasks.ValueTask DisposeAsync() { }
+        public static Namotion.Interceptor.Connectors.BackgroundTaskLifetime Start(System.Threading.CancellationToken parentToken, Microsoft.Extensions.Logging.ILogger logger, System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task> executeAsyncFunc, System.Func<System.Threading.Tasks.ValueTask>? disposeAsyncFunc = null) { }
+    }
     public class ChangeQueueProcessor : System.IDisposable
     {
         public ChangeQueueProcessor(object? source, Namotion.Interceptor.IInterceptorSubjectContext context, System.Func<Namotion.Interceptor.PropertyReference, bool> propertyFilter, System.Func<System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange>, System.Threading.CancellationToken, System.Threading.Tasks.ValueTask> writeHandler, System.TimeSpan? bufferTime, Microsoft.Extensions.Logging.ILogger logger) { }
@@ -40,7 +45,6 @@ namespace Namotion.Interceptor.Connectors
     {
         int WriteBatchSize { get; }
         System.Threading.Tasks.Task<System.Action?> LoadInitialStateAsync(System.Threading.CancellationToken cancellationToken);
-        System.Threading.Tasks.Task<System.IDisposable?> StartListeningAsync(Namotion.Interceptor.Connectors.SubjectPropertyWriter propertyWriter, System.Threading.CancellationToken cancellationToken);
         System.Threading.Tasks.ValueTask<Namotion.Interceptor.Connectors.WriteResult> WriteChangesAsync(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes, System.Threading.CancellationToken cancellationToken);
     }
     public interface ISupportsConcurrentWrites { }
@@ -78,11 +82,16 @@ namespace Namotion.Interceptor.Connectors
         public void StartBuffering() { }
         public void Write<TState>(TState state, System.Action<TState> update) { }
     }
-    public class SubjectSourceBackgroundService : Microsoft.Extensions.Hosting.BackgroundService
+    public abstract class SubjectSourceBase : Microsoft.Extensions.Hosting.BackgroundService, Namotion.Interceptor.Connectors.ISubjectConnector, Namotion.Interceptor.Connectors.ISubjectSource
     {
-        public SubjectSourceBackgroundService(Namotion.Interceptor.Connectors.ISubjectSource source, Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger logger, System.TimeSpan? bufferTime = default, System.TimeSpan? retryTime = default, int writeRetryQueueSize = 1000) { }
+        protected SubjectSourceBase(Namotion.Interceptor.IInterceptorSubjectContext context, Microsoft.Extensions.Logging.ILogger logger, System.TimeSpan? bufferTime = default, System.TimeSpan? retryTime = default, int writeRetryQueueSize = 1000) { }
+        public abstract Namotion.Interceptor.IInterceptorSubject RootSubject { get; }
+        public virtual int WriteBatchSize { get; }
         public override void Dispose() { }
-        protected override System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        protected override sealed System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
+        public abstract System.Threading.Tasks.Task<System.Action?> LoadInitialStateAsync(System.Threading.CancellationToken cancellationToken);
+        protected abstract System.Threading.Tasks.Task<System.IAsyncDisposable?> StartListeningAsync(Namotion.Interceptor.Connectors.SubjectPropertyWriter propertyWriter, System.Threading.CancellationToken cancellationToken);
+        public abstract System.Threading.Tasks.ValueTask<Namotion.Interceptor.Connectors.WriteResult> WriteChangesAsync(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes, System.Threading.CancellationToken cancellationToken);
     }
     public static class SubjectSourceExtensions
     {

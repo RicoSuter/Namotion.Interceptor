@@ -310,11 +310,11 @@ public partial class OpcUaRegistrationTests
         // Arrange
         var subject = CreateSubject();
         var configuration = new OpcUaServerConfiguration { ValueConverter = new OpcUaValueConverter() };
-        var logger = NullLogger<OpcUaSubjectServerBackgroundService>.Instance;
+        var logger = NullLogger<OpcUaSubjectServer>.Instance;
 
         // Act
-        var first = new OpcUaSubjectServerBackgroundService(subject, configuration, logger);
-        var second = new OpcUaSubjectServerBackgroundService(subject, configuration, logger);
+        var first = new OpcUaSubjectServer(subject, configuration, logger);
+        var second = new OpcUaSubjectServer(subject, configuration, logger);
 
         // Assert
         Assert.NotEqual(first.OpcUaVariableKey, second.OpcUaVariableKey);

@@ -14,7 +14,7 @@ internal class CustomNodeManager : CustomNodeManager2
     private const string PathDelimiter = ".";
 
     private readonly IInterceptorSubject _subject;
-    private readonly OpcUaSubjectServerBackgroundService _serverService;
+    private readonly OpcUaSubjectServer _serverService;
     private readonly OpcUaServerConfiguration _configuration;
     private readonly IOpcUaNodeMapper _nodeMapper;
     private readonly ILogger _logger;
@@ -25,7 +25,7 @@ internal class CustomNodeManager : CustomNodeManager2
 
     public CustomNodeManager(
         IInterceptorSubject subject,
-        OpcUaSubjectServerBackgroundService serverService,
+        OpcUaSubjectServer serverService,
         IServerInternal server,
         ApplicationConfiguration applicationConfiguration,
         OpcUaServerConfiguration configuration,

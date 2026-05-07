@@ -213,18 +213,14 @@ public class CustomMqttValueConverter : IMqttValueConverter
 
 ### Write Retry Queue
 
-The client automatically queues write operations when the connection is lost. On reconnection, queued writes are optimistically re-applied: after loading the server's current state, each queued change is compared against the current property value and only re-applied if the server hasn't changed it (source wins on conflict). See [Connectors — Write Retry Queue](connectors.md#write-retry-queue).
+Write retry queue behavior (ring buffer, optimistic re-apply on reconnection, source wins on conflict) is provided by `SubjectSourceBase`. See [Connectors — Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
 
 ```csharp
 new MqttClientConfiguration
 {
-    WriteRetryQueueSize = 1000 // Buffer up to 1000 writes (default)
+    WriteRetryQueueSize = 1000 // Buffer up to 1000 writes (default, 0 to disable)
 }
 ```
-
-- Ring buffer semantics: drops oldest when full
-- Optimistic re-apply after reconnection (source wins on conflict)
-- Set to 0 to disable
 
 ### Circuit Breaker
 
