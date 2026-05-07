@@ -122,6 +122,7 @@ The library has specialized support for:
 ## Coding Style
 
 - **Avoid abbreviations** in variable and parameter names unless the name is very long. Use descriptive names (e.g., `attribute` not `attr`).
+- **No em dashes** in docs, READMEs, or PR descriptions. Restructure into plain sentences instead.
 
 ## Git Rules
 
