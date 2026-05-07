@@ -342,6 +342,7 @@ public class SubjectPathResolver : ILifecycleHandler
             }
         }
 
+        paths.Sort(static (a, b) => a.Count(c => c == '/').CompareTo(b.Count(c => c == '/')));
         return paths.Count > 0 ? paths : Array.Empty<string>();
     }
 

@@ -6,7 +6,6 @@ using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Attributes;
 using Microsoft.Extensions.DependencyInjection;
 using Namotion.Interceptor;
-using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Dynamic;
 using Namotion.Interceptor.Hosting;
 using Namotion.Interceptor.OpcUa;
@@ -146,21 +145,15 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
         if (IsEnabled)
         {
             await StartClientAsync(stoppingToken);
+            UpdateDiagnostics();
         }
 
         try
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                if (_clientSource is { } source)
-                {
-                    var diagnostics = source.Diagnostics;
-                    IsConnected = diagnostics.IsConnected;
-                    IncomingChangesPerSecond = diagnostics.IncomingChangesPerSecond;
-                    OutgoingChangesPerSecond = diagnostics.OutgoingChangesPerSecond;
-                }
-
-                await Task.Delay(TimeSpan.FromSeconds(60), stoppingToken);
+                await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
+                UpdateDiagnostics();
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -174,6 +167,17 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     {
         await StopClientAsync(cancellationToken);
         await StartClientAsync(cancellationToken);
+    }
+
+    private void UpdateDiagnostics()
+    {
+        if (_clientSource is { } source)
+        {
+            var diagnostics = source.Diagnostics;
+            IsConnected = diagnostics.IsConnected;
+            IncomingChangesPerSecond = diagnostics.IncomingChangesPerSecond;
+            OutgoingChangesPerSecond = diagnostics.OutgoingChangesPerSecond;
+        }
     }
 
     private async Task StartClientAsync(CancellationToken cancellationToken)
@@ -190,7 +194,7 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
                 return;
             }
 
-            var root = new DynamicSubject(((IInterceptorSubject)this).Context);
+            var root = new OpcUaDynamicSubject(RootName ?? "Root");
             Root = root;
 
             var configuration = new OpcUaClientConfiguration
@@ -199,7 +203,7 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
                 RootName = RootName,
                 TypeResolver = new HomeBlazeOpcUaTypeResolver(_logger),
                 ValueConverter = new OpcUaValueConverter(),
-                SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
+                SubjectFactory = new HomeBlazeOpcUaSubjectFactory(),
             };
 
             _clientSource = root.CreateOpcUaClientSource(configuration, _logger);

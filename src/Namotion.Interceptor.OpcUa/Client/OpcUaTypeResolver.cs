@@ -59,23 +59,20 @@ public class OpcUaTypeResolver
                     ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
                     IncludeSubtypes = true,
                     NodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object,
-                    ResultMask = (uint)BrowseResultMask.All
+                    ResultMask = (uint)(BrowseResultMask.BrowseName | BrowseResultMask.NodeClass)
                 }
             };
 
-            var response = await session.BrowseAsync(
-                null,
-                null,
-                0u,
-                browseDescriptions,
-                cancellationToken);
-
-            if (response.Results.Count > 0 && response.Results[0].References.Any(n => n.NodeClass == NodeClass.Variable))
+            var response = await session.BrowseAsync(null, null, 1u, browseDescriptions, cancellationToken);
+            if (response.Results.Count > 0 &&
+                response.Results[0].References.Count > 0 &&
+                response.Results[0].References[0].NodeClass == NodeClass.Object &&
+                response.Results[0].References[0].BrowseName.Name.Contains('['))
             {
-                return typeof(DynamicSubject);
+                return typeof(DynamicSubject[]);
             }
 
-            return typeof(DynamicSubject[]);
+            return typeof(DynamicSubject);
         }
 
         try
@@ -97,7 +94,7 @@ public class OpcUaTypeResolver
                 var dataTypeId = response.Results[0].Value as NodeId;
                 if (dataTypeId != null)
                 {
-                    var builtIn = TypeInfo.GetBuiltInType(dataTypeId);
+                    var builtIn = await TypeInfo.GetBuiltInTypeAsync(dataTypeId, session.TypeTree, cancellationToken);
                     var elementType = TryMapBuiltInType(builtIn);
                     if (elementType is not null)
                     {
@@ -138,14 +135,21 @@ public class OpcUaTypeResolver
         BuiltInType.DateTime => typeof(DateTime),
         BuiltInType.Guid => typeof(Guid),
         BuiltInType.ByteString => typeof(byte[]),
+        BuiltInType.XmlElement => typeof(string),
         BuiltInType.NodeId => typeof(NodeId),
         BuiltInType.ExpandedNodeId => typeof(ExpandedNodeId),
         BuiltInType.StatusCode => typeof(StatusCode),
         BuiltInType.QualifiedName => typeof(QualifiedName),
         BuiltInType.LocalizedText => typeof(LocalizedText),
         BuiltInType.DiagnosticInfo => typeof(DiagnosticInfo),
+        BuiltInType.ExtensionObject => typeof(ExtensionObject),
         BuiltInType.DataValue => typeof(DataValue),
-        BuiltInType.Enumeration => typeof(int), // map enum to underlying Int32
+        BuiltInType.Enumeration => typeof(int),
+        BuiltInType.Number => typeof(double),
+        BuiltInType.Integer => typeof(long),
+        BuiltInType.UInteger => typeof(ulong),
+        BuiltInType.Variant => null,
+        BuiltInType.Null => null,
         _ => null
     };
 }

@@ -20,4 +20,11 @@ public class OpcUaSubjectFactory
     {
         return Task.FromResult(_subjectFactory.CreateSubject(property));
     }
+
+    public virtual Task<IInterceptorSubject> CreateCollectionSubjectAsync(
+        RegisteredSubjectProperty collectionProperty, ReferenceDescription node, object? index,
+        ISession session, CancellationToken cancellationToken)
+    {
+        return Task.FromResult(_subjectFactory.CreateCollectionSubject(collectionProperty, index));
+    }
 }
