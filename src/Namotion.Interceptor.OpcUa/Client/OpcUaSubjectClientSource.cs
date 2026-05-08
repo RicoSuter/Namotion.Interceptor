@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
@@ -569,7 +570,352 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             return WriteResult.Failure(changes, new InvalidOperationException("OPC UA client not started."));
         }
 
+        if (_configuration.EnableRemoteNodeManagement)
+        {
+            // Separate structural changes from value changes.
+            // Structural changes need AddNodes/DeleteNodes, value changes use the normal write path.
+            List<SubjectPropertyChange>? structuralChanges = null;
+            List<SubjectPropertyChange>? valueChanges = null;
+
+            var span = changes.Span;
+            for (var i = 0; i < span.Length; i++)
+            {
+                var change = span[i];
+                var registeredProperty = change.Property.TryGetRegisteredProperty();
+                if (registeredProperty is not null &&
+                    (registeredProperty.IsSubjectCollection || registeredProperty.IsSubjectDictionary || registeredProperty.IsSubjectReference))
+                {
+                    structuralChanges ??= new List<SubjectPropertyChange>();
+                    structuralChanges.Add(change);
+                }
+                else
+                {
+                    valueChanges ??= new List<SubjectPropertyChange>();
+                    valueChanges.Add(change);
+                }
+            }
+
+            // Handle structural changes via AddNodes/DeleteNodes
+            if (structuralChanges is not null)
+            {
+                await HandleStructuralChangesAsync(structuralChanges, cancellationToken).ConfigureAwait(false);
+            }
+
+            // Handle remaining value changes via normal write path
+            if (valueChanges is not null)
+            {
+                return await _writer.WriteChangesAsync(valueChanges.ToArray(), cancellationToken).ConfigureAwait(false);
+            }
+
+            return WriteResult.Success;
+        }
+
         return await _writer.WriteChangesAsync(changes, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task HandleStructuralChangesAsync(List<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    {
+        var session = _sessionManager?.CurrentSession;
+        if (session is null || !session.Connected)
+        {
+            _logger.LogWarning("Cannot send structural changes: no active OPC UA session.");
+            return;
+        }
+
+        foreach (var change in changes)
+        {
+            var registeredProperty = change.Property.TryGetRegisteredProperty();
+            if (registeredProperty is null)
+            {
+                continue;
+            }
+
+            var oldSubjects = ExtractSubjects(change.GetOldValue<object?>());
+            var newSubjects = ExtractSubjects(change.GetNewValue<object?>());
+
+            // Determine added and removed subjects
+            var addedSubjects = new List<(IInterceptorSubject Subject, object? Index)>();
+            var removedSubjects = new List<(IInterceptorSubject Subject, object? Index)>();
+
+            foreach (var (subject, index) in newSubjects)
+            {
+                if (!oldSubjects.Any(o => ReferenceEquals(o.Subject, subject)))
+                {
+                    addedSubjects.Add((subject, index));
+                }
+            }
+
+            foreach (var (subject, index) in oldSubjects)
+            {
+                if (!newSubjects.Any(n => ReferenceEquals(n.Subject, subject)))
+                {
+                    removedSubjects.Add((subject, index));
+                }
+            }
+
+            _logger.LogInformation(
+                "Client structural change for property {PropertyName}: {AddedCount} added, {RemovedCount} removed.",
+                registeredProperty.Name, addedSubjects.Count, removedSubjects.Count);
+
+            // Process removals first (frees NodeIds for reuse)
+            foreach (var (subject, _) in removedSubjects)
+            {
+                await TryDeleteRemoteNodeAsync(session, subject, cancellationToken).ConfigureAwait(false);
+            }
+
+            // Process additions
+            foreach (var (subject, index) in addedSubjects)
+            {
+                await TryAddRemoteNodeAsync(session, subject, registeredProperty, index, cancellationToken).ConfigureAwait(false);
+            }
+        }
+    }
+
+    private async Task TryAddRemoteNodeAsync(
+        ISession session,
+        IInterceptorSubject subject,
+        RegisteredSubjectProperty registeredProperty,
+        object? index,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Find parent NodeId from the property's owning subject
+            var parentSubject = registeredProperty.Subject;
+            NodeId? parentNodeId = null;
+
+            if (parentSubject.TryGetData(SubjectNodeIdDataKey, out var parentNodeIdObj) &&
+                parentNodeIdObj is NodeId parentId)
+            {
+                parentNodeId = parentId;
+            }
+
+            if (parentNodeId is null)
+            {
+                _logger.LogWarning(
+                    "Cannot add remote node for subject: parent has no NodeId. Property: {PropertyName}",
+                    registeredProperty.Name);
+                return;
+            }
+
+            // For collections and dictionaries, the parent is the container folder node
+            // The container folder NodeId follows the pattern: parentPath + propertyName
+            var propertyName = registeredProperty.ResolvePropertyName(_configuration.NodeMapper);
+            if (propertyName is null)
+            {
+                return;
+            }
+
+            NodeId containerNodeId;
+            if (registeredProperty.IsSubjectCollection || registeredProperty.IsSubjectDictionary)
+            {
+                // Container folder NodeId: parentNodeId.Identifier + "." + propertyName
+                var parentPath = parentNodeId.Identifier is string stringId ? stringId : "";
+                var containerPath = string.IsNullOrEmpty(parentPath)
+                    ? propertyName
+                    : parentPath + "." + propertyName;
+
+                var namespaceIndex = GetNamespaceIndex(session);
+                containerNodeId = new NodeId(containerPath, namespaceIndex);
+            }
+            else
+            {
+                containerNodeId = parentNodeId;
+            }
+
+            // Build browse name
+            QualifiedName browseName;
+            var namespaceIdx = GetNamespaceIndex(session);
+
+            if (registeredProperty.IsSubjectCollection)
+            {
+                browseName = new QualifiedName($"{propertyName}[{index}]", namespaceIdx);
+            }
+            else if (registeredProperty.IsSubjectDictionary)
+            {
+                var keyString = index?.ToString();
+                if (string.IsNullOrEmpty(keyString))
+                {
+                    _logger.LogWarning("Cannot add remote node: dictionary key is null or empty.");
+                    return;
+                }
+                browseName = new QualifiedName(keyString, namespaceIdx);
+            }
+            else
+            {
+                // Reference property
+                browseName = new QualifiedName(propertyName, namespaceIdx);
+            }
+
+            var addNodesItem = new AddNodesItem
+            {
+                ParentNodeId = new ExpandedNodeId(containerNodeId),
+                ReferenceTypeId = ReferenceTypeIds.HasComponent,
+                RequestedNewNodeId = ExpandedNodeId.Null,
+                BrowseName = browseName,
+                NodeClass = NodeClass.Object,
+                NodeAttributes = new ExtensionObject(new ObjectAttributes
+                {
+                    DisplayName = new LocalizedText(browseName.Name),
+                    Description = LocalizedText.Null,
+                    WriteMask = 0,
+                    UserWriteMask = 0,
+                    EventNotifier = 0
+                }),
+                TypeDefinition = new ExpandedNodeId(ObjectTypeIds.BaseObjectType)
+            };
+
+            var response = await session.AddNodesAsync(
+                requestHeader: null,
+                [addNodesItem],
+                cancellationToken).ConfigureAwait(false);
+
+            if (response.Results.Count > 0)
+            {
+                var result = response.Results[0];
+                if (StatusCode.IsGood(result.StatusCode))
+                {
+                    var assignedNodeId = result.AddedNodeId;
+                    subject.SetData(SubjectNodeIdDataKey, assignedNodeId);
+
+                    _logger.LogInformation(
+                        "Successfully created remote node {NodeId} for property {PropertyName}.",
+                        assignedNodeId, registeredProperty.Name);
+                }
+                else if (result.StatusCode == StatusCodes.BadNotSupported ||
+                         result.StatusCode == StatusCodes.BadServiceUnsupported)
+                {
+                    _logger.LogWarning(
+                        "Server does not support AddNodes service. " +
+                        "Local structural change on '{PropertyName}' will not be reflected on the server.",
+                        registeredProperty.Name);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Failed to create remote node for property {PropertyName}: {StatusCode}",
+                        registeredProperty.Name, result.StatusCode);
+                }
+            }
+        }
+        catch (ServiceResultException ex) when (
+            ex.StatusCode == StatusCodes.BadNotSupported ||
+            ex.StatusCode == StatusCodes.BadServiceUnsupported)
+        {
+            _logger.LogWarning(
+                "Server does not support AddNodes service for property '{PropertyName}'.",
+                registeredProperty.Name);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create remote node for property {PropertyName}.", registeredProperty.Name);
+        }
+    }
+
+    private async Task TryDeleteRemoteNodeAsync(
+        ISession session,
+        IInterceptorSubject subject,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Find the NodeId for this subject
+            if (!subject.TryGetData(SubjectNodeIdDataKey, out var nodeIdObj) ||
+                nodeIdObj is not NodeId nodeId)
+            {
+                _logger.LogDebug("Cannot delete remote node: subject has no NodeId.");
+                return;
+            }
+
+            var deleteNodesItem = new DeleteNodesItem
+            {
+                NodeId = nodeId,
+                DeleteTargetReferences = true
+            };
+
+            var response = await session.DeleteNodesAsync(
+                requestHeader: null,
+                [deleteNodesItem],
+                cancellationToken).ConfigureAwait(false);
+
+            if (response.Results.Count > 0)
+            {
+                var result = response.Results[0];
+                if (StatusCode.IsGood(result))
+                {
+                    _logger.LogInformation(
+                        "Successfully deleted remote node {NodeId}.",
+                        nodeId);
+                }
+                else if (result == StatusCodes.BadNotSupported ||
+                         result == StatusCodes.BadServiceUnsupported)
+                {
+                    _logger.LogWarning(
+                        "Server does not support DeleteNodes service for node {NodeId}.",
+                        nodeId);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Failed to delete remote node {NodeId}: {StatusCode}",
+                        nodeId, result);
+                }
+            }
+        }
+        catch (ServiceResultException ex) when (
+            ex.StatusCode == StatusCodes.BadNotSupported ||
+            ex.StatusCode == StatusCodes.BadServiceUnsupported)
+        {
+            _logger.LogWarning(
+                "Server does not support DeleteNodes service.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to delete remote node.");
+        }
+    }
+
+    private ushort GetNamespaceIndex(ISession session)
+    {
+        var namespaceUri = _configuration.DefaultNamespaceUri ?? "http://namotion.com/Interceptor/";
+        var index = session.NamespaceUris.GetIndex(namespaceUri);
+        return index >= 0 ? (ushort)index : (ushort)0;
+    }
+
+    private static List<(IInterceptorSubject Subject, object? Index)> ExtractSubjects(object? value)
+    {
+        var result = new List<(IInterceptorSubject, object?)>();
+
+        switch (value)
+        {
+            case IInterceptorSubject subject:
+                result.Add((subject, null));
+                break;
+
+            case IDictionary dictionary:
+                foreach (DictionaryEntry entry in dictionary)
+                {
+                    if (entry.Value is IInterceptorSubject s)
+                    {
+                        result.Add((s, entry.Key));
+                    }
+                }
+                break;
+
+            case ICollection collection:
+                var i = 0;
+                foreach (var item in collection)
+                {
+                    if (item is IInterceptorSubject s)
+                    {
+                        result.Add((s, i));
+                    }
+                    i++;
+                }
+                break;
+        }
+
+        return result;
     }
 
     internal void OnCurrentSessionChanged(ISession? previousSession, ISession? currentSession)

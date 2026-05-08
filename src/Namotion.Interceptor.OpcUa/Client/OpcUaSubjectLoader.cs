@@ -640,15 +640,36 @@ internal class OpcUaSubjectLoader
                     }
                     else
                     {
+                        // Claim source ownership for structural properties when remote node
+                        // management is enabled, so changes are captured by the ChangeQueueProcessor.
+                        if (_configuration.EnableRemoteNodeManagement)
+                        {
+                            _ownership.ClaimSource(property.Reference);
+                        }
+
                         await LoadSubjectReferenceAsync(property, nodeReference, subject, session, monitoredItems, loadedSubjects, subjectsByNodeId, subjectMap, cancellationToken).ConfigureAwait(false);
                     }
                 }
                 else if (property.IsSubjectCollection)
                 {
+                    // Claim source ownership for structural properties when remote node
+                    // management is enabled, so changes are captured by the ChangeQueueProcessor.
+                    if (_configuration.EnableRemoteNodeManagement)
+                    {
+                        _ownership.ClaimSource(property.Reference);
+                    }
+
                     await LoadSubjectCollectionAsync(property, childNodeId, monitoredItems, session, loadedSubjects, subjectsByNodeId, subjectMap, cancellationToken).ConfigureAwait(false);
                 }
                 else if (property.IsSubjectDictionary)
                 {
+                    // Claim source ownership for structural properties when remote node
+                    // management is enabled, so changes are captured by the ChangeQueueProcessor.
+                    if (_configuration.EnableRemoteNodeManagement)
+                    {
+                        _ownership.ClaimSource(property.Reference);
+                    }
+
                     await LoadSubjectDictionaryAsync(property, childNodeId, monitoredItems, session, loadedSubjects, subjectsByNodeId, subjectMap, cancellationToken).ConfigureAwait(false);
                 }
                 else

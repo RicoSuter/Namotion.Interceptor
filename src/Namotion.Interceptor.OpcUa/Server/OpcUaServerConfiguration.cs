@@ -75,6 +75,22 @@ public class OpcUaServerConfiguration
     public bool EnableStructureSynchronization { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether remote node management is allowed.
+    /// When true, connected clients can add and remove nodes via the OPC UA AddNodes
+    /// and DeleteNodes services, which creates or removes subjects in the local model.
+    /// Requires the client to also have EnableRemoteNodeManagement enabled.
+    /// Default is false.
+    /// </summary>
+    public bool AllowRemoteNodeManagement { get; set; }
+
+    /// <summary>
+    /// Gets or sets the subject factory used to create interceptor subject instances
+    /// when remote clients issue AddNodes requests.
+    /// Required when AllowRemoteNodeManagement is true.
+    /// </summary>
+    public OpcUaSubjectFactory? SubjectFactory { get; set; }
+
+    /// <summary>
     /// Gets or sets a value indicating whether periodic resynchronization is enabled.
     /// When true, the address space is periodically reconciled with the subject graph.
     /// Default is false.

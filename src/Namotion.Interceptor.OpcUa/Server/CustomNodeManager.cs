@@ -1,9 +1,12 @@
+using System.Collections;
 using System.Reflection;
 using Microsoft.Extensions.Logging;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Server;
@@ -647,6 +650,25 @@ internal class CustomNodeManager : CustomNodeManager2
     }
 
     /// <summary>
+    /// Gets the NodeId for a registered subject, or null if not found.
+    /// </summary>
+    public NodeId? TryGetNodeIdForSubject(RegisteredSubject subject)
+    {
+        if (_subjects.TryGetValue(subject, out var node))
+        {
+            return node.NodeId;
+        }
+
+        // Check root subject
+        if (subject.Subject == _subject && _configuration.RootName is not null)
+        {
+            return new NodeId(_configuration.RootName, NamespaceIndex);
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Tries to get the NodeId for a registered subject from the internal subjects dictionary.
     /// </summary>
     public bool TryGetNodeId(RegisteredSubject subject, out NodeId? nodeId)
@@ -734,5 +756,527 @@ internal class CustomNodeManager : CustomNodeManager2
         // For subjects, check if type has OpcUaNode attribute at class level
         var typeAttribute = subject.GetType().GetCustomAttribute<OpcUaNodeAttribute>();
         return _nodeFactory.GetTypeDefinitionId(this, typeAttribute);
+    }
+
+    /// <summary>
+    /// Processes an AddNodes request from a remote client.
+    /// Creates a subject in the local model and the corresponding OPC UA nodes.
+    /// Called by OpcUaStandardServer.AddNodesAsync when AllowRemoteNodeManagement is enabled.
+    /// </summary>
+    /// <returns>The result for each AddNodesItem, containing the assigned NodeId or error status.</returns>
+    public AddNodesResult HandleRemoteAddNode(AddNodesItem item)
+    {
+        if (_configuration.SubjectFactory is null)
+        {
+            return new AddNodesResult
+            {
+                StatusCode = StatusCodes.BadNotSupported,
+                AddedNodeId = NodeId.Null
+            };
+        }
+
+        _structureLock.Wait();
+        try
+        {
+            // Resolve the parent NodeId
+            var parentNodeId = ExpandedNodeId.ToNodeId(item.ParentNodeId, Server.NamespaceUris);
+            if (parentNodeId is null)
+            {
+                return new AddNodesResult
+                {
+                    StatusCode = StatusCodes.BadParentNodeIdInvalid,
+                    AddedNodeId = NodeId.Null
+                };
+            }
+
+            // Find the parent subject
+            var (parentRegisteredSubject, _) = FindSubjectByNodeId(parentNodeId);
+            if (parentRegisteredSubject is null)
+            {
+                return new AddNodesResult
+                {
+                    StatusCode = StatusCodes.BadParentNodeIdInvalid,
+                    AddedNodeId = NodeId.Null
+                };
+            }
+
+            // Find the property that matches the browse name
+            var (property, dictionaryKey, collectionIndex) = FindPropertyForBrowseName(
+                parentRegisteredSubject, item.BrowseName);
+
+            if (property is null)
+            {
+                return new AddNodesResult
+                {
+                    StatusCode = StatusCodes.BadBrowseNameInvalid,
+                    AddedNodeId = NodeId.Null
+                };
+            }
+
+            // Create a new subject using the SubjectFactory.
+            // For collections and dictionaries, use CreateCollectionSubjectAsync which
+            // derives the element type from the property type (e.g., TestPerson from TestPerson[]).
+            IInterceptorSubject newSubject;
+            try
+            {
+                var referenceDescription = new ReferenceDescription
+                {
+                    BrowseName = item.BrowseName,
+                    DisplayName = new LocalizedText(item.BrowseName.Name),
+                    NodeClass = NodeClass.Object
+                };
+
+                if (property.IsSubjectCollection || property.IsSubjectDictionary)
+                {
+                    newSubject = _configuration.SubjectFactory
+                        .CreateCollectionSubjectAsync(property, referenceDescription,
+                            dictionaryKey ?? (object?)collectionIndex,
+                            session: null!, CancellationToken.None)
+                        .GetAwaiter().GetResult();
+                }
+                else
+                {
+                    newSubject = _configuration.SubjectFactory
+                        .CreateSubjectAsync(property, referenceDescription,
+                            session: null!, CancellationToken.None)
+                        .GetAwaiter().GetResult();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to create subject for remote AddNodes request.");
+                return new AddNodesResult
+                {
+                    StatusCode = StatusCodes.BadInternalError,
+                    AddedNodeId = NodeId.Null
+                };
+            }
+
+            // Add the subject to the property. Uses SetValueFromSource to tag the change
+            // as originating from the server, preventing the ChangeQueueProcessor from
+            // sending it back to clients (loop prevention).
+            AddSubjectToProperty(property, newSubject, dictionaryKey, collectionIndex);
+
+            // Create OPC UA nodes for the new subject.
+            // Note: OnSubjectAttached will skip node creation because
+            // SubjectChangeContext.Current.Source == _serverService.
+            var lifecycleChange = new SubjectLifecycleChange
+            {
+                Subject = newSubject,
+                Property = property.Reference,
+                Index = dictionaryKey ?? (object?)collectionIndex,
+                ReferenceCount = 0
+            };
+
+            var createdNode = CreateDynamicSubjectNodes(lifecycleChange);
+            if (createdNode is null)
+            {
+                return new AddNodesResult
+                {
+                    StatusCode = StatusCodes.BadInternalError,
+                    AddedNodeId = NodeId.Null
+                };
+            }
+
+            _logger.LogInformation(
+                "Remote AddNodes: created subject for browse name '{BrowseName}' with NodeId {NodeId}.",
+                item.BrowseName, createdNode.NodeId);
+
+            FireModelChangeEvent(ModelChangeStructureVerbMask.NodeAdded, createdNode.NodeId);
+
+            return new AddNodesResult
+            {
+                StatusCode = StatusCodes.Good,
+                AddedNodeId = createdNode.NodeId
+            };
+        }
+        finally
+        {
+            _structureLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Processes a DeleteNodes request from a remote client.
+    /// Removes the subject from the local model and cleans up the OPC UA nodes.
+    /// Called by OpcUaStandardServer.DeleteNodesAsync when AllowRemoteNodeManagement is enabled.
+    /// </summary>
+    /// <returns>The status code for the delete operation.</returns>
+    public StatusCode HandleRemoteDeleteNode(DeleteNodesItem item)
+    {
+        _structureLock.Wait();
+        try
+        {
+            // Find the subject for this NodeId
+            var (registeredSubject, subject) = FindSubjectByNodeId(item.NodeId);
+            if (registeredSubject is null || subject is null)
+            {
+                return StatusCodes.BadNodeIdUnknown;
+            }
+
+            // Find the parent property that contains this subject
+            var parents = registeredSubject.Parents;
+            if (parents.Length == 0)
+            {
+                _logger.LogWarning(
+                    "Remote DeleteNodes: subject for NodeId {NodeId} has no parent property.",
+                    item.NodeId);
+                return StatusCodes.BadInternalError;
+            }
+
+            var parent = parents[0];
+
+            // Remove the subject from the parent property using SetValueFromSource
+            // (loop prevention: tagged as originating from the server).
+            RemoveSubjectFromProperty(parent.Property, subject, parent.Index);
+
+            // Clean up OPC UA nodes
+            RemoveSubjectNodes(subject);
+
+            _logger.LogInformation(
+                "Remote DeleteNodes: removed subject for NodeId {NodeId}.",
+                item.NodeId);
+
+            FireModelChangeEvent(ModelChangeStructureVerbMask.NodeDeleted, item.NodeId);
+
+            return StatusCodes.Good;
+        }
+        finally
+        {
+            _structureLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Finds a RegisteredSubject and its IInterceptorSubject given a NodeId.
+    /// Checks both the _subjects dictionary and the root subject.
+    /// </summary>
+    private (RegisteredSubject? RegisteredSubject, IInterceptorSubject? Subject) FindSubjectByNodeId(NodeId nodeId)
+    {
+        // Check root subject
+        var rootRegistered = _subject.TryGetRegisteredSubject();
+        if (rootRegistered is not null)
+        {
+            NodeId? rootNodeId = null;
+            if (_configuration.RootName is not null)
+            {
+                rootNodeId = new NodeId(_configuration.RootName, NamespaceIndex);
+            }
+            else if (_subjects.TryGetValue(rootRegistered, out var rootNode))
+            {
+                rootNodeId = rootNode.NodeId;
+            }
+
+            if (rootNodeId is not null && rootNodeId == nodeId)
+            {
+                return (rootRegistered, _subject);
+            }
+        }
+
+        // Check child subjects
+        foreach (var (registeredSubject, nodeState) in _subjects)
+        {
+            if (nodeState.NodeId == nodeId)
+            {
+                return (registeredSubject, registeredSubject.Subject);
+            }
+        }
+
+        // Check if it's a container folder (collection/dictionary folder nodes).
+        // Container folders don't map directly to subjects, but they parent
+        // the subjects inside. For AddNodes, the parentId may be a container folder.
+        // In that case, we need to find the subject that owns the container.
+        return (null, null);
+    }
+
+    /// <summary>
+    /// Finds a RegisteredSubject whose collection/dictionary container folder matches the given NodeId.
+    /// Returns the parent subject and the structural property that owns the container.
+    /// </summary>
+    public (RegisteredSubject? ParentSubject, RegisteredSubjectProperty? Property) FindContainerOwner(NodeId containerNodeId)
+    {
+        // The container folder's NodeId is typically: parentPath + propertyName
+        // We need to find which subject+property created this folder.
+        var containerIdStr = containerNodeId.Identifier as string;
+        if (containerIdStr is null)
+        {
+            return (null, null);
+        }
+
+        // Check root subject
+        var rootRegistered = _subject.TryGetRegisteredSubject();
+        if (rootRegistered is not null)
+        {
+            var rootPrefix = _configuration.RootName is not null
+                ? _configuration.RootName + PathDelimiter
+                : string.Empty;
+
+            foreach (var property in rootRegistered.Properties)
+            {
+                if (!property.IsSubjectCollection && !property.IsSubjectDictionary)
+                {
+                    continue;
+                }
+
+                var propertyName = property.ResolvePropertyName(_nodeMapper);
+                if (propertyName is not null && containerIdStr == rootPrefix + propertyName)
+                {
+                    return (rootRegistered, property);
+                }
+            }
+        }
+
+        // Check child subjects
+        foreach (var (registeredSubject, nodeState) in _subjects)
+        {
+            var parentPath = nodeState.NodeId.Identifier is string stringId
+                ? stringId + PathDelimiter
+                : string.Empty;
+
+            foreach (var property in registeredSubject.Properties)
+            {
+                if (!property.IsSubjectCollection && !property.IsSubjectDictionary)
+                {
+                    continue;
+                }
+
+                var propertyName = property.ResolvePropertyName(_nodeMapper);
+                if (propertyName is not null && containerIdStr == parentPath + propertyName)
+                {
+                    return (registeredSubject, property);
+                }
+            }
+        }
+
+        return (null, null);
+    }
+
+    /// <summary>
+    /// Finds the structural property that matches a browse name on a parent subject.
+    /// For collections: browse name is "PropertyName[index]"
+    /// For dictionaries: browse name is the dictionary key (parent is the container folder)
+    /// For references: browse name is the property name
+    /// </summary>
+    private (RegisteredSubjectProperty? Property, string? DictionaryKey, int? CollectionIndex)
+        FindPropertyForBrowseName(RegisteredSubject parentSubject, QualifiedName browseName)
+    {
+        var browseNameStr = browseName.Name;
+
+        foreach (var property in parentSubject.Properties)
+        {
+            var propertyName = property.ResolvePropertyName(_nodeMapper);
+            if (propertyName is null)
+            {
+                continue;
+            }
+
+            if (property.IsSubjectReference && propertyName == browseNameStr)
+            {
+                return (property, null, null);
+            }
+
+            if (property.IsSubjectCollection)
+            {
+                // Collection browse names: "PropertyName[index]"
+                if (browseNameStr.StartsWith(propertyName + "[") && browseNameStr.EndsWith("]"))
+                {
+                    var indexStr = browseNameStr.Substring(
+                        propertyName.Length + 1,
+                        browseNameStr.Length - propertyName.Length - 2);
+
+                    if (int.TryParse(indexStr, out var index))
+                    {
+                        return (property, null, index);
+                    }
+                }
+            }
+
+            if (property.IsSubjectDictionary)
+            {
+                // For dictionaries, the parentId is the container folder.
+                // The browse name is the dictionary key itself.
+                return (property, browseNameStr, null);
+            }
+        }
+
+        return (null, null, null);
+    }
+
+    /// <summary>
+    /// Adds a subject to a structural property (collection, dictionary, or reference).
+    /// Uses SetValueFromSource to tag the change as originating from the server.
+    /// </summary>
+    private void AddSubjectToProperty(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject newSubject,
+        string? dictionaryKey,
+        int? collectionIndex)
+    {
+        var propertyRef = property.Reference;
+
+        if (property.IsSubjectReference)
+        {
+            propertyRef.SetValueFromSource(_serverService, null, null, newSubject);
+        }
+        else if (property.IsSubjectCollection)
+        {
+            var currentValue = property.GetValue();
+            var newCollection = AppendToCollection(currentValue, newSubject, property.Type);
+            propertyRef.SetValueFromSource(_serverService, null, null, newCollection);
+        }
+        else if (property.IsSubjectDictionary && dictionaryKey is not null)
+        {
+            var currentValue = property.GetValue();
+            var newDictionary = AddToDictionary(currentValue, dictionaryKey, newSubject, property.Type);
+            propertyRef.SetValueFromSource(_serverService, null, null, newDictionary);
+        }
+    }
+
+    /// <summary>
+    /// Removes a subject from a structural property (collection, dictionary, or reference).
+    /// Uses SetValueFromSource to tag the change as originating from the server.
+    /// </summary>
+    private void RemoveSubjectFromProperty(
+        RegisteredSubjectProperty property,
+        IInterceptorSubject subject,
+        object? index)
+    {
+        var propertyRef = property.Reference;
+
+        if (property.IsSubjectReference)
+        {
+            var factory = _configuration.SubjectFactory;
+            if (factory is not null)
+            {
+                var emptySubject = factory.CreateSubjectAsync(property, new ReferenceDescription
+                {
+                    BrowseName = new QualifiedName(property.Name, NamespaceIndex),
+                    DisplayName = new LocalizedText(property.Name),
+                    NodeClass = NodeClass.Object
+                }, session: null!, CancellationToken.None).GetAwaiter().GetResult();
+
+                propertyRef.SetValueFromSource(_serverService, null, null, emptySubject);
+            }
+        }
+        else if (property.IsSubjectCollection)
+        {
+            var currentValue = property.GetValue();
+            var newCollection = RemoveFromCollection(currentValue, subject, property.Type);
+            propertyRef.SetValueFromSource(_serverService, null, null, newCollection);
+        }
+        else if (property.IsSubjectDictionary)
+        {
+            var currentValue = property.GetValue();
+            var newDictionary = RemoveFromDictionary(currentValue, subject, property.Type);
+            propertyRef.SetValueFromSource(_serverService, null, null, newDictionary);
+        }
+    }
+
+    private static object AppendToCollection(object? currentValue, IInterceptorSubject newItem, Type propertyType)
+    {
+        if (propertyType.IsArray)
+        {
+            var elementType = propertyType.GetElementType()!;
+            var existingArray = currentValue as Array ?? Array.CreateInstance(elementType, 0);
+            var newArray = Array.CreateInstance(elementType, existingArray.Length + 1);
+            Array.Copy(existingArray, newArray, existingArray.Length);
+            newArray.SetValue(newItem, existingArray.Length);
+            return newArray;
+        }
+
+        if (currentValue is IList list)
+        {
+            var newList = (IList)Activator.CreateInstance(currentValue.GetType())!;
+            foreach (var item in list)
+            {
+                newList.Add(item);
+            }
+            newList.Add(newItem);
+            return newList;
+        }
+
+        var subjectType = newItem.GetType();
+        var fallbackArray = Array.CreateInstance(subjectType, 1);
+        fallbackArray.SetValue(newItem, 0);
+        return fallbackArray;
+    }
+
+    private static object RemoveFromCollection(object? currentValue, IInterceptorSubject itemToRemove, Type propertyType)
+    {
+        if (propertyType.IsArray)
+        {
+            var elementType = propertyType.GetElementType()!;
+            if (currentValue is not Array existingArray)
+            {
+                return Array.CreateInstance(elementType, 0);
+            }
+
+            var items = new List<object>();
+            foreach (var item in existingArray)
+            {
+                if (!ReferenceEquals(item, itemToRemove))
+                {
+                    items.Add(item);
+                }
+            }
+
+            var newArray = Array.CreateInstance(elementType, items.Count);
+            for (var i = 0; i < items.Count; i++)
+            {
+                newArray.SetValue(items[i], i);
+            }
+            return newArray;
+        }
+
+        if (currentValue is IList list)
+        {
+            var newList = (IList)Activator.CreateInstance(currentValue.GetType())!;
+            foreach (var item in list)
+            {
+                if (!ReferenceEquals(item, itemToRemove))
+                {
+                    newList.Add(item);
+                }
+            }
+            return newList;
+        }
+
+        return currentValue ?? Array.Empty<object>();
+    }
+
+    private static object AddToDictionary(object? currentValue, string key, IInterceptorSubject newItem, Type propertyType)
+    {
+        if (currentValue is IDictionary dict)
+        {
+            var newDict = (IDictionary)Activator.CreateInstance(currentValue.GetType())!;
+            foreach (DictionaryEntry entry in dict)
+            {
+                newDict[entry.Key] = entry.Value;
+            }
+            newDict[key] = newItem;
+            return newDict;
+        }
+
+        var newDictionary = (IDictionary)Activator.CreateInstance(propertyType)!;
+        newDictionary[key] = newItem;
+        return newDictionary;
+    }
+
+    private static object RemoveFromDictionary(object? currentValue, IInterceptorSubject itemToRemove, Type propertyType)
+    {
+        if (currentValue is IDictionary dict)
+        {
+            var newDict = (IDictionary)Activator.CreateInstance(currentValue.GetType())!;
+            foreach (DictionaryEntry entry in dict)
+            {
+                if (!ReferenceEquals(entry.Value, itemToRemove))
+                {
+                    newDict[entry.Key] = entry.Value;
+                }
+            }
+            return newDict;
+        }
+
+        return currentValue ?? Activator.CreateInstance(propertyType)!;
     }
 }

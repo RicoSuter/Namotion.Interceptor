@@ -228,6 +228,16 @@ public class OpcUaClientConfiguration
     public bool EnableStructureSynchronization { get; set; }
 
     /// <summary>
+    /// Gets or sets a value indicating whether remote node management is enabled.
+    /// When true, the client sends AddNodes/DeleteNodes requests to the server
+    /// when the local subject graph changes structurally (collection add/remove,
+    /// dictionary add/remove, reference set/clear).
+    /// Requires the server to also have AllowRemoteNodeManagement enabled.
+    /// Default is false.
+    /// </summary>
+    public bool EnableRemoteNodeManagement { get; set; }
+
+    /// <summary>
     /// Gets or sets a value indicating whether periodic resynchronization is enabled.
     /// When true, the client periodically re-browses the server to detect structural changes.
     /// Default is false.
