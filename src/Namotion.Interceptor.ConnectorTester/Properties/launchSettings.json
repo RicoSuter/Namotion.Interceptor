@@ -1,5 +1,9 @@
 {
   "profiles": {
+    "opcua-structural": {
+      "commandName": "Project",
+      "environmentVariables": { "DOTNET_ENVIRONMENT": "opcua-structural" }
+    },
     "opcua-chaos": {
       "commandName": "Project",
       "environmentVariables": { "DOTNET_ENVIRONMENT": "opcua-chaos" }
