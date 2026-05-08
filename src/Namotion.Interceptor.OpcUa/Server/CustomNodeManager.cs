@@ -4,6 +4,7 @@ using Namotion.Interceptor.OpcUa.Attributes;
 using Namotion.Interceptor.OpcUa.Mapping;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
 using Opc.Ua.Server;
 
@@ -454,6 +455,193 @@ internal class CustomNodeManager : CustomNodeManager2
             _subjects[registeredSubject] = node;
             CreateSubjectNodes(node.NodeId, registeredSubject, path + PathDelimiter);
         }
+    }
+
+    /// <summary>
+    /// Creates OPC UA nodes for a subject that was dynamically attached at runtime.
+    /// Returns the created node, or null if the subject could not be added (e.g., parent not found).
+    /// </summary>
+    public NodeState? CreateDynamicSubjectNodes(SubjectLifecycleChange change)
+    {
+        if (change.Property is not { } property)
+        {
+            return null;
+        }
+
+        var parentSubject = property.Subject.TryGetRegisteredSubject();
+        if (parentSubject is null)
+        {
+            return null;
+        }
+
+        var registeredProperty = property.TryGetRegisteredProperty();
+        if (registeredProperty is null)
+        {
+            return null;
+        }
+
+        var registeredSubject = change.Subject.TryGetRegisteredSubject();
+        if (registeredSubject is null)
+        {
+            return null;
+        }
+
+        _structureLock.Wait();
+        try
+        {
+            // Already created (dedup)
+            if (_subjects.TryGetValue(registeredSubject, out var existing))
+            {
+                return existing;
+            }
+
+            // Find the parent node in the address space
+            NodeId? parentNodeId;
+            string parentPath;
+
+            if (_subjects.TryGetValue(parentSubject, out var parentNode))
+            {
+                parentNodeId = parentNode.NodeId;
+                // Reconstruct the path prefix from the parent node's NodeId string identifier
+                parentPath = parentNode.NodeId.Identifier is string stringId
+                    ? stringId + PathDelimiter
+                    : string.Empty;
+            }
+            else if (parentSubject.Subject == _subject)
+            {
+                // Parent is the root subject
+                if (_configuration.RootName is not null)
+                {
+                    var rootNodeId = new NodeId(_configuration.RootName, NamespaceIndex);
+                    parentNodeId = rootNodeId;
+                    parentPath = _configuration.RootName + PathDelimiter;
+                }
+                else
+                {
+                    parentNodeId = ObjectIds.ObjectsFolder;
+                    parentPath = string.Empty;
+                }
+            }
+            else
+            {
+                return null;
+            }
+
+            var propertyName = registeredProperty.ResolvePropertyName(_nodeMapper);
+            if (propertyName is null)
+            {
+                return null;
+            }
+
+            // For collections and dictionaries, we need to find or create the container folder
+            // and then add the child beneath it
+            if (registeredProperty.IsSubjectCollection)
+            {
+                var folderNodeId = _nodeFactory.GetNodeId(this, _nodeMapper.TryGetNodeConfiguration(registeredProperty), parentPath + propertyName);
+                var folderNode = FindNodeInAddressSpace(folderNodeId);
+                if (folderNode is null)
+                {
+                    return null;
+                }
+
+                var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(registeredProperty);
+                var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(this, nodeConfiguration);
+                var childBrowseName = new QualifiedName($"{propertyName}[{change.Index}]", NamespaceIndex);
+                var childPath = $"{parentPath}{propertyName}[{change.Index}]";
+
+                CreateChildObject(registeredProperty, childBrowseName, change.Subject, childPath, folderNode.NodeId, childReferenceTypeId);
+                return _subjects.GetValueOrDefault(registeredSubject);
+            }
+            else if (registeredProperty.IsSubjectDictionary)
+            {
+                var folderNodeId = _nodeFactory.GetNodeId(this, _nodeMapper.TryGetNodeConfiguration(registeredProperty), parentPath + propertyName);
+                var folderNode = FindNodeInAddressSpace(folderNodeId);
+                if (folderNode is null)
+                {
+                    return null;
+                }
+
+                var indexString = change.Index?.ToString();
+                if (string.IsNullOrEmpty(indexString))
+                {
+                    return null;
+                }
+
+                var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(registeredProperty);
+                var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(this, nodeConfiguration);
+                var childBrowseName = new QualifiedName(indexString, NamespaceIndex);
+                var childPath = parentPath + propertyName + PathDelimiter + change.Index;
+
+                CreateChildObject(registeredProperty, childBrowseName, change.Subject, childPath, folderNode.NodeId, childReferenceTypeId);
+                return _subjects.GetValueOrDefault(registeredSubject);
+            }
+            else if (registeredProperty.IsSubjectReference)
+            {
+                var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(registeredProperty);
+                if (nodeConfiguration?.NodeClass == OpcUaNodeClass.Variable)
+                {
+                    CreateVariableNodeForSubject(propertyName, registeredProperty, parentNodeId, parentPath);
+                }
+                else
+                {
+                    var child = new SubjectPropertyChild { Subject = change.Subject, Index = change.Index };
+                    CreateReferenceObjectNode(propertyName, registeredProperty, child, parentNodeId, parentPath);
+                }
+                return _subjects.GetValueOrDefault(registeredSubject);
+            }
+
+            return null;
+        }
+        finally
+        {
+            _structureLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Tries to get the NodeId for a registered subject from the internal subjects dictionary.
+    /// </summary>
+    public bool TryGetNodeId(RegisteredSubject subject, out NodeId? nodeId)
+    {
+        if (_subjects.TryGetValue(subject, out var node))
+        {
+            nodeId = node.NodeId;
+            return true;
+        }
+        nodeId = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Fires a GeneralModelChangeEvent to notify connected clients of address space structure changes.
+    /// </summary>
+    public void FireModelChangeEvent(ModelChangeStructureVerbMask verb, NodeId affectedNodeId)
+    {
+        var context = SystemContext;
+        var eventState = new GeneralModelChangeEventState(null);
+
+        eventState.Initialize(
+            context,
+            source: null,
+            EventSeverity.Low,
+            new LocalizedText("Address space structure changed"));
+
+        eventState.SetChildValue(context, BrowseNames.SourceNode, ObjectIds.Server, false);
+        eventState.SetChildValue(context, BrowseNames.SourceName, "Server", false);
+        eventState.SetChildValue(context, BrowseNames.Changes,
+            new[]
+            {
+                new ModelChangeStructureDataType
+                {
+                    Verb = (byte)verb,
+                    Affected = affectedNodeId,
+                    AffectedType = ObjectTypeIds.BaseObjectType
+                }
+            }, false);
+        eventState.SetChildValue(context, BrowseNames.Time, DateTime.UtcNow, false);
+        eventState.SetChildValue(context, BrowseNames.ReceiveTime, DateTime.UtcNow, false);
+
+        Server.ReportEvent(eventState);
     }
 
     private NodeId? GetTypeDefinitionIdForSubject(IInterceptorSubject subject)

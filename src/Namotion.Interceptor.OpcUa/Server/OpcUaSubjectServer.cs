@@ -160,6 +160,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
         _lifecycleInterceptor = _context.TryGetLifecycleInterceptor();
         if (_lifecycleInterceptor is not null)
         {
+            _lifecycleInterceptor.SubjectAttached += OnSubjectAttached;
             _lifecycleInterceptor.SubjectDetaching += OnSubjectDetaching;
         }
 
@@ -171,6 +172,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
         {
             if (_lifecycleInterceptor is not null)
             {
+                _lifecycleInterceptor.SubjectAttached -= OnSubjectAttached;
                 _lifecycleInterceptor.SubjectDetaching -= OnSubjectDetaching;
             }
         }
@@ -386,8 +388,40 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
         }
     }
 
+    private void OnSubjectAttached(SubjectLifecycleChange change)
+    {
+        var nodeManager = _server?.GetNodeManager();
+        if (nodeManager is null)
+        {
+            return;
+        }
+
+        var createdNode = nodeManager.CreateDynamicSubjectNodes(change);
+        if (createdNode is not null && _configuration.EnableStructureSynchronization)
+        {
+            nodeManager.FireModelChangeEvent(ModelChangeStructureVerbMask.NodeAdded, createdNode.NodeId);
+        }
+    }
+
     private void OnSubjectDetaching(SubjectLifecycleChange change)
     {
+        var nodeManager = _server?.GetNodeManager();
+        NodeId? nodeId = null;
+
+        if (nodeManager is not null)
+        {
+            var registeredSubject = change.Subject.TryGetRegisteredSubject();
+            if (registeredSubject is not null)
+            {
+                nodeManager.TryGetNodeId(registeredSubject, out nodeId);
+            }
+        }
+
         _server?.RemoveSubjectNodes(change.Subject);
+
+        if (nodeId is not null && _configuration.EnableStructureSynchronization && nodeManager is not null)
+        {
+            nodeManager.FireModelChangeEvent(ModelChangeStructureVerbMask.NodeDeleted, nodeId);
+        }
     }
 }

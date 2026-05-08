@@ -69,6 +69,11 @@ internal class OpcUaStandardServer : StandardServer
     }
 
     /// <summary>
+    /// Gets the custom node manager instance, or null if the server hasn't been started yet.
+    /// </summary>
+    internal CustomNodeManager? GetNodeManager() => _nodeManagerFactory.NodeManager;
+
+    /// <summary>
     /// Gets the node manager's lock object for thread-safe node updates.
     /// This is the same lock used by the SDK for Read/Write operations.
     /// </summary>

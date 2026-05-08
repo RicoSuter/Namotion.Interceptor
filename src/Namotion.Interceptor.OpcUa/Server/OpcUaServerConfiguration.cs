@@ -67,6 +67,28 @@ public class OpcUaServerConfiguration
     public ITelemetryContext TelemetryContext { get; set; } = NullTelemetryContext.Instance;
 
     /// <summary>
+    /// Gets or sets a value indicating whether structural synchronization is enabled.
+    /// When true, ModelChangeEvents are fired when subjects are attached or detached,
+    /// notifying connected clients of address space changes.
+    /// Default is false.
+    /// </summary>
+    public bool EnableStructureSynchronization { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether periodic resynchronization is enabled.
+    /// When true, the address space is periodically reconciled with the subject graph.
+    /// Default is false.
+    /// </summary>
+    public bool EnablePeriodicResynchronization { get; set; }
+
+    /// <summary>
+    /// Gets or sets the interval for periodic resynchronization.
+    /// Only used when <see cref="EnablePeriodicResynchronization"/> is true.
+    /// Default is 30 seconds.
+    /// </summary>
+    public TimeSpan PeriodicResynchronizationInterval { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// Gets or sets a value indicating whether to automatically accept untrusted certificates.
     /// Should only be set to true for testing or development scenarios.
     /// Default is false for security.
