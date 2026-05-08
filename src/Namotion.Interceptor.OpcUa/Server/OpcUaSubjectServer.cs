@@ -470,7 +470,6 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
         _lifecycleInterceptor = _context.TryGetLifecycleInterceptor();
         if (_lifecycleInterceptor is not null)
         {
-            _lifecycleInterceptor.SubjectAttached += OnSubjectAttached;
             _lifecycleInterceptor.SubjectDetaching += OnSubjectDetaching;
         }
 
@@ -482,7 +481,6 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
         {
             if (_lifecycleInterceptor is not null)
             {
-                _lifecycleInterceptor.SubjectAttached -= OnSubjectAttached;
                 _lifecycleInterceptor.SubjectDetaching -= OnSubjectDetaching;
             }
         }
@@ -698,43 +696,10 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
         }
     }
 
-    private void OnSubjectAttached(SubjectLifecycleChange change)
-    {
-        // Loop prevention: skip if this structural change originated from our own OPC UA writes.
-        // SubjectChangeContext.Current.Source is set by SetValueFromSource and is available here
-        // because lifecycle events fire synchronously within the WriteProperty interceptor chain.
-        if (SubjectChangeContext.Current.Source == this)
-        {
-            return;
-        }
-
-        var nodeManager = _server?.GetNodeManager();
-        if (nodeManager is null)
-        {
-            return;
-        }
-
-        // When structural sync is enabled AND we're doing in-place reference replacement,
-        // skip node creation here. HandleStructuralChange will handle it via the rebind path.
-        if (_configuration.EnableStructureSynchronization)
-        {
-            lock (_pendingDetachInfo)
-            {
-                if (_pendingDetachInfo.Count > 0)
-                {
-                    // A detach was recorded, meaning this attach is part of a reference replacement.
-                    // HandleStructuralChange will handle the rebinding.
-                    return;
-                }
-            }
-        }
-
-        var createdNode = nodeManager.CreateDynamicSubjectNodes(change);
-        if (createdNode is not null && _configuration.EnableStructureSynchronization)
-        {
-            nodeManager.FireModelChangeEvent(ModelChangeStructureVerbMask.NodeAdded, createdNode.NodeId);
-        }
-    }
+    // Node creation is handled exclusively by HandleStructuralChange via the
+    // ChangeQueueProcessor (reacting to property changes). Lifecycle events
+    // (SubjectAttached/SubjectDetaching) are only used for metadata capture
+    // and cleanup, never for node creation/removal.
 
     private void OnSubjectDetaching(SubjectLifecycleChange change)
     {
@@ -746,42 +711,44 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
 
         if (_configuration.EnableStructureSynchronization)
         {
-            // When structural sync is enabled, defer node removal to HandleStructuralChange
-            // which runs later via the ChangeQueueProcessor. Capture metadata now (while
-            // the subject is still registered) so HandleStructuralChange can find it later
-            // (TryGetRegisteredSubject returns null after detach).
-            var nodeManager = server.GetNodeManager();
-            if (nodeManager is not null)
+            try
             {
-                var registeredSubject = change.Subject.TryGetRegisteredSubject();
-                if (registeredSubject is not null &&
-                    nodeManager.TryGetNodeId(registeredSubject, out var nodeId) &&
-                    nodeId is not null)
+                var nodeManager = server.GetNodeManager();
+                if (nodeManager is not null)
                 {
-                    // Capture variable node references for potential in-place replacement
-                    var variableNodes = new Dictionary<string, BaseDataVariableState>();
-                    foreach (var property in registeredSubject.Properties)
+                    var registeredSubject = change.Subject.TryGetRegisteredSubject();
+                    if (registeredSubject is not null &&
+                        nodeManager.TryGetNodeId(registeredSubject, out var nodeId) &&
+                        nodeId is not null)
                     {
-                        if (property.Reference.TryGetPropertyData(OpcUaVariableKey, out var data) &&
-                            data is BaseDataVariableState variableNode)
+                        var variableNodes = new Dictionary<string, BaseDataVariableState>();
+                        foreach (var property in registeredSubject.Properties)
                         {
-                            var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
-                            if (propertyName is not null)
+                            if (property.Reference.TryGetPropertyData(OpcUaVariableKey, out var data) &&
+                                data is BaseDataVariableState variableNode)
                             {
-                                variableNodes[propertyName] = variableNode;
+                                var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
+                                if (propertyName is not null)
+                                {
+                                    variableNodes[propertyName] = variableNode;
+                                }
                             }
                         }
-                    }
 
-                    lock (_pendingDetachInfo)
-                    {
-                        _pendingDetachInfo[change.Subject] = new PendingDetachInfo
+                        lock (_pendingDetachInfo)
+                        {
+                            _pendingDetachInfo[change.Subject] = new PendingDetachInfo
                         {
                             NodeId = nodeId,
                             VariableNodes = variableNodes
                         };
                     }
                 }
+            }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to capture PendingDetachInfo for subject {SubjectType}", change.Subject.GetType().Name);
             }
             return;
         }

@@ -871,11 +871,12 @@ public class StructuralSyncTests
             server.Root.People = server.Root.People.Where(p => p.FirstName == "Bob").ToArray();
             logger.Log("Server removed first item, keeping Bob");
 
-            // Assert: Client should have 1 item remaining (Bob)
+            // Assert: Client should have 1 item remaining (Bob) with values loaded
             await AsyncTestHelpers.WaitUntilAsync(
-                () => client.Root.People.Length == 1,
+                () => client.Root.People.Length == 1
+                      && client.Root.People[0].FirstName == "Bob",
                 timeout: TimeSpan.FromSeconds(30),
-                message: "Client should see specific item removed while others remain");
+                message: "Client should see specific item removed while others remain, with values");
 
             Assert.Single(client.Root.People);
             Assert.Equal("Bob", client.Root.People[0].FirstName);
