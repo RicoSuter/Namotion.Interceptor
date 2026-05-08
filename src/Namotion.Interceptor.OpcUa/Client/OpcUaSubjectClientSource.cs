@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Logging;
@@ -630,28 +629,11 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 continue;
             }
 
-            var oldSubjects = ExtractSubjects(change.GetOldValue<object?>());
-            var newSubjects = ExtractSubjects(change.GetNewValue<object?>());
+            var oldSubjects = OpcUaStructuralChangeHelper.ExtractSubjects(change.GetOldValue<object?>());
+            var newSubjects = OpcUaStructuralChangeHelper.ExtractSubjects(change.GetNewValue<object?>());
 
             // Determine added and removed subjects
-            var addedSubjects = new List<(IInterceptorSubject Subject, object? Index)>();
-            var removedSubjects = new List<(IInterceptorSubject Subject, object? Index)>();
-
-            foreach (var (subject, index) in newSubjects)
-            {
-                if (!oldSubjects.Any(o => ReferenceEquals(o.Subject, subject)))
-                {
-                    addedSubjects.Add((subject, index));
-                }
-            }
-
-            foreach (var (subject, index) in oldSubjects)
-            {
-                if (!newSubjects.Any(n => ReferenceEquals(n.Subject, subject)))
-                {
-                    removedSubjects.Add((subject, index));
-                }
-            }
+            var (addedSubjects, removedSubjects) = OpcUaStructuralChangeHelper.ComputeSubjectDiff(oldSubjects, newSubjects);
 
             _logger.LogInformation(
                 "Client structural change for property {PropertyName}: {AddedCount} added, {RemovedCount} removed.",
@@ -880,42 +862,6 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         var namespaceUri = _configuration.DefaultNamespaceUri ?? "http://namotion.com/Interceptor/";
         var index = session.NamespaceUris.GetIndex(namespaceUri);
         return index >= 0 ? (ushort)index : (ushort)0;
-    }
-
-    private static List<(IInterceptorSubject Subject, object? Index)> ExtractSubjects(object? value)
-    {
-        var result = new List<(IInterceptorSubject, object?)>();
-
-        switch (value)
-        {
-            case IInterceptorSubject subject:
-                result.Add((subject, null));
-                break;
-
-            case IDictionary dictionary:
-                foreach (DictionaryEntry entry in dictionary)
-                {
-                    if (entry.Value is IInterceptorSubject s)
-                    {
-                        result.Add((s, entry.Key));
-                    }
-                }
-                break;
-
-            case ICollection collection:
-                var i = 0;
-                foreach (var item in collection)
-                {
-                    if (item is IInterceptorSubject s)
-                    {
-                        result.Add((s, i));
-                    }
-                    i++;
-                }
-                break;
-        }
-
-        return result;
     }
 
     internal void OnCurrentSessionChanged(ISession? previousSession, ISession? currentSession)

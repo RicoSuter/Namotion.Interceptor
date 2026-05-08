@@ -61,7 +61,6 @@ internal class OpcUaSubjectLoader
     /// <param name="session">The active OPC UA session.</param>
     /// <param name="subjectMap">The map from NodeId to subject for dedup and cleanup.</param>
     /// <param name="subscriptionManager">The subscription manager for adding/removing monitored items.</param>
-    /// <param name="skipIfInSync">When true, skip collections/dictionaries that already match the remote state.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The list of new monitored items that were created during reconciliation.</returns>
     public async Task<IReadOnlyList<MonitoredItem>> ReconcileSubtreeAsync(
@@ -70,14 +69,13 @@ internal class OpcUaSubjectLoader
         ISession session,
         ConnectorSubjectMap<NodeId> subjectMap,
         SubscriptionManager subscriptionManager,
-        bool skipIfInSync,
         CancellationToken cancellationToken)
     {
         var newMonitoredItems = new List<MonitoredItem>();
         var visitedSubjects = new HashSet<IInterceptorSubject>();
         await ReconcileSubtreeInternalAsync(
             parentSubject, parentNodeId, session, subjectMap,
-            newMonitoredItems, visitedSubjects, skipIfInSync, cancellationToken).ConfigureAwait(false);
+            newMonitoredItems, visitedSubjects, cancellationToken).ConfigureAwait(false);
 
         // Register any new monitored items with existing subscriptions
         if (newMonitoredItems.Count > 0)
@@ -104,7 +102,6 @@ internal class OpcUaSubjectLoader
         ConnectorSubjectMap<NodeId> subjectMap,
         List<MonitoredItem> newMonitoredItems,
         HashSet<IInterceptorSubject> visitedSubjects,
-        bool skipIfInSync,
         CancellationToken cancellationToken)
     {
         if (!visitedSubjects.Add(parentSubject))
@@ -131,13 +128,13 @@ internal class OpcUaSubjectLoader
             {
                 await ReconcileCollectionPropertyAsync(
                     property, parentSubject, parentNodeId, remoteChildren, session, subjectMap,
-                    newMonitoredItems, visitedSubjects, skipIfInSync, cancellationToken).ConfigureAwait(false);
+                    newMonitoredItems, visitedSubjects, cancellationToken).ConfigureAwait(false);
             }
             else if (property.IsSubjectDictionary)
             {
                 await ReconcileDictionaryPropertyAsync(
                     property, parentSubject, parentNodeId, remoteChildren, session, subjectMap,
-                    newMonitoredItems, visitedSubjects, skipIfInSync, cancellationToken).ConfigureAwait(false);
+                    newMonitoredItems, visitedSubjects, cancellationToken).ConfigureAwait(false);
             }
             else if (property.IsSubjectReference)
             {
@@ -163,7 +160,7 @@ internal class OpcUaSubjectLoader
                 {
                     await ReconcileSubtreeInternalAsync(
                         child.Subject, childNodeId, session, subjectMap,
-                        newMonitoredItems, visitedSubjects, skipIfInSync, cancellationToken).ConfigureAwait(false);
+                        newMonitoredItems, visitedSubjects, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -178,7 +175,6 @@ internal class OpcUaSubjectLoader
         ConnectorSubjectMap<NodeId> subjectMap,
         List<MonitoredItem> newMonitoredItems,
         HashSet<IInterceptorSubject> visitedSubjects,
-        bool skipIfInSync,
         CancellationToken cancellationToken)
     {
         var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
@@ -203,75 +199,80 @@ internal class OpcUaSubjectLoader
         }
 
         var containerNodeId = ExpandedNodeId.ToNodeId(containerNode.NodeId, session.NamespaceUris);
-
-        // Browse the container's children from the server to see what currently exists.
         var remoteContainerChildren = await BrowseNodeAsync(containerNodeId, session, cancellationToken).ConfigureAwait(false);
 
-        // When this is a coalesced/redundant reconciliation pass, check if local state already
-        // matches remote state (same count, same NodeIds in order). This avoids destroying
-        // perfectly good subjects and monitored items. On the first pass (skipIfInSync=false),
-        // always reload because the same NodeId path can be reused for different subjects.
-        if (skipIfInSync && IsCollectionInSync(property, remoteContainerChildren, session))
+        // Build remote NodeId set
+        var remoteNodeIds = new HashSet<NodeId>();
+        var remoteByNodeId = new Dictionary<NodeId, ReferenceDescription>();
+        foreach (var remoteChild in remoteContainerChildren)
         {
-            _logger.LogDebug(
-                "ReconcileCollectionPropertyAsync: property {PropertyName} already in sync ({Count} children). Skipping reload.",
-                propertyName, remoteContainerChildren.Count);
-            return;
+            var id = ExpandedNodeId.ToNodeId(remoteChild.NodeId, session.NamespaceUris);
+            if (id is not null)
+            {
+                remoteNodeIds.Add(id);
+                remoteByNodeId[id] = remoteChild;
+            }
         }
 
-        // Clear existing collection so LoadSubjectCollectionAsync creates fresh subjects
-        // for all positions (prevents index-based reuse of replaced subjects).
-        var emptyCollection = DefaultSubjectFactory.Instance
-            .CreateSubjectCollection(property.Type, Array.Empty<IInterceptorSubject>());
-        property.SetValueFromSource(_source, null, null, emptyCollection);
-
-        // Re-load the entire collection from the server.
-        var loadedSubjects = new HashSet<IInterceptorSubject>();
-        var subjectsByNodeId = new Dictionary<NodeId, IInterceptorSubject>();
-        await LoadSubjectCollectionAsync(
-            property, containerNodeId, newMonitoredItems, session,
-            loadedSubjects, subjectsByNodeId, subjectMap, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Checks whether the local collection children match the remote OPC UA children.
-    /// Returns true if the count matches and each local child's stored NodeId matches
-    /// the corresponding remote child's NodeId.
-    /// </summary>
-    private static bool IsCollectionInSync(
-        RegisteredSubjectProperty property,
-        ReferenceDescriptionCollection remoteContainerChildren,
-        ISession session)
-    {
+        // Build local NodeId → subject map
         var localChildren = property.Children.ToArray();
-
-        if (localChildren.Length != remoteContainerChildren.Count)
+        var localByNodeId = new Dictionary<NodeId, IInterceptorSubject>();
+        foreach (var child in localChildren)
         {
-            return false;
-        }
-
-        for (var i = 0; i < localChildren.Length; i++)
-        {
-            var localSubject = localChildren[i].Subject;
-            if (localSubject is null)
+            if (child.Subject is not null &&
+                child.Subject.TryGetData(OpcUaSubjectClientSource.SubjectNodeIdDataKey, out var obj) &&
+                obj is NodeId nodeId)
             {
-                return false;
-            }
-
-            if (!localSubject.TryGetData(OpcUaSubjectClientSource.SubjectNodeIdDataKey, out var localNodeIdObj) ||
-                localNodeIdObj is not NodeId localNodeId)
-            {
-                return false;
-            }
-
-            var remoteNodeId = ExpandedNodeId.ToNodeId(remoteContainerChildren[i].NodeId, session.NamespaceUris);
-            if (remoteNodeId is null || !localNodeId.Equals(remoteNodeId))
-            {
-                return false;
+                localByNodeId[nodeId] = child.Subject;
             }
         }
 
-        return true;
+        // Incremental diff: add what's new, remove what's gone, keep existing
+        var hasChanges = false;
+        var result = new List<IInterceptorSubject>();
+
+        // Keep existing subjects that are still present remotely (preserves monitored items)
+        foreach (var child in localChildren)
+        {
+            if (child.Subject is not null &&
+                child.Subject.TryGetData(OpcUaSubjectClientSource.SubjectNodeIdDataKey, out var obj) &&
+                obj is NodeId nodeId && remoteNodeIds.Contains(nodeId))
+            {
+                result.Add(child.Subject);
+            }
+            else if (child.Subject is not null)
+            {
+                hasChanges = true;
+            }
+        }
+
+        // Add new remote subjects not present locally
+        foreach (var remoteChild in remoteContainerChildren)
+        {
+            var id = ExpandedNodeId.ToNodeId(remoteChild.NodeId, session.NamespaceUris);
+            if (id is not null && !localByNodeId.ContainsKey(id))
+            {
+                var newSubject = await _configuration.SubjectFactory.CreateCollectionSubjectAsync(
+                    property, remoteChild, result.Count, session, cancellationToken).ConfigureAwait(false);
+                newSubject.Context.AddFallbackContext(parentSubject.Context);
+
+                var loadedSubjects = new HashSet<IInterceptorSubject>();
+                var subjectsByNodeId = new Dictionary<NodeId, IInterceptorSubject>();
+                await LoadSubjectAsync(
+                    newSubject, remoteChild, session, newMonitoredItems, loadedSubjects,
+                    subjectsByNodeId, subjectMap, cancellationToken).ConfigureAwait(false);
+
+                result.Add(newSubject);
+                hasChanges = true;
+            }
+        }
+
+        if (hasChanges)
+        {
+            var collection = DefaultSubjectFactory.Instance
+                .CreateSubjectCollection(property.Type, result);
+            property.SetValueFromSource(_source, null, null, collection);
+        }
     }
 
     private async Task ReconcileDictionaryPropertyAsync(
@@ -283,7 +284,6 @@ internal class OpcUaSubjectLoader
         ConnectorSubjectMap<NodeId> subjectMap,
         List<MonitoredItem> newMonitoredItems,
         HashSet<IInterceptorSubject> visitedSubjects,
-        bool skipIfInSync,
         CancellationToken cancellationToken)
     {
         var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
@@ -308,74 +308,71 @@ internal class OpcUaSubjectLoader
         }
 
         var containerNodeId = ExpandedNodeId.ToNodeId(containerNode.NodeId, session.NamespaceUris);
-
-        // Browse the container's children from the server to see what currently exists.
         var remoteContainerChildren = await BrowseNodeAsync(containerNodeId, session, cancellationToken).ConfigureAwait(false);
 
-        // When this is a coalesced/redundant reconciliation pass, check if local state already
-        // matches remote state (same keys, same NodeIds). On the first pass (skipIfInSync=false),
-        // always reload because the same NodeId path can be reused for different subjects.
-        if (skipIfInSync && IsDictionaryInSync(property, remoteContainerChildren, session))
-        {
-            _logger.LogDebug(
-                "ReconcileDictionaryPropertyAsync: property {PropertyName} already in sync ({Count} entries). Skipping reload.",
-                propertyName, remoteContainerChildren.Count);
-            return;
-        }
-
-        // Clear existing dictionary so LoadSubjectDictionaryAsync creates fresh subjects
-        // for all keys (prevents key-based reuse of replaced subjects).
-        var emptyDictionary = DefaultSubjectFactory.Instance
-            .CreateSubjectDictionary(property.Type, new Dictionary<object, IInterceptorSubject>());
-        property.SetValueFromSource(_source, null, null, emptyDictionary);
-
-        // Re-load the entire dictionary from the server.
-        var loadedSubjects = new HashSet<IInterceptorSubject>();
-        var subjectsByNodeId = new Dictionary<NodeId, IInterceptorSubject>();
-        await LoadSubjectDictionaryAsync(
-            property, containerNodeId, newMonitoredItems, session,
-            loadedSubjects, subjectsByNodeId, subjectMap, cancellationToken).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// Checks whether the local dictionary entries match the remote OPC UA children.
-    /// Returns true if the count matches and each local child's stored NodeId corresponds
-    /// to a remote child with the same BrowseName key and NodeId.
-    /// </summary>
-    private static bool IsDictionaryInSync(
-        RegisteredSubjectProperty property,
-        ReferenceDescriptionCollection remoteContainerChildren,
-        ISession session)
-    {
-        var localChildren = property.Children.ToDictionary(c => c.Index!, c => c.Subject);
-
-        if (localChildren.Count != remoteContainerChildren.Count)
-        {
-            return false;
-        }
-
+        // Build remote key set (BrowseName → NodeId)
+        var remoteKeys = new Dictionary<string, (NodeId NodeId, ReferenceDescription Node)>();
         foreach (var remoteChild in remoteContainerChildren)
         {
-            var key = remoteChild.BrowseName.Name;
-            if (!localChildren.TryGetValue(key, out var localSubject) || localSubject is null)
+            var id = ExpandedNodeId.ToNodeId(remoteChild.NodeId, session.NamespaceUris);
+            if (id is not null)
             {
-                return false;
-            }
-
-            if (!localSubject.TryGetData(OpcUaSubjectClientSource.SubjectNodeIdDataKey, out var localNodeIdObj) ||
-                localNodeIdObj is not NodeId localNodeId)
-            {
-                return false;
-            }
-
-            var remoteNodeId = ExpandedNodeId.ToNodeId(remoteChild.NodeId, session.NamespaceUris);
-            if (remoteNodeId is null || !localNodeId.Equals(remoteNodeId))
-            {
-                return false;
+                remoteKeys[remoteChild.BrowseName.Name] = (id, remoteChild);
             }
         }
 
-        return true;
+        // Build local key → subject map
+        var localByKey = new Dictionary<string, IInterceptorSubject>();
+        foreach (var child in property.Children)
+        {
+            if (child.Index is string key && child.Subject is not null)
+            {
+                localByKey[key] = child.Subject;
+            }
+        }
+
+        // Incremental diff
+        var hasChanges = false;
+        var result = new Dictionary<object, IInterceptorSubject>();
+
+        // Keep existing entries still present remotely
+        foreach (var (key, subject) in localByKey)
+        {
+            if (remoteKeys.ContainsKey(key))
+            {
+                result[key] = subject;
+            }
+            else
+            {
+                hasChanges = true;
+            }
+        }
+
+        // Add new remote entries not present locally
+        foreach (var (key, (nodeId, node)) in remoteKeys)
+        {
+            if (!localByKey.ContainsKey(key))
+            {
+                var newSubject = await _configuration.SubjectFactory.CreateCollectionSubjectAsync(
+                    property, node, key, session, cancellationToken).ConfigureAwait(false);
+                newSubject.Context.AddFallbackContext(parentSubject.Context);
+
+                var loadedSubjects = new HashSet<IInterceptorSubject>();
+                var subjectsByNodeId = new Dictionary<NodeId, IInterceptorSubject>();
+                await LoadSubjectAsync(
+                    newSubject, node, session, newMonitoredItems, loadedSubjects,
+                    subjectsByNodeId, subjectMap, cancellationToken).ConfigureAwait(false);
+
+                result[key] = newSubject;
+                hasChanges = true;
+            }
+        }
+
+        if (hasChanges)
+        {
+            var dictionary = DefaultSubjectFactory.Instance.CreateSubjectDictionary(property.Type, result);
+            property.SetValueFromSource(_source, null, null, dictionary);
+        }
     }
 
     private async Task ReconcileReferencePropertyAsync(

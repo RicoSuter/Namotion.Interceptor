@@ -1,4 +1,3 @@
-using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -190,32 +189,14 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
 
     private void HandleStructuralChange(SubjectPropertyChange change, RegisteredSubjectProperty registeredProperty, CustomNodeManager nodeManager)
     {
-        var oldSubjects = ExtractSubjects(change.GetOldValue<object?>());
-        var newSubjects = ExtractSubjects(change.GetNewValue<object?>());
+        var oldSubjects = OpcUaStructuralChangeHelper.ExtractSubjects(change.GetOldValue<object?>());
+        var newSubjects = OpcUaStructuralChangeHelper.ExtractSubjects(change.GetNewValue<object?>());
 
         _logger.LogInformation(
             "HandleStructuralChange for property {PropertyName}: old={OldCount} subjects, new={NewCount} subjects.",
             registeredProperty.Name, oldSubjects.Count, newSubjects.Count);
 
-        // Build maps for efficient lookup
-        var removedSubjects = new List<(IInterceptorSubject Subject, object? Index)>();
-        var addedSubjects = new List<(IInterceptorSubject Subject, object? Index)>();
-
-        foreach (var (subject, index) in oldSubjects)
-        {
-            if (!newSubjects.Any(n => ReferenceEquals(n.Subject, subject)))
-            {
-                removedSubjects.Add((subject, index));
-            }
-        }
-
-        foreach (var (subject, index) in newSubjects)
-        {
-            if (!oldSubjects.Any(o => ReferenceEquals(o.Subject, subject)))
-            {
-                addedSubjects.Add((subject, index));
-            }
-        }
+        var (addedSubjects, removedSubjects) = OpcUaStructuralChangeHelper.ComputeSubjectDiff(oldSubjects, newSubjects);
 
         // For reference properties (single subject), try in-place replacement.
         // This avoids deleting/recreating nodes at the same NodeId path, which would
@@ -425,42 +406,6 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
                 }
             }
         }
-    }
-
-    private static List<(IInterceptorSubject Subject, object? Index)> ExtractSubjects(object? value)
-    {
-        var result = new List<(IInterceptorSubject, object?)>();
-
-        switch (value)
-        {
-            case IInterceptorSubject subject:
-                result.Add((subject, null));
-                break;
-
-            case IDictionary dictionary:
-                foreach (DictionaryEntry entry in dictionary)
-                {
-                    if (entry.Value is IInterceptorSubject s)
-                    {
-                        result.Add((s, entry.Key));
-                    }
-                }
-                break;
-
-            case ICollection collection:
-                var i = 0;
-                foreach (var item in collection)
-                {
-                    if (item is IInterceptorSubject s)
-                    {
-                        result.Add((s, i));
-                    }
-                    i++;
-                }
-                break;
-        }
-
-        return result;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -738,12 +683,12 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
                         lock (_pendingDetachInfo)
                         {
                             _pendingDetachInfo[change.Subject] = new PendingDetachInfo
-                        {
-                            NodeId = nodeId,
-                            VariableNodes = variableNodes
-                        };
+                            {
+                                NodeId = nodeId,
+                                VariableNodes = variableNodes
+                            };
+                        }
                     }
-                }
             }
             }
             catch (Exception ex)

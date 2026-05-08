@@ -173,16 +173,13 @@ internal sealed class OpcUaStructureHandler : IAsyncDisposable
 
         try
         {
-            // First pass: triggered by an actual model change event. Always do the full
-            // reconciliation (clear+reload) because a structural change occurred.
             Interlocked.Exchange(ref _reconcilePending, 0);
-            await ReconcileFromRootCoreAsync(skipIfInSync: false, cancellationToken).ConfigureAwait(false);
+            await ReconcileFromRootCoreAsync(cancellationToken).ConfigureAwait(false);
 
             // Subsequent passes: triggered by events that arrived during the first pass.
-            // These are redundant for the same structural change, so skip if already in sync.
             while (Interlocked.CompareExchange(ref _reconcilePending, 0, 1) == 1)
             {
-                await ReconcileFromRootCoreAsync(skipIfInSync: true, cancellationToken).ConfigureAwait(false);
+                await ReconcileFromRootCoreAsync(cancellationToken).ConfigureAwait(false);
             }
         }
         finally
@@ -191,7 +188,7 @@ internal sealed class OpcUaStructureHandler : IAsyncDisposable
         }
     }
 
-    private async Task ReconcileFromRootCoreAsync(bool skipIfInSync, CancellationToken cancellationToken)
+    private async Task ReconcileFromRootCoreAsync(CancellationToken cancellationToken)
     {
         var rootSubject = _rootSubject;
         var rootNodeId = _rootNodeId;
@@ -212,7 +209,6 @@ internal sealed class OpcUaStructureHandler : IAsyncDisposable
                 session,
                 _subjectMap,
                 subscriptionManager,
-                skipIfInSync,
                 cancellationToken).ConfigureAwait(false);
 
             if (newMonitoredItems.Count > 0)
