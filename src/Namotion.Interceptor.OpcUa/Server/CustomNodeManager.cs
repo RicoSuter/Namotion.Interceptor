@@ -156,6 +156,54 @@ internal class CustomNodeManager : CustomNodeManager2
         }
     }
 
+    /// <summary>
+    /// Re-maps the internal subject dictionary from an old (detached) subject to a new subject,
+    /// keeping the same OPC UA object node. Used for same-path reference replacement.
+    /// </summary>
+    /// <returns>True if the old subject was found and replaced, false otherwise.</returns>
+    public bool TryReplaceSubjectMapping(
+        IInterceptorSubject oldSubject,
+        IInterceptorSubject newSubject)
+    {
+        var newRegistered = newSubject.TryGetRegisteredSubject();
+        if (newRegistered is null)
+        {
+            return false;
+        }
+
+        _structureLock.Wait();
+        try
+        {
+            // Find the old subject's entry in _subjects
+            RegisteredSubject? oldKey = null;
+            NodeState? existingNode = null;
+            foreach (var kvp in _subjects)
+            {
+                if (kvp.Key.Subject == oldSubject)
+                {
+                    oldKey = kvp.Key;
+                    existingNode = kvp.Value;
+                    break;
+                }
+            }
+
+            if (oldKey is null || existingNode is null)
+            {
+                return false;
+            }
+
+            // Re-map: remove old key, add new key pointing to same node
+            _subjects.Remove(oldKey);
+            _subjects[newRegistered] = existingNode;
+
+            return true;
+        }
+        finally
+        {
+            _structureLock.Release();
+        }
+    }
+
     private void CreateSubjectNodes(NodeId parentNodeId, RegisteredSubject subject, string prefix)
     {
         foreach (var property in subject.Properties)
@@ -642,6 +690,43 @@ internal class CustomNodeManager : CustomNodeManager2
         eventState.SetChildValue(context, BrowseNames.ReceiveTime, DateTime.UtcNow, false);
 
         Server.ReportEvent(eventState);
+    }
+
+    /// <summary>
+    /// Forces data change notifications for all variable nodes belonging to a subject.
+    /// Call this after dynamically creating nodes for a subject that reuses NodeIds
+    /// (e.g., when a reference property is replaced with a new subject at the same path).
+    /// Without this, existing monitored items may not receive the new values because
+    /// the node was deleted and recreated at the same NodeId.
+    /// </summary>
+    public void ClearChangeMasksForSubject(IInterceptorSubject subject)
+    {
+        var registeredSubject = subject.TryGetRegisteredSubject();
+        if (registeredSubject is null)
+        {
+            return;
+        }
+
+        var context = SystemContext;
+
+        foreach (var property in registeredSubject.Properties)
+        {
+            if (property.Reference.TryGetPropertyData(_serverService.OpcUaVariableKey, out var data) &&
+                data is BaseDataVariableState variableNode)
+            {
+                variableNode.ClearChangeMasks(context, false);
+            }
+
+            // Also clear change masks for attributes
+            foreach (var attribute in property.Attributes)
+            {
+                if (attribute.Reference.TryGetPropertyData(_serverService.OpcUaVariableKey, out var attrData) &&
+                    attrData is BaseDataVariableState attrNode)
+                {
+                    attrNode.ClearChangeMasks(context, false);
+                }
+            }
+        }
     }
 
     private NodeId? GetTypeDefinitionIdForSubject(IInterceptorSubject subject)

@@ -110,6 +110,10 @@ internal class OpcUaSubjectLoader
         // Browse the current children from the OPC UA server
         var remoteChildren = await BrowseNodeAsync(parentNodeId, session, cancellationToken).ConfigureAwait(false);
 
+        _logger.LogDebug(
+            "ReconcileSubtreeInternalAsync: parentNodeId={ParentNodeId}, remoteChildren={RemoteChildCount}, properties={PropertyCount}.",
+            parentNodeId, remoteChildren.Count, registeredSubject.Properties.Length);
+
         foreach (var property in registeredSubject.Properties)
         {
             if (property.IsSubjectCollection)
@@ -457,9 +461,38 @@ internal class OpcUaSubjectLoader
         var existingChild = property.Children.SingleOrDefault();
         var existingSubject = existingChild.Subject;
 
-        if (remoteNode is not null && existingSubject is null)
+        // Determine if the existing local subject matches the remote node
+        var needsReplacement = false;
+        if (remoteNode is not null && existingSubject is not null)
         {
-            // New remote reference: create subject
+            var remoteNodeId = ExpandedNodeId.ToNodeId(remoteNode.NodeId, session.NamespaceUris);
+            if (existingSubject.TryGetData(OpcUaSubjectClientSource.SubjectNodeIdDataKey, out var existingNodeIdObj) &&
+                existingNodeIdObj is NodeId existingNodeId)
+            {
+                // Both exist but NodeIds differ: the reference was replaced on the server
+                if (remoteNodeId is not null && !remoteNodeId.Equals(existingNodeId))
+                {
+                    needsReplacement = true;
+                    subjectMap.Remove(existingNodeId);
+
+                    _logger.LogInformation(
+                        "Reconciler: reference for property {PropertyName} changed from {OldNodeId} to {NewNodeId}.",
+                        propertyName, existingNodeId, remoteNodeId);
+                }
+            }
+            else
+            {
+                // Local subject has no NodeId, treat as replacement
+                needsReplacement = true;
+                _logger.LogDebug(
+                    "Reconciler: reference for property {PropertyName} has no local NodeId, treating as replacement.",
+                    propertyName);
+            }
+        }
+
+        if (remoteNode is not null && (existingSubject is null || needsReplacement))
+        {
+            // New or replaced remote reference: create subject
             var remoteNodeId = ExpandedNodeId.ToNodeId(remoteNode.NodeId, session.NamespaceUris);
 
             IInterceptorSubject newSubject;

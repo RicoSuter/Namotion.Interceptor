@@ -129,7 +129,7 @@ internal sealed class OpcUaStructureHandler : IAsyncDisposable
         NodeId affectedNodeId,
         CancellationToken cancellationToken)
     {
-        _logger.LogDebug(
+        _logger.LogInformation(
             "Structure handler received model change: verb={Verb}, nodeId={NodeId}. Triggering reconciliation.",
             verb, affectedNodeId);
 

@@ -1,8 +1,11 @@
+using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Registry.Abstractions;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
@@ -29,6 +32,28 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
     private int _consecutiveFailures;
     private DateTimeOffset? _startTime;
     private Exception? _lastError;
+
+    /// <summary>
+    /// Maps detached subjects to their metadata, captured during OnSubjectDetaching.
+    /// When structural sync is enabled, node removal is deferred to HandleStructuralChange.
+    /// This dictionary bridges the gap: the lifecycle event captures metadata (while the
+    /// subject is still registered) and HandleStructuralChange consumes it.
+    /// </summary>
+    private readonly Dictionary<IInterceptorSubject, PendingDetachInfo> _pendingDetachInfo = new(System.Collections.Generic.ReferenceEqualityComparer.Instance);
+
+    /// <summary>
+    /// Metadata captured when a subject is detaching, used for deferred node removal.
+    /// </summary>
+    private sealed class PendingDetachInfo
+    {
+        public required NodeId NodeId { get; init; }
+
+        /// <summary>
+        /// Variable node references keyed by property BrowseName, captured before detach.
+        /// Used for in-place reference replacement to rebind monitored items.
+        /// </summary>
+        public required Dictionary<string, BaseDataVariableState> VariableNodes { get; init; }
+    }
 
     internal ThroughputCounter IncomingThroughput { get; } = new();
     internal ThroughputCounter OutgoingThroughput { get; } = new();
@@ -118,25 +143,35 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
             return ValueTask.CompletedTask;
         }
 
-        // Use the SDK's NodeManager.Lock for thread-safe node updates.
-        // This is the same lock the SDK uses for Read/Write/subscription operations.
-        // ClearChangeMasks → OnMonitoredNodeChanged also acquires this lock,
-        // but Monitor is reentrant on the same thread so no deadlock.
         var nodeManagerLock = server?.NodeManagerLock;
         if (nodeManagerLock == null)
         {
             return ValueTask.CompletedTask;
         }
 
+        var nodeManager = server?.GetNodeManager();
         var span = changes.Span;
+
         lock (nodeManagerLock)
         {
             for (var i = 0; i < span.Length; i++)
             {
                 var change = span[i];
-                if (change.Property.TryGetPropertyData(OpcUaVariableKey, out var data) &&
-                    data is BaseDataVariableState node &&
-                    change.Property.TryGetRegisteredProperty() is { } registeredProperty)
+                var registeredProperty = change.Property.TryGetRegisteredProperty();
+                if (registeredProperty is null)
+                {
+                    continue;
+                }
+
+                if (registeredProperty.IsSubjectCollection || registeredProperty.IsSubjectDictionary || registeredProperty.IsSubjectReference)
+                {
+                    if (nodeManager is not null && _configuration.EnableStructureSynchronization)
+                    {
+                        HandleStructuralChange(change, registeredProperty, nodeManager);
+                    }
+                }
+                else if (change.Property.TryGetPropertyData(OpcUaVariableKey, out var data) &&
+                         data is BaseDataVariableState node)
                 {
                     var value = change.GetNewValue<object?>();
                     var convertedValue = _configuration.ValueConverter
@@ -151,6 +186,281 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
 
         OutgoingThroughput.Add(span.Length);
         return ValueTask.CompletedTask;
+    }
+
+    private void HandleStructuralChange(SubjectPropertyChange change, RegisteredSubjectProperty registeredProperty, CustomNodeManager nodeManager)
+    {
+        var oldSubjects = ExtractSubjects(change.GetOldValue<object?>());
+        var newSubjects = ExtractSubjects(change.GetNewValue<object?>());
+
+        _logger.LogInformation(
+            "HandleStructuralChange for property {PropertyName}: old={OldCount} subjects, new={NewCount} subjects.",
+            registeredProperty.Name, oldSubjects.Count, newSubjects.Count);
+
+        // Build maps for efficient lookup
+        var removedSubjects = new List<(IInterceptorSubject Subject, object? Index)>();
+        var addedSubjects = new List<(IInterceptorSubject Subject, object? Index)>();
+
+        foreach (var (subject, index) in oldSubjects)
+        {
+            if (!newSubjects.Any(n => ReferenceEquals(n.Subject, subject)))
+            {
+                removedSubjects.Add((subject, index));
+            }
+        }
+
+        foreach (var (subject, index) in newSubjects)
+        {
+            if (!oldSubjects.Any(o => ReferenceEquals(o.Subject, subject)))
+            {
+                addedSubjects.Add((subject, index));
+            }
+        }
+
+        // For reference properties (single subject), try in-place replacement.
+        // This avoids deleting/recreating nodes at the same NodeId path, which would
+        // orphan existing monitored items on connected clients.
+        if (registeredProperty.IsSubjectReference &&
+            removedSubjects.Count == 1 && addedSubjects.Count == 1)
+        {
+            var oldSubject = removedSubjects[0].Subject;
+            var newSubject = addedSubjects[0].Subject;
+
+            PendingDetachInfo? detachInfo;
+            lock (_pendingDetachInfo)
+            {
+                _pendingDetachInfo.Remove(oldSubject, out detachInfo);
+            }
+
+            if (detachInfo is not null &&
+                nodeManager.TryReplaceSubjectMapping(oldSubject, newSubject))
+            {
+                // Rebind variable nodes and push updated values using captured references
+                var newRegistered = newSubject.TryGetRegisteredSubject();
+                if (newRegistered is not null)
+                {
+                    RebindVariableNodesFromDetachInfo(
+                        detachInfo.VariableNodes, newRegistered, nodeManager);
+
+                    // Recursively handle child reference replacements (e.g., Person.Address)
+                    RebindChildReferences(oldSubject, newSubject, nodeManager);
+                }
+
+                _logger.LogInformation(
+                    "HandleStructuralChange: in-place replaced reference for property {PropertyName}.",
+                    registeredProperty.Name);
+                return;
+            }
+        }
+
+        // General case: remove old subjects, then add new ones.
+        // Do removals FIRST so that NodeIds are freed for reuse.
+        foreach (var (subject, _) in removedSubjects)
+        {
+            // Try to get NodeId from the subject's registration first.
+            // If the subject was already unregistered by the lifecycle interceptor,
+            // fall back to the NodeId captured in OnSubjectDetaching.
+            NodeId? nodeId = null;
+            var registeredSubject = subject.TryGetRegisteredSubject();
+            if (registeredSubject is not null)
+            {
+                nodeManager.TryGetNodeId(registeredSubject, out nodeId);
+            }
+
+            if (nodeId is null)
+            {
+                lock (_pendingDetachInfo)
+                {
+                    if (_pendingDetachInfo.Remove(subject, out var info))
+                    {
+                        nodeId = info.NodeId;
+                    }
+                }
+            }
+
+            nodeManager.RemoveSubjectNodes(subject);
+
+            if (nodeId is not null)
+            {
+                _logger.LogInformation(
+                    "HandleStructuralChange: firing NodeDeleted for {NodeId} on property {PropertyName}.",
+                    nodeId, registeredProperty.Name);
+                nodeManager.FireModelChangeEvent(ModelChangeStructureVerbMask.NodeDeleted, nodeId);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "HandleStructuralChange: removed subject has no NodeId, cannot fire NodeDeleted for property {PropertyName}.",
+                    registeredProperty.Name);
+            }
+        }
+
+        // Add new subjects.
+        foreach (var (subject, index) in addedSubjects)
+        {
+            var lifecycleChange = new SubjectLifecycleChange
+            {
+                Subject = subject,
+                Property = change.Property,
+                Index = index,
+                ReferenceCount = 0
+            };
+
+            var createdNode = nodeManager.CreateDynamicSubjectNodes(lifecycleChange);
+            if (createdNode is not null)
+            {
+                // Force data change notifications for variable nodes of the new subject.
+                nodeManager.ClearChangeMasksForSubject(subject);
+
+                _logger.LogInformation(
+                    "HandleStructuralChange: firing NodeAdded for {NodeId} on property {PropertyName}.",
+                    createdNode.NodeId, registeredProperty.Name);
+                nodeManager.FireModelChangeEvent(ModelChangeStructureVerbMask.NodeAdded, createdNode.NodeId);
+            }
+        }
+    }
+
+    private void RebindVariableNodesFromDetachInfo(
+        Dictionary<string, BaseDataVariableState> capturedNodes,
+        RegisteredSubject newRegistered,
+        CustomNodeManager nodeManager)
+    {
+        var currentInstance = _server?.CurrentInstance;
+
+        foreach (var newProperty in newRegistered.Properties)
+        {
+            var propertyName = newProperty.ResolvePropertyName(_configuration.NodeMapper);
+            if (propertyName is null || newProperty.CanContainSubjects)
+            {
+                continue;
+            }
+
+            if (!capturedNodes.TryGetValue(propertyName, out var variableNode))
+            {
+                continue;
+            }
+
+            // Rebind the variable node to the new property
+            newProperty.Reference.SetPropertyData(OpcUaVariableKey, variableNode);
+            variableNode.Handle = newProperty.Reference;
+
+            // Update value and push to clients via ClearChangeMasks
+            var value = _configuration.ValueConverter.ConvertToNodeValue(newProperty.GetValue(), newProperty);
+            variableNode.Value = value;
+            variableNode.Timestamp = DateTime.UtcNow;
+
+            if (currentInstance is not null)
+            {
+                variableNode.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Recursively rebinds child reference subjects. When a parent is replaced in-place,
+    /// its child references also need rebinding. Each child subject has its own
+    /// PendingDetachInfo captured during OnSubjectDetaching.
+    /// </summary>
+    private void RebindChildReferences(
+        IInterceptorSubject oldParent,
+        IInterceptorSubject newParent,
+        CustomNodeManager nodeManager)
+    {
+        var newRegistered = newParent.TryGetRegisteredSubject();
+        if (newRegistered is null)
+        {
+            return;
+        }
+
+        foreach (var newProperty in newRegistered.Properties)
+        {
+            if (!newProperty.IsSubjectReference)
+            {
+                continue;
+            }
+
+            var newChild = newProperty.Children.SingleOrDefault().Subject;
+            if (newChild is null)
+            {
+                continue;
+            }
+
+            // Find the matching old child's detach info by scanning _pendingDetachInfo
+            // for entries whose NodeId matches the expected child path
+            PendingDetachInfo? childDetachInfo = null;
+            IInterceptorSubject? oldChildSubject = null;
+
+            lock (_pendingDetachInfo)
+            {
+                foreach (var kvp in _pendingDetachInfo)
+                {
+                    // Use the first pending detach info that successfully maps to the new child
+                    if (nodeManager.TryReplaceSubjectMapping(kvp.Key, newChild))
+                    {
+                        childDetachInfo = kvp.Value;
+                        oldChildSubject = kvp.Key;
+                        break;
+                    }
+                }
+
+                if (oldChildSubject is not null)
+                {
+                    _pendingDetachInfo.Remove(oldChildSubject);
+                }
+            }
+
+            if (childDetachInfo is not null)
+            {
+                var childRegistered = newChild.TryGetRegisteredSubject();
+                if (childRegistered is not null)
+                {
+                    RebindVariableNodesFromDetachInfo(
+                        childDetachInfo.VariableNodes, childRegistered, nodeManager);
+
+                    // Recurse for nested children
+                    if (oldChildSubject is not null)
+                    {
+                        RebindChildReferences(oldChildSubject, newChild, nodeManager);
+                    }
+                }
+            }
+        }
+    }
+
+    private static List<(IInterceptorSubject Subject, object? Index)> ExtractSubjects(object? value)
+    {
+        var result = new List<(IInterceptorSubject, object?)>();
+
+        switch (value)
+        {
+            case IInterceptorSubject subject:
+                result.Add((subject, null));
+                break;
+
+            case IDictionary dictionary:
+                foreach (DictionaryEntry entry in dictionary)
+                {
+                    if (entry.Value is IInterceptorSubject s)
+                    {
+                        result.Add((s, entry.Key));
+                    }
+                }
+                break;
+
+            case ICollection collection:
+                var i = 0;
+                foreach (var item in collection)
+                {
+                    if (item is IInterceptorSubject s)
+                    {
+                        result.Add((s, i));
+                    }
+                    i++;
+                }
+                break;
+        }
+
+        return result;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -404,6 +714,21 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
             return;
         }
 
+        // When structural sync is enabled AND we're doing in-place reference replacement,
+        // skip node creation here. HandleStructuralChange will handle it via the rebind path.
+        if (_configuration.EnableStructureSynchronization)
+        {
+            lock (_pendingDetachInfo)
+            {
+                if (_pendingDetachInfo.Count > 0)
+                {
+                    // A detach was recorded, meaning this attach is part of a reference replacement.
+                    // HandleStructuralChange will handle the rebinding.
+                    return;
+                }
+            }
+        }
+
         var createdNode = nodeManager.CreateDynamicSubjectNodes(change);
         if (createdNode is not null && _configuration.EnableStructureSynchronization)
         {
@@ -413,29 +738,54 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
 
     private void OnSubjectDetaching(SubjectLifecycleChange change)
     {
-        // Loop prevention: skip if this structural change originated from our own OPC UA writes.
-        if (SubjectChangeContext.Current.Source == this)
+        var server = _server;
+        if (server is null)
         {
             return;
         }
 
-        var nodeManager = _server?.GetNodeManager();
-        NodeId? nodeId = null;
-
-        if (nodeManager is not null)
+        if (_configuration.EnableStructureSynchronization)
         {
-            var registeredSubject = change.Subject.TryGetRegisteredSubject();
-            if (registeredSubject is not null)
+            // When structural sync is enabled, defer node removal to HandleStructuralChange
+            // which runs later via the ChangeQueueProcessor. Capture metadata now (while
+            // the subject is still registered) so HandleStructuralChange can find it later
+            // (TryGetRegisteredSubject returns null after detach).
+            var nodeManager = server.GetNodeManager();
+            if (nodeManager is not null)
             {
-                nodeManager.TryGetNodeId(registeredSubject, out nodeId);
+                var registeredSubject = change.Subject.TryGetRegisteredSubject();
+                if (registeredSubject is not null &&
+                    nodeManager.TryGetNodeId(registeredSubject, out var nodeId) &&
+                    nodeId is not null)
+                {
+                    // Capture variable node references for potential in-place replacement
+                    var variableNodes = new Dictionary<string, BaseDataVariableState>();
+                    foreach (var property in registeredSubject.Properties)
+                    {
+                        if (property.Reference.TryGetPropertyData(OpcUaVariableKey, out var data) &&
+                            data is BaseDataVariableState variableNode)
+                        {
+                            var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
+                            if (propertyName is not null)
+                            {
+                                variableNodes[propertyName] = variableNode;
+                            }
+                        }
+                    }
+
+                    lock (_pendingDetachInfo)
+                    {
+                        _pendingDetachInfo[change.Subject] = new PendingDetachInfo
+                        {
+                            NodeId = nodeId,
+                            VariableNodes = variableNodes
+                        };
+                    }
+                }
             }
+            return;
         }
 
-        _server?.RemoveSubjectNodes(change.Subject);
-
-        if (nodeId is not null && _configuration.EnableStructureSynchronization && nodeManager is not null)
-        {
-            nodeManager.FireModelChangeEvent(ModelChangeStructureVerbMask.NodeDeleted, nodeId);
-        }
+        server.RemoveSubjectNodes(change.Subject);
     }
 }
