@@ -390,6 +390,14 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
 
     private void OnSubjectAttached(SubjectLifecycleChange change)
     {
+        // Loop prevention: skip if this structural change originated from our own OPC UA writes.
+        // SubjectChangeContext.Current.Source is set by SetValueFromSource and is available here
+        // because lifecycle events fire synchronously within the WriteProperty interceptor chain.
+        if (SubjectChangeContext.Current.Source == this)
+        {
+            return;
+        }
+
         var nodeManager = _server?.GetNodeManager();
         if (nodeManager is null)
         {
@@ -405,6 +413,12 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
 
     private void OnSubjectDetaching(SubjectLifecycleChange change)
     {
+        // Loop prevention: skip if this structural change originated from our own OPC UA writes.
+        if (SubjectChangeContext.Current.Source == this)
+        {
+            return;
+        }
+
         var nodeManager = _server?.GetNodeManager();
         NodeId? nodeId = null;
 

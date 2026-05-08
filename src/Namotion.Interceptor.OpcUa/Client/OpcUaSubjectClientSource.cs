@@ -16,6 +16,12 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 {
     private const int DefaultChunkSize = 512;
 
+    /// <summary>
+    /// Well-known key for storing the OPC UA NodeId in a subject's Data dictionary.
+    /// Used by the reconciler and structure handler to look up which NodeId a subject represents.
+    /// </summary>
+    internal const string SubjectNodeIdDataKey = "OpcUa:SubjectNodeId";
+
     private readonly IInterceptorSubject _subject;
     private readonly ILogger _logger;
     private readonly SourceOwnershipManager _ownership;

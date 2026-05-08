@@ -222,6 +222,100 @@ internal class SubscriptionManager : IAsyncDisposable
     }
 
     /// <summary>
+    /// Adds monitored items to existing subscriptions (incremental, for reconciliation).
+    /// Items are appended to the last subscription that has capacity, or a new subscription is created.
+    /// </summary>
+    public async Task AddMonitoredItemsAsync(
+        IReadOnlyList<MonitoredItem> monitoredItems,
+        Session session,
+        CancellationToken cancellationToken)
+    {
+        if (monitoredItems.Count == 0)
+        {
+            return;
+        }
+
+        var maximumItemsPerSubscription = _configuration.MaximumItemsPerSubscription;
+        var itemIndex = 0;
+
+        // Try to fill existing subscriptions first
+        foreach (var subscription in _subscriptions.Keys)
+        {
+            if (itemIndex >= monitoredItems.Count)
+            {
+                break;
+            }
+
+            var currentCount = (int)subscription.MonitoredItemCount;
+            var available = maximumItemsPerSubscription - currentCount;
+            if (available <= 0)
+            {
+                continue;
+            }
+
+            var added = false;
+            var batchEnd = Math.Min(itemIndex + available, monitoredItems.Count);
+            for (var j = itemIndex; j < batchEnd; j++)
+            {
+                var item = monitoredItems[j];
+                subscription.AddItem(item);
+                if (item.Handle is RegisteredSubjectProperty property)
+                {
+                    _monitoredItems[item.ClientHandle] = property;
+                }
+                added = true;
+            }
+
+            if (added)
+            {
+                await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
+                itemIndex = batchEnd;
+            }
+        }
+
+        // Create new subscriptions for remaining items
+        while (itemIndex < monitoredItems.Count)
+        {
+            var subscription = new Subscription(session.DefaultSubscription)
+            {
+                PublishingEnabled = true,
+                PublishingInterval = _configuration.DefaultPublishingInterval,
+                DisableMonitoredItemCache = true,
+                MinLifetimeInterval = 60_000,
+                KeepAliveCount = _configuration.SubscriptionKeepAliveCount,
+                LifetimeCount = _configuration.SubscriptionLifetimeCount,
+                Priority = _configuration.SubscriptionPriority,
+                MaxNotificationsPerPublish = _configuration.SubscriptionMaximumNotificationsPerPublish,
+                RepublishAfterTransfer = true,
+                SequentialPublishing = _configuration.SubscriptionSequentialPublishing,
+            };
+
+            if (!session.AddSubscription(subscription))
+            {
+                throw new InvalidOperationException("Failed to add OPC UA subscription.");
+            }
+
+            subscription.FastDataChangeCallback += OnFastDataChange;
+            await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
+
+            var batchEnd = Math.Min(itemIndex + maximumItemsPerSubscription, monitoredItems.Count);
+            for (var j = itemIndex; j < batchEnd; j++)
+            {
+                var item = monitoredItems[j];
+                subscription.AddItem(item);
+                if (item.Handle is RegisteredSubjectProperty property)
+                {
+                    _monitoredItems[item.ClientHandle] = property;
+                }
+            }
+
+            await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
+            _subscriptions.TryAdd(subscription, 0);
+            itemIndex = batchEnd;
+        }
+    }
+
+    /// <summary>
     /// Updates the subscription list to reference subscriptions transferred by SessionReconnectHandler.
     /// Called after successful session transfer to embrace OPC Foundation's subscription preservation.
     /// </summary>
