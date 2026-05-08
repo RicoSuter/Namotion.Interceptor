@@ -63,11 +63,13 @@ public class OpcUaTypeResolver
                 }
             };
 
+            // Browse only the first child: the [index] convention requires every collection
+            // element to follow the pattern, so the first reference is enough to classify the parent.
             var response = await session.BrowseAsync(null, null, 1u, browseDescriptions, cancellationToken);
             if (response.Results.Count > 0 &&
                 response.Results[0].References.Count > 0 &&
                 response.Results[0].References[0].NodeClass == NodeClass.Object &&
-                response.Results[0].References[0].BrowseName.Name.Contains('['))
+                response.Results[0].References[0].BrowseName?.Name?.Contains('[') == true)
             {
                 return typeof(DynamicSubject[]);
             }

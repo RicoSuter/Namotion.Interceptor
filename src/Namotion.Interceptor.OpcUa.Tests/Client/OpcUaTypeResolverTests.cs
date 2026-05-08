@@ -118,6 +118,41 @@ public class OpcUaTypeResolverTests
         Assert.Equal(typeof(DynamicSubject), result);
     }
 
+    [Fact]
+    public async Task WhenObjectNodeHasNoChildren_ThenTypeIsDynamicSubject()
+    {
+        // Arrange
+        var objectReference = new ReferenceDescription
+        {
+            BrowseName = new QualifiedName("Empty"),
+            NodeId = new ExpandedNodeId(new NodeId(3000, 2)),
+            NodeClass = NodeClass.Object
+        };
+
+        var mockSession = CreateMockSession();
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BrowseResponse
+            {
+                Results =
+                [
+                    new BrowseResult { References = new ReferenceDescriptionCollection() }
+                ],
+                DiagnosticInfos = []
+            });
+
+        // Act
+        var result = await _resolver.TryGetTypeForNodeAsync(mockSession.Object, objectReference, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(typeof(DynamicSubject), result);
+    }
+
     private static Mock<ISession> CreateMockSession()
     {
         var mockSession = new Mock<ISession>();

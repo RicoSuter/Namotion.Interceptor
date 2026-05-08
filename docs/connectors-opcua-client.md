@@ -627,7 +627,7 @@ Override `TryGetTypeForNodeAsync` on `OpcUaTypeResolver` to customize type mappi
 
 #### Subject Deduplication
 
-When the same OPC UA node appears at multiple paths in the address space (e.g., `Identification` referenced from both `MyMachine` and `MachineryBuildingBlocks`), the client reuses the same subject instance. Both parent properties point to the same `DynamicSubject`, which receives a single set of monitored items. The subject's canonical path resolves to the shallowest location in the tree.
+When the same OPC UA node appears at multiple paths in the address space (e.g., `Identification` referenced from both `MyMachine` and `MachineryBuildingBlocks`), the client reuses the same subject instance. Both parent properties point to the same `DynamicSubject`, which receives a single set of monitored items.
 
 ## Write Error Handling
 

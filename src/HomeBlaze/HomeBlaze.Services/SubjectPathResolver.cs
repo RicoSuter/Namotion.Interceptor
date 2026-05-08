@@ -173,9 +173,8 @@ public class SubjectPathResolver : ILifecycleHandler
             return canonicalPath;
 
         var sb = new StringBuilder(canonicalPath.Length);
-        for (var i = 0; i < canonicalPath.Length; i++)
+        foreach (var ch in canonicalPath)
         {
-            var ch = canonicalPath[i];
             if (ch == '[')
                 sb.Append('/');
             else if (ch != ']')
@@ -342,7 +341,27 @@ public class SubjectPathResolver : ILifecycleHandler
             }
         }
 
-        paths.Sort(static (a, b) => a.Count(c => c == '/').CompareTo(b.Count(c => c == '/')));
+        if (paths.Count > 1)
+        {
+            // Order by path depth (number of '/' separators) so the shallowest path is first.
+            // Precompute the depth per path to avoid recounting on every comparison.
+            var depths = new int[paths.Count];
+            for (var i = 0; i < paths.Count; i++)
+            {
+                var path = paths[i];
+                var depth = 0;
+                foreach (var t in path)
+                {
+                    if (t == '/') depth++;
+                }
+                depths[i] = depth;
+            }
+
+            var pathArray = paths.ToArray();
+            Array.Sort(depths, pathArray);
+            paths = new List<string>(pathArray);
+        }
+
         return paths.Count > 0 ? paths : Array.Empty<string>();
     }
 
@@ -367,16 +386,10 @@ public class SubjectPathResolver : ILifecycleHandler
             string segment;
             if (parent.Index != null)
             {
-                if (isInlinePathsProperty)
-                {
-                    // InlinePaths: just the key (dots are fine with / separator)
-                    segment = parent.Index.ToString()!;
-                }
-                else
-                {
+                // InlinePaths: just the key (dots are fine with / separator)
+                segment = isInlinePathsProperty ? parent.Index.ToString()! :
                     // Regular collection/dict: PropertyName[index]
-                    segment = $"{parent.Property.Name}[{parent.Index}]";
-                }
+                    $"{parent.Property.Name}[{parent.Index}]";
             }
             else
             {
