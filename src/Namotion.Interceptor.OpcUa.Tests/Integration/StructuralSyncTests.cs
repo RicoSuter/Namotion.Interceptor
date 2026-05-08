@@ -835,6 +835,222 @@ public class StructuralSyncTests
     }
 
     // -----------------------------------------------------------------------
+    // Server -> Client: Partial mutations (remove specific, replace value)
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task WhenServerRemovesSpecificCollectionItem_ThenClientRetainsOthers()
+    {
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            // Arrange: Start with 2 items
+            (server, client, port, var logger) = await StartServerAndClientWithStructuralSyncAsync();
+
+            Assert.NotNull(server.Root);
+            Assert.NotNull(client.Root);
+
+            var serverContext = ((IInterceptorSubject)server.Root).Context;
+            server.Root.People =
+            [
+                server.Root.People[0],
+                new TestPerson(serverContext) { FirstName = "Bob", LastName = "Builder", Scores = [80.0] }
+            ];
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 2,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial 2-item collection should sync");
+
+            logger.Log($"Client has {client.Root.People.Length} people before removal");
+
+            // Act: Remove first item, keep second
+            server.Root.People = server.Root.People.Where(p => p.FirstName == "Bob").ToArray();
+            logger.Log("Server removed first item, keeping Bob");
+
+            // Assert: Client should have 1 item remaining (Bob)
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 1,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should see specific item removed while others remain");
+
+            Assert.Single(client.Root.People);
+            Assert.Equal("Bob", client.Root.People[0].FirstName);
+
+            logger.Log("Test passed: Client retained correct item after partial removal");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
+
+    [Fact(Skip = "Requires unique NodeIds or content-based diffing: replacing subjects at the same index reuses the NodeId path, so the reconciler cannot detect the replacement.")]
+    public async Task WhenServerReplacesCollectionEntirely_ThenClientSeesNewItems()
+    {
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            // Arrange
+            (server, client, port, var logger) = await StartServerAndClientWithStructuralSyncAsync();
+
+            Assert.NotNull(server.Root);
+            Assert.NotNull(client.Root);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 1,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial collection should sync");
+
+            // Act: Replace entire collection with completely different items
+            var serverContext = ((IInterceptorSubject)server.Root).Context;
+            server.Root.People =
+            [
+                new TestPerson(serverContext) { FirstName = "X", LastName = "Alpha", Scores = [1.0] },
+                new TestPerson(serverContext) { FirstName = "Y", LastName = "Beta", Scores = [2.0] },
+                new TestPerson(serverContext) { FirstName = "Z", LastName = "Gamma", Scores = [3.0] }
+            ];
+            logger.Log("Server replaced entire collection with 3 new items");
+
+            // Assert: wait for both structure AND values to sync
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 3
+                      && client.Root.People.Any(p => p.FirstName == "X"),
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should see entirely new collection with values");
+
+            Assert.Equal(3, client.Root.People.Length);
+            Assert.Contains(client.Root.People, p => p.FirstName == "X");
+            Assert.Contains(client.Root.People, p => p.FirstName == "Y");
+            Assert.Contains(client.Root.People, p => p.FirstName == "Z");
+            Assert.DoesNotContain(client.Root.People, p => p.FirstName == "Jane");
+
+            logger.Log("Test passed: Client sees entirely replaced collection");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenServerRemovesSpecificDictionaryEntry_ThenClientRetainsOthers()
+    {
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            // Arrange: Start with 2 entries
+            (server, client, port, var logger) = await StartServerAndClientWithStructuralSyncAsync();
+
+            Assert.NotNull(server.Root);
+            Assert.NotNull(client.Root);
+
+            var serverContext = ((IInterceptorSubject)server.Root).Context;
+            server.Root.PeopleByName = new Dictionary<string, TestPerson>(server.Root.PeopleByName!)
+            {
+                ["bob"] = new TestPerson(serverContext) { FirstName = "Bob", LastName = "Builder", Scores = [80.0] }
+            };
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.PeopleByName != null && client.Root.PeopleByName.Count == 2,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial 2-entry dictionary should sync");
+
+            logger.Log($"Client has {client.Root.PeopleByName!.Count} entries before removal");
+
+            // Act: Remove "alice", keep "bob"
+            server.Root.PeopleByName = server.Root.PeopleByName
+                .Where(kvp => kvp.Key != "alice")
+                .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+            logger.Log("Server removed alice, keeping bob");
+
+            // Assert
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.PeopleByName != null && client.Root.PeopleByName.Count == 1,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should see specific entry removed while others remain");
+
+            Assert.Single(client.Root.PeopleByName!);
+            Assert.True(client.Root.PeopleByName.ContainsKey("bob"));
+            Assert.False(client.Root.PeopleByName.ContainsKey("alice"));
+
+            logger.Log("Test passed: Client retained correct entry after partial removal");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
+
+    [Fact(Skip = "Requires unique NodeIds or content-based diffing: replacing subjects at the same dictionary key reuses the NodeId path, so the reconciler cannot detect the replacement.")]
+    public async Task WhenServerReplacesValueAtExistingDictionaryKey_ThenClientSeesNewSubject()
+    {
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            // Arrange
+            (server, client, port, var logger) = await StartServerAndClientWithStructuralSyncAsync();
+
+            Assert.NotNull(server.Root);
+            Assert.NotNull(client.Root);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.PeopleByName != null && client.Root.PeopleByName.Count == 1
+                      && client.Root.PeopleByName.ContainsKey("alice"),
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial dictionary with alice should sync");
+
+            Assert.Equal("Alice", client.Root.PeopleByName!["alice"].FirstName);
+            logger.Log("Initial alice entry synced");
+
+            // Act: Replace subject at existing key "alice" with a different subject
+            var serverContext = ((IInterceptorSubject)server.Root).Context;
+            server.Root.PeopleByName = new Dictionary<string, TestPerson>
+            {
+                ["alice"] = new TestPerson(serverContext) { FirstName = "Alicia", LastName = "Replaced", Scores = [99.0] }
+            };
+            logger.Log("Server replaced alice with Alicia at same key");
+
+            // Assert: Client should see the new subject at the same key (wait for values too)
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.PeopleByName != null
+                      && client.Root.PeopleByName.ContainsKey("alice")
+                      && client.Root.PeopleByName["alice"].FirstName == "Alicia",
+                timeout: TimeSpan.FromSeconds(60),
+                message: "Client should see replaced subject at existing dictionary key with new values");
+
+            Assert.Equal("Alicia", client.Root.PeopleByName!["alice"].FirstName);
+            Assert.Equal("Replaced", client.Root.PeopleByName["alice"].LastName);
+
+            logger.Log("Test passed: Client sees replaced subject at existing key");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Loop prevention
     // -----------------------------------------------------------------------
 
