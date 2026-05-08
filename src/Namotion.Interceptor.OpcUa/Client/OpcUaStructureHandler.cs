@@ -29,6 +29,19 @@ internal sealed class OpcUaStructureHandler : IAsyncDisposable
     private NodeId? _rootNodeId;
 
     /// <summary>
+    /// Serializes reconciliation calls. Only one reconciliation runs at a time.
+    /// If events arrive while one is in progress, they are coalesced into a single
+    /// re-reconciliation after the current one completes.
+    /// </summary>
+    private readonly SemaphoreSlim _reconcileLock = new(1, 1);
+
+    /// <summary>
+    /// Set to 1 when a reconciliation request arrives while another is in progress.
+    /// The running reconciliation checks this on completion and runs again if set.
+    /// </summary>
+    private volatile int _reconcilePending;
+
+    /// <summary>
     /// Gets the subject map that tracks NodeId-to-subject mappings.
     /// </summary>
     public ConnectorSubjectMap<NodeId> SubjectMap => _subjectMap;
@@ -89,6 +102,7 @@ internal sealed class OpcUaStructureHandler : IAsyncDisposable
     {
         await DisposeTriggersAsync().ConfigureAwait(false);
         _subjectMap.Dispose();
+        _reconcileLock.Dispose();
     }
 
     private async Task StartTriggersAsync(Session session, CancellationToken cancellationToken)
@@ -144,6 +158,41 @@ internal sealed class OpcUaStructureHandler : IAsyncDisposable
 
     private async Task ReconcileFromRootAsync(CancellationToken cancellationToken)
     {
+        // Serialize reconciliations. When multiple model change events arrive (e.g., NodeDeleted
+        // + several NodeAdded for a collection replacement), only one reconciliation runs at a
+        // time. Concurrent requests are coalesced: if a reconciliation is in progress, we just
+        // mark that another pass is needed and return. The running reconciliation will re-run
+        // when it finishes.
+        if (!await _reconcileLock.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+        {
+            // Another reconciliation is in progress. Mark that we need another pass.
+            Interlocked.Exchange(ref _reconcilePending, 1);
+            _logger.LogDebug("Reconciliation already in progress. Coalescing request.");
+            return;
+        }
+
+        try
+        {
+            // First pass: triggered by an actual model change event. Always do the full
+            // reconciliation (clear+reload) because a structural change occurred.
+            Interlocked.Exchange(ref _reconcilePending, 0);
+            await ReconcileFromRootCoreAsync(skipIfInSync: false, cancellationToken).ConfigureAwait(false);
+
+            // Subsequent passes: triggered by events that arrived during the first pass.
+            // These are redundant for the same structural change, so skip if already in sync.
+            while (Interlocked.CompareExchange(ref _reconcilePending, 0, 1) == 1)
+            {
+                await ReconcileFromRootCoreAsync(skipIfInSync: true, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            _reconcileLock.Release();
+        }
+    }
+
+    private async Task ReconcileFromRootCoreAsync(bool skipIfInSync, CancellationToken cancellationToken)
+    {
         var rootSubject = _rootSubject;
         var rootNodeId = _rootNodeId;
         var session = _session;
@@ -163,6 +212,7 @@ internal sealed class OpcUaStructureHandler : IAsyncDisposable
                 session,
                 _subjectMap,
                 subscriptionManager,
+                skipIfInSync,
                 cancellationToken).ConfigureAwait(false);
 
             if (newMonitoredItems.Count > 0)

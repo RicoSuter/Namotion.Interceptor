@@ -890,7 +890,7 @@ public class StructuralSyncTests
         }
     }
 
-    [Fact(Skip = "Requires unique NodeIds or content-based diffing: replacing subjects at the same index reuses the NodeId path, so the reconciler cannot detect the replacement.")]
+    [Fact]
     public async Task WhenServerReplacesCollectionEntirely_ThenClientSeesNewItems()
     {
         OpcUaTestServer<TestRoot>? server = null;
@@ -997,7 +997,7 @@ public class StructuralSyncTests
         }
     }
 
-    [Fact(Skip = "Requires unique NodeIds or content-based diffing: replacing subjects at the same dictionary key reuses the NodeId path, so the reconciler cannot detect the replacement.")]
+    [Fact]
     public async Task WhenServerReplacesValueAtExistingDictionaryKey_ThenClientSeesNewSubject()
     {
         OpcUaTestServer<TestRoot>? server = null;
