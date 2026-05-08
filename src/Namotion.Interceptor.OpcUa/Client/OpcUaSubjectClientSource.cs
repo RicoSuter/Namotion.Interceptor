@@ -33,11 +33,13 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     private volatile SessionManager? _sessionManager;
     private volatile SubjectPropertyWriter? _propertyWriter;
     private OutboundWriter? _writer;
-    private OpcUaStructureHandler? _structureHandler;
+    private OpcUaClientStructuralChangeProcessor? _structuralProcessor;
+    private Task? _structuralProcessorTask;
+    private OpcUaModelChangeEventHandler? _modelChangeHandler;
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
-    private volatile CancellationTokenSource? _reconnectCts; // Cancelled by KillAsync to abort in-flight reconnection
-    private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
+    private volatile CancellationTokenSource? _reconnectCts;
+    private int _disposed;
 
     private volatile bool _isStarted;
     private long _reconnectStartedTimestamp; // 0 = not reconnecting, otherwise Stopwatch timestamp when reconnection started (for stall detection)
@@ -142,17 +144,27 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                         _logger.LogWarning("No OPC UA monitored items found.");
                     }
 
-                    if (_configuration.EnableStructureSynchronization || _configuration.EnablePeriodicResynchronization)
+                    if (_configuration.EnableStructureSynchronization)
                     {
-                        var rootNodeId = ExpandedNodeId.ToNodeId(rootNode.NodeId, session.NamespaceUris);
-                        if (rootNodeId is not null)
-                        {
-                            _structureHandler = new OpcUaStructureHandler(
-                                _subjectLoader, this, _configuration, _logger);
-                            await _structureHandler.StartAsync(
-                                _subject, rootNodeId, session, _sessionManager.SubscriptionManager,
-                                cancellationToken).ConfigureAwait(false);
-                        }
+                        _structuralProcessor = new OpcUaClientStructuralChangeProcessor(
+                            _subjectLoader, this, _configuration, _logger);
+                        _structuralProcessor.SetSession(session, _sessionManager.SubscriptionManager);
+                        _structuralProcessor.PopulateSubjectMap(_subject);
+
+                        _modelChangeHandler = new OpcUaModelChangeEventHandler(
+                            (verb, nodeId, _) =>
+                            {
+                                var changeVerb = verb == ModelChangeStructureVerbMask.NodeAdded
+                                    ? StructuralChangeVerb.Add
+                                    : StructuralChangeVerb.Remove;
+                                _structuralProcessor.Enqueue(new StructuralChangeEvent(
+                                    changeVerb, false, null, null, null, nodeId));
+                                return Task.CompletedTask;
+                            },
+                            _logger);
+                        await _modelChangeHandler.SubscribeAsync(session, cancellationToken).ConfigureAwait(false);
+
+                        _structuralProcessorTask = _structuralProcessor.RunAsync(cancellationToken);
                     }
                 }
                 else
@@ -505,9 +517,27 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 _structureLock.Release();
             }
 
-            if (_structureHandler is not null)
+            if (_structuralProcessor is not null)
             {
-                await _structureHandler.OnReconnectedAsync(session, token).ConfigureAwait(false);
+                _structuralProcessor.SetSession(session, sessionManager.SubscriptionManager);
+
+                if (_modelChangeHandler is not null)
+                {
+                    await _modelChangeHandler.DisposeAsync().ConfigureAwait(false);
+                }
+
+                _modelChangeHandler = new OpcUaModelChangeEventHandler(
+                    (verb, nodeId, _) =>
+                    {
+                        var changeVerb = verb == ModelChangeStructureVerbMask.NodeAdded
+                            ? StructuralChangeVerb.Add
+                            : StructuralChangeVerb.Remove;
+                        _structuralProcessor.Enqueue(new StructuralChangeEvent(
+                            changeVerb, false, null, null, null, nodeId));
+                        return Task.CompletedTask;
+                    },
+                    _logger);
+                await _modelChangeHandler.SubscribeAsync(session, token).ConfigureAwait(false);
             }
 
             await propertyWriter.LoadInitialStateAndResumeAsync(token).ConfigureAwait(false);
@@ -569,299 +599,9 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             return WriteResult.Failure(changes, new InvalidOperationException("OPC UA client not started."));
         }
 
-        if (_configuration.EnableRemoteNodeManagement)
-        {
-            // Separate structural changes from value changes.
-            // Structural changes need AddNodes/DeleteNodes, value changes use the normal write path.
-            List<SubjectPropertyChange>? structuralChanges = null;
-            List<SubjectPropertyChange>? valueChanges = null;
-
-            var span = changes.Span;
-            for (var i = 0; i < span.Length; i++)
-            {
-                var change = span[i];
-                var registeredProperty = change.Property.TryGetRegisteredProperty();
-                if (registeredProperty is not null &&
-                    (registeredProperty.IsSubjectCollection || registeredProperty.IsSubjectDictionary || registeredProperty.IsSubjectReference))
-                {
-                    structuralChanges ??= new List<SubjectPropertyChange>();
-                    structuralChanges.Add(change);
-                }
-                else
-                {
-                    valueChanges ??= new List<SubjectPropertyChange>();
-                    valueChanges.Add(change);
-                }
-            }
-
-            // Handle structural changes via AddNodes/DeleteNodes
-            if (structuralChanges is not null)
-            {
-                await HandleStructuralChangesAsync(structuralChanges, cancellationToken).ConfigureAwait(false);
-            }
-
-            // Handle remaining value changes via normal write path
-            if (valueChanges is not null)
-            {
-                return await _writer.WriteChangesAsync(valueChanges.ToArray(), cancellationToken).ConfigureAwait(false);
-            }
-
-            return WriteResult.Success;
-        }
+        _structuralProcessor?.EnqueueStructuralChanges(changes.Span);
 
         return await _writer.WriteChangesAsync(changes, cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task HandleStructuralChangesAsync(List<SubjectPropertyChange> changes, CancellationToken cancellationToken)
-    {
-        var session = _sessionManager?.CurrentSession;
-        if (session is null || !session.Connected)
-        {
-            _logger.LogWarning("Cannot send structural changes: no active OPC UA session.");
-            return;
-        }
-
-        foreach (var change in changes)
-        {
-            var registeredProperty = change.Property.TryGetRegisteredProperty();
-            if (registeredProperty is null)
-            {
-                continue;
-            }
-
-            var oldSubjects = OpcUaStructuralChangeHelper.ExtractSubjects(change.GetOldValue<object?>());
-            var newSubjects = OpcUaStructuralChangeHelper.ExtractSubjects(change.GetNewValue<object?>());
-
-            // Determine added and removed subjects
-            var (addedSubjects, removedSubjects) = OpcUaStructuralChangeHelper.ComputeSubjectDiff(oldSubjects, newSubjects);
-
-            _logger.LogInformation(
-                "Client structural change for property {PropertyName}: {AddedCount} added, {RemovedCount} removed.",
-                registeredProperty.Name, addedSubjects.Count, removedSubjects.Count);
-
-            // Process removals first (frees NodeIds for reuse)
-            foreach (var (subject, _) in removedSubjects)
-            {
-                await TryDeleteRemoteNodeAsync(session, subject, cancellationToken).ConfigureAwait(false);
-            }
-
-            // Process additions
-            foreach (var (subject, index) in addedSubjects)
-            {
-                await TryAddRemoteNodeAsync(session, subject, registeredProperty, index, cancellationToken).ConfigureAwait(false);
-            }
-        }
-    }
-
-    private async Task TryAddRemoteNodeAsync(
-        ISession session,
-        IInterceptorSubject subject,
-        RegisteredSubjectProperty registeredProperty,
-        object? index,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            // Find parent NodeId from the property's owning subject
-            var parentSubject = registeredProperty.Subject;
-            NodeId? parentNodeId = null;
-
-            if (parentSubject.TryGetData(SubjectNodeIdDataKey, out var parentNodeIdObj) &&
-                parentNodeIdObj is NodeId parentId)
-            {
-                parentNodeId = parentId;
-            }
-
-            if (parentNodeId is null)
-            {
-                _logger.LogWarning(
-                    "Cannot add remote node for subject: parent has no NodeId. Property: {PropertyName}",
-                    registeredProperty.Name);
-                return;
-            }
-
-            // For collections and dictionaries, the parent is the container folder node
-            // The container folder NodeId follows the pattern: parentPath + propertyName
-            var propertyName = registeredProperty.ResolvePropertyName(_configuration.NodeMapper);
-            if (propertyName is null)
-            {
-                return;
-            }
-
-            NodeId containerNodeId;
-            if (registeredProperty.IsSubjectCollection || registeredProperty.IsSubjectDictionary)
-            {
-                // Container folder NodeId: parentNodeId.Identifier + "." + propertyName
-                var parentPath = parentNodeId.Identifier is string stringId ? stringId : "";
-                var containerPath = string.IsNullOrEmpty(parentPath)
-                    ? propertyName
-                    : parentPath + "." + propertyName;
-
-                var namespaceIndex = GetNamespaceIndex(session);
-                containerNodeId = new NodeId(containerPath, namespaceIndex);
-            }
-            else
-            {
-                containerNodeId = parentNodeId;
-            }
-
-            // Build browse name
-            QualifiedName browseName;
-            var namespaceIdx = GetNamespaceIndex(session);
-
-            if (registeredProperty.IsSubjectCollection)
-            {
-                browseName = new QualifiedName($"{propertyName}[{index}]", namespaceIdx);
-            }
-            else if (registeredProperty.IsSubjectDictionary)
-            {
-                var keyString = index?.ToString();
-                if (string.IsNullOrEmpty(keyString))
-                {
-                    _logger.LogWarning("Cannot add remote node: dictionary key is null or empty.");
-                    return;
-                }
-                browseName = new QualifiedName(keyString, namespaceIdx);
-            }
-            else
-            {
-                // Reference property
-                browseName = new QualifiedName(propertyName, namespaceIdx);
-            }
-
-            var addNodesItem = new AddNodesItem
-            {
-                ParentNodeId = new ExpandedNodeId(containerNodeId),
-                ReferenceTypeId = ReferenceTypeIds.HasComponent,
-                RequestedNewNodeId = ExpandedNodeId.Null,
-                BrowseName = browseName,
-                NodeClass = NodeClass.Object,
-                NodeAttributes = new ExtensionObject(new ObjectAttributes
-                {
-                    DisplayName = new LocalizedText(browseName.Name),
-                    Description = LocalizedText.Null,
-                    WriteMask = 0,
-                    UserWriteMask = 0,
-                    EventNotifier = 0
-                }),
-                TypeDefinition = new ExpandedNodeId(ObjectTypeIds.BaseObjectType)
-            };
-
-            var response = await session.AddNodesAsync(
-                requestHeader: null,
-                [addNodesItem],
-                cancellationToken).ConfigureAwait(false);
-
-            if (response.Results.Count > 0)
-            {
-                var result = response.Results[0];
-                if (StatusCode.IsGood(result.StatusCode))
-                {
-                    var assignedNodeId = result.AddedNodeId;
-                    subject.SetData(SubjectNodeIdDataKey, assignedNodeId);
-
-                    _logger.LogInformation(
-                        "Successfully created remote node {NodeId} for property {PropertyName}.",
-                        assignedNodeId, registeredProperty.Name);
-                }
-                else if (result.StatusCode == StatusCodes.BadNotSupported ||
-                         result.StatusCode == StatusCodes.BadServiceUnsupported)
-                {
-                    _logger.LogWarning(
-                        "Server does not support AddNodes service. " +
-                        "Local structural change on '{PropertyName}' will not be reflected on the server.",
-                        registeredProperty.Name);
-                }
-                else
-                {
-                    _logger.LogWarning(
-                        "Failed to create remote node for property {PropertyName}: {StatusCode}",
-                        registeredProperty.Name, result.StatusCode);
-                }
-            }
-        }
-        catch (ServiceResultException ex) when (
-            ex.StatusCode == StatusCodes.BadNotSupported ||
-            ex.StatusCode == StatusCodes.BadServiceUnsupported)
-        {
-            _logger.LogWarning(
-                "Server does not support AddNodes service for property '{PropertyName}'.",
-                registeredProperty.Name);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to create remote node for property {PropertyName}.", registeredProperty.Name);
-        }
-    }
-
-    private async Task TryDeleteRemoteNodeAsync(
-        ISession session,
-        IInterceptorSubject subject,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            // Find the NodeId for this subject
-            if (!subject.TryGetData(SubjectNodeIdDataKey, out var nodeIdObj) ||
-                nodeIdObj is not NodeId nodeId)
-            {
-                _logger.LogDebug("Cannot delete remote node: subject has no NodeId.");
-                return;
-            }
-
-            var deleteNodesItem = new DeleteNodesItem
-            {
-                NodeId = nodeId,
-                DeleteTargetReferences = true
-            };
-
-            var response = await session.DeleteNodesAsync(
-                requestHeader: null,
-                [deleteNodesItem],
-                cancellationToken).ConfigureAwait(false);
-
-            if (response.Results.Count > 0)
-            {
-                var result = response.Results[0];
-                if (StatusCode.IsGood(result))
-                {
-                    _logger.LogInformation(
-                        "Successfully deleted remote node {NodeId}.",
-                        nodeId);
-                }
-                else if (result == StatusCodes.BadNotSupported ||
-                         result == StatusCodes.BadServiceUnsupported)
-                {
-                    _logger.LogWarning(
-                        "Server does not support DeleteNodes service for node {NodeId}.",
-                        nodeId);
-                }
-                else
-                {
-                    _logger.LogWarning(
-                        "Failed to delete remote node {NodeId}: {StatusCode}",
-                        nodeId, result);
-                }
-            }
-        }
-        catch (ServiceResultException ex) when (
-            ex.StatusCode == StatusCodes.BadNotSupported ||
-            ex.StatusCode == StatusCodes.BadServiceUnsupported)
-        {
-            _logger.LogWarning(
-                "Server does not support DeleteNodes service.");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to delete remote node.");
-        }
-    }
-
-    private ushort GetNamespaceIndex(ISession session)
-    {
-        var namespaceUri = _configuration.DefaultNamespaceUri ?? "http://namotion.com/Interceptor/";
-        var index = session.NamespaceUris.GetIndex(namespaceUri);
-        return index >= 0 ? (ushort)index : (ushort)0;
     }
 
     internal void OnCurrentSessionChanged(ISession? previousSession, ISession? currentSession)
@@ -1006,10 +746,22 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             return; // Already disposed
         }
 
-        if (_structureHandler is not null)
+        if (_modelChangeHandler is not null)
         {
-            await _structureHandler.DisposeAsync().ConfigureAwait(false);
-            _structureHandler = null;
+            await _modelChangeHandler.DisposeAsync().ConfigureAwait(false);
+            _modelChangeHandler = null;
+        }
+
+        if (_structuralProcessor is not null)
+        {
+            await _structuralProcessor.DisposeAsync().ConfigureAwait(false);
+            if (_structuralProcessorTask is not null)
+            {
+                try { await _structuralProcessorTask.ConfigureAwait(false); }
+                catch (OperationCanceledException) { }
+            }
+            _structuralProcessor = null;
+            _structuralProcessorTask = null;
         }
 
         var sessionManager = _sessionManager;
@@ -1019,9 +771,6 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             _sessionManager = null;
         }
 
-        // Clean up property data to prevent memory leaks
-        // This ensures that property data associated with this OpcUaNodeIdKey is cleared
-        // even if properties are reused across multiple source instances
         CleanupPropertyData();
         _ownership.Dispose();
         Dispose();

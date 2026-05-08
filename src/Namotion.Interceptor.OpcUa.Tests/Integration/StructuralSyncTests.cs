@@ -190,18 +190,15 @@ public class StructuralSyncTests
             server.Root.People = [..server.Root.People, newPerson];
             logger.Log($"Server People count after add: {server.Root.People.Length}");
 
-            // Assert: Client should discover the new subject
+            // Assert: Client should discover the new subject with values
             await AsyncTestHelpers.WaitUntilAsync(
-                () => client.Root.People.Length == 2,
+                () => client.Root.People.Length == 2
+                      && client.Root.People.Any(p => p.FirstName == "Bob"),
                 timeout: TimeSpan.FromSeconds(30),
-                message: "Client should see the new collection item after server adds it");
+                message: "Client should see the new collection item with values");
 
             Assert.Equal(2, client.Root.People.Length);
-
-            // Verify the new person's properties are synced
-            var clientBob = client.Root.People.FirstOrDefault(
-                person => person.FirstName == "Bob");
-            Assert.NotNull(clientBob);
+            var clientBob = client.Root.People.First(p => p.FirstName == "Bob");
             Assert.Equal("Builder", clientBob.LastName);
 
             logger.Log("Test passed: Client sees new collection item");

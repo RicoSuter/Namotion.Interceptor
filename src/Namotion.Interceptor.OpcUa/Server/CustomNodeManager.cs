@@ -16,6 +16,7 @@ namespace Namotion.Interceptor.OpcUa.Server;
 internal class CustomNodeManager : CustomNodeManager2
 {
     private const string PathDelimiter = ".";
+    internal string SubjectNodeIdDataKey { get; } = "OpcUa:ServerNodeId:" + Guid.NewGuid();
 
     private readonly IInterceptorSubject _subject;
     private readonly OpcUaSubjectServer _serverService;
@@ -504,6 +505,7 @@ internal class CustomNodeManager : CustomNodeManager2
             var node = _nodeFactory.CreateObjectNode(this, parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId, nodeConfiguration);
             _nodeFactory.AddAdditionalReferences(this, node, nodeConfiguration);
             _subjects[registeredSubject] = node;
+            subject.SetData(SubjectNodeIdDataKey, node.NodeId);
             CreateSubjectNodes(node.NodeId, registeredSubject, path + PathDelimiter);
         }
     }
