@@ -32,6 +32,24 @@ public static class DerivedPropertyChangeHandlerExtensions
     }
 
     /// <summary>
+    /// Recalculates a derived property by re-evaluating its getter and firing change
+    /// notifications if the value changed. Use this when the getter depends on external
+    /// (non-intercepted) data and that data has changed.
+    /// No-op if the property is not a derived property or is not attached to a context.
+    /// </summary>
+    public static void RecalculateDerivedProperty(this PropertyReference property)
+    {
+        var data = property.TryGetDerivedPropertyData();
+        if (data is null || !Volatile.Read(ref data.IsDerived))
+        {
+            return;
+        }
+
+        DerivedPropertyChangeHandler.RecalculateDerivedProperty(
+            ref property, SubjectChangeContext.Current.ChangedTimestampUtcTicks);
+    }
+
+    /// <summary>
     /// Gets the consolidated tracking data for a property, creating it if needed.
     /// A single dictionary lookup provides access to UsedByProperties, RequiredProperties, and LastKnownValue.
     /// </summary>
