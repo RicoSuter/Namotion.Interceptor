@@ -33,6 +33,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     private volatile SessionManager? _sessionManager;
     private volatile SubjectPropertyWriter? _propertyWriter;
     private OutboundWriter? _writer;
+    private OpcUaStructureHandler? _structureHandler;
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
     private volatile CancellationTokenSource? _reconnectCts; // Cancelled by KillAsync to abort in-flight reconnection
@@ -139,6 +140,19 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                     else
                     {
                         _logger.LogWarning("No OPC UA monitored items found.");
+                    }
+
+                    if (_configuration.EnableStructureSynchronization || _configuration.EnablePeriodicResynchronization)
+                    {
+                        var rootNodeId = ExpandedNodeId.ToNodeId(rootNode.NodeId, session.NamespaceUris);
+                        if (rootNodeId is not null)
+                        {
+                            _structureHandler = new OpcUaStructureHandler(
+                                _subjectLoader, this, _configuration, _logger);
+                            await _structureHandler.StartAsync(
+                                _subject, rootNodeId, session, _sessionManager.SubscriptionManager,
+                                cancellationToken).ConfigureAwait(false);
+                        }
                     }
                 }
                 else
@@ -491,6 +505,11 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 _structureLock.Release();
             }
 
+            if (_structureHandler is not null)
+            {
+                await _structureHandler.OnReconnectedAsync(session, token).ConfigureAwait(false);
+            }
+
             await propertyWriter.LoadInitialStateAndResumeAsync(token).ConfigureAwait(false);
 
             ReconnectionMetrics.RecordSuccess();
@@ -693,6 +712,12 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         if (Interlocked.Exchange(ref _disposed, 1) == 1)
         {
             return; // Already disposed
+        }
+
+        if (_structureHandler is not null)
+        {
+            await _structureHandler.DisposeAsync().ConfigureAwait(false);
+            _structureHandler = null;
         }
 
         var sessionManager = _sessionManager;
