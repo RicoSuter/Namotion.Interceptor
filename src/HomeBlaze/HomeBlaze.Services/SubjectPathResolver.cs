@@ -344,22 +344,19 @@ public class SubjectPathResolver : ILifecycleHandler
         if (paths.Count > 1)
         {
             // Order by path depth (number of '/' separators) so the shallowest path is first.
-            // Precompute the depth per path to avoid recounting on every comparison.
-            var depths = new int[paths.Count];
-            for (var i = 0; i < paths.Count; i++)
-            {
-                var path = paths[i];
-                var depth = 0;
-                foreach (var t in path)
+            // OrderBy is a documented stable sort: keys are computed once per element, and equal
+            // keys preserve insertion order so paths at the same depth stay deterministic.
+            paths = paths
+                .OrderBy(static path =>
                 {
-                    if (t == '/') depth++;
-                }
-                depths[i] = depth;
-            }
-
-            var pathArray = paths.ToArray();
-            Array.Sort(depths, pathArray);
-            paths = new List<string>(pathArray);
+                    var depth = 0;
+                    foreach (var ch in path)
+                    {
+                        if (ch == '/') depth++;
+                    }
+                    return depth;
+                })
+                .ToList();
         }
 
         return paths.Count > 0 ? paths : Array.Empty<string>();

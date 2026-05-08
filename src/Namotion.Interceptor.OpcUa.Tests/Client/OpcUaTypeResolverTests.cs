@@ -153,6 +153,57 @@ public class OpcUaTypeResolverTests
         Assert.Equal(typeof(DynamicSubject), result);
     }
 
+    [Fact]
+    public async Task WhenVariableHasCustomDataTypeSubtype_ThenWalksTypeTreeToBuiltInType()
+    {
+        // Arrange: a Variable whose DataType is a custom NodeId outside the built-in range.
+        // The session's TypeTree walks the custom DataType up to the well-known Double DataType.
+        // This locks in the fix that uses session.TypeTree instead of the static (no-walk) overload.
+        var customDataTypeId = new NodeId(5001, 2);
+        var variableNodeId = new NodeId(2001, 2);
+
+        var mockTypeTable = new Mock<ITypeTable>();
+        mockTypeTable
+            .Setup(t => t.FindSuperTypeAsync(customDataTypeId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataTypeIds.Double);
+
+        var mockSession = CreateMockSession();
+        mockSession.SetupGet(s => s.TypeTree).Returns(mockTypeTable.Object);
+        mockSession
+            .Setup(s => s.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ReadResponse
+            {
+                ResponseHeader = new ResponseHeader(),
+                Results =
+                [
+                    new DataValue { Value = customDataTypeId, StatusCode = StatusCodes.Good },
+                    new DataValue { Value = -1, StatusCode = StatusCodes.Good }
+                ],
+                DiagnosticInfos = []
+            });
+
+        var variableReference = new ReferenceDescription
+        {
+            BrowseName = new QualifiedName("Temperature"),
+            NodeId = new ExpandedNodeId(variableNodeId),
+            NodeClass = NodeClass.Variable
+        };
+
+        // Act
+        var result = await _resolver.TryGetTypeForNodeAsync(mockSession.Object, variableReference, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(typeof(double), result);
+        mockTypeTable.Verify(
+            t => t.FindSuperTypeAsync(customDataTypeId, It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
+    }
+
     private static Mock<ISession> CreateMockSession()
     {
         var mockSession = new Mock<ISession>();
