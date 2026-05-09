@@ -807,7 +807,7 @@ Server fires ModelChangeEvent (NodeAdded/NodeDeleted)
            -> Create subject via SubjectFactory
            -> LoadSubjectAsync (properties + monitored items)
            -> Add to parent collection/dictionary/reference via SetValueFromSource
-           -> Register monitored items + read initial values
+           -> Register monitored items (initial values arrive via MonitoringMode.Reporting)
      Remove: Look up subject in ConnectorSubjectMap
            -> Find parent via RegisteredSubject.Parents
            -> Remove from parent via SetValueFromSource
@@ -832,5 +832,7 @@ Property write (e.g., root.People = [...])
 **Loop prevention:** The CQP filters changes from its own source. When the client creates a subject from an external `ModelChangeEvent`, it uses `SetValueFromSource(clientSource, ...)`, which tags the change so the CQP does not re-enqueue it. Similarly, when the server processes an `AddNodes` request, it tags the change with the server as source.
 
 **Idempotent processing:** Add events for NodeIds already in the `ConnectorSubjectMap` are no-ops. Remove events for unknown NodeIds are no-ops. This prevents duplicate processing when events arrive multiple times.
+
+**Initial values for dynamically added subjects:** The subject is attached to its parent via `AddSubjectToProperty`, then monitored items are subscribed via `AddMonitoredItemsAsync`, and finally an explicit read is performed. This subscribe-then-read order ensures no changes are lost: the subscription captures all changes from the moment it starts, and the read provides baseline values for properties that have not yet received a notification. Subsequent notifications overwrite any stale read values.
 
 **Reconnect:** On session reconnect, the processor updates its session reference and re-subscribes to `ModelChangeEvent`s via a new `OpcUaModelChangeEventHandler`. The `ConnectorSubjectMap` is preserved across reconnections since it tracks the local subject graph, not the session state.

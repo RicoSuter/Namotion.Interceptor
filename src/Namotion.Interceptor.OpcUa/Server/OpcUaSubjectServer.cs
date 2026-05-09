@@ -25,7 +25,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
 
     private LifecycleInterceptor? _lifecycleInterceptor;
     private volatile OpcUaStandardServer? _server;
-    private volatile OpcUaServerStructuralChangeProcessor? _structuralProcessor;
+    private volatile CustomNodeManager? _nodeManager;
     private volatile bool _isForceKill;
     private volatile CancellationTokenSource? _forceKillCts;
     private int _consecutiveFailures;
@@ -121,17 +121,20 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
         }
 
         var nodeManagerLock = server?.NodeManagerLock;
-        if (nodeManagerLock == null)
+        var nodeManager = _nodeManager;
+        if (nodeManagerLock == null || nodeManager == null)
         {
             return ValueTask.CompletedTask;
         }
 
         var span = changes.Span;
+        var fireModelChangeEvents = _configuration.EnableStructureSynchronization;
 
-        _structuralProcessor?.EnqueueStructuralChanges(span);
+        ProcessStructuralChangesInline(span, nodeManager, fireModelChangeEvents);
 
         lock (nodeManagerLock)
         {
+            var skipped = 0;
             for (var i = 0; i < span.Length; i++)
             {
                 var change = span[i];
@@ -150,11 +153,93 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
                         node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
                     }
                 }
+                else
+                {
+                    var prop = change.Property.TryGetRegisteredProperty();
+                    if (prop is not null && !prop.CanContainSubjects)
+                    {
+                        skipped++;
+                    }
+                }
+            }
+
+            if (skipped > 0)
+            {
+                _logger.LogDebug("Skipped {Count} value changes (no OPC UA node found).", skipped);
             }
         }
 
         OutgoingThroughput.Add(span.Length);
         return ValueTask.CompletedTask;
+    }
+
+    private void ProcessStructuralChangesInline(
+        ReadOnlySpan<SubjectPropertyChange> changes,
+        CustomNodeManager nodeManager,
+        bool fireModelChangeEvents)
+    {
+        for (var i = 0; i < changes.Length; i++)
+        {
+            var change = changes[i];
+            var property = change.Property.TryGetRegisteredProperty();
+            if (property is null || !property.CanContainSubjects)
+            {
+                continue;
+            }
+
+            var oldSubjects = OpcUaStructuralChangeHelper.ExtractSubjects(change.GetOldValue<object?>());
+            var newSubjects = OpcUaStructuralChangeHelper.ExtractSubjects(change.GetNewValue<object?>());
+            var (added, removed) = OpcUaStructuralChangeHelper.ComputeSubjectDiff(oldSubjects, newSubjects);
+
+            foreach (var (subject, _) in removed)
+            {
+                NodeId? nodeId = null;
+                var nodeIdDataKey = nodeManager.SubjectNodeIdDataKey;
+                if (subject.TryGetData(nodeIdDataKey, out var obj) && obj is NodeId id)
+                {
+                    nodeId = id;
+                }
+                else
+                {
+                    var registered = subject.TryGetRegisteredSubject();
+                    if (registered is not null)
+                    {
+                        nodeManager.TryGetNodeId(registered, out nodeId);
+                    }
+                }
+
+                nodeManager.RemoveSubjectNodes(subject);
+                if (nodeId is not null && fireModelChangeEvents)
+                {
+                    nodeManager.FireModelChangeEvent(ModelChangeStructureVerbMask.NodeDeleted, nodeId);
+                }
+            }
+
+            foreach (var (subject, index) in added)
+            {
+                var lifecycleChange = new SubjectLifecycleChange
+                {
+                    Subject = subject,
+                    Property = property.Reference,
+                    Index = index,
+                    ReferenceCount = 0
+                };
+
+                var createdNode = nodeManager.CreateDynamicSubjectNodes(lifecycleChange);
+                if (createdNode is not null)
+                {
+                    nodeManager.ClearChangeMasksForSubject(subject);
+                    if (fireModelChangeEvents)
+                    {
+                        nodeManager.FireModelChangeEvent(ModelChangeStructureVerbMask.NodeAdded, createdNode.NodeId);
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning("Failed to create dynamic nodes for subject {Type}.", subject.GetType().Name);
+                }
+            }
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -218,35 +303,14 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
                     _consecutiveFailures = 0;
                     _lastError = null;
 
-                    OpcUaServerStructuralChangeProcessor? structuralProcessor = null;
-                    Task? structuralProcessorTask = null;
                     try
                     {
-                        var nodeManager = server.GetNodeManager();
-                        var nodeManagerLock = server.NodeManagerLock;
-                        if (nodeManager is not null && nodeManagerLock is not null)
-                        {
-                            structuralProcessor = new OpcUaServerStructuralChangeProcessor(
-                                nodeManager, nodeManagerLock,
-                                _configuration.EnableStructureSynchronization, _logger);
-                            _structuralProcessor = structuralProcessor;
-                            structuralProcessorTask = structuralProcessor.RunAsync(linkedToken);
-                        }
-
+                        _nodeManager = server.GetNodeManager();
                         await changeQueueProcessor.ProcessAsync(linkedToken);
                     }
                     finally
                     {
-                        _structuralProcessor = null;
-                        if (structuralProcessor is not null)
-                        {
-                            await structuralProcessor.DisposeAsync();
-                        }
-                        if (structuralProcessorTask is not null)
-                        {
-                            try { await structuralProcessorTask.ConfigureAwait(false); }
-                            catch (OperationCanceledException) { }
-                        }
+                        _nodeManager = null;
                     }
                 }
                 finally

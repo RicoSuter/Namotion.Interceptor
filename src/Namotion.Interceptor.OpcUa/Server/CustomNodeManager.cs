@@ -27,6 +27,7 @@ internal class CustomNodeManager : CustomNodeManager2
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
     private readonly Dictionary<RegisteredSubject, NodeState> _subjects = new();
+    private long _dynamicNodeCounter;
 
     public CustomNodeManager(
         IInterceptorSubject subject,
@@ -274,12 +275,12 @@ internal class CustomNodeManager : CustomNodeManager2
 
         var propertyNode = _nodeFactory.CreateFolderNode(this, parentNodeId, nodeId, browseName, typeDefinitionId, referenceTypeId, nodeConfiguration);
 
-        // Child objects below the array folder use path: parentPath + propertyName + "[index]"
         var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(this, nodeConfiguration);
         foreach (var child in children)
         {
             var childBrowseName = new QualifiedName($"{propertyName}[{child.Index}]", NamespaceIndex);
-            var childPath = $"{parentPath}{propertyName}[{child.Index}]";
+            var counter = Interlocked.Increment(ref _dynamicNodeCounter);
+            var childPath = $"{parentPath}{propertyName}_{counter}";
 
             CreateChildObject(property, childBrowseName, child.Subject, childPath, propertyNode.NodeId, childReferenceTypeId);
         }
@@ -311,7 +312,8 @@ internal class CustomNodeManager : CustomNodeManager2
             }
 
             var childBrowseName = new QualifiedName(indexString, NamespaceIndex);
-            var childPath = parentPath + propertyName + PathDelimiter + child.Index;
+            var counter = Interlocked.Increment(ref _dynamicNodeCounter);
+            var childPath = $"{parentPath}{propertyName}_{counter}";
 
             CreateChildObject(property, childBrowseName, child.Subject, childPath, propertyNode.NodeId, childReferenceTypeId);
         }
@@ -600,7 +602,8 @@ internal class CustomNodeManager : CustomNodeManager2
                 var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(registeredProperty);
                 var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(this, nodeConfiguration);
                 var childBrowseName = new QualifiedName($"{propertyName}[{change.Index}]", NamespaceIndex);
-                var childPath = $"{parentPath}{propertyName}[{change.Index}]";
+                var counter = Interlocked.Increment(ref _dynamicNodeCounter);
+                var childPath = $"{parentPath}{propertyName}_{counter}";
 
                 CreateChildObject(registeredProperty, childBrowseName, change.Subject, childPath, folderNode.NodeId, childReferenceTypeId);
                 return _subjects.GetValueOrDefault(registeredSubject);
@@ -623,7 +626,8 @@ internal class CustomNodeManager : CustomNodeManager2
                 var nodeConfiguration = _nodeMapper.TryGetNodeConfiguration(registeredProperty);
                 var childReferenceTypeId = _nodeFactory.GetChildReferenceTypeId(this, nodeConfiguration);
                 var childBrowseName = new QualifiedName(indexString, NamespaceIndex);
-                var childPath = parentPath + propertyName + PathDelimiter + change.Index;
+                var counter = Interlocked.Increment(ref _dynamicNodeCounter);
+                var childPath = $"{parentPath}{propertyName}_{counter}";
 
                 CreateChildObject(registeredProperty, childBrowseName, change.Subject, childPath, folderNode.NodeId, childReferenceTypeId);
                 return _subjects.GetValueOrDefault(registeredSubject);

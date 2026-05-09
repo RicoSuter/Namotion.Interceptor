@@ -298,8 +298,7 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
             await subscriptionManager.AddMonitoredItemsAsync(
                 monitoredItems, (Session)session, cancellationToken).ConfigureAwait(false);
 
-            await _loader.ReadInitialValuesAsync(
-                monitoredItems.ToList(), session, cancellationToken).ConfigureAwait(false);
+            await ReadInitialValuesAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -425,6 +424,40 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
                 {
                     PopulateRecursive(child.Subject, visited);
                 }
+            }
+        }
+    }
+
+    private async Task ReadInitialValuesAsync(
+        IReadOnlyList<MonitoredItem> monitoredItems,
+        ISession session,
+        CancellationToken cancellationToken)
+    {
+        var readValues = new ReadValueIdCollection(monitoredItems.Count);
+        foreach (var item in monitoredItems)
+        {
+            readValues.Add(new ReadValueId
+            {
+                NodeId = item.StartNodeId,
+                AttributeId = Opc.Ua.Attributes.Value
+            });
+        }
+
+        var readResponse = await session.ReadAsync(
+            requestHeader: null,
+            maxAge: 0,
+            timestampsToReturn: TimestampsToReturn.Source,
+            readValues,
+            cancellationToken).ConfigureAwait(false);
+
+        for (var i = 0; i < Math.Min(readResponse.Results.Count, monitoredItems.Count); i++)
+        {
+            if (StatusCode.IsGood(readResponse.Results[i].StatusCode) &&
+                monitoredItems[i].Handle is RegisteredSubjectProperty property)
+            {
+                var dataValue = readResponse.Results[i];
+                var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
+                property.SetValueFromSource(_clientSource, dataValue.SourceTimestamp, null, value);
             }
         }
     }

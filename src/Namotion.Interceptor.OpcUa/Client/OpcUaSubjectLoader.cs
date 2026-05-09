@@ -524,42 +524,4 @@ internal class OpcUaSubjectLoader
         return results;
     }
 
-    internal async Task ReadInitialValuesAsync(
-        List<MonitoredItem> monitoredItems,
-        ISession session,
-        CancellationToken cancellationToken)
-    {
-        if (monitoredItems.Count == 0)
-        {
-            return;
-        }
-
-        var readValues = new ReadValueIdCollection(monitoredItems.Count);
-        foreach (var item in monitoredItems)
-        {
-            readValues.Add(new ReadValueId
-            {
-                NodeId = item.StartNodeId,
-                AttributeId = Opc.Ua.Attributes.Value
-            });
-        }
-
-        var readResponse = await session.ReadAsync(
-            requestHeader: null,
-            maxAge: 0,
-            timestampsToReturn: TimestampsToReturn.Source,
-            readValues,
-            cancellationToken).ConfigureAwait(false);
-
-        for (var i = 0; i < Math.Min(readResponse.Results.Count, monitoredItems.Count); i++)
-        {
-            if (StatusCode.IsGood(readResponse.Results[i].StatusCode) &&
-                monitoredItems[i].Handle is RegisteredSubjectProperty property)
-            {
-                var dataValue = readResponse.Results[i];
-                var value = _configuration.ValueConverter.ConvertToPropertyValue(dataValue.Value, property);
-                property.SetValueFromSource(_source, dataValue.SourceTimestamp, null, value);
-            }
-        }
-    }
 }

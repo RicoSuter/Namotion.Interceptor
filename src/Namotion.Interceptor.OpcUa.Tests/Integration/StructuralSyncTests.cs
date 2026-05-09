@@ -888,7 +888,7 @@ public class StructuralSyncTests
         }
     }
 
-    [Fact(Skip = "Requires unique NodeIds: path-based NodeIds are reused when items are replaced at the same index")]
+    [Fact]
     public async Task WhenServerReplacesCollectionEntirely_ThenClientSeesNewItems()
     {
         OpcUaTestServer<TestRoot>? server = null;
@@ -995,7 +995,7 @@ public class StructuralSyncTests
         }
     }
 
-    [Fact(Skip = "Requires unique NodeIds: path-based NodeIds are reused when values are replaced at the same key")]
+    [Fact]
     public async Task WhenServerReplacesValueAtExistingDictionaryKey_ThenClientSeesNewSubject()
     {
         OpcUaTestServer<TestRoot>? server = null;
@@ -1039,6 +1039,77 @@ public class StructuralSyncTests
             Assert.Equal("Replaced", client.Root.PeopleByName["alice"].LastName);
 
             logger.Log("Test passed: Client sees replaced subject at existing key");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // NodeId collision: replace at same index
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task WhenServerReplacesCollectionItemAtSameIndex_ThenClientSeesNewSubject()
+    {
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            // Arrange: Start with 3 items
+            (server, client, port, var logger) = await StartServerAndClientWithStructuralSyncAsync();
+
+            Assert.NotNull(server.Root);
+            Assert.NotNull(client.Root);
+
+            var serverContext = ((IInterceptorSubject)server.Root).Context;
+
+            // Add Bob and Carol to the initial collection (Jane is already there)
+            var jane = server.Root.People[0];
+            server.Root.People =
+            [
+                jane,
+                new TestPerson(serverContext) { FirstName = "Bob", LastName = "B", Scores = [2.0] },
+                new TestPerson(serverContext) { FirstName = "Carol", LastName = "C", Scores = [3.0] }
+            ];
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 3
+                      && client.Root.People.Any(p => p.FirstName == "Bob"),
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial 3-item collection should sync");
+
+            logger.Log("Initial 3 items synced");
+
+            // Act: Replace Bob (index 1) with Dave (same array position, different instance)
+            var carol = server.Root.People[2];
+            server.Root.People =
+            [
+                jane,
+                new TestPerson(serverContext) { FirstName = "Dave", LastName = "D", Scores = [4.0] },
+                carol
+            ];
+            logger.Log("Server replaced Bob with Dave at index 1");
+
+            // Assert: Client should see Dave instead of Bob
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 3
+                      && client.Root.People.Any(p => p.FirstName == "Dave"),
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should see Dave replacing Bob at same index");
+
+            Assert.Equal(3, client.Root.People.Length);
+            Assert.Contains(client.Root.People, p => p.FirstName == "Jane");
+            Assert.Contains(client.Root.People, p => p.FirstName == "Dave");
+            Assert.Contains(client.Root.People, p => p.FirstName == "Carol");
+            Assert.DoesNotContain(client.Root.People, p => p.FirstName == "Bob");
+
+            logger.Log("Test passed: Client sees replacement at same index");
         }
         finally
         {
@@ -1100,6 +1171,539 @@ public class StructuralSyncTests
             logger.Log($"Server People count: {server.Root.People.Length}");
             logger.Log($"Client People count: {client.Root.People.Length}");
             logger.Log("Test passed: No infinite loop detected");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Value sync after structural changes
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task WhenServerAddsCollectionItem_ThenValueChangesAreSyncedForNewSubject()
+    {
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            // Arrange
+            (server, client, port, var logger) = await StartServerAndClientWithStructuralSyncAsync();
+
+            Assert.NotNull(server.Root);
+            Assert.NotNull(client.Root);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 1,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial People collection should sync");
+
+            // Act: Add a new person, wait for structure to sync, then mutate its values
+            var serverContext = ((IInterceptorSubject)server.Root).Context;
+            var newPerson = new TestPerson(serverContext)
+            {
+                FirstName = "Bob",
+                LastName = "Builder",
+                Scores = [80.0]
+            };
+            server.Root.People = [..server.Root.People, newPerson];
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 2
+                      && client.Root.People.Any(p => p.FirstName == "Bob"),
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should see the new collection item");
+
+            // Now mutate the new person's values on the server
+            newPerson.FirstName = "Robert";
+            newPerson.LastName = "TheBuilder";
+
+            // Assert: Client should see the value changes on the dynamically added subject
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Any(p => p.FirstName == "Robert" && p.LastName == "TheBuilder"),
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should see value changes on dynamically added subject");
+
+            var clientBob = client.Root.People.First(p => p.FirstName == "Robert");
+            Assert.Equal("TheBuilder", clientBob.LastName);
+
+            logger.Log("Test passed: Value changes synced for dynamically added subject");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenServerAddsMultipleItemsRapidly_ThenClientConverges()
+    {
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            // Arrange
+            (server, client, port, var logger) = await StartServerAndClientWithStructuralSyncAsync();
+
+            Assert.NotNull(server.Root);
+            Assert.NotNull(client.Root);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 1,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial People collection should sync");
+
+            var serverContext = ((IInterceptorSubject)server.Root).Context;
+
+            // Act: Add 5 items rapidly
+            for (var i = 0; i < 5; i++)
+            {
+                server.Root.People =
+                [
+                    ..server.Root.People,
+                    new TestPerson(serverContext)
+                    {
+                        FirstName = $"Person{i}",
+                        LastName = $"Last{i}",
+                        Scores = [i * 10.0]
+                    }
+                ];
+            }
+
+            logger.Log($"Server People count after rapid adds: {server.Root.People.Length}");
+
+            // Assert: Client should eventually have all 6 items (1 initial + 5 added)
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 6,
+                timeout: TimeSpan.FromSeconds(60),
+                message: "Client should converge to 6 items after rapid adds");
+
+            Assert.Equal(6, client.Root.People.Length);
+
+            // Verify values are synced for at least some of the new subjects
+            Assert.Contains(client.Root.People, p => p.FirstName == "Person0");
+            Assert.Contains(client.Root.People, p => p.FirstName == "Person4");
+
+            logger.Log("Test passed: Client converged after rapid structural mutations");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenServerAddsItemAndMutatesValuesConcurrently_ThenClientConverges()
+    {
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            // Arrange
+            (server, client, port, var logger) = await StartServerAndClientWithStructuralSyncAsync();
+
+            Assert.NotNull(server.Root);
+            Assert.NotNull(client.Root);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 1,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial People collection should sync");
+
+            var serverContext = ((IInterceptorSubject)server.Root).Context;
+
+            // Act: Add a person and simultaneously mutate existing values
+            var newPerson = new TestPerson(serverContext)
+            {
+                FirstName = "Concurrent",
+                LastName = "Test",
+                Scores = [1.0]
+            };
+            server.Root.People = [..server.Root.People, newPerson];
+
+            // Rapidly mutate the root's scalar values while structural change propagates
+            for (var i = 0; i < 20; i++)
+            {
+                server.Root.Name = $"Mutation{i}";
+                server.Root.Number = i * 1.5m;
+                await Task.Delay(10);
+            }
+
+            // Assert: Client should see both the structural change AND final values
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 2
+                      && client.Root.People.Any(p => p.FirstName == "Concurrent")
+                      && client.Root.Name == "Mutation19",
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should see structural change and converged values");
+
+            Assert.Equal(2, client.Root.People.Length);
+            Assert.Equal("Mutation19", client.Root.Name);
+
+            logger.Log("Test passed: Concurrent value and structural mutations converged");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenServerAddsAndRemovesItems_ThenClientConvergesToFinalState()
+    {
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            // Arrange
+            (server, client, port, var logger) = await StartServerAndClientWithStructuralSyncAsync();
+
+            Assert.NotNull(server.Root);
+            Assert.NotNull(client.Root);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 1,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial People collection should sync");
+
+            var serverContext = ((IInterceptorSubject)server.Root).Context;
+
+            // Act: Add 3 items
+            var people = server.Root.People.ToList();
+            for (var i = 0; i < 3; i++)
+            {
+                people.Add(new TestPerson(serverContext)
+                {
+                    FirstName = $"Temp{i}",
+                    LastName = $"Person{i}",
+                    Scores = [i * 10.0]
+                });
+            }
+            server.Root.People = people.ToArray();
+            logger.Log($"Server has {server.Root.People.Length} items after adds");
+
+            // Wait for adds to propagate
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 4,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should see 4 items after adds");
+
+            // Now remove 2 of the 3 added items, keep Temp1
+            server.Root.People = server.Root.People
+                .Where(p => p.FirstName != "Temp0" && p.FirstName != "Temp2")
+                .ToArray();
+            logger.Log($"Server has {server.Root.People.Length} items after removals");
+
+            // Assert: Client should converge to final state (2 items: Jane + Temp1)
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 2
+                      && client.Root.People.Any(p => p.FirstName == "Jane")
+                      && client.Root.People.Any(p => p.FirstName == "Temp1"),
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should converge to final state after add+remove");
+
+            Assert.Equal(2, client.Root.People.Length);
+            Assert.Contains(client.Root.People, p => p.FirstName == "Jane");
+            Assert.Contains(client.Root.People, p => p.FirstName == "Temp1");
+
+            logger.Log("Test passed: Client converged after add+remove cycle");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Server outgoing race: value mutation immediately after structural add
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task WhenServerAndClientBothMutateValues_ThenFinalStateConverges()
+    {
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            // Arrange: Bidirectional sync (client can write to server)
+            (server, client, port, var logger) = await StartServerAndClientWithStructuralSyncAsync();
+
+            Assert.NotNull(server.Root);
+            Assert.NotNull(client.Root);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 1
+                      && client.Root.People[0].FirstName == "Jane",
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial sync");
+
+            var serverContext = ((IInterceptorSubject)server.Root).Context;
+
+            // Act: Add 3 subjects, then mutate values on BOTH server and client concurrently
+            for (var i = 0; i < 3; i++)
+            {
+                server.Root.People =
+                [
+                    ..server.Root.People,
+                    new TestPerson(serverContext)
+                    {
+                        FirstName = $"Person{i}",
+                        LastName = $"Last{i}",
+                        Scores = [i * 1.0]
+                    }
+                ];
+            }
+
+            // Wait for structure to sync
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 4,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should see 4 people");
+
+            // Concurrently mutate values on both sides
+            for (var i = 0; i < 10; i++)
+            {
+                server.Root.People[1].FirstName = $"SV{i}";
+                client.Root.People[1].FirstName = $"CV{i}";
+                await Task.Delay(20);
+            }
+
+            // Set final deterministic values
+            server.Root.People[1].FirstName = "ServerFinal";
+            await Task.Delay(500);
+
+            // Assert: Client should see the server's final value
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People[1].FirstName == "ServerFinal",
+                timeout: TimeSpan.FromSeconds(30),
+                pollInterval: TimeSpan.FromMilliseconds(200),
+                message: "Client should converge to server's final value");
+
+            // Check all subjects have consistent values
+            for (var i = 0; i < server.Root.People.Length; i++)
+            {
+                var sp = server.Root.People[i];
+                var cp = client.Root.People.FirstOrDefault(p => p.LastName == sp.LastName);
+                if (cp is null)
+                {
+                    logger.Log($"  Missing client person with LastName={sp.LastName}");
+                    continue;
+                }
+
+                if (sp.FirstName != cp.FirstName)
+                {
+                    logger.Log($"  Value diff: {sp.LastName}.FirstName server={sp.FirstName} client={cp.FirstName}");
+                }
+            }
+
+            Assert.Equal("ServerFinal", client.Root.People[1].FirstName);
+            logger.Log("Test passed: Bidirectional value mutations converged");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenServerAddsSubjectAndImmediatelyMutatesValue_ThenClientSeesValue()
+    {
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            // Arrange
+            (server, client, port, var logger) = await StartServerAndClientWithStructuralSyncAsync();
+
+            Assert.NotNull(server.Root);
+            Assert.NotNull(client.Root);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 1,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial People collection should sync");
+
+            var serverContext = ((IInterceptorSubject)server.Root).Context;
+
+            // Act: Add a subject and immediately mutate its value in the same synchronous block.
+            // With the server-side CQP race, the value mutation is processed before the
+            // structural processor creates OPC UA nodes, so the value is silently dropped.
+            var newPerson = new TestPerson(serverContext)
+            {
+                FirstName = "Initial",
+                LastName = "Name",
+                Scores = [1.0]
+            };
+            server.Root.People = [..server.Root.People, newPerson];
+            newPerson.FirstName = "Mutated";
+            newPerson.LastName = "AfterAdd";
+
+            // Assert: Client should see both the subject AND the mutated values
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 2
+                      && client.Root.People.Any(p => p.FirstName == "Mutated" && p.LastName == "AfterAdd"),
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should see subject with immediately mutated values");
+
+            var clientPerson = client.Root.People.First(p => p.FirstName == "Mutated");
+            Assert.Equal("AfterAdd", clientPerson.LastName);
+
+            logger.Log("Test passed: Immediate value mutation after structural add is visible");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Stress test: mirrors ConnectorTester pattern
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task WhenServerMutatesStructureAndValuesRapidly_ThenClientConvergesToFinalState()
+    {
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            // Arrange
+            (server, client, port, var logger) = await StartServerAndClientWithStructuralSyncAsync();
+
+            Assert.NotNull(server.Root);
+            Assert.NotNull(client.Root);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 1,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial People collection should sync");
+
+            var serverContext = ((IInterceptorSubject)server.Root).Context;
+            var random = new Random(42);
+            var addedPeople = new List<TestPerson>();
+
+            // Act: Run 50 structural + value mutations over ~2 seconds (similar to ConnectorTester)
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var valueMutationTask = Task.Run(async () =>
+            {
+                while (!cts.Token.IsCancellationRequested)
+                {
+                    // Mutate values on root
+                    server.Root.Name = $"Val{random.Next(10000)}";
+                    server.Root.Number = random.Next(1000) / 10m;
+
+                    // Mutate values on existing people
+                    foreach (var person in server.Root.People)
+                    {
+                        person.FirstName = $"F{random.Next(10000)}";
+                    }
+
+                    await Task.Delay(50, cts.Token).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+                }
+            });
+
+            // Structural mutations: add and remove people rapidly
+            for (var i = 0; i < 20; i++)
+            {
+                var shouldAdd = random.Next(3) != 0 || server.Root.People.Length < 3;
+                if (shouldAdd)
+                {
+                    var newPerson = new TestPerson(serverContext)
+                    {
+                        FirstName = $"Stress{i}",
+                        LastName = $"Test{i}",
+                        Scores = [i * 1.0]
+                    };
+                    addedPeople.Add(newPerson);
+                    server.Root.People = [..server.Root.People, newPerson];
+                }
+                else if (server.Root.People.Length > 1)
+                {
+                    var removeIndex = random.Next(server.Root.People.Length);
+                    var removed = server.Root.People[removeIndex];
+                    addedPeople.Remove(removed);
+                    server.Root.People = [..server.Root.People[..removeIndex], ..server.Root.People[(removeIndex + 1)..]];
+                }
+
+                await Task.Delay(100);
+            }
+
+            // Set final deterministic state
+            cts.Cancel();
+            await valueMutationTask;
+
+            server.Root.Name = "FinalName";
+            server.Root.Number = 999m;
+            foreach (var person in server.Root.People)
+            {
+                person.FirstName = $"Final_{person.LastName}";
+            }
+
+            var expectedCount = server.Root.People.Length;
+            var expectedName = server.Root.Name;
+            logger.Log($"Server final state: {expectedCount} people, Name={expectedName}");
+
+            // Assert: Client should converge to final state
+            await AsyncTestHelpers.WaitUntilAsync(
+                () =>
+                {
+                    var clientCount = client.Root.People.Length;
+                    var clientName = client.Root.Name;
+                    if (clientCount != expectedCount || clientName != expectedName)
+                    {
+                        logger.Log($"  Waiting: client has {clientCount}/{expectedCount} people, Name={clientName}");
+                        return false;
+                    }
+                    return true;
+                },
+                timeout: TimeSpan.FromSeconds(60),
+                pollInterval: TimeSpan.FromSeconds(2),
+                message: $"Client should converge to {expectedCount} people and Name={expectedName}");
+
+            Assert.Equal(expectedCount, client.Root.People.Length);
+            Assert.Equal("FinalName", client.Root.Name);
+            Assert.Equal(999m, client.Root.Number);
+
+            // Verify values on dynamically added subjects converged
+            foreach (var serverPerson in server.Root.People)
+            {
+                var clientPerson = client.Root.People.FirstOrDefault(
+                    p => p.FirstName == serverPerson.FirstName);
+                Assert.NotNull(clientPerson);
+                Assert.Equal(serverPerson.LastName, clientPerson.LastName);
+            }
+
+            logger.Log("Test passed: Stress test converged");
         }
         finally
         {
