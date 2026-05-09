@@ -43,6 +43,10 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
 
     protected override async Task ProcessEventAsync(StructuralChangeEvent evt, CancellationToken cancellationToken)
     {
+        Logger.LogDebug(
+            "Client structural event: {Verb} IsLocal={IsLocal} NodeId={NodeId} Subject={Subject}.",
+            evt.Verb, evt.IsLocal, evt.AffectedNodeId, evt.Subject?.GetType().Name);
+
         if (evt.IsLocal)
         {
             if (evt.Verb == StructuralChangeVerb.Add)
@@ -207,25 +211,29 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
             return;
         }
 
-        // Browse inverse to find parent NodeId
-        var parentNodeId = await BrowseParentAsync(affectedNodeId, session, cancellationToken).ConfigureAwait(false);
-        if (parentNodeId is null)
-        {
-            return;
-        }
+        // Walk up the hierarchy to find the nearest known ancestor.
+        // Depth 0 = direct parent (reference property), depth 1 = container folder
+        // (collection/dictionary), depth 2+ = deeply nested or unordered events.
+        NodeId? containerNodeId = null;
+        var currentNodeId = affectedNodeId;
+        ParentContext? context = null;
 
-        // Resolve parent subject (direct or via container folder)
-        var context = ResolveParentContext(parentNodeId);
-        if (context is null)
+        for (var depth = 0; depth < 10; depth++)
         {
-            // Parent might be a container folder, try one level up
-            var grandparentNodeId = await BrowseParentAsync(parentNodeId, session, cancellationToken).ConfigureAwait(false);
-            if (grandparentNodeId is null)
+            var parentId = await BrowseParentAsync(currentNodeId, session, cancellationToken).ConfigureAwait(false);
+            if (parentId is null)
             {
                 return;
             }
 
-            context = ResolveParentContext(grandparentNodeId, containerNodeId: parentNodeId);
+            context = ResolveParentContext(parentId, containerNodeId: containerNodeId);
+            if (context is not null)
+            {
+                break;
+            }
+
+            containerNodeId = parentId;
+            currentNodeId = parentId;
         }
 
         if (context is null)
@@ -233,7 +241,7 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
             return;
         }
 
-        // Browse the container/parent to get the ReferenceDescription of the affected node
+        // Browse the container/parent to find the affected node's ReferenceDescription
         var browseNodeId = context.Value.ContainerNodeId ?? context.Value.ParentNodeId;
         var children = await _loader.BrowseNodeAsync(browseNodeId, session, cancellationToken).ConfigureAwait(false);
         ReferenceDescription? affectedRef = null;
@@ -252,53 +260,14 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
             return;
         }
 
-        // Find the target property
+        // Find the target property on the parent subject
         var registered = context.Value.ParentSubject.TryGetRegisteredSubject();
         if (registered is null)
         {
             return;
         }
 
-        RegisteredSubjectProperty? targetProperty = null;
-        object? index = null;
-
-        foreach (var property in registered.Properties)
-        {
-            if (!property.CanContainSubjects)
-            {
-                continue;
-            }
-
-            var name = property.ResolvePropertyName(_configuration.NodeMapper);
-            if (name is null)
-            {
-                continue;
-            }
-
-            if (context.Value.ContainerNodeId is not null)
-            {
-                // Container folder: match by container BrowseName
-                if (context.Value.ContainerBrowseName == name)
-                {
-                    targetProperty = property;
-                    if (property.IsSubjectCollection)
-                    {
-                        index = children.IndexOf(affectedRef);
-                    }
-                    else if (property.IsSubjectDictionary)
-                    {
-                        index = affectedRef.BrowseName.Name;
-                    }
-                    break;
-                }
-            }
-            else if (property.IsSubjectReference && name == affectedRef.BrowseName.Name)
-            {
-                targetProperty = property;
-                break;
-            }
-        }
-
+        var (targetProperty, index) = FindTargetProperty(registered, context.Value, affectedRef, children);
         if (targetProperty is null)
         {
             return;
@@ -319,24 +288,63 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
 
         newSubject.Context.AddFallbackContext(context.Value.ParentSubject.Context);
 
-        // Load subject properties and create monitored items
         var monitoredItems = await _loader.LoadSubjectAsync(
             newSubject, affectedRef, session, _subjectMap, cancellationToken).ConfigureAwait(false);
 
-        // Add to parent
         AddSubjectToProperty(targetProperty, newSubject, index);
 
-        // Register monitored items
         if (monitoredItems.Count > 0)
         {
             await subscriptionManager.AddMonitoredItemsAsync(
                 monitoredItems, (Session)session, cancellationToken).ConfigureAwait(false);
 
-            // OPC UA SDK may deliver stale initial notifications when nodes are recreated at the same path.
-            // Brief yield lets those fire first, then we read authoritative values.
-            await Task.Delay(100, cancellationToken).ConfigureAwait(false);
-            await _loader.ReadInitialValuesAsync(monitoredItems.ToList(), session, cancellationToken).ConfigureAwait(false);
+            await _loader.ReadInitialValuesAsync(
+                monitoredItems.ToList(), session, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    private (RegisteredSubjectProperty? Property, object? Index) FindTargetProperty(
+        RegisteredSubject registered,
+        ParentContext context,
+        ReferenceDescription affectedRef,
+        ReferenceDescriptionCollection children)
+    {
+        foreach (var property in registered.Properties)
+        {
+            if (!property.CanContainSubjects)
+            {
+                continue;
+            }
+
+            var name = property.ResolvePropertyName(_configuration.NodeMapper);
+            if (name is null)
+            {
+                continue;
+            }
+
+            if (context.ContainerNodeId is not null)
+            {
+                if (context.ContainerBrowseName == name)
+                {
+                    object? index = null;
+                    if (property.IsSubjectCollection)
+                    {
+                        index = children.IndexOf(affectedRef);
+                    }
+                    else if (property.IsSubjectDictionary)
+                    {
+                        index = affectedRef.BrowseName.Name;
+                    }
+                    return (property, index);
+                }
+            }
+            else if (property.IsSubjectReference && name == affectedRef.BrowseName.Name)
+            {
+                return (property, null);
+            }
+        }
+
+        return (null, null);
     }
 
     private void ProcessExternalRemove(StructuralChangeEvent evt)
