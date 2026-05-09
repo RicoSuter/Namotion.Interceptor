@@ -179,6 +179,14 @@ Beyond the settings shown above, the following properties are available on `OpcU
 |----------|---------|-------------|
 | `MaximumReferencesPerNode` | 0 | Max references per browse request (0 = server default) |
 
+**Structural Synchronization:**
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `EnableStructureSynchronization` | false | Subscribe to `ModelChangeEvent`s and reconcile when server address space changes |
+| `EnableRemoteNodeManagement` | false | Send `AddNodes`/`DeleteNodes` to the server when local subjects are added/removed |
+| `SubjectFactory` | null | Factory for creating subjects from remote structural changes |
+
 ## Security
 
 ### Transport Security
@@ -722,6 +730,7 @@ The OPC UA client hooks into the interceptor lifecycle system (see [Subject Life
 - Property data (OPC UA node IDs) associated with the subject is cleared
 - OPC UA subscription items remain on the server until session ends
 - Cleanup is skipped during reconnection to avoid interfering with subscription transfer
+- When `EnableStructureSynchronization` is enabled, the `OpcUaClientStructuralChangeProcessor` handles incoming `ModelChangeEvent`s and creates/removes local subjects accordingly
 
 See also [Lifecycle Limitations](connectors-opcua.md#lifecycle-limitations) that apply to both client and server.
 
@@ -743,9 +752,13 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
  │    │    └── uses ReadAfterWriteManager
  │    ├── creates PollingManager           (back-ref to source)
  │    └── creates ReadAfterWriteManager
- └── creates OutboundWriter
-      ├── receives SessionManager
-      └── receives ThroughputCounter
+ ├── creates OutboundWriter
+ │    ├── receives SessionManager
+ │    └── receives ThroughputCounter
+ └── creates OpcUaClientStructuralChangeProcessor  (when EnableStructureSynchronization)
+      ├── owns ConnectorSubjectMap<NodeId>
+      ├── owns OpcUaModelChangeEventHandler
+      └── uses OpcUaSubjectLoader (for LoadSubjectAsync, BrowseNodeAsync)
 ```
 
 ### Responsibilities
@@ -760,6 +773,9 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
 | `ReadAfterWriteManager` | Schedules read-backs after writes for nodes where exception-based monitoring was revised to sampling. |
 | `SubscriptionHealthMonitor` | Retries failed monitored items that may succeed later (transient server errors). |
 | `OpcUaSubjectLoader` | Browses the OPC UA address space and maps nodes to C# properties. |
+| `OpcUaClientStructuralChangeProcessor` | Channel-based queue. Processes Add/Remove events from ModelChangeEvents (external) and CQP (local). |
+| `OpcUaModelChangeEventHandler` | Subscribes to `GeneralModelChangeEventType` on the server and forwards NodeAdded/NodeDeleted events. |
+| `ConnectorSubjectMap<NodeId>` | Reverse-index map from NodeId to subject with ref counting and lifecycle cleanup. |
 | `OpcUaClientDiagnostics` | Read-only public facade that aggregates diagnostics from all internal components. |
 | `ReconnectionMetrics` | Thread-safe counters for reconnection tracking (attempts, successes, failures, abandoned). |
 | `ThroughputCounter` | Lock-free 60-second sliding window rate counter for incoming/outgoing changes per second. |
@@ -771,3 +787,50 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
 **Back-reference pattern.** Several classes (`SessionManager`, `SubscriptionManager`, `PollingManager`) receive a reference to `OpcUaSubjectClientSource` to access shared state (metrics, throughput counters, error tracking). `OutboundWriter` demonstrates the preferred alternative: receiving only the specific dependencies it needs via constructor parameters.
 
 **Diagnostics as a facade.** `OpcUaClientDiagnostics` navigates through `OpcUaSubjectClientSource` and `SessionManager` to expose a flat public API. It allocates `PollingDiagnostics` and `ReadAfterWriteDiagnostics` wrappers on demand to avoid exposing internal types.
+
+### Structural Change Processing
+
+When `EnableStructureSynchronization` is enabled, the client creates an `OpcUaClientStructuralChangeProcessor` that handles bidirectional structural sync via a Channel-based event queue.
+
+**External changes (server to client):**
+
+```
+Server fires ModelChangeEvent (NodeAdded/NodeDeleted)
+  -> OpcUaModelChangeEventHandler receives event
+  -> Enqueues StructuralChangeEvent(IsLocal=false, AffectedNodeId)
+  -> Background loop processes:
+     Add:  Browse inverse to find parent NodeId
+           -> Look up parent in ConnectorSubjectMap
+           -> If not found, try one level up (container folder)
+           -> Browse parent forward to get ReferenceDescription
+           -> Find matching structural property by BrowseName
+           -> Create subject via SubjectFactory
+           -> LoadSubjectAsync (properties + monitored items)
+           -> Add to parent collection/dictionary/reference via SetValueFromSource
+           -> Register monitored items + read initial values
+     Remove: Look up subject in ConnectorSubjectMap
+           -> Find parent via RegisteredSubject.Parents
+           -> Remove from parent via SetValueFromSource
+           -> ConnectorSubjectMap entry cleaned up by lifecycle
+```
+
+**Local changes (client to server):**
+
+```
+Property write (e.g., root.People = [...])
+  -> CQP captures old/new values
+  -> WriteChangesAsync fires
+  -> OpcUaClientStructuralChangeProcessor.EnqueueStructuralChanges()
+     diffs old/new subjects, enqueues Add/Remove events
+  -> Background loop processes:
+     Add:    Build AddNodesItem with parent NodeId + BrowseName
+             -> session.AddNodesAsync() to tell the server
+     Remove: Get NodeId from subject.Data
+             -> session.DeleteNodesAsync() to tell the server
+```
+
+**Loop prevention:** The CQP filters changes from its own source. When the client creates a subject from an external `ModelChangeEvent`, it uses `SetValueFromSource(clientSource, ...)`, which tags the change so the CQP does not re-enqueue it. Similarly, when the server processes an `AddNodes` request, it tags the change with the server as source.
+
+**Idempotent processing:** Add events for NodeIds already in the `ConnectorSubjectMap` are no-ops. Remove events for unknown NodeIds are no-ops. This prevents duplicate processing when events arrive multiple times.
+
+**Reconnect:** On session reconnect, the processor updates its session reference and re-subscribes to `ModelChangeEvent`s via a new `OpcUaModelChangeEventHandler`. The `ConnectorSubjectMap` is preserved across reconnections since it tracks the local subject graph, not the session state.
