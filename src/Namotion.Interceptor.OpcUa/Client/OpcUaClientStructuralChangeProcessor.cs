@@ -69,6 +69,7 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
                 ProcessExternalRemove(evt);
             }
         }
+
     }
 
     private async Task SendAddNodesToServerAsync(StructuralChangeEvent evt, CancellationToken cancellationToken)

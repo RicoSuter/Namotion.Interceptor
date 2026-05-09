@@ -183,7 +183,6 @@ internal class SubscriptionManager : IAsyncDisposable
         }
         catch
         {
-            // Return pooled list on exception to prevent pool exhaustion
             changes.Clear();
             ChangesPool.Return(changes);
             throw;
@@ -193,8 +192,6 @@ internal class SubscriptionManager : IAsyncDisposable
         {
             _source.IncomingThroughput.Add(changes.Count);
 
-            // Pool item returned inside callback. Safe because ApplyUpdate never throws:
-            // It wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
             var state = (source: _source, subscription, receivedTimestamp, changes, logger: _logger);
             _propertyWriter.Write(state, static s =>
             {
