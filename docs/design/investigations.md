@@ -2,6 +2,49 @@
 
 Open questions and issues to look into.
 
+## OPC UA: ConnectorTester convergence investigation (2026-05-09)
+
+### Progress
+
+Fixed the snapshot comparison (was using sequential IDs that shifted when subjects were missing, now uses path-based matching). With correct comparison:
+
+- **Structure converges perfectly**: 148 paths on both sides, 0 missing, 0 extra
+- **Values nearly converge**: only 3-6 diffs per run, all on `ObjectRef` paths
+
+### Fixes applied (committed)
+
+1. **Unique NodeIds** (`CustomNodeManager._dynamicNodeCounter`): positional `People[2]` replaced with counter-based `People_42`. Fixes NodeId reuse when subjects shift positions.
+2. **Inline server structural processing**: structural changes processed synchronously in `WriteChangesAsync` before value loop. Removed `OpcUaServerStructuralChangeProcessor` class.
+3. **Filter failed monitored items**: `AddMonitoredItemsAsync` now calls `FilterOutFailedMonitoredItemsAsync` after `ApplyChangesAsync`.
+4. **Path-based snapshot comparison**: `VerificationEngine.CreateSnapshot` now walks graph by position (`ROOT/Collection[2]/Items[key]`) instead of sequential IDs.
+
+### Ruled out
+
+- **Throughput**: structural events process in 1ms median, not a bottleneck
+- **SemaphoreSlim for incoming serialization**: blocking the SDK callback thread makes things worse (365 diffs vs 12)
+- **Removing ReadInitialValuesAsync**: 1385 diffs without it (initial notifications unreliable)
+- **Dropped notifications**: only 2 unmatched ClientHandle warnings in a full run
+
+### Remaining issue: ObjectRef value diffs (3-6 per run)
+
+All remaining diffs are on `ObjectRef` paths. Pattern:
+- `ROOT/Collection[N]/ObjectRef`: both sides have values but they disagree (stale values on one side)
+- `ROOT/Items[key]/ObjectRef`: server has defaults, client has values (or vice versa)
+
+ObjectRef replacement during `MutateObjectRef`:
+```csharp
+target.ObjectRef = null;       // remove
+target.ObjectRef = CreateNewNode();  // add new with defaults
+```
+
+This creates two structural events (Remove + Add). The new ObjectRef starts with defaults. The MutationEngine may or may not mutate its values before mutations stop. If one side processes the Remove+Add at a different point in time than the other, values diverge.
+
+### Next steps
+
+- Investigate why ObjectRef replacement causes stale values
+- Check if ObjectRef Remove event properly cleans up subscriptions on client
+- Check if ObjectRef Add event properly sets up subscriptions for the new subject
+
 ## OPC UA: Duplicate Add events for same NodeId without intervening Remove
 
 **Observed in:** Stress test `WhenServerMutatesStructureAndValuesRapidly_ThenClientConvergesToFinalState`

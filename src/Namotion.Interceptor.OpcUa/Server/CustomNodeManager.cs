@@ -641,8 +641,11 @@ internal class CustomNodeManager : CustomNodeManager2
                 }
                 else
                 {
-                    var child = new SubjectPropertyChild { Subject = change.Subject, Index = change.Index };
-                    CreateReferenceObjectNode(propertyName, registeredProperty, child, parentNodeId, parentPath);
+                    var counter = Interlocked.Increment(ref _dynamicNodeCounter);
+                    var childPath = $"{parentPath}{propertyName}_{counter}";
+                    var browseName = _nodeFactory.GetBrowseName(this, propertyName, nodeConfiguration, change.Index);
+                    var referenceTypeId = _nodeFactory.GetReferenceTypeId(this, nodeConfiguration);
+                    CreateChildObject(registeredProperty, browseName, change.Subject, childPath, parentNodeId, referenceTypeId);
                 }
                 return _subjects.GetValueOrDefault(registeredSubject);
             }
