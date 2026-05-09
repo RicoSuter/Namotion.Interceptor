@@ -211,9 +211,6 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
             return;
         }
 
-        // Walk up the hierarchy to find the nearest known ancestor.
-        // Depth 0 = direct parent (reference property), depth 1 = container folder
-        // (collection/dictionary), depth 2+ = deeply nested or unordered events.
         NodeId? containerNodeId = null;
         var currentNodeId = affectedNodeId;
         ParentContext? context = null;
@@ -241,7 +238,6 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
             return;
         }
 
-        // Browse the container/parent to find the affected node's ReferenceDescription
         var browseNodeId = context.Value.ContainerNodeId ?? context.Value.ParentNodeId;
         var children = await _loader.BrowseNodeAsync(browseNodeId, session, cancellationToken).ConfigureAwait(false);
         ReferenceDescription? affectedRef = null;
@@ -260,7 +256,6 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
             return;
         }
 
-        // Find the target property on the parent subject
         var registered = context.Value.ParentSubject.TryGetRegisteredSubject();
         if (registered is null)
         {
@@ -273,7 +268,6 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
             return;
         }
 
-        // Create subject
         IInterceptorSubject newSubject;
         if (targetProperty.IsSubjectCollection || targetProperty.IsSubjectDictionary)
         {

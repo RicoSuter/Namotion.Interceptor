@@ -269,6 +269,7 @@ internal class SubscriptionManager : IAsyncDisposable
             if (added)
             {
                 await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
+                await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
                 itemIndex = batchEnd;
             }
         }
@@ -310,6 +311,7 @@ internal class SubscriptionManager : IAsyncDisposable
             }
 
             await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
+            await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
             _subscriptions.TryAdd(subscription, 0);
             itemIndex = batchEnd;
         }
