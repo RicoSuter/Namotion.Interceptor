@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Logging;
 using Namotion.Interceptor.ConnectorTester.Model;
@@ -15,7 +17,14 @@ public class VerificationEngine : BackgroundService
 {
     private static readonly TimeSpan SnapshotPollInterval = TimeSpan.FromSeconds(5);
 
+    private static readonly JsonSerializerOptions IndentedJsonOptions = new()
+    {
+        WriteIndented = true
+    };
+
     private const string CyclesLogPath = "logs/cycles.csv";
+
+    private const string LogsDirectory = "logs";
 
     private readonly ConnectorTesterConfiguration _configuration;
     private readonly TestCycleCoordinator _coordinator;
@@ -204,11 +213,7 @@ public class VerificationEngine : BackgroundService
                     }
                 }
 
-                // Log full snapshots
-                foreach (var snapshot in snapshots)
-                {
-                    _logger.LogError("Snapshot [{Name}]: {Snapshot}", snapshot.Name, snapshot.Snapshot);
-                }
+                await LogFailureSnapshotsAsync(snapshots, stoppingToken);
 
                 WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, "FAIL");
                 CompactHeapAndLogCycle(activeProfileName, "FAIL", cycleStopwatch.Elapsed, convergeStopwatch.Elapsed);
@@ -282,6 +287,38 @@ public class VerificationEngine : BackgroundService
         }
         catch
         {
+        }
+    }
+
+    /// <summary>
+    /// Writes formatted JSON snapshots to disk for each participant, so failures can
+    /// be diffed with any text tool. Runs only on convergence failure; never replaces
+    /// the failure signal.
+    /// </summary>
+    private async Task LogFailureSnapshotsAsync(
+        List<(string Name, string Snapshot)> snapshots,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            Directory.CreateDirectory(LogsDirectory);
+
+            foreach (var snapshot in snapshots)
+            {
+                var fileName = $"cycle{_cycleNumber:D3}-fail-{snapshot.Name}.json";
+                var filePath = Path.Combine(LogsDirectory, fileName);
+
+                // Re-serialize with indentation for readability.
+                var node = JsonNode.Parse(snapshot.Snapshot);
+                var formatted = node?.ToJsonString(IndentedJsonOptions) ?? snapshot.Snapshot;
+
+                await File.WriteAllTextAsync(filePath, formatted, cancellationToken);
+                _logger.LogError("Snapshot [{Name}] written to {FilePath}", snapshot.Name, filePath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to write failure snapshots to disk");
         }
     }
 
