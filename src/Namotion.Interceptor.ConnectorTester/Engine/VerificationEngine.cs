@@ -386,14 +386,32 @@ public class VerificationEngine : BackgroundService
                     }
                 }
 
-                // Also report subjects present only on the other side.
-                foreach (var (subjectId, _) in other)
+                // Also report subjects present only on the other side, and properties
+                // present only on the other side within shared subjects.
+                foreach (var (subjectId, otherSubjectNode) in other)
                 {
                     if (!reference.ContainsKey(subjectId))
                     {
                         _logger.LogError(
                             "  Subject {SubjectId}: missing from {Reference}, present in {Other}",
                             subjectId, referenceName, otherName);
+                        continue;
+                    }
+
+                    if (otherSubjectNode is not JsonObject otherSharedProperties)
+                    {
+                        continue;
+                    }
+
+                    var refSharedProperties = reference[subjectId]!.AsObject();
+                    foreach (var (propertyName, _) in otherSharedProperties)
+                    {
+                        if (!refSharedProperties.ContainsKey(propertyName))
+                        {
+                            _logger.LogError(
+                                "  {SubjectId}.{Property}: missing from {Reference}, present in {Other}",
+                                subjectId, propertyName, referenceName, otherName);
+                        }
                     }
                 }
             }
@@ -429,10 +447,12 @@ public class VerificationEngine : BackgroundService
                 var otherRoot = _participants[snapshots[i].Name];
                 otherRoot.ApplySubjectUpdate(completeUpdate, DefaultSubjectFactory.Instance);
 
-                var refReSnapshot = SnapshotComparer.Capture(referenceRoot);
+                // Reference is paused and not mutated since snapshots[0] was taken; re-using
+                // that string avoids redundant work and a subtle correctness footgun if a
+                // future change introduced reference-side mutation between cycles.
                 var otherReSnapshot = SnapshotComparer.Capture(otherRoot);
 
-                if (SnapshotComparer.SnapshotsMatch(refReSnapshot, otherReSnapshot))
+                if (SnapshotComparer.SnapshotsMatch(snapshots[0].Snapshot, otherReSnapshot))
                 {
                     _logger.LogWarning(
                         "Re-sync check: {Participant} converged after applying reference complete update -> transient delivery gap",
