@@ -226,6 +226,11 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
                 };
 
                 var createdNode = nodeManager.CreateDynamicSubjectNodes(lifecycleChange);
+                if (createdNode is null)
+                {
+                    _logger.LogDebug("Structural add: node already exists for {Type} (likely created by AddNodes handler).", subject.GetType().Name);
+                }
+
                 if (createdNode is not null)
                 {
                     nodeManager.ClearChangeMasksForSubject(subject);
@@ -236,7 +241,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
                 }
                 else
                 {
-                    _logger.LogWarning("Failed to create dynamic nodes for subject {Type}.", subject.GetType().Name);
+                    _logger.LogDebug("Structural add: node already exists for {Type} (likely created by AddNodes handler).", subject.GetType().Name);
                 }
             }
         }

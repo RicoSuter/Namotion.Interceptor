@@ -39,11 +39,22 @@ target.ObjectRef = CreateNewNode();  // add new with defaults
 
 This creates two structural events (Remove + Add). The new ObjectRef starts with defaults. The MutationEngine may or may not mutate its values before mutations stop. If one side processes the Remove+Add at a different point in time than the other, values diverge.
 
-### Next steps
+### Resolved: ObjectRef value diffs
 
-- Investigate why ObjectRef replacement causes stale values
-- Check if ObjectRef Remove event properly cleans up subscriptions on client
-- Check if ObjectRef Add event properly sets up subscriptions for the new subject
+Root cause: ObjectRef used fixed path-based NodeIds (`Root.Collection_5.ObjectRef`). When replaced, the new subject got the same NodeId. Fixed by using the counter for dynamically created reference nodes.
+
+### Remaining: server-only stale events (1-3 missing subjects)
+
+At 20 struct/sec, 1-3 deeply nested subjects are missing from the client. Diagnostic logs show `browse parent null` or `not found in browse`. The server added a node, fired NodeAdded, then removed it before the client could browse. The stale Add event silently fails. A periodic reconciliation pass would fix this.
+
+### Remaining: bidirectional structural mutations (major)
+
+At 50 struct/sec on both sides, client only syncs ~39 out of ~500 subjects. The bidirectional case has fundamental coordination challenges:
+- Both sides fire ModelChangeEvents and send AddNodes simultaneously
+- The server's `CreateDynamicSubjectNodes` returns null for subjects already created by the AddNodes handler (expected, not a bug)
+- The client's structural processor can't handle the volume of events from both directions
+
+This needs a separate design effort. PR #121 had dedicated `GraphChangeSender`/`GraphChangeReceiver`/`GraphChangeDispatcher` classes with more sophisticated coordination. The current simple Channel-based approach works for server-only mutations but not for bidirectional.
 
 ## OPC UA: Duplicate Add events for same NodeId without intervening Remove
 
