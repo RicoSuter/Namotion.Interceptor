@@ -398,7 +398,6 @@ public class OpcUaSubjectLoaderTests
         };
 
         var mockSession = CreateMockSession();
-        var callCount = 0;
         mockSession
             .Setup(s => s.BrowseAsync(
                 It.IsAny<RequestHeader>(),
@@ -420,7 +419,6 @@ public class OpcUaSubjectLoaderTests
                 else
                     children = [];
 
-                callCount++;
                 var collection = new ReferenceDescriptionCollection();
                 collection.AddRange(children);
                 return new BrowseResponse
