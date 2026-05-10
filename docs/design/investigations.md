@@ -2,6 +2,8 @@
 
 Current state and open issues for OPC UA structural synchronization.
 
+This branch (`feature/opcua-bidirectional-structural-sync`) is a rewrite of the original structural mutations PR (#121). That PR used a more complex architecture with `GraphChangeSender`/`GraphChangeReceiver`/`GraphChangeDispatcher`/`GraphChangeApplier` base classes and ~3,200 lines of production code. This rewrite is simpler at ~2,100 lines: the server processes structural changes inline in `WriteChangesAsync`, and the client uses a Channel queue for incoming `ModelChangeEvent`s.
+
 ## Current State (2026-05-10)
 
 ### ConnectorTester Profile Results
