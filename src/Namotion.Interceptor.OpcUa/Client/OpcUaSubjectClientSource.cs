@@ -609,6 +609,104 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         };
     }
 
+    protected override async Task OnChangeProcessorStartedAsync(CancellationToken cancellationToken)
+    {
+        var processor = _incomingProcessor;
+        if (processor is null)
+        {
+            return;
+        }
+
+        var session = _sessionManager?.CurrentSession;
+        if (session is null || !session.Connected)
+        {
+            return;
+        }
+
+        var reconciled = 0;
+        var visited = new HashSet<IInterceptorSubject>(System.Collections.Generic.ReferenceEqualityComparer.Instance);
+        await ReconcileSubjectAsync(_subject, session, processor, visited, cancellationToken).ConfigureAwait(false);
+
+        async Task ReconcileSubjectAsync(
+            IInterceptorSubject subject,
+            ISession currentSession,
+            OpcUaClientIncomingEventProcessor proc,
+            HashSet<IInterceptorSubject> visitedSet,
+            CancellationToken ct)
+        {
+            if (!visitedSet.Add(subject))
+            {
+                return;
+            }
+
+            var registered = subject.TryGetRegisteredSubject();
+            if (registered is null)
+            {
+                return;
+            }
+
+            foreach (var property in registered.Properties)
+            {
+                if (!property.CanContainSubjects)
+                {
+                    continue;
+                }
+
+                if (!property.Reference.TryGetPropertyData(OpcUaNodeIdKey, out _) &&
+                    !property.Reference.TryGetSource(out _))
+                {
+                    continue;
+                }
+
+                foreach (var child in property.Children)
+                {
+                    if (child.Subject is null)
+                    {
+                        continue;
+                    }
+
+                    if (!child.Subject.TryGetData(SubjectNodeIdDataKey, out _))
+                    {
+                        var addedNodeId = await SendAddNodesToServerAsync(
+                            child.Subject, property, child.Index, currentSession, ct).ConfigureAwait(false);
+                        if (addedNodeId is not null)
+                        {
+                            proc.AddEcho(addedNodeId);
+                            proc.SubjectMap.Add(addedNodeId, child.Subject);
+
+                            var refDescription = new ReferenceDescription
+                            {
+                                NodeId = new ExpandedNodeId(addedNodeId),
+                                BrowseName = new QualifiedName(
+                                    addedNodeId.Identifier?.ToString() ?? "", addedNodeId.NamespaceIndex),
+                                NodeClass = NodeClass.Object
+                            };
+
+                            var monitoredItems = await _subjectLoader.LoadSubjectAsync(
+                                child.Subject, refDescription, currentSession, proc.SubjectMap,
+                                ct).ConfigureAwait(false);
+
+                            if (monitoredItems.Count > 0 && _sessionManager?.SubscriptionManager is { } sm)
+                            {
+                                await sm.AddMonitoredItemsAsync(
+                                    monitoredItems, (Session)currentSession, ct).ConfigureAwait(false);
+                            }
+
+                            reconciled++;
+                        }
+                    }
+
+                    await ReconcileSubjectAsync(child.Subject, currentSession, proc, visitedSet, ct).ConfigureAwait(false);
+                }
+            }
+        }
+
+        if (reconciled > 0)
+        {
+            _logger.LogInformation("Post-load reconciliation: sent AddNodes for {Count} locally-created subjects.", reconciled);
+        }
+    }
+
     public override async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         if (_writer is null)
