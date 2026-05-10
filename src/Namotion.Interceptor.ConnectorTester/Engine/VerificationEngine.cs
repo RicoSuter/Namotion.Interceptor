@@ -202,18 +202,11 @@ public class VerificationEngine : BackgroundService
                 _logger.LogError("=== Cycle {Cycle}: FAIL (did not converge within {Timeout}) ===",
                     _cycleNumber, _configuration.ConvergenceTimeout);
 
-                // Log snapshot diffs
-                var referenceSnapshot = snapshots[0];
-                foreach (var snapshot in snapshots.Skip(1))
-                {
-                    if (!SnapshotComparer.SnapshotsMatch(referenceSnapshot.Snapshot, snapshot.Snapshot))
-                    {
-                        _logger.LogError("Mismatch between {Reference} and {Other}",
-                            referenceSnapshot.Name, snapshot.Name);
-                    }
-                }
-
+                // Per-participant snapshot files (canonical artifact for diffing)
                 await LogFailureSnapshotsAsync(snapshots, stoppingToken);
+
+                // Per-property diff log (values + write timestamps)
+                LogPropertyDiffsWithTimestamps(snapshots);
 
                 WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, "FAIL");
                 CompactHeapAndLogCycle(activeProfileName, "FAIL", cycleStopwatch.Elapsed, convergeStopwatch.Elapsed);
@@ -320,6 +313,153 @@ public class VerificationEngine : BackgroundService
         {
             _logger.LogWarning(ex, "Failed to write failure snapshots to disk");
         }
+    }
+
+    /// <summary>
+    /// Diffs the snapshots and logs each diverged property with values and timestamps.
+    /// All data comes from the normalized snapshot JSON: Value-kind timestamps are
+    /// preserved by <see cref="SnapshotComparer.Capture"/>, so a missing timestamp
+    /// field means the property was never written via the interceptor chain on that
+    /// participant. Structural-kind properties (Object/Collection/Dictionary) have
+    /// their timestamps stripped during normalization and are not informative here.
+    /// </summary>
+    private void LogPropertyDiffsWithTimestamps(List<(string Name, string Snapshot)> snapshots)
+    {
+        try
+        {
+            if (snapshots.Count < 2)
+            {
+                return;
+            }
+
+            var reference = JsonNode.Parse(snapshots[0].Snapshot)?["subjects"]?.AsObject();
+            if (reference is null)
+            {
+                return;
+            }
+            var referenceName = snapshots[0].Name;
+
+            for (var i = 1; i < snapshots.Count; i++)
+            {
+                var other = JsonNode.Parse(snapshots[i].Snapshot)?["subjects"]?.AsObject();
+                if (other is null)
+                {
+                    continue;
+                }
+                var otherName = snapshots[i].Name;
+
+                foreach (var (subjectId, refSubjectNode) in reference)
+                {
+                    if (other[subjectId] is not JsonObject otherProperties)
+                    {
+                        _logger.LogError(
+                            "  Subject {SubjectId}: present in {Reference}, missing from {Other}",
+                            subjectId, referenceName, otherName);
+                        continue;
+                    }
+
+                    var refProperties = refSubjectNode!.AsObject();
+                    foreach (var (propertyName, refPropertyNode) in refProperties)
+                    {
+                        if (otherProperties[propertyName] is not JsonObject otherProp)
+                        {
+                            _logger.LogError(
+                                "  {SubjectId}.{Property}: present in {Reference}, missing from {Other}",
+                                subjectId, propertyName, referenceName, otherName);
+                            continue;
+                        }
+
+                        var refProp = refPropertyNode!.AsObject();
+                        if (PropertyJsonsAreEffectivelyEqual(refProp, otherProp))
+                        {
+                            continue;
+                        }
+
+                        _logger.LogError(
+                            "  {SubjectId}.{Property}: {Reference}={RefSummary}, {Other}={OtherSummary}",
+                            subjectId, propertyName,
+                            referenceName, SummarizeProperty(refProp),
+                            otherName, SummarizeProperty(otherProp));
+                    }
+                }
+
+                // Also report subjects present only on the other side.
+                foreach (var (subjectId, _) in other)
+                {
+                    if (!reference.ContainsKey(subjectId))
+                    {
+                        _logger.LogError(
+                            "  Subject {SubjectId}: missing from {Reference}, present in {Other}",
+                            subjectId, referenceName, otherName);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to log property diffs with timestamps");
+        }
+    }
+
+    /// <summary>
+    /// Mirrors the null-timestamp rule from <see cref="SnapshotComparer.SnapshotsMatch"/>
+    /// at the per-property level so the diff log treats convergence the same way
+    /// the convergence check does (no false-positive diffs).
+    /// </summary>
+    private static bool PropertyJsonsAreEffectivelyEqual(JsonObject a, JsonObject b)
+    {
+        if (a.ToJsonString() == b.ToJsonString())
+        {
+            return true;
+        }
+
+        var keys = new HashSet<string>(a.Select(kvp => kvp.Key));
+        keys.UnionWith(b.Select(kvp => kvp.Key));
+
+        foreach (var key in keys)
+        {
+            var valueA = a[key];
+            var valueB = b[key];
+
+            if (key == "timestamp")
+            {
+                // Null on either side matches any value (NullTimestampTicks contract).
+                if (valueA is not null && valueB is not null &&
+                    valueA.ToJsonString() != valueB.ToJsonString())
+                {
+                    return false;
+                }
+            }
+            else
+            {
+                if ((valueA is null) != (valueB is null) ||
+                    (valueA is not null && valueA.ToJsonString() != valueB!.ToJsonString()))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    private static string SummarizeProperty(JsonObject property)
+    {
+        var kind = property["kind"]?.GetValue<string>() ?? "?";
+        return kind switch
+        {
+            "Value" => FormatValueSummary(property),
+            "Object" => $"Object id={property["id"]?.ToJsonString() ?? "null"}",
+            "Collection" or "Dictionary" => $"{kind} count={property["count"]?.ToJsonString() ?? "?"} items={property["items"]?.ToJsonString() ?? "[]"}",
+            _ => property.ToJsonString()
+        };
+    }
+
+    private static string FormatValueSummary(JsonObject property)
+    {
+        var value = property["value"]?.ToJsonString() ?? "null";
+        var timestamp = property["timestamp"]?.GetValue<string>() ?? "never";
+        return $"{value} (written {timestamp})";
     }
 
     private string? ApplyChaosProfile()
