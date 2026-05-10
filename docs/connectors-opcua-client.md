@@ -601,6 +601,37 @@ if (dynamicProperty != null)
 }
 ```
 
+#### Type Resolution
+
+The `OpcUaTypeResolver` maps OPC UA nodes to CLR types during dynamic discovery:
+
+- **Object nodes** become `DynamicSubject` (named sub-properties on the parent subject).
+- **Object nodes with `[numeric]` convention** (e.g., `People[0]`, `People[1]`) become `DynamicSubject[]` collections.
+- **Object nodes with `[string]` convention** (e.g., `Devices[SensorA]`) become `IReadOnlyDictionary<string, DynamicSubject>` dictionaries.
+
+The bracket convention is produced by this library's OPC UA server when exposing C# collections and dictionaries. Standard OPC UA servers typically use named children and are always treated as single subjects.
+- **Variable nodes** are mapped to CLR types based on their OPC UA DataType. The resolver uses `session.TypeTree` to walk the type hierarchy, so custom DataType subtypes (e.g., a server-specific `LocalizedText` variant) are correctly resolved to their base built-in type.
+
+| OPC UA BuiltInType | CLR Type | Notes |
+|---|---|---|
+| Boolean, SByte, Byte, Int16, ... | bool, sbyte, byte, short, ... | Direct mapping |
+| String | string | |
+| DateTime | DateTime | |
+| LocalizedText | LocalizedText | |
+| Enumeration | int | Mapped to underlying Int32 |
+| Number | double | Abstract numeric base type |
+| Integer | long | Abstract signed integer |
+| UInteger | ulong | Abstract unsigned integer |
+| ExtensionObject | ExtensionObject | Complex structured types |
+| XmlElement | string | |
+| Variant, Null | (skipped) | Type cannot be determined |
+
+Override `TryGetTypeForNodeAsync` on `OpcUaTypeResolver` to customize type mapping for specific nodes.
+
+#### Subject Deduplication
+
+When the same OPC UA node appears at multiple paths in the address space (e.g., `Identification` referenced from both `MyMachine` and `MachineryBuildingBlocks`), the client reuses the same subject instance. Reuse applies to single references as well as collection and dictionary elements: any property that resolves to the same `NodeId` during a load is bound to the existing subject, which receives a single set of monitored items.
+
 ## Write Error Handling
 
 When a batch write to the OPC UA server partially fails, the client throws an `OpcUaWriteException`. The exception distinguishes between transient failures (connectivity issues, timeouts that may succeed on retry) and permanent failures (invalid nodes, access denied; should not be retried). The write retry queue (see [Resilience](#write-retry-queue-during-disconnection)) handles transient failures automatically during disconnection, but writes that fail while connected surface this exception.

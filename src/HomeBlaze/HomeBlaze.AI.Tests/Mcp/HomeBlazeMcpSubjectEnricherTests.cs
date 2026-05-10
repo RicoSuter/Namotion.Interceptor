@@ -210,7 +210,7 @@ public class HomeBlazeMcpSubjectEnricherTests
             .WithFullPropertyTracking()
             .WithRegistry()
             .WithLifecycle()
-            .WithService<ILifecycleHandler>(
+            .WithService<IPropertyLifecycleHandler>(
                 () => new PropertyAttributeInitializer(),
                 handler => handler is PropertyAttributeInitializer);
     }

@@ -320,6 +320,7 @@ namespace Namotion.Interceptor.OpcUa
     public class OpcUaSubjectFactory
     {
         public OpcUaSubjectFactory(Namotion.Interceptor.Connectors.ISubjectFactory subjectFactory) { }
+        public virtual System.Threading.Tasks.Task<Namotion.Interceptor.IInterceptorSubject> CreateCollectionSubjectAsync(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty collectionProperty, Opc.Ua.ReferenceDescription node, object? index, Opc.Ua.Client.ISession session, System.Threading.CancellationToken cancellationToken) { }
         public virtual System.Threading.Tasks.Task<Namotion.Interceptor.IInterceptorSubject> CreateSubjectAsync(Namotion.Interceptor.Registry.Abstractions.RegisteredSubjectProperty property, Opc.Ua.ReferenceDescription node, Opc.Ua.Client.ISession session, System.Threading.CancellationToken cancellationToken) { }
     }
     public class OpcUaValueConverter
