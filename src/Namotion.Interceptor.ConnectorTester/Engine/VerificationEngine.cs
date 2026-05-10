@@ -1,8 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime;
-using System.Text.Json;
-using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Logging;
 using Namotion.Interceptor.ConnectorTester.Model;
@@ -18,11 +16,6 @@ public class VerificationEngine : BackgroundService
     private static readonly TimeSpan SnapshotPollInterval = TimeSpan.FromSeconds(5);
 
     private const string CyclesLogPath = "logs/cycles.csv";
-
-    private static readonly JsonSerializerOptions SnapshotJsonOptions = new()
-    {
-        WriteIndented = false
-    };
 
     private readonly ConnectorTesterConfiguration _configuration;
     private readonly TestCycleCoordinator _coordinator;
@@ -163,11 +156,10 @@ public class VerificationEngine : BackgroundService
                 var snapshots = _participants
                     .Select(participant => (
                         Name: participant.Key,
-                        Snapshot: CreateSnapshot(participant.Value)))
+                        Snapshot: SnapshotComparer.Capture(participant.Value)))
                     .ToList();
 
-                var firstSnapshot = snapshots[0].Snapshot;
-                if (snapshots.All(snapshot => snapshot.Snapshot == firstSnapshot))
+                if (snapshots.All(snapshot => SnapshotComparer.SnapshotsMatch(snapshots[0].Snapshot, snapshot.Snapshot)))
                 {
                     convergeStopwatch.Stop();
                     cycleStopwatch.Stop();
@@ -195,7 +187,7 @@ public class VerificationEngine : BackgroundService
                 var snapshots = _participants
                     .Select(participant => (
                         Name: participant.Key,
-                        Snapshot: CreateSnapshot(participant.Value)))
+                        Snapshot: SnapshotComparer.Capture(participant.Value)))
                     .ToList();
 
                 _logger.LogError("=== Cycle {Cycle}: FAIL (did not converge within {Timeout}) ===",
@@ -205,7 +197,7 @@ public class VerificationEngine : BackgroundService
                 var referenceSnapshot = snapshots[0];
                 foreach (var snapshot in snapshots.Skip(1))
                 {
-                    if (snapshot.Snapshot != referenceSnapshot.Snapshot)
+                    if (!SnapshotComparer.SnapshotsMatch(referenceSnapshot.Snapshot, snapshot.Snapshot))
                     {
                         _logger.LogError("Mismatch between {Reference} and {Other}",
                             referenceSnapshot.Name, snapshot.Name);
@@ -227,35 +219,6 @@ public class VerificationEngine : BackgroundService
                 return;
             }
         }
-    }
-
-    private static string CreateSnapshot(TestNode root)
-    {
-        var update = SubjectUpdate.CreateCompleteUpdate(root, []);
-
-        // Strip timestamps from structural properties (Collection, Dictionary, Object).
-        // These are set during local graph creation and are inherently different per participant.
-        // Value property timestamps ARE compared and must converge via source timestamps.
-        if (update.Subjects != null)
-        {
-            foreach (var subject in update.Subjects.Values)
-            {
-                if (subject == null)
-                {
-                    continue;
-                }
-
-                foreach (var property in subject.Values)
-                {
-                    if (property.Kind != SubjectPropertyUpdateKind.Value)
-                    {
-                        property.Timestamp = null;
-                    }
-                }
-            }
-        }
-
-        return JsonSerializer.Serialize(update, SnapshotJsonOptions);
     }
 
     private void WriteStatistics(TimeSpan cycleDuration, TimeSpan convergeDuration, string result)
