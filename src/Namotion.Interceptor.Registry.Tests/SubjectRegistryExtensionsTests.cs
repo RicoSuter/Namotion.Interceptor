@@ -89,4 +89,32 @@ public class SubjectRegistryExtensionsTests
         Assert.Contains(properties, p => p.Name == "FirstName" && p.Subject == father);
         Assert.Contains(properties, p => p.Name == "FirstName" && p.Subject == child);
     }
+
+    [Fact]
+    public void WhenAttributeIsSubjectTyped_ThenGetAllPropertiesDoesNotDescendIntoAttributeChildren()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create().WithRegistry();
+
+        var nested = new Person { FirstName = "Nested" };
+        var root = new Person(context)
+        {
+            FirstName = "Root",
+            Father = new Person { FirstName = "Father" }
+        };
+
+        var registered = root.TryGetRegisteredSubject()!;
+        var firstNameProperty = registered.TryGetProperty("FirstName")!;
+
+        // Add a subject-typed attribute (its CanContainSubjects will be true)
+        firstNameProperty.AddAttribute<Person>("Metadata", _ => nested);
+
+        // Act
+        var allProperties = registered.GetAllProperties().ToArray();
+        var allPropertiesAndAttributes = registered.GetAllPropertiesAndAttributes().ToArray();
+
+        // Assert — neither traversal descends into the attribute's children
+        Assert.DoesNotContain(allProperties, p => p.Subject == nested);
+        Assert.DoesNotContain(allPropertiesAndAttributes, p => p.Subject == nested);
+    }
 }
