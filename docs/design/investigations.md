@@ -57,7 +57,10 @@ Remaining: client-only profile shows ~31 value diffs across all 31 common nodes.
 
 Value-only (no structural sync) converges perfectly: the nosync profile runs indefinitely without failing. So structural sync doesn't interfere with value ownership. The timing issue is inherent to bidirectional value sync when both sides stop writing simultaneously.
 
-**Potential fix**: After mutations stop, one side should do a final value read from the server (or both sides should do a push-all-owned-values). This would resolve the last-writer-wins race.
+Server-only (20/s struct, no client structural): 470/469 nodes, 1 value diff. Nearly perfect.
+Client-only (20/s struct client, 0 struct server): 31/34 nodes, 30 value diffs. The inline `ProcessOutgoingStructuralChangesAsync` (AddNodes network calls) blocks the CQP flush, delaying value writes. During this delay, incoming values from the server arrive and the buffered CQP values become stale.
+
+**Next step**: The CQP uses `change.GetNewValue()` (buffered value). If a server notification updated the property between capture and flush, the CQP writes the stale buffered value. With eventual consistency, a follow-up change should correct this, but the follow-up never arrives because mutations have stopped. Possible fix: read current property value at flush time instead of buffered value (tested, works for convergence but breaks some integration tests that expect specific value ordering).
 
 ### 3. Chaos profiles not tested
 
