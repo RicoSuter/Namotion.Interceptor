@@ -829,10 +829,20 @@ Property write (e.g., root.People = [...])
              -> session.DeleteNodesAsync() to tell the server
 ```
 
-**Loop prevention:** The CQP filters changes from its own source. When the client creates a subject from an external `ModelChangeEvent`, it uses `SetValueFromSource(clientSource, ...)`, which tags the change so the CQP does not re-enqueue it. Similarly, when the server processes an `AddNodes` request, it tags the change with the server as source.
+**Loop prevention:** The CQP skips changes whose source matches itself (`change.Source == _source`). When the client creates a subject from an external `ModelChangeEvent`, it uses `SetValueFromSource(clientSource, ...)`, which tags the change with the client source. The CQP skips it because the source matches. Similarly, when the server processes an `AddNodes` request, it tags the change with the server as source.
 
 **Idempotent processing:** Add events for NodeIds already in the `ConnectorSubjectMap` are no-ops. Remove events for unknown NodeIds are no-ops. This prevents duplicate processing when events arrive multiple times.
 
-**Initial values for dynamically added subjects:** The subject is attached to its parent via `AddSubjectToProperty`, then monitored items are subscribed via `AddMonitoredItemsAsync`, and finally an explicit read is performed. This subscribe-then-read order ensures no changes are lost: the subscription captures all changes from the moment it starts, and the read provides baseline values for properties that have not yet received a notification. Subsequent notifications overwrite any stale read values.
+**Unique NodeIds:** The server assigns a monotonic counter to each dynamically created node (collections, dictionaries, and references). This prevents NodeId collisions when subjects are replaced at the same array index or dictionary key. BrowseNames remain positional for OPC UA browsing.
+
+**Initial values for dynamically added subjects:** The subject is attached to its parent via `AddSubjectToProperty`, then monitored items are subscribed via `AddMonitoredItemsAsync`, and finally an explicit read is performed. This subscribe-then-read order ensures no changes are lost: the subscription captures all changes from the moment it starts, and the read provides baseline values for properties that have not yet received a notification. Subsequent notifications overwrite any stale read values. Failed monitored items (for nodes removed between subscribe and server-side creation) are filtered out via `FilterOutFailedMonitoredItemsAsync`.
+
+**Stale events:** During rapid structural mutations, the server may fire `NodeAdded` for a node that is subsequently removed before the client processes the event. The client's `ProcessExternalAddAsync` detects this (browse returns null) and logs a warning. These stale events are benign: the corresponding `NodeDeleted` event will clean up the subject if it was created.
 
 **Reconnect:** On session reconnect, the processor updates its session reference and re-subscribes to `ModelChangeEvent`s via a new `OpcUaModelChangeEventHandler`. The `ConnectorSubjectMap` is preserved across reconnections since it tracks the local subject graph, not the session state.
+
+### Known Limitations
+
+**Server-only structural mutations** at 20/sec: 0 value diffs, 1-3 deeply nested subjects may be missing due to stale events. A periodic reconciliation pass would address this.
+
+**Bidirectional structural mutations** are not fully working. Both sides firing `ModelChangeEvent`s and sending `AddNodes` simultaneously requires coordination that the current design does not provide. See `docs/design/investigations.md` for details.

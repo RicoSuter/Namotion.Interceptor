@@ -293,22 +293,24 @@ See also [Lifecycle Limitations](connectors-opcua.md#lifecycle-limitations) that
 
 ### Structural Change Processing
 
-When subjects are added or removed from collections, dictionaries, or references at runtime, the server detects these changes through the `ChangeQueueProcessor` (CQP) and processes them via a Channel-based event queue.
+When subjects are added or removed from collections, dictionaries, or references at runtime, the server detects these changes through the `ChangeQueueProcessor` (CQP) and processes them inline in `WriteChangesAsync`.
 
 ```
 Property write (e.g., root.People = [...])
   -> CQP captures old/new values
   -> WriteChangesAsync fires
-  -> OpcUaServerStructuralChangeProcessor.EnqueueStructuralChanges()
-     diffs old/new subjects, enqueues Add/Remove events
-  -> Background loop processes events one at a time:
+  -> ProcessStructuralChangesInline() runs BEFORE the value loop:
+     diffs old/new subjects, creates/removes OPC UA nodes synchronously
      Add:    CreateDynamicSubjectNodes() + FireModelChangeEvent(NodeAdded)
      Remove: RemoveSubjectNodes()       + FireModelChangeEvent(NodeDeleted)
+  -> Value loop runs (OPC UA nodes guaranteed to exist)
 ```
 
-The processor always creates/removes OPC UA nodes for structural changes. `ModelChangeEvent` firing is controlled by `EnableStructureSynchronization`: when enabled, connected clients receive `GeneralModelChangeEventType` events and can reconcile their local model.
+Structural changes are processed synchronously before value updates in the same `WriteChangesAsync` call. This ensures OPC UA nodes exist before any value writes reference them.
 
-Node creation uses `CustomNodeManager.CreateDynamicSubjectNodes()`, which builds the full subtree (object node, variable nodes for properties, folder nodes for nested collections/dictionaries). Each subject's `NodeId` is stored in `subject.Data` with a per-server GUID key so it can be looked up even after the subject is detached from the registry.
+`ModelChangeEvent` firing is controlled by `EnableStructureSynchronization`: when enabled, connected clients receive `GeneralModelChangeEventType` events and can reconcile their local model.
+
+Node creation uses `CustomNodeManager.CreateDynamicSubjectNodes()`, which builds the full subtree (object node, variable nodes for properties, folder nodes for nested collections/dictionaries). Each subject's `NodeId` uses a monotonic counter (`_dynamicNodeCounter`) to ensure uniqueness across replacements. The NodeId is also stored in `subject.Data` with a per-server GUID key so it can be looked up even after the subject is detached from the registry.
 
 ### Remote Node Management
 
@@ -324,15 +326,14 @@ OpcUaSubjectServer (BackgroundService)
  ├── owns OpcUaServerDiagnostics             (read-only facade)
  ├── creates OpcUaStandardServer             (SDK server, per restart cycle)
  │    └── creates CustomNodeManager          (OPC UA address space)
- └── creates OpcUaServerStructuralChangeProcessor  (Channel queue for Add/Remove)
-      └── uses CustomNodeManager (CreateDynamicSubjectNodes, RemoveSubjectNodes, FireModelChangeEvent)
+ └── WriteChangesAsync processes structural changes inline
+      (uses CustomNodeManager: CreateDynamicSubjectNodes, RemoveSubjectNodes, FireModelChangeEvent)
 ```
 
 ### Class Responsibilities
 
 | Class | Role |
 |-------|------|
-| `OpcUaSubjectServer` | Orchestrator. Creates CQP and structural processor. Routes value changes to OPC UA nodes. |
-| `OpcUaServerStructuralChangeProcessor` | Channel-based queue. Processes Add/Remove events by creating/removing OPC UA nodes and firing `ModelChangeEvent`s. |
-| `CustomNodeManager` | Manages OPC UA address space. Creates nodes at startup and dynamically. Handles `AddNodes`/`DeleteNodes` from remote clients. |
+| `OpcUaSubjectServer` | Orchestrator. Creates CQP. Processes structural changes inline in `WriteChangesAsync` before value updates. |
+| `CustomNodeManager` | Manages OPC UA address space. Creates nodes at startup and dynamically. Uses monotonic counter for unique NodeIds. Handles `AddNodes`/`DeleteNodes` from remote clients. |
 | `OpcUaStandardServer` | OPC UA SDK server. Overrides `AddNodesAsync`/`DeleteNodesAsync` to delegate to `CustomNodeManager`. |
