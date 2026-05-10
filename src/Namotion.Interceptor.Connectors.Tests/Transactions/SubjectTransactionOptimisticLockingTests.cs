@@ -107,7 +107,8 @@ public class SubjectTransactionOptimisticLockingTests
         var person = new Person(context);
 
         var tx1Acquired = new TaskCompletionSource<bool>();
-        var tx1Complete = new TaskCompletionSource<bool>();
+        var tx1CanCommit = new TaskCompletionSource<bool>();
+        var tx2Started = new TaskCompletionSource<bool>();
 
         Task tx1Task;
         using (ExecutionContext.SuppressFlow())
@@ -121,11 +122,9 @@ public class SubjectTransactionOptimisticLockingTests
 
                 person.FirstName = "Tx1";
 
-                // Hold the lock for a bit
-                await Task.Delay(500);
+                await tx1CanCommit.Task;
 
                 await tx.CommitAsync(CancellationToken.None);
-                tx1Complete.SetResult(true);
             });
         }
 
@@ -135,9 +134,9 @@ public class SubjectTransactionOptimisticLockingTests
         Task<SubjectTransaction> tx2Task;
         using (ExecutionContext.SuppressFlow())
         {
-            // Try to start tx2 - should block until tx1 completes
             tx2Task = Task.Run(async () =>
             {
+                tx2Started.SetResult(true);
                 return await context.BeginTransactionAsync(
                     TransactionFailureHandling.BestEffort,
                     TransactionLocking.Exclusive);
@@ -145,12 +144,13 @@ public class SubjectTransactionOptimisticLockingTests
         }
 
         // Act
-        // Wait a bit - tx2 should still be waiting
-        await Task.Delay(100);
+        await tx2Started.Task;
+        await Task.Yield();
         Assert.False(tx2Task.IsCompleted, "tx2 should wait for tx1 to complete");
 
-        // Wait for tx1 to complete
-        await tx1Complete.Task;
+        // Release tx1 to commit
+        tx1CanCommit.SetResult(true);
+        await tx1Task;
 
         // Now tx2 should complete
         using var tx2 = await tx2Task;
@@ -347,7 +347,6 @@ public class SubjectTransactionOptimisticLockingTests
 
                 // Wait for optimistic to signal it's trying to commit
                 await optimisticCommitStarted.Task;
-                await Task.Delay(100);
 
                 await tx.CommitAsync(CancellationToken.None);
                 exclusiveComplete.SetResult(true);

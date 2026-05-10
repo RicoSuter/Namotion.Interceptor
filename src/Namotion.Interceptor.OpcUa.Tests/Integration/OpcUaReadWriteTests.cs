@@ -22,6 +22,25 @@ public class OpcUaReadWriteTests : SharedServerTestBase
         // Arrange - use dedicated test area
         var serverArea = ServerFixture.ServerRoot.ReadWrite.BasicSync;
         var clientArea = Client!.Root!.ReadWrite.BasicSync;
+        var diagnostics = Client!.Source!.Diagnostics;
+
+        // Assert - on a healthy connection the new diagnostic surface must be populated:
+        // session/server live, no captured error, and Name is bound on both sides.
+        Assert.NotNull(Client.Source);
+        Assert.NotNull(Client.Source.CurrentSession);
+        Assert.Null(diagnostics.LastError);
+        Assert.NotNull(ServerFixture.Server.CurrentServer);
+
+        // Each side owns its own subject tree, so the lookup must use that side's property reference.
+        Assert.True(
+            Client.Source.TryGetNodeId(clientArea.GetPropertyReference(nameof(BasicSyncArea.Name)), out var clientNodeId),
+            "Client must have resolved a NodeId for the bound BasicSync.Name property");
+        Assert.NotNull(clientNodeId);
+
+        Assert.True(
+            ServerFixture.Server.TryGetVariableNode(serverArea.GetPropertyReference(nameof(BasicSyncArea.Name)), out var serverVariable),
+            "Server must expose a BaseDataVariableState for the bound BasicSync.Name property");
+        Assert.NotNull(serverVariable);
 
         // Act & Assert - Test string property from server
         serverArea.Name = "Updated Server Name";
@@ -50,6 +69,12 @@ public class OpcUaReadWriteTests : SharedServerTestBase
             () => serverArea.Number == 54.321m,
             timeout: TimeSpan.FromSeconds(90),
             message: "Server should receive client's number update");
+
+        // Verify throughput diagnostics after bidirectional writes
+        Assert.True(diagnostics.IncomingChangesPerSecond > 0.0,
+            $"IncomingChangesPerSecond should be positive after receiving updates, was {diagnostics.IncomingChangesPerSecond}");
+        Assert.True(diagnostics.OutgoingChangesPerSecond > 0.0,
+            $"OutgoingChangesPerSecond should be positive after writing changes, was {diagnostics.OutgoingChangesPerSecond}");
     }
 
     [Fact]

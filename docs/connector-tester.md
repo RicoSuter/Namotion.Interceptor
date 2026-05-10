@@ -1,8 +1,30 @@
 # Connector Tester
 
-An in-process integration test that validates **eventual consistency** across Namotion.Interceptor connectors under chaos conditions. It hosts a server and multiple clients in a single process, mutates their object models concurrently, injects disruptions via `IFaultInjectable` (kill and disconnect), and verifies that all participants eventually reach identical state. Exits with code 1 on failure for CI/CD integration.
+The Connector Tester verifies connector correctness and performance. Run it after any connector change to confirm that **eventual consistency holds under chaos** and that **throughput meets expectations under load**.
 
-## Architecture
+## Quick Start
+
+Run all commands from the repository root. Clear previous logs before each run:
+
+```bash
+rm -rf logs/
+
+# Chaos test: correctness under kill/disconnect disruptions (exits with code 1 on failure)
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-chaos --configuration Release
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt-chaos --configuration Release
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-chaos --configuration Release
+
+# Load test: throughput and latency at 20k changes/sec
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-load --configuration Release
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt-load --configuration Release
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile websocket-load --configuration Release
+```
+
+**Chaos profiles** inject kill/disconnect faults and verify all participants converge to identical state. **Load profiles** push high throughput (configurable via `ValueMutationRate`) and report latency percentiles, memory, and allocation rate. Both modes use the same verification cycle: mutate, pause, compare snapshots. Both should pass before merging connector changes.
+
+## How It Works
+
+The tester hosts a server and one or more clients in a single process, connected via the selected connector (OPC UA, MQTT, or WebSocket). Each participant has its own `TestNode` object graph and `MutationEngine` that continuously modifies properties. A `VerificationEngine` orchestrates repeating mutate/converge cycles: mutations run for a configured duration, then all engines pause and snapshots are compared. If all participants have identical state, the cycle passes. If not, the process logs the diff and exits with code 1.
 
 ```
                          +------------------+
@@ -12,7 +34,7 @@ An in-process integration test that validates **eventual consistency** across Na
                          |  ChaosEngine?    |
                          +--------+---------+
                                   |
-                          Connector (OPC UA / MQTT)
+                          Connector (OPC UA / MQTT / WebSocket)
                                   |
                  +----------------+----------------+
                  |                                 |
@@ -23,15 +45,23 @@ An in-process integration test that validates **eventual consistency** across Na
           |  Chaos?     |                   |  Chaos?     |
           +-------------+                   +-------------+
 
+    MutationEngine: RandomMutationEngine (chaos) or BatchMutationEngine (load)
     VerificationEngine orchestrates mutate/converge cycles
     TestCycleCoordinator pauses all engines during convergence
+    PerformanceProfiler collects latency/throughput/memory metrics
 ```
+
+### Mutation Engines
+
+- **RandomMutationEngine** (chaos profiles, `NumberOfBatches = 0`): Picks a random node and random property, one at a time, at the configured `ValueMutationRate`. Good for chaos testing where mutation patterns should be unpredictable. When `UseTransactions` is enabled, each tick's batch of mutations is wrapped in a single transaction.
+
+- **BatchMutationEngine** (load profiles, `NumberOfBatches > 0`): Mutates `ValueMutationRate` nodes per second, spread across `NumberOfBatches` parallel batches within 1-second windows. Uses a `PeriodicTimer` at 110% of the required tick rate (e.g., 50 batches → 55 ticks/sec → ~18ms interval) to guarantee all batches complete within each second with 10% headroom for scheduling jitter. Each participant mutates a single fixed property (`participantIndex % 4`) to avoid OPC UA subscription coalescing — server always mutates `StringValue`, first client always mutates `DecimalValue`, etc. When `UseTransactions` is enabled, each batch is wrapped in a transaction and runs sequentially (transactions are not thread-safe with `Parallel.For`).
 
 ### Mutate/Converge Cycle
 
 Each test cycle has two phases:
 
-1. **Mutate phase**: All MutationEngines and ChaosEngines run concurrently. Engines randomly mutate value properties (`StringValue`, `DecimalValue`, `IntValue`) on TestNode objects across the graph (1 root + 20 collection items + 10 dictionary items = 31 objects per participant).
+1. **Mutate phase**: All MutationEngines and ChaosEngines run concurrently for `MutatePhaseDuration`.
 
 2. **Converge phase**: The VerificationEngine pauses all engines via the TestCycleCoordinator, recovers any active chaos disruptions, waits a grace period (20s for OPC UA) for reconnection, then polls snapshots every 5 seconds. Each snapshot serializes the full object graph using `SubjectUpdate.CreateCompleteUpdate()`. Structural property timestamps (Collection, Dictionary, Object) are stripped since they represent local creation time, not synced state. Value property timestamps are preserved and must converge.
 
@@ -39,17 +69,22 @@ A cycle **passes** when all participant snapshots are identical JSON. It **fails
 
 ### Chaos via IFaultInjectable
 
-Each connector implements `IFaultInjectable` (separate from the production `ISubjectConnector` interface) with two chaos modes:
+Each connector implements `IFaultInjectable` (separate from the production `ISubjectConnector` interface) with a single `InjectFaultAsync(FaultType, CancellationToken)` method supporting two chaos modes:
 
-- **Kill** (`KillAsync`): Hard kill — stops the connector entirely. The background service loop auto-restarts.
+- **Kill** (`FaultType.Kill`): Hard kill — stops the connector entirely. The background service loop auto-restarts.
   - *OPC UA Server*: Cancels the server loop token, closes transport listeners (TCP RST to all clients), disposes without graceful shutdown.
-  - *OPC UA Client*: Clears the session without sending `CloseSession` to the server (disposes local socket). Health check detects missing session and triggers full reconnection.
-  - *MQTT*: Stops the underlying service and lets the background loop restart it.
+  - *OPC UA Client*: Attempts graceful session close, then kills the transport channel. Health check detects missing session and triggers full reconnection.
+  - *MQTT*: Cancels the force-kill CTS, causing the processing loop to exit and restart.
+  - *WebSocket Server*: Cancels the force-kill CTS, triggering full teardown and rebuild of the Kestrel HTTP listener.
+  - *WebSocket Client*: Sets force-kill flag and cancels the force-kill CTS; the monitor loop catch block aborts the WebSocket and reconnects.
 
-- **Disconnect** (`DisconnectAsync`): Soft kill — breaks the transport connection without stopping the connector. Lets the SDK's built-in reconnection logic detect the failure and recover.
-  - *OPC UA Server*: Delegates to `KillAsync` (no meaningful "soft disconnect" for a multi-connection server).
+- **Disconnect** (`FaultType.Disconnect`): Soft kill — breaks the transport connection without stopping the connector. Lets the connector's built-in reconnection logic detect the failure and recover.
+  - *OPC UA Server*: Delegates to Kill (no meaningful "soft disconnect" for a multi-connection server).
   - *OPC UA Client*: Disposes the transport channel. Keep-alive failure triggers `SessionReconnectHandler.BeginReconnect`, exercising the session preservation/transfer path.
-  - *MQTT*: Delegates to `KillAsync`.
+  - *MQTT Server*: Enumerates connected clients and disconnects each one individually.
+  - *MQTT Client*: Calls `DisconnectAsync()` on the MQTT client for a graceful disconnect.
+  - *WebSocket Server*: Closes all client connections via `CloseAllConnectionsAsync()`.
+  - *WebSocket Client*: Aborts the underlying `ClientWebSocket`, triggering reconnection.
 
 The ChaosEngine picks an action based on the configured `Mode` ("kill", "disconnect", or "both"). In "both" mode, each event randomly chooses between kill and disconnect. After the action, the engine holds a "disruption window" for a random duration (representing the outage period for verification purposes).
 
@@ -57,7 +92,7 @@ The ChaosEngine picks an action based on the configured `Mode` ("kill", "disconn
 
 - **Global mutation counter**: A static `Interlocked.Increment` counter ensures every mutation produces a globally unique value, preventing the equality interceptor from dropping duplicate changes.
 - **Explicit timestamp scoping**: Mutations use `SubjectChangeContext.WithChangedTimestamp()` so all interceptors and change queue observers see the same timestamp.
-- **IFaultInjectable separation**: Chaos testing uses a dedicated `IFaultInjectable` interface (separate from production `ISubjectConnector`). Two modes: `KillAsync` (hard kill with auto-restart) and `DisconnectAsync` (transport disconnect with SDK reconnection).
+- **IFaultInjectable separation**: Chaos testing uses a dedicated `IFaultInjectable` interface (separate from production `ISubjectConnector`) with `InjectFaultAsync(FaultType, CancellationToken)`. Two modes: `FaultType.Kill` (hard kill with auto-restart) and `FaultType.Disconnect` (transport disconnect with reconnection).
 - **Shutdown timeout**: The OPC UA server's `ShutdownServerAsync` wraps `application.StopAsync()` with a 10s timeout to prevent hang when clients keep reconnecting during graceful shutdown.
 
 ## Supported Connectors
@@ -66,7 +101,7 @@ The ChaosEngine picks an action based on the configured `Mode` ("kill", "disconn
 |-----------|--------|-------|
 | OPC UA | Working | Server kill drops TCP connections, client kill abandons session. 1 min convergence timeout. `decimal` round-trips through `double`. |
 | MQTT | Working | Server and client kill/disconnect. 2 min convergence timeout. |
-| WebSocket | Planned | Config exists but no wiring in Program.cs yet. |
+| WebSocket | Working | Server kill cancels background loop, client kill aborts socket. Sequence gap detection triggers reconnection. |
 
 ### Connector-Specific Behaviors
 
@@ -74,19 +109,23 @@ The ChaosEngine picks an action based on the configured `Mode` ("kill", "disconn
 
 **MQTT**: Uses server-authoritative relay pattern where client publishes are intercepted, applied to the server model, and re-published to all clients. Ticks-based timestamp serialization (`UtcTicks`) for full precision. QoS=AtLeastOnce with retained messages.
 
+**WebSocket**: Uses Hello/Welcome handshake for initial state delivery. Server broadcasts all changes to all clients (including originator) with monotonic sequence numbers. Client tracks sequences and triggers reconnection on gap detection. Server kill cancels the background loop CTS; client kill aborts the underlying `ClientWebSocket`. Disconnect mode closes all server connections or aborts the client socket respectively. Circuit breaker (5 failures, 60s cooldown) pauses reconnection during prolonged outages.
+
 ## Running
 
-Run with a launch profile to select the connector:
+### Multi-Process Mode
+
+Run server and client in separate processes for isolated load testing:
 
 ```bash
-# OPC UA (Release mode recommended for performance)
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua -c Release
+# Terminal 1: Run server only
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-load --configuration Release -- --participant server
 
-# MQTT
-dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile mqtt -c Release
+# Terminal 2: Run client only
+dotnet run --project src/Namotion.Interceptor.ConnectorTester --launch-profile opcua-load --configuration Release -- --participant client
 ```
 
-Launch profiles set the `DOTNET_ENVIRONMENT` variable, which loads the corresponding `appsettings.{environment}.json` file.
+When `--participant` is specified, only the named participant starts and the verification engine is skipped. Mutations run continuously with performance metrics.
 
 ### What to Look For
 
@@ -96,9 +135,9 @@ Launch profiles set the `DOTNET_ENVIRONMENT` variable, which loads the correspon
 --- Cycle 1 Statistics ---
 Duration: 85s (converged in 5.1s)
 Total mutations: 17,200 | Total chaos events: 7
-  server: 11,300 value mutations
-  client-a: 2,950 value mutations
-  client-b: 2,950 value mutations
+  server: 11,300 value mutations, 0 structural mutations
+  client-a: 2,950 value mutations, 0 structural mutations
+  client-b: 2,950 value mutations, 0 structural mutations
   client-b: disconnect at 21:08:37 (2.8s)
   server: kill at 21:08:38 (5.4s)
 ```
@@ -111,7 +150,7 @@ Mismatch between server and client-b
 
 ### Log Files
 
-Per-cycle log files are written to a `logs/` directory (relative to working directory):
+All log files are written to `logs/` in the repository root (the working directory):
 
 ```
 logs/
@@ -128,21 +167,28 @@ Files are created as `pending` and renamed to `pass` or `FAIL` on cycle completi
 - Mutation counts in the statistics block to confirm all engines were active.
 - Snapshot diffs at the end of failed cycles to identify which properties or participants didn't converge.
 
+### Performance Logs
+
+Performance metrics are written to `logs/performance-{participant}.csv` for every profile (chaos and load). Each file has a header row and one data row per reporting interval. Columns: Timestamp, Participant, Recv/s, Recv-E2E-Avg, Recv-E2E-P50, Recv-E2E-P90, Recv-E2E-P95, Recv-E2E-P99, Recv-E2E-P999, Recv-E2E-Max, Recv-Proc, Published, Received, CPU%, ProcessMB, HeapMB, AllocMB/s. Files are reset on each run.
+
+### Cycle Logs
+
+`logs/cycles.csv` records one row per verification cycle with post-GC memory measurements. Columns: Timestamp, Cycle, Result, Profile, CycleSec, ConvergeSec, ValueMutations, StructuralMutations, ChaosEvents, HeapMB, ProcessMB. Memory is measured after a full GC + LOH compaction, giving a stable baseline for leak detection. The file is reset on each run.
+
 ## Configuration
 
-Configuration is loaded from `appsettings.json` with environment-specific overrides (e.g., `appsettings.opcua.json`). The root section is `"ConnectorTester"`.
+Configuration is loaded from `appsettings.json` with environment-specific overrides (e.g., `appsettings.opcua-chaos.json`). The root section is `"ConnectorTester"`. Use `--launch-profile` to select a profile (e.g., `--launch-profile opcua-chaos`), which sets `DOTNET_ENVIRONMENT` and loads the corresponding `appsettings.{environment}.json` file.
 
-### OPC UA Example (appsettings.opcua.json)
+### Chaos Profile Example (appsettings.opcua-chaos.json)
 
 ```json
 {
   "ConnectorTester": {
     "Connector": "opcua",
-    "EnableStructuralMutations": false,
     "MutatePhaseDuration": "00:01:00",
     "ConvergenceTimeout": "00:05:00",
     "Server": {
-      "MutationRate": 1000,
+      "ValueMutationRate": 1000,
       "Chaos": {
         "IntervalMin": "00:00:10",
         "IntervalMax": "00:00:20",
@@ -154,7 +200,7 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
     "Clients": [
       {
         "Name": "client-a",
-        "MutationRate": 100,
+        "ValueMutationRate": 100,
         "Chaos": {
           "IntervalMin": "00:00:10",
           "IntervalMax": "00:00:20",
@@ -165,7 +211,7 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
       },
       {
         "Name": "client-b",
-        "MutationRate": 100,
+        "ValueMutationRate": 100,
         "Chaos": {
           "IntervalMin": "00:00:08",
           "IntervalMax": "00:00:15",
@@ -186,12 +232,41 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
 }
 ```
 
+### Load Profile Example (appsettings.opcua-load.json)
+
+```json
+{
+  "ConnectorTester": {
+    "Connector": "opcua",
+    "CollectionCount": 20000,
+    "DictionaryCount": 0,
+    "NumberOfBatches": 50,
+    "MutatePhaseDuration": "00:30:00",
+    "ConvergenceTimeout": "00:05:00",
+    "MetricsReportingInterval": "00:01:00",
+    "Server": {
+      "Name": "server",
+      "ValueMutationRate": 20000
+    },
+    "Clients": [
+      {
+        "Name": "client",
+        "ValueMutationRate": 20000
+      }
+    ]
+  }
+}
+```
+
 ### Configuration Reference
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `Connector` | string | `"opcua"` | Protocol to test: `"opcua"`, `"mqtt"`, or `"websocket"` |
-| `EnableStructuralMutations` | bool | `false` | Reserved for future collection/dictionary mutations |
+| `CollectionCount` | int | `20` | Number of collection children in the test graph |
+| `DictionaryCount` | int | `10` | Number of dictionary entries in the test graph |
+| `NumberOfBatches` | int | `0` | Batches per second. `0` = RandomMutationEngine, `> 0` = BatchMutationEngine. Each batch mutates `ceil(ValueMutationRate / NumberOfBatches)` nodes. |
+| `MetricsReportingInterval` | TimeSpan | `00:01:00` | How often performance metrics are logged |
 | `MutatePhaseDuration` | TimeSpan | `00:01:00` | How long mutations run before convergence check |
 | `ConvergenceTimeout` | TimeSpan | `00:01:00` | Max time to wait for all snapshots to match |
 | `Server` | object | - | Server participant configuration |
@@ -203,7 +278,9 @@ Configuration is loaded from `appsettings.json` with environment-specific overri
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `Name` | string | `""` | Participant identifier (appears in logs) |
-| `MutationRate` | int | `50` | Target mutations per second |
+| `ValueMutationRate` | int | `50` | Value mutations per second |
+| `StructuralMutationRate` | int | `0` | Structural mutations per second (0 = disabled) |
+| `UseTransactions` | bool | `false` | Wrap each mutation batch in a transaction (`BeginTransactionAsync`/`CommitAsync`). When enabled, `BatchMutationEngine` runs sequentially (transactions are not thread-safe with `Parallel.For`). |
 | `Chaos` | object? | `null` | Chaos configuration (`null` = no chaos) |
 
 ### Chaos Configuration
@@ -267,6 +344,17 @@ Each profile lists which participants have chaos active for that cycle. Profiles
 | Concurrent server + client chaos | Both engines run independently, overlapping disruptions possible | Same | Each connector recovers independently |
 | Bidirectional mutations during chaos | Server and clients mutate concurrently during disruptions | Same | WriteRetryQueue buffers outbound writes, full state sync on reconnect |
 
+### Covered (WebSocket)
+
+| Scenario | Kill | Disconnect | Recovery Mechanism |
+|----------|------|------------|-------------------|
+| Abrupt server crash | Force-kill CTS cancelled, full Kestrel teardown and rebuild | All client connections closed | Background loop rebuilds HTTP listener and restarts |
+| Abrupt client crash | Force-kill CTS cancelled, WebSocket aborted, monitor loop reconnects | Socket aborted, receive loop exits | Monitor loop reconnects with exponential backoff |
+| Sequence gap detection | N/A | N/A | Client detects missed sequence number, exits receive loop, reconnects with full state via Welcome |
+| Heartbeat timeout | N/A | N/A | Receive timeout fires, client exits receive loop and reconnects |
+| Concurrent server + client chaos | Both engines run independently | Same | Each side recovers independently, Welcome handshake re-syncs state |
+| Bidirectional mutations during chaos | Server and clients mutate concurrently | Same | WriteRetryQueue buffers outbound writes, Welcome snapshot on reconnect |
+
 ### Not Covered
 
 | Scenario | Why Not Covered | Production Impact |
@@ -311,10 +399,10 @@ For multi-day runs, consider using longer cycle durations and lower mutation rat
   "ConnectorTester": {
     "MutatePhaseDuration": "00:02:00",
     "ConvergenceTimeout": "00:02:00",
-    "Server": { "MutationRate": 500 },
+    "Server": { "ValueMutationRate": 500 },
     "Clients": [
-      { "Name": "client-a", "MutationRate": 25 },
-      { "Name": "client-b", "MutationRate": 25 }
+      { "Name": "client-a", "ValueMutationRate": 25 },
+      { "Name": "client-b", "ValueMutationRate": 25 }
     ],
     "ChaosProfiles": []
   }
@@ -366,31 +454,3 @@ OPC UA maps `decimal` through `double`, which has ~15-17 significant digits. The
 ### Wrong Connector Running
 
 If the test appears to run the wrong connector, verify you're using `--launch-profile` (not `--environment`). The launch profile sets `DOTNET_ENVIRONMENT` which controls appsettings loading.
-
-## Project Structure
-
-```
-Namotion.Interceptor.ConnectorTester/
-  Program.cs                             # Entry point, server/client wiring
-  GlobalUsings.cs                        # Global using directives
-  Configuration/
-    ConnectorTesterConfiguration.cs      # Top-level config
-    ParticipantConfiguration.cs          # Per-participant config
-    ChaosConfiguration.cs               # Chaos timing config
-    ChaosProfileConfiguration.cs        # Chaos profile config
-  Model/
-    TestNode.cs                          # Test data model with path annotations
-  Engine/
-    TestCycleCoordinator.cs             # Pause/resume synchronization
-    MutationEngine.cs                   # Random property mutations
-    ChaosEngine.cs                      # Kill/disconnect disruptions
-    VerificationEngine.cs               # Cycle orchestration and snapshot comparison
-  Logging/
-    CycleLoggerProvider.cs              # Per-cycle log file writer
-  Properties/
-    launchSettings.json                 # Launch profiles (opcua, mqtt, websocket)
-  appsettings.json                      # Base configuration
-  appsettings.opcua.json                # OPC UA profile
-  appsettings.mqtt.json                 # MQTT profile
-  appsettings.websocket.json            # WebSocket profile (placeholder)
-```

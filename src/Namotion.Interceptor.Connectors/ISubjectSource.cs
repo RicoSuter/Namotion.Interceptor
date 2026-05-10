@@ -10,16 +10,6 @@ namespace Namotion.Interceptor.Connectors;
 public interface ISubjectSource : ISubjectConnector
 {
     /// <summary>
-    /// Initializes the source and starts listening for external changes.
-    /// </summary>
-    /// <param name="propertyWriter">The writer to use for applying inbound property updates to the subject.</param>
-    /// <param name="cancellationToken">The cancellation token.</param>
-    /// <returns>
-    /// A disposable that can be used to stop listening for changes. Returns <c>null</c> if there is no active listener or nothing needs to be disposed.
-    /// </returns>
-    Task<IDisposable?> StartListeningAsync(SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken);
-
-    /// <summary>
     /// Gets the maximum number of property changes that can be applied in a single batch (0 = no limit).
     /// </summary>
     public int WriteBatchSize { get; }

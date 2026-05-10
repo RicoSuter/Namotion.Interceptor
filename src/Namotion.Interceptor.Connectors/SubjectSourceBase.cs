@@ -5,9 +5,15 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors;
 
-public class SubjectSourceBackgroundService : BackgroundService
+/// <summary>
+/// Abstract base for source classes that owns the entire pump lifecycle
+/// (buffer -> listen -> load initial state -> run change queue processor -> retry on failure).
+/// Derived classes override three hooks to plug in protocol-specific behavior:
+/// <see cref="StartListeningAsync"/> (protected), <see cref="LoadInitialStateAsync"/> (public),
+/// and <see cref="WriteChangesAsync"/> (public).
+/// </summary>
+public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
 {
-    private readonly ISubjectSource _source;
     private readonly IInterceptorSubjectContext _context;
     private readonly ILogger _logger;
     private readonly TimeSpan _bufferTime;
@@ -16,15 +22,13 @@ public class SubjectSourceBackgroundService : BackgroundService
 
     internal WriteRetryQueue? WriteRetryQueue { get; }
 
-    public SubjectSourceBackgroundService(
-        ISubjectSource source,
+    protected SubjectSourceBase(
         IInterceptorSubjectContext context,
         ILogger logger,
         TimeSpan? bufferTime = null,
         TimeSpan? retryTime = null,
         int writeRetryQueueSize = 1000)
     {
-        _source = source;
         _context = context;
         _logger = logger;
         _bufferTime = bufferTime ?? TimeSpan.FromMilliseconds(8);
@@ -35,71 +39,89 @@ public class SubjectSourceBackgroundService : BackgroundService
             WriteRetryQueue = new WriteRetryQueue(writeRetryQueueSize, logger);
         }
 
-        _propertyWriter = new SubjectPropertyWriter(source, logger);
+        _propertyWriter = new SubjectPropertyWriter(this, logger);
     }
 
+    /// <inheritdoc cref="ISubjectConnector.RootSubject" />
+    public abstract IInterceptorSubject RootSubject { get; }
+
+    /// <inheritdoc cref="ISubjectSource.WriteBatchSize" />
+    public virtual int WriteBatchSize => 0;
+
+    /// <summary>
+    /// Initializes the source and starts listening for external changes.
+    /// </summary>
+    /// <param name="propertyWriter">The writer to use for applying inbound property updates to the subject.</param>
+    /// <param name="cancellationToken">The cancellation token.</param>
+    /// <returns>
+    /// An async disposable that can be used to stop listening for changes,
+    /// or <c>null</c> if there is nothing to dispose.
+    /// </returns>
+    protected abstract Task<IAsyncDisposable?> StartListeningAsync(
+        SubjectPropertyWriter propertyWriter, CancellationToken cancellationToken);
+
     /// <inheritdoc />
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    public abstract Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken);
+
+    /// <inheritdoc />
+    public abstract ValueTask<WriteResult> WriteChangesAsync(
+        ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken);
+
+    /// <inheritdoc />
+    protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 _propertyWriter.StartBuffering();
-                var disposable = await _source.StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
-                try
-                {
-                    await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken);
+                await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
 
-                    using var processor = new ChangeQueueProcessor(
-                        _source,
-                        _context,
-                        propertyReference => propertyReference.TryGetSource(out var source) && source == _source,
-                        WriteChangesAsync,
-                        _bufferTime,
-                        _logger);
+                await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
 
-                    // Optimistic retry re-apply: after initial state load + ChangeQueueProcessor creation,
-                    // re-apply queued changes locally if the source hasn't changed the property.
-                    // ChangeQueueProcessor picks up re-applied changes and sends them to the source as fresh writes.
-                    ReapplyRetryQueue();
+                using var processor = new ChangeQueueProcessor(
+                    this,
+                    _context,
+                    propertyReference => propertyReference.TryGetSource(out var source) && source == this,
+                    WriteChangesViaRetryQueueAsync,
+                    _bufferTime,
+                    _logger);
 
-                    await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
-                }
-                finally
-                {
-                    if (disposable is IAsyncDisposable asyncDisposable)
-                    {
-                        await asyncDisposable.DisposeAsync().ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        disposable?.Dispose();
-                    }
-                }
+                // Optimistic retry re-apply: after initial state load + ChangeQueueProcessor creation,
+                // re-apply queued changes locally if the source hasn't changed the property.
+                // ChangeQueueProcessor picks up re-applied changes and sends them to the source as fresh writes.
+                ReapplyRetryQueue();
+
+                await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
             }
             catch (Exception ex)
             {
-                if (ex is TaskCanceledException or OperationCanceledException)
+                _logger.LogError(ex, "Failed to listen for changes in source.");
+                try
+                {
+                    await Task.Delay(_retryTime, stoppingToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
                 {
                     return;
                 }
-
-                _logger.LogError(ex, "Failed to listen for changes in source.");
-                await Task.Delay(_retryTime, stoppingToken).ConfigureAwait(false);
             }
         }
     }
 
     [AsyncMethodBuilder(typeof(PoolingAsyncValueTaskMethodBuilder))]
-    private async ValueTask WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    private async ValueTask WriteChangesViaRetryQueueAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         if (WriteRetryQueue is null)
         {
             // No retry queue - write directly
             try
             {
-                var result = await _source.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
+                var result = await this.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
                 if (!result.IsFullySuccessful)
                 {
                     _logger.LogError(result.Error, "Failed to write {Count} changes to source.",
@@ -118,7 +140,7 @@ public class SubjectSourceBackgroundService : BackgroundService
         }
 
         // First flush any queued changes
-        var succeeded = await WriteRetryQueue.FlushAsync(_source, cancellationToken).ConfigureAwait(false);
+        var succeeded = await WriteRetryQueue.FlushAsync(this, cancellationToken).ConfigureAwait(false);
         if (!succeeded)
         {
             WriteRetryQueue.Enqueue(changes);
@@ -128,7 +150,7 @@ public class SubjectSourceBackgroundService : BackgroundService
         // Write current changes
         try
         {
-            var result = await _source.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
+            var result = await this.WriteChangesInBatchesAsync(changes, cancellationToken).ConfigureAwait(false);
             if (result is { IsFullySuccessful: false, FailedChanges.IsEmpty: false })
             {
                 _logger.LogWarning(result.Error, "Failed to write {Count} changes to source, queuing for retry.",
@@ -168,7 +190,7 @@ public class SubjectSourceBackgroundService : BackgroundService
 
                 if (Equals(currentValue, oldValue))
                 {
-                    // Server hasn't changed this property — re-apply client's change locally.
+                    // Server hasn't changed this property - re-apply client's change locally.
                     // The interceptor chain fires, ChangeQueueProcessor captures the change, and sends it to the source.
                     property.Metadata.SetValue?.Invoke(property.Subject, change.GetNewValue<object>());
                     applied++;

@@ -11,7 +11,7 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.Connectors.Tests;
 
-public class SubjectSourceBackgroundServiceTests
+public class SubjectSourceBaseTests
 {
     [Fact]
     public async Task WhenStartingSourceAndPushingChanges_ThenUpdatesAreInCorrectOrder()
@@ -27,36 +27,27 @@ public class SubjectSourceBackgroundServiceTests
             .Setup(s => s.Context)
             .Returns(subjectContextMock.Object);
 
-        var subjectSourceMock = new Mock<ISubjectSource>();
-
         var updates = new List<string>();
-        subjectSourceMock
-            .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
-            .Callback((SubjectPropertyWriter propertyWriter, CancellationToken _) =>
+        var source = new TestSubjectSource(subjectMock.Object, subjectContextMock.Object, NullLogger.Instance)
+        {
+            StartListeningOverride = (propertyWriter, _) =>
             {
                 propertyWriter.Write(updates, u => u.Add("Update1"));
                 propertyWriter.Write(updates, u => u.Add("Update2"));
-            })
-            .ReturnsAsync((IDisposable?)null);
-
-        subjectSourceMock
-            .Setup(s => s.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => { updates.Add("Complete"); });
-
-        subjectSourceMock
-            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
-                new ValueTask<WriteResult>(WriteResult.Success));
+                return Task.FromResult<IAsyncDisposable?>(null);
+            },
+            LoadInitialStateOverride = _ =>
+                Task.FromResult<Action?>(() => updates.Add("Complete")),
+            WriteChangesOverride = (_, _) => ValueTask.FromResult(WriteResult.Success),
+        };
 
         var cancellationTokenSource = new CancellationTokenSource();
 
         // Act
-        var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, subjectContextMock.Object, NullLogger.Instance);
-
-        await service.StartAsync(cancellationTokenSource.Token);
+        await source.StartAsync(cancellationTokenSource.Token);
         await AsyncTestHelpers.WaitUntilAsync(() => updates.Count >= 3,
             message: "Expected 3 updates (Complete + Update1 + Update2)");
-        await service.StopAsync(cancellationTokenSource.Token);
+        await source.StopAsync(cancellationTokenSource.Token);
 
         await cancellationTokenSource.CancelAsync();
 
@@ -81,35 +72,25 @@ public class SubjectSourceBackgroundServiceTests
         context.AddService(propertyChangedChannel);
 
         var subject = new Person(context);
-        var subjectSourceMock = new Mock<ISubjectSource>();
-
-        // Claim ownership of the property
-        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(subjectSourceMock.Object);
-
-        subjectSourceMock
-            .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((IDisposable?)null);
-
-        subjectSourceMock
-            .Setup(s => s.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Action?)null);
 
         SubjectPropertyChange[]? changes = null;
-
-        subjectSourceMock
-            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns((ReadOnlyMemory<SubjectPropertyChange> c, CancellationToken _) =>
+        var source = new TestSubjectSource(subject, context, NullLogger.Instance)
+        {
+            WriteChangesOverride = (c, _) =>
             {
                 changes = c.ToArray();
-                return new ValueTask<WriteResult>(WriteResult.Success);
-            });
+                return ValueTask.FromResult(WriteResult.Success);
+            },
+        };
+
+        // Claim ownership of the property
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
 
         var cancellationTokenSource = new CancellationTokenSource();
 
         // Act
-        var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, context, NullLogger.Instance);
-        await service.StartAsync(cancellationTokenSource.Token);
-        
+        await source.StartAsync(cancellationTokenSource.Token);
+
         var writeContext = new PropertyWriteContext<string?>(
             subject.GetPropertyReference(nameof(Person.FirstName)), null, "Bar");
 
@@ -117,7 +98,7 @@ public class SubjectSourceBackgroundServiceTests
 
         await AsyncTestHelpers.WaitUntilAsync(() => changes != null,
             message: "Expected WriteChangesAsync to be called");
-        await service.StopAsync(cancellationTokenSource.Token);
+        await source.StopAsync(cancellationTokenSource.Token);
 
         await cancellationTokenSource.CancelAsync();
 
@@ -137,31 +118,22 @@ public class SubjectSourceBackgroundServiceTests
         context.AddService(propertyChangedChannel);
 
         var subject = new Person(context);
-        var subjectSourceMock = new Mock<ISubjectSource>();
-
-        // Claim ownership of the property
-        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(subjectSourceMock.Object);
-
-        subjectSourceMock
-            .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((IDisposable?)null);
-
-        subjectSourceMock
-            .Setup(s => s.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Action?)null);
 
         var tcs = new TaskCompletionSource();
-        subjectSourceMock
-            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+        var source = new TestSubjectSource(subject, context, NullLogger.Instance)
+        {
+            WriteChangesOverride = (_, _) =>
             {
                 tcs.TrySetResult();
                 throw new Exception("Connection failed");
-            });
+            },
+        };
+
+        // Claim ownership of the property
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
 
         // Act
-        var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, context, NullLogger.Instance);
-        await service.StartAsync(CancellationToken.None);
+        await source.StartAsync(CancellationToken.None);
 
         var writeContext = new PropertyWriteContext<string?>(
             subject.GetPropertyReference(nameof(Person.FirstName)), null, "Test");
@@ -169,7 +141,7 @@ public class SubjectSourceBackgroundServiceTests
 
         // Wait for the write to be attempted
         await tcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await service.StopAsync(CancellationToken.None);
+        await source.StopAsync(CancellationToken.None);
 
         // Assert - service processed the write (exception was logged, not thrown)
         Assert.True(tcs.Task.IsCompleted);
@@ -186,31 +158,22 @@ public class SubjectSourceBackgroundServiceTests
         context.AddService(propertyChangedChannel);
 
         var subject = new Person(context);
-        var subjectSourceMock = new Mock<ISubjectSource>();
-
-        // Claim ownership of the property
-        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(subjectSourceMock.Object);
-
-        subjectSourceMock
-            .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((IDisposable?)null);
-
-        subjectSourceMock
-            .Setup(s => s.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Action?)null);
 
         var tcs = new TaskCompletionSource();
-        subjectSourceMock
-            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+        var source = new TestSubjectSource(subject, context, NullLogger.Instance)
+        {
+            WriteChangesOverride = (_, _) =>
             {
                 tcs.TrySetResult();
                 throw new OperationCanceledException();
-            });
+            },
+        };
+
+        // Claim ownership of the property
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
 
         // Act
-        var service = new SubjectSourceBackgroundService(subjectSourceMock.Object, context, NullLogger.Instance);
-        await service.StartAsync(CancellationToken.None);
+        await source.StartAsync(CancellationToken.None);
 
         var writeContext = new PropertyWriteContext<string?>(
             subject.GetPropertyReference(nameof(Person.FirstName)), null, "Test");
@@ -218,7 +181,7 @@ public class SubjectSourceBackgroundServiceTests
 
         // Wait for the write to be attempted
         await tcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await service.StopAsync(CancellationToken.None);
+        await source.StopAsync(CancellationToken.None);
 
         // Assert - write was attempted (OperationCanceledException propagated up)
         Assert.True(tcs.Task.IsCompleted);
@@ -235,26 +198,15 @@ public class SubjectSourceBackgroundServiceTests
         context.AddService(propertyChangedChannel);
 
         var subject = new Person(context);
-        var subjectSourceMock = new Mock<ISubjectSource>();
-
-        // Claim ownership of the property
-        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(subjectSourceMock.Object);
-
-        subjectSourceMock
-            .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((IDisposable?)null);
-
-        subjectSourceMock
-            .Setup(s => s.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Action?)null);
 
         // First call fails (simulates queued items failing to flush), second succeeds
         var callCount = 0;
         var firstCallTcs = new TaskCompletionSource();
         var secondCallTcs = new TaskCompletionSource();
-        subjectSourceMock
-            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+        var source = new TestSubjectSource(subject, context, NullLogger.Instance,
+            bufferTime: TimeSpan.Zero) // Disable buffering for immediate writes
+        {
+            WriteChangesOverride = (changes, _) =>
             {
                 callCount++;
                 if (callCount == 1)
@@ -264,13 +216,14 @@ public class SubjectSourceBackgroundServiceTests
                 }
                 secondCallTcs.TrySetResult();
                 return new ValueTask<WriteResult>(WriteResult.Success);
-            });
+            },
+        };
+
+        // Claim ownership of the property
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
 
         // Act
-        var service = new SubjectSourceBackgroundService(
-            subjectSourceMock.Object, context, NullLogger.Instance,
-            bufferTime: TimeSpan.Zero); // Disable buffering for immediate writes
-        await service.StartAsync(CancellationToken.None);
+        await source.StartAsync(CancellationToken.None);
 
         // First change - will fail and be queued
         var writeContext1 = new PropertyWriteContext<string?>(
@@ -286,7 +239,7 @@ public class SubjectSourceBackgroundServiceTests
         propertyChangedChannel.WriteProperty(ref writeContext2, (ref _) => { });
 
         await secondCallTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await service.StopAsync(CancellationToken.None);
+        await source.StopAsync(CancellationToken.None);
 
         // Assert - both writes were attempted (first failed and was retried)
         Assert.True(callCount >= 2);
@@ -303,39 +256,29 @@ public class SubjectSourceBackgroundServiceTests
         context.AddService(propertyChangedChannel);
 
         var subject = new Person(context);
-        var subjectSourceMock = new Mock<ISubjectSource>();
-
-        // Claim ownership of the property
-        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(subjectSourceMock.Object);
-
-        subjectSourceMock
-            .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((IDisposable?)null);
-
-        subjectSourceMock
-            .Setup(s => s.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Action?)null);
 
         var tcs = new TaskCompletionSource();
-        subjectSourceMock
-            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns((ReadOnlyMemory<SubjectPropertyChange> _, CancellationToken _) =>
+        var source = new TestSubjectSource(subject, context, NullLogger.Instance)
+        {
+            WriteChangesOverride = (_, _) =>
             {
                 tcs.TrySetResult();
                 throw new OperationCanceledException();
-            });
+            },
+        };
+
+        // Claim ownership of the property
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
 
         // Act
-        var service = new SubjectSourceBackgroundService(
-            subjectSourceMock.Object, context, NullLogger.Instance);
-        await service.StartAsync(CancellationToken.None);
+        await source.StartAsync(CancellationToken.None);
 
         var writeContext = new PropertyWriteContext<string?>(
             subject.GetPropertyReference(nameof(Person.FirstName)), null, "Test");
         propertyChangedChannel.WriteProperty(ref writeContext, (ref _) => { });
 
         await tcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await service.StopAsync(CancellationToken.None);
+        await source.StopAsync(CancellationToken.None);
 
         // Assert - OperationCanceledException was thrown (propagates up)
         Assert.True(tcs.Task.IsCompleted);
@@ -352,25 +295,14 @@ public class SubjectSourceBackgroundServiceTests
         context.AddService(propertyChangedChannel);
 
         var subject = new Person(context);
-        var subjectSourceMock = new Mock<ISubjectSource>();
-
-        // Claim ownership of the property
-        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(subjectSourceMock.Object);
-
-        subjectSourceMock
-            .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((IDisposable?)null);
-
-        subjectSourceMock
-            .Setup(s => s.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Action?)null);
 
         var callCount = 0;
         var firstCallTcs = new TaskCompletionSource();
         var secondCallTcs = new TaskCompletionSource();
-        subjectSourceMock
-            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+        var source = new TestSubjectSource(subject, context, NullLogger.Instance,
+            bufferTime: TimeSpan.Zero) // Disable buffering for immediate writes
+        {
+            WriteChangesOverride = (changes, _) =>
             {
                 callCount++;
                 if (callCount == 1)
@@ -380,13 +312,14 @@ public class SubjectSourceBackgroundServiceTests
                 }
                 secondCallTcs.TrySetResult();
                 return new ValueTask<WriteResult>(WriteResult.Success);
-            });
+            },
+        };
+
+        // Claim ownership of the property
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
 
         // Act
-        var service = new SubjectSourceBackgroundService(
-            subjectSourceMock.Object, context, NullLogger.Instance,
-            bufferTime: TimeSpan.Zero); // Disable buffering for immediate writes
-        await service.StartAsync(CancellationToken.None);
+        await source.StartAsync(CancellationToken.None);
 
         // First change fails, second triggers retry
         var writeContext1 = new PropertyWriteContext<string?>(
@@ -401,7 +334,7 @@ public class SubjectSourceBackgroundServiceTests
         propertyChangedChannel.WriteProperty(ref writeContext2, (ref _) => { });
 
         await secondCallTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await service.StopAsync(CancellationToken.None);
+        await source.StopAsync(CancellationToken.None);
 
         // Assert - changes were enqueued and retried
         Assert.True(callCount >= 2);
@@ -418,26 +351,15 @@ public class SubjectSourceBackgroundServiceTests
         context.AddService(propertyChangedChannel);
 
         var subject = new Person(context);
-        var subjectSourceMock = new Mock<ISubjectSource>();
-
-        // Claim ownership of the property
-        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(subjectSourceMock.Object);
-
-        subjectSourceMock
-            .Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((IDisposable?)null);
-
-        subjectSourceMock
-            .Setup(s => s.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Action?)null);
 
         var allWrittenValues = new ConcurrentBag<string?[]>();
         var callCount = 0;
         var firstCallTcs = new TaskCompletionSource();
         var thirdCallTcs = new TaskCompletionSource();
-        subjectSourceMock
-            .Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+        var source = new TestSubjectSource(subject, context, NullLogger.Instance,
+            bufferTime: TimeSpan.Zero)
+        {
+            WriteChangesOverride = (changes, _) =>
             {
                 var current = Interlocked.Increment(ref callCount);
                 allWrittenValues.Add(changes.ToArray().Select(c => c.GetNewValue<string?>()).ToArray());
@@ -445,7 +367,7 @@ public class SubjectSourceBackgroundServiceTests
                 if (current == 1)
                 {
                     firstCallTcs.TrySetResult();
-                    // First write fails — WriteResult.Failure should cause SBBS to enqueue
+                    // First write fails - WriteResult.Failure should cause SubjectSourceBase to enqueue
                     return new ValueTask<WriteResult>(WriteResult.Failure(changes, new Exception("Transient error")));
                 }
 
@@ -455,34 +377,35 @@ public class SubjectSourceBackgroundServiceTests
                 }
 
                 return new ValueTask<WriteResult>(WriteResult.Success);
-            });
+            },
+        };
+
+        // Claim ownership of the property
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
 
         // Act
-        var service = new SubjectSourceBackgroundService(
-            subjectSourceMock.Object, context, NullLogger.Instance,
-            bufferTime: TimeSpan.Zero);
-        await service.StartAsync(CancellationToken.None);
+        await source.StartAsync(CancellationToken.None);
 
-        // First change — will return WriteResult.Failure, should be enqueued for retry
+        // First change - will return WriteResult.Failure, should be enqueued for retry
         var writeContext1 = new PropertyWriteContext<string?>(
             subject.GetPropertyReference(nameof(Person.FirstName)), null, "FailedValue");
         propertyChangedChannel.WriteProperty(ref writeContext1, (ref _) => { });
         await firstCallTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        // Second change — triggers retry queue flush (retrying first), then writes second
+        // Second change - triggers retry queue flush (retrying first), then writes second
         var writeContext2 = new PropertyWriteContext<string?>(
             subject.GetPropertyReference(nameof(Person.FirstName)), "FailedValue", "SecondValue");
         propertyChangedChannel.WriteProperty(ref writeContext2, (ref _) => { });
 
         // Wait for retry flush + new write (3 total calls)
         await thirdCallTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await service.StopAsync(CancellationToken.None);
+        await source.StopAsync(CancellationToken.None);
 
         // Assert
         // 3 calls expected:
-        //   1. "FailedValue" → Failure (enqueued to retry queue)
-        //   2. "FailedValue" → Success (retry from queue flush)
-        //   3. "SecondValue" → Success (new write)
+        //   1. "FailedValue" -> Failure (enqueued to retry queue)
+        //   2. "FailedValue" -> Success (retry from queue flush)
+        //   3. "SecondValue" -> Success (new write)
         Assert.True(callCount >= 3,
             $"Expected at least 3 write calls (initial + retry + new), got {callCount}");
 
@@ -504,18 +427,18 @@ public class SubjectSourceBackgroundServiceTests
             .WithRegistry();
         var subject = new Person(context) { FirstName = "Original" };
 
-        var (service, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
-            initialStateAction: () => { subject.FirstName = "Original"; }); // Server didn't change it
+        var (source, writtenChanges, writeTcs) = CreateSourceWithRetryQueue(subject, context,
+            initialStateAction: s => { subject.FirstName = "Original"; }); // Server didn't change it
 
-        // Pre-fill retry queue: client changed "Original" → "ClientChange"
-        EnqueueRetryChange(service, subject, nameof(Person.FirstName), "Original", "ClientChange");
+        // Pre-fill retry queue: client changed "Original" -> "ClientChange"
+        EnqueueRetryChange(source, subject, nameof(Person.FirstName), "Original", "ClientChange");
 
         // Act
-        await service.StartAsync(CancellationToken.None);
+        await source.StartAsync(CancellationToken.None);
         await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await service.StopAsync(CancellationToken.None);
+        await source.StopAsync(CancellationToken.None);
 
-        // Assert — change was re-applied locally and sent to server
+        // Assert - change was re-applied locally and sent to server
         Assert.Equal("ClientChange", subject.FirstName);
         Assert.Contains(writtenChanges, c =>
             c.Property.Name == nameof(Person.FirstName) &&
@@ -531,19 +454,19 @@ public class SubjectSourceBackgroundServiceTests
             .WithRegistry();
         var subject = new Person(context) { FirstName = "Original" };
 
-        var (service, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
-            initialStateAction: () => { subject.FirstName = "ServerChanged"; }); // Server DID change it
+        var (source, writtenChanges, _) = CreateSourceWithRetryQueue(subject, context,
+            initialStateAction: s => { subject.FirstName = "ServerChanged"; }); // Server DID change it
 
-        // Pre-fill retry queue: client changed "Original" → "ClientChange"
-        EnqueueRetryChange(service, subject, nameof(Person.FirstName), "Original", "ClientChange");
+        // Pre-fill retry queue: client changed "Original" -> "ClientChange"
+        EnqueueRetryChange(source, subject, nameof(Person.FirstName), "Original", "ClientChange");
 
         // Act
-        await service.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => service.WriteRetryQueue!.IsEmpty,
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => source.WriteRetryQueue!.IsEmpty,
             message: "Expected retry queue to be drained by ReapplyRetryQueue");
-        await service.StopAsync(CancellationToken.None);
+        await source.StopAsync(CancellationToken.None);
 
-        // Assert — server wins, change was dropped
+        // Assert - server wins, change was dropped
         Assert.Equal("ServerChanged", subject.FirstName);
         Assert.DoesNotContain(writtenChanges, c => c.Property.Name == nameof(Person.FirstName));
     }
@@ -559,18 +482,18 @@ public class SubjectSourceBackgroundServiceTests
         var personB = new Person(context) { FirstName = "B" };
         var subject = new Person(context) { Father = personA };
 
-        var (service, _, writeTcs) = CreateServiceWithRetryQueue(subject, context,
-            initialStateAction: () => { subject.Father = personA; }); // Server didn't change it
+        var (source, _, writeTcs) = CreateSourceWithRetryQueue(subject, context,
+            initialStateAction: s => { subject.Father = personA; }); // Server didn't change it
 
-        // Pre-fill retry queue: client changed Father from personA → personB
-        EnqueueRetryChange<Person?>(service, subject, nameof(Person.Father), personA, personB);
+        // Pre-fill retry queue: client changed Father from personA -> personB
+        EnqueueRetryChange<Person?>(source, subject, nameof(Person.Father), personA, personB);
 
         // Act
-        await service.StartAsync(CancellationToken.None);
+        await source.StartAsync(CancellationToken.None);
         await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await service.StopAsync(CancellationToken.None);
+        await source.StopAsync(CancellationToken.None);
 
-        // Assert — re-applied
+        // Assert - re-applied
         Assert.Same(personB, subject.Father);
     }
 
@@ -586,19 +509,19 @@ public class SubjectSourceBackgroundServiceTests
         var personC = new Person(context) { FirstName = "C" };
         var subject = new Person(context) { Father = personA };
 
-        var (service, _, _) = CreateServiceWithRetryQueue(subject, context,
-            initialStateAction: () => { subject.Father = personC; }); // Server replaced with C
+        var (source, _, _) = CreateSourceWithRetryQueue(subject, context,
+            initialStateAction: s => { subject.Father = personC; }); // Server replaced with C
 
-        // Pre-fill retry queue: client changed Father from personA → personB
-        EnqueueRetryChange<Person?>(service, subject, nameof(Person.Father), personA, personB);
+        // Pre-fill retry queue: client changed Father from personA -> personB
+        EnqueueRetryChange<Person?>(source, subject, nameof(Person.Father), personA, personB);
 
         // Act
-        await service.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => service.WriteRetryQueue!.IsEmpty,
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => source.WriteRetryQueue!.IsEmpty,
             message: "Expected retry queue to be drained by ReapplyRetryQueue");
-        await service.StopAsync(CancellationToken.None);
+        await source.StopAsync(CancellationToken.None);
 
-        // Assert — server wins
+        // Assert - server wins
         Assert.Same(personC, subject.Father);
     }
 
@@ -613,18 +536,18 @@ public class SubjectSourceBackgroundServiceTests
         var listB = new List<Person> { new Person(context) { FirstName = "Child" } };
         var subject = new Person(context) { Children = listA };
 
-        var (service, _, writeTcs) = CreateServiceWithRetryQueue(subject, context,
-            initialStateAction: () => { subject.Children = listA; }); // Server didn't replace it
+        var (source, _, writeTcs) = CreateSourceWithRetryQueue(subject, context,
+            initialStateAction: s => { subject.Children = listA; }); // Server didn't replace it
 
-        // Pre-fill retry queue: client replaced collection listA → listB
-        EnqueueRetryChange(service, subject, nameof(Person.Children), listA, listB);
+        // Pre-fill retry queue: client replaced collection listA -> listB
+        EnqueueRetryChange(source, subject, nameof(Person.Children), listA, listB);
 
         // Act
-        await service.StartAsync(CancellationToken.None);
+        await source.StartAsync(CancellationToken.None);
         await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await service.StopAsync(CancellationToken.None);
+        await source.StopAsync(CancellationToken.None);
 
-        // Assert — re-applied (reference equality)
+        // Assert - re-applied (reference equality)
         Assert.Same(listB, subject.Children);
     }
 
@@ -640,19 +563,19 @@ public class SubjectSourceBackgroundServiceTests
         var listC = new List<Person> { new Person(context) { FirstName = "ServerChild" } };
         var subject = new Person(context) { Children = listA };
 
-        var (service, _, _) = CreateServiceWithRetryQueue(subject, context,
-            initialStateAction: () => { subject.Children = listC; }); // Server replaced collection
+        var (source, _, _) = CreateSourceWithRetryQueue(subject, context,
+            initialStateAction: s => { subject.Children = listC; }); // Server replaced collection
 
-        // Pre-fill retry queue: client replaced listA → listB
-        EnqueueRetryChange(service, subject, nameof(Person.Children), listA, listB);
+        // Pre-fill retry queue: client replaced listA -> listB
+        EnqueueRetryChange(source, subject, nameof(Person.Children), listA, listB);
 
         // Act
-        await service.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => service.WriteRetryQueue!.IsEmpty,
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => source.WriteRetryQueue!.IsEmpty,
             message: "Expected retry queue to be drained by ReapplyRetryQueue");
-        await service.StopAsync(CancellationToken.None);
+        await source.StopAsync(CancellationToken.None);
 
-        // Assert — server wins
+        // Assert - server wins
         Assert.Same(listC, subject.Children);
     }
 
@@ -665,22 +588,22 @@ public class SubjectSourceBackgroundServiceTests
             .WithRegistry();
         var subject = new Person(context) { FirstName = "OrigFirst", LastName = "OrigLast" };
 
-        var (service, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
-            initialStateAction: () =>
+        var (source, writtenChanges, writeTcs) = CreateSourceWithRetryQueue(subject, context,
+            initialStateAction: s =>
             {
-                subject.FirstName = "ServerFirst"; // Server changed this → conflict
-                subject.LastName = "OrigLast";     // Server didn't change this → no conflict
+                subject.FirstName = "ServerFirst"; // Server changed this -> conflict
+                subject.LastName = "OrigLast";     // Server didn't change this -> no conflict
             });
 
-        EnqueueRetryChange(service, subject, nameof(Person.FirstName), "OrigFirst", "ClientFirst");
-        EnqueueRetryChange(service, subject, nameof(Person.LastName), "OrigLast", "ClientLast");
+        EnqueueRetryChange(source, subject, nameof(Person.FirstName), "OrigFirst", "ClientFirst");
+        EnqueueRetryChange(source, subject, nameof(Person.LastName), "OrigLast", "ClientLast");
 
         // Act
-        await service.StartAsync(CancellationToken.None);
+        await source.StartAsync(CancellationToken.None);
         await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await service.StopAsync(CancellationToken.None);
+        await source.StopAsync(CancellationToken.None);
 
-        // Assert — FirstName dropped (server wins), LastName re-applied
+        // Assert - FirstName dropped (server wins), LastName re-applied
         Assert.Equal("ServerFirst", subject.FirstName);
         Assert.Equal("ClientLast", subject.LastName);
         Assert.DoesNotContain(writtenChanges, c => c.Property.Name == nameof(Person.FirstName));
@@ -698,23 +621,23 @@ public class SubjectSourceBackgroundServiceTests
             .WithRegistry();
         var subject = new Person(context) { FirstName = "OrigFirst", LastName = "OrigLast" };
 
-        var (service, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
-            initialStateAction: () =>
+        var (source, writtenChanges, _) = CreateSourceWithRetryQueue(subject, context,
+            initialStateAction: s =>
             {
                 subject.FirstName = "ServerFirst";
                 subject.LastName = "ServerLast";
             });
 
-        EnqueueRetryChange(service, subject, nameof(Person.FirstName), "OrigFirst", "ClientFirst");
-        EnqueueRetryChange(service, subject, nameof(Person.LastName), "OrigLast", "ClientLast");
+        EnqueueRetryChange(source, subject, nameof(Person.FirstName), "OrigFirst", "ClientFirst");
+        EnqueueRetryChange(source, subject, nameof(Person.LastName), "OrigLast", "ClientLast");
 
         // Act
-        await service.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => service.WriteRetryQueue!.IsEmpty,
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => source.WriteRetryQueue!.IsEmpty,
             message: "Expected retry queue to be drained by ReapplyRetryQueue");
-        await service.StopAsync(CancellationToken.None);
+        await source.StopAsync(CancellationToken.None);
 
-        // Assert — all dropped, server values remain
+        // Assert - all dropped, server values remain
         Assert.Equal("ServerFirst", subject.FirstName);
         Assert.Equal("ServerLast", subject.LastName);
         Assert.Empty(writtenChanges);
@@ -729,18 +652,18 @@ public class SubjectSourceBackgroundServiceTests
             .WithRegistry();
         var subject = new Person(context); // FirstName starts as null
 
-        var (service, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
-            initialStateAction: () => { }); // Server didn't set it either — stays null
+        var (source, writtenChanges, writeTcs) = CreateSourceWithRetryQueue(subject, context,
+            initialStateAction: s => { }); // Server didn't set it either - stays null
 
-        // Pre-fill retry queue: client changed null → "ClientValue"
-        EnqueueRetryChange(service, subject, nameof(Person.FirstName), null, "ClientValue");
+        // Pre-fill retry queue: client changed null -> "ClientValue"
+        EnqueueRetryChange(source, subject, nameof(Person.FirstName), null, "ClientValue");
 
         // Act
-        await service.StartAsync(CancellationToken.None);
+        await source.StartAsync(CancellationToken.None);
         await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await service.StopAsync(CancellationToken.None);
+        await source.StopAsync(CancellationToken.None);
 
-        // Assert — null == null → non-conflicting, re-applied
+        // Assert - null == null -> non-conflicting, re-applied
         Assert.Equal("ClientValue", subject.FirstName);
         Assert.Contains(writtenChanges, c =>
             c.Property.Name == nameof(Person.FirstName) &&
@@ -756,19 +679,19 @@ public class SubjectSourceBackgroundServiceTests
             .WithRegistry();
         var subject = new Person(context); // FirstName starts as null
 
-        var (service, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
-            initialStateAction: () => { subject.FirstName = "ServerValue"; }); // Server set it
+        var (source, writtenChanges, _) = CreateSourceWithRetryQueue(subject, context,
+            initialStateAction: s => { subject.FirstName = "ServerValue"; }); // Server set it
 
-        // Pre-fill retry queue: client changed null → "ClientValue"
-        EnqueueRetryChange(service, subject, nameof(Person.FirstName), null, "ClientValue");
+        // Pre-fill retry queue: client changed null -> "ClientValue"
+        EnqueueRetryChange(source, subject, nameof(Person.FirstName), null, "ClientValue");
 
         // Act
-        await service.StartAsync(CancellationToken.None);
-        await AsyncTestHelpers.WaitUntilAsync(() => service.WriteRetryQueue!.IsEmpty,
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => source.WriteRetryQueue!.IsEmpty,
             message: "Expected retry queue to be drained by ReapplyRetryQueue");
-        await service.StopAsync(CancellationToken.None);
+        await source.StopAsync(CancellationToken.None);
 
-        // Assert — null != "ServerValue" → conflict, dropped
+        // Assert - null != "ServerValue" -> conflict, dropped
         Assert.Equal("ServerValue", subject.FirstName);
         Assert.DoesNotContain(writtenChanges, c => c.Property.Name == nameof(Person.FirstName));
     }
@@ -782,18 +705,18 @@ public class SubjectSourceBackgroundServiceTests
             .WithRegistry();
         var subject = new Person(context) { FirstName = "Original" };
 
-        var (service, writtenChanges, _) = CreateServiceWithRetryQueue(subject, context,
-            initialStateAction: () => { subject.FirstName = "ServerValue"; });
+        var (source, writtenChanges, _) = CreateSourceWithRetryQueue(subject, context,
+            initialStateAction: s => { subject.FirstName = "ServerValue"; });
 
         // No retry changes enqueued
 
         // Act
-        await service.StartAsync(CancellationToken.None);
+        await source.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => subject.FirstName == "ServerValue",
             message: "Expected initial state to be applied");
-        await service.StopAsync(CancellationToken.None);
+        await source.StopAsync(CancellationToken.None);
 
-        // Assert — Initial state applied, no retry changes sent
+        // Assert - Initial state applied, no retry changes sent
         Assert.Equal("ServerValue", subject.FirstName);
         Assert.Empty(writtenChanges);
     }
@@ -807,28 +730,30 @@ public class SubjectSourceBackgroundServiceTests
             .WithRegistry();
         var subject = new Person(context) { FirstName = "Original" };
 
-        var sourceMock = new Mock<ISubjectSource>();
-        sourceMock.Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((IDisposable?)null);
-        sourceMock.Setup(s => s.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => { subject.FirstName = "ServerValue"; });
-        sourceMock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns(new ValueTask<WriteResult>(WriteResult.Success));
-
-        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(sourceMock.Object);
-
+        TestSubjectSource? source = null;
         // writeRetryQueueSize: 0 disables the queue
-        var service = new SubjectSourceBackgroundService(
-            sourceMock.Object, context, NullLogger.Instance,
-            writeRetryQueueSize: 0);
+        source = new TestSubjectSource(subject, context, NullLogger.Instance,
+            writeRetryQueueSize: 0)
+        {
+            LoadInitialStateOverride = _ => Task.FromResult<Action?>(() =>
+            {
+                using (SubjectChangeContext.WithSource(source!))
+                {
+                    subject.FirstName = "ServerValue";
+                }
+            }),
+            WriteChangesOverride = (_, _) => new ValueTask<WriteResult>(WriteResult.Success),
+        };
+
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
 
         // Act
-        await service.StartAsync(CancellationToken.None);
+        await source.StartAsync(CancellationToken.None);
         await AsyncTestHelpers.WaitUntilAsync(() => subject.FirstName == "ServerValue",
             message: "Expected initial state to be applied");
-        await service.StopAsync(CancellationToken.None);
+        await source.StopAsync(CancellationToken.None);
 
-        // Assert — service runs normally without retry queue
+        // Assert - service runs normally without retry queue
         Assert.Equal("ServerValue", subject.FirstName);
     }
 
@@ -841,49 +766,47 @@ public class SubjectSourceBackgroundServiceTests
             .WithRegistry();
         var subject = new Person(context) { FirstName = "Original", LastName = "Original" };
 
-        var (service, writtenChanges, writeTcs) = CreateServiceWithRetryQueue(subject, context,
-            initialStateAction: () => { }); // Server didn't change anything
+        var (source, writtenChanges, writeTcs) = CreateSourceWithRetryQueue(subject, context,
+            initialStateAction: s => { }); // Server didn't change anything
 
-        // Enqueue a change with a bogus property name — Metadata access will throw
-        EnqueueRetryChange(service, subject, "NonExistentProperty", "old", "new");
+        // Enqueue a change with a bogus property name - Metadata access will throw
+        EnqueueRetryChange(source, subject, "NonExistentProperty", "old", "new");
 
         // Enqueue a valid change after the broken one
-        EnqueueRetryChange(service, subject, nameof(Person.LastName), "Original", "ClientLast");
+        EnqueueRetryChange(source, subject, nameof(Person.LastName), "Original", "ClientLast");
 
         // Act
-        await service.StartAsync(CancellationToken.None);
+        await source.StartAsync(CancellationToken.None);
         await writeTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await service.StopAsync(CancellationToken.None);
+        await source.StopAsync(CancellationToken.None);
 
-        // Assert — broken change failed, but LastName was still re-applied
+        // Assert - broken change failed, but LastName was still re-applied
         Assert.Equal("ClientLast", subject.LastName);
         Assert.Contains(writtenChanges, c =>
             c.Property.Name == nameof(Person.LastName) &&
             c.GetNewValue<string?>() == "ClientLast");
     }
 
-    private static (SubjectSourceBackgroundService service,
+    private static (TestSubjectSource source,
         ConcurrentBag<SubjectPropertyChange> writtenChanges, TaskCompletionSource writeTcs)
-        CreateServiceWithRetryQueue(Person subject, IInterceptorSubjectContext context, Action initialStateAction)
+        CreateSourceWithRetryQueue(Person subject, IInterceptorSubjectContext context,
+            Action<TestSubjectSource> initialStateAction)
     {
-        var sourceMock = new Mock<ISubjectSource>();
         var writtenChanges = new ConcurrentBag<SubjectPropertyChange>();
         var writeTcs = new TaskCompletionSource();
 
-        sourceMock.Setup(s => s.StartListeningAsync(It.IsAny<SubjectPropertyWriter>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((IDisposable?)null);
-
-        sourceMock.Setup(s => s.LoadInitialStateAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() =>
+        TestSubjectSource? source = null;
+        source = new TestSubjectSource(subject, context, NullLogger.Instance,
+            bufferTime: TimeSpan.FromMilliseconds(50))
+        {
+            LoadInitialStateOverride = _ => Task.FromResult<Action?>(() =>
             {
-                using (SubjectChangeContext.WithSource(sourceMock.Object))
+                using (SubjectChangeContext.WithSource(source!))
                 {
-                    initialStateAction();
+                    initialStateAction(source!);
                 }
-            });
-
-        sourceMock.Setup(s => s.WriteChangesAsync(It.IsAny<ReadOnlyMemory<SubjectPropertyChange>>(), It.IsAny<CancellationToken>()))
-            .Returns((ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken _) =>
+            }),
+            WriteChangesOverride = (changes, _) =>
             {
                 foreach (var change in changes.ToArray())
                 {
@@ -891,32 +814,29 @@ public class SubjectSourceBackgroundServiceTests
                 }
                 writeTcs.TrySetResult();
                 return new ValueTask<WriteResult>(WriteResult.Success);
-            });
+            },
+        };
 
         // Claim source ownership for common properties
-        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(sourceMock.Object);
-        new PropertyReference(subject, nameof(Person.LastName)).SetSource(sourceMock.Object);
-        new PropertyReference(subject, nameof(Person.Father)).SetSource(sourceMock.Object);
-        new PropertyReference(subject, nameof(Person.Mother)).SetSource(sourceMock.Object);
-        new PropertyReference(subject, nameof(Person.Children)).SetSource(sourceMock.Object);
+        new PropertyReference(subject, nameof(Person.FirstName)).SetSource(source);
+        new PropertyReference(subject, nameof(Person.LastName)).SetSource(source);
+        new PropertyReference(subject, nameof(Person.Father)).SetSource(source);
+        new PropertyReference(subject, nameof(Person.Mother)).SetSource(source);
+        new PropertyReference(subject, nameof(Person.Children)).SetSource(source);
 
-        var service = new SubjectSourceBackgroundService(
-            sourceMock.Object, context, NullLogger.Instance,
-            bufferTime: TimeSpan.FromMilliseconds(50));
-
-        return (service, writtenChanges, writeTcs);
+        return (source, writtenChanges, writeTcs);
     }
 
-    private static void EnqueueRetryChange(SubjectSourceBackgroundService service,
+    private static void EnqueueRetryChange(TestSubjectSource source,
         IInterceptorSubject subject, string propertyName, string? oldValue, string? newValue)
     {
-        EnqueueRetryChange<string?>(service, subject, propertyName, oldValue, newValue);
+        EnqueueRetryChange<string?>(source, subject, propertyName, oldValue, newValue);
     }
 
-    private static void EnqueueRetryChange<TValue>(SubjectSourceBackgroundService service,
+    private static void EnqueueRetryChange<TValue>(TestSubjectSource source,
         IInterceptorSubject subject, string propertyName, TValue oldValue, TValue newValue)
     {
-        var queue = service.WriteRetryQueue!;
+        var queue = source.WriteRetryQueue!;
 
         var change = SubjectPropertyChange.Create(
             new PropertyReference(subject, propertyName),
@@ -927,5 +847,137 @@ public class SubjectSourceBackgroundServiceTests
             newValue);
 
         queue.Enqueue(new[] { change });
+    }
+
+    [Fact]
+    public async Task WhenStartListeningAsyncFails_ThenRetriesAndEventuallySucceeds()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext.Create()
+            .WithFullPropertyTracking()
+            .WithRegistry();
+        var subject = new Person(context);
+
+        var callCount = 0;
+        var source = new TestSubjectSource(subject, context, NullLogger.Instance,
+            retryTime: TimeSpan.FromMilliseconds(50))
+        {
+            StartListeningOverride = (_, _) =>
+            {
+                var current = Interlocked.Increment(ref callCount);
+                if (current <= 2)
+                {
+                    throw new InvalidOperationException($"Simulated failure #{current}");
+                }
+                return Task.FromResult<IAsyncDisposable?>(null);
+            },
+            LoadInitialStateOverride = _ =>
+                Task.FromResult<Action?>(() => { subject.FirstName = "Loaded"; }),
+            WriteChangesOverride = (_, _) => ValueTask.FromResult(WriteResult.Success),
+        };
+
+        // Act
+        await source.StartAsync(CancellationToken.None);
+        await AsyncTestHelpers.WaitUntilAsync(() => subject.FirstName == "Loaded",
+            message: "Expected source to retry and eventually load initial state");
+        await source.StopAsync(CancellationToken.None);
+
+        // Assert
+        Assert.True(callCount >= 3, $"Expected at least 3 calls (2 failures + 1 success), got {callCount}");
+        Assert.Equal("Loaded", subject.FirstName);
+    }
+
+    [Fact]
+    public async Task WhenStartListeningOverrideSpawnsTaskAndThrows_ThenSpawnedTaskIsCleanedUpBeforeRethrow()
+    {
+        // Spec section 11 R2: per-connector StartListeningAsync overrides must own their
+        // spawned background tasks (OPC UA session-health, MQTT connection-monitor,
+        // WebSocket receive+monitor) and clean them up if the override throws after
+        // the task is spawned. This is a guard test for the cleanup-before-rethrow
+        // pattern at the abstraction level all three connectors share.
+
+        // Arrange
+        var subjectContextMock = new Mock<IInterceptorSubjectContext>();
+        subjectContextMock
+            .Setup(s => s.TryGetService<ISubjectRegistry>())
+            .Returns(new SubjectRegistry());
+
+        var subjectMock = new Mock<IInterceptorSubject>();
+        subjectMock
+            .Setup(s => s.Context)
+            .Returns(subjectContextMock.Object);
+
+        var spawnCount = 0;
+        var spawnedTaskCancelled = false;
+        var spawnedTaskCompleted = false;
+        var cleanupRan = false;
+
+        var source = new TestSubjectSource(
+            subjectMock.Object,
+            subjectContextMock.Object,
+            NullLogger.Instance,
+            retryTime: TimeSpan.FromMilliseconds(50))
+        {
+            StartListeningOverride = async (_, listenToken) =>
+            {
+                CancellationTokenSource? spawnCts = null;
+                Task? spawnedTask = null;
+                try
+                {
+                    spawnCts = CancellationTokenSource.CreateLinkedTokenSource(listenToken);
+                    var cts = spawnCts;
+                    spawnedTask = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await Task.Delay(Timeout.Infinite, cts.Token).ConfigureAwait(false);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            spawnedTaskCancelled = true;
+                        }
+                        finally
+                        {
+                            spawnedTaskCompleted = true;
+                        }
+                    });
+
+                    Interlocked.Increment(ref spawnCount);
+                    throw new InvalidOperationException("simulated post-spawn failure");
+                }
+                catch
+                {
+                    cleanupRan = true;
+                    if (spawnCts is not null)
+                    {
+                        try { await spawnCts.CancelAsync().ConfigureAwait(false); } catch { /* best effort */ }
+                    }
+                    if (spawnedTask is not null)
+                    {
+                        try { await spawnedTask.ConfigureAwait(false); } catch { /* expected */ }
+                    }
+                    if (spawnCts is not null)
+                    {
+                        try { spawnCts.Dispose(); } catch { /* best effort */ }
+                    }
+                    throw;
+                }
+            },
+        };
+
+        var cancellationTokenSource = new CancellationTokenSource();
+
+        // Act
+        await source.StartAsync(cancellationTokenSource.Token);
+        await AsyncTestHelpers.WaitUntilAsync(
+            () => Volatile.Read(ref spawnCount) >= 1 && cleanupRan && spawnedTaskCompleted,
+            message: "Expected the override to have spawned a task, thrown, and cleaned up.");
+        await source.StopAsync(cancellationTokenSource.Token);
+        await cancellationTokenSource.CancelAsync();
+
+        // Assert
+        Assert.True(cleanupRan, "Cleanup-on-failure block should run before re-throwing.");
+        Assert.True(spawnedTaskCancelled, "Spawned task should observe cancellation from the cleanup helper.");
+        Assert.True(spawnedTaskCompleted, "Spawned task should run to completion (cancelled), not be left dangling.");
     }
 }

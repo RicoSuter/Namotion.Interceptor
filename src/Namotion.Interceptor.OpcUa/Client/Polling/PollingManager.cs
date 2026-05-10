@@ -419,6 +419,7 @@ internal sealed class PollingManager : IAsyncDisposable
             });
 
             _metrics.RecordValueChange();
+            _source.IncomingThroughput.Add(1);
 
             _logger.LogTrace("Polled value changed for {NodeId}: {OldValue} -> {NewValue}",
                 pollingItem.NodeId, oldValue, newValue);

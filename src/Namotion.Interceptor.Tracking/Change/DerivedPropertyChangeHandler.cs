@@ -188,7 +188,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// IsRecalculating serializes concurrent recalculations; RecalculationNeeded catches state changes
     /// (writes, attach, detach) that occur during the unlocked evaluation window.
     /// </summary>
-    private static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long timestampUtcTicks)
+    internal static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long timestampUtcTicks)
     {
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
 

@@ -34,7 +34,7 @@ public sealed class CycleLoggerProvider : ILoggerProvider
             _currentCycle = cycleNumber;
             var timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH-mm-ss");
             _currentFilePath = Path.Combine(_logDirectory,
-                $"cycle-{cycleNumber:D3}-pending-{timestamp}.log");
+                $"cycle-{cycleNumber:D4}-pending-{timestamp}.log");
 
             _currentWriter = new StreamWriter(_currentFilePath, append: false)
             {

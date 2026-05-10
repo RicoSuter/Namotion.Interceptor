@@ -25,8 +25,8 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
     private int _disposed;
 
     public TRoot? Root { get; private set; }
-    public string BaseAddress => _baseAddress;
-    public OpcUaServerDiagnostics? Diagnostics { get; private set; }
+
+    public IOpcUaSubjectServer? Server { get; private set; }
 
     public OpcUaTestServer(TestLogger logger)
     {
@@ -94,22 +94,14 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
                     CleanCertificateStore = false,
                     AutoAcceptUntrustedCertificates = true,
                     CertificateStoreBasePath = _certificateStoreBasePath,
-                    
+
                     BufferTime = TimeSpan.FromMilliseconds(100)
                 };
             });
 
         _host = builder.Build();
 
-        var serverService = _host.Services
-            .GetServices<IHostedService>()
-            .OfType<OpcUaSubjectServerBackgroundService>()
-            .FirstOrDefault();
-
-        if (serverService != null)
-        {
-            Diagnostics = serverService.Diagnostics;
-        }
+        Server = _host.Services.GetRequiredService<IOpcUaSubjectServer>();
 
         await _host.StartAsync();
         sw.Stop();

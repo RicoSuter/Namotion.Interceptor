@@ -1,5 +1,6 @@
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Connectors.Tests.Models;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Transactions;
 
@@ -21,6 +22,7 @@ public class SubjectTransactionAsyncTests
 
         Task<SubjectTransaction> tx2Task;
         var tx2AcquiredTcs = new TaskCompletionSource<bool>();
+        var tx2Started = new TaskCompletionSource<bool>();
 
         // Act
         using (await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort))
@@ -31,17 +33,17 @@ public class SubjectTransactionAsyncTests
             {
                 tx2Task = Task.Run(async () =>
                 {
+                    tx2Started.SetResult(true);
                     var tx = await context.BeginTransactionAsync(TransactionFailureHandling.BestEffort);
                     tx2AcquiredTcs.SetResult(true);
                     return tx;
                 });
             }
 
-            // Wait a bit
-            await Task.Delay(100);
-
             // Assert
-            // tx2 should be waiting because tx1 has not been disposed
+            // Wait for tx2 to start, then verify it hasn't acquired the lock
+            await tx2Started.Task;
+            await Task.Yield();
             Assert.False(tx2AcquiredTcs.Task.IsCompleted, "tx2 should be waiting for lock");
         }
 
@@ -105,11 +107,10 @@ public class SubjectTransactionAsyncTests
 
         // Act
         // Give tx2 time to start
-        while (!tx2Started)
-            await Task.Delay(1);
+        await AsyncTestHelpers.WaitUntilAsync(() => tx2Started);
 
         // tx2 should be waiting for lock (not yet completed)
-        await Task.Delay(100);
+        await Task.Yield();
 
         // Assert
         Assert.False(tx2Acquired, "tx2 should not have acquired lock yet");

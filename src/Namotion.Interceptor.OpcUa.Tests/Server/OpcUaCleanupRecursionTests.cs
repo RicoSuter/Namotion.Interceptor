@@ -68,6 +68,8 @@ public class OpcUaCleanupRecursionTests
             baseAddress: portLease.BaseAddress,
             certificateStoreBasePath: portLease.CertificateStoreBasePath);
 
+        var opcUaVariableKey = ((OpcUaSubjectServer)server.Server!).OpcUaVariableKey;
+
         var child = server.Root!.Child!;
         var registered = child.TryGetRegisteredSubject()!;
         var number = registered.TryGetProperty(nameof(CleanupRecursionChild.Number))!;
@@ -75,7 +77,7 @@ public class OpcUaCleanupRecursionTests
         var source = unit.TryGetAttribute("Source")!;
 
         await AsyncTestHelpers.WaitUntilAsync(
-            () => HasOpcVariable(number) && HasOpcVariable(unit) && HasOpcVariable(source),
+            () => HasOpcVariable(number, opcUaVariableKey) && HasOpcVariable(unit, opcUaVariableKey) && HasOpcVariable(source, opcUaVariableKey),
             timeout: TimeSpan.FromSeconds(30),
             message: "Server should populate variable data on the property and both nested attribute levels.");
 
@@ -84,11 +86,11 @@ public class OpcUaCleanupRecursionTests
 
         // Assert
         await AsyncTestHelpers.WaitUntilAsync(
-            () => !HasOpcVariable(number) && !HasOpcVariable(unit) && !HasOpcVariable(source),
+            () => !HasOpcVariable(number, opcUaVariableKey) && !HasOpcVariable(unit, opcUaVariableKey) && !HasOpcVariable(source, opcUaVariableKey),
             timeout: TimeSpan.FromSeconds(30),
             message: "Detach must remove variable data from the property and both nested attribute levels.");
     }
 
-    private static bool HasOpcVariable(RegisteredSubjectProperty property) =>
-        property.Reference.TryGetPropertyData(OpcUaSubjectServerBackgroundService.OpcVariableKey, out _);
+    private static bool HasOpcVariable(RegisteredSubjectProperty property, string opcUaVariableKey) =>
+        property.Reference.TryGetPropertyData(opcUaVariableKey, out _);
 }
