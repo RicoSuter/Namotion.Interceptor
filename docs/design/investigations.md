@@ -1,73 +1,55 @@
 # Investigations
 
-Open questions and issues to look into.
+Current state and open issues for OPC UA structural synchronization.
 
-## OPC UA: ConnectorTester convergence investigation (2026-05-09)
+## Current State (2026-05-10)
 
-### Progress
+### ConnectorTester Profile Results
 
-Fixed the snapshot comparison (was using sequential IDs that shifted when subjects were missing, now uses path-based matching). With correct comparison:
+| Profile | Struct Rate | Description | Status |
+|---------|------------|-------------|--------|
+| `opcua-structural-serveronly` | Server: 20/s, Client: 0 | Server mutates structure, client observes | **Nearly works**: 0 value diffs, 1-3 missing subjects (stale events) |
+| `opcua-structural-simple` | Server: 50/s, Client: 50/s | Both sides mutate structure | **Broken**: client syncs ~39 out of ~500 subjects |
+| `opcua-structural` | Server: 200/s, Client: 200/s + chaos | Full stress with disconnects | **Not tested** |
+| `opcua-structural-nosync` | No structural sync | Baseline value sync | **Not tested** |
 
-- **Structure converges perfectly**: 148 paths on both sides, 0 missing, 0 extra
-- **Values nearly converge**: only 3-6 diffs per run, all on `ObjectRef` paths
+### Integration Tests
 
-### Fixes applied (committed)
+55 pass, 0 skipped, 0 failures (1 pre-existing flaky test: `WhenServerClearsReference_ThenClientSubjectDetaches`, port conflict in full suite).
 
-1. **Unique NodeIds** (`CustomNodeManager._dynamicNodeCounter`): positional `People[2]` replaced with counter-based `People_42`. Fixes NodeId reuse when subjects shift positions.
-2. **Inline server structural processing**: structural changes processed synchronously in `WriteChangesAsync` before value loop. Removed `OpcUaServerStructuralChangeProcessor` class.
-3. **Filter failed monitored items**: `AddMonitoredItemsAsync` now calls `FilterOutFailedMonitoredItemsAsync` after `ApplyChangesAsync`.
-4. **Path-based snapshot comparison**: `VerificationEngine.CreateSnapshot` now walks graph by position (`ROOT/Collection[2]/Items[key]`) instead of sequential IDs.
+## Fixes Applied (this branch)
 
-### Ruled out
+1. **Unique NodeIds** (`CustomNodeManager._dynamicNodeCounter`): Collections, dictionaries, and references all use a monotonic counter for dynamically created NodeIds. Prevents NodeId reuse when subjects are replaced at the same position.
+2. **Inline server structural processing**: Structural changes processed synchronously in `WriteChangesAsync` before the value loop. Removed `OpcUaServerStructuralChangeProcessor` class. Ensures OPC UA nodes exist before value writes.
+3. **Filter failed monitored items**: `AddMonitoredItemsAsync` now calls `FilterOutFailedMonitoredItemsAsync` after `ApplyChangesAsync` for dynamically added items.
+4. **Path-based snapshot comparison**: `VerificationEngine.CreateSnapshot` walks the graph by position (`ROOT/Collection[2]/Items[key]`) instead of sequential IDs. The old approach produced false diffs when subjects were missing.
+5. **Warning logs for stale events**: `ProcessExternalAddAsync` logs when browse fails (node removed between ModelChangeEvent and browse).
+6. **8 new integration tests**: Value sync after structural adds, rapid adds, add/remove convergence, concurrent mutations, NodeId collision, bidirectional values, and stress test.
 
-- **Throughput**: structural events process in 1ms median, not a bottleneck
-- **SemaphoreSlim for incoming serialization**: blocking the SDK callback thread makes things worse (365 diffs vs 12)
-- **Removing ReadInitialValuesAsync**: 1385 diffs without it (initial notifications unreliable)
-- **Dropped notifications**: only 2 unmatched ClientHandle warnings in a full run
+## Ruled Out
 
-### Remaining issue: ObjectRef value diffs (3-6 per run)
+- **Throughput**: Structural events process in 1ms median, not a bottleneck at 20/sec.
+- **SemaphoreSlim for incoming serialization**: Blocking the SDK's publish callback thread causes more diffs (365 vs 12), not fewer.
+- **Removing ReadInitialValuesAsync**: 1385 diffs without it. Initial notifications from `MonitoringMode.Reporting` are unreliable for dynamically added items.
+- **Dropped notifications**: Only 2 unmatched `ClientHandle` warnings in a full run. Subscriptions deliver correctly.
 
-All remaining diffs are on `ObjectRef` paths. Pattern:
-- `ROOT/Collection[N]/ObjectRef`: both sides have values but they disagree (stale values on one side)
-- `ROOT/Items[key]/ObjectRef`: server has defaults, client has values (or vice versa)
+## Open Issues
 
-ObjectRef replacement during `MutateObjectRef`:
-```csharp
-target.ObjectRef = null;       // remove
-target.ObjectRef = CreateNewNode();  // add new with defaults
-```
+### 1. Server-only: stale events (1-3 missing subjects)
 
-This creates two structural events (Remove + Add). The new ObjectRef starts with defaults. The MutationEngine may or may not mutate its values before mutations stop. If one side processes the Remove+Add at a different point in time than the other, values diverge.
+At 20 struct/sec, 1-3 deeply nested subjects are missing from the client after 2-minute convergence. Diagnostic logs show the server added a node, fired `NodeAdded`, then removed it before the client could browse. The client's `ProcessExternalAddAsync` silently fails (`browse parent null` or `not found in browse`).
 
-### Resolved: ObjectRef value diffs
+**Potential fix**: Periodic reconciliation pass after the structural event queue drains. The `OpcUaPeriodicResyncHandler` from an earlier design could serve as a safety net.
 
-Root cause: ObjectRef used fixed path-based NodeIds (`Root.Collection_5.ObjectRef`). When replaced, the new subject got the same NodeId. Fixed by using the counter for dynamically created reference nodes.
+### 2. Bidirectional: client only syncs ~39 out of ~500 subjects
 
-### Remaining: server-only stale events (1-3 missing subjects)
+At 50 struct/sec on both sides, the client barely discovers any dynamically added subjects. The root cause has not been fully investigated. Known contributing factors:
+- The server's `CreateDynamicSubjectNodes` returns null for subjects already created by the `AddNodes` handler (expected, not a bug, downgraded to debug log).
+- The client sends `AddNodes` for local structural changes. The server creates the subject and fires `NodeAdded`. The client receives its own `NodeAdded` event and tries to create the subject again.
+- The current design lacks coordination between outgoing `AddNodes` requests and incoming `ModelChangeEvent` processing.
 
-At 20 struct/sec, 1-3 deeply nested subjects are missing from the client. Diagnostic logs show `browse parent null` or `not found in browse`. The server added a node, fired NodeAdded, then removed it before the client could browse. The stale Add event silently fails. A periodic reconciliation pass would fix this.
+PR #121 had dedicated `GraphChangeSender`/`GraphChangeReceiver`/`GraphChangeDispatcher` classes with more sophisticated coordination. The current simple Channel-based approach works for server-only mutations but may need rethinking for bidirectional.
 
-### Remaining: bidirectional structural mutations (major)
+### 3. Chaos profiles not tested
 
-At 50 struct/sec on both sides, client only syncs ~39 out of ~500 subjects. The bidirectional case has fundamental coordination challenges:
-- Both sides fire ModelChangeEvents and send AddNodes simultaneously
-- The server's `CreateDynamicSubjectNodes` returns null for subjects already created by the AddNodes handler (expected, not a bug)
-- The client's structural processor can't handle the volume of events from both directions
-
-This needs a separate design effort. PR #121 had dedicated `GraphChangeSender`/`GraphChangeReceiver`/`GraphChangeDispatcher` classes with more sophisticated coordination. The current simple Channel-based approach works for server-only mutations but not for bidirectional.
-
-## OPC UA: Duplicate Add events for same NodeId without intervening Remove
-
-**Observed in:** Stress test `WhenServerMutatesStructureAndValuesRapidly_ThenClientConvergesToFinalState`
-
-**Symptom:** The client receives two `ModelChangeEvent(NodeAdded, Root.People[2])` without a `ModelChangeEvent(NodeDeleted, Root.People[2])` in between. The client's idempotent check drops the second Add because the SubjectMap already has an entry for that NodeId.
-
-**Root cause hypothesis:** The server's `EnqueueStructuralChanges` computes the subject diff (old vs new collection). When two rapid mutations both add a subject at the same index (e.g., index 2), the server fires two Add events for `People[2]` without a Remove. This suggests the index assignment in `CreateDynamicSubjectNodes` uses the subject's position in the new array, which can collide across mutations.
-
-**Root cause confirmed:** `ExtractSubjects` records each subject's current array index. `ComputeSubjectDiff` uses reference equality for add/remove detection but carries the array index. When subject C moves from index 2 to index 1 (due to another subject being removed), its OPC UA node keeps NodeId `People[2]`. A new subject D added at array index 2 gets the same path `People[2]`, creating a duplicate NodeId. The diff is correct (different subjects by reference) but the index-to-NodeId mapping is wrong because C# array indices shift on removal while OPC UA NodeIds are fixed.
-
-**Fix:** Use a monotonic counter per collection property instead of array index for NodeId generation. See `docs/design/2026-05-09-structural-sync-fixes.md` for the design.
-
-**Related:** Two integration tests are skipped with the same root cause:
-- `WhenServerReplacesCollectionEntirely_ThenClientSeesNewItems` (Skip: "Requires unique NodeIds: path-based NodeIds are reused when items are replaced at the same index")
-- `WhenServerReplacesValueAtExistingDictionaryKey_ThenClientSeesNewSubject` (Skip: "Requires unique NodeIds: path-based NodeIds are reused when values are replaced at the same key")
+The full stress profile (`opcua-structural`) with disconnects and reconnects has not been tested. This requires the structural sync to handle session reconnection, subscription transfer, and state reconciliation after gaps.
