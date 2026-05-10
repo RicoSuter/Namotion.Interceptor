@@ -221,6 +221,7 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
             var parentId = await BrowseParentAsync(currentNodeId, session, cancellationToken).ConfigureAwait(false);
             if (parentId is null)
             {
+                Logger.LogWarning("ExternalAdd: browse parent null for {NodeId} at depth {Depth} (node removed?).", affectedNodeId, depth);
                 return;
             }
 
@@ -236,6 +237,7 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
 
         if (context is null)
         {
+            Logger.LogWarning("ExternalAdd: no ancestor in SubjectMap for {NodeId} after walk-up.", affectedNodeId);
             return;
         }
 
@@ -254,6 +256,7 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
 
         if (affectedRef is null)
         {
+            Logger.LogWarning("ExternalAdd: {NodeId} not found in browse of {Parent} ({Count} children, node removed?).", affectedNodeId, browseNodeId, children.Count);
             return;
         }
 
@@ -266,6 +269,7 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
         var (targetProperty, index) = FindTargetProperty(registered, context.Value, affectedRef, children);
         if (targetProperty is null)
         {
+            Logger.LogWarning("ExternalAdd: no matching property for {NodeId} BrowseName={BrowseName}.", affectedNodeId, affectedRef.BrowseName.Name);
             return;
         }
 
