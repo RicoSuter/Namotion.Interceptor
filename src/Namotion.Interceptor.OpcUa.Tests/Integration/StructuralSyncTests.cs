@@ -1714,6 +1714,72 @@ public class StructuralSyncTests
     }
 
     // -----------------------------------------------------------------------
+    // Client-only rapid structural mutations
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task WhenClientAddsMultipleItemsRapidly_ThenServerConverges()
+    {
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            // Arrange
+            (server, client, port, var logger) = await StartServerAndClientWithBidirectionalSyncAsync();
+
+            Assert.NotNull(server.Root);
+            Assert.NotNull(client.Root);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 1,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial People collection should sync");
+
+            var initialCount = server.Root.People.Length;
+            const int itemsToAdd = 5;
+
+            // Act: client adds items at ~200ms intervals
+            var clientContext = ((IInterceptorSubject)client.Root).Context;
+            for (var i = 0; i < itemsToAdd; i++)
+            {
+                var person = new TestPerson(clientContext)
+                {
+                    FirstName = $"Client{i}",
+                    LastName = "Person",
+                    Scores = [i * 10.0]
+                };
+                client.Root.People = [..client.Root.People, person];
+                await Task.Delay(200);
+            }
+
+            // Assert
+            var expectedCount = initialCount + itemsToAdd;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => server.Root.People.Length == expectedCount,
+                timeout: TimeSpan.FromSeconds(30),
+                message: $"Server should converge to {expectedCount} items");
+
+            logger.Log($"Final: server={server.Root.People.Length}, client={client.Root.People.Length}");
+
+            // Wait for echo suppression to settle
+            await Task.Delay(3000);
+
+            Assert.Equal(expectedCount, server.Root.People.Length);
+            Assert.Equal(expectedCount, client.Root.People.Length);
+
+            logger.Log("Test passed: Client rapid adds converged");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Echo suppression & bidirectional convergence
     // -----------------------------------------------------------------------
 
