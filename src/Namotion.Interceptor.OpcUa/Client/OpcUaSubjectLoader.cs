@@ -340,8 +340,20 @@ internal class OpcUaSubjectLoader
         {
             var childNode = childNodes[i];
             var childSubject = i < existingChildren.Length ? existingChildren[i].Subject : null;
+            var nodeId = ExpandedNodeId.ToNodeId(childNode.NodeId, session.NamespaceUris);
+
+            if (childSubject is null && nodeId is not null)
+            {
+                subjectsByNodeId.TryGetValue(nodeId, out childSubject);
+            }
+
             childSubject ??= await _configuration.SubjectFactory.CreateCollectionSubjectAsync(
                 property, childNode, i, session, cancellationToken).ConfigureAwait(false);
+
+            if (nodeId is not null)
+            {
+                subjectsByNodeId.TryAdd(nodeId, childSubject);
+            }
 
             children.Add((childNode, childSubject));
         }
@@ -377,9 +389,22 @@ internal class OpcUaSubjectLoader
         foreach (var childNode in childNodes)
         {
             var key = childNode.BrowseName.Name; // Use BrowseName as dictionary key
-            var childSubject = existingChildren.GetValueOrDefault(key)
-                ?? await _configuration.SubjectFactory.CreateCollectionSubjectAsync(
-                    property, childNode, key, session, cancellationToken).ConfigureAwait(false);
+            var childSubject = existingChildren.GetValueOrDefault(key);
+            var nodeId = ExpandedNodeId.ToNodeId(childNode.NodeId, session.NamespaceUris);
+
+            if (childSubject is null && nodeId is not null)
+            {
+                subjectsByNodeId.TryGetValue(nodeId, out childSubject);
+            }
+
+            childSubject ??= await _configuration.SubjectFactory.CreateCollectionSubjectAsync(
+                property, childNode, key, session, cancellationToken).ConfigureAwait(false);
+
+            if (nodeId is not null)
+            {
+                subjectsByNodeId.TryAdd(nodeId, childSubject);
+            }
+
             entries[key] = childSubject;
             nodesByKey[key] = childNode;
         }

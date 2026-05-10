@@ -17,13 +17,13 @@ public class HomeBlazeOpcUaSubjectFactory : OpcUaSubjectFactory
         RegisteredSubjectProperty property, ReferenceDescription node,
         ISession session, CancellationToken cancellationToken)
     {
-        return Task.FromResult<IInterceptorSubject>(new OpcUaDynamicSubject(node.BrowseName.Name));
+        return Task.FromResult<IInterceptorSubject>(new OpcUaDynamicSubject(node.BrowseName?.Name));
     }
 
     public override Task<IInterceptorSubject> CreateCollectionSubjectAsync(
         RegisteredSubjectProperty collectionProperty, ReferenceDescription node, object? index,
         ISession session, CancellationToken cancellationToken)
     {
-        return Task.FromResult<IInterceptorSubject>(new OpcUaDynamicSubject(node.BrowseName.Name));
+        return Task.FromResult<IInterceptorSubject>(new OpcUaDynamicSubject(node.BrowseName?.Name));
     }
 }

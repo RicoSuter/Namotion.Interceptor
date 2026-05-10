@@ -461,6 +461,112 @@ public class OpcUaSubjectLoaderTests
         Assert.Same(sharedFromParent1, sharedFromParent2);
     }
 
+    [Fact]
+    public async Task WhenSameNodeAppearsInCollectionsFromMultipleParents_ThenSubjectIsReused()
+    {
+        // Arrange: type resolver returns DynamicSubject[] for "Collection*" nodes, DynamicSubject for other Objects.
+        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaSubjectClientSource>.Instance);
+        mockTypeResolver
+            .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ISession _, ReferenceDescription reference, CancellationToken _) =>
+            {
+                if (reference.BrowseName.Name?.StartsWith("Collection") == true)
+                    return typeof(DynamicSubject[]);
+                if (reference.NodeClass == NodeClass.Object)
+                    return typeof(DynamicSubject);
+                return typeof(double);
+            });
+        mockTypeResolver
+            .Setup(t => t.GetDynamicPropertyAttributes(It.IsAny<ReferenceDescription>(), It.IsAny<ISession>()))
+            .Returns((ReferenceDescription reference, ISession session) =>
+            {
+                var namespaceUri = reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex);
+                return
+                [
+                    new OpcUaNodeAttribute(reference.BrowseName.Name, namespaceUri)
+                    {
+                        NodeIdentifier = reference.NodeId.Identifier.ToString(),
+                        NodeNamespaceUri = namespaceUri
+                    }
+                ];
+            });
+
+        var sharedNodeId = new NodeId(8888, 2);
+        var collection1NodeId = new NodeId(2001, 2);
+        var collection2NodeId = new NodeId(2002, 2);
+
+        // Both collections contain a "SharedItem[0]" element with the same NodeId.
+        var collection1Children = new ReferenceDescription[]
+        {
+            CreateObjectReferenceDescription("SharedItem[0]", new ExpandedNodeId(sharedNodeId))
+        };
+        var collection2Children = new ReferenceDescription[]
+        {
+            CreateObjectReferenceDescription("SharedItem[0]", new ExpandedNodeId(sharedNodeId))
+        };
+
+        var rootChildren = new ReferenceDescription[]
+        {
+            CreateObjectReferenceDescription("Collection1", new ExpandedNodeId(collection1NodeId)),
+            CreateObjectReferenceDescription("Collection2", new ExpandedNodeId(collection2NodeId))
+        };
+
+        var mockSession = CreateMockSession();
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
+            {
+                var nodeId = browseDescriptions[0].NodeId;
+                ReferenceDescription[] children;
+
+                if (nodeId == new NodeId(1, 0))
+                    children = rootChildren;
+                else if (nodeId == collection1NodeId)
+                    children = collection1Children;
+                else if (nodeId == collection2NodeId)
+                    children = collection2Children;
+                else
+                    children = [];
+
+                var collection = new ReferenceDescriptionCollection();
+                collection.AddRange(children);
+                return new BrowseResponse
+                {
+                    Results = [new BrowseResult { References = collection }],
+                    DiagnosticInfos = []
+                };
+            });
+
+        var (loader, _) = CreateLoader(
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
+            typeResolver: mockTypeResolver.Object);
+
+        var subject = CreateTestSubject();
+        var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
+
+        // Act
+        await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+        var collection1Property = registeredSubject.Properties.Single(p => p.Name == "Collection1");
+        var collection2Property = registeredSubject.Properties.Single(p => p.Name == "Collection2");
+
+        var collection1Value = collection1Property.GetValue() as System.Collections.IEnumerable;
+        var collection2Value = collection2Property.GetValue() as System.Collections.IEnumerable;
+        Assert.NotNull(collection1Value);
+        Assert.NotNull(collection2Value);
+
+        var sharedFromCollection1 = collection1Value!.Cast<IInterceptorSubject>().Single();
+        var sharedFromCollection2 = collection2Value!.Cast<IInterceptorSubject>().Single();
+        Assert.Same(sharedFromCollection1, sharedFromCollection2);
+    }
+
     private static ReferenceDescription CreateObjectReferenceDescription(string name, ExpandedNodeId nodeId)
     {
         return new ReferenceDescription
