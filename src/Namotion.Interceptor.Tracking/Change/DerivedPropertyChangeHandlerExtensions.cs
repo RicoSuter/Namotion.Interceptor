@@ -37,6 +37,7 @@ public static class DerivedPropertyChangeHandlerExtensions
     /// (non-intercepted) data and that data has changed.
     /// No-op if the property is not a derived property or is not attached to a context.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static void RecalculateDerivedProperty(this PropertyReference property)
     {
         var data = property.TryGetDerivedPropertyData();

@@ -15,11 +15,9 @@ public class PropertyChangeQueueTests
 
         using var subscription = context.CreatePropertyChangeQueueSubscription();
         var person = new Person(context);
-        var cts = new CancellationTokenSource();
 
         // Act
         person.FirstName = "John";
-        cts.Cancel();
 
         // Assert
         Assert.True(subscription.TryDequeue(out var change, CancellationToken.None));
@@ -241,7 +239,7 @@ public class PropertyChangeQueueTests
 
         // Assert
         var dequeued = 0;
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
         while (subscription.TryDequeue(out _, cts.Token))
         {
             dequeued++;
