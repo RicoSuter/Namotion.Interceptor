@@ -408,10 +408,18 @@ public class MqttSubjectServer : BackgroundService, ISubjectConnector, IFaultInj
             var server = _mqttServer;
             if (server is null) return;
 
-            foreach (var member in registeredSubject.GetAllPropertiesAndAttributes())
+            await _publishSemaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                if (member.CanContainSubjects) continue;
-                await PublishOneAsync(member, server, cancellationToken).ConfigureAwait(false);
+                foreach (var member in registeredSubject.GetAllPropertiesAndAttributes())
+                {
+                    if (member.CanContainSubjects) continue;
+                    await PublishOneAsync(member, server, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                _publishSemaphore.Release();
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
