@@ -343,6 +343,23 @@ public class SnapshotComparerTests
     }
 
     [Fact]
+    public void WhenOneValueTimestampIsOmitted_ThenSnapshotsMatch()
+    {
+        // Arrange: production JSON omits the "timestamp" key entirely when null
+        // ([JsonIgnore(WhenWritingNull)] on SubjectPropertyUpdate.Timestamp).
+        // This is the actual wire shape; the JSON-walk null-timestamp rule must treat
+        // a missing key the same as an explicit null node.
+        const string a = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1}}}}""";
+        const string b = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1,"timestamp":"2026-01-01T00:00:00+00:00"}}}}""";
+
+        // Act
+        var match = SnapshotComparer.SnapshotsMatch(a, b);
+
+        // Assert
+        Assert.True(match);
+    }
+
+    [Fact]
     public void WhenBothValueTimestampsAreNull_ThenSnapshotsMatch()
     {
         // Arrange: both sides preserve the explicit-null state.
