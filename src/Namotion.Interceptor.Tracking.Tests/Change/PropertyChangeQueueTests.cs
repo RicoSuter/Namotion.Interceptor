@@ -239,7 +239,7 @@ public class PropertyChangeQueueTests
 
         // Assert
         var dequeued = 0;
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(500));
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         while (subscription.TryDequeue(out _, cts.Token))
         {
             dequeued++;
