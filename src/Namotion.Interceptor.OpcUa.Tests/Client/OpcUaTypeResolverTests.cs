@@ -154,6 +154,51 @@ public class OpcUaTypeResolverTests
     }
 
     [Fact]
+    public async Task WhenObjectNodeChildrenHaveNonNumericBracketNames_ThenTypeIsReadOnlyDictionary()
+    {
+        // Arrange
+        var objectReference = new ReferenceDescription
+        {
+            BrowseName = new QualifiedName("Devices"),
+            NodeId = new ExpandedNodeId(new NodeId(4000, 2)),
+            NodeClass = NodeClass.Object
+        };
+
+        var mockSession = CreateMockSession();
+        var childCollection = new ReferenceDescriptionCollection
+        {
+            new ReferenceDescription
+            {
+                BrowseName = new QualifiedName("Device[SensorA]"),
+                NodeId = new ExpandedNodeId(new NodeId(4001, 2)),
+                NodeClass = NodeClass.Object
+            }
+        };
+
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BrowseResponse
+            {
+                Results =
+                [
+                    new BrowseResult { References = childCollection }
+                ],
+                DiagnosticInfos = []
+            });
+
+        // Act
+        var result = await _resolver.TryGetTypeForNodeAsync(mockSession.Object, objectReference, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(typeof(IReadOnlyDictionary<string, DynamicSubject>), result);
+    }
+
+    [Fact]
     public async Task WhenVariableHasCustomDataTypeSubtype_ThenWalksTypeTreeToBuiltInType()
     {
         // Arrange: a Variable whose DataType is a custom NodeId outside the built-in range.

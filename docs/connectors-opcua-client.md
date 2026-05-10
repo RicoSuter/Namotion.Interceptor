@@ -606,7 +606,10 @@ if (dynamicProperty != null)
 The `OpcUaTypeResolver` maps OPC UA nodes to CLR types during dynamic discovery:
 
 - **Object nodes** become `DynamicSubject` (named sub-properties on the parent subject).
-- **Object nodes with `[index]` convention** become `DynamicSubject[]` collections. This convention is used by this library's OPC UA server when exposing C# collections (e.g., `People[0]`, `People[1]`). Standard OPC UA servers typically use named children and are always treated as single subjects.
+- **Object nodes with `[numeric]` convention** (e.g., `People[0]`, `People[1]`) become `DynamicSubject[]` collections.
+- **Object nodes with `[string]` convention** (e.g., `Devices[SensorA]`) become `IReadOnlyDictionary<string, DynamicSubject>` dictionaries.
+
+The bracket convention is produced by this library's OPC UA server when exposing C# collections and dictionaries. Standard OPC UA servers typically use named children and are always treated as single subjects.
 - **Variable nodes** are mapped to CLR types based on their OPC UA DataType. The resolver uses `session.TypeTree` to walk the type hierarchy, so custom DataType subtypes (e.g., a server-specific `LocalizedText` variant) are correctly resolved to their base built-in type.
 
 | OPC UA BuiltInType | CLR Type | Notes |
