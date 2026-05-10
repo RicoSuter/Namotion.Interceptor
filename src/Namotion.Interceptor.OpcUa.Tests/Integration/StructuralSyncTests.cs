@@ -2095,4 +2095,64 @@ public class StructuralSyncTests
             port?.Dispose();
         }
     }
+
+
+    [Fact]
+    public async Task WhenClientConnectsWithBidirectionalSync_ThenStructuralPropertiesAreSourceOwned()
+    {
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            // Arrange
+            (server, client, port, var logger) = await StartServerAndClientWithBidirectionalSyncAsync();
+
+            Assert.NotNull(server.Root);
+            Assert.NotNull(client.Root);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 1,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial People collection should sync");
+
+            // Act & Assert: check source ownership on the client's structural properties
+            var clientSubject = (IInterceptorSubject)client.Root;
+            var peopleRef = new PropertyReference(clientSubject, "People");
+            var hasSource = peopleRef.TryGetSource(out var source);
+
+            logger.Log($"People property hasSource={hasSource}, sourceType={source?.GetType().Name}");
+
+            Assert.True(hasSource, "People property should have a source after bidirectional sync setup");
+
+            // Also check a value property
+            var nameRef = new PropertyReference(clientSubject, "Name");
+            var nameHasSource = nameRef.TryGetSource(out var nameSource);
+            logger.Log($"Name property hasSource={nameHasSource}, sourceType={nameSource?.GetType().Name}");
+
+            // Now do a structural mutation and verify CQP captures it
+            var newPerson = new TestPerson(clientSubject.Context)
+            {
+                FirstName = "SourceTest",
+                LastName = "Person",
+                Scores = [1.0]
+            };
+            client.Root.People = [..client.Root.People, newPerson];
+
+            // Server should see it (proves CQP captured and WriteChangesAsync ran)
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => server.Root.People.Length == 2,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Server should see client structural mutation (proves CQP captures it)");
+
+            logger.Log("Test passed: structural properties are source-owned and CQP captures changes");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
 }

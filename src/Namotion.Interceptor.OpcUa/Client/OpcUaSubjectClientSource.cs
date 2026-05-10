@@ -191,6 +191,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             _isStarted = true;
             Volatile.Write(ref _lastError, null);
 
+
             var sessionManagerForLifetime = _sessionManager;
             return BackgroundTaskLifetime.Start(
                 cancellationToken,

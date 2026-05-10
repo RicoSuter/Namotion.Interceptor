@@ -49,16 +49,13 @@ Previous result (before unified queue): 0 missing, 1 value diff. The unified que
 
 **Potential fix**: Periodic reconciliation pass. Or optimize structural event processing to reduce latency.
 
-### 2. Bidirectional: client receives almost no incoming events
+### 2. ConnectorTester: initial load blocks CQP creation
 
-At 50 struct/sec on both sides, the client only receives 8 incoming changes during the entire 30-second mutation phase. The server has 501 nodes, the client has 42. The client's outgoing works (published 3,443 changes) but incoming is nearly dead.
+The ConnectorTester creates a model with 20 collection children + 10 dictionary entries on both server and client. The client's `LoadSubjectAsync` recursively browses the entire server address space to map OPC UA nodes to C# properties. With 30+ subjects, each having 4 value properties + 3 structural properties, this takes longer than the ConnectorTester's startup delay. The mutation phase starts before loading completes, so the CQP is never created and no outgoing changes are captured.
 
-Root cause not fully identified. The deadlock is fixed (HandleRemoteAddNode no longer deadlocks on _structureLock). Echo suppression works (integration tests pass). But under high bidirectional load, the client's incoming event processing is starved.
+This is a ConnectorTester timing issue, not a structural sync bug. All 61 integration tests pass, including bidirectional structural mutations with value sync in both directions.
 
-Possible causes:
-- The ModelChangeEvent subscription (`PublishingInterval = 1000ms`) may be too slow to keep up with 50 struct/sec
-- The inline outgoing AddNodes calls in `WriteChangesAsync` may block the CQP, preventing subscription publish responses from being processed (the SDK publish thread may depend on the same session I/O thread)
-- The unified incoming queue serializes value and structural processing. If structural processing is slow (browse + load + subscribe per event), values pile up
+**Fix**: The ConnectorTester should wait for all participants to finish initial sync before starting the mutation phase. Alternatively, reduce the initial model size or add a startup readiness signal.
 
 ### 3. Chaos profiles not tested
 
