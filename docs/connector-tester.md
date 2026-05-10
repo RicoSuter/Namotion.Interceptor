@@ -63,9 +63,11 @@ Each test cycle has two phases:
 
 1. **Mutate phase**: All MutationEngines and ChaosEngines run concurrently for `MutatePhaseDuration`.
 
-2. **Converge phase**: The VerificationEngine pauses all engines via the TestCycleCoordinator, recovers any active chaos disruptions, waits a grace period (20s for OPC UA) for reconnection, then polls snapshots every 5 seconds. Each snapshot serializes the full object graph using `SubjectUpdate.CreateCompleteUpdate()`. Structural property timestamps (Collection, Dictionary, Object) are stripped since they represent local creation time, not synced state. Value property timestamps are preserved and must converge.
+2. **Converge phase**: The VerificationEngine pauses all engines via the TestCycleCoordinator, recovers any active chaos disruptions, waits a grace period (20s for OPC UA) for reconnection, then polls snapshots every 5 seconds. `SnapshotComparer.Capture` produces a normalized JSON per participant from `SubjectUpdate.CreateCompleteUpdate()`. Normalization strips timestamps from Collection/Dictionary/Object properties (these are local graph-creation moments and never sync), replaces each participant's root subject ID with a constant placeholder (`"ROOT"`), sorts dictionary items by their key, and sorts the subjects map and per-subject property keys for deterministic ordering. Collection items keep their source order: order is part of equality.
 
-A cycle **passes** when all participant snapshots are identical JSON. It **fails** if the convergence timeout expires. On failure, the process logs snapshot diffs, gracefully shuts down all hosted services, and exits with code 1.
+`SnapshotComparer.SnapshotsMatch` decides convergence. It first tries string equality (the common case after normalization). On mismatch it walks the JSON tree and compares fields. The only special case is the `timestamp` field on Value properties: a null timestamp on either side matches any value (the explicit "never written" state preserved by `SubjectChangeContext.NullTimestampTicks`); two non-null timestamps must be equal. All other fields use strict JSON equality, so any new field added to `SubjectPropertyUpdate` is automatically part of the comparison.
+
+A cycle **passes** when all participant snapshots match by these rules. It **fails** if the convergence timeout expires. On failure, the process writes per-participant JSON snapshots to disk, logs per-property diffs with write timestamps, runs a re-sync diagnostic, gracefully shuts down all hosted services, and exits with code 1.
 
 ### Chaos via IFaultInjectable
 
@@ -142,11 +144,17 @@ Total mutations: 17,200 | Total chaos events: 7
   server: kill at 21:08:38 (5.4s)
 ```
 
-**Failure**: Prints `FAIL` with snapshot diffs, then exits with code 1:
+**Failure**: Prints `FAIL`, runs failure diagnostics, then exits with code 1:
+
 ```
 === Cycle 3: FAIL (did not converge within 00:01:00) ===
-Mismatch between server and client-b
+Snapshot [server] written to logs/cycle003-fail-server.json
+Snapshot [client-a] written to logs/cycle003-fail-client-a.json
+  ROOT.IntValue: server=42 (written 12:34:56.789), client-a=37 (written 12:34:55.110)
+Re-sync check: client-a converged after applying reference complete update -> transient delivery gap
 ```
+
+The per-cycle JSON files are formatted (indented) and can be diffed with any text tool. The `cycleNNN-fail-{participant}.json` files are the canonical artifact for investigating divergence.
 
 ### Log Files
 
@@ -381,6 +389,12 @@ The snapshot comparison **does not detect** (by design):
 - Temporal ordering of changes (only final converged state is checked, not causality)
 - Multi-property atomicity (no transaction support; A and B may converge independently)
 
+The failure diagnostics localize bugs:
+
+- **Per-cycle JSON snapshots** (`logs/cycleNNN-fail-{participant}.json`): full normalized state per participant for diff investigation.
+- **Per-property diffs with timestamps**: lists every diverged property with each side's value and write timestamp. `written never` means the property was never written via the interceptor chain on that participant. `written T` means it was written at time T.
+- **Re-sync classifier**: applies the reference participant's complete state to each diverged participant and re-compares. If the result matches, the failure is a **transient delivery gap** (look at the connector wire: lost or out-of-order messages, missed reconnect catch-up). If it still diverges, the failure is in the snapshot logic, `SubjectUpdate.CreateCompleteUpdate`, `ApplySubjectUpdate`, or the `TestNode` model itself: the connector wire is exonerated.
+
 The MutationEngine's global counter ensures every mutation produces a unique value, which prevents the equality interceptor from ever suppressing test mutations. This makes the tester resilient to the same-value suppression issue, though that issue could still affect production workloads.
 
 ## Long-Running Tests
@@ -445,7 +459,7 @@ If cycles pass but show 0 chaos events, the chaos intervals are too long relativ
 
 ### Structural Timestamp Mismatch
 
-Structural properties (Collection, Dictionary, Object) have local creation timestamps that differ per participant. These are **stripped during snapshot comparison** and should not cause failures. If you see mismatches involving only structural timestamps, the stripping logic in `VerificationEngine.CreateSnapshot()` may need updating.
+Structural properties (Collection, Dictionary, Object) have local creation timestamps that differ per participant. These are **stripped during snapshot comparison** and should not cause failures. If you see mismatches involving only structural timestamps, the stripping logic in `SnapshotComparer.Capture()` may need updating.
 
 ### Decimal Precision (OPC UA)
 
