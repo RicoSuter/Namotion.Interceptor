@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.OpcUa.Client.Connection;
@@ -8,19 +9,20 @@ using Opc.Ua.Client;
 
 namespace Namotion.Interceptor.OpcUa.Client;
 
-internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChangeProcessor
+internal sealed class OpcUaClientIncomingEventProcessor : OpcUaIncomingEventProcessor
 {
     private readonly ConnectorSubjectMap<NodeId> _subjectMap;
     private readonly OpcUaSubjectLoader _loader;
     private readonly OpcUaSubjectClientSource _clientSource;
     private readonly OpcUaClientConfiguration _configuration;
+    private readonly ConcurrentDictionary<NodeId, byte> _echoNodeIds = new();
 
     private volatile Session? _session;
     private volatile SubscriptionManager? _subscriptionManager;
 
     public ConnectorSubjectMap<NodeId> SubjectMap => _subjectMap;
 
-    public OpcUaClientStructuralChangeProcessor(
+    public OpcUaClientIncomingEventProcessor(
         OpcUaSubjectLoader loader,
         OpcUaSubjectClientSource clientSource,
         OpcUaClientConfiguration configuration,
@@ -41,158 +43,59 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
 
     public Task RunAsync(CancellationToken cancellationToken) => ProcessLoopAsync(cancellationToken);
 
-    protected override async Task ProcessEventAsync(StructuralChangeEvent evt, CancellationToken cancellationToken)
+    public void AddEcho(NodeId nodeId) => _echoNodeIds.TryAdd(nodeId, 0);
+
+    public void RemoveEcho(NodeId nodeId) => _echoNodeIds.TryRemove(nodeId, out _);
+
+    public void ClearEchoes() => _echoNodeIds.Clear();
+
+    protected override async Task ProcessEventAsync(IncomingEvent evt, CancellationToken cancellationToken)
     {
-        Logger.LogDebug(
-            "Client structural event: {Verb} IsLocal={IsLocal} NodeId={NodeId} Subject={Subject}.",
-            evt.Verb, evt.IsLocal, evt.AffectedNodeId, evt.Subject?.GetType().Name);
-
-        if (evt.IsLocal)
+        switch (evt.Type)
         {
-            if (evt.Verb == StructuralChangeVerb.Add)
-            {
-                await SendAddNodesToServerAsync(evt, cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                await SendDeleteNodesToServerAsync(evt, cancellationToken).ConfigureAwait(false);
-            }
-        }
-        else
-        {
-            if (evt.Verb == StructuralChangeVerb.Add)
-            {
-                await ProcessExternalAddAsync(evt, cancellationToken).ConfigureAwait(false);
-            }
-            else
-            {
-                ProcessExternalRemove(evt);
-            }
-        }
+            case IncomingEventType.Value:
+                ProcessValueEvent(evt);
+                break;
 
-    }
-
-    private async Task SendAddNodesToServerAsync(StructuralChangeEvent evt, CancellationToken cancellationToken)
-    {
-        if (evt.Subject is null || evt.Property is null)
-        {
-            return;
-        }
-
-        var session = _session;
-        if (session is null || !session.Connected)
-        {
-            return;
-        }
-
-        var parentSubject = evt.Property.Subject;
-        if (!parentSubject.TryGetData(OpcUaSubjectClientSource.SubjectNodeIdDataKey, out var parentNodeIdObj) ||
-            parentNodeIdObj is not NodeId parentNodeId)
-        {
-            return;
-        }
-
-        var propertyName = evt.Property.ResolvePropertyName(_configuration.NodeMapper);
-        if (propertyName is null)
-        {
-            return;
-        }
-
-        var namespaceIndex = GetNamespaceIndex(session);
-        NodeId containerNodeId;
-        QualifiedName browseName;
-
-        if (evt.Property.IsSubjectCollection || evt.Property.IsSubjectDictionary)
-        {
-            var parentPath = parentNodeId.Identifier is string stringId ? stringId : "";
-            var containerPath = string.IsNullOrEmpty(parentPath)
-                ? propertyName
-                : parentPath + "." + propertyName;
-            containerNodeId = new NodeId(containerPath, namespaceIndex);
-
-            browseName = evt.Property.IsSubjectCollection
-                ? new QualifiedName($"{propertyName}[{evt.Index}]", namespaceIndex)
-                : new QualifiedName(evt.Index?.ToString() ?? "", namespaceIndex);
-        }
-        else
-        {
-            containerNodeId = parentNodeId;
-            browseName = new QualifiedName(propertyName, namespaceIndex);
-        }
-
-        try
-        {
-            var response = await session.AddNodesAsync(
-                requestHeader: null,
-                [new AddNodesItem
+            case IncomingEventType.StructuralAdd:
+                if (evt.AffectedNodeId is not null && _echoNodeIds.TryRemove(evt.AffectedNodeId, out _))
                 {
-                    ParentNodeId = new ExpandedNodeId(containerNodeId),
-                    ReferenceTypeId = ReferenceTypeIds.HasComponent,
-                    RequestedNewNodeId = ExpandedNodeId.Null,
-                    BrowseName = browseName,
-                    NodeClass = NodeClass.Object,
-                    NodeAttributes = new ExtensionObject(new ObjectAttributes
-                    {
-                        DisplayName = new LocalizedText(browseName.Name),
-                        Description = LocalizedText.Null,
-                        WriteMask = 0,
-                        UserWriteMask = 0,
-                        EventNotifier = 0
-                    }),
-                    TypeDefinition = new ExpandedNodeId(ObjectTypeIds.BaseObjectType)
-                }],
-                cancellationToken).ConfigureAwait(false);
+                    Logger.LogDebug("Echo suppressed: Add NodeId={NodeId}.", evt.AffectedNodeId);
+                    return;
+                }
+                await ProcessExternalAddAsync(evt, cancellationToken).ConfigureAwait(false);
+                break;
 
-            if (response.Results.Count > 0 && StatusCode.IsGood(response.Results[0].StatusCode))
-            {
-                evt.Subject.SetData(OpcUaSubjectClientSource.SubjectNodeIdDataKey, response.Results[0].AddedNodeId);
-            }
-        }
-        catch (ServiceResultException ex) when (
-            ex.StatusCode == StatusCodes.BadNotSupported ||
-            ex.StatusCode == StatusCodes.BadServiceUnsupported)
-        {
-            Logger.LogWarning("Server does not support AddNodes service.");
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to send AddNodes for property {PropertyName}.", propertyName);
+            case IncomingEventType.StructuralRemove:
+                if (evt.AffectedNodeId is not null && _echoNodeIds.TryRemove(evt.AffectedNodeId, out _))
+                {
+                    Logger.LogDebug("Echo suppressed: Remove NodeId={NodeId}.", evt.AffectedNodeId);
+                    return;
+                }
+                ProcessExternalRemove(evt);
+                break;
         }
     }
 
-    private async Task SendDeleteNodesToServerAsync(StructuralChangeEvent evt, CancellationToken cancellationToken)
+    private void ProcessValueEvent(IncomingEvent evt)
     {
-        if (evt.AffectedNodeId is null)
-        {
-            return;
-        }
-
-        var session = _session;
-        if (session is null || !session.Connected)
+        if (evt.Property is null)
         {
             return;
         }
 
         try
         {
-            await session.DeleteNodesAsync(
-                requestHeader: null,
-                [new DeleteNodesItem { NodeId = evt.AffectedNodeId, DeleteTargetReferences = true }],
-                cancellationToken).ConfigureAwait(false);
+            evt.Property.SetValueFromSource(
+                _clientSource, evt.ValueTimestamp, evt.ValueReceivedTimestamp, evt.Value);
         }
-        catch (ServiceResultException ex) when (
-            ex.StatusCode == StatusCodes.BadNotSupported ||
-            ex.StatusCode == StatusCodes.BadServiceUnsupported)
+        catch (Exception e)
         {
-            Logger.LogWarning("Server does not support DeleteNodes service.");
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to send DeleteNodes for NodeId {NodeId}.", evt.AffectedNodeId);
+            Logger.LogError(e, "Failed to apply incoming value for property {PropertyName}.", evt.Property.Name);
         }
     }
 
-    private async Task ProcessExternalAddAsync(StructuralChangeEvent evt, CancellationToken cancellationToken)
+    private async Task ProcessExternalAddAsync(IncomingEvent evt, CancellationToken cancellationToken)
     {
         var affectedNodeId = evt.AffectedNodeId;
         if (affectedNodeId is null)
@@ -345,7 +248,7 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
         return (null, null);
     }
 
-    private void ProcessExternalRemove(StructuralChangeEvent evt)
+    private void ProcessExternalRemove(IncomingEvent evt)
     {
         if (evt.AffectedNodeId is null)
         {
@@ -374,18 +277,6 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
         _subjectMap.Remove(evt.AffectedNodeId);
     }
 
-    protected override bool TryGetNodeIdForSubject(IInterceptorSubject subject, out NodeId? nodeId)
-    {
-        if (subject.TryGetData(OpcUaSubjectClientSource.SubjectNodeIdDataKey, out var obj) && obj is NodeId id)
-        {
-            nodeId = id;
-            return true;
-        }
-
-        nodeId = null;
-        return false;
-    }
-
     public void PopulateSubjectMap(IInterceptorSubject subject)
     {
         var visited = new HashSet<IInterceptorSubject>(System.Collections.Generic.ReferenceEqualityComparer.Instance);
@@ -399,7 +290,8 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
             return;
         }
 
-        if (TryGetNodeIdForSubject(subject, out var nodeId) && nodeId is not null)
+        if (subject.TryGetData(OpcUaSubjectClientSource.SubjectNodeIdDataKey, out var nodeIdObj) &&
+            nodeIdObj is NodeId nodeId)
         {
             _subjectMap.Add(nodeId, subject);
         }
@@ -568,11 +460,5 @@ internal sealed class OpcUaClientStructuralChangeProcessor : OpcUaStructuralChan
             var dictionary = DefaultSubjectFactory.Instance.CreateSubjectDictionary(property.Type, entries);
             property.SetValueFromSource(_clientSource, null, null, dictionary);
         }
-    }
-
-    private static ushort GetNamespaceIndex(ISession session)
-    {
-        var index = session.NamespaceUris.GetIndex("http://namotion.com/Interceptor/");
-        return index >= 0 ? (ushort)index : (ushort)0;
     }
 }

@@ -755,9 +755,9 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
  ├── creates OutboundWriter
  │    ├── receives SessionManager
  │    └── receives ThroughputCounter
- └── creates OpcUaClientStructuralChangeProcessor  (when EnableStructureSynchronization)
+ └── creates OpcUaClientIncomingEventProcessor  (when EnableStructureSynchronization)
       ├── owns ConnectorSubjectMap<NodeId>
-      ├── owns OpcUaModelChangeEventHandler
+      ├── owns echo set (ConcurrentDictionary<NodeId, byte>)
       └── uses OpcUaSubjectLoader (for LoadSubjectAsync, BrowseNodeAsync)
 ```
 
@@ -773,7 +773,7 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
 | `ReadAfterWriteManager` | Schedules read-backs after writes for nodes where exception-based monitoring was revised to sampling. |
 | `SubscriptionHealthMonitor` | Retries failed monitored items that may succeed later (transient server errors). |
 | `OpcUaSubjectLoader` | Browses the OPC UA address space and maps nodes to C# properties. |
-| `OpcUaClientStructuralChangeProcessor` | Channel-based queue. Processes Add/Remove events from ModelChangeEvents (external) and CQP (local). |
+| `OpcUaClientIncomingEventProcessor` | Unified incoming queue. Processes value notifications and structural ModelChangeEvents in arrival order. Echo suppression via NodeId tracking. |
 | `OpcUaModelChangeEventHandler` | Subscribes to `GeneralModelChangeEventType` on the server and forwards NodeAdded/NodeDeleted events. |
 | `ConnectorSubjectMap<NodeId>` | Reverse-index map from NodeId to subject with ref counting and lifecycle cleanup. |
 | `OpcUaClientDiagnostics` | Read-only public facade that aggregates diagnostics from all internal components. |
@@ -788,61 +788,67 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
 
 **Diagnostics as a facade.** `OpcUaClientDiagnostics` navigates through `OpcUaSubjectClientSource` and `SessionManager` to expose a flat public API. It allocates `PollingDiagnostics` and `ReadAfterWriteDiagnostics` wrappers on demand to avoid exposing internal types.
 
-### Structural Change Processing
+### Incoming Event Processing
 
-When `EnableStructureSynchronization` is enabled, the client creates an `OpcUaClientStructuralChangeProcessor` that handles bidirectional structural sync via a Channel-based event queue.
-
-**External changes (server to client):**
+When `EnableStructureSynchronization` is enabled, the client creates an `OpcUaClientIncomingEventProcessor` with a unified `Channel<IncomingEvent>` queue. Both value notifications (`OnFastDataChange`) and structural events (`ModelChangeEvent`) are enqueued and processed in arrival order by a single background loop.
 
 ```
-Server fires ModelChangeEvent (NodeAdded/NodeDeleted)
-  -> OpcUaModelChangeEventHandler receives event
-  -> Enqueues StructuralChangeEvent(IsLocal=false, AffectedNodeId)
-  -> Background loop processes:
-     Add:  Browse inverse to find parent NodeId
-           -> Look up parent in ConnectorSubjectMap
-           -> If not found, try one level up (container folder)
-           -> Browse parent forward to get ReferenceDescription
-           -> Find matching structural property by BrowseName
-           -> Create subject via SubjectFactory
-           -> LoadSubjectAsync (properties + monitored items)
-           -> Add to parent collection/dictionary/reference via SetValueFromSource
-           -> Register monitored items (initial values arrive via MonitoringMode.Reporting)
-     Remove: Look up subject in ConnectorSubjectMap
-           -> Find parent via RegisteredSubject.Parents
-           -> Remove from parent via SetValueFromSource
-           -> ConnectorSubjectMap entry cleaned up by lifecycle
+OnFastDataChange callback (value notification)
+  -> Enqueues IncomingEvent(Type=Value, Property, Value, Timestamps)
+
+OpcUaModelChangeEventHandler (structural event)
+  -> Enqueues IncomingEvent(Type=StructuralAdd/StructuralRemove, AffectedNodeId)
+
+Single background loop processes events in order:
+  Value:          SetValueFromSource on the property
+  StructuralAdd:  Check echo set -> if echo, skip
+                  Browse inverse to find parent -> look up in ConnectorSubjectMap
+                  Browse parent forward -> find matching property by BrowseName
+                  Create subject via SubjectFactory -> LoadSubjectAsync
+                  AddSubjectToProperty via SetValueFromSource
+                  AddMonitoredItemsAsync + ReadInitialValuesAsync
+  StructuralRemove: Check echo set -> if echo, skip
+                  Look up subject in ConnectorSubjectMap
+                  RemoveSubjectFromProperty via SetValueFromSource
 ```
 
-**Local changes (client to server):**
+### Outgoing Structural Changes
+
+Outgoing structural changes are processed inline in the client's `WriteChangesAsync`, before value writes. This mirrors the server's design.
 
 ```
 Property write (e.g., root.People = [...])
   -> CQP captures old/new values
   -> WriteChangesAsync fires
-  -> OpcUaClientStructuralChangeProcessor.EnqueueStructuralChanges()
-     diffs old/new subjects, enqueues Add/Remove events
-  -> Background loop processes:
-     Add:    Build AddNodesItem with parent NodeId + BrowseName
-             -> session.AddNodesAsync() to tell the server
-     Remove: Get NodeId from subject.Data
-             -> session.DeleteNodesAsync() to tell the server
+  -> ProcessOutgoingStructuralChangesAsync (inline, before values):
+     diffs old/new subjects via OpcUaStructuralChangeHelper
+     Add:    session.AddNodesAsync() -> store returned NodeId in echo set
+     Remove: session.DeleteNodesAsync() -> store NodeId in echo set
+  -> OutboundWriter.WriteChangesAsync (values)
 ```
 
-**Loop prevention:** The CQP skips changes whose source matches itself (`change.Source == _source`). When the client creates a subject from an external `ModelChangeEvent`, it uses `SetValueFromSource(clientSource, ...)`, which tags the change with the client source. The CQP skips it because the source matches. Similarly, when the server processes an `AddNodes` request, it tags the change with the server as source.
+### Echo Suppression
 
-**Idempotent processing:** Add events for NodeIds already in the `ConnectorSubjectMap` are no-ops. Remove events for unknown NodeIds are no-ops. This prevents duplicate processing when events arrive multiple times.
+When the client sends `AddNodes`/`DeleteNodes`, the server fires a `ModelChangeEvent` back. Without echo suppression, the client would process its own structural change as an external event, creating duplicates. The client stores the returned NodeId in a `ConcurrentDictionary<NodeId, byte>` echo set. When an incoming `ModelChangeEvent` arrives, the processor checks the echo set before processing. Matched entries are removed (TryRemove) and the event is skipped.
 
-**Unique NodeIds:** The server assigns a monotonic counter to each dynamically created node (collections, dictionaries, and references). This prevents NodeId collisions when subjects are replaced at the same array index or dictionary key. BrowseNames remain positional for OPC UA browsing.
+The echo set is cleaned up on subject detach (NodeId removed) and on session reconnect (set cleared entirely, since full reconciliation handles state recovery).
 
-**Initial values for dynamically added subjects:** The subject is attached to its parent via `AddSubjectToProperty`, then monitored items are subscribed via `AddMonitoredItemsAsync`, and finally an explicit read is performed. This subscribe-then-read order ensures no changes are lost: the subscription captures all changes from the moment it starts, and the read provides baseline values for properties that have not yet received a notification. Subsequent notifications overwrite any stale read values. Failed monitored items (for nodes removed between subscribe and server-side creation) are filtered out via `FilterOutFailedMonitoredItemsAsync`.
+### Design Decisions
 
-**Stale events:** During rapid structural mutations, the server may fire `NodeAdded` for a node that is subsequently removed before the client processes the event. The client's `ProcessExternalAddAsync` detects this (browse returns null) and logs a warning. These stale events are benign: the corresponding `NodeDeleted` event will clean up the subject if it was created.
+**Loop prevention:** The CQP skips changes whose source matches itself (`change.Source == _source`). When the client creates a subject from an external event, it uses `SetValueFromSource(clientSource, ...)`. The CQP skips it because the source matches.
 
-**Reconnect:** On session reconnect, the processor updates its session reference and re-subscribes to `ModelChangeEvent`s via a new `OpcUaModelChangeEventHandler`. The `ConnectorSubjectMap` is preserved across reconnections since it tracks the local subject graph, not the session state.
+**Idempotent processing:** Add events for NodeIds already in the `ConnectorSubjectMap` are no-ops. Remove events for unknown NodeIds are no-ops.
+
+**Unique NodeIds:** The server assigns a monotonic counter to each dynamically created node. This prevents NodeId collisions when subjects are replaced at the same position. BrowseNames remain positional for OPC UA browsing.
+
+**Initial values for dynamically added subjects:** Subscribe-then-read order ensures no changes are lost. Failed monitored items are filtered out via `FilterOutFailedMonitoredItemsAsync`.
+
+**Stale events:** During rapid structural mutations, the server may fire `NodeAdded` for a node that is subsequently removed before the client processes it. The client's `ProcessExternalAddAsync` detects this (browse returns null) and logs a warning. These are benign.
+
+**Reconnect:** On session reconnect, the processor updates its session reference and re-subscribes to `ModelChangeEvent`s. The `ConnectorSubjectMap` and echo set are preserved/cleared as appropriate.
 
 ### Known Limitations
 
-**Server-only structural mutations** at 20/sec: 0 value diffs, 1-3 deeply nested subjects may be missing due to stale events. A periodic reconciliation pass would address this.
+**Server-only structural mutations** at 20/sec: a few missing subjects and value diffs may remain due to stale events and convergence timing. A periodic reconciliation pass would address this.
 
-**Bidirectional structural mutations** are not fully working. Both sides firing `ModelChangeEvent`s and sending `AddNodes` simultaneously requires coordination that the current design does not provide. See `docs/design/investigations.md` for details.
+**Bidirectional structural mutations** at high rates (50/sec each side) are not fully converging. The client's incoming event processing is starved under sustained bidirectional load. See `docs/design/investigations.md` for details.

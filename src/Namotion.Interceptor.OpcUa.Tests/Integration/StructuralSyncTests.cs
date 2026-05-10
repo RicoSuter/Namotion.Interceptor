@@ -1712,4 +1712,200 @@ public class StructuralSyncTests
             port?.Dispose();
         }
     }
+
+    // -----------------------------------------------------------------------
+    // Echo suppression & bidirectional convergence
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task WhenClientAddsCollectionItem_ThenNoEchoDuplicate()
+    {
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            // Arrange
+            (server, client, port, var logger) = await StartServerAndClientWithBidirectionalSyncAsync();
+
+            Assert.NotNull(server.Root);
+            Assert.NotNull(client.Root);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 1,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial People collection should sync");
+
+            // Act
+            var newPerson = new TestPerson(((IInterceptorSubject)client.Root).Context)
+            {
+                FirstName = "EchoTest",
+                LastName = "Person",
+                Scores = [50.0]
+            };
+            client.Root.People = [..client.Root.People, newPerson];
+
+            // Assert: wait for server to see it
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => server.Root.People.Length == 2,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Server should see client-added item");
+
+            // Wait extra to ensure no echo creates a duplicate
+            await Task.Delay(3000);
+
+            Assert.Equal(2, client.Root.People.Length);
+            Assert.Equal(2, server.Root.People.Length);
+
+            logger.Log("Test passed: No echo duplicate");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenBothSidesAddCollectionItems_ThenBothConverge()
+    {
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            // Arrange
+            (server, client, port, var logger) = await StartServerAndClientWithBidirectionalSyncAsync();
+
+            Assert.NotNull(server.Root);
+            Assert.NotNull(client.Root);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 1,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial People collection should sync");
+
+            // Act: both sides add items
+            var serverPerson = new TestPerson(((IInterceptorSubject)server.Root).Context)
+            {
+                FirstName = "ServerAdded",
+                LastName = "Person",
+                Scores = [80.0]
+            };
+            server.Root.People = [..server.Root.People, serverPerson];
+
+            var clientPerson = new TestPerson(((IInterceptorSubject)client.Root).Context)
+            {
+                FirstName = "ClientAdded",
+                LastName = "Person",
+                Scores = [60.0]
+            };
+            client.Root.People = [..client.Root.People, clientPerson];
+
+            // Assert: both sides should converge to 3 items (1 initial + 1 server + 1 client)
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => server.Root.People.Length >= 3 && client.Root.People.Length >= 3,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Both sides should converge to 3 items");
+
+            // Wait extra for stability
+            await Task.Delay(3000);
+
+            Assert.Equal(3, server.Root.People.Length);
+            Assert.Equal(3, client.Root.People.Length);
+
+            logger.Log("Test passed: Bidirectional adds converged");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenBothSidesAddMultipleItemsRapidly_ThenBothConverge()
+    {
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            // Arrange
+            (server, client, port, var logger) = await StartServerAndClientWithBidirectionalSyncAsync();
+
+            Assert.NotNull(server.Root);
+            Assert.NotNull(client.Root);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 1,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial People collection should sync");
+
+            // Act: both sides add 5 items each at ~100ms intervals
+            var serverContext = ((IInterceptorSubject)server.Root).Context;
+            var clientContext = ((IInterceptorSubject)client.Root).Context;
+            const int itemsPerSide = 5;
+
+            var serverTask = Task.Run(async () =>
+            {
+                for (var i = 0; i < itemsPerSide; i++)
+                {
+                    var person = new TestPerson(serverContext)
+                    {
+                        FirstName = $"Server{i}",
+                        LastName = "Person",
+                        Scores = [i * 10.0]
+                    };
+                    server.Root!.People = [..server.Root.People, person];
+                    await Task.Delay(100);
+                }
+            });
+
+            var clientTask = Task.Run(async () =>
+            {
+                for (var i = 0; i < itemsPerSide; i++)
+                {
+                    var person = new TestPerson(clientContext)
+                    {
+                        FirstName = $"Client{i}",
+                        LastName = "Person",
+                        Scores = [i * 10.0]
+                    };
+                    client.Root!.People = [..client.Root.People, person];
+                    await Task.Delay(100);
+                }
+            });
+
+            await Task.WhenAll(serverTask, clientTask);
+
+            // Assert: both sides should converge to 1 + 5 + 5 = 11 items
+            var expectedCount = 1 + itemsPerSide + itemsPerSide;
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => server.Root.People.Length >= expectedCount && client.Root.People.Length >= expectedCount,
+                timeout: TimeSpan.FromSeconds(60),
+                message: $"Both sides should converge to {expectedCount} items");
+
+            // Wait extra for stability
+            await Task.Delay(3000);
+
+            logger.Log($"Server People count: {server.Root.People.Length}, Client People count: {client.Root.People.Length}");
+
+            Assert.Equal(expectedCount, server.Root.People.Length);
+            Assert.Equal(expectedCount, client.Root.People.Length);
+
+            logger.Log("Test passed: Rapid bidirectional adds converged");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
 }

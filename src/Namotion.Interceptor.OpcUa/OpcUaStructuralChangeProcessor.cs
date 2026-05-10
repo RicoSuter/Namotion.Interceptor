@@ -1,63 +1,39 @@
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
-using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
-using Namotion.Interceptor.Tracking.Change;
 using Opc.Ua;
 
 namespace Namotion.Interceptor.OpcUa;
 
-internal enum StructuralChangeVerb { Add, Remove }
+internal enum IncomingEventType { StructuralAdd, StructuralRemove, Value }
 
-internal readonly record struct StructuralChangeEvent(
-    StructuralChangeVerb Verb,
-    bool IsLocal,
-    IInterceptorSubject? Subject,
-    RegisteredSubjectProperty? Property,
-    object? Index,
-    NodeId? AffectedNodeId);
-
-internal abstract class OpcUaStructuralChangeProcessor : IAsyncDisposable
+internal readonly record struct IncomingEvent
 {
-    private readonly Channel<StructuralChangeEvent> _queue = Channel.CreateUnbounded<StructuralChangeEvent>(
+    public required IncomingEventType Type { get; init; }
+
+    // Structural fields
+    public NodeId? AffectedNodeId { get; init; }
+
+    // Value fields
+    public RegisteredSubjectProperty? Property { get; init; }
+    public object? Value { get; init; }
+    public DateTimeOffset ValueTimestamp { get; init; }
+    public DateTimeOffset ValueReceivedTimestamp { get; init; }
+}
+
+internal abstract class OpcUaIncomingEventProcessor : IAsyncDisposable
+{
+    private readonly Channel<IncomingEvent> _queue = Channel.CreateUnbounded<IncomingEvent>(
         new UnboundedChannelOptions { SingleReader = true });
 
     protected readonly ILogger Logger;
 
-    protected OpcUaStructuralChangeProcessor(ILogger logger)
+    protected OpcUaIncomingEventProcessor(ILogger logger)
     {
         Logger = logger;
     }
 
-    public void Enqueue(StructuralChangeEvent evt) => _queue.Writer.TryWrite(evt);
-
-    public void EnqueueStructuralChanges(ReadOnlySpan<SubjectPropertyChange> changes)
-    {
-        for (var i = 0; i < changes.Length; i++)
-        {
-            var change = changes[i];
-            var property = change.Property.TryGetRegisteredProperty();
-            if (property is null || !property.CanContainSubjects)
-            {
-                continue;
-            }
-
-            var oldSubjects = OpcUaStructuralChangeHelper.ExtractSubjects(change.GetOldValue<object?>());
-            var newSubjects = OpcUaStructuralChangeHelper.ExtractSubjects(change.GetNewValue<object?>());
-            var (added, removed) = OpcUaStructuralChangeHelper.ComputeSubjectDiff(oldSubjects, newSubjects);
-
-            foreach (var (subject, index) in removed)
-            {
-                TryGetNodeIdForSubject(subject, out var nodeId);
-                Enqueue(new StructuralChangeEvent(StructuralChangeVerb.Remove, true, subject, property, index, nodeId));
-            }
-
-            foreach (var (subject, index) in added)
-            {
-                Enqueue(new StructuralChangeEvent(StructuralChangeVerb.Add, true, subject, property, index, null));
-            }
-        }
-    }
+    public void Enqueue(IncomingEvent evt) => _queue.Writer.TryWrite(evt);
 
     protected async Task ProcessLoopAsync(CancellationToken cancellationToken)
     {
@@ -74,15 +50,13 @@ internal abstract class OpcUaStructuralChangeProcessor : IAsyncDisposable
             catch (Exception exception)
             {
                 Logger.LogError(exception,
-                    "Error processing structural change: {Verb} IsLocal={IsLocal}.",
-                    evt.Verb, evt.IsLocal);
+                    "Error processing incoming event: {Type} NodeId={NodeId}.",
+                    evt.Type, evt.AffectedNodeId);
             }
         }
     }
 
-    protected abstract Task ProcessEventAsync(StructuralChangeEvent evt, CancellationToken cancellationToken);
-
-    protected abstract bool TryGetNodeIdForSubject(IInterceptorSubject subject, out NodeId? nodeId);
+    protected abstract Task ProcessEventAsync(IncomingEvent evt, CancellationToken cancellationToken);
 
     public async ValueTask DisposeAsync()
     {

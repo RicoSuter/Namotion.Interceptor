@@ -284,7 +284,7 @@ The consecutive failure counter resets when the server starts successfully. Trac
 The OPC UA server hooks into the interceptor lifecycle system (see [Subject Lifecycle Tracking](tracking.md#subject-lifecycle-tracking)) to clean up resources when subjects are detached.
 
 - When a subject is detached, its OPC UA nodes are removed from the address space
-- When `EnableStructureSynchronization` is enabled, structural changes are processed by the `OpcUaServerStructuralChangeProcessor` which creates/removes nodes and fires `ModelChangeEvent`s
+- When `EnableStructureSynchronization` is enabled, structural changes are processed inline in `WriteChangesAsync` which creates/removes nodes and fires `ModelChangeEvent`s
 - Without structural sync, lifecycle detach directly removes nodes
 
 See also [Lifecycle Limitations](connectors-opcua.md#lifecycle-limitations) that apply to both client and server.

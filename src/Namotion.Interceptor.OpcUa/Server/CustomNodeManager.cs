@@ -784,10 +784,13 @@ internal class CustomNodeManager : CustomNodeManager2
             };
         }
 
+        IInterceptorSubject newSubject;
+        RegisteredSubjectProperty property;
+        object? index;
+
         _structureLock.Wait();
         try
         {
-            // Resolve the parent NodeId
             var parentNodeId = ExpandedNodeId.ToNodeId(item.ParentNodeId, Server.NamespaceUris);
             if (parentNodeId is null)
             {
@@ -798,7 +801,6 @@ internal class CustomNodeManager : CustomNodeManager2
                 };
             }
 
-            // Find the parent subject
             var (parentRegisteredSubject, _) = FindSubjectByNodeId(parentNodeId);
             if (parentRegisteredSubject is null)
             {
@@ -809,11 +811,10 @@ internal class CustomNodeManager : CustomNodeManager2
                 };
             }
 
-            // Find the property that matches the browse name
-            var (property, dictionaryKey, collectionIndex) = FindPropertyForBrowseName(
+            var (foundProperty, dictionaryKey, collectionIndex) = FindPropertyForBrowseName(
                 parentRegisteredSubject, item.BrowseName);
 
-            if (property is null)
+            if (foundProperty is null)
             {
                 return new AddNodesResult
                 {
@@ -822,10 +823,9 @@ internal class CustomNodeManager : CustomNodeManager2
                 };
             }
 
-            // Create a new subject using the SubjectFactory.
-            // For collections and dictionaries, use CreateCollectionSubjectAsync which
-            // derives the element type from the property type (e.g., TestPerson from TestPerson[]).
-            IInterceptorSubject newSubject;
+            property = foundProperty;
+            index = dictionaryKey ?? (object?)collectionIndex;
+
             try
             {
                 var referenceDescription = new ReferenceDescription
@@ -839,8 +839,7 @@ internal class CustomNodeManager : CustomNodeManager2
                 {
                     newSubject = _configuration.SubjectFactory
                         .CreateCollectionSubjectAsync(property, referenceDescription,
-                            dictionaryKey ?? (object?)collectionIndex,
-                            session: null!, CancellationToken.None)
+                            index, session: null!, CancellationToken.None)
                         .GetAwaiter().GetResult();
                 }
                 else
@@ -861,48 +860,44 @@ internal class CustomNodeManager : CustomNodeManager2
                 };
             }
 
-            // Add the subject to the property. Uses SetValueFromSource to tag the change
-            // as originating from the server, preventing the ChangeQueueProcessor from
-            // sending it back to clients (loop prevention).
             AddSubjectToProperty(property, newSubject, dictionaryKey, collectionIndex);
-
-            // Create OPC UA nodes for the new subject.
-            // Note: OnSubjectAttached will skip node creation because
-            // SubjectChangeContext.Current.Source == _serverService.
-            var lifecycleChange = new SubjectLifecycleChange
-            {
-                Subject = newSubject,
-                Property = property.Reference,
-                Index = dictionaryKey ?? (object?)collectionIndex,
-                ReferenceCount = 0
-            };
-
-            var createdNode = CreateDynamicSubjectNodes(lifecycleChange);
-            if (createdNode is null)
-            {
-                return new AddNodesResult
-                {
-                    StatusCode = StatusCodes.BadInternalError,
-                    AddedNodeId = NodeId.Null
-                };
-            }
-
-            _logger.LogInformation(
-                "Remote AddNodes: created subject for browse name '{BrowseName}' with NodeId {NodeId}.",
-                item.BrowseName, createdNode.NodeId);
-
-            FireModelChangeEvent(ModelChangeStructureVerbMask.NodeAdded, createdNode.NodeId);
-
-            return new AddNodesResult
-            {
-                StatusCode = StatusCodes.Good,
-                AddedNodeId = createdNode.NodeId
-            };
         }
         finally
         {
             _structureLock.Release();
         }
+
+        // CreateDynamicSubjectNodes acquires _structureLock internally,
+        // so it must run after the lock above is released.
+        var lifecycleChange = new SubjectLifecycleChange
+        {
+            Subject = newSubject,
+            Property = property.Reference,
+            Index = index,
+            ReferenceCount = 0
+        };
+
+        var createdNode = CreateDynamicSubjectNodes(lifecycleChange);
+        if (createdNode is null)
+        {
+            return new AddNodesResult
+            {
+                StatusCode = StatusCodes.BadInternalError,
+                AddedNodeId = NodeId.Null
+            };
+        }
+
+        _logger.LogInformation(
+            "Remote AddNodes: created subject for browse name '{BrowseName}' with NodeId {NodeId}.",
+            item.BrowseName, createdNode.NodeId);
+
+        FireModelChangeEvent(ModelChangeStructureVerbMask.NodeAdded, createdNode.NodeId);
+
+        return new AddNodesResult
+        {
+            StatusCode = StatusCodes.Good,
+            AddedNodeId = createdNode.NodeId
+        };
     }
 
     /// <summary>
@@ -913,17 +908,19 @@ internal class CustomNodeManager : CustomNodeManager2
     /// <returns>The status code for the delete operation.</returns>
     public StatusCode HandleRemoteDeleteNode(DeleteNodesItem item)
     {
+        IInterceptorSubject subject;
+
         _structureLock.Wait();
         try
         {
-            // Find the subject for this NodeId
-            var (registeredSubject, subject) = FindSubjectByNodeId(item.NodeId);
-            if (registeredSubject is null || subject is null)
+            var (registeredSubject, foundSubject) = FindSubjectByNodeId(item.NodeId);
+            if (registeredSubject is null || foundSubject is null)
             {
                 return StatusCodes.BadNodeIdUnknown;
             }
 
-            // Find the parent property that contains this subject
+            subject = foundSubject;
+
             var parents = registeredSubject.Parents;
             if (parents.Length == 0)
             {
@@ -934,26 +931,24 @@ internal class CustomNodeManager : CustomNodeManager2
             }
 
             var parent = parents[0];
-
-            // Remove the subject from the parent property using SetValueFromSource
-            // (loop prevention: tagged as originating from the server).
             RemoveSubjectFromProperty(parent.Property, subject, parent.Index);
-
-            // Clean up OPC UA nodes
-            RemoveSubjectNodes(subject);
-
-            _logger.LogInformation(
-                "Remote DeleteNodes: removed subject for NodeId {NodeId}.",
-                item.NodeId);
-
-            FireModelChangeEvent(ModelChangeStructureVerbMask.NodeDeleted, item.NodeId);
-
-            return StatusCodes.Good;
         }
         finally
         {
             _structureLock.Release();
         }
+
+        // RemoveSubjectNodes acquires _structureLock internally,
+        // so it must run after the lock above is released.
+        RemoveSubjectNodes(subject);
+
+        _logger.LogInformation(
+            "Remote DeleteNodes: removed subject for NodeId {NodeId}.",
+            item.NodeId);
+
+        FireModelChangeEvent(ModelChangeStructureVerbMask.NodeDeleted, item.NodeId);
+
+        return StatusCodes.Good;
     }
 
     /// <summary>

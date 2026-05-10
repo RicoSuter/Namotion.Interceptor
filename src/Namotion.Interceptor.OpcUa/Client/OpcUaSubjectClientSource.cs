@@ -33,8 +33,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     private volatile SessionManager? _sessionManager;
     private volatile SubjectPropertyWriter? _propertyWriter;
     private OutboundWriter? _writer;
-    private OpcUaClientStructuralChangeProcessor? _structuralProcessor;
-    private Task? _structuralProcessorTask;
+    private OpcUaClientIncomingEventProcessor? _incomingProcessor;
+    private Task? _incomingProcessorTask;
     private OpcUaModelChangeEventHandler? _modelChangeHandler;
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
@@ -105,6 +105,13 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     private void OnSubjectDetaching(IInterceptorSubject subject)
     {
         RemoveItemsForSubject(subject);
+
+        if (_incomingProcessor is not null &&
+            subject.TryGetData(SubjectNodeIdDataKey, out var nodeIdObj) &&
+            nodeIdObj is NodeId nodeId)
+        {
+            _incomingProcessor.RemoveEcho(nodeId);
+        }
     }
 
     /// <inheritdoc />
@@ -146,25 +153,29 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
                     if (_configuration.EnableStructureSynchronization)
                     {
-                        _structuralProcessor = new OpcUaClientStructuralChangeProcessor(
+                        _incomingProcessor = new OpcUaClientIncomingEventProcessor(
                             _subjectLoader, this, _configuration, _logger);
-                        _structuralProcessor.SetSession(session, _sessionManager.SubscriptionManager);
-                        _structuralProcessor.PopulateSubjectMap(_subject);
+                        _incomingProcessor.SetSession(session, _sessionManager.SubscriptionManager);
+                        _incomingProcessor.PopulateSubjectMap(_subject);
+                        _sessionManager.SubscriptionManager.SetIncomingEventProcessor(_incomingProcessor);
 
                         _modelChangeHandler = new OpcUaModelChangeEventHandler(
                             (verb, nodeId, _) =>
                             {
-                                var changeVerb = verb == ModelChangeStructureVerbMask.NodeAdded
-                                    ? StructuralChangeVerb.Add
-                                    : StructuralChangeVerb.Remove;
-                                _structuralProcessor.Enqueue(new StructuralChangeEvent(
-                                    changeVerb, false, null, null, null, nodeId));
+                                var eventType = verb == ModelChangeStructureVerbMask.NodeAdded
+                                    ? IncomingEventType.StructuralAdd
+                                    : IncomingEventType.StructuralRemove;
+                                _incomingProcessor.Enqueue(new IncomingEvent
+                                {
+                                    Type = eventType,
+                                    AffectedNodeId = nodeId
+                                });
                                 return Task.CompletedTask;
                             },
                             _logger);
                         await _modelChangeHandler.SubscribeAsync(session, cancellationToken).ConfigureAwait(false);
 
-                        _structuralProcessorTask = _structuralProcessor.RunAsync(cancellationToken);
+                        _incomingProcessorTask = _incomingProcessor.RunAsync(cancellationToken);
                     }
                 }
                 else
@@ -492,6 +503,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
             // Clear all read-after-write state - new session means old pending reads and registrations are invalid
             sessionManager.ReadAfterWriteManager?.ClearAll();
+            _incomingProcessor?.ClearEchoes();
 
             _logger.LogInformation(
                 "New OPC UA session created successfully (id={SessionId}, connected={Connected}).",
@@ -517,9 +529,10 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 _structureLock.Release();
             }
 
-            if (_structuralProcessor is not null)
+            if (_incomingProcessor is not null)
             {
-                _structuralProcessor.SetSession(session, sessionManager.SubscriptionManager);
+                _incomingProcessor.SetSession(session, sessionManager.SubscriptionManager);
+                sessionManager.SubscriptionManager.SetIncomingEventProcessor(_incomingProcessor);
 
                 if (_modelChangeHandler is not null)
                 {
@@ -529,11 +542,14 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 _modelChangeHandler = new OpcUaModelChangeEventHandler(
                     (verb, nodeId, _) =>
                     {
-                        var changeVerb = verb == ModelChangeStructureVerbMask.NodeAdded
-                            ? StructuralChangeVerb.Add
-                            : StructuralChangeVerb.Remove;
-                        _structuralProcessor.Enqueue(new StructuralChangeEvent(
-                            changeVerb, false, null, null, null, nodeId));
+                        var eventType = verb == ModelChangeStructureVerbMask.NodeAdded
+                            ? IncomingEventType.StructuralAdd
+                            : IncomingEventType.StructuralRemove;
+                        _incomingProcessor.Enqueue(new IncomingEvent
+                        {
+                            Type = eventType,
+                            AffectedNodeId = nodeId
+                        });
                         return Task.CompletedTask;
                     },
                     _logger);
@@ -599,9 +615,179 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             return WriteResult.Failure(changes, new InvalidOperationException("OPC UA client not started."));
         }
 
-        _structuralProcessor?.EnqueueStructuralChanges(changes.Span);
+        await ProcessOutgoingStructuralChangesAsync(changes, cancellationToken).ConfigureAwait(false);
 
         return await _writer.WriteChangesAsync(changes, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task ProcessOutgoingStructuralChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    {
+        var processor = _incomingProcessor;
+        if (processor is null)
+        {
+            return;
+        }
+
+        var session = _sessionManager?.CurrentSession;
+        if (session is null || !session.Connected)
+        {
+            return;
+        }
+
+        for (var i = 0; i < changes.Length; i++)
+        {
+            var change = changes.Span[i];
+            var property = change.Property.TryGetRegisteredProperty();
+            if (property is null || !property.CanContainSubjects)
+            {
+                continue;
+            }
+
+            var oldSubjects = OpcUaStructuralChangeHelper.ExtractSubjects(change.GetOldValue<object?>());
+            var newSubjects = OpcUaStructuralChangeHelper.ExtractSubjects(change.GetNewValue<object?>());
+            var (added, removed) = OpcUaStructuralChangeHelper.ComputeSubjectDiff(oldSubjects, newSubjects);
+
+            foreach (var (subject, _) in removed)
+            {
+                NodeId? nodeId = null;
+                if (subject.TryGetData(SubjectNodeIdDataKey, out var obj) && obj is NodeId id)
+                {
+                    nodeId = id;
+                }
+
+                if (nodeId is not null)
+                {
+                    await SendDeleteNodesToServerAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
+                    processor.AddEcho(nodeId);
+                }
+            }
+
+            foreach (var (subject, index) in added)
+            {
+                var addedNodeId = await SendAddNodesToServerAsync(
+                    subject, property, index, session, cancellationToken).ConfigureAwait(false);
+                if (addedNodeId is not null)
+                {
+                    processor.AddEcho(addedNodeId);
+                }
+            }
+        }
+    }
+
+    private async Task<NodeId?> SendAddNodesToServerAsync(
+        IInterceptorSubject subject,
+        RegisteredSubjectProperty property,
+        object? index,
+        ISession session,
+        CancellationToken cancellationToken)
+    {
+        var parentSubject = property.Subject;
+        if (!parentSubject.TryGetData(SubjectNodeIdDataKey, out var parentNodeIdObj) ||
+            parentNodeIdObj is not NodeId parentNodeId)
+        {
+            return null;
+        }
+
+        var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
+        if (propertyName is null)
+        {
+            return null;
+        }
+
+        var namespaceIndex = GetNamespaceIndex(session);
+        NodeId containerNodeId;
+        QualifiedName browseName;
+
+        if (property.IsSubjectCollection || property.IsSubjectDictionary)
+        {
+            var parentPath = parentNodeId.Identifier is string stringId ? stringId : "";
+            var containerPath = string.IsNullOrEmpty(parentPath)
+                ? propertyName
+                : parentPath + "." + propertyName;
+            containerNodeId = new NodeId(containerPath, namespaceIndex);
+
+            browseName = property.IsSubjectCollection
+                ? new QualifiedName($"{propertyName}[{index}]", namespaceIndex)
+                : new QualifiedName(index?.ToString() ?? "", namespaceIndex);
+        }
+        else
+        {
+            containerNodeId = parentNodeId;
+            browseName = new QualifiedName(propertyName, namespaceIndex);
+        }
+
+        try
+        {
+            var response = await session.AddNodesAsync(
+                requestHeader: null,
+                [new AddNodesItem
+                {
+                    ParentNodeId = new ExpandedNodeId(containerNodeId),
+                    ReferenceTypeId = ReferenceTypeIds.HasComponent,
+                    RequestedNewNodeId = ExpandedNodeId.Null,
+                    BrowseName = browseName,
+                    NodeClass = NodeClass.Object,
+                    NodeAttributes = new ExtensionObject(new ObjectAttributes
+                    {
+                        DisplayName = new LocalizedText(browseName.Name),
+                        Description = LocalizedText.Null,
+                        WriteMask = 0,
+                        UserWriteMask = 0,
+                        EventNotifier = 0
+                    }),
+                    TypeDefinition = new ExpandedNodeId(ObjectTypeIds.BaseObjectType)
+                }],
+                cancellationToken).ConfigureAwait(false);
+
+            if (response.Results.Count > 0 && StatusCode.IsGood(response.Results[0].StatusCode))
+            {
+                var nodeId = ExpandedNodeId.ToNodeId(response.Results[0].AddedNodeId, session.NamespaceUris);
+                if (nodeId is not null)
+                {
+                    subject.SetData(SubjectNodeIdDataKey, nodeId);
+                    return nodeId;
+                }
+            }
+        }
+        catch (ServiceResultException ex) when (
+            ex.StatusCode == StatusCodes.BadNotSupported ||
+            ex.StatusCode == StatusCodes.BadServiceUnsupported)
+        {
+            _logger.LogWarning("Server does not support AddNodes service.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send AddNodes for property {PropertyName}.", propertyName);
+        }
+
+        return null;
+    }
+
+    private async Task SendDeleteNodesToServerAsync(NodeId nodeId, ISession session, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await session.DeleteNodesAsync(
+                requestHeader: null,
+                [new DeleteNodesItem { NodeId = nodeId, DeleteTargetReferences = true }],
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (ServiceResultException ex) when (
+            ex.StatusCode == StatusCodes.BadNotSupported ||
+            ex.StatusCode == StatusCodes.BadServiceUnsupported)
+        {
+            _logger.LogWarning("Server does not support DeleteNodes service.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send DeleteNodes for NodeId {NodeId}.", nodeId);
+        }
+    }
+
+    private static ushort GetNamespaceIndex(ISession session)
+    {
+        var index = session.NamespaceUris.GetIndex("http://namotion.com/Interceptor/");
+        return index >= 0 ? (ushort)index : (ushort)0;
     }
 
     internal void OnCurrentSessionChanged(ISession? previousSession, ISession? currentSession)
@@ -752,16 +938,16 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             _modelChangeHandler = null;
         }
 
-        if (_structuralProcessor is not null)
+        if (_incomingProcessor is not null)
         {
-            await _structuralProcessor.DisposeAsync().ConfigureAwait(false);
-            if (_structuralProcessorTask is not null)
+            await _incomingProcessor.DisposeAsync().ConfigureAwait(false);
+            if (_incomingProcessorTask is not null)
             {
-                try { await _structuralProcessorTask.ConfigureAwait(false); }
+                try { await _incomingProcessorTask.ConfigureAwait(false); }
                 catch (OperationCanceledException) { }
             }
-            _structuralProcessor = null;
-            _structuralProcessorTask = null;
+            _incomingProcessor = null;
+            _incomingProcessorTask = null;
         }
 
         var sessionManager = _sessionManager;

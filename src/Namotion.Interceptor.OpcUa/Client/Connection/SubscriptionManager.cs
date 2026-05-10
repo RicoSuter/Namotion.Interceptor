@@ -28,6 +28,7 @@ internal class SubscriptionManager : IAsyncDisposable
     private readonly ConcurrentDictionary<Subscription, byte> _subscriptions = new();
 
     private volatile bool _shuttingDown; // Prevents new callbacks during cleanup
+    private volatile OpcUaClientIncomingEventProcessor? _incomingEventProcessor;
 
     /// <summary>
     /// Gets the current list of subscriptions (thread-safe collection).
@@ -72,6 +73,11 @@ internal class SubscriptionManager : IAsyncDisposable
         _readAfterWriteManager = readAfterWriteManager;
         _configuration = configuration;
         _logger = logger;
+    }
+
+    public void SetIncomingEventProcessor(OpcUaClientIncomingEventProcessor? processor)
+    {
+        _incomingEventProcessor = processor;
     }
 
     public async Task CreateBatchedSubscriptionsAsync(
@@ -163,6 +169,30 @@ internal class SubscriptionManager : IAsyncDisposable
         }
 
         var receivedTimestamp = DateTimeOffset.UtcNow;
+        var processor = _incomingEventProcessor;
+
+        if (processor is not null)
+        {
+            for (var i = 0; i < monitoredItemsCount; i++)
+            {
+                var item = notification.MonitoredItems[i];
+                if (_monitoredItems.TryGetValue(item.ClientHandle, out var property))
+                {
+                    processor.Enqueue(new IncomingEvent
+                    {
+                        Type = IncomingEventType.Value,
+                        Property = property,
+                        Value = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, property),
+                        ValueTimestamp = item.Value.SourceTimestamp,
+                        ValueReceivedTimestamp = receivedTimestamp
+                    });
+                }
+            }
+
+            _source.IncomingThroughput.Add(monitoredItemsCount);
+            return;
+        }
+
         var changes = ChangesPool.Rent();
 
         try
