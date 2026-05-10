@@ -130,10 +130,63 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         try
         {
             var application = await _configuration.CreateApplicationInstanceAsync().ConfigureAwait(false);
-            await _sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
+            var session = await _sessionManager.CreateSessionAsync(application, _configuration, cancellationToken).ConfigureAwait(false);
 
             ReconnectionMetrics.RecordInitialConnection();
             _logger.LogInformation("Connected to OPC UA server successfully.");
+
+            await _structureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var rootNode = await TryGetRootNodeAsync(session, cancellationToken).ConfigureAwait(false);
+                if (rootNode is not null)
+                {
+                    var monitoredItems = await _subjectLoader.LoadSubjectAsync(_subject, rootNode, session, cancellationToken).ConfigureAwait(false);
+                    if (monitoredItems.Count > 0)
+                    {
+                        await _sessionManager.CreateSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("No OPC UA monitored items found.");
+                    }
+
+                    if (_configuration.EnableStructureSynchronization)
+                    {
+                        _incomingProcessor = new OpcUaClientIncomingEventProcessor(
+                            _subjectLoader, this, _configuration, _logger);
+                        _incomingProcessor.SetSession(session, _sessionManager.SubscriptionManager);
+                        _incomingProcessor.PopulateSubjectMap(_subject);
+                        _sessionManager.SubscriptionManager.SetIncomingEventProcessor(_incomingProcessor);
+
+                        _modelChangeHandler = new OpcUaModelChangeEventHandler(
+                            (verb, nodeId, _) =>
+                            {
+                                var eventType = verb == ModelChangeStructureVerbMask.NodeAdded
+                                    ? IncomingEventType.StructuralAdd
+                                    : IncomingEventType.StructuralRemove;
+                                _incomingProcessor.Enqueue(new IncomingEvent
+                                {
+                                    Type = eventType,
+                                    AffectedNodeId = nodeId
+                                });
+                                return Task.CompletedTask;
+                            },
+                            _logger);
+                        await _modelChangeHandler.SubscribeAsync(session, cancellationToken).ConfigureAwait(false);
+
+                        _incomingProcessorTask = _incomingProcessor.RunAsync(cancellationToken);
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning("Connected to OPC UA server successfully but could not find root node.");
+                }
+            }
+            finally
+            {
+                _structureLock.Release();
+            }
 
             _isStarted = true;
             Volatile.Write(ref _lastError, null);
@@ -176,70 +229,16 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     /// <inheritdoc />
     public override async Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
     {
-        var sessionManager = _sessionManager;
-        var session = sessionManager?.CurrentSession;
-        if (session is null || sessionManager is null)
-        {
-            throw new InvalidOperationException("No active OPC UA session available.");
-        }
-
-        await _structureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            var rootNode = await TryGetRootNodeAsync((Session)session, cancellationToken).ConfigureAwait(false);
-            if (rootNode is not null)
-            {
-                var monitoredItems = await _subjectLoader.LoadSubjectAsync(_subject, rootNode, session, cancellationToken).ConfigureAwait(false);
-                if (monitoredItems.Count > 0)
-                {
-                    await sessionManager.CreateSubscriptionsAsync(monitoredItems, (Session)session, cancellationToken).ConfigureAwait(false);
-                }
-                else
-                {
-                    _logger.LogWarning("No OPC UA monitored items found.");
-                }
-
-                if (_configuration.EnableStructureSynchronization)
-                {
-                    _incomingProcessor = new OpcUaClientIncomingEventProcessor(
-                        _subjectLoader, this, _configuration, _logger);
-                    _incomingProcessor.SetSession((Session)session, sessionManager.SubscriptionManager);
-                    _incomingProcessor.PopulateSubjectMap(_subject);
-                    sessionManager.SubscriptionManager.SetIncomingEventProcessor(_incomingProcessor);
-
-                    _modelChangeHandler = new OpcUaModelChangeEventHandler(
-                        (verb, nodeId, _) =>
-                        {
-                            var eventType = verb == ModelChangeStructureVerbMask.NodeAdded
-                                ? IncomingEventType.StructuralAdd
-                                : IncomingEventType.StructuralRemove;
-                            _incomingProcessor.Enqueue(new IncomingEvent
-                            {
-                                Type = eventType,
-                                AffectedNodeId = nodeId
-                            });
-                            return Task.CompletedTask;
-                        },
-                        _logger);
-                    await _modelChangeHandler.SubscribeAsync((Session)session, cancellationToken).ConfigureAwait(false);
-
-                    _incomingProcessorTask = _incomingProcessor.RunAsync(cancellationToken);
-                }
-            }
-            else
-            {
-                _logger.LogWarning("Connected to OPC UA server successfully but could not find root node.");
-            }
-        }
-        finally
-        {
-            _structureLock.Release();
-        }
-
         var ownedProperties = GetOwnedPropertiesWithNodeIds();
         if (ownedProperties.Count == 0)
         {
             return null;
+        }
+
+        var session = _sessionManager?.CurrentSession;
+        if (session is null)
+        {
+            throw new InvalidOperationException("No active OPC UA session available.");
         }
 
         var itemCount = ownedProperties.Count;
