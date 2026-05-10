@@ -7,9 +7,8 @@ namespace Namotion.Interceptor.ConnectorTester.Engine;
 
 /// <summary>
 /// Captures and compares participant snapshots for the ConnectorTester convergence check.
-/// Produces a deterministic JSON representation per participant so equal source state
-/// (modulo legitimate per-participant differences such as root subject IDs and
-/// all timestamps) yields equal strings.
+/// Produces a deterministic JSON representation per participant: equal source state yields
+/// equal strings even when participants assigned different subject IDs internally.
 /// </summary>
 public static class SnapshotComparer
 {
@@ -20,9 +19,13 @@ public static class SnapshotComparer
 
     /// <summary>
     /// Builds a normalized snapshot JSON for the given root.
-    /// The result is deterministic: root subject ID and all child subject IDs are
-    /// replaced with stable positional IDs, all timestamps are stripped, and
-    /// dictionary items are sorted by key so insertion order does not matter.
+    /// Subject IDs are remapped to stable positional IDs (root → "ROOT", then "SUBJ_1",
+    /// "SUBJ_2", ... by deterministic graph traversal). Timestamps on structural
+    /// (Object/Collection/Dictionary) properties are stripped: those reflect local graph
+    /// creation moments, not synced wire events. Timestamps on Value properties are
+    /// preserved: those propagate via source timestamps and must converge.
+    /// Dictionary items are sorted by their index field (the dictionary key); Collection
+    /// items keep their source order because order is part of equality.
     /// </summary>
     public static string Capture(TestNode root)
     {
@@ -41,12 +44,8 @@ public static class SnapshotComparer
             return;
         }
 
-        // Build a stable ID map: traverse the subject graph in deterministic order
-        // (BFS from root, properties visited in sorted name order, dictionary items
-        // sorted by key, collection items in array order) and assign positional IDs.
         var idMap = BuildStableIdMap(rawRootId, subjects);
 
-        // Rewrite every property in every subject using the stable ID map.
         foreach (var (_, subjectNode) in subjects)
         {
             if (subjectNode is JsonObject properties)
@@ -55,22 +54,25 @@ public static class SnapshotComparer
             }
         }
 
-        // Rebuild the subjects dictionary with stable keys and sorted property names.
         RebuildSubjects(root, subjects, idMap);
 
         root["root"] = idMap.TryGetValue(rawRootId, out var stableRoot) ? stableRoot : "ROOT";
     }
 
     /// <summary>
-    /// Performs a BFS traversal of the subject graph in deterministic order and returns
-    /// a map from raw subject ID to stable positional ID ("ROOT", "SUBJ_1", "SUBJ_2", …).
+    /// Traverses the subject graph from the root in deterministic order (BFS, properties
+    /// visited in sorted name order, dictionary items sorted by index, collection items in
+    /// source order) and assigns positional IDs ("ROOT", "SUBJ_1", "SUBJ_2", ...).
+    /// This guarantees that two participants whose graphs are content-equal but whose
+    /// internal subject IDs were assigned in different orders produce the same map.
     /// </summary>
     private static Dictionary<string, string> BuildStableIdMap(string rawRootId, JsonObject subjects)
     {
-        var idMap = new Dictionary<string, string>(StringComparer.Ordinal);
+        var idMap = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            [rawRootId] = "ROOT"
+        };
         var queue = new Queue<string>();
-
-        idMap[rawRootId] = "ROOT";
         queue.Enqueue(rawRootId);
 
         var counter = 1;
@@ -84,8 +86,9 @@ public static class SnapshotComparer
                 continue;
             }
 
-            // Visit properties in sorted order so traversal is deterministic.
-            foreach (var propertyName in properties.Select(kvp => kvp.Key).OrderBy(k => k, StringComparer.Ordinal))
+            foreach (var propertyName in properties
+                .Select(kvp => kvp.Key)
+                .OrderBy(name => name, StringComparer.Ordinal))
             {
                 if (properties[propertyName] is not JsonObject property)
                 {
@@ -103,19 +106,14 @@ public static class SnapshotComparer
                         queue.Enqueue(refId);
                     }
                 }
-                else if (kind == "Collection" || kind == "Dictionary")
+                else if ((kind == "Collection" || kind == "Dictionary") &&
+                    property["items"] is JsonArray items)
                 {
-                    var items = property["items"] as JsonArray;
-                    if (items is null)
-                    {
-                        continue;
-                    }
-
-                    // For dictionaries, visit items sorted by key so insertion order
-                    // does not affect the traversal; collections keep their source order.
+                    // Visit dictionary items sorted by key so insertion order does not
+                    // affect ID assignment. Collection items keep source order.
                     IEnumerable<JsonNode?> orderedItems = kind == "Dictionary"
                         ? items.OrderBy(item => item?["index"]?.GetValue<string>(), StringComparer.Ordinal)
-                        : (IEnumerable<JsonNode?>)items;
+                        : items;
 
                     foreach (var itemNode in orderedItems)
                     {
@@ -149,10 +147,13 @@ public static class SnapshotComparer
 
             var kind = property["kind"]?.GetValue<string>();
 
-            // Strip all timestamps: structural timestamps are local creation moments,
-            // and Value timestamps differ across participants even for identical values
-            // because each participant creates its context at a different wall-clock time.
-            property.Remove("timestamp");
+            // Structural-property timestamps are local creation moments and never propagate
+            // across the wire; strip them. Value-property timestamps DO propagate (e.g. via
+            // OPC UA source timestamps) and must converge for participants to agree.
+            if (kind != "Value")
+            {
+                property.Remove("timestamp");
+            }
 
             if (kind == "Object")
             {
@@ -162,39 +163,36 @@ public static class SnapshotComparer
                     property["id"] = stableId;
                 }
             }
-            else if (kind == "Collection" || kind == "Dictionary")
+            else if ((kind == "Collection" || kind == "Dictionary") &&
+                property["items"] is JsonArray items)
             {
-                if (property["items"] is JsonArray items)
+                foreach (var itemNode in items)
                 {
-                    foreach (var itemNode in items)
+                    if (itemNode is JsonObject itemObject)
                     {
-                        if (itemNode is not JsonObject itemObject)
-                        {
-                            continue;
-                        }
-
                         var refId = itemObject["id"]?.GetValue<string>();
                         if (refId is not null && idMap.TryGetValue(refId, out var stableId))
                         {
                             itemObject["id"] = stableId;
                         }
                     }
+                }
 
-                    // Dictionary items have no defined order; sort by their "index" field
-                    // (the dictionary key) for deterministic output.
-                    if (kind == "Dictionary")
+                // Dictionary items have no defined order; sort by their "index" field
+                // (the dictionary key, serialized as a string). Collection items keep
+                // their source order because order is part of equality.
+                if (kind == "Dictionary")
+                {
+                    var sortedItems = items
+                        .Select(item => item!.AsObject())
+                        .OrderBy(item => item["index"]?.GetValue<string>(), StringComparer.Ordinal)
+                        .Select(item => item.DeepClone())
+                        .ToArray();
+
+                    items.Clear();
+                    foreach (var item in sortedItems)
                     {
-                        var sortedItems = items
-                            .Select(item => item!.AsObject())
-                            .OrderBy(item => item["index"]?.GetValue<string>(), StringComparer.Ordinal)
-                            .Select(item => item.DeepClone())
-                            .ToArray();
-
-                        items.Clear();
-                        foreach (var item in sortedItems)
-                        {
-                            items.Add(item);
-                        }
+                        items.Add(item);
                     }
                 }
             }
@@ -203,7 +201,7 @@ public static class SnapshotComparer
 
     private static void RebuildSubjects(JsonObject root, JsonObject subjects, Dictionary<string, string> idMap)
     {
-        // Sort subjects by stable ID and property names for deterministic output.
+        // Sort subjects by stable ID and properties within each subject by name for deterministic output.
         var entries = subjects
             .Select(kvp => (
                 StableKey: idMap.TryGetValue(kvp.Key, out var sid) ? sid : kvp.Key,
