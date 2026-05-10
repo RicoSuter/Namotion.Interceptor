@@ -237,4 +237,136 @@ public class SnapshotComparerTests
         // Assert
         Assert.Equal(snapshot1, snapshot2);
     }
+
+    // Raw-JSON tests for SnapshotComparer.SnapshotsMatch — no Capture or SubjectChangeContext needed.
+
+    private const string SampleSnapshotPropertiesAB = """
+        {"root":"ROOT","subjects":{"ROOT":{"A":{"kind":"Value","value":1},"B":{"kind":"Value","value":2}}}}
+        """;
+
+    private const string SampleSnapshotPropertiesBA = """
+        {"root":"ROOT","subjects":{"ROOT":{"B":{"kind":"Value","value":2},"A":{"kind":"Value","value":1}}}}
+        """;
+
+    [Fact]
+    public void WhenPropertyOrderInJsonDiffers_ThenSnapshotsMatch()
+    {
+        // Arrange / Act
+        var match = SnapshotComparer.SnapshotsMatch(SampleSnapshotPropertiesAB, SampleSnapshotPropertiesBA);
+
+        // Assert: the JSON walk treats objects as unordered, so reordered keys still match.
+        Assert.True(match);
+    }
+
+    [Fact]
+    public void WhenSubjectOrderInJsonDiffers_ThenSnapshotsMatch()
+    {
+        // Arrange: same content, subjects in different JSON order.
+        const string a = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Object","id":"OTHER"}},"OTHER":{"Q":{"kind":"Value","value":1}}}}""";
+        const string b = """{"root":"ROOT","subjects":{"OTHER":{"Q":{"kind":"Value","value":1}},"ROOT":{"P":{"kind":"Object","id":"OTHER"}}}}""";
+
+        // Act
+        var match = SnapshotComparer.SnapshotsMatch(a, b);
+
+        // Assert: JSON walk treats the subjects map as unordered.
+        Assert.True(match);
+    }
+
+    [Fact]
+    public void WhenSubjectKeysDiffer_ThenSnapshotsDoNotMatch()
+    {
+        // Arrange
+        const string a = """{"root":"ROOT","subjects":{"ROOT":{}}}""";
+        const string b = """{"root":"ROOT","subjects":{"ROOT":{},"OTHER":{}}}""";
+
+        // Act
+        var match = SnapshotComparer.SnapshotsMatch(a, b);
+
+        // Assert
+        Assert.False(match);
+    }
+
+    [Fact]
+    public void WhenPropertyKeysDiffer_ThenSnapshotsDoNotMatch()
+    {
+        // Arrange
+        const string a = """{"root":"ROOT","subjects":{"ROOT":{"A":{"kind":"Value","value":1}}}}""";
+        const string b = """{"root":"ROOT","subjects":{"ROOT":{"A":{"kind":"Value","value":1},"B":{"kind":"Value","value":2}}}}""";
+
+        // Act
+        var match = SnapshotComparer.SnapshotsMatch(a, b);
+
+        // Assert
+        Assert.False(match);
+    }
+
+    [Fact]
+    public void WhenBothValueTimestampsAreNonNullAndEqual_ThenSnapshotsMatch()
+    {
+        // Arrange
+        const string a = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1,"timestamp":"2026-01-01T00:00:00+00:00"}}}}""";
+        const string b = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1,"timestamp":"2026-01-01T00:00:00+00:00"}}}}""";
+
+        // Act
+        var match = SnapshotComparer.SnapshotsMatch(a, b);
+
+        // Assert
+        Assert.True(match);
+    }
+
+    [Fact]
+    public void WhenBothValueTimestampsAreNonNullAndDiffer_ThenSnapshotsDoNotMatch()
+    {
+        // Arrange: same value, different non-null timestamps. Real divergence.
+        const string a = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1,"timestamp":"2026-01-01T00:00:00+00:00"}}}}""";
+        const string b = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1,"timestamp":"2026-01-02T00:00:00+00:00"}}}}""";
+
+        // Act
+        var match = SnapshotComparer.SnapshotsMatch(a, b);
+
+        // Assert
+        Assert.False(match);
+    }
+
+    [Fact]
+    public void WhenOneValueTimestampIsNull_ThenSnapshotsMatch()
+    {
+        // Arrange: same value, one side has explicit null (NullTimestampTicks contract).
+        const string a = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1,"timestamp":null}}}}""";
+        const string b = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1,"timestamp":"2026-01-01T00:00:00+00:00"}}}}""";
+
+        // Act
+        var match = SnapshotComparer.SnapshotsMatch(a, b);
+
+        // Assert: null-timestamp rule applies.
+        Assert.True(match);
+    }
+
+    [Fact]
+    public void WhenBothValueTimestampsAreNull_ThenSnapshotsMatch()
+    {
+        // Arrange: both sides preserve the explicit-null state.
+        const string a = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1,"timestamp":null}}}}""";
+        const string b = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1,"timestamp":null}}}}""";
+
+        // Act
+        var match = SnapshotComparer.SnapshotsMatch(a, b);
+
+        // Assert
+        Assert.True(match);
+    }
+
+    [Fact]
+    public void WhenValueDiffersAndTimestampsAreNull_ThenSnapshotsDoNotMatch()
+    {
+        // Arrange
+        const string a = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1,"timestamp":null}}}}""";
+        const string b = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":2,"timestamp":null}}}}""";
+
+        // Act
+        var match = SnapshotComparer.SnapshotsMatch(a, b);
+
+        // Assert
+        Assert.False(match);
+    }
 }
