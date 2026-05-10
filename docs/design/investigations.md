@@ -49,13 +49,15 @@ Previous result (before unified queue): 0 missing, 1 value diff. The unified que
 
 **Potential fix**: Periodic reconciliation pass. Or optimize structural event processing to reduce latency.
 
-### 2. ConnectorTester: initial load blocks CQP creation
+### 2. ConnectorTester: value convergence timing
 
-The ConnectorTester creates a model with 20 collection children + 10 dictionary entries on both server and client. The client's `LoadSubjectAsync` recursively browses the entire server address space to map OPC UA nodes to C# properties. With 30+ subjects, each having 4 value properties + 3 structural properties, this takes longer than the ConnectorTester's startup delay. The mutation phase starts before loading completes, so the CQP is never created and no outgoing changes are captured.
+Fixed: CQP now runs concurrently with `LoadInitialStateAsync` (architectural change in `SubjectSourceBase`). The CQP starts processing changes as properties are progressively claimed during loading.
 
-This is a ConnectorTester timing issue, not a structural sync bug. All 61 integration tests pass, including bidirectional structural mutations with value sync in both directions.
+Remaining: client-only profile shows ~31 value diffs across all 31 common nodes. Analysis shows values are CLOSE but not equal (e.g., DecimalValue 50.04 vs 49.13). This is a bidirectional convergence timing issue: after mutations stop, the last 1-2 value changes from each side haven't propagated. Without a "final sync" operation, both sides freeze at their last known values.
 
-**Fix**: The ConnectorTester should wait for all participants to finish initial sync before starting the mutation phase. Alternatively, reduce the initial model size or add a startup readiness signal.
+Value-only (no structural sync) converges perfectly: the nosync profile runs indefinitely without failing. So structural sync doesn't interfere with value ownership. The timing issue is inherent to bidirectional value sync when both sides stop writing simultaneously.
+
+**Potential fix**: After mutations stop, one side should do a final value read from the server (or both sides should do a push-all-owned-values). This would resolve the last-writer-wins race.
 
 ### 3. Chaos profiles not tested
 
