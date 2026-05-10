@@ -240,9 +240,10 @@ public class SubjectTransactionTests
         // Arrange
         var context = CreateTransactionContext();
         var order = new List<int>();
+        var task1CanCommit = new ManualResetEventSlim(false);
+        var task2Waiting = new ManualResetEventSlim(false);
 
         // Act
-        var task1Started = new ManualResetEventSlim(false);
         var task1 = Task.Run(async () =>
         {
             using (var t = await context.BeginTransactionAsync(
@@ -250,15 +251,16 @@ public class SubjectTransactionTests
                 TransactionLocking.Exclusive))
             {
                 lock (order) { order.Add(1); }
-                task1Started.Set();
-                await Task.Delay(100);
+                task2Waiting.Set();
+                task1CanCommit.Wait();
                 await t.CommitAsync(CancellationToken.None);
             }
         });
 
-        task1Started.Wait();
+        task2Waiting.Wait();
         var task2 = Task.Run(async () =>
         {
+            task1CanCommit.Set();
             using (var t = await context.BeginTransactionAsync(
                 TransactionFailureHandling.BestEffort,
                 TransactionLocking.Exclusive))
