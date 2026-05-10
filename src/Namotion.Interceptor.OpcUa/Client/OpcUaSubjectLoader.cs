@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.OpcUa.Client.Connection;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Abstractions;
 using Opc.Ua;
@@ -34,10 +35,20 @@ internal class OpcUaSubjectLoader
         ISession session,
         CancellationToken cancellationToken)
     {
+        return await LoadSubjectAsync(subject, node, session, subjectMap: null, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<MonitoredItem>> LoadSubjectAsync(
+        IInterceptorSubject subject,
+        ReferenceDescription node,
+        ISession session,
+        ConnectorSubjectMap<NodeId>? subjectMap,
+        CancellationToken cancellationToken)
+    {
         var monitoredItems = new List<MonitoredItem>();
         var loadedSubjects = new HashSet<IInterceptorSubject>();
         var subjectsByNodeId = new Dictionary<NodeId, IInterceptorSubject>();
-        await LoadSubjectAsync(subject, node, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
+        await LoadSubjectAsync(subject, node, session, monitoredItems, loadedSubjects, subjectsByNodeId, subjectMap, cancellationToken).ConfigureAwait(false);
         return monitoredItems;
     }
 
@@ -47,6 +58,7 @@ internal class OpcUaSubjectLoader
         List<MonitoredItem> monitoredItems,
         HashSet<IInterceptorSubject> loadedSubjects,
         Dictionary<NodeId, IInterceptorSubject> subjectsByNodeId,
+        ConnectorSubjectMap<NodeId>? subjectMap,
         CancellationToken cancellationToken)
     {
         if (!loadedSubjects.Add(subject))
@@ -61,6 +73,19 @@ internal class OpcUaSubjectLoader
         }
 
         var nodeId = ExpandedNodeId.ToNodeId(node.NodeId, session.NamespaceUris);
+
+        // Store NodeId in subject data for later reconciliation and external access
+        if (nodeId is not null)
+        {
+            subject.SetData(OpcUaSubjectClientSource.SubjectNodeIdDataKey, nodeId);
+            subjectMap?.Add(nodeId, subject);
+        }
+
+        if (nodeId is null)
+        {
+            return;
+        }
+
         var nodeReferences = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
         
         for (var index = 0; index < nodeReferences.Count; index++)
@@ -129,16 +154,37 @@ internal class OpcUaSubjectLoader
                     }
                     else
                     {
-                        await LoadSubjectReferenceAsync(property, nodeReference, subject, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
+                        // Claim source ownership for structural properties when remote node
+                        // management is enabled, so changes are captured by the ChangeQueueProcessor.
+                        if (_configuration.EnableRemoteNodeManagement)
+                        {
+                            _ownership.ClaimSource(property.Reference);
+                        }
+
+                        await LoadSubjectReferenceAsync(property, nodeReference, subject, session, monitoredItems, loadedSubjects, subjectsByNodeId, subjectMap, cancellationToken).ConfigureAwait(false);
                     }
                 }
                 else if (property.IsSubjectCollection)
                 {
-                    await LoadSubjectCollectionAsync(property, childNodeId, monitoredItems, session, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
+                    // Claim source ownership for structural properties when remote node
+                    // management is enabled, so changes are captured by the ChangeQueueProcessor.
+                    if (_configuration.EnableRemoteNodeManagement)
+                    {
+                        _ownership.ClaimSource(property.Reference);
+                    }
+
+                    await LoadSubjectCollectionAsync(property, childNodeId, monitoredItems, session, loadedSubjects, subjectsByNodeId, subjectMap, cancellationToken).ConfigureAwait(false);
                 }
                 else if (property.IsSubjectDictionary)
                 {
-                    await LoadSubjectDictionaryAsync(property, childNodeId, monitoredItems, session, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
+                    // Claim source ownership for structural properties when remote node
+                    // management is enabled, so changes are captured by the ChangeQueueProcessor.
+                    if (_configuration.EnableRemoteNodeManagement)
+                    {
+                        _ownership.ClaimSource(property.Reference);
+                    }
+
+                    await LoadSubjectDictionaryAsync(property, childNodeId, monitoredItems, session, loadedSubjects, subjectsByNodeId, subjectMap, cancellationToken).ConfigureAwait(false);
                 }
                 else
                 {
@@ -243,12 +289,13 @@ internal class OpcUaSubjectLoader
         List<MonitoredItem> monitoredItems,
         HashSet<IInterceptorSubject> loadedSubjects,
         Dictionary<NodeId, IInterceptorSubject> subjectsByNodeId,
+        ConnectorSubjectMap<NodeId>? subjectMap,
         CancellationToken cancellationToken)
     {
         var existingSubject = property.Children.SingleOrDefault();
         if (existingSubject.Subject is not null)
         {
-            await LoadSubjectAsync(existingSubject.Subject, nodeReference, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
+            await LoadSubjectAsync(existingSubject.Subject, nodeReference, session, monitoredItems, loadedSubjects, subjectsByNodeId, subjectMap, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -267,7 +314,7 @@ internal class OpcUaSubjectLoader
                     subjectsByNodeId[nodeId] = newSubject;
                 }
 
-                await LoadSubjectAsync(newSubject, nodeReference, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
+                await LoadSubjectAsync(newSubject, nodeReference, session, monitoredItems, loadedSubjects, subjectsByNodeId, subjectMap, cancellationToken).ConfigureAwait(false);
                 property.SetValueFromSource(_source, null, null, newSubject);
             }
         }
@@ -279,6 +326,7 @@ internal class OpcUaSubjectLoader
         ISession session,
         HashSet<IInterceptorSubject> loadedSubjects,
         Dictionary<NodeId, IInterceptorSubject> subjectsByNodeId,
+        ConnectorSubjectMap<NodeId>? subjectMap,
         CancellationToken cancellationToken)
     {
         var childNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken).ConfigureAwait(false);
@@ -319,7 +367,7 @@ internal class OpcUaSubjectLoader
         // Requires making monitoredItems and loadedSubjects thread-safe (e.g., ConcurrentBag, ConcurrentHashSet).
         foreach (var child in children)
         {
-            await LoadSubjectAsync(child.Subject, child.Node, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
+            await LoadSubjectAsync(child.Subject, child.Node, session, monitoredItems, loadedSubjects, subjectsByNodeId, subjectMap, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -330,6 +378,7 @@ internal class OpcUaSubjectLoader
         ISession session,
         HashSet<IInterceptorSubject> loadedSubjects,
         Dictionary<NodeId, IInterceptorSubject> subjectsByNodeId,
+        ConnectorSubjectMap<NodeId>? subjectMap,
         CancellationToken cancellationToken)
     {
         var childNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken).ConfigureAwait(false);
@@ -366,7 +415,7 @@ internal class OpcUaSubjectLoader
         foreach (var entry in entries)
         {
             var childNode = nodesByKey[entry.Key];
-            await LoadSubjectAsync(entry.Value, childNode, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
+            await LoadSubjectAsync(entry.Value, childNode, session, monitoredItems, loadedSubjects, subjectsByNodeId, subjectMap, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -440,7 +489,7 @@ internal class OpcUaSubjectLoader
         }
     }
 
-    private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
+    internal async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
         NodeId nodeId,
         ISession session,
         CancellationToken cancellationToken)
@@ -499,4 +548,5 @@ internal class OpcUaSubjectLoader
 
         return results;
     }
+
 }

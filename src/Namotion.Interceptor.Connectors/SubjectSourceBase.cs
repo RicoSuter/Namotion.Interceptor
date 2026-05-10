@@ -67,6 +67,13 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
     public abstract ValueTask<WriteResult> WriteChangesAsync(
         ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Called after the change processor is created and ready to capture changes.
+    /// Subclasses can override this to perform post-startup reconciliation
+    /// (e.g., syncing structural changes that occurred during initial loading).
+    /// </summary>
+    protected virtual Task OnChangeProcessorStartedAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
     /// <inheritdoc />
     protected sealed override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -77,8 +84,9 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                 _propertyWriter.StartBuffering();
                 await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
 
-                await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
-
+                // CQP is created before loading and starts processing immediately
+                // so that concurrent property mutations (e.g., from other hosted services)
+                // are captured as properties are progressively claimed during load.
                 using var processor = new ChangeQueueProcessor(
                     this,
                     _context,
@@ -87,12 +95,18 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                     _bufferTime,
                     _logger);
 
-                // Optimistic retry re-apply: after initial state load + ChangeQueueProcessor creation,
+                var processorTask = processor.ProcessAsync(stoppingToken);
+
+                await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
+
+                // Optimistic retry re-apply: after initial state load,
                 // re-apply queued changes locally if the source hasn't changed the property.
                 // ChangeQueueProcessor picks up re-applied changes and sends them to the source as fresh writes.
                 ReapplyRetryQueue();
 
-                await processor.ProcessAsync(stoppingToken).ConfigureAwait(false);
+                await OnChangeProcessorStartedAsync(stoppingToken).ConfigureAwait(false);
+
+                await processorTask.ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

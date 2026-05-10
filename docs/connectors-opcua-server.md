@@ -104,6 +104,9 @@ await server.StartAsync(cancellationToken);
 | `AutoAcceptUntrustedCertificates` | `bool` | false | Accept untrusted client certificates (testing/development only) |
 | `CleanCertificateStore` | `bool` | true | Remove old certificates from the application certificate store on startup |
 | `CertificateStoreBasePath` | `string` | "pki" | Base directory for certificate stores. Change to isolate stores for parallel test execution |
+| `EnableStructureSynchronization` | `bool` | false | Fire `GeneralModelChangeEventType` events when subjects are added/removed at runtime |
+| `AllowRemoteNodeManagement` | `bool` | false | Allow clients to add/remove nodes via `AddNodes`/`DeleteNodes` services |
+| `SubjectFactory` | `OpcUaSubjectFactory?` | null | Factory for creating subjects from remote `AddNodes` requests. Required when `AllowRemoteNodeManagement` is true |
 
 ## Security
 
@@ -280,8 +283,57 @@ The consecutive failure counter resets when the server starts successfully. Trac
 
 The OPC UA server hooks into the interceptor lifecycle system (see [Subject Lifecycle Tracking](tracking.md#subject-lifecycle-tracking)) to clean up resources when subjects are detached.
 
-- When a subject is detached, its entries in the node manager are removed
-- The OPC UA node remains in the address space until server restart (OPC UA SDK limitation)
-- Local tracking is cleaned up immediately to prevent memory leaks
+- When a subject is detached, its OPC UA nodes are removed from the address space
+- When `EnableStructureSynchronization` is enabled, structural changes are processed inline in `WriteChangesAsync` which creates/removes nodes and fires `ModelChangeEvent`s
+- Without structural sync, lifecycle detach directly removes nodes
 
 See also [Lifecycle Limitations](connectors-opcua.md#lifecycle-limitations) that apply to both client and server.
+
+## Internal Design
+
+### Structural Change Processing
+
+When subjects are added or removed from collections, dictionaries, or references at runtime, the server detects these changes through the `ChangeQueueProcessor` (CQP) and processes them inline in `WriteChangesAsync`.
+
+```
+Property write (e.g., root.People = [...])
+  -> CQP captures old/new values
+  -> WriteChangesAsync fires
+  -> ProcessStructuralChangesInline() runs BEFORE the value loop:
+     diffs old/new subjects, creates/removes OPC UA nodes synchronously
+     Add:    CreateDynamicSubjectNodes() + FireModelChangeEvent(NodeAdded)
+     Remove: RemoveSubjectNodes()       + FireModelChangeEvent(NodeDeleted)
+  -> Value loop runs (OPC UA nodes guaranteed to exist)
+```
+
+Structural changes are processed synchronously before value updates in the same `WriteChangesAsync` call. This ensures OPC UA nodes exist before any value writes reference them.
+
+`ModelChangeEvent` firing is controlled by `EnableStructureSynchronization`: when enabled, connected clients receive `GeneralModelChangeEventType` events and can reconcile their local model.
+
+Node creation uses `CustomNodeManager.CreateDynamicSubjectNodes()`, which builds the full subtree (object node, variable nodes for properties, folder nodes for nested collections/dictionaries). Each subject's `NodeId` uses a monotonic counter (`_dynamicNodeCounter`) to ensure uniqueness across replacements. The NodeId is also stored in `subject.Data` with a per-server GUID key so it can be looked up even after the subject is detached from the registry.
+
+### Remote Node Management
+
+When `AllowRemoteNodeManagement` is enabled, clients can call `AddNodes`/`DeleteNodes` on the server. These requests are handled synchronously in `OpcUaStandardServer.AddNodesAsync`/`DeleteNodesAsync`, which resolve the parent subject, create/remove the subject in the local model via `SetValueFromSource`, and create/remove the OPC UA nodes. The change is tagged with the server as source, so the CQP does not re-enqueue it (loop prevention).
+
+### Class Dependency Graph
+
+```
+OpcUaSubjectServer (BackgroundService)
+ ├── owns ChangeQueueProcessor              (detects property changes, calls WriteChangesAsync)
+ ├── owns IncomingThroughput                 (standalone, ThroughputCounter)
+ ├── owns OutgoingThroughput                 (standalone, ThroughputCounter)
+ ├── owns OpcUaServerDiagnostics             (read-only facade)
+ ├── creates OpcUaStandardServer             (SDK server, per restart cycle)
+ │    └── creates CustomNodeManager          (OPC UA address space)
+ └── WriteChangesAsync processes structural changes inline
+      (uses CustomNodeManager: CreateDynamicSubjectNodes, RemoveSubjectNodes, FireModelChangeEvent)
+```
+
+### Class Responsibilities
+
+| Class | Role |
+|-------|------|
+| `OpcUaSubjectServer` | Orchestrator. Creates CQP. Processes structural changes inline in `WriteChangesAsync` before value updates. |
+| `CustomNodeManager` | Manages OPC UA address space. Creates nodes at startup and dynamically. Uses monotonic counter for unique NodeIds. Handles `AddNodes`/`DeleteNodes` from remote clients. |
+| `OpcUaStandardServer` | OPC UA SDK server. Overrides `AddNodesAsync`/`DeleteNodesAsync` to delegate to `CustomNodeManager`. |

@@ -179,6 +179,14 @@ Beyond the settings shown above, the following properties are available on `OpcU
 |----------|---------|-------------|
 | `MaximumReferencesPerNode` | 0 | Max references per browse request (0 = server default) |
 
+**Structural Synchronization:**
+
+| Property | Default | Description |
+|----------|---------|-------------|
+| `EnableStructureSynchronization` | false | Subscribe to `ModelChangeEvent`s and reconcile when server address space changes |
+| `EnableRemoteNodeManagement` | false | Send `AddNodes`/`DeleteNodes` to the server when local subjects are added/removed |
+| `SubjectFactory` | null | Factory for creating subjects from remote structural changes |
+
 ## Security
 
 ### Transport Security
@@ -725,6 +733,7 @@ The OPC UA client hooks into the interceptor lifecycle system (see [Subject Life
 - Property data (OPC UA node IDs) associated with the subject is cleared
 - OPC UA subscription items remain on the server until session ends
 - Cleanup is skipped during reconnection to avoid interfering with subscription transfer
+- When `EnableStructureSynchronization` is enabled, the `OpcUaClientStructuralChangeProcessor` handles incoming `ModelChangeEvent`s and creates/removes local subjects accordingly
 
 See also [Lifecycle Limitations](connectors-opcua.md#lifecycle-limitations) that apply to both client and server.
 
@@ -746,9 +755,13 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
  │    │    └── uses ReadAfterWriteManager
  │    ├── creates PollingManager           (back-ref to source)
  │    └── creates ReadAfterWriteManager
- └── creates OutboundWriter
-      ├── receives SessionManager
-      └── receives ThroughputCounter
+ ├── creates OutboundWriter
+ │    ├── receives SessionManager
+ │    └── receives ThroughputCounter
+ └── creates OpcUaClientIncomingEventProcessor  (when EnableStructureSynchronization)
+      ├── owns ConnectorSubjectMap<NodeId>
+      ├── owns echo set (ConcurrentDictionary<NodeId, byte>)
+      └── uses OpcUaSubjectLoader (for LoadSubjectAsync, BrowseNodeAsync)
 ```
 
 ### Responsibilities
@@ -763,6 +776,9 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
 | `ReadAfterWriteManager` | Schedules read-backs after writes for nodes where exception-based monitoring was revised to sampling. |
 | `SubscriptionHealthMonitor` | Retries failed monitored items that may succeed later (transient server errors). |
 | `OpcUaSubjectLoader` | Browses the OPC UA address space and maps nodes to C# properties. |
+| `OpcUaClientIncomingEventProcessor` | Unified incoming queue. Processes value notifications and structural ModelChangeEvents in arrival order. Echo suppression via NodeId tracking. |
+| `OpcUaModelChangeEventHandler` | Subscribes to `GeneralModelChangeEventType` on the server and forwards NodeAdded/NodeDeleted events. |
+| `ConnectorSubjectMap<NodeId>` | Reverse-index map from NodeId to subject with ref counting and lifecycle cleanup. |
 | `OpcUaClientDiagnostics` | Read-only public facade that aggregates diagnostics from all internal components. |
 | `ReconnectionMetrics` | Thread-safe counters for reconnection tracking (attempts, successes, failures, abandoned). |
 | `ThroughputCounter` | Lock-free 60-second sliding window rate counter for incoming/outgoing changes per second. |
@@ -774,3 +790,68 @@ OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
 **Back-reference pattern.** Several classes (`SessionManager`, `SubscriptionManager`, `PollingManager`) receive a reference to `OpcUaSubjectClientSource` to access shared state (metrics, throughput counters, error tracking). `OutboundWriter` demonstrates the preferred alternative: receiving only the specific dependencies it needs via constructor parameters.
 
 **Diagnostics as a facade.** `OpcUaClientDiagnostics` navigates through `OpcUaSubjectClientSource` and `SessionManager` to expose a flat public API. It allocates `PollingDiagnostics` and `ReadAfterWriteDiagnostics` wrappers on demand to avoid exposing internal types.
+
+### Incoming Event Processing
+
+When `EnableStructureSynchronization` is enabled, the client creates an `OpcUaClientIncomingEventProcessor` with a unified `Channel<IncomingEvent>` queue. Both value notifications (`OnFastDataChange`) and structural events (`ModelChangeEvent`) are enqueued and processed in arrival order by a single background loop.
+
+```
+OnFastDataChange callback (value notification)
+  -> Enqueues IncomingEvent(Type=Value, Property, Value, Timestamps)
+
+OpcUaModelChangeEventHandler (structural event)
+  -> Enqueues IncomingEvent(Type=StructuralAdd/StructuralRemove, AffectedNodeId)
+
+Single background loop processes events in order:
+  Value:          SetValueFromSource on the property
+  StructuralAdd:  Check echo set -> if echo, skip
+                  Browse inverse to find parent -> look up in ConnectorSubjectMap
+                  Browse parent forward -> find matching property by BrowseName
+                  Create subject via SubjectFactory -> LoadSubjectAsync
+                  AddSubjectToProperty via SetValueFromSource
+                  AddMonitoredItemsAsync + ReadInitialValuesAsync
+  StructuralRemove: Check echo set -> if echo, skip
+                  Look up subject in ConnectorSubjectMap
+                  RemoveSubjectFromProperty via SetValueFromSource
+```
+
+### Outgoing Structural Changes
+
+Outgoing structural changes are processed inline in the client's `WriteChangesAsync`, before value writes. This mirrors the server's design.
+
+```
+Property write (e.g., root.People = [...])
+  -> CQP captures old/new values
+  -> WriteChangesAsync fires
+  -> ProcessOutgoingStructuralChangesAsync (inline, before values):
+     diffs old/new subjects via OpcUaStructuralChangeHelper
+     Add:    session.AddNodesAsync() -> store returned NodeId in echo set
+     Remove: session.DeleteNodesAsync() -> store NodeId in echo set
+  -> OutboundWriter.WriteChangesAsync (values)
+```
+
+### Echo Suppression
+
+When the client sends `AddNodes`/`DeleteNodes`, the server fires a `ModelChangeEvent` back. Without echo suppression, the client would process its own structural change as an external event, creating duplicates. The client stores the returned NodeId in a `ConcurrentDictionary<NodeId, byte>` echo set. When an incoming `ModelChangeEvent` arrives, the processor checks the echo set before processing. Matched entries are removed (TryRemove) and the event is skipped.
+
+The echo set is cleaned up on subject detach (NodeId removed) and on session reconnect (set cleared entirely, since full reconciliation handles state recovery).
+
+### Design Decisions
+
+**Loop prevention:** The CQP skips changes whose source matches itself (`change.Source == _source`). When the client creates a subject from an external event, it uses `SetValueFromSource(clientSource, ...)`. The CQP skips it because the source matches.
+
+**Idempotent processing:** Add events for NodeIds already in the `ConnectorSubjectMap` are no-ops. Remove events for unknown NodeIds are no-ops.
+
+**Unique NodeIds:** The server assigns a monotonic counter to each dynamically created node. This prevents NodeId collisions when subjects are replaced at the same position. BrowseNames remain positional for OPC UA browsing.
+
+**Initial values for dynamically added subjects:** Subscribe-then-read order ensures no changes are lost. Failed monitored items are filtered out via `FilterOutFailedMonitoredItemsAsync`.
+
+**Stale events:** During rapid structural mutations, the server may fire `NodeAdded` for a node that is subsequently removed before the client processes it. The client's `ProcessExternalAddAsync` detects this (browse returns null) and logs a warning. These are benign.
+
+**Reconnect:** On session reconnect, the processor updates its session reference and re-subscribes to `ModelChangeEvent`s. The `ConnectorSubjectMap` and echo set are preserved/cleared as appropriate.
+
+### Known Limitations
+
+**Server-only structural mutations** at 20/sec: a few missing subjects and value diffs may remain due to stale events and convergence timing. A periodic reconciliation pass would address this.
+
+**Bidirectional structural mutations** at high rates (50/sec each side) are not fully converging. The client's incoming event processing is starved under sustained bidirectional load. See `docs/design/investigations.md` for details.

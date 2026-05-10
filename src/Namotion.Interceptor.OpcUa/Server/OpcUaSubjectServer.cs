@@ -3,6 +3,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Lifecycle;
 using Opc.Ua;
@@ -24,6 +25,7 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
 
     private LifecycleInterceptor? _lifecycleInterceptor;
     private volatile OpcUaStandardServer? _server;
+    private volatile CustomNodeManager? _nodeManager;
     private volatile bool _isForceKill;
     private volatile CancellationTokenSource? _forceKillCts;
     private int _consecutiveFailures;
@@ -118,39 +120,131 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
             return ValueTask.CompletedTask;
         }
 
-        // Use the SDK's NodeManager.Lock for thread-safe node updates.
-        // This is the same lock the SDK uses for Read/Write/subscription operations.
-        // ClearChangeMasks → OnMonitoredNodeChanged also acquires this lock,
-        // but Monitor is reentrant on the same thread so no deadlock.
         var nodeManagerLock = server?.NodeManagerLock;
-        if (nodeManagerLock == null)
+        var nodeManager = _nodeManager;
+        if (nodeManagerLock == null || nodeManager == null)
         {
             return ValueTask.CompletedTask;
         }
 
         var span = changes.Span;
+        var fireModelChangeEvents = _configuration.EnableStructureSynchronization;
+
+        ProcessStructuralChangesInline(span, nodeManager, fireModelChangeEvents);
+
         lock (nodeManagerLock)
         {
+            var skipped = 0;
             for (var i = 0; i < span.Length; i++)
             {
                 var change = span[i];
                 if (change.Property.TryGetPropertyData(OpcUaVariableKey, out var data) &&
-                    data is BaseDataVariableState node &&
-                    change.Property.TryGetRegisteredProperty() is { } registeredProperty)
+                    data is BaseDataVariableState node)
                 {
-                    var value = change.GetNewValue<object?>();
-                    var convertedValue = _configuration.ValueConverter
-                        .ConvertToNodeValue(value, registeredProperty);
+                    var registeredProperty = change.Property.TryGetRegisteredProperty();
+                    if (registeredProperty is not null)
+                    {
+                        var value = change.GetNewValue<object?>();
+                        var convertedValue = _configuration.ValueConverter
+                            .ConvertToNodeValue(value, registeredProperty);
 
-                    node.Value = convertedValue;
-                    node.Timestamp = change.ChangedTimestamp.UtcDateTime;
-                    node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
+                        node.Value = convertedValue;
+                        node.Timestamp = change.ChangedTimestamp.UtcDateTime;
+                        node.ClearChangeMasks(currentInstance.DefaultSystemContext, false);
+                    }
                 }
+                else
+                {
+                    var prop = change.Property.TryGetRegisteredProperty();
+                    if (prop is not null && !prop.CanContainSubjects)
+                    {
+                        skipped++;
+                    }
+                }
+            }
+
+            if (skipped > 0)
+            {
+                _logger.LogDebug("Skipped {Count} value changes (no OPC UA node found).", skipped);
             }
         }
 
         OutgoingThroughput.Add(span.Length);
         return ValueTask.CompletedTask;
+    }
+
+    private void ProcessStructuralChangesInline(
+        ReadOnlySpan<SubjectPropertyChange> changes,
+        CustomNodeManager nodeManager,
+        bool fireModelChangeEvents)
+    {
+        for (var i = 0; i < changes.Length; i++)
+        {
+            var change = changes[i];
+            var property = change.Property.TryGetRegisteredProperty();
+            if (property is null || !property.CanContainSubjects)
+            {
+                continue;
+            }
+
+            var oldSubjects = OpcUaStructuralChangeHelper.ExtractSubjects(change.GetOldValue<object?>());
+            var newSubjects = OpcUaStructuralChangeHelper.ExtractSubjects(change.GetNewValue<object?>());
+            var (added, removed) = OpcUaStructuralChangeHelper.ComputeSubjectDiff(oldSubjects, newSubjects);
+
+            foreach (var (subject, _) in removed)
+            {
+                NodeId? nodeId = null;
+                var nodeIdDataKey = nodeManager.SubjectNodeIdDataKey;
+                if (subject.TryGetData(nodeIdDataKey, out var obj) && obj is NodeId id)
+                {
+                    nodeId = id;
+                }
+                else
+                {
+                    var registered = subject.TryGetRegisteredSubject();
+                    if (registered is not null)
+                    {
+                        nodeManager.TryGetNodeId(registered, out nodeId);
+                    }
+                }
+
+                nodeManager.RemoveSubjectNodes(subject);
+                if (nodeId is not null && fireModelChangeEvents)
+                {
+                    nodeManager.FireModelChangeEvent(ModelChangeStructureVerbMask.NodeDeleted, nodeId);
+                }
+            }
+
+            foreach (var (subject, index) in added)
+            {
+                var lifecycleChange = new SubjectLifecycleChange
+                {
+                    Subject = subject,
+                    Property = property.Reference,
+                    Index = index,
+                    ReferenceCount = 0
+                };
+
+                var createdNode = nodeManager.CreateDynamicSubjectNodes(lifecycleChange);
+                if (createdNode is null)
+                {
+                    _logger.LogDebug("Structural add: node already exists for {Type} (likely created by AddNodes handler).", subject.GetType().Name);
+                }
+
+                if (createdNode is not null)
+                {
+                    nodeManager.ClearChangeMasksForSubject(subject);
+                    if (fireModelChangeEvents)
+                    {
+                        nodeManager.FireModelChangeEvent(ModelChangeStructureVerbMask.NodeAdded, createdNode.NodeId);
+                    }
+                }
+                else
+                {
+                    _logger.LogDebug("Structural add: node already exists for {Type} (likely created by AddNodes handler).", subject.GetType().Name);
+                }
+            }
+        }
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -202,9 +296,6 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
                 {
                     _server = server;
 
-                    // Create the ChangeQueueProcessor (and its subscription) BEFORE starting the server.
-                    // This ensures property changes during OPC UA node creation are captured in the queue
-                    // and not lost in the gap between node creation and processing start.
                     using var changeQueueProcessor = new ChangeQueueProcessor(
                         source: this, _context,
                         propertyFilter: IsPropertyIncluded, writeHandler: WriteChangesAsync,
@@ -217,7 +308,15 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
                     _consecutiveFailures = 0;
                     _lastError = null;
 
-                    await changeQueueProcessor.ProcessAsync(linkedToken);
+                    try
+                    {
+                        _nodeManager = server.GetNodeManager();
+                        await changeQueueProcessor.ProcessAsync(linkedToken);
+                    }
+                    finally
+                    {
+                        _nodeManager = null;
+                    }
                 }
                 finally
                 {
@@ -388,6 +487,11 @@ internal class OpcUaSubjectServer : BackgroundService, IOpcUaSubjectServer, ISub
 
     private void OnSubjectDetaching(SubjectLifecycleChange change)
     {
+        if (_configuration.EnableStructureSynchronization)
+        {
+            return;
+        }
+
         _server?.RemoveSubjectNodes(change.Subject);
     }
 }

@@ -220,6 +220,38 @@ public class OpcUaClientConfiguration
     public bool EnableReadAfterWrite { get; set; } = true;
 
     /// <summary>
+    /// Gets or sets a value indicating whether structural synchronization is enabled.
+    /// When true, the client subscribes to ModelChangeEvents and reconciles the local
+    /// subject graph when the server's address space changes.
+    /// Default is false.
+    /// </summary>
+    public bool EnableStructureSynchronization { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether remote node management is enabled.
+    /// When true, the client sends AddNodes/DeleteNodes requests to the server
+    /// when the local subject graph changes structurally (collection add/remove,
+    /// dictionary add/remove, reference set/clear).
+    /// Requires the server to also have AllowRemoteNodeManagement enabled.
+    /// Default is false.
+    /// </summary>
+    public bool EnableRemoteNodeManagement { get; set; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether periodic resynchronization is enabled.
+    /// When true, the client periodically re-browses the server to detect structural changes.
+    /// Default is false.
+    /// </summary>
+    public bool EnablePeriodicResynchronization { get; set; }
+
+    /// <summary>
+    /// Gets or sets the interval for periodic resynchronization.
+    /// Only used when <see cref="EnablePeriodicResynchronization"/> is true.
+    /// Default is 30 seconds.
+    /// </summary>
+    public TimeSpan PeriodicResynchronizationInterval { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>
     /// Gets or sets the base path for certificate stores.
     /// Default is "pki". Change this to isolate certificate stores for parallel test execution.
     /// </summary>

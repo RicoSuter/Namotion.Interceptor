@@ -144,15 +144,22 @@ public class CustomValueConverter : OpcUaValueConverter
 
 Both client and server configurations support overriding `CreateApplicationInstanceAsync()` for full control over OPC UA application settings (certificates, transport quotas, security policies). See [Client](connectors-opcua-client.md#custom-application-configuration) and [Server](connectors-opcua-server.md#custom-application-configuration) for side-specific examples.
 
-## Lifecycle Limitations
+## Structural Synchronization
 
-The OPC UA integration takes a snapshot of the object model at startup. Both client and server share these limitations:
+By default, the OPC UA integration takes a snapshot of the object model at startup. Subjects added or removed after initialization are not reflected in the OPC UA address space.
 
-- Does NOT dynamically add new subjects to OPC UA after initialization
-- Does NOT update the OPC UA address space when subjects are attached
-- New subjects added after startup require a restart to appear in OPC UA
+To enable runtime structural changes (adding/removing subjects in collections, dictionaries, and references), configure both sides:
 
-For side-specific cleanup behavior, see [Client Lifecycle](connectors-opcua-client.md#lifecycle) and [Server Lifecycle](connectors-opcua-server.md#lifecycle).
+- **Server:** Set `EnableStructureSynchronization = true` to fire `ModelChangeEvent`s when the address space changes. Set `AllowRemoteNodeManagement = true` to allow clients to add/remove nodes.
+- **Client:** Set `EnableStructureSynchronization = true` to subscribe to `ModelChangeEvent`s and reconcile the local model. Set `EnableRemoteNodeManagement = true` to send `AddNodes`/`DeleteNodes` to the server when local subjects change.
+
+Both sides require a `SubjectFactory` to create subject instances for incoming structural changes.
+
+For design details, see [Server Internal Design](connectors-opcua-server.md#internal-design) and [Client Internal Design](connectors-opcua-client.md#structural-change-processing).
+
+## Lifecycle
+
+For side-specific lifecycle and cleanup behavior, see [Client Lifecycle](connectors-opcua-client.md#lifecycle) and [Server Lifecycle](connectors-opcua-server.md#lifecycle).
 
 ## Performance
 

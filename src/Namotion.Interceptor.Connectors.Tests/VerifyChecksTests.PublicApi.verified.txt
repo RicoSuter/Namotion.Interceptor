@@ -14,6 +14,16 @@ namespace Namotion.Interceptor.Connectors
         public void Dispose() { }
         public System.Threading.Tasks.Task ProcessAsync(System.Threading.CancellationToken cancellationToken) { }
     }
+    public class ConnectorSubjectMap<TExternalId> : System.IDisposable
+        where TExternalId :  notnull
+    {
+        public ConnectorSubjectMap(Namotion.Interceptor.IInterceptorSubjectContext context) { }
+        public System.Collections.Generic.IEnumerable<TExternalId> ExternalIds { get; }
+        public void Add(TExternalId externalId, Namotion.Interceptor.IInterceptorSubject subject) { }
+        public void Dispose() { }
+        public bool Remove(TExternalId externalId) { }
+        public bool TryGetSubject(TExternalId externalId, out Namotion.Interceptor.IInterceptorSubject? subject) { }
+    }
     public class DefaultSubjectFactory : Namotion.Interceptor.Connectors.ISubjectFactory
     {
         public DefaultSubjectFactory() { }
@@ -90,6 +100,7 @@ namespace Namotion.Interceptor.Connectors
         public override void Dispose() { }
         protected override sealed System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
         public abstract System.Threading.Tasks.Task<System.Action?> LoadInitialStateAsync(System.Threading.CancellationToken cancellationToken);
+        protected virtual System.Threading.Tasks.Task OnChangeProcessorStartedAsync(System.Threading.CancellationToken cancellationToken) { }
         protected abstract System.Threading.Tasks.Task<System.IAsyncDisposable?> StartListeningAsync(Namotion.Interceptor.Connectors.SubjectPropertyWriter propertyWriter, System.Threading.CancellationToken cancellationToken);
         public abstract System.Threading.Tasks.ValueTask<Namotion.Interceptor.Connectors.WriteResult> WriteChangesAsync(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes, System.Threading.CancellationToken cancellationToken);
     }

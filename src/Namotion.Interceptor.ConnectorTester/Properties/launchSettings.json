@@ -1,28 +1,70 @@
 {
   "profiles": {
+    "opcua-structural-serveronly": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "opcua-structural-serveronly"
+      }
+    },
+    "opcua-structural-simple": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "opcua-structural-simple"
+      }
+    },
+    "opcua-structural": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "opcua-structural"
+      }
+    },
     "opcua-chaos": {
       "commandName": "Project",
-      "environmentVariables": { "DOTNET_ENVIRONMENT": "opcua-chaos" }
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "opcua-chaos"
+      }
     },
     "mqtt-chaos": {
       "commandName": "Project",
-      "environmentVariables": { "DOTNET_ENVIRONMENT": "mqtt-chaos" }
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "mqtt-chaos"
+      }
     },
     "websocket-chaos": {
       "commandName": "Project",
-      "environmentVariables": { "DOTNET_ENVIRONMENT": "websocket-chaos" }
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "websocket-chaos"
+      }
     },
     "opcua-load": {
       "commandName": "Project",
-      "environmentVariables": { "DOTNET_ENVIRONMENT": "opcua-load" }
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "opcua-load"
+      }
     },
     "mqtt-load": {
       "commandName": "Project",
-      "environmentVariables": { "DOTNET_ENVIRONMENT": "mqtt-load" }
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "mqtt-load"
+      }
     },
     "websocket-load": {
       "commandName": "Project",
-      "environmentVariables": { "DOTNET_ENVIRONMENT": "websocket-load" }
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "websocket-load"
+      }
+    },
+    "opcua-structural-slow": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "opcua-structural-slow"
+      }
+    },
+    "opcua-structural-clientonly": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "DOTNET_ENVIRONMENT": "opcua-structural-clientonly"
+      }
     }
   }
 }

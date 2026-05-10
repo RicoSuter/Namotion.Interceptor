@@ -155,6 +155,9 @@ if (!skipServer)
                         TelemetryContext = telemetryContext,
                         AutoAcceptUntrustedCertificates = true,
                         CleanCertificateStore = false,
+                        EnableStructureSynchronization = true,
+                        AllowRemoteNodeManagement = true,
+                        SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
                     };
                 });
             break;
@@ -251,6 +254,8 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
                         ValueConverter = new OpcUaValueConverter(),
                         SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
                         TelemetryContext = telemetryContext,
+                        EnableStructureSynchronization = true,
+                        EnableRemoteNodeManagement = true,
                     };
                 });
             break;

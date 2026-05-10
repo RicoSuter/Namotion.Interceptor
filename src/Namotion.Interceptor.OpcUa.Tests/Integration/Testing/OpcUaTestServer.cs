@@ -16,6 +16,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
     private const string DefaultBaseAddress = "opc.tcp://localhost:4840/";
 
     private readonly TestLogger _logger;
+    private readonly Action<OpcUaServerConfiguration>? _configureServer;
     private IHost? _host;
     private IInterceptorSubjectContext? _context;
     private Func<IInterceptorSubjectContext, TRoot>? _createRoot;
@@ -28,9 +29,10 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
 
     public IOpcUaSubjectServer? Server { get; private set; }
 
-    public OpcUaTestServer(TestLogger logger)
+    public OpcUaTestServer(TestLogger logger, Action<OpcUaServerConfiguration>? configureServer = null)
     {
         _logger = logger;
+        _configureServer = configureServer;
     }
 
     public Task StartAsync(
@@ -85,7 +87,7 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
                 var telemetryContext = DefaultTelemetry.Create(b =>
                     b.Services.AddSingleton(loggerFactory));
 
-                return new OpcUaServerConfiguration
+                var config = new OpcUaServerConfiguration
                 {
                     RootName = "Root",
                     BaseAddress = _baseAddress,
@@ -97,6 +99,11 @@ public class OpcUaTestServer<TRoot> : IAsyncDisposable
 
                     BufferTime = TimeSpan.FromMilliseconds(100)
                 };
+
+                // Allow tests to override configuration
+                _configureServer?.Invoke(config);
+
+                return config;
             });
 
         _host = builder.Build();

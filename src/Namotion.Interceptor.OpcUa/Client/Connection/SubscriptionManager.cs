@@ -28,6 +28,7 @@ internal class SubscriptionManager : IAsyncDisposable
     private readonly ConcurrentDictionary<Subscription, byte> _subscriptions = new();
 
     private volatile bool _shuttingDown; // Prevents new callbacks during cleanup
+    private volatile OpcUaClientIncomingEventProcessor? _incomingEventProcessor;
 
     /// <summary>
     /// Gets the current list of subscriptions (thread-safe collection).
@@ -72,6 +73,11 @@ internal class SubscriptionManager : IAsyncDisposable
         _readAfterWriteManager = readAfterWriteManager;
         _configuration = configuration;
         _logger = logger;
+    }
+
+    public void SetIncomingEventProcessor(OpcUaClientIncomingEventProcessor? processor)
+    {
+        _incomingEventProcessor = processor;
     }
 
     public async Task CreateBatchedSubscriptionsAsync(
@@ -163,6 +169,30 @@ internal class SubscriptionManager : IAsyncDisposable
         }
 
         var receivedTimestamp = DateTimeOffset.UtcNow;
+        var processor = _incomingEventProcessor;
+
+        if (processor is not null)
+        {
+            for (var i = 0; i < monitoredItemsCount; i++)
+            {
+                var item = notification.MonitoredItems[i];
+                if (_monitoredItems.TryGetValue(item.ClientHandle, out var property))
+                {
+                    processor.Enqueue(new IncomingEvent
+                    {
+                        Type = IncomingEventType.Value,
+                        Property = property,
+                        Value = _configuration.ValueConverter.ConvertToPropertyValue(item.Value.Value, property),
+                        ValueTimestamp = item.Value.SourceTimestamp,
+                        ValueReceivedTimestamp = receivedTimestamp
+                    });
+                }
+            }
+
+            _source.IncomingThroughput.Add(monitoredItemsCount);
+            return;
+        }
+
         var changes = ChangesPool.Rent();
 
         try
@@ -183,7 +213,6 @@ internal class SubscriptionManager : IAsyncDisposable
         }
         catch
         {
-            // Return pooled list on exception to prevent pool exhaustion
             changes.Clear();
             ChangesPool.Return(changes);
             throw;
@@ -193,8 +222,6 @@ internal class SubscriptionManager : IAsyncDisposable
         {
             _source.IncomingThroughput.Add(changes.Count);
 
-            // Pool item returned inside callback. Safe because ApplyUpdate never throws:
-            // It wraps callback execution in try-catch and only throws on catastrophic failures (lock/memory corruption).
             var state = (source: _source, subscription, receivedTimestamp, changes, logger: _logger);
             _propertyWriter.Write(state, static s =>
             {
@@ -218,6 +245,102 @@ internal class SubscriptionManager : IAsyncDisposable
         else
         {
             ChangesPool.Return(changes);
+        }
+    }
+
+    /// <summary>
+    /// Adds monitored items to existing subscriptions (incremental, for reconciliation).
+    /// Items are appended to the last subscription that has capacity, or a new subscription is created.
+    /// </summary>
+    public async Task AddMonitoredItemsAsync(
+        IReadOnlyList<MonitoredItem> monitoredItems,
+        Session session,
+        CancellationToken cancellationToken)
+    {
+        if (monitoredItems.Count == 0)
+        {
+            return;
+        }
+
+        var maximumItemsPerSubscription = _configuration.MaximumItemsPerSubscription;
+        var itemIndex = 0;
+
+        // Try to fill existing subscriptions first
+        foreach (var subscription in _subscriptions.Keys)
+        {
+            if (itemIndex >= monitoredItems.Count)
+            {
+                break;
+            }
+
+            var currentCount = (int)subscription.MonitoredItemCount;
+            var available = maximumItemsPerSubscription - currentCount;
+            if (available <= 0)
+            {
+                continue;
+            }
+
+            var added = false;
+            var batchEnd = Math.Min(itemIndex + available, monitoredItems.Count);
+            for (var j = itemIndex; j < batchEnd; j++)
+            {
+                var item = monitoredItems[j];
+                subscription.AddItem(item);
+                if (item.Handle is RegisteredSubjectProperty property)
+                {
+                    _monitoredItems[item.ClientHandle] = property;
+                }
+                added = true;
+            }
+
+            if (added)
+            {
+                await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
+                await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
+                itemIndex = batchEnd;
+            }
+        }
+
+        // Create new subscriptions for remaining items
+        while (itemIndex < monitoredItems.Count)
+        {
+            var subscription = new Subscription(session.DefaultSubscription)
+            {
+                PublishingEnabled = true,
+                PublishingInterval = _configuration.DefaultPublishingInterval,
+                DisableMonitoredItemCache = true,
+                MinLifetimeInterval = 60_000,
+                KeepAliveCount = _configuration.SubscriptionKeepAliveCount,
+                LifetimeCount = _configuration.SubscriptionLifetimeCount,
+                Priority = _configuration.SubscriptionPriority,
+                MaxNotificationsPerPublish = _configuration.SubscriptionMaximumNotificationsPerPublish,
+                RepublishAfterTransfer = true,
+                SequentialPublishing = _configuration.SubscriptionSequentialPublishing,
+            };
+
+            if (!session.AddSubscription(subscription))
+            {
+                throw new InvalidOperationException("Failed to add OPC UA subscription.");
+            }
+
+            subscription.FastDataChangeCallback += OnFastDataChange;
+            await subscription.CreateAsync(cancellationToken).ConfigureAwait(false);
+
+            var batchEnd = Math.Min(itemIndex + maximumItemsPerSubscription, monitoredItems.Count);
+            for (var j = itemIndex; j < batchEnd; j++)
+            {
+                var item = monitoredItems[j];
+                subscription.AddItem(item);
+                if (item.Handle is RegisteredSubjectProperty property)
+                {
+                    _monitoredItems[item.ClientHandle] = property;
+                }
+            }
+
+            await subscription.ApplyChangesAsync(cancellationToken).ConfigureAwait(false);
+            await FilterOutFailedMonitoredItemsAsync(subscription, cancellationToken).ConfigureAwait(false);
+            _subscriptions.TryAdd(subscription, 0);
+            itemIndex = batchEnd;
         }
     }
 

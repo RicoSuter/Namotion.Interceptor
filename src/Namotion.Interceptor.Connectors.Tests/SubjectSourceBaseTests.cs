@@ -21,6 +21,9 @@ public class SubjectSourceBaseTests
         subjectContextMock
             .Setup(s => s.TryGetService<ISubjectRegistry>())
             .Returns(new SubjectRegistry());
+        subjectContextMock
+            .Setup(s => s.TryGetService<Namotion.Interceptor.Tracking.Change.PropertyChangeQueue>())
+            .Returns(new Namotion.Interceptor.Tracking.Change.PropertyChangeQueue());
 
         var subjectMock = new Mock<IInterceptorSubject>();
         subjectMock
@@ -901,6 +904,9 @@ public class SubjectSourceBaseTests
         subjectContextMock
             .Setup(s => s.TryGetService<ISubjectRegistry>())
             .Returns(new SubjectRegistry());
+        subjectContextMock
+            .Setup(s => s.TryGetService<Namotion.Interceptor.Tracking.Change.PropertyChangeQueue>())
+            .Returns(new Namotion.Interceptor.Tracking.Change.PropertyChangeQueue());
 
         var subjectMock = new Mock<IInterceptorSubject>();
         subjectMock

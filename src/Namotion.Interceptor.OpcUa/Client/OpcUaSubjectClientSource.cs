@@ -16,6 +16,12 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 {
     private const int DefaultChunkSize = 512;
 
+    /// <summary>
+    /// Well-known key for storing the OPC UA NodeId in a subject's Data dictionary.
+    /// Used by the reconciler and structure handler to look up which NodeId a subject represents.
+    /// </summary>
+    internal const string SubjectNodeIdDataKey = "OpcUa:SubjectNodeId";
+
     private readonly IInterceptorSubject _subject;
     private readonly ILogger _logger;
     private readonly SourceOwnershipManager _ownership;
@@ -27,10 +33,13 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     private volatile SessionManager? _sessionManager;
     private volatile SubjectPropertyWriter? _propertyWriter;
     private OutboundWriter? _writer;
+    private OpcUaClientIncomingEventProcessor? _incomingProcessor;
+    private Task? _incomingProcessorTask;
+    private OpcUaModelChangeEventHandler? _modelChangeHandler;
 
     private readonly SemaphoreSlim _structureLock = new(1, 1);
-    private volatile CancellationTokenSource? _reconnectCts; // Cancelled by KillAsync to abort in-flight reconnection
-    private int _disposed; // 0 = false, 1 = true (thread-safe via Interlocked)
+    private volatile CancellationTokenSource? _reconnectCts;
+    private int _disposed;
 
     private volatile bool _isStarted;
     private long _reconnectStartedTimestamp; // 0 = not reconnecting, otherwise Stopwatch timestamp when reconnection started (for stall detection)
@@ -96,6 +105,13 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     private void OnSubjectDetaching(IInterceptorSubject subject)
     {
         RemoveItemsForSubject(subject);
+
+        if (_incomingProcessor is not null &&
+            subject.TryGetData(SubjectNodeIdDataKey, out var nodeIdObj) &&
+            nodeIdObj is NodeId nodeId)
+        {
+            _incomingProcessor.RemoveEcho(nodeId);
+        }
     }
 
     /// <inheritdoc />
@@ -118,32 +134,6 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
             ReconnectionMetrics.RecordInitialConnection();
             _logger.LogInformation("Connected to OPC UA server successfully.");
-
-            await _structureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
-            try
-            {
-                var rootNode = await TryGetRootNodeAsync(session, cancellationToken).ConfigureAwait(false);
-                if (rootNode is not null)
-                {
-                    var monitoredItems = await _subjectLoader.LoadSubjectAsync(_subject, rootNode, session, cancellationToken).ConfigureAwait(false);
-                    if (monitoredItems.Count > 0)
-                    {
-                        await _sessionManager.CreateSubscriptionsAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        _logger.LogWarning("No OPC UA monitored items found.");
-                    }
-                }
-                else
-                {
-                    _logger.LogWarning("Connected to OPC UA server successfully but could not find root node.");
-                }
-            }
-            finally
-            {
-                _structureLock.Release();
-            }
 
             _isStarted = true;
             Volatile.Write(ref _lastError, null);
@@ -186,16 +176,70 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
     /// <inheritdoc />
     public override async Task<Action?> LoadInitialStateAsync(CancellationToken cancellationToken)
     {
+        var sessionManager = _sessionManager;
+        var session = sessionManager?.CurrentSession;
+        if (session is null || sessionManager is null)
+        {
+            throw new InvalidOperationException("No active OPC UA session available.");
+        }
+
+        await _structureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var rootNode = await TryGetRootNodeAsync((Session)session, cancellationToken).ConfigureAwait(false);
+            if (rootNode is not null)
+            {
+                var monitoredItems = await _subjectLoader.LoadSubjectAsync(_subject, rootNode, session, cancellationToken).ConfigureAwait(false);
+                if (monitoredItems.Count > 0)
+                {
+                    await sessionManager.CreateSubscriptionsAsync(monitoredItems, (Session)session, cancellationToken).ConfigureAwait(false);
+                }
+                else
+                {
+                    _logger.LogWarning("No OPC UA monitored items found.");
+                }
+
+                if (_configuration.EnableStructureSynchronization)
+                {
+                    _incomingProcessor = new OpcUaClientIncomingEventProcessor(
+                        _subjectLoader, this, _configuration, _logger);
+                    _incomingProcessor.SetSession((Session)session, sessionManager.SubscriptionManager);
+                    _incomingProcessor.PopulateSubjectMap(_subject);
+                    sessionManager.SubscriptionManager.SetIncomingEventProcessor(_incomingProcessor);
+
+                    _modelChangeHandler = new OpcUaModelChangeEventHandler(
+                        (verb, nodeId, _) =>
+                        {
+                            var eventType = verb == ModelChangeStructureVerbMask.NodeAdded
+                                ? IncomingEventType.StructuralAdd
+                                : IncomingEventType.StructuralRemove;
+                            _incomingProcessor.Enqueue(new IncomingEvent
+                            {
+                                Type = eventType,
+                                AffectedNodeId = nodeId
+                            });
+                            return Task.CompletedTask;
+                        },
+                        _logger);
+                    await _modelChangeHandler.SubscribeAsync((Session)session, cancellationToken).ConfigureAwait(false);
+
+                    _incomingProcessorTask = _incomingProcessor.RunAsync(cancellationToken);
+                }
+            }
+            else
+            {
+                _logger.LogWarning("Connected to OPC UA server successfully but could not find root node.");
+            }
+        }
+        finally
+        {
+            _structureLock.Release();
+        }
+
         var ownedProperties = GetOwnedPropertiesWithNodeIds();
         if (ownedProperties.Count == 0)
         {
             return null;
-        }
-
-        var session = _sessionManager?.CurrentSession;
-        if (session is null)
-        {
-            throw new InvalidOperationException("No active OPC UA session available.");
         }
 
         var itemCount = ownedProperties.Count;
@@ -460,6 +504,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
             // Clear all read-after-write state - new session means old pending reads and registrations are invalid
             sessionManager.ReadAfterWriteManager?.ClearAll();
+            _incomingProcessor?.ClearEchoes();
 
             _logger.LogInformation(
                 "New OPC UA session created successfully (id={SessionId}, connected={Connected}).",
@@ -483,6 +528,33 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             finally
             {
                 _structureLock.Release();
+            }
+
+            if (_incomingProcessor is not null)
+            {
+                _incomingProcessor.SetSession(session, sessionManager.SubscriptionManager);
+                sessionManager.SubscriptionManager.SetIncomingEventProcessor(_incomingProcessor);
+
+                if (_modelChangeHandler is not null)
+                {
+                    await _modelChangeHandler.DisposeAsync().ConfigureAwait(false);
+                }
+
+                _modelChangeHandler = new OpcUaModelChangeEventHandler(
+                    (verb, nodeId, _) =>
+                    {
+                        var eventType = verb == ModelChangeStructureVerbMask.NodeAdded
+                            ? IncomingEventType.StructuralAdd
+                            : IncomingEventType.StructuralRemove;
+                        _incomingProcessor.Enqueue(new IncomingEvent
+                        {
+                            Type = eventType,
+                            AffectedNodeId = nodeId
+                        });
+                        return Task.CompletedTask;
+                    },
+                    _logger);
+                await _modelChangeHandler.SubscribeAsync(session, token).ConfigureAwait(false);
             }
 
             await propertyWriter.LoadInitialStateAndResumeAsync(token).ConfigureAwait(false);
@@ -537,6 +609,104 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
         };
     }
 
+    protected override async Task OnChangeProcessorStartedAsync(CancellationToken cancellationToken)
+    {
+        var processor = _incomingProcessor;
+        if (processor is null)
+        {
+            return;
+        }
+
+        var session = _sessionManager?.CurrentSession;
+        if (session is null || !session.Connected)
+        {
+            return;
+        }
+
+        var reconciled = 0;
+        var visited = new HashSet<IInterceptorSubject>(System.Collections.Generic.ReferenceEqualityComparer.Instance);
+        await ReconcileSubjectAsync(_subject, session, processor, visited, cancellationToken).ConfigureAwait(false);
+
+        async Task ReconcileSubjectAsync(
+            IInterceptorSubject subject,
+            ISession currentSession,
+            OpcUaClientIncomingEventProcessor proc,
+            HashSet<IInterceptorSubject> visitedSet,
+            CancellationToken ct)
+        {
+            if (!visitedSet.Add(subject))
+            {
+                return;
+            }
+
+            var registered = subject.TryGetRegisteredSubject();
+            if (registered is null)
+            {
+                return;
+            }
+
+            foreach (var property in registered.Properties)
+            {
+                if (!property.CanContainSubjects)
+                {
+                    continue;
+                }
+
+                if (!property.Reference.TryGetPropertyData(OpcUaNodeIdKey, out _) &&
+                    !property.Reference.TryGetSource(out _))
+                {
+                    continue;
+                }
+
+                foreach (var child in property.Children)
+                {
+                    if (child.Subject is null)
+                    {
+                        continue;
+                    }
+
+                    if (!child.Subject.TryGetData(SubjectNodeIdDataKey, out _))
+                    {
+                        var addedNodeId = await SendAddNodesToServerAsync(
+                            child.Subject, property, child.Index, currentSession, ct).ConfigureAwait(false);
+                        if (addedNodeId is not null)
+                        {
+                            proc.AddEcho(addedNodeId);
+                            proc.SubjectMap.Add(addedNodeId, child.Subject);
+
+                            var refDescription = new ReferenceDescription
+                            {
+                                NodeId = new ExpandedNodeId(addedNodeId),
+                                BrowseName = new QualifiedName(
+                                    addedNodeId.Identifier?.ToString() ?? "", addedNodeId.NamespaceIndex),
+                                NodeClass = NodeClass.Object
+                            };
+
+                            var monitoredItems = await _subjectLoader.LoadSubjectAsync(
+                                child.Subject, refDescription, currentSession, proc.SubjectMap,
+                                ct).ConfigureAwait(false);
+
+                            if (monitoredItems.Count > 0 && _sessionManager?.SubscriptionManager is { } sm)
+                            {
+                                await sm.AddMonitoredItemsAsync(
+                                    monitoredItems, (Session)currentSession, ct).ConfigureAwait(false);
+                            }
+
+                            reconciled++;
+                        }
+                    }
+
+                    await ReconcileSubjectAsync(child.Subject, currentSession, proc, visitedSet, ct).ConfigureAwait(false);
+                }
+            }
+        }
+
+        if (reconciled > 0)
+        {
+            _logger.LogInformation("Post-load reconciliation: sent AddNodes for {Count} locally-created subjects.", reconciled);
+        }
+    }
+
     public override async ValueTask<WriteResult> WriteChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
     {
         if (_writer is null)
@@ -544,7 +714,198 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             return WriteResult.Failure(changes, new InvalidOperationException("OPC UA client not started."));
         }
 
+        await ProcessOutgoingStructuralChangesAsync(changes, cancellationToken).ConfigureAwait(false);
+
         return await _writer.WriteChangesAsync(changes, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task ProcessOutgoingStructuralChangesAsync(ReadOnlyMemory<SubjectPropertyChange> changes, CancellationToken cancellationToken)
+    {
+        var processor = _incomingProcessor;
+        if (processor is null)
+        {
+            return;
+        }
+
+        var session = _sessionManager?.CurrentSession;
+        if (session is null || !session.Connected)
+        {
+            return;
+        }
+
+        for (var i = 0; i < changes.Length; i++)
+        {
+            var change = changes.Span[i];
+            var property = change.Property.TryGetRegisteredProperty();
+            if (property is null || !property.CanContainSubjects)
+            {
+                continue;
+            }
+
+            var oldSubjects = OpcUaStructuralChangeHelper.ExtractSubjects(change.GetOldValue<object?>());
+            var newSubjects = OpcUaStructuralChangeHelper.ExtractSubjects(change.GetNewValue<object?>());
+            var (added, removed) = OpcUaStructuralChangeHelper.ComputeSubjectDiff(oldSubjects, newSubjects);
+
+            foreach (var (subject, _) in removed)
+            {
+                NodeId? nodeId = null;
+                if (subject.TryGetData(SubjectNodeIdDataKey, out var obj) && obj is NodeId id)
+                {
+                    nodeId = id;
+                }
+
+                if (nodeId is not null)
+                {
+                    await SendDeleteNodesToServerAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
+                    processor.AddEcho(nodeId);
+                }
+            }
+
+            foreach (var (subject, index) in added)
+            {
+                var addedNodeId = await SendAddNodesToServerAsync(
+                    subject, property, index, session, cancellationToken).ConfigureAwait(false);
+                if (addedNodeId is not null)
+                {
+                    processor.AddEcho(addedNodeId);
+                    processor.SubjectMap.Add(addedNodeId, subject);
+
+                    var refDescription = new ReferenceDescription
+                    {
+                        NodeId = new ExpandedNodeId(addedNodeId),
+                        BrowseName = new QualifiedName(
+                            addedNodeId.Identifier?.ToString() ?? "", addedNodeId.NamespaceIndex),
+                        NodeClass = NodeClass.Object
+                    };
+
+                    var monitoredItems = await _subjectLoader.LoadSubjectAsync(
+                        subject, refDescription, session, processor.SubjectMap,
+                        cancellationToken).ConfigureAwait(false);
+
+                    if (monitoredItems.Count > 0 && _sessionManager?.SubscriptionManager is { } subscriptionManager)
+                    {
+                        await subscriptionManager.AddMonitoredItemsAsync(
+                            monitoredItems, (Session)session, cancellationToken).ConfigureAwait(false);
+                    }
+                }
+            }
+        }
+    }
+
+    private async Task<NodeId?> SendAddNodesToServerAsync(
+        IInterceptorSubject subject,
+        RegisteredSubjectProperty property,
+        object? index,
+        ISession session,
+        CancellationToken cancellationToken)
+    {
+        var parentSubject = property.Subject;
+        if (!parentSubject.TryGetData(SubjectNodeIdDataKey, out var parentNodeIdObj) ||
+            parentNodeIdObj is not NodeId parentNodeId)
+        {
+            return null;
+        }
+
+        var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
+        if (propertyName is null)
+        {
+            return null;
+        }
+
+        var namespaceIndex = GetNamespaceIndex(session);
+        NodeId containerNodeId;
+        QualifiedName browseName;
+
+        if (property.IsSubjectCollection || property.IsSubjectDictionary)
+        {
+            var parentPath = parentNodeId.Identifier is string stringId ? stringId : "";
+            var containerPath = string.IsNullOrEmpty(parentPath)
+                ? propertyName
+                : parentPath + "." + propertyName;
+            containerNodeId = new NodeId(containerPath, namespaceIndex);
+
+            browseName = property.IsSubjectCollection
+                ? new QualifiedName($"{propertyName}[{index}]", namespaceIndex)
+                : new QualifiedName(index?.ToString() ?? "", namespaceIndex);
+        }
+        else
+        {
+            containerNodeId = parentNodeId;
+            browseName = new QualifiedName(propertyName, namespaceIndex);
+        }
+
+        try
+        {
+            var response = await session.AddNodesAsync(
+                requestHeader: null,
+                [new AddNodesItem
+                {
+                    ParentNodeId = new ExpandedNodeId(containerNodeId),
+                    ReferenceTypeId = ReferenceTypeIds.HasComponent,
+                    RequestedNewNodeId = ExpandedNodeId.Null,
+                    BrowseName = browseName,
+                    NodeClass = NodeClass.Object,
+                    NodeAttributes = new ExtensionObject(new ObjectAttributes
+                    {
+                        DisplayName = new LocalizedText(browseName.Name),
+                        Description = LocalizedText.Null,
+                        WriteMask = 0,
+                        UserWriteMask = 0,
+                        EventNotifier = 0
+                    }),
+                    TypeDefinition = new ExpandedNodeId(ObjectTypeIds.BaseObjectType)
+                }],
+                cancellationToken).ConfigureAwait(false);
+
+            if (response.Results.Count > 0 && StatusCode.IsGood(response.Results[0].StatusCode))
+            {
+                var nodeId = ExpandedNodeId.ToNodeId(response.Results[0].AddedNodeId, session.NamespaceUris);
+                if (nodeId is not null)
+                {
+                    subject.SetData(SubjectNodeIdDataKey, nodeId);
+                    return nodeId;
+                }
+            }
+        }
+        catch (ServiceResultException ex) when (
+            ex.StatusCode == StatusCodes.BadNotSupported ||
+            ex.StatusCode == StatusCodes.BadServiceUnsupported)
+        {
+            _logger.LogWarning("Server does not support AddNodes service.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send AddNodes for property {PropertyName}.", propertyName);
+        }
+
+        return null;
+    }
+
+    private async Task SendDeleteNodesToServerAsync(NodeId nodeId, ISession session, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await session.DeleteNodesAsync(
+                requestHeader: null,
+                [new DeleteNodesItem { NodeId = nodeId, DeleteTargetReferences = true }],
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (ServiceResultException ex) when (
+            ex.StatusCode == StatusCodes.BadNotSupported ||
+            ex.StatusCode == StatusCodes.BadServiceUnsupported)
+        {
+            _logger.LogWarning("Server does not support DeleteNodes service.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send DeleteNodes for NodeId {NodeId}.", nodeId);
+        }
+    }
+
+    private static ushort GetNamespaceIndex(ISession session)
+    {
+        var index = session.NamespaceUris.GetIndex("http://namotion.com/Interceptor/");
+        return index >= 0 ? (ushort)index : (ushort)0;
     }
 
     internal void OnCurrentSessionChanged(ISession? previousSession, ISession? currentSession)
@@ -689,6 +1050,24 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             return; // Already disposed
         }
 
+        if (_modelChangeHandler is not null)
+        {
+            await _modelChangeHandler.DisposeAsync().ConfigureAwait(false);
+            _modelChangeHandler = null;
+        }
+
+        if (_incomingProcessor is not null)
+        {
+            await _incomingProcessor.DisposeAsync().ConfigureAwait(false);
+            if (_incomingProcessorTask is not null)
+            {
+                try { await _incomingProcessorTask.ConfigureAwait(false); }
+                catch (OperationCanceledException) { }
+            }
+            _incomingProcessor = null;
+            _incomingProcessorTask = null;
+        }
+
         var sessionManager = _sessionManager;
         if (sessionManager is not null)
         {
@@ -696,9 +1075,6 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             _sessionManager = null;
         }
 
-        // Clean up property data to prevent memory leaks
-        // This ensures that property data associated with this OpcUaNodeIdKey is cleared
-        // even if properties are reused across multiple source instances
         CleanupPropertyData();
         _ownership.Dispose();
         Dispose();

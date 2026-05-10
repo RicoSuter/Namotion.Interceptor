@@ -7,6 +7,7 @@ namespace Namotion.Interceptor.OpcUa.Server;
 internal class OpcUaStandardServer : StandardServer
 {
     private readonly ILogger _logger;
+    private readonly OpcUaServerConfiguration _configuration;
     private readonly CustomNodeManagerFactory _nodeManagerFactory;
 
     private IServerInternal? _server;
@@ -17,6 +18,7 @@ internal class OpcUaStandardServer : StandardServer
     public OpcUaStandardServer(IInterceptorSubject subject, OpcUaSubjectServer source, OpcUaServerConfiguration configuration, ILogger logger)
     {
         _logger = logger;
+        _configuration = configuration;
         _nodeManagerFactory = new CustomNodeManagerFactory(subject, source, configuration, logger);
         AddNodeManager(_nodeManagerFactory);
     }
@@ -69,6 +71,11 @@ internal class OpcUaStandardServer : StandardServer
     }
 
     /// <summary>
+    /// Gets the custom node manager instance, or null if the server hasn't been started yet.
+    /// </summary>
+    internal CustomNodeManager? GetNodeManager() => _nodeManagerFactory.NodeManager;
+
+    /// <summary>
     /// Gets the node manager's lock object for thread-safe node updates.
     /// This is the same lock used by the SDK for Read/Write operations.
     /// </summary>
@@ -82,6 +89,183 @@ internal class OpcUaStandardServer : StandardServer
     public void RemoveSubjectNodes(IInterceptorSubject subject)
     {
         _nodeManagerFactory.NodeManager?.RemoveSubjectNodes(subject);
+    }
+
+    /// <summary>
+    /// Handles AddNodes requests from OPC UA clients.
+    /// When AllowRemoteNodeManagement is enabled, delegates to the CustomNodeManager
+    /// to create subjects in the local model and OPC UA nodes.
+    /// </summary>
+    public override async Task<AddNodesResponse> AddNodesAsync(
+        SecureChannelContext secureChannelContext,
+        RequestHeader requestHeader,
+        AddNodesItemCollection nodesToAdd,
+        CancellationToken cancellationToken)
+    {
+        if (!_configuration.AllowRemoteNodeManagement)
+        {
+            return await base.AddNodesAsync(secureChannelContext, requestHeader, nodesToAdd, cancellationToken).ConfigureAwait(false);
+        }
+
+        var nodeManager = GetNodeManager();
+        if (nodeManager is null)
+        {
+            return await base.AddNodesAsync(secureChannelContext, requestHeader, nodesToAdd, cancellationToken).ConfigureAwait(false);
+        }
+
+        var nodeManagerLock = NodeManagerLock;
+        if (nodeManagerLock is null)
+        {
+            return await base.AddNodesAsync(secureChannelContext, requestHeader, nodesToAdd, cancellationToken).ConfigureAwait(false);
+        }
+
+        var results = new AddNodesResultCollection(nodesToAdd.Count);
+        var diagnosticInfos = new DiagnosticInfoCollection(nodesToAdd.Count);
+
+        lock (nodeManagerLock)
+        {
+            foreach (var item in nodesToAdd)
+            {
+                try
+                {
+                    // Check if the parent is a container folder (collection/dictionary)
+                    var parentNodeId = ExpandedNodeId.ToNodeId(item.ParentNodeId, CurrentInstance.NamespaceUris);
+                    if (parentNodeId is not null)
+                    {
+                        var (containerOwner, containerProperty) = nodeManager.FindContainerOwner(parentNodeId);
+                        if (containerOwner is not null && containerProperty is not null)
+                        {
+                            // Parent is a container folder. The browse name is the key/index.
+                            // We need to pass through to HandleRemoteAddNode which will
+                            // find the right property using FindPropertyForBrowseName on the container owner.
+                            var containerItem = new AddNodesItem
+                            {
+                                ParentNodeId = item.ParentNodeId,
+                                ReferenceTypeId = item.ReferenceTypeId,
+                                RequestedNewNodeId = item.RequestedNewNodeId,
+                                BrowseName = item.BrowseName,
+                                NodeClass = item.NodeClass,
+                                NodeAttributes = item.NodeAttributes,
+                                TypeDefinition = item.TypeDefinition
+                            };
+
+                            // Temporarily change the ParentNodeId to the owner subject's NodeId
+                            // so HandleRemoteAddNode can find the right parent subject
+                            // But actually, for dictionaries the parent in the AddNodes call IS
+                            // the container folder, and we need to resolve to the parent subject.
+                            // The FindPropertyForBrowseName on the containerOwner will match
+                            // the dictionary property with browseNameStr as key.
+
+                            // Create a modified item with the parent set to the container owner
+                            var ownerNodeId = nodeManager.TryGetNodeIdForSubject(containerOwner);
+                            if (ownerNodeId is not null)
+                            {
+                                containerItem.ParentNodeId = new ExpandedNodeId(ownerNodeId);
+                            }
+
+                            results.Add(nodeManager.HandleRemoteAddNode(containerItem));
+                        }
+                        else
+                        {
+                            results.Add(nodeManager.HandleRemoteAddNode(item));
+                        }
+                    }
+                    else
+                    {
+                        results.Add(nodeManager.HandleRemoteAddNode(item));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing AddNodes request for browse name '{BrowseName}'.", item.BrowseName);
+                    results.Add(new AddNodesResult
+                    {
+                        StatusCode = StatusCodes.BadInternalError,
+                        AddedNodeId = NodeId.Null
+                    });
+                }
+
+                diagnosticInfos.Add(null);
+            }
+        }
+
+        var response = new AddNodesResponse
+        {
+            ResponseHeader = CreateResponseHeader(requestHeader, StatusCodes.Good),
+            Results = results,
+            DiagnosticInfos = diagnosticInfos
+        };
+
+        return response;
+    }
+
+    /// <summary>
+    /// Handles DeleteNodes requests from OPC UA clients.
+    /// When AllowRemoteNodeManagement is enabled, delegates to the CustomNodeManager
+    /// to remove subjects from the local model and clean up OPC UA nodes.
+    /// </summary>
+    public override async Task<DeleteNodesResponse> DeleteNodesAsync(
+        SecureChannelContext secureChannelContext,
+        RequestHeader requestHeader,
+        DeleteNodesItemCollection nodesToDelete,
+        CancellationToken cancellationToken)
+    {
+        if (!_configuration.AllowRemoteNodeManagement)
+        {
+            return await base.DeleteNodesAsync(secureChannelContext, requestHeader, nodesToDelete, cancellationToken).ConfigureAwait(false);
+        }
+
+        var nodeManager = GetNodeManager();
+        if (nodeManager is null)
+        {
+            return await base.DeleteNodesAsync(secureChannelContext, requestHeader, nodesToDelete, cancellationToken).ConfigureAwait(false);
+        }
+
+        var nodeManagerLock = NodeManagerLock;
+        if (nodeManagerLock is null)
+        {
+            return await base.DeleteNodesAsync(secureChannelContext, requestHeader, nodesToDelete, cancellationToken).ConfigureAwait(false);
+        }
+
+        var results = new StatusCodeCollection(nodesToDelete.Count);
+        var diagnosticInfos = new DiagnosticInfoCollection(nodesToDelete.Count);
+
+        lock (nodeManagerLock)
+        {
+            foreach (var item in nodesToDelete)
+            {
+                try
+                {
+                    results.Add(nodeManager.HandleRemoteDeleteNode(item));
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error processing DeleteNodes request for NodeId '{NodeId}'.", item.NodeId);
+                    results.Add(StatusCodes.BadInternalError);
+                }
+
+                diagnosticInfos.Add(null);
+            }
+        }
+
+        var response = new DeleteNodesResponse
+        {
+            ResponseHeader = CreateResponseHeader(requestHeader, StatusCodes.Good),
+            Results = results,
+            DiagnosticInfos = diagnosticInfos
+        };
+
+        return response;
+    }
+
+    private static ResponseHeader CreateResponseHeader(RequestHeader requestHeader, StatusCode statusCode)
+    {
+        return new ResponseHeader
+        {
+            Timestamp = DateTime.UtcNow,
+            RequestHandle = requestHeader?.RequestHandle ?? 0,
+            ServiceResult = statusCode
+        };
     }
 
     protected override void OnServerStarted(IServerInternal server)

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Runtime;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Logging;
@@ -231,31 +232,50 @@ public class VerificationEngine : BackgroundService
 
     private static string CreateSnapshot(TestNode root)
     {
-        var update = SubjectUpdate.CreateCompleteUpdate(root, []);
+        var entries = new SortedDictionary<string, JsonObject>(StringComparer.Ordinal);
+        VisitNodeForSnapshot(root, "ROOT", entries, []);
+        return JsonSerializer.Serialize(entries, SnapshotJsonOptions);
+    }
 
-        // Strip timestamps from structural properties (Collection, Dictionary, Object).
-        // These are set during local graph creation and are inherently different per participant.
-        // Value property timestamps ARE compared and must converge via source timestamps.
-        if (update.Subjects != null)
+    private static void VisitNodeForSnapshot(TestNode node, string path,
+        SortedDictionary<string, JsonObject> entries, HashSet<TestNode> visited)
+    {
+        if (!visited.Add(node))
         {
-            foreach (var subject in update.Subjects.Values)
-            {
-                if (subject == null)
-                {
-                    continue;
-                }
+            return;
+        }
 
-                foreach (var property in subject.Values)
-                {
-                    if (property.Kind != SubjectPropertyUpdateKind.Value)
-                    {
-                        property.Timestamp = null;
-                    }
-                }
+        entries[path] = new JsonObject
+        {
+            ["StringValue"] = node.StringValue,
+            ["DecimalValue"] = node.DecimalValue,
+            ["IntValue"] = node.IntValue,
+            ["LongValue"] = node.LongValue
+        };
+
+        var collection = node.Collection;
+        if (collection is not null)
+        {
+            for (var i = 0; i < collection.Length; i++)
+            {
+                VisitNodeForSnapshot(collection[i], $"{path}/Collection[{i}]", entries, visited);
             }
         }
 
-        return JsonSerializer.Serialize(update, SnapshotJsonOptions);
+        var items = node.Items;
+        if (items is not null)
+        {
+            foreach (var (key, child) in items.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
+            {
+                VisitNodeForSnapshot(child, $"{path}/Items[{key}]", entries, visited);
+            }
+        }
+
+        var objectRef = node.ObjectRef;
+        if (objectRef is not null)
+        {
+            VisitNodeForSnapshot(objectRef, $"{path}/ObjectRef", entries, visited);
+        }
     }
 
     private void WriteStatistics(TimeSpan cycleDuration, TimeSpan convergeDuration, string result)
