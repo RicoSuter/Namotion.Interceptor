@@ -36,6 +36,63 @@ public static class SnapshotComparer
         return node.ToJsonString(CompactJsonOptions);
     }
 
+    /// <summary>
+    /// Compares two normalized snapshots produced by <see cref="Capture"/>.
+    /// Falls back from string equality to a JSON-walking comparison that respects the
+    /// architectural null-timestamp contract (see SubjectChangeContext NullTimestampTicks):
+    /// a null timestamp on either side matches any timestamp value. All other fields
+    /// compare by strict JSON equality.
+    /// </summary>
+    public static bool SnapshotsMatch(string snapshotA, string snapshotB)
+    {
+        if (snapshotA == snapshotB)
+        {
+            return true;
+        }
+
+        var subjectsA = JsonNode.Parse(snapshotA)?["subjects"]?.AsObject();
+        var subjectsB = JsonNode.Parse(snapshotB)?["subjects"]?.AsObject();
+
+        if (subjectsA is null || subjectsB is null)
+        {
+            return subjectsA is null && subjectsB is null;
+        }
+
+        if (subjectsA.Count != subjectsB.Count)
+        {
+            return false;
+        }
+
+        foreach (var (subjectId, subjectNodeA) in subjectsA)
+        {
+            if (subjectsB[subjectId] is not JsonObject propertiesB)
+            {
+                return false;
+            }
+
+            var propertiesA = subjectNodeA!.AsObject();
+            if (propertiesA.Count != propertiesB.Count)
+            {
+                return false;
+            }
+
+            foreach (var (propertyName, propertyNodeA) in propertiesA)
+            {
+                if (propertiesB[propertyName] is not JsonObject propertyB)
+                {
+                    return false;
+                }
+
+                if (!PropertiesMatch(propertyNodeA!.AsObject(), propertyB))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
     private static void Normalize(JsonObject root)
     {
         var rawRootId = root["root"]?.GetValue<string>();
@@ -223,5 +280,49 @@ public static class SnapshotComparer
         }
 
         root["subjects"] = sorted;
+    }
+
+    private static bool PropertiesMatch(JsonObject propertyA, JsonObject propertyB)
+    {
+        var keys = new HashSet<string>(propertyA.Select(kvp => kvp.Key));
+        keys.UnionWith(propertyB.Select(kvp => kvp.Key));
+
+        foreach (var key in keys)
+        {
+            var valueA = propertyA[key];
+            var valueB = propertyB[key];
+
+            if (key == "timestamp")
+            {
+                // Architectural null-timestamp rule: null on either side is a legitimate
+                // "no explicit write timestamp" state and matches any value. Only fail
+                // when both sides are non-null and unequal.
+                if (valueA is not null && valueB is not null && !JsonValuesEqual(valueA, valueB))
+                {
+                    return false;
+                }
+            }
+            else if (!JsonValuesEqual(valueA, valueB))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool JsonValuesEqual(JsonNode? a, JsonNode? b)
+    {
+        if (a is null && b is null)
+        {
+            return true;
+        }
+
+        if (a is null || b is null)
+        {
+            return false;
+        }
+
+        return a.ToJsonString() == b.ToJsonString();
     }
 }
