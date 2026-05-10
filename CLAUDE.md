@@ -132,6 +132,7 @@ The library has specialized support for:
 
 - **Naming**: `When<Condition>_Then<ExpectedBehavior>` (e.g., `WhenDepthIsZero_ThenReturnsNoChildren`)
 - **Structure**: Explicit `// Arrange`, `// Act`, `// Assert` comments separating each phase (use `// Act & Assert` for exception tests)
+- **No hardcoded waits**: Use `AsyncTestHelpers.WaitUntilAsync(() => condition)` or event-based synchronization (`ManualResetEventSlim`, `CountdownEvent`) instead of `Task.Delay`/`Thread.Sleep`. Hardcoded delays are either too long (slow CI) or too short (flaky CI).
 
 ## Public API Tracking
 

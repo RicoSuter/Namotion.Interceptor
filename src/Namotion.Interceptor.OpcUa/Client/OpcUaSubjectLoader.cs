@@ -36,7 +36,8 @@ internal class OpcUaSubjectLoader
     {
         var monitoredItems = new List<MonitoredItem>();
         var loadedSubjects = new HashSet<IInterceptorSubject>();
-        await LoadSubjectAsync(subject, node, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
+        var subjectsByNodeId = new Dictionary<NodeId, IInterceptorSubject>();
+        await LoadSubjectAsync(subject, node, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
         return monitoredItems;
     }
 
@@ -45,6 +46,7 @@ internal class OpcUaSubjectLoader
         ISession session,
         List<MonitoredItem> monitoredItems,
         HashSet<IInterceptorSubject> loadedSubjects,
+        Dictionary<NodeId, IInterceptorSubject> subjectsByNodeId,
         CancellationToken cancellationToken)
     {
         if (!loadedSubjects.Add(subject))
@@ -127,16 +129,16 @@ internal class OpcUaSubjectLoader
                     }
                     else
                     {
-                        await LoadSubjectReferenceAsync(property, nodeReference, subject, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
+                        await LoadSubjectReferenceAsync(property, nodeReference, subject, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
                     }
                 }
                 else if (property.IsSubjectCollection)
                 {
-                    await LoadSubjectCollectionAsync(property, childNodeId, monitoredItems, session, loadedSubjects, cancellationToken).ConfigureAwait(false);
+                    await LoadSubjectCollectionAsync(property, childNodeId, monitoredItems, session, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
                 }
                 else if (property.IsSubjectDictionary)
                 {
-                    await LoadSubjectDictionaryAsync(property, childNodeId, monitoredItems, session, loadedSubjects, cancellationToken).ConfigureAwait(false);
+                    await LoadSubjectDictionaryAsync(property, childNodeId, monitoredItems, session, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
                 }
                 else
                 {
@@ -240,20 +242,34 @@ internal class OpcUaSubjectLoader
         ISession session,
         List<MonitoredItem> monitoredItems,
         HashSet<IInterceptorSubject> loadedSubjects,
+        Dictionary<NodeId, IInterceptorSubject> subjectsByNodeId,
         CancellationToken cancellationToken)
     {
         var existingSubject = property.Children.SingleOrDefault();
         if (existingSubject.Subject is not null)
         {
-            await LoadSubjectAsync(existingSubject.Subject, nodeReference, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
+            await LoadSubjectAsync(existingSubject.Subject, nodeReference, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
         }
         else
         {
-            // Create new subject instance
-            var newSubject = await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeReference, session, cancellationToken).ConfigureAwait(false);
-            newSubject.Context.AddFallbackContext(subject.Context);
-            await LoadSubjectAsync(newSubject, nodeReference, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
-            property.SetValueFromSource(_source, null, null, newSubject);
+            var nodeId = ExpandedNodeId.ToNodeId(nodeReference.NodeId, session.NamespaceUris);
+            if (nodeId is not null && subjectsByNodeId.TryGetValue(nodeId, out var reusedSubject))
+            {
+                property.SetValueFromSource(_source, null, null, reusedSubject);
+            }
+            else
+            {
+                var newSubject = await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeReference, session, cancellationToken).ConfigureAwait(false);
+                newSubject.Context.AddFallbackContext(subject.Context);
+
+                if (nodeId is not null)
+                {
+                    subjectsByNodeId[nodeId] = newSubject;
+                }
+
+                await LoadSubjectAsync(newSubject, nodeReference, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
+                property.SetValueFromSource(_source, null, null, newSubject);
+            }
         }
     }
 
@@ -262,20 +278,34 @@ internal class OpcUaSubjectLoader
         List<MonitoredItem> monitoredItems,
         ISession session,
         HashSet<IInterceptorSubject> loadedSubjects,
+        Dictionary<NodeId, IInterceptorSubject> subjectsByNodeId,
         CancellationToken cancellationToken)
     {
         var childNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken).ConfigureAwait(false);
         var childCount = childNodes.Count;
         var children = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>(childCount);
-        
+
         // Convert to array once to avoid multiple enumerations
         var existingChildren = property.Children.ToArray();
-        
+
         for (var i = 0; i < childCount; i++)
         {
             var childNode = childNodes[i];
             var childSubject = i < existingChildren.Length ? existingChildren[i].Subject : null;
-            childSubject ??= DefaultSubjectFactory.Instance.CreateCollectionSubject(property, i);
+            var nodeId = ExpandedNodeId.ToNodeId(childNode.NodeId, session.NamespaceUris);
+
+            if (childSubject is null && nodeId is not null)
+            {
+                subjectsByNodeId.TryGetValue(nodeId, out childSubject);
+            }
+
+            childSubject ??= await _configuration.SubjectFactory.CreateCollectionSubjectAsync(
+                property, childNode, i, session, cancellationToken).ConfigureAwait(false);
+
+            if (nodeId is not null)
+            {
+                subjectsByNodeId.TryAdd(nodeId, childSubject);
+            }
 
             children.Add((childNode, childSubject));
         }
@@ -289,7 +319,7 @@ internal class OpcUaSubjectLoader
         // Requires making monitoredItems and loadedSubjects thread-safe (e.g., ConcurrentBag, ConcurrentHashSet).
         foreach (var child in children)
         {
-            await LoadSubjectAsync(child.Subject, child.Node, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
+            await LoadSubjectAsync(child.Subject, child.Node, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -299,6 +329,7 @@ internal class OpcUaSubjectLoader
         List<MonitoredItem> monitoredItems,
         ISession session,
         HashSet<IInterceptorSubject> loadedSubjects,
+        Dictionary<NodeId, IInterceptorSubject> subjectsByNodeId,
         CancellationToken cancellationToken)
     {
         var childNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken).ConfigureAwait(false);
@@ -309,8 +340,22 @@ internal class OpcUaSubjectLoader
         foreach (var childNode in childNodes)
         {
             var key = childNode.BrowseName.Name; // Use BrowseName as dictionary key
-            var childSubject = existingChildren.GetValueOrDefault(key)
-                ?? DefaultSubjectFactory.Instance.CreateCollectionSubject(property, key);
+            var childSubject = existingChildren.GetValueOrDefault(key);
+            var nodeId = ExpandedNodeId.ToNodeId(childNode.NodeId, session.NamespaceUris);
+
+            if (childSubject is null && nodeId is not null)
+            {
+                subjectsByNodeId.TryGetValue(nodeId, out childSubject);
+            }
+
+            childSubject ??= await _configuration.SubjectFactory.CreateCollectionSubjectAsync(
+                property, childNode, key, session, cancellationToken).ConfigureAwait(false);
+
+            if (nodeId is not null)
+            {
+                subjectsByNodeId.TryAdd(nodeId, childSubject);
+            }
+
             entries[key] = childSubject;
             nodesByKey[key] = childNode;
         }
@@ -321,7 +366,7 @@ internal class OpcUaSubjectLoader
         foreach (var entry in entries)
         {
             var childNode = nodesByKey[entry.Key];
-            await LoadSubjectAsync(entry.Value, childNode, session, monitoredItems, loadedSubjects, cancellationToken).ConfigureAwait(false);
+            await LoadSubjectAsync(entry.Value, childNode, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
         }
     }
 
