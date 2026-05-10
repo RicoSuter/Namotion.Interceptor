@@ -669,6 +669,7 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 if (addedNodeId is not null)
                 {
                     processor.AddEcho(addedNodeId);
+                    processor.SubjectMap.Add(addedNodeId, subject);
                 }
             }
         }

@@ -60,7 +60,7 @@ internal sealed class OpcUaClientIncomingEventProcessor : OpcUaIncomingEventProc
             case IncomingEventType.StructuralAdd:
                 if (evt.AffectedNodeId is not null && _echoNodeIds.TryRemove(evt.AffectedNodeId, out _))
                 {
-                    Logger.LogDebug("Echo suppressed: Add NodeId={NodeId}.", evt.AffectedNodeId);
+                    await SetupSubscriptionsForLocalSubjectAsync(evt.AffectedNodeId, cancellationToken).ConfigureAwait(false);
                     return;
                 }
                 await ProcessExternalAddAsync(evt, cancellationToken).ConfigureAwait(false);
@@ -75,6 +75,42 @@ internal sealed class OpcUaClientIncomingEventProcessor : OpcUaIncomingEventProc
                 ProcessExternalRemove(evt);
                 break;
         }
+    }
+
+    private async Task SetupSubscriptionsForLocalSubjectAsync(NodeId nodeId, CancellationToken cancellationToken)
+    {
+        if (!_subjectMap.TryGetSubject(nodeId, out var subject) || subject is null)
+        {
+            Logger.LogDebug("Echo add: no local subject for NodeId={NodeId}, skipping subscription setup.", nodeId);
+            return;
+        }
+
+        var session = _session;
+        var subscriptionManager = _subscriptionManager;
+        if (session is null || !session.Connected || subscriptionManager is null)
+        {
+            return;
+        }
+
+        var refDescription = new ReferenceDescription
+        {
+            NodeId = new ExpandedNodeId(nodeId),
+            BrowseName = new QualifiedName(nodeId.Identifier?.ToString() ?? "", nodeId.NamespaceIndex),
+            NodeClass = NodeClass.Object
+        };
+
+        var monitoredItems = await _loader.LoadSubjectAsync(
+            subject, refDescription, session, _subjectMap, cancellationToken).ConfigureAwait(false);
+
+        if (monitoredItems.Count > 0)
+        {
+            await subscriptionManager.AddMonitoredItemsAsync(
+                monitoredItems, (Session)session, cancellationToken).ConfigureAwait(false);
+
+            await ReadInitialValuesAsync(monitoredItems, session, cancellationToken).ConfigureAwait(false);
+        }
+
+        Logger.LogDebug("Echo add: set up {Count} subscriptions for local subject NodeId={NodeId}.", monitoredItems.Count, nodeId);
     }
 
     private void ProcessValueEvent(IncomingEvent evt)

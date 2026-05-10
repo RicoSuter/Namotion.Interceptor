@@ -1714,6 +1714,134 @@ public class StructuralSyncTests
     }
 
     // -----------------------------------------------------------------------
+    // Client-originated value sync
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task WhenClientAddsSubjectAndWritesValue_ThenServerSeesValue()
+    {
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            // Arrange
+            (server, client, port, var logger) = await StartServerAndClientWithBidirectionalSyncAsync();
+
+            Assert.NotNull(server.Root);
+            Assert.NotNull(client.Root);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 1,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial People collection should sync");
+
+            // Act: client adds a person with specific values
+            var newPerson = new TestPerson(((IInterceptorSubject)client.Root).Context)
+            {
+                FirstName = "ClientCreated",
+                LastName = "ValueTest",
+                Scores = [42.0]
+            };
+            client.Root.People = [..client.Root.People, newPerson];
+
+            // Wait for server to see the structural change
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => server.Root.People.Length == 2,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Server should see client-added item");
+
+            // Wait for echo subscription setup (ModelChangeEvent arrives ~1s after AddNodes,
+            // then LoadSubjectAsync sets up OpcUaNodeIdKey for the properties)
+            await Task.Delay(3000);
+
+            // Now write a value on the client-originated subject
+            newPerson.FirstName = "UpdatedName";
+
+            // Assert: server should see the updated value
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => server.Root.People.Any(p => p.FirstName == "UpdatedName"),
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Server should see value written to client-originated subject");
+
+            logger.Log("Test passed: Value sync works for client-originated subjects");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
+
+    [Fact]
+    public async Task WhenClientAddsSubject_ThenServerValueChangesReachClient()
+    {
+        OpcUaTestServer<TestRoot>? server = null;
+        OpcUaTestClient<TestRoot>? client = null;
+        PortLease? port = null;
+
+        try
+        {
+            // Arrange
+            (server, client, port, var logger) = await StartServerAndClientWithBidirectionalSyncAsync();
+
+            Assert.NotNull(server.Root);
+            Assert.NotNull(client.Root);
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => client.Root.People.Length == 1,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Initial People collection should sync");
+
+            // Act: client adds a person
+            var clientPerson = new TestPerson(((IInterceptorSubject)client.Root).Context)
+            {
+                FirstName = "ClientCreated",
+                LastName = "InitialValue",
+                Scores = [10.0]
+            };
+            client.Root.People = [..client.Root.People, clientPerson];
+
+            // Wait for server to see the structural change
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => server.Root.People.Length == 2,
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Server should see client-added item");
+
+            // Wait for echo subscription setup
+            await Task.Delay(3000);
+
+            // Write a value on the client side so it syncs to server
+            clientPerson.FirstName = "SyncedName";
+
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => server.Root.People.Any(p => p.FirstName == "SyncedName"),
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Server should see client value after subscription setup");
+
+            // Now modify the subject on the SERVER side
+            var serverPerson = server.Root.People.First(p => p.FirstName == "SyncedName");
+            serverPerson.LastName = "ServerModified";
+
+            // Assert: client should see the server's value change via subscription
+            await AsyncTestHelpers.WaitUntilAsync(
+                () => clientPerson.LastName == "ServerModified",
+                timeout: TimeSpan.FromSeconds(30),
+                message: "Client should see server's value change on client-originated subject");
+
+            logger.Log("Test passed: Server value changes reach client for client-originated subjects");
+        }
+        finally
+        {
+            if (client != null) await client.DisposeAsync();
+            if (server != null) await server.DisposeAsync();
+            port?.Dispose();
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Client-only rapid structural mutations
     // -----------------------------------------------------------------------
 
