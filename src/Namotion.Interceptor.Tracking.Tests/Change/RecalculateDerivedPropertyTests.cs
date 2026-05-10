@@ -112,6 +112,10 @@ public class RecalculateDerivedPropertyTests
         });
 
         // Assert
+        // Thread-safety contract: concurrent calls must not deadlock, notifications must
+        // arrive in order (no stale value after a newer one), and the final settled value
+        // must be correct. The count is non-deterministic because IsRecalculating coalesces
+        // concurrent calls, so fewer than 100 getter evaluations occur.
         lock (changes)
         {
             Assert.True(changes.Count > 0, "At least some recalculations should produce change notifications");
@@ -123,6 +127,9 @@ public class RecalculateDerivedPropertyTests
                 Assert.True(current > previous,
                     $"Notifications must be monotonically increasing but got {previous} -> {current} at index {i}");
             }
+
+            var finalNotifiedValue = changes[^1].GetNewValue<double>();
+            Assert.Equal((double)callCount, finalNotifiedValue);
         }
     }
 }
