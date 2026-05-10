@@ -670,6 +670,24 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 {
                     processor.AddEcho(addedNodeId);
                     processor.SubjectMap.Add(addedNodeId, subject);
+
+                    var refDescription = new ReferenceDescription
+                    {
+                        NodeId = new ExpandedNodeId(addedNodeId),
+                        BrowseName = new QualifiedName(
+                            addedNodeId.Identifier?.ToString() ?? "", addedNodeId.NamespaceIndex),
+                        NodeClass = NodeClass.Object
+                    };
+
+                    var monitoredItems = await _subjectLoader.LoadSubjectAsync(
+                        subject, refDescription, session, processor.SubjectMap,
+                        cancellationToken).ConfigureAwait(false);
+
+                    if (monitoredItems.Count > 0 && _sessionManager?.SubscriptionManager is { } subscriptionManager)
+                    {
+                        await subscriptionManager.AddMonitoredItemsAsync(
+                            monitoredItems, (Session)session, cancellationToken).ConfigureAwait(false);
+                    }
                 }
             }
         }

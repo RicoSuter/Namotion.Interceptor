@@ -1752,10 +1752,6 @@ public class StructuralSyncTests
                 timeout: TimeSpan.FromSeconds(30),
                 message: "Server should see client-added item");
 
-            // Wait for echo subscription setup (ModelChangeEvent arrives ~1s after AddNodes,
-            // then LoadSubjectAsync sets up OpcUaNodeIdKey for the properties)
-            await Task.Delay(3000);
-
             // Now write a value on the client-originated subject
             newPerson.FirstName = "UpdatedName";
 
@@ -1809,9 +1805,6 @@ public class StructuralSyncTests
                 () => server.Root.People.Length == 2,
                 timeout: TimeSpan.FromSeconds(30),
                 message: "Server should see client-added item");
-
-            // Wait for echo subscription setup
-            await Task.Delay(3000);
 
             // Write a value on the client side so it syncs to server
             clientPerson.FirstName = "SyncedName";
