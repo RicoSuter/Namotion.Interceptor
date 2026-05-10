@@ -72,7 +72,7 @@ public class BackgroundTaskLifetimeTests
             NullLogger.Instance,
             _ => throw new InvalidOperationException("monitor failed"));
 
-        await Task.Delay(50);
+        await Task.Yield();
 
         // Act & Assert
         await lifetime.DisposeAsync();
@@ -144,7 +144,7 @@ public class BackgroundTaskLifetimeTests
             NullLogger.Instance,
             _ => Task.CompletedTask);
 
-        await Task.Delay(50);
+        await Task.Yield();
 
         // Act & Assert
         await lifetime.DisposeAsync();

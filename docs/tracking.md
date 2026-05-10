@@ -187,6 +187,28 @@ person.LastName = "Doe";
 - When a dependency changes, the derived property is recalculated
 - If the derived value changes, a change event is triggered with `Source = null` (indicating local calculation)
 
+### Manual Recalculation
+
+When a derived property's getter depends on data outside the interceptor system (external APIs, services, static state, etc.), automatic dependency tracking cannot detect changes. Use `RecalculateDerivedProperty()` to manually trigger recalculation:
+
+```csharp
+[InterceptorSubject]
+public partial class Sensor
+{
+    public partial string? Label { get; set; }
+
+    [Derived]
+    public double CalibratedTemperature => _externalService.GetCalibratedTemperature();
+}
+
+// When external data changes, trigger recalculation:
+var property = new PropertyReference(sensor, nameof(Sensor.CalibratedTemperature));
+property.RecalculateDerivedProperty();
+// Getter is re-evaluated; if the value changed, change notifications fire
+```
+
+This goes through the same pipeline as automatic recalculation: the getter is re-evaluated, dependencies are updated, and all notifications (observable, queue, `INotifyPropertyChanged`) fire if the value changed. It is fully thread-safe and can be called concurrently with property writes.
+
 > **Internal design:** For details on the dependency graph, concurrency model, and correctness guarantees, see [Derived Property Design](design/tracking-derived-properties.md).
 
 ## Context Inheritance
