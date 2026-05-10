@@ -3,6 +3,8 @@ using System.Globalization;
 using System.Runtime;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Namotion.Interceptor.Connectors;
+using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Logging;
 using Namotion.Interceptor.ConnectorTester.Model;
@@ -207,6 +209,7 @@ public class VerificationEngine : BackgroundService
 
                 // Per-property diff log (values + write timestamps)
                 LogPropertyDiffsWithTimestamps(snapshots);
+                LogReSyncCheck(snapshots);
 
                 WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, "FAIL");
                 CompactHeapAndLogCycle(activeProfileName, "FAIL", cycleStopwatch.Elapsed, convergeStopwatch.Elapsed);
@@ -398,6 +401,54 @@ public class VerificationEngine : BackgroundService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to log property diffs with timestamps");
+        }
+    }
+
+    /// <summary>
+    /// Re-sync diagnostic. Takes the reference participant's complete update and applies
+    /// it to each diverged participant, then re-compares.
+    /// "Match after re-apply" => suspect connector wire (lost or out-of-order messages).
+    /// "Still diverged" => suspect snapshot logic, ApplySubjectUpdate, or the model.
+    /// Mutates participant state intentionally; runs only after the cycle has failed
+    /// and the process is shutting down.
+    /// </summary>
+    private void LogReSyncCheck(List<(string Name, string Snapshot)> snapshots)
+    {
+        try
+        {
+            var referenceRoot = _participants[snapshots[0].Name];
+            var completeUpdate = SubjectUpdate.CreateCompleteUpdate(referenceRoot, []);
+
+            for (var i = 1; i < snapshots.Count; i++)
+            {
+                if (SnapshotComparer.SnapshotsMatch(snapshots[i].Snapshot, snapshots[0].Snapshot))
+                {
+                    continue;
+                }
+
+                var otherRoot = _participants[snapshots[i].Name];
+                otherRoot.ApplySubjectUpdate(completeUpdate, DefaultSubjectFactory.Instance);
+
+                var refReSnapshot = SnapshotComparer.Capture(referenceRoot);
+                var otherReSnapshot = SnapshotComparer.Capture(otherRoot);
+
+                if (SnapshotComparer.SnapshotsMatch(refReSnapshot, otherReSnapshot))
+                {
+                    _logger.LogWarning(
+                        "Re-sync check: {Participant} converged after applying reference complete update -> transient delivery gap",
+                        snapshots[i].Name);
+                }
+                else
+                {
+                    _logger.LogError(
+                        "Re-sync check: {Participant} still diverged after applying reference complete update -> suspect snapshot logic, ApplySubjectUpdate, or model",
+                        snapshots[i].Name);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to perform re-sync check");
         }
     }
 
