@@ -100,6 +100,7 @@ namespace Namotion.Interceptor.Connectors
         public override void Dispose() { }
         protected override sealed System.Threading.Tasks.Task ExecuteAsync(System.Threading.CancellationToken stoppingToken) { }
         public abstract System.Threading.Tasks.Task<System.Action?> LoadInitialStateAsync(System.Threading.CancellationToken cancellationToken);
+        protected virtual System.Threading.Tasks.Task OnChangeProcessorStartedAsync(System.Threading.CancellationToken cancellationToken) { }
         protected abstract System.Threading.Tasks.Task<System.IAsyncDisposable?> StartListeningAsync(Namotion.Interceptor.Connectors.SubjectPropertyWriter propertyWriter, System.Threading.CancellationToken cancellationToken);
         public abstract System.Threading.Tasks.ValueTask<Namotion.Interceptor.Connectors.WriteResult> WriteChangesAsync(System.ReadOnlyMemory<Namotion.Interceptor.Tracking.Change.SubjectPropertyChange> changes, System.Threading.CancellationToken cancellationToken);
     }

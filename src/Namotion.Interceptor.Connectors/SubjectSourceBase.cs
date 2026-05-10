@@ -84,8 +84,6 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                 _propertyWriter.StartBuffering();
                 await using var listenLifetime = await StartListeningAsync(_propertyWriter, stoppingToken).ConfigureAwait(false);
 
-                await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
-
                 using var processor = new ChangeQueueProcessor(
                     this,
                     _context,
@@ -93,6 +91,8 @@ public abstract class SubjectSourceBase : BackgroundService, ISubjectSource
                     WriteChangesViaRetryQueueAsync,
                     _bufferTime,
                     _logger);
+
+                await _propertyWriter.LoadInitialStateAndResumeAsync(stoppingToken).ConfigureAwait(false);
 
                 // Optimistic retry re-apply: after initial state load + ChangeQueueProcessor creation,
                 // re-apply queued changes locally if the source hasn't changed the property.
