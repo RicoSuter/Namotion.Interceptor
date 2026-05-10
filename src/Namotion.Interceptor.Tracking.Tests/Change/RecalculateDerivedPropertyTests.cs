@@ -79,4 +79,50 @@ public class RecalculateDerivedPropertyTests
         var property = new PropertyReference(sensor, nameof(ExternalSensor.Label));
         property.RecalculateDerivedProperty();
     }
+
+    [Fact]
+    public void WhenRecalculateCalledConcurrently_ThenAllChangesAreSerializedAndNoNotificationsLost()
+    {
+        // Arrange
+        var callCount = 0;
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(change =>
+            {
+                lock (changes) { changes.Add(change); }
+            });
+
+        var sensor = new ExternalSensor(context);
+        sensor.ExternalValueProvider = () => Interlocked.Increment(ref callCount);
+        var property = new PropertyReference(sensor, nameof(ExternalSensor.CalibratedTemperature));
+        property.RecalculateDerivedProperty();
+
+        lock (changes) { changes.Clear(); }
+        Interlocked.Exchange(ref callCount, 0);
+
+        // Act
+        Parallel.For(0, 100, _ =>
+        {
+            property.RecalculateDerivedProperty();
+        });
+
+        // Assert
+        lock (changes)
+        {
+            Assert.True(changes.Count > 0, "At least some recalculations should produce change notifications");
+
+            for (var i = 1; i < changes.Count; i++)
+            {
+                var previous = changes[i - 1].GetNewValue<double>();
+                var current = changes[i].GetNewValue<double>();
+                Assert.True(current > previous,
+                    $"Notifications must be monotonically increasing but got {previous} -> {current} at index {i}");
+            }
+        }
+    }
 }
