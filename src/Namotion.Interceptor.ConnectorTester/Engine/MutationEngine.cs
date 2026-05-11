@@ -1,4 +1,5 @@
 using Namotion.Interceptor.ConnectorTester.Configuration;
+using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 using Namotion.Interceptor.ConnectorTester.Model;
 
 namespace Namotion.Interceptor.ConnectorTester.Engine;
@@ -94,8 +95,7 @@ public abstract class MutationEngine : BackgroundService
 
     private async Task RunStructuralMutationsAsync(CancellationToken stoppingToken)
     {
-        var batchSize = Math.Max(1, (int)Math.Ceiling(_configuration.StructuralMutationRate / 1000.0));
-        var delayMs = Math.Max(1, (int)Math.Round(1000.0 * batchSize / _configuration.StructuralMutationRate));
+        var (batchSize, delayMs) = TickPlan.From(_configuration.StructuralMutationRate);
         var rebuildCounter = 0;
 
         while (!stoppingToken.IsCancellationRequested)

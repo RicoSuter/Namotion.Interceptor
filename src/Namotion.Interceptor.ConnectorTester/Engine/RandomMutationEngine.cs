@@ -1,4 +1,5 @@
 using Namotion.Interceptor.ConnectorTester.Configuration;
+using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Tracking.Transactions;
 
@@ -25,8 +26,7 @@ public class RandomMutationEngine : MutationEngine
 
     protected override async Task RunValueMutationsAsync(CancellationToken stoppingToken)
     {
-        var batchSize = Math.Max(1, (int)Math.Ceiling(ValueMutationRate / 1000.0));
-        var delayMs = Math.Max(1, (int)Math.Round(1000.0 * batchSize / ValueMutationRate));
+        var (batchSize, delayMs) = TickPlan.From(ValueMutationRate);
 
         while (!stoppingToken.IsCancellationRequested)
         {
