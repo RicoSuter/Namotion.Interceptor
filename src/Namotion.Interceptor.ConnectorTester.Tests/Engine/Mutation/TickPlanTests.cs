@@ -28,7 +28,8 @@ public class TickPlanTests
         // Arrange / Act
         var plan = TickPlan.From(0);
 
-        // Assert: today's Math.Max(1, ...) clamp prevents division by zero downstream.
+        // Assert: when rate is clamped to 1 mutation per second, BatchSize is 1 and DelayMs is 1000.
         Assert.Equal(1, plan.BatchSize);
+        Assert.Equal(1000, plan.DelayMs);
     }
 }
