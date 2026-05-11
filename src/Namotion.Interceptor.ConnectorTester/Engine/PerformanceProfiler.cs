@@ -7,7 +7,6 @@ namespace Namotion.Interceptor.ConnectorTester.Engine;
 
 public class PerformanceProfiler : IDisposable
 {
-    private const string LogDirectory = "logs";
     private const int MaxLatencySamples = 10_000;
     private static readonly Lock ConsoleLock = new();
 
@@ -35,11 +34,16 @@ public class PerformanceProfiler : IDisposable
     private long _windowStartTotalAllocatedBytes;
     private TimeSpan _windowStartCpuTime;
 
+    private readonly TestCycleCoordinator? _coordinator;
+
     public PerformanceProfiler(
         IInterceptorSubjectContext context,
         string participantName,
-        TimeSpan reportingInterval)
+        TimeSpan reportingInterval,
+        string logDirectory,
+        TestCycleCoordinator? coordinator = null)
     {
+        _coordinator = coordinator;
         _participantName = participantName;
         _windowStartTime = DateTimeOffset.UtcNow;
         _lastThroughputTime = _windowStartTime;
@@ -49,12 +53,11 @@ public class PerformanceProfiler : IDisposable
             _windowStartCpuTime = process.TotalProcessorTime;
         }
 
-        Directory.CreateDirectory(LogDirectory);
-        _logFilePath = Path.Combine(LogDirectory, $"performance-{participantName}.csv");
+        _logFilePath = Path.Combine(logDirectory, $"performance-{participantName}.csv");
 
         var header = string.Format(
-            "{0,24}, {1,12}, {2,12}, {3,12}, {4,12}, {5,12}, {6,12}, {7,12}, {8,12}, {9,12}, {10,12}, {11,12}, {12,12}, {13,12}, {14,12}, {15,12}, {16,12}",
-            "Timestamp", "Participant", "Recv/s", "Recv-E2E-Avg", "Recv-E2E-P50", "Recv-E2E-P90", "Recv-E2E-P95", "Recv-E2E-P99", "Recv-E2E-P999", "Recv-E2E-Max", "Recv-Proc", "Published", "Received", "CPU%", "ProcessMB", "HeapMB", "AllocMB/s");
+            "{0,24}, {1,12}, {2,6}, {3,12}, {4,16}, {5,14}, {6,14}, {7,14}, {8,14}, {9,15}, {10,14}, {11,20}, {12,12}, {13,12}, {14,12}, {15,12}, {16,12}, {17,14}",
+            "Timestamp", "Participant", "Cycle", "Received/s", "Received-Average", "Received-P50", "Received-P90", "Received-P95", "Received-P99", "Received-P999", "Received-Max", "Received-Processing", "Published", "Received", "CPU%", "ProcessMB", "HeapMB", "AllocationMB/s");
         File.WriteAllText(_logFilePath, header + Environment.NewLine);
 
         _subscription = context.CreatePropertyChangeQueueSubscription();
@@ -248,10 +251,11 @@ public class PerformanceProfiler : IDisposable
         var p99ChangedLatency = changedLatencies.Count > 0 ? Percentile(changedLatencies, 0.99) : 0;
         var p999ChangedLatency = changedLatencies.Count > 0 ? Percentile(changedLatencies, 0.999) : 0;
 
+        var cycle = _coordinator?.CurrentCycle ?? 0;
         var logLine = string.Format(
             CultureInfo.InvariantCulture,
-            "{0,24:yyyy-MM-ddTHH:mm:ss.fffZ}, {1,12}, {2,12:F0}, {3,12:F1}, {4,12:F1}, {5,12:F1}, {6,12:F1}, {7,12:F1}, {8,12:F1}, {9,12:F1}, {10,12:F1}, {11,12}, {12,12}, {13,12:F1}, {14,12:F1}, {15,12:F1}, {16,12:F2}",
-            now, _participantName, avgThroughput,
+            "{0,24:yyyy-MM-ddTHH:mm:ss.fffZ}, {1,12}, {2,6}, {3,12:F0}, {4,16:F1}, {5,14:F1}, {6,14:F1}, {7,14:F1}, {8,14:F1}, {9,15:F1}, {10,14:F1}, {11,20:F1}, {12,12}, {13,12}, {14,12:F1}, {15,12:F1}, {16,12:F1}, {17,14:F2}",
+            now, _participantName, cycle, avgThroughput,
             avgChangedLatency, p50ChangedLatency, p90ChangedLatency, p95ChangedLatency,
             p99ChangedLatency, p999ChangedLatency, changedLatencyMax,
             avgReceivedLatency, publishedCount, receivedCount,
