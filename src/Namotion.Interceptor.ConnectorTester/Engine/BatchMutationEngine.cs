@@ -149,6 +149,6 @@ public class BatchMutationEngine : MutationEngine
                 break;
         }
 
-        IncrementValueMutationCount();
+        Counters.IncrementValue();
     }
 }

@@ -42,7 +42,7 @@ public class RandomMutationEngine : MutationEngine
                     for (var i = 0; i < batchSize; i++)
                     {
                         PerformValueMutation();
-                        IncrementValueMutationCount();
+                        Counters.IncrementValue();
                     }
 
                     await transaction.CommitAsync(stoppingToken);
@@ -52,7 +52,7 @@ public class RandomMutationEngine : MutationEngine
                     for (var i = 0; i < batchSize; i++)
                     {
                         PerformValueMutation();
-                        IncrementValueMutationCount();
+                        Counters.IncrementValue();
                     }
                 }
 

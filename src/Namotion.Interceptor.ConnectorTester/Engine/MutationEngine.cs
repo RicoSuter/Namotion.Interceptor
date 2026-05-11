@@ -24,8 +24,7 @@ public abstract class MutationEngine : BackgroundService
 
     private List<TestNode> _structuralTargets = [];
 
-    private long _valueMutationCount;
-    private long _structuralMutationCount;
+    protected readonly MutationCounters Counters = new();
 
     protected readonly Lock NodeLock = new();
     protected readonly ILogger Logger;
@@ -35,8 +34,8 @@ public abstract class MutationEngine : BackgroundService
     public string Name => _configuration.Name;
     public int ValueMutationRate => _configuration.ValueMutationRate;
     public int StructuralMutationRate => _configuration.StructuralMutationRate;
-    public long ValueMutationCount => Interlocked.Read(ref _valueMutationCount);
-    public long StructuralMutationCount => Interlocked.Read(ref _structuralMutationCount);
+    public long ValueMutationCount => Counters.ValueMutationCount;
+    public long StructuralMutationCount => Counters.StructuralMutationCount;
 
     protected TestNode Root => _root;
     protected IInterceptorSubjectContext Context => ((IInterceptorSubject)_root).Context;
@@ -55,16 +54,7 @@ public abstract class MutationEngine : BackgroundService
         Logger = logger;
     }
 
-    public void ResetCounters()
-    {
-        Interlocked.Exchange(ref _valueMutationCount, 0);
-        Interlocked.Exchange(ref _structuralMutationCount, 0);
-    }
-
-    protected void IncrementValueMutationCount()
-    {
-        Interlocked.Increment(ref _valueMutationCount);
-    }
+    public void ResetCounters() => Counters.Reset();
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -100,7 +90,7 @@ public abstract class MutationEngine : BackgroundService
                 for (var i = 0; i < batchSize; i++)
                 {
                     PerformStructuralMutation();
-                    Interlocked.Increment(ref _structuralMutationCount);
+                    Counters.IncrementStructural();
                 }
 
                 rebuildCounter += batchSize;
