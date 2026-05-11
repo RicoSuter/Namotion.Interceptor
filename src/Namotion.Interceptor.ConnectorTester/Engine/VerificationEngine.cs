@@ -180,7 +180,8 @@ public class VerificationEngine : BackgroundService
                         Snapshot: SnapshotComparer.Capture(participant.Value)))
                     .ToList();
 
-                if (snapshots.All(snapshot => SnapshotComparer.SnapshotsMatch(snapshots[0].Snapshot, snapshot.Snapshot)))
+                var referenceSubjects = SnapshotComparer.ParseSubjects(snapshots[0].Snapshot);
+                if (snapshots.All(snapshot => SnapshotComparer.SnapshotsMatch(referenceSubjects, snapshot.Snapshot)))
                 {
                     convergeStopwatch.Stop();
                     cycleStopwatch.Stop();

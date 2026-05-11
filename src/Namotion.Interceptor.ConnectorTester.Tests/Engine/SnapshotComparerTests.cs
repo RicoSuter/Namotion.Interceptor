@@ -301,6 +301,21 @@ public class SnapshotComparerTests
     }
 
     [Fact]
+    public void WhenRootFieldDiffers_ThenSnapshotsDoNotMatch()
+    {
+        // Arrange: Capture always normalizes root to "ROOT", but if that invariant
+        // broke the comparison should still catch the divergence via subject keys.
+        const string a = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1}}}}""";
+        const string b = """{"root":"OTHER","subjects":{"OTHER":{"P":{"kind":"Value","value":1}}}}""";
+
+        // Act
+        var match = SnapshotComparer.SnapshotsMatch(a, b);
+
+        // Assert
+        Assert.False(match);
+    }
+
+    [Fact]
     public void WhenBothValueTimestampsAreNonNullAndEqual_ThenSnapshotsMatch()
     {
         // Arrange

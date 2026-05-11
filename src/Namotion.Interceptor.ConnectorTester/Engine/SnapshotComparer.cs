@@ -52,6 +52,16 @@ public static class SnapshotComparer
         var subjectsA = JsonNode.Parse(snapshotA)?["subjects"]?.AsObject();
         var subjectsB = JsonNode.Parse(snapshotB)?["subjects"]?.AsObject();
 
+        return SubjectsMatch(subjectsA, subjectsB);
+    }
+
+    public static bool SnapshotsMatch(JsonObject? referenceSubjects, string snapshotB)
+    {
+        return SubjectsMatch(referenceSubjects, JsonNode.Parse(snapshotB)?["subjects"]?.AsObject());
+    }
+
+    private static bool SubjectsMatch(JsonObject? subjectsA, JsonObject? subjectsB)
+    {
         if (subjectsA is null || subjectsB is null)
         {
             return subjectsA is null && subjectsB is null;
@@ -90,6 +100,11 @@ public static class SnapshotComparer
         }
 
         return true;
+    }
+
+    public static JsonObject? ParseSubjects(string snapshot)
+    {
+        return JsonNode.Parse(snapshot)?["subjects"]?.AsObject();
     }
 
     private static Dictionary<string, string> BuildStableIdMap(SubjectUpdate update)
