@@ -74,7 +74,7 @@ public class RandomMutationEngine : MutationEngine
         }
 
         var property = _valueMutationRandom.Next(4);
-        var counter = NextGlobalCounter();
+        var counter = GlobalMutationCounter.Next();
 
         using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
         {

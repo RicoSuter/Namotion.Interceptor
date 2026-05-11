@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Namotion.Interceptor.ConnectorTester.Configuration;
+using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Tracking.Transactions;
 
@@ -130,7 +131,7 @@ public class BatchMutationEngine : MutationEngine
 
     private void MutateNode(TestNode node, int property)
     {
-        var counter = NextGlobalCounter();
+        var counter = GlobalMutationCounter.Next();
 
         switch (property)
         {

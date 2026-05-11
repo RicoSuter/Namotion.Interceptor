@@ -17,8 +17,6 @@ public abstract class MutationEngine : BackgroundService
     private const int MaxDepth = 3;
     private const int MaxTotalNodes = 500;
 
-    private static long _globalCounter;
-
     private readonly TestNode _root;
     private readonly ParticipantConfiguration _configuration;
     private readonly TestCycleCoordinator _coordinator;
@@ -66,11 +64,6 @@ public abstract class MutationEngine : BackgroundService
     protected void IncrementValueMutationCount()
     {
         Interlocked.Increment(ref _valueMutationCount);
-    }
-
-    protected static long NextGlobalCounter()
-    {
-        return Interlocked.Increment(ref _globalCounter);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -296,7 +289,7 @@ public abstract class MutationEngine : BackgroundService
 
     private void AddToDictionary(TestNode target)
     {
-        var uniqueKey = $"item-{NextGlobalCounter()}";
+        var uniqueKey = $"item-{GlobalMutationCounter.Next()}";
         var newItems = new Dictionary<string, TestNode>(target.Items)
         {
             [uniqueKey] = CreateNewNode()
