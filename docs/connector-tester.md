@@ -151,8 +151,8 @@ Total mutations: 17,200 | Total chaos events: 7
 
 ```
 === Cycle 3: FAIL (did not converge within 00:01:00) ===
-Snapshot [server] written to logs/cycle-0003-fail-server.json
-Snapshot [client-a] written to logs/cycle-0003-fail-client-a.json
+Snapshot [server] written to logs/2026-02-08T22-40-00Z-opcua-chaos/cycle-0003-fail-server.json
+Snapshot [client-a] written to logs/2026-02-08T22-40-00Z-opcua-chaos/cycle-0003-fail-client-a.json
   ROOT.IntValue: server=42 (written 12:34:56.789), client-a=37 (written 12:34:55.110)
 Re-sync check: client-a converged after applying reference complete update -> transient delivery gap
 ```
