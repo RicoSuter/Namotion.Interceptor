@@ -40,8 +40,13 @@ var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
     ContentRootPath = AppContext.BaseDirectory
 });
 
+// Create a per-run log directory so each run is isolated and nothing needs resetting.
+var profile = builder.Environment.EnvironmentName;
+var runDirectory = Path.Combine("logs", $"{DateTime.UtcNow:yyyy-MM-ddTHH-mm-ssZ}-{profile}");
+Directory.CreateDirectory(runDirectory);
+
 // Add a cycle logger provider (created first so it can be shared with sharedLoggerFactory)
-var cycleLoggerProvider = new CycleLoggerProvider();
+var cycleLoggerProvider = new CycleLoggerProvider(runDirectory);
 builder.Services.AddSingleton(cycleLoggerProvider);
 builder.Logging.AddProvider(cycleLoggerProvider);
 
@@ -251,6 +256,7 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
                         ValueConverter = new OpcUaValueConverter(),
                         SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
                         TelemetryContext = telemetryContext,
+                        WriteRetryQueueSize = 10_000,
                     };
                 });
             break;
@@ -272,6 +278,7 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
                     HealthCheckInterval = TimeSpan.FromSeconds(5),
                     CircuitBreakerFailureThreshold = 3,
                     CircuitBreakerCooldown = TimeSpan.FromSeconds(10),
+                    WriteRetryQueueSize = 10_000,
                 });
             break;
 
@@ -284,6 +291,7 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
                     config.ReconnectDelay = TimeSpan.FromSeconds(1);
                     config.MaxReconnectDelay = TimeSpan.FromSeconds(10);
                     config.PathProvider = new AttributeBasedPathProvider("ws");
+                    config.WriteRetryQueueSize = 10_000;
                 });
             break;
     }
@@ -314,7 +322,8 @@ if (participantFilter == null)
         chaosEngines,
         cycleLoggerProvider,
         sp.GetRequiredService<IHostApplicationLifetime>(),
-        sp.GetRequiredService<ILogger<VerificationEngine>>()));
+        sp.GetRequiredService<ILogger<VerificationEngine>>(),
+        runDirectory));
 
     builder.Services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<VerificationEngine>());
 }
@@ -358,7 +367,9 @@ foreach (var (name, root) in participants)
     var profiler = new PerformanceProfiler(
         ((IInterceptorSubject)root).Context,
         name,
-        configuration.MetricsReportingInterval);
+        configuration.MetricsReportingInterval,
+        runDirectory,
+        coordinator);
     profilers.Add(profiler);
 }
 

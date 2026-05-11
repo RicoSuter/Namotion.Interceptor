@@ -32,9 +32,8 @@ public sealed class CycleLoggerProvider : ILoggerProvider
             _currentWriter?.Dispose();
 
             _currentCycle = cycleNumber;
-            var timestamp = DateTime.UtcNow.ToString("yyyy-MM-ddTHH-mm-ss");
             _currentFilePath = Path.Combine(_logDirectory,
-                $"cycle-{cycleNumber:D4}-pending-{timestamp}.log");
+                $"cycle-{cycleNumber:D4}-pending.log");
 
             _currentWriter = new StreamWriter(_currentFilePath, append: false)
             {
@@ -56,7 +55,7 @@ public sealed class CycleLoggerProvider : ILoggerProvider
 
             // Rename file with result
             var result = passed ? "pass" : "FAIL";
-            var newPath = _currentFilePath.Replace("-pending-", $"-{result}-");
+            var newPath = _currentFilePath.Replace("-pending.log", $"-{result}.log");
 
             try
             {
@@ -100,7 +99,7 @@ public sealed class CycleLoggerProvider : ILoggerProvider
     {
         try
         {
-            var passingLogs = Directory.GetFiles(_logDirectory, "cycle-*-pass-*.log")
+            var passingLogs = Directory.GetFiles(_logDirectory, "cycle-*-pass.log")
                 .OrderByDescending(File.GetLastWriteTimeUtc)
                 .Skip(MaxPassingLogFiles)
                 .ToList();

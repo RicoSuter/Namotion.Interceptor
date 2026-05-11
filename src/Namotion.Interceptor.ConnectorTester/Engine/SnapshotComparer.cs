@@ -19,7 +19,7 @@ public static class SnapshotComparer
 
     /// <summary>
     /// Builds a normalized snapshot JSON for the given root.
-    /// Subject IDs are remapped to stable positional IDs (root → "ROOT", then "SUBJ_1",
+    /// Subject IDs are remapped to stable positional IDs (root -> "ROOT", then "SUBJ_1",
     /// "SUBJ_2", ... by deterministic graph traversal). Timestamps on structural
     /// (Object/Collection/Dictionary) properties are stripped: those reflect local graph
     /// creation moments, not synced wire events. Timestamps on Value properties are
@@ -30,10 +30,9 @@ public static class SnapshotComparer
     public static string Capture(TestNode root)
     {
         var update = SubjectUpdate.CreateCompleteUpdate(root, []);
-        var rawJson = JsonSerializer.Serialize(update, CompactJsonOptions);
-        var node = JsonNode.Parse(rawJson)!.AsObject();
-        Normalize(node);
-        return node.ToJsonString(CompactJsonOptions);
+        var idMap = BuildStableIdMap(update);
+        var normalized = NormalizeUpdate(update, idMap);
+        return JsonSerializer.Serialize(normalized, CompactJsonOptions);
     }
 
     /// <summary>
@@ -93,44 +92,14 @@ public static class SnapshotComparer
         return true;
     }
 
-    private static void Normalize(JsonObject root)
-    {
-        var rawRootId = root["root"]?.GetValue<string>();
-        if (rawRootId is null || root["subjects"] is not JsonObject subjects)
-        {
-            return;
-        }
-
-        var idMap = BuildStableIdMap(rawRootId, subjects);
-
-        foreach (var (_, subjectNode) in subjects)
-        {
-            if (subjectNode is JsonObject properties)
-            {
-                NormalizeProperties(properties, idMap);
-            }
-        }
-
-        RebuildSubjects(root, subjects, idMap);
-
-        root["root"] = idMap.TryGetValue(rawRootId, out var stableRoot) ? stableRoot : "ROOT";
-    }
-
-    /// <summary>
-    /// Traverses the subject graph from the root in deterministic order (BFS, properties
-    /// visited in sorted name order, dictionary items sorted by index, collection items in
-    /// source order) and assigns positional IDs ("ROOT", "SUBJ_1", "SUBJ_2", ...).
-    /// This guarantees that two participants whose graphs are content-equal but whose
-    /// internal subject IDs were assigned in different orders produce the same map.
-    /// </summary>
-    private static Dictionary<string, string> BuildStableIdMap(string rawRootId, JsonObject subjects)
+    private static Dictionary<string, string> BuildStableIdMap(SubjectUpdate update)
     {
         var idMap = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            [rawRootId] = "ROOT"
+            [update.Root] = "ROOT"
         };
         var queue = new Queue<string>();
-        queue.Enqueue(rawRootId);
+        queue.Enqueue(update.Root);
 
         var counter = 1;
 
@@ -138,52 +107,37 @@ public static class SnapshotComparer
         {
             var currentRawId = queue.Dequeue();
 
-            if (subjects[currentRawId] is not JsonObject properties)
+            if (!update.Subjects.TryGetValue(currentRawId, out var properties))
             {
                 continue;
             }
 
-            foreach (var propertyName in properties
-                .Select(kvp => kvp.Key)
-                .OrderBy(name => name, StringComparer.Ordinal))
+            foreach (var propertyName in properties.Keys.OrderBy(name => name, StringComparer.Ordinal))
             {
-                if (properties[propertyName] is not JsonObject property)
-                {
-                    continue;
-                }
+                var property = properties[propertyName];
 
-                var kind = property["kind"]?.GetValue<string>();
-
-                if (kind == "Object")
+                if (property.Kind == SubjectPropertyUpdateKind.Object)
                 {
-                    var refId = property["id"]?.GetValue<string>();
-                    if (refId is not null && !idMap.ContainsKey(refId))
+                    if (property.Id is not null && !idMap.ContainsKey(property.Id))
                     {
-                        idMap[refId] = $"SUBJ_{counter++}";
-                        queue.Enqueue(refId);
+                        idMap[property.Id] = $"SUBJ_{counter++}";
+                        queue.Enqueue(property.Id);
                     }
                 }
-                else if ((kind == "Collection" || kind == "Dictionary") &&
-                    property["items"] is JsonArray items)
+                else if (property.Kind is SubjectPropertyUpdateKind.Collection or SubjectPropertyUpdateKind.Dictionary
+                    && property.Items is { } items)
                 {
-                    // Visit dictionary items sorted by key so insertion order does not
-                    // affect ID assignment. Collection items keep source order.
-                    IEnumerable<JsonNode?> orderedItems = kind == "Dictionary"
-                        ? items.OrderBy(item => item?["index"]?.GetValue<string>(), StringComparer.Ordinal)
-                        : items;
+                    IEnumerable<SubjectPropertyItemUpdate> orderedItems =
+                        property.Kind == SubjectPropertyUpdateKind.Dictionary
+                            ? items.OrderBy(item => item.Index?.ToString(), StringComparer.Ordinal)
+                            : items;
 
-                    foreach (var itemNode in orderedItems)
+                    foreach (var item in orderedItems)
                     {
-                        if (itemNode is not JsonObject itemObject)
+                        if (item.Id is not null && !idMap.ContainsKey(item.Id))
                         {
-                            continue;
-                        }
-
-                        var refId = itemObject["id"]?.GetValue<string>();
-                        if (refId is not null && !idMap.ContainsKey(refId))
-                        {
-                            idMap[refId] = $"SUBJ_{counter++}";
-                            queue.Enqueue(refId);
+                            idMap[item.Id] = $"SUBJ_{counter++}";
+                            queue.Enqueue(item.Id);
                         }
                     }
                 }
@@ -193,96 +147,136 @@ public static class SnapshotComparer
         return idMap;
     }
 
-    private static void NormalizeProperties(JsonObject properties, Dictionary<string, string> idMap)
+    private static SubjectUpdate NormalizeUpdate(SubjectUpdate update, Dictionary<string, string> idMap)
     {
-        foreach (var (_, propertyNode) in properties)
+        string RemapId(string id) => idMap.TryGetValue(id, out var stable) ? stable : id;
+
+        var normalizedSubjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>();
+
+        foreach (var (rawSubjectId, properties) in update.Subjects
+            .OrderBy(kvp => RemapId(kvp.Key), StringComparer.Ordinal))
         {
-            if (propertyNode is not JsonObject property)
-            {
-                continue;
-            }
+            var normalizedProperties = new Dictionary<string, SubjectPropertyUpdate>();
 
-            var kind = property["kind"]?.GetValue<string>();
-
-            // Structural-property timestamps are local creation moments and never propagate
-            // across the wire; strip them. Value-property timestamps DO propagate (e.g. via
-            // OPC UA source timestamps) and must converge for participants to agree.
-            if (kind != "Value")
+            foreach (var (propertyName, property) in properties
+                .OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
             {
-                property.Remove("timestamp");
-            }
-
-            if (kind == "Object")
-            {
-                var refId = property["id"]?.GetValue<string>();
-                if (refId is not null && idMap.TryGetValue(refId, out var stableId))
+                var normalized = new SubjectPropertyUpdate
                 {
-                    property["id"] = stableId;
-                }
-            }
-            else if ((kind == "Collection" || kind == "Dictionary") &&
-                property["items"] is JsonArray items)
-            {
-                foreach (var itemNode in items)
+                    Kind = property.Kind,
+                    Value = property.Value,
+                    Timestamp = property.Kind == SubjectPropertyUpdateKind.Value ? property.Timestamp : null,
+                    Id = property.Id is not null ? RemapId(property.Id) : null,
+                    Count = property.Count,
+                    Operations = property.Operations,
+                    Attributes = property.Attributes,
+                    ExtensionData = property.ExtensionData,
+                };
+
+                if (property.Items is { } items)
                 {
-                    if (itemNode is JsonObject itemObject)
-                    {
-                        var refId = itemObject["id"]?.GetValue<string>();
-                        if (refId is not null && idMap.TryGetValue(refId, out var stableId))
+                    var normalizedItems = items
+                        .Select(item => new SubjectPropertyItemUpdate
                         {
-                            itemObject["id"] = stableId;
-                        }
-                    }
-                }
+                            Index = item.Index,
+                            Id = item.Id is not null ? RemapId(item.Id) : null,
+                        })
+                        .ToList();
 
-                // Dictionary items have no defined order; sort by their "index" field
-                // (the dictionary key, serialized as a string). Collection items keep
-                // their source order because order is part of equality.
-                if (kind == "Dictionary")
-                {
-                    var sortedItems = items
-                        .Select(item => item!.AsObject())
-                        .OrderBy(item => item["index"]?.GetValue<string>(), StringComparer.Ordinal)
-                        .Select(item => item.DeepClone())
-                        .ToArray();
-
-                    items.Clear();
-                    foreach (var item in sortedItems)
+                    if (property.Kind == SubjectPropertyUpdateKind.Dictionary)
                     {
-                        items.Add(item);
+                        normalizedItems.Sort((a, b) =>
+                            string.Compare(a.Index?.ToString(), b.Index?.ToString(), StringComparison.Ordinal));
                     }
+
+                    normalized.Items = normalizedItems;
+                }
+
+                normalizedProperties[propertyName] = normalized;
+            }
+
+            normalizedSubjects[RemapId(rawSubjectId)] = normalizedProperties;
+        }
+
+        return new SubjectUpdate
+        {
+            Root = "ROOT",
+            Subjects = normalizedSubjects,
+        };
+    }
+
+    /// <summary>
+    /// Compares two snapshots and returns a list of properties where the null-timestamp
+    /// rule forgave a mismatch (one side had a timestamp, the other did not).
+    /// Returns an empty list when the snapshots are string-equal or when there are no
+    /// forgiven mismatches. Returns null when the snapshots do not match at all.
+    /// </summary>
+    public static List<string>? CollectFindings(
+        string nameA, string snapshotA,
+        string nameB, string snapshotB)
+    {
+        if (snapshotA == snapshotB)
+        {
+            return [];
+        }
+
+        var subjectsA = JsonNode.Parse(snapshotA)?["subjects"]?.AsObject();
+        var subjectsB = JsonNode.Parse(snapshotB)?["subjects"]?.AsObject();
+
+        if (subjectsA is null || subjectsB is null)
+        {
+            return (subjectsA is null && subjectsB is null) ? [] : null;
+        }
+
+        if (subjectsA.Count != subjectsB.Count)
+        {
+            return null;
+        }
+
+        var findings = new List<string>();
+
+        foreach (var (subjectId, subjectNodeA) in subjectsA)
+        {
+            if (subjectsB[subjectId] is not JsonObject propertiesB)
+            {
+                return null;
+            }
+
+            var propertiesA = subjectNodeA!.AsObject();
+            if (propertiesA.Count != propertiesB.Count)
+            {
+                return null;
+            }
+
+            foreach (var (propertyName, propertyNodeA) in propertiesA)
+            {
+                if (propertiesB[propertyName] is not JsonObject propertyB)
+                {
+                    return null;
+                }
+
+                var propertyA = propertyNodeA!.AsObject();
+                if (!PropertiesMatch(propertyA, propertyB))
+                {
+                    return null;
+                }
+
+                var tsA = propertyA["timestamp"];
+                var tsB = propertyB["timestamp"];
+                if ((tsA is null) != (tsB is null))
+                {
+                    var hasTimestamp = tsA is not null ? nameA : nameB;
+                    var missingTimestamp = tsA is null ? nameA : nameB;
+                    var timestampValue = (tsA ?? tsB)!.ToJsonString();
+                    findings.Add($"{subjectId}.{propertyName}: {hasTimestamp} has timestamp {timestampValue}, {missingTimestamp} has none");
                 }
             }
         }
+
+        return findings;
     }
 
-    private static void RebuildSubjects(JsonObject root, JsonObject subjects, Dictionary<string, string> idMap)
-    {
-        // Sort subjects by stable ID and properties within each subject by name for deterministic output.
-        var entries = subjects
-            .Select(kvp => (
-                StableKey: idMap.TryGetValue(kvp.Key, out var sid) ? sid : kvp.Key,
-                Properties: kvp.Value!.AsObject()))
-            .OrderBy(entry => entry.StableKey, StringComparer.Ordinal)
-            .ToList();
-
-        var sorted = new JsonObject();
-        foreach (var (stableKey, properties) in entries)
-        {
-            var sortedProperties = new JsonObject();
-            foreach (var propertyKey in properties
-                .Select(kvp => kvp.Key)
-                .OrderBy(name => name, StringComparer.Ordinal))
-            {
-                sortedProperties[propertyKey] = properties[propertyKey]!.DeepClone();
-            }
-            sorted[stableKey] = sortedProperties;
-        }
-
-        root["subjects"] = sorted;
-    }
-
-    private static bool PropertiesMatch(JsonObject propertyA, JsonObject propertyB)
+    internal static bool PropertiesMatch(JsonObject propertyA, JsonObject propertyB)
     {
         var keys = new HashSet<string>(propertyA.Select(kvp => kvp.Key));
         keys.UnionWith(propertyB.Select(kvp => kvp.Key));

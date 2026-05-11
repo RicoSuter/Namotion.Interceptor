@@ -24,9 +24,10 @@ public class VerificationEngine : BackgroundService
         WriteIndented = true
     };
 
-    private const string CyclesLogPath = "logs/cycles.csv";
-
-    private const string LogsDirectory = "logs";
+    private readonly string _cyclesLogPath;
+    private readonly string _chaosEventsLogPath;
+    private readonly string _findingsLogPath;
+    private readonly string _runDirectory;
 
     private readonly ConnectorTesterConfiguration _configuration;
     private readonly TestCycleCoordinator _coordinator;
@@ -53,7 +54,8 @@ public class VerificationEngine : BackgroundService
         List<ChaosEngine> chaosEngines,
         CycleLoggerProvider? cycleLoggerProvider,
         IHostApplicationLifetime applicationLifetime,
-        ILogger logger)
+        ILogger logger,
+        string runDirectory)
     {
         _configuration = configuration;
         _coordinator = coordinator;
@@ -63,18 +65,25 @@ public class VerificationEngine : BackgroundService
         _cycleLoggerProvider = cycleLoggerProvider;
         _applicationLifetime = applicationLifetime;
         _logger = logger;
+        _runDirectory = runDirectory;
+        _cyclesLogPath = Path.Combine(runDirectory, "cycles.csv");
+        _chaosEventsLogPath = Path.Combine(runDirectory, "chaos-events.csv");
+        _findingsLogPath = Path.Combine(runDirectory, "findings.log");
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(CyclesLogPath)!);
-        var header = string.Format(
-            "{0,24}, {1,6}, {2,6}, {3,20}, {4,10}, {5,12}, {6,12}, {7,16}, {8,20}, {9,12}, {10,10}, {11,10}",
-            "Timestamp", "Cycle", "Result", "Profile", "MutateSec", "ConvergeSec", "CycleSec",
+        var cyclesHeader = string.Format(
+            "{0,24}, {1,6}, {2,6}, {3,20}, {4,14}, {5,16}, {6,12}, {7,16}, {8,20}, {9,12}, {10,10}, {11,10}",
+            "Timestamp", "Cycle", "Result", "Profile", "MutateSeconds", "ConvergeSeconds", "CycleSeconds",
             "ValueMutations", "StructuralMutations", "ChaosEvents",
             "HeapMB", "ProcessMB");
-        
-        await File.WriteAllTextAsync(CyclesLogPath, header + Environment.NewLine, stoppingToken);
+        await File.WriteAllTextAsync(_cyclesLogPath, cyclesHeader + Environment.NewLine, stoppingToken);
+
+        var chaosHeader = string.Format(
+            "{0,24}, {1,6}, {2,16}, {3,12}, {4,16}",
+            "Timestamp", "Cycle", "Participant", "FaultType", "DurationSeconds");
+        await File.WriteAllTextAsync(_chaosEventsLogPath, chaosHeader + Environment.NewLine, stoppingToken);
 
         // Brief startup delay to let connectors initialize
         await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
@@ -121,6 +130,7 @@ public class VerificationEngine : BackgroundService
         while (!stoppingToken.IsCancellationRequested)
         {
             _cycleNumber++;
+            _coordinator.SetCycle(_cycleNumber);
 
             // Reset counters
             foreach (var engine in _mutationEngines)
@@ -175,6 +185,8 @@ public class VerificationEngine : BackgroundService
                     convergeStopwatch.Stop();
                     cycleStopwatch.Stop();
 
+                    LogFindings(snapshots, convergeStopwatch.Elapsed);
+
                     WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, "PASS");
                     CompactHeapAndLogCycle(activeProfileName, "PASS", cycleStopwatch.Elapsed, convergeStopwatch.Elapsed);
                     _logger.LogInformation(
@@ -219,6 +231,53 @@ public class VerificationEngine : BackgroundService
                 _applicationLifetime.StopApplication();
                 return;
             }
+        }
+    }
+
+    private void LogFindings(List<(string Name, string Snapshot)> snapshots, TimeSpan convergeTime)
+    {
+        try
+        {
+            var findings = new List<string>();
+
+            // 1. Convergence time anomaly (>10s with no chaos active)
+            var chaosActive = _chaosEngines.Any(engine => engine.ChaosEventCount > 0);
+            if (convergeTime.TotalSeconds > 10 && !chaosActive)
+            {
+                findings.Add($"slow-convergence: {convergeTime.TotalSeconds:F1}s with no chaos active");
+            }
+
+            // 2. Null-timestamp forgiveness (JSON walk needed)
+            for (var i = 1; i < snapshots.Count; i++)
+            {
+                var timestampFindings = SnapshotComparer.CollectFindings(
+                    snapshots[0].Name, snapshots[0].Snapshot,
+                    snapshots[i].Name, snapshots[i].Snapshot);
+
+                if (timestampFindings is { Count: > 0 })
+                {
+                    findings.AddRange(timestampFindings.Select(finding => $"null-timestamp: {finding}"));
+                }
+            }
+
+            if (findings.Count == 0)
+            {
+                return;
+            }
+
+            _logger.LogWarning("Cycle {Cycle}: {Count} finding(s)", _cycleNumber, findings.Count);
+
+            var lines = new List<string>
+            {
+                $"[{DateTimeOffset.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}] Cycle {_cycleNumber}: {findings.Count} finding(s)"
+            };
+            lines.AddRange(findings.Select(finding => $"  {finding}"));
+            lines.Add("");
+            File.AppendAllLines(_findingsLogPath, lines);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to log findings");
         }
     }
 
@@ -269,17 +328,29 @@ public class VerificationEngine : BackgroundService
         var totalStructuralMutations = _mutationEngines.Sum(e => e.StructuralMutationCount);
         var totalChaosEvents = _chaosEngines.Sum(e => e.ChaosEventCount);
 
-        var mutateSec = _configuration.MutatePhaseDuration.TotalSeconds;
+        var mutateSeconds = _configuration.MutatePhaseDuration.TotalSeconds;
         var line = string.Format(CultureInfo.InvariantCulture,
-            "{0,24:yyyy-MM-ddTHH:mm:ss.fffZ}, {1,6}, {2,6}, {3,20}, {4,10:F1}, {5,12:F1}, {6,12:F1}, {7,16}, {8,20}, {9,12}, {10,10:F1}, {11,10:F1}",
+            "{0,24:yyyy-MM-ddTHH:mm:ss.fffZ}, {1,6}, {2,6}, {3,20}, {4,14:F1}, {5,16:F1}, {6,12:F1}, {7,16}, {8,20}, {9,12}, {10,10:F1}, {11,10:F1}",
             DateTimeOffset.UtcNow, _cycleNumber, result, profileName ?? "",
-            mutateSec, convergeDuration.TotalSeconds, cycleDuration.TotalSeconds,
+            mutateSeconds, convergeDuration.TotalSeconds, cycleDuration.TotalSeconds,
             totalValueMutations, totalStructuralMutations, totalChaosEvents,
             heapMb, processMb);
 
         try
         {
-            File.AppendAllText(CyclesLogPath, line + Environment.NewLine);
+            File.AppendAllText(_cyclesLogPath, line + Environment.NewLine);
+
+            foreach (var engine in _chaosEngines)
+            {
+                foreach (var record in engine.EventHistory)
+                {
+                    var chaosLine = string.Format(CultureInfo.InvariantCulture,
+                        "{0,24:yyyy-MM-ddTHH:mm:ss.fffZ}, {1,6}, {2,16}, {3,12}, {4,16:F1}",
+                        record.DisruptedAt.UtcDateTime, _cycleNumber, engine.TargetName,
+                        record.FaultType, record.Duration.TotalSeconds);
+                    File.AppendAllText(_chaosEventsLogPath, chaosLine + Environment.NewLine);
+                }
+            }
         }
         catch
         {
@@ -297,19 +368,19 @@ public class VerificationEngine : BackgroundService
     {
         try
         {
-            Directory.CreateDirectory(LogsDirectory);
+            Directory.CreateDirectory(_runDirectory);
 
             foreach (var snapshot in snapshots)
             {
-                var fileName = $"cycle{_cycleNumber:D3}-fail-{snapshot.Name}.json";
-                var filePath = Path.Combine(LogsDirectory, fileName);
+                var fileName = $"cycle-{_cycleNumber:D4}-fail-{snapshot.Name}.json";
+                var filePath = Path.Combine(_runDirectory, fileName);
 
                 // Re-serialize with indentation for readability.
                 var node = JsonNode.Parse(snapshot.Snapshot);
                 var formatted = node?.ToJsonString(IndentedJsonOptions) ?? snapshot.Snapshot;
 
                 await File.WriteAllTextAsync(filePath, formatted, cancellationToken);
-                _logger.LogError("Snapshot [{Name}] written to {FilePath}", snapshot.Name, filePath);
+                _logger.LogInformation("Snapshot [{Name}] written to {FilePath}", snapshot.Name, filePath);
             }
         }
         catch (Exception ex)
@@ -373,7 +444,7 @@ public class VerificationEngine : BackgroundService
                         }
 
                         var refProp = refPropertyNode!.AsObject();
-                        if (PropertyJsonsAreEffectivelyEqual(refProp, otherProp))
+                        if (SnapshotComparer.PropertiesMatch(refProp, otherProp))
                         {
                             continue;
                         }
@@ -470,48 +541,6 @@ public class VerificationEngine : BackgroundService
         {
             _logger.LogWarning(ex, "Failed to perform re-sync check");
         }
-    }
-
-    /// <summary>
-    /// Mirrors the null-timestamp rule from <see cref="SnapshotComparer.SnapshotsMatch"/>
-    /// at the per-property level so the diff log treats convergence the same way
-    /// the convergence check does (no false-positive diffs).
-    /// </summary>
-    private static bool PropertyJsonsAreEffectivelyEqual(JsonObject a, JsonObject b)
-    {
-        if (a.ToJsonString() == b.ToJsonString())
-        {
-            return true;
-        }
-
-        var keys = new HashSet<string>(a.Select(kvp => kvp.Key));
-        keys.UnionWith(b.Select(kvp => kvp.Key));
-
-        foreach (var key in keys)
-        {
-            var valueA = a[key];
-            var valueB = b[key];
-
-            if (key == "timestamp")
-            {
-                // Null on either side matches any value (NullTimestampTicks contract).
-                if (valueA is not null && valueB is not null &&
-                    valueA.ToJsonString() != valueB.ToJsonString())
-                {
-                    return false;
-                }
-            }
-            else
-            {
-                if ((valueA is null) != (valueB is null) ||
-                    (valueA is not null && valueA.ToJsonString() != valueB!.ToJsonString()))
-                {
-                    return false;
-                }
-            }
-        }
-
-        return true;
     }
 
     private static string SummarizeProperty(JsonObject property)
