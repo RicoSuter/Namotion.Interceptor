@@ -292,7 +292,9 @@ jobs:
           $version = "${{ github.event.release.tag_name }}" -replace '^v', ''
           echo "VERSION=$version" >> $env:GITHUB_OUTPUT
 
-      - run: dotnet pack src/Namotion.Interceptor.slnx --configuration Release --output ${{ env.NUGET_DIRECTORY }} -p:PackageVersion=${{ steps.version.outputs.VERSION }}
+      - run: dotnet build src/Namotion.Interceptor.slnx --configuration Release
+
+      - run: dotnet pack src/Namotion.Interceptor.slnx --configuration Release --no-build --output ${{ env.NUGET_DIRECTORY }} -p:PackageVersion=${{ steps.version.outputs.VERSION }}
 
       - name: Remove non-library packages
         run: Get-ChildItem "${{ env.NUGET_DIRECTORY }}" -Include *.nupkg -Recurse | Where-Object { $_.Name -notlike "Namotion.Interceptor*" } | Remove-Item -Force
