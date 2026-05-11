@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using Namotion.Interceptor.ConnectorTester.Performance;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -16,7 +17,7 @@ public class PerformanceProfiler : IDisposable
     private readonly string _participantName;
     private readonly string _logFilePath;
     private readonly CancellationTokenSource _cts = new();
-    private readonly Random _samplingRandom = new();
+    private readonly ReservoirSampler _sampler = new(MaxLatencySamples);
 
     private readonly Lock _syncLock = new();
     private readonly List<double> _changedLatencies = [];
@@ -94,14 +95,14 @@ public class PerformanceProfiler : IDisposable
                 var changedLatencyMs = (now - change.ChangedTimestamp).TotalMilliseconds;
                 _changedLatencySum += changedLatencyMs;
                 if (changedLatencyMs > _changedLatencyMax) _changedLatencyMax = changedLatencyMs;
-                ReservoirAdd(_changedLatencies, changedLatencyMs, _totalReceivedChanges);
+                _sampler.Add(_changedLatencies, changedLatencyMs, _totalReceivedChanges);
 
                 if (change.ReceivedTimestamp is not null)
                 {
                     var receivedLatencyMs = (now - change.ReceivedTimestamp.Value).TotalMilliseconds;
                     _receivedLatencySum += receivedLatencyMs;
                     if (receivedLatencyMs > _receivedLatencyMax) _receivedLatencyMax = receivedLatencyMs;
-                    ReservoirAdd(_receivedLatencies, receivedLatencyMs, _totalReceivedChanges);
+                    _sampler.Add(_receivedLatencies, receivedLatencyMs, _totalReceivedChanges);
                 }
 
                 var timeSinceLastSample = (now - _lastThroughputTime).TotalSeconds;
@@ -111,22 +112,6 @@ public class PerformanceProfiler : IDisposable
                     _updatesSinceLastSample = 0;
                     _lastThroughputTime = now;
                 }
-            }
-        }
-    }
-
-    private void ReservoirAdd(List<double> reservoir, double value, int totalSeen)
-    {
-        if (reservoir.Count < MaxLatencySamples)
-        {
-            reservoir.Add(value);
-        }
-        else
-        {
-            var index = _samplingRandom.Next(totalSeen);
-            if (index < MaxLatencySamples)
-            {
-                reservoir[index] = value;
             }
         }
     }
