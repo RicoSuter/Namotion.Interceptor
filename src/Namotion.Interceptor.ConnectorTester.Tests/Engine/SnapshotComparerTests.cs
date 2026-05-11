@@ -238,6 +238,161 @@ public class SnapshotComparerTests
         Assert.Equal(snapshot1, snapshot2);
     }
 
+    [Fact]
+    public void WhenNestedValueDiffers_ThenCapturesDiffer()
+    {
+        // Arrange: divergence one level deep (under ObjectRef). Root-level Value divergence
+        // is already covered; this exercises nested subjects after ID remap.
+        using var _ = SubjectChangeContext.WithChangedTimestamp(FixedTimestamp);
+
+        var contextA = CreateContext();
+        var rootA = new TestNode(contextA)
+        {
+            StringValue = "x", IntValue = 1, DecimalValue = 1, LongValue = 1,
+            ObjectRef = CreateLeaf(contextA, "nested-a", 1)
+        };
+
+        var contextB = CreateContext();
+        var rootB = new TestNode(contextB)
+        {
+            StringValue = "x", IntValue = 1, DecimalValue = 1, LongValue = 1,
+            ObjectRef = CreateLeaf(contextB, "nested-b", 1) // StringValue differs on nested node
+        };
+
+        // Act
+        var snapshotA = SnapshotComparer.Capture(rootA);
+        var snapshotB = SnapshotComparer.Capture(rootB);
+
+        // Assert
+        Assert.NotEqual(snapshotA, snapshotB);
+    }
+
+    [Fact]
+    public void WhenDeepGraphHasIdenticalStateAndDifferentRawIds_ThenCapturesMatch()
+    {
+        // Arrange: multi-level graph (root -> ObjectRef -> {Collection, Items}) so the BFS
+        // ID remap must assign SUBJ_N stably across many subjects. Each participant has its
+        // own context so raw subject IDs differ throughout.
+        using var _ = SubjectChangeContext.WithChangedTimestamp(FixedTimestamp);
+
+        static TestNode BuildGraph(IInterceptorSubjectContext context) =>
+            new(context)
+            {
+                StringValue = "root", IntValue = 1, DecimalValue = 1, LongValue = 1,
+                ObjectRef = new TestNode(context)
+                {
+                    StringValue = "nested", IntValue = 2, DecimalValue = 2, LongValue = 2,
+                    Collection =
+                    [
+                        CreateLeaf(context, "c0", 10),
+                        CreateLeaf(context, "c1", 11)
+                    ],
+                    Items = new Dictionary<string, TestNode>
+                    {
+                        ["alpha"] = CreateLeaf(context, "a", 100),
+                        ["bravo"] = CreateLeaf(context, "b", 101)
+                    }
+                }
+            };
+
+        // Act
+        var snapshotA = SnapshotComparer.Capture(BuildGraph(CreateContext()));
+        var snapshotB = SnapshotComparer.Capture(BuildGraph(CreateContext()));
+
+        // Assert
+        Assert.Equal(snapshotA, snapshotB);
+    }
+
+    [Fact]
+    public void WhenDictionaryKeysDiffer_ThenCapturesDiffer()
+    {
+        // Arrange: same item count, same item values, different keys. Must not match.
+        using var _ = SubjectChangeContext.WithChangedTimestamp(FixedTimestamp);
+
+        var contextA = CreateContext();
+        var rootA = new TestNode(contextA)
+        {
+            StringValue = "x", IntValue = 1, DecimalValue = 1, LongValue = 1,
+            Items = new Dictionary<string, TestNode> { ["alpha"] = CreateLeaf(contextA, "v", 1) }
+        };
+
+        var contextB = CreateContext();
+        var rootB = new TestNode(contextB)
+        {
+            StringValue = "x", IntValue = 1, DecimalValue = 1, LongValue = 1,
+            Items = new Dictionary<string, TestNode> { ["bravo"] = CreateLeaf(contextB, "v", 1) }
+        };
+
+        // Act
+        var snapshotA = SnapshotComparer.Capture(rootA);
+        var snapshotB = SnapshotComparer.Capture(rootB);
+
+        // Assert
+        Assert.NotEqual(snapshotA, snapshotB);
+    }
+
+    [Fact]
+    public void WhenCollectionLengthDiffers_ThenCapturesDiffer()
+    {
+        // Arrange: one side has more items. Must not match.
+        using var _ = SubjectChangeContext.WithChangedTimestamp(FixedTimestamp);
+
+        var contextA = CreateContext();
+        var rootA = new TestNode(contextA)
+        {
+            StringValue = "x", IntValue = 1, DecimalValue = 1, LongValue = 1,
+            Collection = [CreateLeaf(contextA, "a", 1), CreateLeaf(contextA, "b", 2)]
+        };
+
+        var contextB = CreateContext();
+        var rootB = new TestNode(contextB)
+        {
+            StringValue = "x", IntValue = 1, DecimalValue = 1, LongValue = 1,
+            Collection = [CreateLeaf(contextB, "a", 1)]
+        };
+
+        // Act
+        var snapshotA = SnapshotComparer.Capture(rootA);
+        var snapshotB = SnapshotComparer.Capture(rootB);
+
+        // Assert
+        Assert.NotEqual(snapshotA, snapshotB);
+    }
+
+    [Fact]
+    public void WhenSubjectHasMixedKindsAndOnlyValueDiverges_ThenCapturesDiffer()
+    {
+        // Arrange: subject carries Value + Collection + Dictionary + Object properties.
+        // Only the Value (StringValue) differs. Structural-timestamp stripping must not
+        // accidentally mask Value-property divergence in the same subject.
+        using var _ = SubjectChangeContext.WithChangedTimestamp(FixedTimestamp);
+
+        var contextA = CreateContext();
+        var rootA = new TestNode(contextA)
+        {
+            StringValue = "x", IntValue = 1, DecimalValue = 1, LongValue = 1,
+            ObjectRef = CreateLeaf(contextA, "ref", 0),
+            Collection = [CreateLeaf(contextA, "c", 1)],
+            Items = new Dictionary<string, TestNode> { ["k"] = CreateLeaf(contextA, "i", 1) }
+        };
+
+        var contextB = CreateContext();
+        var rootB = new TestNode(contextB)
+        {
+            StringValue = "y", IntValue = 1, DecimalValue = 1, LongValue = 1, // StringValue differs
+            ObjectRef = CreateLeaf(contextB, "ref", 0),
+            Collection = [CreateLeaf(contextB, "c", 1)],
+            Items = new Dictionary<string, TestNode> { ["k"] = CreateLeaf(contextB, "i", 1) }
+        };
+
+        // Act
+        var snapshotA = SnapshotComparer.Capture(rootA);
+        var snapshotB = SnapshotComparer.Capture(rootB);
+
+        // Assert
+        Assert.NotEqual(snapshotA, snapshotB);
+    }
+
     // Raw-JSON tests for SnapshotComparer.SnapshotsMatch — no Capture or SubjectChangeContext needed.
 
     private const string SampleSnapshotPropertiesAB = """

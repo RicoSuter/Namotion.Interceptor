@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Namotion.Interceptor.ConnectorTester.Engine;
 
 namespace Namotion.Interceptor.ConnectorTester.Logging;
 
@@ -42,7 +43,7 @@ public sealed class CycleLoggerProvider : ILoggerProvider
         }
     }
 
-    public void FinishCycle(int cycleNumber, bool passed)
+    public void FinishCycle(int cycleNumber, CycleResult result)
     {
         lock (_fileLock)
         {
@@ -53,9 +54,8 @@ public sealed class CycleLoggerProvider : ILoggerProvider
             _currentWriter.Dispose();
             _currentWriter = null;
 
-            // Rename file with result
-            var result = passed ? "pass" : "FAIL";
-            var newPath = _currentFilePath.Replace("-pending.log", $"-{result}.log");
+            var resultSuffix = result == CycleResult.Pass ? "pass" : "FAIL";
+            var newPath = _currentFilePath.Replace("-pending.log", $"-{resultSuffix}.log");
 
             try
             {

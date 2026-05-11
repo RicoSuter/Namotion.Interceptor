@@ -12,6 +12,14 @@ namespace Namotion.Interceptor.ConnectorTester.Engine;
 /// </summary>
 public static class SnapshotComparer
 {
+    private const string SubjectsKey = "subjects";
+    internal const string TimestampKey = "timestamp";
+    internal const string KindKey = "kind";
+    internal const string ValueKey = "value";
+    internal const string IdKey = "id";
+    internal const string CountKey = "count";
+    internal const string ItemsKey = "items";
+
     private static readonly JsonSerializerOptions CompactJsonOptions = new()
     {
         WriteIndented = false
@@ -31,6 +39,25 @@ public static class SnapshotComparer
     {
         var update = SubjectUpdate.CreateCompleteUpdate(root, []);
         var idMap = BuildStableIdMap(update);
+
+        // Verification-tooling invariant: every subject must be reachable from the root
+        // via Object/Collection/Dictionary edges. Unreachable orphans would keep their
+        // raw (per-participant) IDs after normalization and silently produce false
+        // convergence failures. Fail fast so this surfaces as a tooling issue rather
+        // than masquerading as a connector bug.
+        if (update.Subjects.Count != idMap.Count)
+        {
+            var unreachable = update.Subjects.Keys.Where(id => !idMap.ContainsKey(id)).ToList();
+            if (unreachable.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"SnapshotComparer: SubjectUpdate contains {unreachable.Count} subject(s) " +
+                    $"not reachable from root '{update.Root}': {string.Join(", ", unreachable)}. " +
+                    "This is a verification-tooling invariant violation (CreateCompleteUpdate is " +
+                    "expected to emit only reachable subjects), not a connector convergence failure.");
+            }
+        }
+
         var normalized = NormalizeUpdate(update, idMap);
         return JsonSerializer.Serialize(normalized, CompactJsonOptions);
     }
@@ -49,15 +76,12 @@ public static class SnapshotComparer
             return true;
         }
 
-        var subjectsA = JsonNode.Parse(snapshotA)?["subjects"]?.AsObject();
-        var subjectsB = JsonNode.Parse(snapshotB)?["subjects"]?.AsObject();
-
-        return SubjectsMatch(subjectsA, subjectsB);
+        return SubjectsMatch(ParseSubjects(snapshotA), ParseSubjects(snapshotB));
     }
 
     public static bool SnapshotsMatch(JsonObject? referenceSubjects, string snapshotB)
     {
-        return SubjectsMatch(referenceSubjects, JsonNode.Parse(snapshotB)?["subjects"]?.AsObject());
+        return SubjectsMatch(referenceSubjects, ParseSubjects(snapshotB));
     }
 
     private static bool SubjectsMatch(JsonObject? subjectsA, JsonObject? subjectsB)
@@ -104,7 +128,7 @@ public static class SnapshotComparer
 
     public static JsonObject? ParseSubjects(string snapshot)
     {
-        return JsonNode.Parse(snapshot)?["subjects"]?.AsObject();
+        return JsonNode.Parse(snapshot)?[SubjectsKey]?.AsObject();
     }
 
     private static Dictionary<string, string> BuildStableIdMap(SubjectUpdate update)
@@ -164,7 +188,7 @@ public static class SnapshotComparer
 
     private static SubjectUpdate NormalizeUpdate(SubjectUpdate update, Dictionary<string, string> idMap)
     {
-        string RemapId(string id) => idMap.TryGetValue(id, out var stable) ? stable : id;
+        string RemapId(string id) => idMap.GetValueOrDefault(id, id);
 
         var normalizedSubjects = new Dictionary<string, Dictionary<string, SubjectPropertyUpdate>>();
 
@@ -235,8 +259,8 @@ public static class SnapshotComparer
             return [];
         }
 
-        var subjectsA = JsonNode.Parse(snapshotA)?["subjects"]?.AsObject();
-        var subjectsB = JsonNode.Parse(snapshotB)?["subjects"]?.AsObject();
+        var subjectsA = ParseSubjects(snapshotA);
+        var subjectsB = ParseSubjects(snapshotB);
 
         if (subjectsA is null || subjectsB is null)
         {
@@ -276,8 +300,8 @@ public static class SnapshotComparer
                     return null;
                 }
 
-                var tsA = propertyA["timestamp"];
-                var tsB = propertyB["timestamp"];
+                var tsA = propertyA[TimestampKey];
+                var tsB = propertyB[TimestampKey];
                 if ((tsA is null) != (tsB is null))
                 {
                     var hasTimestamp = tsA is not null ? nameA : nameB;
@@ -293,25 +317,22 @@ public static class SnapshotComparer
 
     internal static bool PropertiesMatch(JsonObject propertyA, JsonObject propertyB)
     {
-        var keys = new HashSet<string>(propertyA.Select(kvp => kvp.Key));
-        keys.UnionWith(propertyB.Select(kvp => kvp.Key));
-
-        foreach (var key in keys)
+        foreach (var (key, valueA) in propertyA)
         {
-            var valueA = propertyA[key];
-            var valueB = propertyB[key];
-
-            if (key == "timestamp")
+            if (!CompareField(key, valueA, propertyB[key]))
             {
-                // Architectural null-timestamp rule: null on either side is a legitimate
-                // "no explicit write timestamp" state and matches any value. Only fail
-                // when both sides are non-null and unequal.
-                if (valueA is not null && valueB is not null && !JsonValuesEqual(valueA, valueB))
-                {
-                    return false;
-                }
+                return false;
             }
-            else if (!JsonValuesEqual(valueA, valueB))
+        }
+
+        foreach (var (key, valueB) in propertyB)
+        {
+            if (propertyA.ContainsKey(key))
+            {
+                continue;
+            }
+
+            if (!CompareField(key, null, valueB))
             {
                 return false;
             }
@@ -320,18 +341,16 @@ public static class SnapshotComparer
         return true;
     }
 
-    private static bool JsonValuesEqual(JsonNode? a, JsonNode? b)
+    private static bool CompareField(string key, JsonNode? valueA, JsonNode? valueB)
     {
-        if (a is null && b is null)
+        if (key == TimestampKey)
         {
-            return true;
+            // Architectural null-timestamp rule: null on either side is a legitimate
+            // "no explicit write timestamp" state and matches any value. Only fail
+            // when both sides are non-null and unequal.
+            return valueA is null || valueB is null || JsonNode.DeepEquals(valueA, valueB);
         }
 
-        if (a is null || b is null)
-        {
-            return false;
-        }
-
-        return a.ToJsonString() == b.ToJsonString();
+        return JsonNode.DeepEquals(valueA, valueB);
     }
 }
