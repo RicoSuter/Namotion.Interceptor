@@ -1,6 +1,6 @@
 using System.Diagnostics;
-using System.Globalization;
 using Namotion.Interceptor.ConnectorTester.Performance;
+using Namotion.Interceptor.ConnectorTester.Reporting;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.Tracking.Change;
 
@@ -15,7 +15,7 @@ public class PerformanceProfiler : IDisposable
     private readonly Thread _consumerThread;
     private readonly Timer _timer;
     private readonly string _participantName;
-    private readonly string _logFilePath;
+    private readonly CsvFile<PerformanceCsvRow> _csv;
     private readonly CancellationTokenSource _cts = new();
     private readonly ReservoirSampler _sampler = new(MaxLatencySamples);
 
@@ -54,12 +54,8 @@ public class PerformanceProfiler : IDisposable
             _windowStartCpuTime = process.TotalProcessorTime;
         }
 
-        _logFilePath = Path.Combine(logDirectory, $"performance-{participantName}.csv");
-
-        var header = string.Format(
-            "{0,24}, {1,12}, {2,6}, {3,12}, {4,16}, {5,14}, {6,14}, {7,14}, {8,14}, {9,15}, {10,14}, {11,20}, {12,12}, {13,12}, {14,12}, {15,12}, {16,12}, {17,14}",
-            "Timestamp", "Participant", "Cycle", "Received/s", "Received-Average", "Received-P50", "Received-P90", "Received-P95", "Received-P99", "Received-P999", "Received-Max", "Received-Processing", "Published", "Received", "CPU%", "ProcessMB", "HeapMB", "AllocationMB/s");
-        File.WriteAllText(_logFilePath, header + Environment.NewLine);
+        _csv = PerformanceCsv.Create(Path.Combine(logDirectory, $"performance-{participantName}.csv"));
+        _csv.WriteHeader();
 
         _subscription = context.CreatePropertyChangeQueueSubscription();
 
@@ -236,20 +232,27 @@ public class PerformanceProfiler : IDisposable
         var p99ChangedLatency = changedLatencies.Count > 0 ? Percentile(changedLatencies, 0.99) : 0;
         var p999ChangedLatency = changedLatencies.Count > 0 ? Percentile(changedLatencies, 0.999) : 0;
 
-        var cycle = _coordinator?.CurrentCycle ?? 0;
-        var logLine = string.Format(
-            CultureInfo.InvariantCulture,
-            "{0,24:yyyy-MM-ddTHH:mm:ss.fffZ}, {1,12}, {2,6}, {3,12:F0}, {4,16:F1}, {5,14:F1}, {6,14:F1}, {7,14:F1}, {8,14:F1}, {9,15:F1}, {10,14:F1}, {11,20:F1}, {12,12}, {13,12}, {14,12:F1}, {15,12:F1}, {16,12:F1}, {17,14:F2}",
-            now, _participantName, cycle, avgThroughput,
-            avgChangedLatency, p50ChangedLatency, p90ChangedLatency, p95ChangedLatency,
-            p99ChangedLatency, p999ChangedLatency, changedLatencyMax,
-            avgReceivedLatency, publishedCount, receivedCount,
-            cpuPercent,
-            workingSetMb, heapMb, allocRateMbPerSec);
-
         try
         {
-            File.AppendAllText(_logFilePath, logLine + Environment.NewLine);
+            _csv.AppendRow(new PerformanceCsvRow(
+                Timestamp: now,
+                Participant: _participantName,
+                Cycle: _coordinator?.CurrentCycle ?? 0,
+                ReceivedPerSecond: avgThroughput,
+                ReceivedAverage: avgChangedLatency,
+                ReceivedP50: p50ChangedLatency,
+                ReceivedP90: p90ChangedLatency,
+                ReceivedP95: p95ChangedLatency,
+                ReceivedP99: p99ChangedLatency,
+                ReceivedP999: p999ChangedLatency,
+                ReceivedMax: changedLatencyMax,
+                ReceivedProcessing: avgReceivedLatency,
+                Published: publishedCount,
+                Received: receivedCount,
+                CpuPercent: cpuPercent,
+                ProcessMb: workingSetMb,
+                HeapMb: heapMb,
+                AllocationMbPerSec: allocRateMbPerSec));
         }
         catch
         {
@@ -290,6 +293,7 @@ public class PerformanceProfiler : IDisposable
         _timer.Dispose();
         _consumerThread.Join(TimeSpan.FromSeconds(2));
         _subscription.Dispose();
+        _csv.Dispose();
         _cts.Dispose();
     }
 }
