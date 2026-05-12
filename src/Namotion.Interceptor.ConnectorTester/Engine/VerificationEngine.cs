@@ -243,7 +243,7 @@ public class VerificationEngine : BackgroundService
             // 2. Null-timestamp forgiveness (JSON walk needed)
             for (var i = 1; i < snapshots.Count; i++)
             {
-                var timestampFindings = SnapshotComparer.CollectFindings(
+                var timestampFindings = SnapshotDiffer.CollectFindings(
                     snapshots[0].Name, snapshots[0].Snapshot,
                     snapshots[i].Name, snapshots[i].Snapshot);
 
@@ -400,90 +400,57 @@ public class VerificationEngine : BackgroundService
                 return;
             }
 
-            var reference = SnapshotComparer.ParseSubjects(snapshots[0].Snapshot);
-            if (reference is null)
-            {
-                return;
-            }
             var referenceName = snapshots[0].Name;
+            var referenceSnapshot = snapshots[0].Snapshot;
 
             for (var i = 1; i < snapshots.Count; i++)
             {
-                var other = SnapshotComparer.ParseSubjects(snapshots[i].Snapshot);
-                if (other is null)
-                {
-                    continue;
-                }
                 var otherName = snapshots[i].Name;
+                var otherSnapshot = snapshots[i].Snapshot;
 
-                foreach (var (subjectId, refSubjectNode) in reference)
+                foreach (var entry in SnapshotDiffer.Diff(referenceName, referenceSnapshot, otherName, otherSnapshot))
                 {
-                    if (other[subjectId] is not JsonObject otherProperties)
-                    {
-                        _logger.LogError(
-                            "  Subject {SubjectId}: present in {Reference}, missing from {Other}",
-                            subjectId, referenceName, otherName);
-                        continue;
-                    }
-
-                    var refProperties = refSubjectNode!.AsObject();
-                    foreach (var (propertyName, refPropertyNode) in refProperties)
-                    {
-                        if (otherProperties[propertyName] is not JsonObject otherProp)
-                        {
-                            _logger.LogError(
-                                "  {SubjectId}.{Property}: present in {Reference}, missing from {Other}",
-                                subjectId, propertyName, referenceName, otherName);
-                            continue;
-                        }
-
-                        var refProp = refPropertyNode!.AsObject();
-                        if (SnapshotComparer.PropertiesMatch(refProp, otherProp))
-                        {
-                            continue;
-                        }
-
-                        _logger.LogError(
-                            "  {SubjectId}.{Property}: {Reference}={RefSummary}, {Other}={OtherSummary}",
-                            subjectId, propertyName,
-                            referenceName, SummarizeProperty(refProp),
-                            otherName, SummarizeProperty(otherProp));
-                    }
-                }
-
-                // Also report subjects present only on the other side, and properties
-                // present only on the other side within shared subjects.
-                foreach (var (subjectId, otherSubjectNode) in other)
-                {
-                    if (!reference.ContainsKey(subjectId))
-                    {
-                        _logger.LogError(
-                            "  Subject {SubjectId}: missing from {Reference}, present in {Other}",
-                            subjectId, referenceName, otherName);
-                        continue;
-                    }
-
-                    if (otherSubjectNode is not JsonObject otherSharedProperties)
-                    {
-                        continue;
-                    }
-
-                    var refSharedProperties = reference[subjectId]!.AsObject();
-                    foreach (var (propertyName, _) in otherSharedProperties)
-                    {
-                        if (!refSharedProperties.ContainsKey(propertyName))
-                        {
-                            _logger.LogError(
-                                "  {SubjectId}.{Property}: missing from {Reference}, present in {Other}",
-                                subjectId, propertyName, referenceName, otherName);
-                        }
-                    }
+                    LogDiffEntry(entry, referenceName, otherName);
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            _logger.LogWarning(ex, "Failed to log property diffs with timestamps");
+            _logger.LogWarning(exception, "Failed to log property diffs with timestamps");
+        }
+    }
+
+    private void LogDiffEntry(SnapshotDiffEntry entry, string referenceName, string otherName)
+    {
+        switch (entry.Kind)
+        {
+            case SnapshotDiffKind.SubjectMissingFromOther:
+                _logger.LogError(
+                    "  Subject {SubjectId}: present in {Reference}, missing from {Other}",
+                    entry.SubjectId, referenceName, otherName);
+                break;
+            case SnapshotDiffKind.SubjectMissingFromReference:
+                _logger.LogError(
+                    "  Subject {SubjectId}: missing from {Reference}, present in {Other}",
+                    entry.SubjectId, referenceName, otherName);
+                break;
+            case SnapshotDiffKind.PropertyMissingFromOther:
+                _logger.LogError(
+                    "  {SubjectId}.{Property}: present in {Reference}, missing from {Other}",
+                    entry.SubjectId, entry.PropertyName, referenceName, otherName);
+                break;
+            case SnapshotDiffKind.PropertyMissingFromReference:
+                _logger.LogError(
+                    "  {SubjectId}.{Property}: missing from {Reference}, present in {Other}",
+                    entry.SubjectId, entry.PropertyName, referenceName, otherName);
+                break;
+            case SnapshotDiffKind.PropertyDiffers:
+                _logger.LogError(
+                    "  {SubjectId}.{Property}: {Reference}={ReferenceSummary}, {Other}={OtherSummary}",
+                    entry.SubjectId, entry.PropertyName,
+                    referenceName, entry.ReferenceSummary,
+                    otherName, entry.OtherSummary);
+                break;
         }
     }
 
@@ -535,27 +502,6 @@ public class VerificationEngine : BackgroundService
         {
             _logger.LogWarning(ex, "Failed to perform re-sync check");
         }
-    }
-
-    private static string SummarizeProperty(JsonObject property)
-    {
-        var kind = property[SnapshotComparer.KindKey]?.GetValue<string>() ?? "?";
-        return kind switch
-        {
-            "Value" => FormatValueSummary(property),
-            "Object" => $"Object id={property[SnapshotComparer.IdKey]?.ToJsonString() ?? "null"}",
-            "Collection" or "Dictionary" =>
-                $"{kind} count={property[SnapshotComparer.CountKey]?.ToJsonString() ?? "?"} " +
-                $"items={property[SnapshotComparer.ItemsKey]?.ToJsonString() ?? "[]"}",
-            _ => property.ToJsonString()
-        };
-    }
-
-    private static string FormatValueSummary(JsonObject property)
-    {
-        var value = property[SnapshotComparer.ValueKey]?.ToJsonString() ?? "null";
-        var timestamp = property[SnapshotComparer.TimestampKey]?.GetValue<string>() ?? "never";
-        return $"{value} (written {timestamp})";
     }
 
     private string? ApplyChaosProfile()
