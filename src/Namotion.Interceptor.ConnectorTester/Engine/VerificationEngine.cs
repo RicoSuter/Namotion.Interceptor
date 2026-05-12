@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Globalization;
 using System.Runtime;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -29,7 +28,7 @@ public class VerificationEngine : BackgroundService
     };
 
     private readonly CsvFile<CycleCsvRow> _cyclesCsv;
-    private readonly string _chaosEventsLogPath;
+    private readonly CsvFile<ChaosEventCsvRow> _chaosEventsCsv;
     private readonly string _findingsLogPath;
     private readonly string _runDirectory;
 
@@ -71,24 +70,21 @@ public class VerificationEngine : BackgroundService
         _logger = logger;
         _runDirectory = runDirectory;
         _cyclesCsv = CyclesCsv.Create(Path.Combine(runDirectory, "cycles.csv"));
-        _chaosEventsLogPath = Path.Combine(runDirectory, "chaos-events.csv");
+        _chaosEventsCsv = ChaosEventsCsv.Create(Path.Combine(runDirectory, "chaos-events.csv"));
         _findingsLogPath = Path.Combine(runDirectory, "findings.log");
     }
 
     public override void Dispose()
     {
         _cyclesCsv.Dispose();
+        _chaosEventsCsv.Dispose();
         base.Dispose();
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _cyclesCsv.WriteHeader();
-
-        var chaosHeader = string.Format(
-            "{0,24}, {1,6}, {2,16}, {3,12}, {4,16}",
-            "Timestamp", "Cycle", "Participant", "FaultType", "DurationSeconds");
-        await File.WriteAllTextAsync(_chaosEventsLogPath, chaosHeader + Environment.NewLine, stoppingToken);
+        _chaosEventsCsv.WriteHeader();
 
         await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
 
@@ -345,11 +341,12 @@ public class VerificationEngine : BackgroundService
             {
                 foreach (var record in engine.EventHistory)
                 {
-                    var chaosLine = string.Format(CultureInfo.InvariantCulture,
-                        "{0,24:yyyy-MM-ddTHH:mm:ss.fffZ}, {1,6}, {2,16}, {3,12}, {4,16:F1}",
-                        record.DisruptedAt.UtcDateTime, _cycleNumber, engine.TargetName,
-                        record.FaultType, record.Duration.TotalSeconds);
-                    File.AppendAllText(_chaosEventsLogPath, chaosLine + Environment.NewLine);
+                    _chaosEventsCsv.AppendRow(new ChaosEventCsvRow(
+                        Timestamp: record.DisruptedAt.UtcDateTime,
+                        Cycle: _cycleNumber,
+                        Participant: engine.TargetName,
+                        FaultType: record.FaultType,
+                        DurationSeconds: record.Duration.TotalSeconds));
                 }
             }
         }
