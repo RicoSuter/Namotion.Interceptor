@@ -150,7 +150,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // even when the getter recorded zero deps (e.g. short-circuited at attach).
         if (Volatile.Read(ref data.IsDerived) && context.Property.Metadata.SetValue is not null)
         {
-            var currentTimestampUtcTicks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
+            var currentTimestampUtcTicks = context.WriteTimestampStorageTicks;
             var property = context.Property;
             RecalculateDerivedProperty(ref property, currentTimestampUtcTicks);
         }
@@ -165,19 +165,38 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 return;
             }
 
-            var timestampUtcTicks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
-            for (var i = 0; i < usedByProperties.Length; i++)
+            var timestampUtcTicks = context.WriteTimestampStorageTicks;
+            // Share trigger's timestamp with cascade chain so derived recalc events match
+            // the trigger's stored property timestamp. Skips scope for explicit null (ticks == 0)
+            // where cascade child should retain its own behavior.
+            if (timestampUtcTicks > 0)
             {
-                var dependent = usedByProperties[i];
-                if (dependent == context.Property)
+                using (SubjectChangeContext.WithChangedTimestamp(new DateTimeOffset(timestampUtcTicks, TimeSpan.Zero)))
                 {
-                    // Defensive: DerivedPropertyRecorder filters self-refs, so this is unreachable
-                    // via the normal recorder path.
-                    continue;
+                    RecalculateDependents(usedByProperties, context.Property, timestampUtcTicks);
                 }
-
-                RecalculateDerivedProperty(ref dependent, timestampUtcTicks);
             }
+            else
+            {
+                RecalculateDependents(usedByProperties, context.Property, timestampUtcTicks);
+            }
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void RecalculateDependents(ReadOnlySpan<PropertyReference> usedByProperties, PropertyReference triggerProperty, long timestampUtcTicks)
+    {
+        for (var i = 0; i < usedByProperties.Length; i++)
+        {
+            var dependent = usedByProperties[i];
+            if (dependent == triggerProperty)
+            {
+                // Defensive: DerivedPropertyRecorder filters self-refs, so this is unreachable
+                // via the normal recorder path.
+                continue;
+            }
+
+            RecalculateDerivedProperty(ref dependent, timestampUtcTicks);
         }
     }
 

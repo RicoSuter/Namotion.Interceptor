@@ -1,4 +1,6 @@
-﻿namespace Namotion.Interceptor.Interceptors;
+﻿using System.Runtime.CompilerServices;
+
+namespace Namotion.Interceptor.Interceptors;
 
 /// <summary>
 /// Interceptor that can intercept and modify property write operations.
@@ -26,6 +28,12 @@ public delegate void WriteInterceptionDelegate<TProperty>(ref PropertyWriteConte
 /// </summary>
 public struct PropertyWriteContext<TProperty>
 {
+    // Encoding: 0 = uninitialized, >0 = snapped real ticks (storage == publish),
+    // <0 = explicit null scope (storage = 0, publish = -value).
+    // Negative encoding lets one long carry both "stored as null" and the publish ticks,
+    // keeping the struct compact.
+    private long _writeTimestampTicks;
+
     /// <summary>
     /// Gets the property to write a value to.
     /// </summary>
@@ -48,18 +56,85 @@ public struct PropertyWriteContext<TProperty>
     /// </summary>
     public bool IsWritten { get; set; }
 
-    /// <summary>
-    /// Gets the UTC ticks of the write timestamp set by the terminal write action.
-    /// Available after the terminal write completes (i.e., after calling <c>next</c>).
-    /// </summary>
-    internal long WriteTimestampUtcTicks { get; set; }
-
     public PropertyWriteContext(PropertyReference property, TProperty currentValue, TProperty newValue)
     {
         Property = property;
         CurrentValue = currentValue;
         NewValue = newValue;
         IsWritten = false;
+        _writeTimestampTicks = 0;
+    }
+
+    /// <summary>
+    /// Gets the timestamp stamped on the property by this write, or <c>null</c> if the write used
+    /// an explicit null-timestamp scope (the property is stamped as never-written).
+    ///
+    /// Lazily snapshotted on first access and cached for the remainder of the write so all consumers
+    /// (terminal write, change-event publishers, transaction capture, derived recalc) observe the
+    /// same value regardless of read order. Source: an active <see cref="SubjectChangeContext.WithChangedTimestamp"/>
+    /// scope (when set), or <see cref="SubjectChangeContext.GetTimestampFunction"/> when no scope is active.
+    /// </summary>
+    public DateTimeOffset? WriteTimestamp
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+            var ticks = _writeTimestampTicks;
+            if (ticks == 0) ticks = SnapAndCacheWriteTimestamp();
+            return ticks > 0 ? new DateTimeOffset(ticks, TimeSpan.Zero) : null;
+        }
+    }
+
+    /// <summary>
+    /// Raw ticks for property storage: <c>0</c> for the explicit null-timestamp scope (never-written sentinel),
+    /// otherwise the snapped real ticks. Same lazy-snap semantics as <see cref="WriteTimestamp"/>.
+    /// </summary>
+    internal long WriteTimestampStorageTicks
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+            var ticks = _writeTimestampTicks;
+            if (ticks == 0) ticks = SnapAndCacheWriteTimestamp();
+            return ticks > 0 ? ticks : 0;
+        }
+    }
+
+    /// <summary>
+    /// The timestamp to use when publishing this write as a change event. Always a real value,
+    /// even when the write used an explicit null-timestamp scope (consumers expect a value).
+    /// Same lazy-snap semantics as <see cref="WriteTimestamp"/>.
+    /// </summary>
+    internal DateTimeOffset WriteTimestampForPublishing
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+            var ticks = _writeTimestampTicks;
+            if (ticks == 0) ticks = SnapAndCacheWriteTimestamp();
+            return new DateTimeOffset(ticks > 0 ? ticks : -ticks, TimeSpan.Zero);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private long SnapAndCacheWriteTimestamp()
+    {
+        var scopeTicks = SubjectChangeContext.RawCurrentChangedTimestampTicks;
+        long result;
+        if (scopeTicks > 0)
+        {
+            result = scopeTicks;
+        }
+        else if (scopeTicks == SubjectChangeContext.NullTimestampTicks)
+        {
+            result = -SubjectChangeContext.GetTimestampFunction().UtcTicks; // negative = explicit-null encoding
+        }
+        else
+        {
+            result = SubjectChangeContext.GetTimestampFunction().UtcTicks;
+        }
+        _writeTimestampTicks = result;
+        return result;
     }
 
     /// <summary>

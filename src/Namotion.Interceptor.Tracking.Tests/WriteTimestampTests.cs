@@ -1,4 +1,5 @@
 using System.Reactive.Concurrency;
+using Namotion.Interceptor.Interceptors;
 using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking.Change;
 using Namotion.Interceptor.Tracking.Tests.Models;
@@ -351,5 +352,75 @@ public class WriteTimestampTests
         Assert.Null(person.GetPropertyReference("FirstName").TryGetWriteTimestamp());
         var firstNameChange = changes.First(c => c.Property.Name == "FirstName");
         Assert.True(firstNameChange.ChangedTimestamp >= before);
+    }
+
+    [Fact]
+    public void WhenWrittenWithExplicitTimestamp_ThenStoredQueueAndObservableTimestampsAllMatch()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        var observableChanges = new List<SubjectPropertyChange>();
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(c => observableChanges.Add(c));
+
+        var person = new Person(context);
+        var explicitTimestamp = DateTimeOffset.UtcNow.AddDays(-7);
+
+        // Act
+        using (SubjectChangeContext.WithChangedTimestamp(explicitTimestamp))
+        {
+            person.FirstName = "John";
+        }
+
+        // Assert
+        var storedTimestamp = person.GetPropertyReference("FirstName").TryGetWriteTimestamp();
+        Assert.True(subscription.TryDequeue(out var queuedChange, CancellationToken.None));
+        var observedChange = observableChanges.First(c => c.Property.Name == "FirstName");
+
+        Assert.Equal(explicitTimestamp, storedTimestamp);
+        Assert.Equal(explicitTimestamp, queuedChange.ChangedTimestamp);
+        Assert.Equal(explicitTimestamp, observedChange.ChangedTimestamp);
+    }
+
+    [Fact]
+    public void WhenReadingContextWriteTimestamp_MultipleReads_ThenAllReturnSameLazilySnappedValue()
+    {
+        // Arrange
+        var capturingInterceptor = new ContextTimestampCapturingInterceptor();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking()
+            .WithService<IWriteInterceptor>(() => capturingInterceptor, _ => false);
+
+        var person = new Person(context);
+
+        // Act: reads occur both before and after next() — both must observe the same lazily-snapped value.
+        person.FirstName = "John";
+
+        // Assert
+        Assert.NotNull(capturingInterceptor.BeforeNext);
+        Assert.NotNull(capturingInterceptor.AfterNext);
+        Assert.Equal(capturingInterceptor.BeforeNext, capturingInterceptor.AfterNext);
+
+        var storedTimestamp = person.GetPropertyReference("FirstName").TryGetWriteTimestamp();
+        Assert.Equal(storedTimestamp, capturingInterceptor.BeforeNext);
+    }
+
+    private sealed class ContextTimestampCapturingInterceptor : IWriteInterceptor
+    {
+        public DateTimeOffset? BeforeNext { get; private set; }
+        public DateTimeOffset? AfterNext { get; private set; }
+
+        public void WriteProperty<TProperty>(ref PropertyWriteContext<TProperty> context, WriteInterceptionDelegate<TProperty> next)
+        {
+            BeforeNext ??= context.WriteTimestamp;
+            next(ref context);
+            AfterNext ??= context.WriteTimestamp;
+        }
     }
 }

@@ -134,7 +134,6 @@ namespace Namotion.Interceptor
     public readonly struct SubjectChangeContext
     {
         public readonly object? Source;
-        public System.DateTimeOffset ChangedTimestamp { get; }
         public System.DateTimeOffset? ReceivedTimestamp { get; }
         public static Namotion.Interceptor.SubjectChangeContext Current { get; }
         public static System.Func<System.DateTimeOffset> GetTimestampFunction { get; set; }
@@ -216,6 +215,7 @@ namespace Namotion.Interceptor.Interceptors
         public bool IsWritten { get; set; }
         public TProperty NewValue { get; set; }
         public Namotion.Interceptor.PropertyReference Property { get; }
+        public System.DateTimeOffset? WriteTimestamp { get; }
         public TProperty GetFinalValue() { }
     }
     public delegate TProperty ReadInterceptionDelegate<out TProperty>(ref Namotion.Interceptor.Interceptors.PropertyReadContext context);

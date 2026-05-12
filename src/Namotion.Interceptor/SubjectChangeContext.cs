@@ -15,13 +15,13 @@ public readonly struct SubjectChangeContext
     /// <summary>
     /// No timestamp was set (default struct value). Falls back to <see cref="GetTimestampFunction"/>.
     /// </summary>
-    private const long UndefinedTimestampTicks = 0;
+    internal const long UndefinedTimestampTicks = 0;
 
     /// <summary>
     /// Timestamp was explicitly set to null (source had no timestamp).
     /// Distinct from <see cref="UndefinedTimestampTicks"/> which triggers a fallback to <see cref="GetTimestampFunction"/>.
     /// </summary>
-    private const long NullTimestampTicks = -1;
+    internal const long NullTimestampTicks = -1;
     
     /// <summary>
     /// Gets or sets a function which retrieves the current timestamp (default is <see cref="DateTimeOffset.UtcNow"/>).
@@ -43,21 +43,20 @@ public readonly struct SubjectChangeContext
     }
 
     /// <summary>
-    /// Gets the changed timestamp from the thread-local context or falls back to <see cref="GetTimestampFunction"/>.
-    /// Always returns a valid timestamp (even for "never written" properties) because change notifications
-    /// and connectors (OPC UA, MQTT) need a concrete value. Use <see cref="ChangedTimestampUtcTicks"/>
-    /// for write-timestamp storage where 0 means "no timestamp".
+    /// Returns the raw scope-state ticks without any fallback or processing.
+    /// Use this when implementing lazy snapshot logic (see <c>PropertyWriteContext.WriteTimestamp</c>):
+    /// returns <c>0</c> (no scope), <c>-1</c> (explicit null scope), or a positive value (explicit timestamp scope).
     /// </summary>
-    public DateTimeOffset ChangedTimestamp
+    internal static long RawCurrentChangedTimestampTicks
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => _changedTimestampUtcTicks > 0
-            ? new DateTimeOffset(_changedTimestampUtcTicks, TimeSpan.Zero)
-            : GetTimestampFunction();
+        get => _current._changedTimestampUtcTicks;
     }
 
     /// <summary>
-    /// Gets the changed timestamp as raw UTC ticks, avoiding DateTimeOffset allocation on the hot path.
+    /// Gets the changed timestamp as raw UTC ticks for paths that do not have a <c>PropertyWriteContext</c>
+    /// available (e.g., lifecycle attach handlers). Within a write chain, prefer
+    /// <c>PropertyWriteContext.WriteTimestampStorageTicks</c> for stability across multiple reads.
     /// Returns 0 when the source explicitly had no timestamp (preserving "never written" state).
     /// </summary>
     internal long ChangedTimestampUtcTicks
@@ -66,13 +65,26 @@ public readonly struct SubjectChangeContext
         get
         {
             if (_changedTimestampUtcTicks == NullTimestampTicks)
-                return 0; // Explicitly null: preserve "never written" state
-
+                return 0;
             if (_changedTimestampUtcTicks != UndefinedTimestampTicks)
-                return _changedTimestampUtcTicks; // Real timestamp from scope
-
-            return GetTimestampFunction().UtcTicks; // No scope: generate current time
+                return _changedTimestampUtcTicks;
+            return GetTimestampFunction().UtcTicks;
         }
+    }
+
+    /// <summary>
+    /// Gets the changed timestamp as a DateTimeOffset for paths that do not have a <c>PropertyWriteContext</c>
+    /// available (e.g., lifecycle attach handlers). Within a write chain, prefer
+    /// <c>PropertyWriteContext.WriteTimestampForPublishing</c> for stability across multiple reads
+    /// (this getter falls back to <see cref="GetTimestampFunction"/> on every call when no scope is active,
+    /// so multiple reads within one write can drift by microseconds).
+    /// </summary>
+    internal DateTimeOffset ChangedTimestamp
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _changedTimestampUtcTicks > 0
+            ? new DateTimeOffset(_changedTimestampUtcTicks, TimeSpan.Zero)
+            : GetTimestampFunction();
     }
 
     /// <summary>Gets the received timestamp from the thread-local context, or null if not set.</summary>

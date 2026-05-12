@@ -28,13 +28,10 @@ public class PropertyChangeObservable : IObservable<SubjectPropertyChange>, IWri
         var newValue = context.GetFinalValue();
 
         var changeContext = SubjectChangeContext.Current;
-        var changedTimestamp = context.WriteTimestampUtcTicks > 0
-            ? new DateTimeOffset(context.WriteTimestampUtcTicks, TimeSpan.Zero)
-            : changeContext.ChangedTimestamp;
         var propertyChange = SubjectPropertyChange.Create(
             context.Property,
             changeContext.Source,
-            changedTimestamp,
+            context.WriteTimestampForPublishing,
             changeContext.ReceivedTimestamp,
             oldValue,
             newValue);
