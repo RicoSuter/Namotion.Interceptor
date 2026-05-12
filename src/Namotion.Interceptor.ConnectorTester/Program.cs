@@ -15,6 +15,7 @@ using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Engine;
 using Namotion.Interceptor.ConnectorTester.Logging;
+using Namotion.Interceptor.ConnectorTester.Performance;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Tracking;
 using Namotion.Interceptor.WebSocket;

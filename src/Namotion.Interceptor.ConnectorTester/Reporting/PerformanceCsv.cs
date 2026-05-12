@@ -1,4 +1,4 @@
-using Namotion.Interceptor.ConnectorTester.Engine;
+using Namotion.Interceptor.ConnectorTester.Performance;
 
 namespace Namotion.Interceptor.ConnectorTester.Reporting;
 
