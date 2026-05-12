@@ -41,6 +41,7 @@ public class VerificationEngine : BackgroundService
     private readonly IHostApplicationLifetime _applicationLifetime;
     private readonly ILogger _logger;
     private readonly HeapSampler _heapSampler = new();
+    private readonly FindingsLog _findingsLog;
 
     private int _cycleNumber;
     private bool _failed;
@@ -74,6 +75,7 @@ public class VerificationEngine : BackgroundService
         _cyclesCsv = CyclesCsv.Create(Path.Combine(runDirectory, "cycles.csv"));
         _chaosEventsCsv = ChaosEventsCsv.Create(Path.Combine(runDirectory, "chaos-events.csv"));
         _findingsLogPath = Path.Combine(runDirectory, "findings.log");
+        _findingsLog = new FindingsLog(_findingsLogPath, () => _cycleNumber, () => _chaosEngines.Any(engine => engine.ChaosEventCount > 0), logger);
     }
 
     public override void Dispose()
@@ -163,7 +165,7 @@ public class VerificationEngine : BackgroundService
                     convergeStopwatch.Stop();
                     cycleStopwatch.Stop();
 
-                    LogFindings(snapshots, convergeStopwatch.Elapsed);
+                    _findingsLog.AppendIfAny(snapshots, convergeStopwatch.Elapsed);
 
                     WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, CycleResult.Pass);
                     CompactHeapAndLogCycle(activeProfileName, CycleResult.Pass, cycleStopwatch.Elapsed, convergeStopwatch.Elapsed);
@@ -212,53 +214,6 @@ public class VerificationEngine : BackgroundService
                 Name: participant.Key,
                 Snapshot: SnapshotComparer.Capture(participant.Value)))
             .ToList();
-    }
-
-    private void LogFindings(List<(string Name, string Snapshot)> snapshots, TimeSpan convergeTime)
-    {
-        try
-        {
-            var findings = new List<string>();
-
-            // 1. Convergence time anomaly (>10s with no chaos active)
-            var chaosActive = _chaosEngines.Any(engine => engine.ChaosEventCount > 0);
-            if (convergeTime.TotalSeconds > 10 && !chaosActive)
-            {
-                findings.Add($"slow-convergence: {convergeTime.TotalSeconds:F1}s with no chaos active");
-            }
-
-            // 2. Null-timestamp forgiveness (JSON walk needed)
-            for (var i = 1; i < snapshots.Count; i++)
-            {
-                var timestampFindings = SnapshotDiffer.CollectFindings(
-                    snapshots[0].Name, snapshots[0].Snapshot,
-                    snapshots[i].Name, snapshots[i].Snapshot);
-
-                if (timestampFindings is { Count: > 0 })
-                {
-                    findings.AddRange(timestampFindings.Select(finding => $"null-timestamp: {finding}"));
-                }
-            }
-
-            if (findings.Count == 0)
-            {
-                return;
-            }
-
-            _logger.LogWarning("Cycle {Cycle}: {Count} finding(s)", _cycleNumber, findings.Count);
-
-            var lines = new List<string>
-            {
-                $"[{DateTimeOffset.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ}] Cycle {_cycleNumber}: {findings.Count} finding(s)"
-            };
-            lines.AddRange(findings.Select(finding => $"  {finding}"));
-            lines.Add("");
-            File.AppendAllLines(_findingsLogPath, lines);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to log findings");
-        }
     }
 
     private void WriteStatistics(TimeSpan cycleDuration, TimeSpan convergeDuration, CycleResult result)
