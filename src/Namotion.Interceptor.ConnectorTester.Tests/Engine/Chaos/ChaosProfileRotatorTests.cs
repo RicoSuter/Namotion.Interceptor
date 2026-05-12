@@ -1,12 +1,19 @@
 using Xunit;
 using Microsoft.Extensions.Logging.Abstractions;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.ConnectorTester.Configuration;
+using Namotion.Interceptor.ConnectorTester.Connectors;
 using Namotion.Interceptor.ConnectorTester.Engine.Chaos;
 
 namespace Namotion.Interceptor.ConnectorTester.Tests.Engine.Chaos;
 
 public class ChaosProfileRotatorTests
 {
+    private sealed class NullFaultTargetResolver : IFaultTargetResolver
+    {
+        public IFaultInjectable? Resolve(string participantName) => null;
+    }
+
     private static ChaosEngine MakeEngine(string targetName)
     {
         var coordinator = new Namotion.Interceptor.ConnectorTester.Engine.TestCycleCoordinator();
@@ -14,7 +21,7 @@ public class ChaosProfileRotatorTests
             targetName,
             new ChaosConfiguration(),
             coordinator,
-            target: null,
+            new NullFaultTargetResolver(),
             NullLogger.Instance);
     }
 

@@ -13,6 +13,7 @@ using Opc.Ua;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.ConnectorTester.Configuration;
+using Namotion.Interceptor.ConnectorTester.Connectors;
 using Namotion.Interceptor.ConnectorTester.Engine;
 using Namotion.Interceptor.ConnectorTester.Engine.Chaos;
 using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
@@ -74,6 +75,9 @@ builder.Services.AddSingleton(coordinator);
 var participants = new Dictionary<string, TestNode>();
 var mutationEngines = new List<MutationEngineHost>();
 var chaosEngines = new List<ChaosEngine>();
+
+// Stub fault target resolver - Phase 7 will replace this with real wiring.
+var stubFaultResolver = new StubFaultTargetResolver();
 
 // Read configuration
 var configuration = builder.Configuration
@@ -202,7 +206,7 @@ if (!skipServer)
             configuration.Server.Name,
             configuration.Server.Chaos,
             coordinator,
-            target: null, // resolved after build
+            stubFaultResolver,
             sharedLoggerFactory.CreateLogger($"ChaosEngine.{configuration.Server.Name}"));
 
         chaosEngines.Add(serverChaosEngine);
@@ -307,7 +311,7 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
             clientConfig.Name,
             clientConfig.Chaos,
             coordinator,
-            target: null, // resolved after build
+            stubFaultResolver,
             sharedLoggerFactory.CreateLogger($"ChaosEngine.{clientConfig.Name}"));
 
         chaosEngines.Add(clientChaosEngine);
@@ -332,32 +336,7 @@ if (participantFilter == null)
     builder.Services.AddSingleton<IHostedService>(sp => sp.GetRequiredService<VerificationEngine>());
 }
 
-// Build and wire up connectors for chaos engines
 var host = builder.Build();
-
-var allConnectors = host.Services.GetServices<IHostedService>()
-    .OfType<ISubjectConnector>()
-    .ToList();
-
-var startupLogger = host.Services.GetRequiredService<ILoggerFactory>()
-    .CreateLogger("Startup");
-
-foreach (var chaosEngine in chaosEngines)
-{
-    // Find the connector whose root subject matches one of the participants, then cast to IFaultInjectable
-    participants.TryGetValue(chaosEngine.TargetName, out var participantRoot);
-    var connector = allConnectors.FirstOrDefault(c => c.RootSubject == participantRoot);
-    if (connector is IFaultInjectable faultInjectable)
-    {
-        chaosEngine.SetTarget(faultInjectable);
-    }
-    else
-    {
-        startupLogger.LogWarning(
-            "ChaosEngine [{Target}] could not be wired to a connector. Chaos will be skipped for this participant.",
-            chaosEngine.TargetName);
-    }
-}
 
 // Resolve verification engine before RunAsync (service provider is disposed after)
 VerificationEngine? verificationEngine = participantFilter == null
@@ -389,4 +368,9 @@ foreach (var profiler in profilers)
 if (verificationEngine is { Failed: true })
 {
     Environment.ExitCode = 1;
+}
+
+file sealed class StubFaultTargetResolver : Namotion.Interceptor.ConnectorTester.Connectors.IFaultTargetResolver
+{
+    public Namotion.Interceptor.Connectors.IFaultInjectable? Resolve(string participantName) => null;
 }

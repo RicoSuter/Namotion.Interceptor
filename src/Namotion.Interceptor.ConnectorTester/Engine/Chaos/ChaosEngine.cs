@@ -1,4 +1,5 @@
 using Namotion.Interceptor.ConnectorTester.Configuration;
+using Namotion.Interceptor.ConnectorTester.Connectors;
 using Namotion.Interceptor.Connectors;
 
 namespace Namotion.Interceptor.ConnectorTester.Engine.Chaos;
@@ -13,6 +14,7 @@ public class ChaosEngine : BackgroundService
     private readonly string _targetName;
     private readonly ChaosConfiguration _configuration;
     private readonly TestCycleCoordinator _coordinator;
+    private readonly IFaultTargetResolver _targetResolver;
     private IFaultInjectable? _target;
     private readonly ILogger _logger;
     private readonly Random _random = new();
@@ -48,21 +50,29 @@ public class ChaosEngine : BackgroundService
         string targetName,
         ChaosConfiguration configuration,
         TestCycleCoordinator coordinator,
-        IFaultInjectable? target,
+        IFaultTargetResolver targetResolver,
         ILogger logger)
     {
         _targetName = targetName;
         _configuration = configuration;
         _coordinator = coordinator;
-        _target = target;
+        _targetResolver = targetResolver;
+        _target = null;
         _logger = logger;
 
         configuration.Validate();
     }
 
-    public void SetTarget(IFaultInjectable target)
+    public override Task StartAsync(CancellationToken cancellationToken)
     {
-        _target = target;
+        _target = _targetResolver.Resolve(_targetName);
+        if (_target is null)
+        {
+            _logger.LogWarning(
+                "ChaosEngine [{Target}] could not be wired to a connector. Chaos will be skipped for this participant.",
+                _targetName);
+        }
+        return base.StartAsync(cancellationToken);
     }
 
     public void ResetCounters()
