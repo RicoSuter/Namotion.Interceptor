@@ -28,26 +28,34 @@ public sealed class ConnectorTesterHost
     public IReadOnlyList<PerformanceProfiler> Profilers { get; }
     public VerificationEngine? VerificationEngine { get; }
     public RunModeSelection RunModeSelection { get; }
+    public string RunDirectory { get; }
 
     private ConnectorTesterHost(
         IHost host,
         IReadOnlyList<PerformanceProfiler> profilers,
         VerificationEngine? verificationEngine,
-        RunModeSelection runModeSelection)
+        RunModeSelection runModeSelection,
+        string runDirectory)
     {
         Host = host;
         Profilers = profilers;
         VerificationEngine = verificationEngine;
         RunModeSelection = runModeSelection;
+        RunDirectory = runDirectory;
     }
 
-    public static ConnectorTesterHost Build(string[] args, string runDirectory)
+    public static ConnectorTesterHost Build(string[] args)
     {
         var builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
         {
             Args = args,
             ContentRootPath = AppContext.BaseDirectory
         });
+
+        // Resolve the environment from the full host config chain (DOTNET_ENVIRONMENT,
+        // ASPNETCORE_ENVIRONMENT, --environment CLI arg) instead of reading one env var.
+        var runDirectory = Path.Combine("logs", $"{DateTime.UtcNow:yyyy-MM-ddTHH-mm-ssZ}-{builder.Environment.EnvironmentName}");
+        Directory.CreateDirectory(runDirectory);
 
         // Cycle logger provider doubles as ILoggerProvider and ICycleLifecycleNotifier.
         var cycleLoggerProvider = new CycleLoggerProvider(runDirectory);
@@ -128,11 +136,12 @@ public sealed class ConnectorTesterHost
             }
         }
 
-        builder.Services.AddSingleton<IFaultTargetResolver>(serviceProvider =>
-        {
-            var connectors = serviceProvider.GetServices<IHostedService>().OfType<ISubjectConnector>();
-            return new FaultTargetResolver(participants, connectors);
-        });
+        // Populated after host.Build() to avoid a resolution cycle: ChaosEngine (IHostedService)
+        // depends on IFaultTargetResolver, and the resolver's input is IEnumerable<ISubjectConnector>
+        // which lives on the IHostedService graph. Resolving connectors from inside the factory
+        // would re-enter the ChaosEngine factory.
+        var faultTargetResolver = new FaultTargetResolver();
+        builder.Services.AddSingleton<IFaultTargetResolver>(faultTargetResolver);
 
         foreach (var (participantConfiguration, _) in participantConfigurations)
         {
@@ -179,6 +188,12 @@ public sealed class ConnectorTesterHost
 
         var host = builder.Build();
 
+        // Bind the fault-target resolver now that the DI container is built. Enumerating
+        // IHostedService here constructs every connector exactly once and caches them as
+        // singletons; host.RunAsync() reuses the same instances when starting hosted services.
+        var allConnectors = host.Services.GetServices<IHostedService>().OfType<ISubjectConnector>().ToList();
+        faultTargetResolver.Bind(participants, allConnectors);
+
         if (runModeSelection.Mode == RunMode.Verify)
         {
             verificationEngine = host.Services.GetRequiredService<VerificationEngine>();
@@ -193,7 +208,7 @@ public sealed class ConnectorTesterHost
                 coordinator))
             .ToList();
 
-        return new ConnectorTesterHost(host, profilers, verificationEngine, runModeSelection);
+        return new ConnectorTesterHost(host, profilers, verificationEngine, runModeSelection, runDirectory);
     }
 
     private static IEnumerable<(ParticipantConfiguration Configuration, bool IsServer)> EnumerateActiveParticipants(

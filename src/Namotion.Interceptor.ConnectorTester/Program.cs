@@ -1,10 +1,6 @@
 using Namotion.Interceptor.ConnectorTester.Hosting;
 
-var profile = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") ?? "Production";
-var runDirectory = Path.Combine("logs", $"{DateTime.UtcNow:yyyy-MM-ddTHH-mm-ssZ}-{profile}");
-Directory.CreateDirectory(runDirectory);
-
-var connectorTesterHost = ConnectorTesterHost.Build(args, runDirectory);
+var connectorTesterHost = ConnectorTesterHost.Build(args);
 
 try
 {
