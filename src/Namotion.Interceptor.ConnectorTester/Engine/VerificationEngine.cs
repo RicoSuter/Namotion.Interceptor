@@ -8,6 +8,7 @@ using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Logging;
 using Namotion.Interceptor.ConnectorTester.Model;
+using Namotion.Interceptor.ConnectorTester.Reporting;
 using Namotion.Interceptor.ConnectorTester.Snapshot;
 
 namespace Namotion.Interceptor.ConnectorTester.Engine;
@@ -27,7 +28,7 @@ public class VerificationEngine : BackgroundService
         WriteIndented = true
     };
 
-    private readonly string _cyclesLogPath;
+    private readonly CsvFile<CycleCsvRow> _cyclesCsv;
     private readonly string _chaosEventsLogPath;
     private readonly string _findingsLogPath;
     private readonly string _runDirectory;
@@ -69,19 +70,20 @@ public class VerificationEngine : BackgroundService
         _applicationLifetime = applicationLifetime;
         _logger = logger;
         _runDirectory = runDirectory;
-        _cyclesLogPath = Path.Combine(runDirectory, "cycles.csv");
+        _cyclesCsv = CyclesCsv.Create(Path.Combine(runDirectory, "cycles.csv"));
         _chaosEventsLogPath = Path.Combine(runDirectory, "chaos-events.csv");
         _findingsLogPath = Path.Combine(runDirectory, "findings.log");
     }
 
+    public override void Dispose()
+    {
+        _cyclesCsv.Dispose();
+        base.Dispose();
+    }
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var cyclesHeader = string.Format(
-            "{0,24}, {1,6}, {2,6}, {3,20}, {4,14}, {5,16}, {6,12}, {7,16}, {8,20}, {9,12}, {10,10}, {11,10}",
-            "Timestamp", "Cycle", "Result", "Profile", "MutateSeconds", "ConvergeSeconds", "CycleSeconds",
-            "ValueMutations", "StructuralMutations", "ChaosEvents",
-            "HeapMB", "ProcessMB");
-        await File.WriteAllTextAsync(_cyclesLogPath, cyclesHeader + Environment.NewLine, stoppingToken);
+        _cyclesCsv.WriteHeader();
 
         var chaosHeader = string.Format(
             "{0,24}, {1,6}, {2,16}, {3,12}, {4,16}",
@@ -322,16 +324,22 @@ public class VerificationEngine : BackgroundService
         var totalChaosEvents = _chaosEngines.Sum(e => e.ChaosEventCount);
 
         var mutateSeconds = _configuration.MutatePhaseDuration.TotalSeconds;
-        var line = string.Format(CultureInfo.InvariantCulture,
-            "{0,24:yyyy-MM-ddTHH:mm:ss.fffZ}, {1,6}, {2,6}, {3,20}, {4,14:F1}, {5,16:F1}, {6,12:F1}, {7,16}, {8,20}, {9,12}, {10,10:F1}, {11,10:F1}",
-            DateTimeOffset.UtcNow, _cycleNumber, result, profileName ?? "",
-            mutateSeconds, convergeDuration.TotalSeconds, cycleDuration.TotalSeconds,
-            totalValueMutations, totalStructuralMutations, totalChaosEvents,
-            heapMb, processMb);
 
         try
         {
-            File.AppendAllText(_cyclesLogPath, line + Environment.NewLine);
+            _cyclesCsv.AppendRow(new CycleCsvRow(
+                Timestamp: DateTimeOffset.UtcNow,
+                Cycle: _cycleNumber,
+                Result: result,
+                Profile: profileName ?? "",
+                MutateSeconds: mutateSeconds,
+                ConvergeSeconds: convergeDuration.TotalSeconds,
+                CycleSeconds: cycleDuration.TotalSeconds,
+                ValueMutations: totalValueMutations,
+                StructuralMutations: totalStructuralMutations,
+                ChaosEvents: totalChaosEvents,
+                HeapMb: heapMb,
+                ProcessMb: processMb));
 
             foreach (var engine in _chaosEngines)
             {
