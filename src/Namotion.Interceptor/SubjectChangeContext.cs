@@ -15,11 +15,12 @@ public readonly struct SubjectChangeContext
     /// <summary>
     /// No timestamp was set (default struct value). Falls back to <see cref="GetTimestampFunction"/>.
     /// </summary>
-    internal const long UndefinedTimestampTicks = 0;
+    private const long UndefinedTimestampTicks = 0;
 
     /// <summary>
     /// Timestamp was explicitly set to null (source had no timestamp).
     /// Distinct from <see cref="UndefinedTimestampTicks"/> which triggers a fallback to <see cref="GetTimestampFunction"/>.
+    /// Exposed as internal so <c>PropertyWriteContext</c> can recognize the null-scope state.
     /// </summary>
     internal const long NullTimestampTicks = -1;
     
@@ -43,41 +44,11 @@ public readonly struct SubjectChangeContext
     }
 
     /// <summary>
-    /// Returns the raw scope-state ticks without any fallback or processing.
-    /// Use this when implementing lazy snapshot logic (see <c>PropertyWriteContext.WriteTimestamp</c>):
-    /// returns <c>0</c> (no scope), <c>-1</c> (explicit null scope), or a positive value (explicit timestamp scope).
-    /// </summary>
-    internal static long RawCurrentChangedTimestampTicks
-    {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => _current._changedTimestampUtcTicks;
-    }
-
-    /// <summary>
-    /// Gets the changed timestamp as raw UTC ticks for paths that do not have a <c>PropertyWriteContext</c>
-    /// available (e.g., lifecycle attach handlers). Within a write chain, prefer
-    /// <c>PropertyWriteContext.WriteTimestampStorageTicks</c> for stability across multiple reads.
-    /// Returns 0 when the source explicitly had no timestamp (preserving "never written" state).
-    /// </summary>
-    internal long ChangedTimestampUtcTicks
-    {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get
-        {
-            if (_changedTimestampUtcTicks == NullTimestampTicks)
-                return 0;
-            if (_changedTimestampUtcTicks != UndefinedTimestampTicks)
-                return _changedTimestampUtcTicks;
-            return GetTimestampFunction().UtcTicks;
-        }
-    }
-
-    /// <summary>
-    /// Gets the changed timestamp as a DateTimeOffset for paths that do not have a <c>PropertyWriteContext</c>
-    /// available (e.g., lifecycle attach handlers). Within a write chain, prefer
-    /// <c>PropertyWriteContext.WriteTimestampForPublishing</c> for stability across multiple reads
-    /// (this getter falls back to <see cref="GetTimestampFunction"/> on every call when no scope is active,
-    /// so multiple reads within one write can drift by microseconds).
+    /// Gets the changed timestamp from the thread-local context or falls back to <see cref="GetTimestampFunction"/>.
+    /// Always returns a valid timestamp (even for "never written" properties) because change notifications
+    /// and connectors (OPC UA, MQTT) need a concrete value. Use <see cref="ChangedTimestampUtcTicks"/>
+    /// for write-timestamp storage where 0 means "no timestamp". Within a write chain, prefer
+    /// <c>PropertyWriteContext.WriteTimestampForPublishing</c> for stability across multiple reads.
     /// </summary>
     internal DateTimeOffset ChangedTimestamp
     {
@@ -85,6 +56,36 @@ public readonly struct SubjectChangeContext
         get => _changedTimestampUtcTicks > 0
             ? new DateTimeOffset(_changedTimestampUtcTicks, TimeSpan.Zero)
             : GetTimestampFunction();
+    }
+
+    /// <summary>
+    /// Gets the changed timestamp as raw UTC ticks, avoiding DateTimeOffset allocation on the hot path.
+    /// Returns 0 when the source explicitly had no timestamp (preserving "never written" state).
+    /// Within a write chain, prefer <c>PropertyWriteContext.WriteTimestampStorageTicks</c> for stability.
+    /// </summary>
+    internal long ChangedTimestampUtcTicks
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get
+        {
+            if (_changedTimestampUtcTicks == NullTimestampTicks)
+                return 0; // Explicitly null: preserve "never written" state
+
+            if (_changedTimestampUtcTicks != UndefinedTimestampTicks)
+                return _changedTimestampUtcTicks; // Real timestamp from scope
+
+            return GetTimestampFunction().UtcTicks; // No scope: generate current time
+        }
+    }
+
+    /// <summary>
+    /// Returns the raw scope-state ticks without fallback. Used by <c>PropertyWriteContext</c> for
+    /// lazy-snapshot logic: returns 0 (no scope), <see cref="NullTimestampTicks"/>, or positive ticks.
+    /// </summary>
+    internal static long RawCurrentChangedTimestampTicks
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => _current._changedTimestampUtcTicks;
     }
 
     /// <summary>Gets the received timestamp from the thread-local context, or null if not set.</summary>

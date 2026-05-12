@@ -166,9 +166,9 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             }
 
             var timestampUtcTicks = context.WriteTimestampStorageTicks;
-            // Share trigger's timestamp with cascade chain so derived recalc events match
-            // the trigger's stored property timestamp. Skips scope for explicit null (ticks == 0)
-            // where cascade child should retain its own behavior.
+            // Share trigger's timestamp with cascade chain so derived recalc events match the
+            // trigger's stored property timestamp. Skip scope push for explicit null (ticks == 0)
+            // where cascade child retains its own behavior.
             if (timestampUtcTicks > 0)
             {
                 using (SubjectChangeContext.WithChangedTimestamp(new DateTimeOffset(timestampUtcTicks, TimeSpan.Zero)))
