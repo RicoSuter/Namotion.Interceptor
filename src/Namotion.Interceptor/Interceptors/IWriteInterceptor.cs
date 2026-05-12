@@ -48,6 +48,12 @@ public struct PropertyWriteContext<TProperty>
     /// </summary>
     public bool IsWritten { get; set; }
 
+    /// <summary>
+    /// Gets the UTC ticks of the write timestamp set by the terminal write action.
+    /// Available after the terminal write completes (i.e., after calling <c>next</c>).
+    /// </summary>
+    internal long WriteTimestampUtcTicks { get; set; }
+
     public PropertyWriteContext(PropertyReference property, TProperty currentValue, TProperty newValue)
     {
         Property = property;

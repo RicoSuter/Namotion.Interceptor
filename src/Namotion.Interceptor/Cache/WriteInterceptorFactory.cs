@@ -15,7 +15,9 @@ internal static class WriteInterceptorFactory<TProperty>
                 {
                     innerWriteValue(interception.Property.Subject, interception.NewValue);
                     interception.IsWritten = true;
-                    interception.Property.SetWriteTimestampUtcTicks(SubjectChangeContext.Current.ChangedTimestampUtcTicks);
+                    var ticks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
+                    interception.Property.SetWriteTimestampUtcTicks(ticks);
+                    interception.WriteTimestampUtcTicks = ticks;
                 }
             };
         }
@@ -28,7 +30,9 @@ internal static class WriteInterceptorFactory<TProperty>
                 {
                     innerWriteValue(context.Property.Subject, context.NewValue);
                     context.IsWritten = true;
-                    context.Property.SetWriteTimestampUtcTicks(SubjectChangeContext.Current.ChangedTimestampUtcTicks);
+                    var ticks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
+                    context.Property.SetWriteTimestampUtcTicks(ticks);
+                    context.WriteTimestampUtcTicks = ticks;
                 }
                 return context.NewValue;
             }

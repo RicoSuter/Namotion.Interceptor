@@ -63,10 +63,13 @@ public sealed class PropertyChangeQueue : IWriteInterceptor, IDisposable
         var newValue = context.GetFinalValue();
 
         var changeContext = SubjectChangeContext.Current;
+        var changedTimestamp = context.WriteTimestampUtcTicks > 0
+            ? new DateTimeOffset(context.WriteTimestampUtcTicks, TimeSpan.Zero)
+            : changeContext.ChangedTimestamp;
         var propertyChange = SubjectPropertyChange.Create(
             context.Property,
             changeContext.Source,
-            changeContext.ChangedTimestamp,
+            changedTimestamp,
             changeContext.ReceivedTimestamp,
             oldValue,
             newValue);

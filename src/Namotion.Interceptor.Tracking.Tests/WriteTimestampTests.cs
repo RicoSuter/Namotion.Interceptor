@@ -254,4 +254,102 @@ public class WriteTimestampTests
         Assert.True(timestamp.Value >= before);
         Assert.NotEqual(explicitTimestamp, timestamp);
     }
+
+    [Fact]
+    public void WhenWrittenWithoutScope_ThenQueueChangeTimestampMatchesStoredTimestamp()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        var person = new Person(context);
+
+        // Act
+        person.FirstName = "John";
+
+        // Assert
+        var storedTimestamp = person.GetPropertyReference("FirstName").TryGetWriteTimestamp();
+        Assert.True(subscription.TryDequeue(out var change, CancellationToken.None));
+        Assert.NotNull(storedTimestamp);
+        Assert.Equal(storedTimestamp.Value, change.ChangedTimestamp);
+    }
+
+    [Fact]
+    public void WhenWrittenWithoutScope_ThenObservableChangeTimestampMatchesStoredTimestamp()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        var changes = new List<SubjectPropertyChange>();
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c));
+
+        var person = new Person(context);
+
+        // Act
+        person.FirstName = "John";
+
+        // Assert
+        var storedTimestamp = person.GetPropertyReference("FirstName").TryGetWriteTimestamp();
+        var firstNameChange = changes.First(c => c.Property.Name == "FirstName");
+        Assert.NotNull(storedTimestamp);
+        Assert.Equal(storedTimestamp.Value, firstNameChange.ChangedTimestamp);
+    }
+
+    [Fact]
+    public void WhenWrittenWithNullTimestamp_ThenQueueChangeTimestampFallsBackToCurrentTime()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        using var subscription = context.CreatePropertyChangeQueueSubscription();
+        var person = new Person(context);
+        var before = DateTimeOffset.UtcNow;
+
+        // Act
+        using (SubjectChangeContext.WithChangedTimestamp(null))
+        {
+            person.FirstName = "John";
+        }
+
+        // Assert
+        Assert.Null(person.GetPropertyReference("FirstName").TryGetWriteTimestamp());
+        Assert.True(subscription.TryDequeue(out var change, CancellationToken.None));
+        Assert.True(change.ChangedTimestamp >= before);
+    }
+
+    [Fact]
+    public void WhenWrittenWithNullTimestamp_ThenObservableChangeTimestampFallsBackToCurrentTime()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        var changes = new List<SubjectPropertyChange>();
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c));
+
+        var person = new Person(context);
+        var before = DateTimeOffset.UtcNow;
+
+        // Act
+        using (SubjectChangeContext.WithChangedTimestamp(null))
+        {
+            person.FirstName = "John";
+        }
+
+        // Assert
+        Assert.Null(person.GetPropertyReference("FirstName").TryGetWriteTimestamp());
+        var firstNameChange = changes.First(c => c.Property.Name == "FirstName");
+        Assert.True(firstNameChange.ChangedTimestamp >= before);
+    }
 }
