@@ -1,7 +1,7 @@
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.Connectors;
 
-namespace Namotion.Interceptor.ConnectorTester.Engine;
+namespace Namotion.Interceptor.ConnectorTester.Engine.Chaos;
 
 /// <summary>
 /// Randomly disrupts a participant's connector by killing or disconnecting it.
@@ -158,9 +158,4 @@ public class ChaosEngine : BackgroundService
         var range = max - min;
         return min + TimeSpan.FromMilliseconds(_random.NextDouble() * range.TotalMilliseconds);
     }
-}
-
-public record ChaosEventRecord(FaultType FaultType, DateTimeOffset DisruptedAt, DateTimeOffset RecoveredAt)
-{
-    public TimeSpan Duration => RecoveredAt - DisruptedAt;
 }

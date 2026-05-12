@@ -4,6 +4,7 @@ using System.Text.Json.Nodes;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.ConnectorTester.Configuration;
+using Namotion.Interceptor.ConnectorTester.Engine.Chaos;
 using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 using Namotion.Interceptor.ConnectorTester.Model;
