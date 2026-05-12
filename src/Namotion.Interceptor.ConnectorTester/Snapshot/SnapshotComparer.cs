@@ -38,7 +38,7 @@ public static class SnapshotComparer
     public static string Capture(TestNode root)
     {
         var update = SubjectUpdate.CreateCompleteUpdate(root, []);
-        var idMap = BuildStableIdMap(update);
+        var idMap = SnapshotIdMap.Build(update);
 
         // Verification-tooling invariant: every subject must be reachable from the root
         // via Object/Collection/Dictionary edges. Unreachable orphans would keep their
@@ -129,61 +129,6 @@ public static class SnapshotComparer
     public static JsonObject? ParseSubjects(string snapshot)
     {
         return JsonNode.Parse(snapshot)?[SubjectsKey]?.AsObject();
-    }
-
-    private static Dictionary<string, string> BuildStableIdMap(SubjectUpdate update)
-    {
-        var idMap = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [update.Root] = "ROOT"
-        };
-        var queue = new Queue<string>();
-        queue.Enqueue(update.Root);
-
-        var counter = 1;
-
-        while (queue.Count > 0)
-        {
-            var currentRawId = queue.Dequeue();
-
-            if (!update.Subjects.TryGetValue(currentRawId, out var properties))
-            {
-                continue;
-            }
-
-            foreach (var propertyName in properties.Keys.OrderBy(name => name, StringComparer.Ordinal))
-            {
-                var property = properties[propertyName];
-
-                if (property.Kind == SubjectPropertyUpdateKind.Object)
-                {
-                    if (property.Id is not null && !idMap.ContainsKey(property.Id))
-                    {
-                        idMap[property.Id] = $"SUBJ_{counter++}";
-                        queue.Enqueue(property.Id);
-                    }
-                }
-                else if (property.Kind is SubjectPropertyUpdateKind.Collection or SubjectPropertyUpdateKind.Dictionary
-                    && property.Items is { } items)
-                {
-                    IEnumerable<SubjectPropertyItemUpdate> orderedItems =
-                        property.Kind == SubjectPropertyUpdateKind.Dictionary
-                            ? items.OrderBy(item => item.Index?.ToString(), StringComparer.Ordinal)
-                            : items;
-
-                    foreach (var item in orderedItems)
-                    {
-                        if (item.Id is not null && !idMap.ContainsKey(item.Id))
-                        {
-                            idMap[item.Id] = $"SUBJ_{counter++}";
-                            queue.Enqueue(item.Id);
-                        }
-                    }
-                }
-            }
-        }
-
-        return idMap;
     }
 
     private static SubjectUpdate NormalizeUpdate(SubjectUpdate update, Dictionary<string, string> idMap)
