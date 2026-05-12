@@ -14,6 +14,7 @@ using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Engine;
+using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 using Namotion.Interceptor.ConnectorTester.Logging;
 using Namotion.Interceptor.ConnectorTester.Performance;
 using Namotion.Interceptor.ConnectorTester.Model;
@@ -69,7 +70,7 @@ builder.Services.AddSingleton(coordinator);
 
 // Will be populated during setup
 var participants = new Dictionary<string, TestNode>();
-var mutationEngines = new List<MutationEngine>();
+var mutationEngines = new List<MutationEngineHost>();
 var chaosEngines = new List<ChaosEngine>();
 
 // Read configuration
@@ -95,18 +96,18 @@ for (var i = 0; i < args.Length; i++)
     }
 }
 
-MutationEngine CreateMutationEngine(TestNode root, ParticipantConfiguration config, string logCategory)
+MutationEngineHost CreateMutationEngine(TestNode root, ParticipantConfiguration config, string logCategory)
 {
     var logger = sharedLoggerFactory.CreateLogger(logCategory);
 
     if (configuration.NumberOfBatches > 0)
     {
-        return new BatchMutationEngine(
+        return MutationEngineHost.CreateBatch(
             root, config, coordinator, logger,
             configuration.NumberOfBatches, config.Index);
     }
 
-    return new RandomMutationEngine(root, config, coordinator, logger);
+    return MutationEngineHost.CreateRandom(root, config, coordinator, logger);
 }
 
 // Determine server port based on connector type

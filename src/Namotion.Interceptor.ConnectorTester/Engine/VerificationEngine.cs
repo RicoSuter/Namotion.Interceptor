@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.ConnectorTester.Configuration;
+using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 using Namotion.Interceptor.ConnectorTester.Logging;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.ConnectorTester.Reporting;
@@ -35,7 +36,7 @@ public class VerificationEngine : BackgroundService
     private readonly ConnectorTesterConfiguration _configuration;
     private readonly TestCycleCoordinator _coordinator;
     private readonly Dictionary<string, TestNode> _participants;
-    private readonly List<MutationEngine> _mutationEngines;
+    private readonly List<MutationEngineHost> _mutationEngines;
     private readonly List<ChaosEngine> _chaosEngines;
     private readonly CycleLoggerProvider? _cycleLoggerProvider;
     private readonly IHostApplicationLifetime _applicationLifetime;
@@ -53,7 +54,7 @@ public class VerificationEngine : BackgroundService
         ConnectorTesterConfiguration configuration,
         TestCycleCoordinator coordinator,
         Dictionary<string, TestNode> participants,
-        List<MutationEngine> mutationEngines,
+        List<MutationEngineHost> mutationEngines,
         List<ChaosEngine> chaosEngines,
         CycleLoggerProvider? cycleLoggerProvider,
         IHostApplicationLifetime applicationLifetime,
