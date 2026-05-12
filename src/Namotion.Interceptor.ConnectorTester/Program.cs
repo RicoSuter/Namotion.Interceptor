@@ -16,6 +16,7 @@ using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Engine;
 using Namotion.Interceptor.ConnectorTester.Engine.Chaos;
 using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
+using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 using Namotion.Interceptor.ConnectorTester.Logging;
 using Namotion.Interceptor.ConnectorTester.Performance;
 using Namotion.Interceptor.ConnectorTester.Model;

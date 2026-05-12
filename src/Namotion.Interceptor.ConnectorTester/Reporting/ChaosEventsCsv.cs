@@ -1,5 +1,5 @@
 using Namotion.Interceptor.Connectors;
-using Namotion.Interceptor.ConnectorTester.Engine;
+using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 
 namespace Namotion.Interceptor.ConnectorTester.Reporting;
 

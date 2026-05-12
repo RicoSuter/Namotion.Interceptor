@@ -21,7 +21,7 @@ public sealed record CycleCsvRow(
 
 /// <summary>
 /// Column schema and factory for the cycles.csv report. Widths and formats are pinned to
-/// the historical output of <see cref="Engine.VerificationEngine"/> so existing log scrapers and
+/// the historical output of <see cref="VerificationEngine"/> so existing log scrapers and
 /// human readers see byte-identical lines after the refactor.
 /// </summary>
 public static class CyclesCsv

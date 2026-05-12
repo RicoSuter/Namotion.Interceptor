@@ -2,12 +2,11 @@ using System.Diagnostics;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Engine.Chaos;
 using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
-using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.ConnectorTester.Reporting;
 using Namotion.Interceptor.ConnectorTester.Snapshot;
 
-namespace Namotion.Interceptor.ConnectorTester.Engine;
+namespace Namotion.Interceptor.ConnectorTester.Engine.Verification;
 
 /// <summary>
 /// Top-level orchestrator. Runs repeating mutate/converge cycles.
@@ -19,8 +18,6 @@ public class VerificationEngine : BackgroundService
 
     private readonly CsvFile<CycleCsvRow> _cyclesCsv;
     private readonly CsvFile<ChaosEventCsvRow> _chaosEventsCsv;
-    private readonly string _findingsLogPath;
-    private readonly string _runDirectory;
 
     private readonly ConnectorTesterConfiguration _configuration;
     private readonly TestCycleCoordinator _coordinator;
@@ -31,10 +28,10 @@ public class VerificationEngine : BackgroundService
     private readonly ICycleLifecycleNotifier? _cycleLifecycle;
     private readonly IHostApplicationLifetime _applicationLifetime;
     private readonly ILogger _logger;
-    private readonly HeapSampler _heapSampler = new();
     private readonly FindingsLog _findingsLog;
     private readonly ConvergenceChecker _convergenceChecker;
     private readonly FailureDiagnostics _failureDiagnostics;
+    private readonly CycleStatistics _cycleStatistics;
 
     private int _cycleNumber;
     private bool _failed;
@@ -64,17 +61,25 @@ public class VerificationEngine : BackgroundService
         _cycleLifecycle = cycleLifecycle;
         _applicationLifetime = applicationLifetime;
         _logger = logger;
-        _runDirectory = runDirectory;
         _cyclesCsv = CyclesCsv.Create(Path.Combine(runDirectory, "cycles.csv"));
         _chaosEventsCsv = ChaosEventsCsv.Create(Path.Combine(runDirectory, "chaos-events.csv"));
-        _findingsLogPath = Path.Combine(runDirectory, "findings.log");
-        _findingsLog = new FindingsLog(_findingsLogPath, () => _cycleNumber, () => _chaosEngines.Any(engine => engine.ChaosEventCount > 0), logger);
+        _findingsLog = new FindingsLog(
+            Path.Combine(runDirectory, "findings.log"),
+            () => _cycleNumber,
+            () => _chaosEngines.Any(engine => engine.ChaosEventCount > 0),
+            logger);
 
         var captureFunctions = participants.ToDictionary(
             participant => participant.Key,
             participant => (Func<string>)(() => SnapshotComparer.Capture(participant.Value)));
         _convergenceChecker = new ConvergenceChecker(captureFunctions, _configuration.ConvergenceTimeout, SnapshotPollInterval);
         _failureDiagnostics = new FailureDiagnostics(runDirectory, participants, logger);
+        _cycleStatistics = new CycleStatistics(
+            _cyclesCsv, _chaosEventsCsv,
+            new HeapSampler(),
+            mutationEngines, chaosEngines,
+            _configuration.MutatePhaseDuration,
+            logger);
     }
 
     public override void Dispose()
@@ -91,29 +96,7 @@ public class VerificationEngine : BackgroundService
 
         await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
 
-        _logger.LogInformation("""
-            === Connector Tester Configuration ===
-            Connector: {Connector}
-            MutatePhaseDuration: {MutatePhaseDuration}
-            ConvergenceTimeout: {ConvergenceTimeout}
-            Participants: {Participants}
-            """,
-            _configuration.Connector,
-            _configuration.MutatePhaseDuration,
-            _configuration.ConvergenceTimeout,
-            string.Join(", ", _participants.Select(p => p.Key)));
-        foreach (var engine in _mutationEngines)
-        {
-            _logger.LogInformation("  {Name}: {Rate} value mutations/sec, {StructuralRate} structural mutations/sec",
-                engine.Name, engine.ValueMutationRate, engine.StructuralMutationRate);
-        }
-
-        if (_configuration.ChaosProfiles.Count > 0)
-        {
-            _logger.LogInformation("  Chaos profiles ({Count}): {Profiles}",
-                _configuration.ChaosProfiles.Count,
-                string.Join(" -> ", _configuration.ChaosProfiles.Select(p => p.Name)));
-        }
+        LogStartupInformation();
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -151,33 +134,26 @@ public class VerificationEngine : BackgroundService
             await Task.Delay(TimeSpan.FromSeconds(20), stoppingToken);
 
             var outcome = await _convergenceChecker.WaitForConvergenceAsync(stoppingToken);
+            cycleStopwatch.Stop();
 
             if (outcome.Converged)
             {
-                var convergeElapsed = outcome.Elapsed;
-                cycleStopwatch.Stop();
-
-                _findingsLog.AppendIfAny(outcome.Snapshots, convergeElapsed);
-                WriteStatistics(cycleStopwatch.Elapsed, convergeElapsed, CycleResult.Pass);
-                CompactHeapAndLogCycle(activeProfileName, CycleResult.Pass, cycleStopwatch.Elapsed, convergeElapsed);
+                _findingsLog.AppendIfAny(outcome.Snapshots, outcome.Elapsed);
+                _cycleStatistics.RecordPass(_cycleNumber, cycleStopwatch.Elapsed, outcome.Elapsed, activeProfileName);
                 _logger.LogInformation(
                     "=== Cycle {Cycle}: PASS (converged in {ConvergeTime:F1}s, cycle {CycleTime:F0}s) ===",
-                    _cycleNumber, convergeElapsed.TotalSeconds, cycleStopwatch.Elapsed.TotalSeconds);
+                    _cycleNumber, outcome.Elapsed.TotalSeconds, cycleStopwatch.Elapsed.TotalSeconds);
 
                 _cycleLifecycle?.FinishCycle(_cycleNumber, CycleResult.Pass);
                 continue;
             }
-
-            cycleStopwatch.Stop();
-            var convergeFailedElapsed = outcome.Elapsed;
 
             _logger.LogError("=== Cycle {Cycle}: FAIL (did not converge within {Timeout}) ===",
                 _cycleNumber, _configuration.ConvergenceTimeout);
 
             await _failureDiagnostics.RunAsync(_cycleNumber, outcome.Snapshots, stoppingToken);
 
-            WriteStatistics(cycleStopwatch.Elapsed, convergeFailedElapsed, CycleResult.Fail);
-            CompactHeapAndLogCycle(activeProfileName, CycleResult.Fail, cycleStopwatch.Elapsed, convergeFailedElapsed);
+            _cycleStatistics.RecordFail(_cycleNumber, cycleStopwatch.Elapsed, outcome.Elapsed, activeProfileName);
             _cycleLifecycle?.FinishCycle(_cycleNumber, CycleResult.Fail);
 
             _failed = true;
@@ -186,81 +162,31 @@ public class VerificationEngine : BackgroundService
         }
     }
 
-    private void WriteStatistics(TimeSpan cycleDuration, TimeSpan convergeDuration, CycleResult result)
+    private void LogStartupInformation()
     {
-        var totalMutations = _mutationEngines.Sum(engine => engine.ValueMutationCount);
-        var totalChaos = _chaosEngines.Sum(engine => engine.ChaosEventCount);
-
         _logger.LogInformation("""
-            --- Cycle {Cycle} Statistics ---
-            Duration: {CycleDuration:F0}s (converged in {ConvergeDuration:F1}s)
-            Total mutations: {TotalMutations:N0} | Total chaos events: {TotalChaos}
-            Result: {Result}
+            === Connector Tester Configuration ===
+            Connector: {Connector}
+            MutatePhaseDuration: {MutatePhaseDuration}
+            ConvergenceTimeout: {ConvergenceTimeout}
+            Participants: {Participants}
             """,
-            _cycleNumber, cycleDuration.TotalSeconds, convergeDuration.TotalSeconds,
-            totalMutations, totalChaos, result);
+            _configuration.Connector,
+            _configuration.MutatePhaseDuration,
+            _configuration.ConvergenceTimeout,
+            string.Join(", ", _participants.Select(participant => participant.Key)));
 
-        // Per-participant breakdown
         foreach (var engine in _mutationEngines)
         {
-            _logger.LogInformation("  {Name}: {Values:N0} value mutations, {Structural:N0} structural mutations",
-                engine.Name, engine.ValueMutationCount, engine.StructuralMutationCount);
+            _logger.LogInformation("  {Name}: {Rate} value mutations/sec, {StructuralRate} structural mutations/sec",
+                engine.Name, engine.ValueMutationRate, engine.StructuralMutationRate);
         }
 
-        // Chaos event timeline
-        foreach (var engine in _chaosEngines)
+        if (_configuration.ChaosProfiles.Count > 0)
         {
-            foreach (var record in engine.EventHistory)
-            {
-                _logger.LogInformation("  {Name}: {FaultType} at {Time:HH:mm:ss} ({Duration:F1}s)",
-                    engine.TargetName, record.FaultType, record.DisruptedAt.LocalDateTime, record.Duration.TotalSeconds);
-            }
+            _logger.LogInformation("  Chaos profiles ({Count}): {Profiles}",
+                _configuration.ChaosProfiles.Count,
+                string.Join(" -> ", _configuration.ChaosProfiles.Select(profile => profile.Name)));
         }
     }
-
-    private void CompactHeapAndLogCycle(string? profileName, CycleResult result, TimeSpan cycleDuration, TimeSpan convergeDuration)
-    {
-        var (heapMb, processMb) = _heapSampler.CompactAndSample();
-
-        var totalValueMutations = _mutationEngines.Sum(e => e.ValueMutationCount);
-        var totalStructuralMutations = _mutationEngines.Sum(e => e.StructuralMutationCount);
-        var totalChaosEvents = _chaosEngines.Sum(e => e.ChaosEventCount);
-
-        var mutateSeconds = _configuration.MutatePhaseDuration.TotalSeconds;
-
-        try
-        {
-            _cyclesCsv.AppendRow(new CycleCsvRow(
-                Timestamp: DateTimeOffset.UtcNow,
-                Cycle: _cycleNumber,
-                Result: result,
-                Profile: profileName ?? "",
-                MutateSeconds: mutateSeconds,
-                ConvergeSeconds: convergeDuration.TotalSeconds,
-                CycleSeconds: cycleDuration.TotalSeconds,
-                ValueMutations: totalValueMutations,
-                StructuralMutations: totalStructuralMutations,
-                ChaosEvents: totalChaosEvents,
-                HeapMb: heapMb,
-                ProcessMb: processMb));
-
-            foreach (var engine in _chaosEngines)
-            {
-                foreach (var record in engine.EventHistory)
-                {
-                    _chaosEventsCsv.AppendRow(new ChaosEventCsvRow(
-                        Timestamp: record.DisruptedAt.UtcDateTime,
-                        Cycle: _cycleNumber,
-                        Participant: engine.TargetName,
-                        FaultType: record.FaultType,
-                        DurationSeconds: record.Duration.TotalSeconds));
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to append to cycles.csv or chaos-events.csv");
-        }
-    }
-
 }
