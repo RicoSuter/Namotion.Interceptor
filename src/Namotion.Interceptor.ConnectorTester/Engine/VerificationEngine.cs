@@ -36,6 +36,7 @@ public class VerificationEngine : BackgroundService
     private readonly Dictionary<string, TestNode> _participants;
     private readonly List<MutationEngineHost> _mutationEngines;
     private readonly List<ChaosEngine> _chaosEngines;
+    private readonly ChaosProfileRotator _chaosProfileRotator;
     private readonly ICycleLifecycleNotifier? _cycleLifecycle;
     private readonly IHostApplicationLifetime _applicationLifetime;
     private readonly ILogger _logger;
@@ -65,6 +66,7 @@ public class VerificationEngine : BackgroundService
         _participants = participants;
         _mutationEngines = mutationEngines;
         _chaosEngines = chaosEngines;
+        _chaosProfileRotator = new ChaosProfileRotator(configuration.ChaosProfiles, chaosEngines, logger);
         _cycleLifecycle = cycleLifecycle;
         _applicationLifetime = applicationLifetime;
         _logger = logger;
@@ -112,19 +114,6 @@ public class VerificationEngine : BackgroundService
                 string.Join(" -> ", _configuration.ChaosProfiles.Select(p => p.Name)));
         }
 
-        foreach (var profile in _configuration.ChaosProfiles)
-        {
-            foreach (var participant in profile.Participants)
-            {
-                if (_chaosEngines.All(e => e.TargetName != participant))
-                {
-                    _logger.LogWarning(
-                        "Chaos profile '{Profile}' references '{Participant}' which has no chaos engine (no Chaos config or not a known participant). It will be ignored.",
-                        profile.Name, participant);
-                }
-            }
-        }
-
         while (!stoppingToken.IsCancellationRequested)
         {
             _cycleNumber++;
@@ -135,7 +124,7 @@ public class VerificationEngine : BackgroundService
             foreach (var engine in _chaosEngines)
                 engine.ResetCounters();
 
-            var activeProfileName = ApplyChaosProfile();
+            var activeProfileName = _chaosProfileRotator.ApplyForCycle(_cycleNumber);
 
             _cycleLifecycle?.StartCycle(_cycleNumber);
 
@@ -502,21 +491,4 @@ public class VerificationEngine : BackgroundService
         }
     }
 
-    private string? ApplyChaosProfile()
-    {
-        var profiles = _configuration.ChaosProfiles;
-        if (profiles.Count == 0)
-        {
-            return null;
-        }
-
-        var profile = profiles[(_cycleNumber - 1) % profiles.Count];
-
-        foreach (var engine in _chaosEngines)
-        {
-            engine.Enabled = profile.Participants.Contains(engine.TargetName);
-        }
-
-        return profile.Name;
-    }
 }
