@@ -42,6 +42,7 @@ public class VerificationEngine : BackgroundService
     private readonly ILogger _logger;
     private readonly HeapSampler _heapSampler = new();
     private readonly FindingsLog _findingsLog;
+    private readonly ConvergenceChecker _convergenceChecker;
 
     private int _cycleNumber;
     private bool _failed;
@@ -76,6 +77,11 @@ public class VerificationEngine : BackgroundService
         _chaosEventsCsv = ChaosEventsCsv.Create(Path.Combine(runDirectory, "chaos-events.csv"));
         _findingsLogPath = Path.Combine(runDirectory, "findings.log");
         _findingsLog = new FindingsLog(_findingsLogPath, () => _cycleNumber, () => _chaosEngines.Any(engine => engine.ChaosEventCount > 0), logger);
+
+        var captureFunctions = participants.ToDictionary(
+            participant => participant.Key,
+            participant => (Func<string>)(() => SnapshotComparer.Capture(participant.Value)));
+        _convergenceChecker = new ConvergenceChecker(captureFunctions, _configuration.ConvergenceTimeout, SnapshotPollInterval);
     }
 
     public override void Dispose()
@@ -151,69 +157,42 @@ public class VerificationEngine : BackgroundService
             // detection (up to 5s), reconnect handler (5s), session + subscription setup.
             await Task.Delay(TimeSpan.FromSeconds(20), stoppingToken);
 
-            var convergeStopwatch = Stopwatch.StartNew();
-            var converged = false;
-            var maxPolls = (int)(_configuration.ConvergenceTimeout / SnapshotPollInterval);
+            var outcome = await _convergenceChecker.WaitForConvergenceAsync(stoppingToken);
 
-            for (var poll = 0; poll < maxPolls; poll++)
+            if (outcome.Converged)
             {
-                var snapshots = CaptureAllSnapshots();
-
-                var referenceSubjects = SnapshotComparer.ParseSubjects(snapshots[0].Snapshot);
-                if (snapshots.All(snapshot => SnapshotComparer.SnapshotsMatch(referenceSubjects, snapshot.Snapshot)))
-                {
-                    convergeStopwatch.Stop();
-                    cycleStopwatch.Stop();
-
-                    _findingsLog.AppendIfAny(snapshots, convergeStopwatch.Elapsed);
-
-                    WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, CycleResult.Pass);
-                    CompactHeapAndLogCycle(activeProfileName, CycleResult.Pass, cycleStopwatch.Elapsed, convergeStopwatch.Elapsed);
-                    _logger.LogInformation(
-                        "=== Cycle {Cycle}: PASS (converged in {ConvergeTime:F1}s, cycle {CycleTime:F0}s) ===",
-                        _cycleNumber, convergeStopwatch.Elapsed.TotalSeconds, cycleStopwatch.Elapsed.TotalSeconds);
-
-                    _cycleLifecycle?.FinishCycle(_cycleNumber, CycleResult.Pass);
-                    converged = true;
-                    break;
-                }
-
-                await Task.Delay(SnapshotPollInterval, stoppingToken);
-            }
-
-            if (!converged)
-            {
+                var convergeElapsed = outcome.Elapsed;
                 cycleStopwatch.Stop();
-                convergeStopwatch.Stop();
 
-                var snapshots = CaptureAllSnapshots();
+                _findingsLog.AppendIfAny(outcome.Snapshots, convergeElapsed);
+                WriteStatistics(cycleStopwatch.Elapsed, convergeElapsed, CycleResult.Pass);
+                CompactHeapAndLogCycle(activeProfileName, CycleResult.Pass, cycleStopwatch.Elapsed, convergeElapsed);
+                _logger.LogInformation(
+                    "=== Cycle {Cycle}: PASS (converged in {ConvergeTime:F1}s, cycle {CycleTime:F0}s) ===",
+                    _cycleNumber, convergeElapsed.TotalSeconds, cycleStopwatch.Elapsed.TotalSeconds);
 
-                _logger.LogError("=== Cycle {Cycle}: FAIL (did not converge within {Timeout}) ===",
-                    _cycleNumber, _configuration.ConvergenceTimeout);
-
-                await LogFailureSnapshotsAsync(snapshots, stoppingToken);
-
-                LogPropertyDiffsWithTimestamps(snapshots);
-                LogReSyncCheck(snapshots);
-
-                WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, CycleResult.Fail);
-                CompactHeapAndLogCycle(activeProfileName, CycleResult.Fail, cycleStopwatch.Elapsed, convergeStopwatch.Elapsed);
-                _cycleLifecycle?.FinishCycle(_cycleNumber, CycleResult.Fail);
-
-                _failed = true;
-                _applicationLifetime.StopApplication();
-                return;
+                _cycleLifecycle?.FinishCycle(_cycleNumber, CycleResult.Pass);
+                continue;
             }
-        }
-    }
 
-    private List<(string Name, string Snapshot)> CaptureAllSnapshots()
-    {
-        return _participants
-            .Select(participant => (
-                Name: participant.Key,
-                Snapshot: SnapshotComparer.Capture(participant.Value)))
-            .ToList();
+            cycleStopwatch.Stop();
+            var convergeFailedElapsed = outcome.Elapsed;
+
+            _logger.LogError("=== Cycle {Cycle}: FAIL (did not converge within {Timeout}) ===",
+                _cycleNumber, _configuration.ConvergenceTimeout);
+
+            await LogFailureSnapshotsAsync(outcome.Snapshots.ToList(), stoppingToken);
+            LogPropertyDiffsWithTimestamps(outcome.Snapshots.ToList());
+            LogReSyncCheck(outcome.Snapshots.ToList());
+
+            WriteStatistics(cycleStopwatch.Elapsed, convergeFailedElapsed, CycleResult.Fail);
+            CompactHeapAndLogCycle(activeProfileName, CycleResult.Fail, cycleStopwatch.Elapsed, convergeFailedElapsed);
+            _cycleLifecycle?.FinishCycle(_cycleNumber, CycleResult.Fail);
+
+            _failed = true;
+            _applicationLifetime.StopApplication();
+            return;
+        }
     }
 
     private void WriteStatistics(TimeSpan cycleDuration, TimeSpan convergeDuration, CycleResult result)
