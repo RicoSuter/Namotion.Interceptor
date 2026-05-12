@@ -14,7 +14,6 @@ public abstract class MutationEngine : BackgroundService
 {
     private const int MinCollectionSize = 10;
     private const int MaxCollectionSize = 30;
-    private const int MaxDepth = 3;
     private const int MaxTotalNodes = 500;
 
     private readonly TestNode _root;
@@ -22,14 +21,9 @@ public abstract class MutationEngine : BackgroundService
     private readonly TestCycleCoordinator _coordinator;
     private readonly Random _structuralMutationRandom = new();
 
-    private List<TestNode> _structuralTargets = [];
-
     protected readonly MutationCounters Counters = new();
-
-    protected readonly Lock NodeLock = new();
+    protected readonly KnownNodeGraph Graph = new();
     protected readonly ILogger Logger;
-
-    protected List<TestNode> KnownNodes = [];
 
     public string Name => _configuration.Name;
     public int ValueMutationRate => _configuration.ValueMutationRate;
@@ -62,7 +56,7 @@ public abstract class MutationEngine : BackgroundService
             "MutationEngine [{Name}] started at {Rate} value mutations/sec, {StructuralRate} structural mutations/sec",
             _configuration.Name, _configuration.ValueMutationRate, _configuration.StructuralMutationRate);
 
-        RebuildKnownNodes();
+        Graph.Rebuild(_root);
 
         var tasks = new List<Task> { RunValueMutationsAsync(stoppingToken) };
 
@@ -96,7 +90,7 @@ public abstract class MutationEngine : BackgroundService
                 rebuildCounter += batchSize;
                 if (rebuildCounter >= 10)
                 {
-                    RebuildKnownNodes();
+                    Graph.Rebuild(_root);
                     rebuildCounter = 0;
                 }
 
@@ -113,70 +107,19 @@ public abstract class MutationEngine : BackgroundService
         }
     }
 
-    protected void RebuildKnownNodes()
-    {
-        lock (NodeLock)
-        {
-            KnownNodes = [];
-            _structuralTargets = [];
-
-            VisitNode(_root, 0);
-        }
-    }
-
-    private void VisitNode(TestNode node, int depth, HashSet<TestNode>? visited = null)
-    {
-        visited ??= [];
-        if (!visited.Add(node))
-        {
-            return;
-        }
-
-        KnownNodes.Add(node);
-
-        if (depth < MaxDepth)
-        {
-            _structuralTargets.Add(node);
-        }
-
-        var collection = node.Collection;
-        if (collection is not null)
-        {
-            foreach (var child in collection)
-            {
-                VisitNode(child, depth + 1, visited);
-            }
-        }
-
-        var items = node.Items;
-        if (items is not null)
-        {
-            foreach (var child in items.Values)
-            {
-                VisitNode(child, depth + 1, visited);
-            }
-        }
-
-        var objectRef = node.ObjectRef;
-        if (objectRef is not null)
-        {
-            VisitNode(objectRef, depth + 1, visited);
-        }
-    }
-
     private void PerformStructuralMutation()
     {
         TestNode target;
         int totalNodeCount;
-        lock (NodeLock)
+        lock (Graph.NodeLock)
         {
-            if (_structuralTargets.Count == 0)
+            if (Graph.StructuralTargets.Count == 0)
             {
                 return;
             }
 
-            target = _structuralTargets[_structuralMutationRandom.Next(_structuralTargets.Count)];
-            totalNodeCount = KnownNodes.Count;
+            target = Graph.StructuralTargets[_structuralMutationRandom.Next(Graph.StructuralTargets.Count)];
+            totalNodeCount = Graph.KnownNodes.Count;
         }
 
         var category = _structuralMutationRandom.Next(3);

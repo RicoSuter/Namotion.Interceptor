@@ -37,9 +37,9 @@ public class BatchMutationEngine : MutationEngine
     protected override async Task RunValueMutationsAsync(CancellationToken stoppingToken)
     {
         int nodeCount;
-        lock (NodeLock)
+        lock (Graph.NodeLock)
         {
-            nodeCount = KnownNodes.Count;
+            nodeCount = Graph.KnownNodes.Count;
         }
 
         if (nodeCount == 0)
@@ -73,9 +73,9 @@ public class BatchMutationEngine : MutationEngine
             }
 
             List<TestNode> nodes;
-            lock (NodeLock)
+            lock (Graph.NodeLock)
             {
-                nodes = KnownNodes;
+                nodes = Graph.KnownNodes;
                 nodeCount = nodes.Count;
                 if (nodeCount == 0)
                 {

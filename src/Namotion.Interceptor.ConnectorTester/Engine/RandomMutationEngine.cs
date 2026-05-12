@@ -68,9 +68,9 @@ public class RandomMutationEngine : MutationEngine
     private void PerformValueMutation()
     {
         TestNode node;
-        lock (NodeLock)
+        lock (Graph.NodeLock)
         {
-            node = KnownNodes[_valueMutationRandom.Next(KnownNodes.Count)];
+            node = Graph.KnownNodes[_valueMutationRandom.Next(Graph.KnownNodes.Count)];
         }
 
         var property = _valueMutationRandom.Next(4);
