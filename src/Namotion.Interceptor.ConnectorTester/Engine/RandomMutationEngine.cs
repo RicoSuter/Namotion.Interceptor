@@ -1,7 +1,6 @@
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 using Namotion.Interceptor.ConnectorTester.Model;
-using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.ConnectorTester.Engine;
 
@@ -13,7 +12,7 @@ namespace Namotion.Interceptor.ConnectorTester.Engine;
 /// </summary>
 public class RandomMutationEngine : MutationEngine
 {
-    private readonly Random _valueMutationRandom = new();
+    private readonly RandomValueMutationStrategy _strategy;
 
     public RandomMutationEngine(
         TestNode root,
@@ -22,77 +21,8 @@ public class RandomMutationEngine : MutationEngine
         ILogger logger)
         : base(root, configuration, coordinator, logger)
     {
+        _strategy = new RandomValueMutationStrategy(Graph, coordinator, ((IInterceptorSubject)root).Context, Counters, configuration);
     }
 
-    protected override async Task RunValueMutationsAsync(CancellationToken stoppingToken)
-    {
-        var (batchSize, delayMs) = TickPlan.From(ValueMutationRate);
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                Coordinator.WaitIfPaused(stoppingToken);
-
-                if (UseTransactions)
-                {
-                    using var transaction = await Context.BeginTransactionAsync(
-                        TransactionFailureHandling.BestEffort);
-
-                    for (var i = 0; i < batchSize; i++)
-                    {
-                        PerformValueMutation();
-                        Counters.IncrementValue();
-                    }
-
-                    await transaction.CommitAsync(stoppingToken);
-                }
-                else
-                {
-                    for (var i = 0; i < batchSize; i++)
-                    {
-                        PerformValueMutation();
-                        Counters.IncrementValue();
-                    }
-                }
-
-                await Task.Delay(delayMs, stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-        }
-    }
-
-    private void PerformValueMutation()
-    {
-        TestNode node;
-        lock (Graph.NodeLock)
-        {
-            node = Graph.KnownNodes[_valueMutationRandom.Next(Graph.KnownNodes.Count)];
-        }
-
-        var property = _valueMutationRandom.Next(4);
-        var counter = GlobalMutationCounter.Next();
-
-        using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
-        {
-            switch (property)
-            {
-                case 0:
-                    node.StringValue = counter.ToString("x8");
-                    break;
-                case 1:
-                    node.DecimalValue = counter / 100m;
-                    break;
-                case 2:
-                    node.IntValue = (int)(counter % int.MaxValue);
-                    break;
-                case 3:
-                    node.LongValue = counter;
-                    break;
-            }
-        }
-    }
+    protected override Task RunValueMutationsAsync(CancellationToken stoppingToken) => _strategy.RunAsync(stoppingToken);
 }
