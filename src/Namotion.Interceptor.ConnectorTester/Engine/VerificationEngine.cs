@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Namotion.Interceptor.Connectors;
@@ -39,6 +38,7 @@ public class VerificationEngine : BackgroundService
     private readonly ICycleLifecycleNotifier? _cycleLifecycle;
     private readonly IHostApplicationLifetime _applicationLifetime;
     private readonly ILogger _logger;
+    private readonly HeapSampler _heapSampler = new();
 
     private int _cycleNumber;
     private bool _failed;
@@ -305,14 +305,7 @@ public class VerificationEngine : BackgroundService
 
     private void CompactHeapAndLogCycle(string? profileName, CycleResult result, TimeSpan cycleDuration, TimeSpan convergeDuration)
     {
-        GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
-        GC.WaitForPendingFinalizers();
-        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
-
-        using var process = Process.GetCurrentProcess();
-        var heapMb = GC.GetTotalMemory(forceFullCollection: false) / (1024.0 * 1024.0);
-        var processMb = process.WorkingSet64 / (1024.0 * 1024.0);
+        var (heapMb, processMb) = _heapSampler.CompactAndSample();
 
         var totalValueMutations = _mutationEngines.Sum(e => e.ValueMutationCount);
         var totalStructuralMutations = _mutationEngines.Sum(e => e.StructuralMutationCount);
