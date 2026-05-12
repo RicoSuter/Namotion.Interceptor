@@ -8,6 +8,7 @@ using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Logging;
 using Namotion.Interceptor.ConnectorTester.Model;
+using Namotion.Interceptor.ConnectorTester.Snapshot;
 
 namespace Namotion.Interceptor.ConnectorTester.Engine;
 

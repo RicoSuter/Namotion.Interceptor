@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.ConnectorTester.Model;
 
-namespace Namotion.Interceptor.ConnectorTester.Engine;
+namespace Namotion.Interceptor.ConnectorTester.Snapshot;
 
 /// <summary>
 /// Captures and compares participant snapshots for the ConnectorTester convergence check.

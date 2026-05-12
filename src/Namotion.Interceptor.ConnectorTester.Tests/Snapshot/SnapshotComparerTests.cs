@@ -1,11 +1,11 @@
 using System.Text.Json.Nodes;
 using Xunit;
-using Namotion.Interceptor.ConnectorTester.Engine;
+using Namotion.Interceptor.ConnectorTester.Snapshot;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Registry;
 using Namotion.Interceptor.Tracking;
 
-namespace Namotion.Interceptor.ConnectorTester.Tests.Engine;
+namespace Namotion.Interceptor.ConnectorTester.Tests.Snapshot;
 
 public class SnapshotComparerTests
 {
