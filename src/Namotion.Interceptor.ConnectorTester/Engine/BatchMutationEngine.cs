@@ -1,8 +1,6 @@
-using System.Diagnostics;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 using Namotion.Interceptor.ConnectorTester.Model;
-using Namotion.Interceptor.Tracking.Transactions;
 
 namespace Namotion.Interceptor.ConnectorTester.Engine;
 
@@ -18,8 +16,7 @@ namespace Namotion.Interceptor.ConnectorTester.Engine;
 /// </summary>
 public class BatchMutationEngine : MutationEngine
 {
-    private readonly int _numberOfBatches;
-    private readonly int _participantIndex;
+    private readonly BatchValueMutationStrategy _strategy;
 
     public BatchMutationEngine(
         TestNode root,
@@ -30,125 +27,16 @@ public class BatchMutationEngine : MutationEngine
         int participantIndex)
         : base(root, configuration, coordinator, logger)
     {
-        _numberOfBatches = numberOfBatches;
-        _participantIndex = participantIndex;
+        _strategy = new BatchValueMutationStrategy(
+            Graph,
+            coordinator,
+            ((IInterceptorSubject)root).Context,
+            Counters,
+            configuration,
+            numberOfBatches,
+            participantIndex);
     }
 
-    protected override async Task RunValueMutationsAsync(CancellationToken stoppingToken)
-    {
-        int nodeCount;
-        lock (Graph.NodeLock)
-        {
-            nodeCount = Graph.KnownNodes.Count;
-        }
-
-        if (nodeCount == 0)
-        {
-            return;
-        }
-
-        var nodesPerBatch = (int)Math.Ceiling((double)ValueMutationRate / _numberOfBatches);
-        var timerIntervalMs = 1000.0 / (_numberOfBatches * 1.1);
-        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(timerIntervalMs));
-
-        var nodeIndex = 0;
-        var mutationsThisSecond = 0;
-        var cycleStart = Stopwatch.GetTimestamp();
-        var property = _participantIndex % 4;
-
-        while (await timer.WaitForNextTickAsync(stoppingToken))
-        {
-            Coordinator.WaitIfPaused(stoppingToken);
-
-            if (mutationsThisSecond >= ValueMutationRate)
-            {
-                var elapsed = Stopwatch.GetElapsedTime(cycleStart);
-                if (elapsed < TimeSpan.FromSeconds(1))
-                {
-                    continue;
-                }
-
-                mutationsThisSecond = 0;
-                cycleStart += Stopwatch.Frequency;
-            }
-
-            List<TestNode> nodes;
-            lock (Graph.NodeLock)
-            {
-                nodes = Graph.KnownNodes;
-                nodeCount = nodes.Count;
-                if (nodeCount == 0)
-                {
-                    continue;
-                }
-            }
-
-            var count = Math.Min(Math.Min(nodesPerBatch, ValueMutationRate - mutationsThisSecond), nodeCount);
-
-            if (UseTransactions)
-            {
-                await MutateBatchWithTransactionAsync(nodes, nodeCount, nodeIndex, count, property, stoppingToken);
-            }
-            else
-            {
-                MutateBatchParallel(nodes, nodeCount, nodeIndex, count, property);
-            }
-
-            nodeIndex = (nodeIndex + count) % nodeCount;
-            mutationsThisSecond += count;
-        }
-    }
-
-    private async Task MutateBatchWithTransactionAsync(
-        List<TestNode> nodes, int nodeCount, int nodeIndex, int count, int property,
-        CancellationToken stoppingToken)
-    {
-        using var transaction = await Context.BeginTransactionAsync(
-            TransactionFailureHandling.BestEffort);
-
-        using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
-        {
-            for (var j = 0; j < count; j++)
-            {
-                MutateNode(nodes[(nodeIndex + j) % nodeCount], property);
-            }
-        }
-
-        await transaction.CommitAsync(stoppingToken);
-    }
-
-    private void MutateBatchParallel(
-        List<TestNode> nodes, int nodeCount, int nodeIndex, int count, int property)
-    {
-        using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
-        {
-            Parallel.For(0, count, j =>
-            {
-                MutateNode(nodes[(nodeIndex + j) % nodeCount], property);
-            });
-        }
-    }
-
-    private void MutateNode(TestNode node, int property)
-    {
-        var counter = GlobalMutationCounter.Next();
-
-        switch (property)
-        {
-            case 0:
-                node.StringValue = counter.ToString("x8");
-                break;
-            case 1:
-                node.DecimalValue = counter / 100m;
-                break;
-            case 2:
-                node.IntValue = (int)(counter % int.MaxValue);
-                break;
-            case 3:
-                node.LongValue = counter;
-                break;
-        }
-
-        Counters.IncrementValue();
-    }
+    protected override Task RunValueMutationsAsync(CancellationToken stoppingToken)
+        => _strategy.RunAsync(stoppingToken);
 }
