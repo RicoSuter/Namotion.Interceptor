@@ -1,9 +1,21 @@
+using Namotion.Interceptor.ConnectorTester.Connectors;
+
 namespace Namotion.Interceptor.ConnectorTester.Configuration;
 
 public class ConnectorTesterConfiguration
 {
     /// <summary>"opcua", "mqtt", or "websocket"</summary>
     public string Connector { get; set; } = "opcua";
+
+    /// <summary>Parsed connector kind based on <see cref="Connector"/>.</summary>
+    public ConnectorKind ConnectorKind => Connector?.ToLowerInvariant() switch
+    {
+        "opcua"     => Namotion.Interceptor.ConnectorTester.Connectors.ConnectorKind.OpcUa,
+        "mqtt"      => Namotion.Interceptor.ConnectorTester.Connectors.ConnectorKind.Mqtt,
+        "websocket" => Namotion.Interceptor.ConnectorTester.Connectors.ConnectorKind.WebSocket,
+        _ => throw new InvalidOperationException(
+            $"Unknown ConnectorTester:Connector value '{Connector}'. Expected one of: opcua, mqtt, websocket.")
+    };
 
     /// <summary>Number of collection children in the test graph.</summary>
     public int CollectionCount { get; set; } = 20;
