@@ -77,15 +77,13 @@ public class ChaosEngine : BackgroundService
     /// <summary>
     /// Marks active disruption as recovered. Called by verification engine before convergence check.
     /// </summary>
-    public Task RecoverActiveDisruptionAsync(CancellationToken cancellationToken)
+    public void RecoverActiveDisruption()
     {
         if (_isDisrupted)
         {
             _isDisrupted = false;
             _logger.LogInformation("Chaos: {Target} recovered from disruption", _targetName);
         }
-
-        return Task.CompletedTask;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

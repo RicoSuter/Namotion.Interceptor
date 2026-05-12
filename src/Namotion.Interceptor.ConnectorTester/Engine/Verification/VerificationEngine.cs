@@ -126,7 +126,7 @@ public class VerificationEngine : BackgroundService
 
             foreach (var chaosEngine in _chaosEngines)
             {
-                await chaosEngine.RecoverActiveDisruptionAsync(stoppingToken);
+                chaosEngine.RecoverActiveDisruption();
             }
 
             // OPC UA needs ~15-20s: server restart + port bind, client keep-alive
