@@ -1,13 +1,13 @@
 using System.Collections.Concurrent;
-using Namotion.Interceptor.ConnectorTester.Engine;
+using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 
 namespace Namotion.Interceptor.ConnectorTester.Logging;
 
 /// <summary>
 /// Logger provider that writes to both console and per-cycle log files.
-/// The verification engine signals cycle boundaries via StartNewCycle/FinishCycle.
+/// The verification engine signals cycle boundaries via StartCycle/FinishCycle.
 /// </summary>
-public sealed class CycleLoggerProvider : ILoggerProvider
+public sealed class CycleLoggerProvider : ILoggerProvider, ICycleLifecycleNotifier
 {
     private const int MaxPassingLogFiles = 50;
 
@@ -25,7 +25,7 @@ public sealed class CycleLoggerProvider : ILoggerProvider
         Directory.CreateDirectory(_logDirectory);
     }
 
-    public void StartNewCycle(int cycleNumber)
+    public void StartCycle(int cycleNumber)
     {
         lock (_fileLock)
         {

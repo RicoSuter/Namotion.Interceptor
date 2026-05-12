@@ -1,6 +1,6 @@
 using Xunit;
 using Namotion.Interceptor.ConnectorTester.Reporting;
-using Namotion.Interceptor.ConnectorTester.Engine;
+using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 
 namespace Namotion.Interceptor.ConnectorTester.Tests.Reporting;
 

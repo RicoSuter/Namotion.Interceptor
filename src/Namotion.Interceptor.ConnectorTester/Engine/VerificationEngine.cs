@@ -6,14 +6,12 @@ using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.Connectors.Updates;
 using Namotion.Interceptor.ConnectorTester.Configuration;
 using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
-using Namotion.Interceptor.ConnectorTester.Logging;
+using Namotion.Interceptor.ConnectorTester.Engine.Verification;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.ConnectorTester.Reporting;
 using Namotion.Interceptor.ConnectorTester.Snapshot;
 
 namespace Namotion.Interceptor.ConnectorTester.Engine;
-
-public enum CycleResult { Pass, Fail }
 
 /// <summary>
 /// Top-level orchestrator. Runs repeating mutate/converge cycles.
@@ -38,7 +36,7 @@ public class VerificationEngine : BackgroundService
     private readonly Dictionary<string, TestNode> _participants;
     private readonly List<MutationEngineHost> _mutationEngines;
     private readonly List<ChaosEngine> _chaosEngines;
-    private readonly CycleLoggerProvider? _cycleLoggerProvider;
+    private readonly ICycleLifecycleNotifier? _cycleLifecycle;
     private readonly IHostApplicationLifetime _applicationLifetime;
     private readonly ILogger _logger;
 
@@ -56,7 +54,7 @@ public class VerificationEngine : BackgroundService
         Dictionary<string, TestNode> participants,
         List<MutationEngineHost> mutationEngines,
         List<ChaosEngine> chaosEngines,
-        CycleLoggerProvider? cycleLoggerProvider,
+        ICycleLifecycleNotifier? cycleLifecycle,
         IHostApplicationLifetime applicationLifetime,
         ILogger logger,
         string runDirectory)
@@ -66,7 +64,7 @@ public class VerificationEngine : BackgroundService
         _participants = participants;
         _mutationEngines = mutationEngines;
         _chaosEngines = chaosEngines;
-        _cycleLoggerProvider = cycleLoggerProvider;
+        _cycleLifecycle = cycleLifecycle;
         _applicationLifetime = applicationLifetime;
         _logger = logger;
         _runDirectory = runDirectory;
@@ -138,7 +136,7 @@ public class VerificationEngine : BackgroundService
 
             var activeProfileName = ApplyChaosProfile();
 
-            _cycleLoggerProvider?.StartNewCycle(_cycleNumber);
+            _cycleLifecycle?.StartCycle(_cycleNumber);
 
             var cycleStopwatch = Stopwatch.StartNew();
 
@@ -183,7 +181,7 @@ public class VerificationEngine : BackgroundService
                         "=== Cycle {Cycle}: PASS (converged in {ConvergeTime:F1}s, cycle {CycleTime:F0}s) ===",
                         _cycleNumber, convergeStopwatch.Elapsed.TotalSeconds, cycleStopwatch.Elapsed.TotalSeconds);
 
-                    _cycleLoggerProvider?.FinishCycle(_cycleNumber, CycleResult.Pass);
+                    _cycleLifecycle?.FinishCycle(_cycleNumber, CycleResult.Pass);
                     converged = true;
                     break;
                 }
@@ -208,7 +206,7 @@ public class VerificationEngine : BackgroundService
 
                 WriteStatistics(cycleStopwatch.Elapsed, convergeStopwatch.Elapsed, CycleResult.Fail);
                 CompactHeapAndLogCycle(activeProfileName, CycleResult.Fail, cycleStopwatch.Elapsed, convergeStopwatch.Elapsed);
-                _cycleLoggerProvider?.FinishCycle(_cycleNumber, CycleResult.Fail);
+                _cycleLifecycle?.FinishCycle(_cycleNumber, CycleResult.Fail);
 
                 _failed = true;
                 _applicationLifetime.StopApplication();
