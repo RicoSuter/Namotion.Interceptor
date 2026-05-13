@@ -62,21 +62,10 @@ internal class OpcUaSubjectLoader
 
         var nodeId = ExpandedNodeId.ToNodeId(node.NodeId, session.NamespaceUris);
         var nodeReferences = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
+        var distinctReferences = DistinctByResolvedNodeId(nodeReferences, session);
 
-        // Dedup duplicate browse entries (e.g. same target via HasComponent + HasProperty).
-        // Resolve to NodeId for the dedup key: ExpandedNodeId compares unequal when the
-        // same target is expressed with NamespaceIndex vs NamespaceUri.
-        var processedReferenceNodeIds = new HashSet<NodeId>();
-
-        for (var index = 0; index < nodeReferences.Count; index++)
+        foreach (var (nodeReference, resolvedNodeId) in distinctReferences)
         {
-            var nodeReference = nodeReferences[index];
-            var resolvedNodeId = ExpandedNodeId.ToNodeId(nodeReference.NodeId, session.NamespaceUris);
-            if (!processedReferenceNodeIds.Add(resolvedNodeId))
-            {
-                continue;
-            }
-
             var property = await FindSubjectPropertyAsync(registeredSubject, nodeReference, session, cancellationToken).ConfigureAwait(false);
             if (property is null)
             {
@@ -128,34 +117,32 @@ internal class OpcUaSubjectLoader
             var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
             if (propertyName is not null)
             {
-                var childNodeId = resolvedNodeId;
-
                 if (property.IsSubjectReference)
                 {
                     // Check if this should be treated as a VariableNode
                     var nodeConfiguration = _configuration.NodeMapper.TryGetNodeConfiguration(property);
                     if (nodeConfiguration?.NodeClass == Mapping.OpcUaNodeClass.Variable)
                     {
-                        await LoadVariableNodeForSubjectAsync(property, childNodeId, session, monitoredItems, cancellationToken).ConfigureAwait(false);
+                        await LoadVariableNodeForSubjectAsync(property, resolvedNodeId, session, monitoredItems, cancellationToken).ConfigureAwait(false);
                     }
                     else
                     {
-                        await LoadSubjectReferenceAsync(property, nodeReference, subject, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
+                        await LoadSubjectReferenceAsync(property, nodeReference, resolvedNodeId, subject, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
                     }
                 }
                 else if (property.IsSubjectCollection)
                 {
-                    await LoadSubjectCollectionAsync(property, childNodeId, monitoredItems, session, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
+                    await LoadSubjectCollectionAsync(property, resolvedNodeId, monitoredItems, session, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
                 }
                 else if (property.IsSubjectDictionary)
                 {
-                    await LoadSubjectDictionaryAsync(property, childNodeId, monitoredItems, session, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
+                    await LoadSubjectDictionaryAsync(property, resolvedNodeId, monitoredItems, session, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
                 }
                 else
                 {
-                    MonitorValueNode(childNodeId, property, monitoredItems);
+                    MonitorValueNode(resolvedNodeId, property, monitoredItems);
                     var visitedNodes = new HashSet<NodeId>();
-                    await LoadAttributeNodesAsync(property, childNodeId, session, monitoredItems, visitedNodes, cancellationToken).ConfigureAwait(false);
+                    await LoadAttributeNodesAsync(property, resolvedNodeId, session, monitoredItems, visitedNodes, cancellationToken).ConfigureAwait(false);
                 }
             }
         }
@@ -175,19 +162,7 @@ internal class OpcUaSubjectLoader
 
         // Browse children of the variable node
         var rawChildNodes = await BrowseNodeAsync(parentNodeId, session, cancellationToken).ConfigureAwait(false);
-
-        // Dedup duplicate browse entries; see LoadSubjectAsync for the NodeId-vs-ExpandedNodeId rationale.
-        var processedReferenceNodeIds = new HashSet<NodeId>();
-        var childNodes = new List<ReferenceDescription>(rawChildNodes.Count);
-        foreach (var childNode in rawChildNodes)
-        {
-            var resolvedChildNodeId = ExpandedNodeId.ToNodeId(childNode.NodeId, session.NamespaceUris);
-            if (!processedReferenceNodeIds.Add(resolvedChildNodeId))
-            {
-                continue;
-            }
-            childNodes.Add(childNode);
-        }
+        var childNodes = DistinctByResolvedNodeId(rawChildNodes, session);
 
         var matchedNames = new HashSet<string>();
 
@@ -199,29 +174,28 @@ internal class OpcUaSubjectLoader
                 continue;
 
             var attributeBrowseName = attributeConfiguration.BrowseName ?? attribute.BrowseName;
-            ReferenceDescription? matchingNode = null;
-            foreach (var childNode in childNodes)
+            NodeId? matchingNodeId = null;
+            foreach (var (childNode, childNodeId) in childNodes)
             {
                 if (childNode.BrowseName.Name == attributeBrowseName)
                 {
-                    matchingNode = childNode;
+                    matchingNodeId = childNodeId;
                     break;
                 }
             }
 
-            if (matchingNode is null)
+            if (matchingNodeId is null)
                 continue;
 
             matchedNames.Add(attributeBrowseName);
-            var attributeNodeId = ExpandedNodeId.ToNodeId(matchingNode.NodeId, session.NamespaceUris);
-            MonitorValueNode(attributeNodeId, attribute, monitoredItems);
+            MonitorValueNode(matchingNodeId, attribute, monitoredItems);
 
             // Recursive: attributes can have attributes
-            await LoadAttributeNodesAsync(attribute, attributeNodeId, session, monitoredItems, visitedNodes, cancellationToken).ConfigureAwait(false);
+            await LoadAttributeNodesAsync(attribute, matchingNodeId, session, monitoredItems, visitedNodes, cancellationToken).ConfigureAwait(false);
         }
 
         // Second pass: add dynamic attributes (same pattern as ShouldAddDynamicProperty)
-        foreach (var childNode in childNodes)
+        foreach (var (childNode, childNodeId) in childNodes)
         {
             if (childNode.NodeClass != NodeClass.Variable)
                 continue;
@@ -230,14 +204,14 @@ internal class OpcUaSubjectLoader
             if (!matchedNames.Add(browseName))
                 continue;
 
-            // Safety net for name collisions: a lifecycle handler may have registered an
-            // unrelated attribute under the same key (e.g. HomeBlaze's [StateAttribute] maps
-            // to a registry attribute literally named "State", colliding with the standard
-            // OPC UA Server.ServerStatus.State child).
+            // Safety net for name collisions: a lifecycle handler from another source (e.g. HomeBlaze's
+            // [StateAttribute]) may have registered a registry attribute under the same key as a standard
+            // OPC UA browse-name child (e.g. Server.ServerStatus.State). Skip rather than crash on
+            // duplicate AddAttribute; the existing registration wins.
             if (property.TryGetAttribute(browseName) is not null)
             {
                 _logger.LogWarning(
-                    "Skipping OPC UA child '{AttributeName}' on '{PropertyName}' (parent {ParentNodeId}, child {ChildNodeId}): attribute name already registered.",
+                    "Skipping OPC UA child '{AttributeName}' on '{PropertyName}' (parent {ParentNodeId}, child {ChildNodeId}): an attribute with this name was already registered by another source (e.g. a lifecycle handler).",
                     browseName, property.Name, parentNodeId, childNode.NodeId);
                 continue;
             }
@@ -265,16 +239,16 @@ internal class OpcUaSubjectLoader
                 (_, o) => value = o,
                 _configuration.TypeResolver.GetDynamicPropertyAttributes(childNode, session));
 
-            var attributeNodeId = ExpandedNodeId.ToNodeId(childNode.NodeId, session.NamespaceUris);
-            MonitorValueNode(attributeNodeId, dynamicAttribute, monitoredItems);
+            MonitorValueNode(childNodeId, dynamicAttribute, monitoredItems);
 
             // Recursive with cycle detection
-            await LoadAttributeNodesAsync(dynamicAttribute, attributeNodeId, session, monitoredItems, visitedNodes, cancellationToken).ConfigureAwait(false);
+            await LoadAttributeNodesAsync(dynamicAttribute, childNodeId, session, monitoredItems, visitedNodes, cancellationToken).ConfigureAwait(false);
         }
     }
 
     private async Task LoadSubjectReferenceAsync(RegisteredSubjectProperty property,
         ReferenceDescription nodeReference,
+        NodeId nodeId,
         IInterceptorSubject subject,
         ISession session,
         List<MonitoredItem> monitoredItems,
@@ -282,33 +256,28 @@ internal class OpcUaSubjectLoader
         Dictionary<NodeId, IInterceptorSubject> subjectsByNodeId,
         CancellationToken cancellationToken)
     {
-        var nodeId = ExpandedNodeId.ToNodeId(nodeReference.NodeId, session.NamespaceUris);
-        if (nodeId is not null && subjectsByNodeId.TryGetValue(nodeId, out var reusedSubject))
+        if (subjectsByNodeId.TryGetValue(nodeId, out var reusedSubject))
         {
             // The cache wins over property.Children: if a sibling reference loaded earlier in
             // this call already bound a subject to this NodeId, every other property pointing
             // at the same node must resolve to that same instance to preserve DAG identity.
             property.SetValueFromSource(_source, null, null, reusedSubject);
+            return;
         }
-        else
+
+        var existingSubject = property.Children.SingleOrDefault();
+        var subjectToLoad = existingSubject.Subject
+            ?? await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeReference, session, cancellationToken).ConfigureAwait(false);
+
+        if (existingSubject.Subject is null)
         {
-            var existingSubject = property.Children.SingleOrDefault();
-            var subjectToLoad = existingSubject.Subject
-                ?? await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeReference, session, cancellationToken).ConfigureAwait(false);
-
-            if (existingSubject.Subject is null)
-            {
-                subjectToLoad.Context.AddFallbackContext(subject.Context);
-                property.SetValueFromSource(_source, null, null, subjectToLoad);
-            }
-
-            if (nodeId is not null)
-            {
-                subjectsByNodeId.TryAdd(nodeId, subjectToLoad);
-            }
-
-            await LoadSubjectAsync(subjectToLoad, nodeReference, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
+            subjectToLoad.Context.AddFallbackContext(subject.Context);
+            property.SetValueFromSource(_source, null, null, subjectToLoad);
         }
+
+        subjectsByNodeId.TryAdd(nodeId, subjectToLoad);
+
+        await LoadSubjectAsync(subjectToLoad, nodeReference, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task LoadSubjectCollectionAsync(RegisteredSubjectProperty property,
@@ -320,20 +289,7 @@ internal class OpcUaSubjectLoader
         CancellationToken cancellationToken)
     {
         var rawChildNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken).ConfigureAwait(false);
-
-        // Dedup duplicate browse entries; see LoadSubjectAsync for the NodeId-vs-ExpandedNodeId rationale.
-        // Index-based mapping to existingChildren below requires duplicates be removed before the loop.
-        var processedReferenceNodeIds = new HashSet<NodeId>();
-        var childNodes = new List<(ReferenceDescription Node, NodeId NodeId)>(rawChildNodes.Count);
-        foreach (var rawChildNode in rawChildNodes)
-        {
-            var resolvedChildNodeId = ExpandedNodeId.ToNodeId(rawChildNode.NodeId, session.NamespaceUris);
-            if (!processedReferenceNodeIds.Add(resolvedChildNodeId))
-            {
-                continue;
-            }
-            childNodes.Add((rawChildNode, resolvedChildNodeId));
-        }
+        var childNodes = DistinctByResolvedNodeId(rawChildNodes, session);
 
         var childCount = childNodes.Count;
         var children = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>(childCount);
@@ -346,7 +302,7 @@ internal class OpcUaSubjectLoader
             var (childNode, nodeId) = childNodes[i];
             var childSubject = i < existingChildren.Length ? existingChildren[i].Subject : null;
 
-            if (childSubject is null && nodeId is not null)
+            if (childSubject is null)
             {
                 subjectsByNodeId.TryGetValue(nodeId, out childSubject);
             }
@@ -354,10 +310,7 @@ internal class OpcUaSubjectLoader
             childSubject ??= await _configuration.SubjectFactory.CreateCollectionSubjectAsync(
                 property, childNode, i, session, cancellationToken).ConfigureAwait(false);
 
-            if (nodeId is not null)
-            {
-                subjectsByNodeId.TryAdd(nodeId, childSubject);
-            }
+            subjectsByNodeId.TryAdd(nodeId, childSubject);
 
             children.Add((childNode, childSubject));
         }
@@ -384,22 +337,14 @@ internal class OpcUaSubjectLoader
         Dictionary<NodeId, IInterceptorSubject> subjectsByNodeId,
         CancellationToken cancellationToken)
     {
-        var childNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken).ConfigureAwait(false);
+        var rawChildNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken).ConfigureAwait(false);
+        var childNodes = DistinctByResolvedNodeId(rawChildNodes, session);
         var existingChildren = property.Children.ToDictionary(c => c.Index!, c => c.Subject);
         var entries = new Dictionary<object, IInterceptorSubject>();
         var nodesByKey = new Dictionary<object, ReferenceDescription>();
 
-        // Dedup duplicate browse entries; see LoadSubjectAsync for the NodeId-vs-ExpandedNodeId rationale.
-        var processedReferenceNodeIds = new HashSet<NodeId>();
-
-        foreach (var childNode in childNodes)
+        foreach (var (childNode, nodeId) in childNodes)
         {
-            var nodeId = ExpandedNodeId.ToNodeId(childNode.NodeId, session.NamespaceUris);
-            if (!processedReferenceNodeIds.Add(nodeId))
-            {
-                continue;
-            }
-
             var key = childNode.BrowseName.Name; // Use BrowseName as dictionary key
             var childSubject = existingChildren.GetValueOrDefault(key);
 
@@ -495,6 +440,30 @@ internal class OpcUaSubjectLoader
                 }
             }
         }
+    }
+
+    // Dedup duplicate browse entries (e.g. same target via HasComponent + HasProperty).
+    // Resolves each ExpandedNodeId via the session's NamespaceTable to produce a canonical
+    // NodeId for the dedup key: ExpandedNodeId compares unequal when the same target is
+    // expressed with NamespaceIndex vs NamespaceUri. References with an unresolvable
+    // namespace URI (ToNodeId returns null) are skipped, since they cannot be addressed
+    // for monitoring or further browsing.
+    private static List<(ReferenceDescription Reference, NodeId NodeId)> DistinctByResolvedNodeId(
+        IReadOnlyCollection<ReferenceDescription> references,
+        ISession session)
+    {
+        var seen = new HashSet<NodeId>(references.Count);
+        var result = new List<(ReferenceDescription, NodeId)>(references.Count);
+        foreach (var reference in references)
+        {
+            var nodeId = ExpandedNodeId.ToNodeId(reference.NodeId, session.NamespaceUris);
+            if (nodeId is null || !seen.Add(nodeId))
+            {
+                continue;
+            }
+            result.Add((reference, nodeId));
+        }
+        return result;
     }
 
     private async Task<ReferenceDescriptionCollection> BrowseNodeAsync(
