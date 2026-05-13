@@ -71,10 +71,8 @@ internal class OpcUaSubjectLoader
         for (var index = 0; index < nodeReferences.Count; index++)
         {
             var nodeReference = nodeReferences[index];
-            var resolvedNodeId = nodeReference.NodeId is not null
-                ? ExpandedNodeId.ToNodeId(nodeReference.NodeId, session.NamespaceUris)
-                : null;
-            if (resolvedNodeId is not null && !processedReferenceNodeIds.Add(resolvedNodeId))
+            var resolvedNodeId = ExpandedNodeId.ToNodeId(nodeReference.NodeId, session.NamespaceUris);
+            if (!processedReferenceNodeIds.Add(resolvedNodeId))
             {
                 continue;
             }
@@ -130,7 +128,7 @@ internal class OpcUaSubjectLoader
             var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
             if (propertyName is not null)
             {
-                var childNodeId = ExpandedNodeId.ToNodeId(nodeReference.NodeId, session.NamespaceUris);
+                var childNodeId = resolvedNodeId;
 
                 if (property.IsSubjectReference)
                 {
@@ -183,10 +181,8 @@ internal class OpcUaSubjectLoader
         var childNodes = new List<ReferenceDescription>(rawChildNodes.Count);
         foreach (var childNode in rawChildNodes)
         {
-            var resolvedChildNodeId = childNode.NodeId is not null
-                ? ExpandedNodeId.ToNodeId(childNode.NodeId, session.NamespaceUris)
-                : null;
-            if (resolvedChildNodeId is not null && !processedReferenceNodeIds.Add(resolvedChildNodeId))
+            var resolvedChildNodeId = ExpandedNodeId.ToNodeId(childNode.NodeId, session.NamespaceUris);
+            if (!processedReferenceNodeIds.Add(resolvedChildNodeId))
             {
                 continue;
             }
@@ -289,6 +285,9 @@ internal class OpcUaSubjectLoader
         var nodeId = ExpandedNodeId.ToNodeId(nodeReference.NodeId, session.NamespaceUris);
         if (nodeId is not null && subjectsByNodeId.TryGetValue(nodeId, out var reusedSubject))
         {
+            // The cache wins over property.Children: if a sibling reference loaded earlier in
+            // this call already bound a subject to this NodeId, every other property pointing
+            // at the same node must resolve to that same instance to preserve DAG identity.
             property.SetValueFromSource(_source, null, null, reusedSubject);
         }
         else
@@ -320,7 +319,22 @@ internal class OpcUaSubjectLoader
         Dictionary<NodeId, IInterceptorSubject> subjectsByNodeId,
         CancellationToken cancellationToken)
     {
-        var childNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken).ConfigureAwait(false);
+        var rawChildNodes = await BrowseNodeAsync(childNodeId, session, cancellationToken).ConfigureAwait(false);
+
+        // Dedup duplicate browse entries; see LoadSubjectAsync for the NodeId-vs-ExpandedNodeId rationale.
+        // Index-based mapping to existingChildren below requires duplicates be removed before the loop.
+        var processedReferenceNodeIds = new HashSet<NodeId>();
+        var childNodes = new List<(ReferenceDescription Node, NodeId NodeId)>(rawChildNodes.Count);
+        foreach (var rawChildNode in rawChildNodes)
+        {
+            var resolvedChildNodeId = ExpandedNodeId.ToNodeId(rawChildNode.NodeId, session.NamespaceUris);
+            if (!processedReferenceNodeIds.Add(resolvedChildNodeId))
+            {
+                continue;
+            }
+            childNodes.Add((rawChildNode, resolvedChildNodeId));
+        }
+
         var childCount = childNodes.Count;
         var children = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>(childCount);
 
@@ -329,9 +343,8 @@ internal class OpcUaSubjectLoader
 
         for (var i = 0; i < childCount; i++)
         {
-            var childNode = childNodes[i];
+            var (childNode, nodeId) = childNodes[i];
             var childSubject = i < existingChildren.Length ? existingChildren[i].Subject : null;
-            var nodeId = ExpandedNodeId.ToNodeId(childNode.NodeId, session.NamespaceUris);
 
             if (childSubject is null && nodeId is not null)
             {
@@ -376,13 +389,21 @@ internal class OpcUaSubjectLoader
         var entries = new Dictionary<object, IInterceptorSubject>();
         var nodesByKey = new Dictionary<object, ReferenceDescription>();
 
+        // Dedup duplicate browse entries; see LoadSubjectAsync for the NodeId-vs-ExpandedNodeId rationale.
+        var processedReferenceNodeIds = new HashSet<NodeId>();
+
         foreach (var childNode in childNodes)
         {
+            var nodeId = ExpandedNodeId.ToNodeId(childNode.NodeId, session.NamespaceUris);
+            if (!processedReferenceNodeIds.Add(nodeId))
+            {
+                continue;
+            }
+
             var key = childNode.BrowseName.Name; // Use BrowseName as dictionary key
             var childSubject = existingChildren.GetValueOrDefault(key);
-            var nodeId = ExpandedNodeId.ToNodeId(childNode.NodeId, session.NamespaceUris);
 
-            if (childSubject is null && nodeId is not null)
+            if (childSubject is null)
             {
                 subjectsByNodeId.TryGetValue(nodeId, out childSubject);
             }
@@ -390,10 +411,7 @@ internal class OpcUaSubjectLoader
             childSubject ??= await _configuration.SubjectFactory.CreateCollectionSubjectAsync(
                 property, childNode, key, session, cancellationToken).ConfigureAwait(false);
 
-            if (nodeId is not null)
-            {
-                subjectsByNodeId.TryAdd(nodeId, childSubject);
-            }
+            subjectsByNodeId.TryAdd(nodeId, childSubject);
 
             entries[key] = childSubject;
             nodesByKey[key] = childNode;
