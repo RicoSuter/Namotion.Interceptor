@@ -202,7 +202,7 @@ internal class OpcUaSubjectLoader
                 continue;
 
             var browseName = childNode.BrowseName.Name;
-            if (matchedNames.Contains(browseName))
+            if (!matchedNames.Add(browseName))
                 continue;
 
             var addAsDynamic = _configuration.ShouldAddDynamicAttribute is not null &&
