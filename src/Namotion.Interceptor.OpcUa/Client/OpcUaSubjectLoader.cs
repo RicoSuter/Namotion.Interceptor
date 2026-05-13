@@ -62,17 +62,23 @@ internal class OpcUaSubjectLoader
 
         var nodeId = ExpandedNodeId.ToNodeId(node.NodeId, session.NamespaceUris);
         var nodeReferences = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
-        var processedProperties = new HashSet<RegisteredSubjectProperty>();
+
+        // OPC UA servers can expose the same target node via multiple reference types
+        // (e.g. HasComponent + HasProperty). Dedup at the raw ExpandedNodeId so each
+        // underlying node is processed exactly once, regardless of how many references
+        // point at it. ExpandedNodeId is used directly (rather than the resolved NodeId)
+        // so the dedup is independent of NamespaceTable state.
+        var processedReferenceNodeIds = new HashSet<ExpandedNodeId>();
 
         for (var index = 0; index < nodeReferences.Count; index++)
         {
             var nodeReference = nodeReferences[index];
-            var property = await FindSubjectPropertyAsync(registeredSubject, nodeReference, session, cancellationToken).ConfigureAwait(false);
-            if (property is not null && !processedProperties.Add(property))
+            if (nodeReference.NodeId is not null && !processedReferenceNodeIds.Add(nodeReference.NodeId))
             {
                 continue;
             }
 
+            var property = await FindSubjectPropertyAsync(registeredSubject, nodeReference, session, cancellationToken).ConfigureAwait(false);
             if (property is null)
             {
                 var dynamicPropertyName = nodeReference.BrowseName.Name;
@@ -118,7 +124,6 @@ internal class OpcUaSubjectLoader
                     _ => value,
                     (_, o) => value = o,
                     _configuration.TypeResolver.GetDynamicPropertyAttributes(nodeReference, session));
-                processedProperties.Add(property);
             }
 
             var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
@@ -170,7 +175,24 @@ internal class OpcUaSubjectLoader
             return;
 
         // Browse children of the variable node
-        var childNodes = await BrowseNodeAsync(parentNodeId, session, cancellationToken).ConfigureAwait(false);
+        var rawChildNodes = await BrowseNodeAsync(parentNodeId, session, cancellationToken).ConfigureAwait(false);
+
+        // OPC UA servers can expose the same child node via multiple reference types
+        // (e.g. HasComponent + HasProperty). Dedup by raw ExpandedNodeId so each
+        // underlying node is processed exactly once, regardless of how many references
+        // point at it. ExpandedNodeId is used directly (rather than the resolved NodeId)
+        // so the dedup is independent of NamespaceTable state.
+        var processedReferenceNodeIds = new HashSet<ExpandedNodeId>();
+        var childNodes = new List<ReferenceDescription>(rawChildNodes.Count);
+        foreach (var childNode in rawChildNodes)
+        {
+            if (childNode.NodeId is not null && !processedReferenceNodeIds.Add(childNode.NodeId))
+            {
+                continue;
+            }
+            childNodes.Add(childNode);
+        }
+
         var matchedNames = new HashSet<string>();
 
         // First pass: match known attributes from C# model
