@@ -127,11 +127,11 @@ public struct PropertyWriteContext<TProperty>
         }
         else if (scopeTicks == SubjectChangeContext.NullTimestampTicks)
         {
-            result = -SubjectChangeContext.GetTimestampFunction().UtcTicks; // negative = explicit-null encoding
+            result = -SubjectChangeContext.SnapUtcTicks(); // negative = explicit-null encoding
         }
         else
         {
-            result = SubjectChangeContext.GetTimestampFunction().UtcTicks;
+            result = SubjectChangeContext.SnapUtcTicks();
         }
         _writeTimestampTicks = result;
         return result;

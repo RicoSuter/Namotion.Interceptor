@@ -24,10 +24,30 @@ public readonly struct SubjectChangeContext
     /// </summary>
     internal const long NullTimestampTicks = -1;
     
+    private static Func<DateTimeOffset>? _customTimestampFunction;
+    private static readonly Func<DateTimeOffset> _defaultTimestampFunction = () => DateTimeOffset.UtcNow;
+
     /// <summary>
     /// Gets or sets a function which retrieves the current timestamp (default is <see cref="DateTimeOffset.UtcNow"/>).
+    /// When the default function is in use, the snap fast-path calls <see cref="DateTimeOffset.UtcNow"/> directly,
+    /// bypassing delegate dispatch.
     /// </summary>
-    public static Func<DateTimeOffset> GetTimestampFunction { get; set; } = () => DateTimeOffset.UtcNow;
+    public static Func<DateTimeOffset> GetTimestampFunction
+    {
+        get => _customTimestampFunction ?? _defaultTimestampFunction;
+        set => _customTimestampFunction = ReferenceEquals(value, _defaultTimestampFunction) ? null : value;
+    }
+
+    /// <summary>
+    /// Snaps the current timestamp ticks, bypassing delegate dispatch when the default function is in use.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static long SnapUtcTicks()
+    {
+        return _customTimestampFunction is null
+            ? DateTimeOffset.UtcNow.UtcTicks
+            : _customTimestampFunction().UtcTicks;
+    }
 
     /// <summary>Gets the current change context.</summary>
     public static SubjectChangeContext Current
