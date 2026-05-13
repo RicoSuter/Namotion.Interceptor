@@ -62,11 +62,17 @@ internal class OpcUaSubjectLoader
 
         var nodeId = ExpandedNodeId.ToNodeId(node.NodeId, session.NamespaceUris);
         var nodeReferences = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
-        
+        var processedProperties = new HashSet<RegisteredSubjectProperty>();
+
         for (var index = 0; index < nodeReferences.Count; index++)
         {
             var nodeReference = nodeReferences[index];
             var property = await FindSubjectPropertyAsync(registeredSubject, nodeReference, session, cancellationToken).ConfigureAwait(false);
+            if (property is not null && !processedProperties.Add(property))
+            {
+                continue;
+            }
+
             if (property is null)
             {
                 var dynamicPropertyName = nodeReference.BrowseName.Name;
@@ -112,6 +118,7 @@ internal class OpcUaSubjectLoader
                     _ => value,
                     (_, o) => value = o,
                     _configuration.TypeResolver.GetDynamicPropertyAttributes(nodeReference, session));
+                processedProperties.Add(property);
             }
 
             var propertyName = property.ResolvePropertyName(_configuration.NodeMapper);
@@ -202,7 +209,7 @@ internal class OpcUaSubjectLoader
                 continue;
 
             var browseName = childNode.BrowseName.Name;
-            if (!matchedNames.Add(browseName))
+            if (matchedNames.Contains(browseName))
                 continue;
 
             var addAsDynamic = _configuration.ShouldAddDynamicAttribute is not null &&
@@ -245,31 +252,29 @@ internal class OpcUaSubjectLoader
         Dictionary<NodeId, IInterceptorSubject> subjectsByNodeId,
         CancellationToken cancellationToken)
     {
-        var existingSubject = property.Children.SingleOrDefault();
-        if (existingSubject.Subject is not null)
+        var nodeId = ExpandedNodeId.ToNodeId(nodeReference.NodeId, session.NamespaceUris);
+        if (nodeId is not null && subjectsByNodeId.TryGetValue(nodeId, out var reusedSubject))
         {
-            await LoadSubjectAsync(existingSubject.Subject, nodeReference, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
+            property.SetValueFromSource(_source, null, null, reusedSubject);
         }
         else
         {
-            var nodeId = ExpandedNodeId.ToNodeId(nodeReference.NodeId, session.NamespaceUris);
-            if (nodeId is not null && subjectsByNodeId.TryGetValue(nodeId, out var reusedSubject))
-            {
-                property.SetValueFromSource(_source, null, null, reusedSubject);
-            }
-            else
-            {
-                var newSubject = await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeReference, session, cancellationToken).ConfigureAwait(false);
-                newSubject.Context.AddFallbackContext(subject.Context);
+            var existingSubject = property.Children.SingleOrDefault();
+            var subjectToLoad = existingSubject.Subject
+                ?? await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeReference, session, cancellationToken).ConfigureAwait(false);
 
-                if (nodeId is not null)
-                {
-                    subjectsByNodeId[nodeId] = newSubject;
-                }
-
-                await LoadSubjectAsync(newSubject, nodeReference, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
-                property.SetValueFromSource(_source, null, null, newSubject);
+            if (existingSubject.Subject is null)
+            {
+                subjectToLoad.Context.AddFallbackContext(subject.Context);
+                property.SetValueFromSource(_source, null, null, subjectToLoad);
             }
+
+            if (nodeId is not null)
+            {
+                subjectsByNodeId.TryAdd(nodeId, subjectToLoad);
+            }
+
+            await LoadSubjectAsync(subjectToLoad, nodeReference, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
         }
     }
 

@@ -212,6 +212,7 @@ public class OpcUaSubjectLoaderTests
 
     private (OpcUaSubjectLoader Loader, SourceOwnershipManager PropertyTracker) CreateLoader(
         Func<ReferenceDescription, CancellationToken, Task<bool>>? shouldAddDynamicProperties = null,
+        Func<ReferenceDescription, CancellationToken, Task<bool>>? shouldAddDynamicAttributes = null,
         OpcUaTypeResolver? typeResolver = null)
     {
         var config = new OpcUaClientConfiguration
@@ -221,6 +222,7 @@ public class OpcUaSubjectLoaderTests
             ValueConverter = _baseConfiguration.ValueConverter,
             SubjectFactory = _baseConfiguration.SubjectFactory,
             ShouldAddDynamicProperty = shouldAddDynamicProperties ?? _baseConfiguration.ShouldAddDynamicProperty,
+            ShouldAddDynamicAttribute = shouldAddDynamicAttributes,
             DefaultNamespaceUri = _baseConfiguration.DefaultNamespaceUri
         };
 
@@ -563,6 +565,129 @@ public class OpcUaSubjectLoaderTests
         var sharedFromCollection1 = collection1Value!.Cast<IInterceptorSubject>().Single();
         var sharedFromCollection2 = collection2Value!.Cast<IInterceptorSubject>().Single();
         Assert.Same(sharedFromCollection1, sharedFromCollection2);
+    }
+
+    [Fact]
+    public async Task WhenSamePropertyAppearsViaDifferentReferenceTypes_ThenPropertyIsProcessedOnce()
+    {
+        // Arrange: a variable node appears twice in browse results (e.g., via HasComponent and HasProperty)
+        var (loader, _) = CreateLoader();
+        var subject = CreateTestSubject();
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+
+        var sharedNodeId = new ExpandedNodeId("1001", "urn:test");
+        registeredSubject.AddProperty(
+            "ServerStatus",
+            typeof(int),
+            _ => 0,
+            (_, _) => { },
+            new OpcUaNodeAttribute("ServerStatus", "urn:test", "opc")
+            {
+                NodeIdentifier = "1001",
+                NodeNamespaceUri = "urn:test"
+            });
+
+        var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
+
+        // Same node returned twice (simulating HasComponent + HasProperty references)
+        var mockSession = CreateMockSessionWithChildren(
+        [
+            CreateTestReferenceDescription("ServerStatus", sharedNodeId),
+            CreateTestReferenceDescription("ServerStatus", sharedNodeId)
+        ]);
+
+        // Act
+        var result = await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert - should only create one monitored item, not two
+        Assert.Single(result);
+    }
+
+    [Fact]
+    public async Task WhenDynamicPropertyAppearsViaDifferentReferenceTypes_ThenAttributeIsAddedOnce()
+    {
+        // Arrange: a dynamic variable node appears twice, and its child attribute should only be added once
+        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaSubjectClientSource>.Instance);
+        mockTypeResolver
+            .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(typeof(int));
+        mockTypeResolver
+            .Setup(t => t.GetDynamicPropertyAttributes(It.IsAny<ReferenceDescription>(), It.IsAny<ISession>()))
+            .Returns((ReferenceDescription reference, ISession session) =>
+            {
+                var namespaceUri = reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex);
+                return
+                [
+                    new OpcUaNodeAttribute(reference.BrowseName.Name, namespaceUri)
+                    {
+                        NodeIdentifier = reference.NodeId.Identifier.ToString(),
+                        NodeNamespaceUri = namespaceUri
+                    }
+                ];
+            });
+
+        var statusNodeId = new NodeId(5001, 2);
+        var stateNodeId = new NodeId(5002, 2);
+
+        // Browse returns ServerStatus twice (different reference types), and ServerStatus has a State child
+        var mockSession = CreateMockSession();
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
+            {
+                var nodeId = browseDescriptions[0].NodeId;
+                ReferenceDescriptionCollection children;
+
+                if (nodeId == new NodeId(1, 0))
+                {
+                    // Root returns ServerStatus twice
+                    children =
+                    [
+                        CreateTestReferenceDescription("ServerStatus", new ExpandedNodeId(statusNodeId)),
+                        CreateTestReferenceDescription("ServerStatus", new ExpandedNodeId(statusNodeId))
+                    ];
+                }
+                else if (nodeId == statusNodeId)
+                {
+                    // ServerStatus has a State child
+                    children =
+                    [
+                        CreateTestReferenceDescription("State", new ExpandedNodeId(stateNodeId))
+                    ];
+                }
+                else
+                {
+                    children = [];
+                }
+
+                return new BrowseResponse
+                {
+                    Results = [new BrowseResult { References = children }],
+                    DiagnosticInfos = []
+                };
+            });
+
+        var (loader, _) = CreateLoader(
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
+            shouldAddDynamicAttributes: (_, _) => Task.FromResult(true),
+            typeResolver: mockTypeResolver.Object);
+
+        var subject = CreateTestSubject();
+        var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
+
+        // Act - should not throw "duplicate key" exception
+        await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+        var serverStatus = registeredSubject.Properties.Single(p => p.Name == "ServerStatus");
+        var stateAttribute = serverStatus.TryGetAttribute("State");
+        Assert.NotNull(stateAttribute);
     }
 
     private static ReferenceDescription CreateObjectReferenceDescription(string name, ExpandedNodeId nodeId)
