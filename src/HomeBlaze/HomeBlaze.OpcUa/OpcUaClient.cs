@@ -40,7 +40,7 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     public partial string ServerUrl { get; set; }
 
     /// <summary>
-    /// Optional root path to start browsing from under the Objects folder (use / as delimiter, e.g. "foo/bar").
+    /// Optional root path to start browsing from under the Objects folder (use / as delimiter, e.g. "Machines/MyMachine").
     /// </summary>
     [Configuration]
     public partial string? RootPath { get; set; }

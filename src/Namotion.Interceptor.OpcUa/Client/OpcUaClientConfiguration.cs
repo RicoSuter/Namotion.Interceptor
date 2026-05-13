@@ -21,7 +21,7 @@ public class OpcUaClientConfiguration
 
     /// <summary>
     /// Gets the optional root path segments to start browsing from under the Objects folder.
-    /// Each element is a browse name to resolve one level deeper (e.g., ["foo", "bar"] browses Objects/foo/bar).
+    /// Each element is a browse name to resolve one level deeper (e.g., ["Machines", "MyMachine"] browses Objects/Machines/MyMachine).
     /// If not specified or empty, browsing starts from the ObjectsFolder root.
     /// </summary>
     public string[]? RootPath { get; set; }
