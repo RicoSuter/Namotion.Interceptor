@@ -178,6 +178,10 @@ The following limits are configured by default. Override `CreateApplicationInsta
 | MaxNodesPerBrowse | 4,000 |
 | MaxMonitoredItemsPerCall | 4,000 |
 
+## Subject Deduplication
+
+When the same C# subject instance is referenced from multiple properties in the model (for example, the same `Identification` instance reachable from both a machine root and a building-blocks folder), the server publishes it as a single OPC UA node referenced from each parent rather than creating duplicate nodes. The mapping is keyed by the registered subject identity, so reuse applies whether the property is a single reference, a collection element, or a dictionary value. See [connectors-opcua-client.md](connectors-opcua-client.md#subject-deduplication) for the symmetric client-side behavior.
+
 ## Companion Specifications
 
 The server automatically loads embedded NodeSets for common industrial standards:

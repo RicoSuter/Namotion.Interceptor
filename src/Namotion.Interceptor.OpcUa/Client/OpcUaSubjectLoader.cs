@@ -64,16 +64,20 @@ internal class OpcUaSubjectLoader
         var nodeReferences = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
 
         // OPC UA servers can expose the same target node via multiple reference types
-        // (e.g. HasComponent + HasProperty). Dedup at the raw ExpandedNodeId so each
-        // underlying node is processed exactly once, regardless of how many references
-        // point at it. ExpandedNodeId is used directly (rather than the resolved NodeId)
-        // so the dedup is independent of NamespaceTable state.
+        // (e.g. HasComponent + HasProperty), producing duplicate browse entries. Dedup
+        // by raw ExpandedNodeId so each target is processed exactly once per parent.
+        // For Variable targets (values, properties, attributes), there is no "reuse"
+        // semantic — duplicate references are pure noise from the OPC UA layer and the
+        // correct response is to filter them. For Object targets, deduping here is
+        // harmless because subject identity across distinct browse paths is preserved
+        // by subjectsByNodeId in LoadSubjectReferenceAsync.
         var processedReferenceNodeIds = new HashSet<ExpandedNodeId>();
 
         for (var index = 0; index < nodeReferences.Count; index++)
         {
             var nodeReference = nodeReferences[index];
-            if (nodeReference.NodeId is not null && !processedReferenceNodeIds.Add(nodeReference.NodeId))
+            if (nodeReference.NodeId is not null
+                && !processedReferenceNodeIds.Add(nodeReference.NodeId))
             {
                 continue;
             }
@@ -179,14 +183,15 @@ internal class OpcUaSubjectLoader
 
         // OPC UA servers can expose the same child node via multiple reference types
         // (e.g. HasComponent + HasProperty). Dedup by raw ExpandedNodeId so each
-        // underlying node is processed exactly once, regardless of how many references
-        // point at it. ExpandedNodeId is used directly (rather than the resolved NodeId)
-        // so the dedup is independent of NamespaceTable state.
+        // underlying node is processed exactly once. The browse-name component of the
+        // reference is redundant for dedup because a target node has a single browse
+        // name; duplicate references to the same NodeId always carry it.
         var processedReferenceNodeIds = new HashSet<ExpandedNodeId>();
         var childNodes = new List<ReferenceDescription>(rawChildNodes.Count);
         foreach (var childNode in rawChildNodes)
         {
-            if (childNode.NodeId is not null && !processedReferenceNodeIds.Add(childNode.NodeId))
+            if (childNode.NodeId is not null
+                && !processedReferenceNodeIds.Add(childNode.NodeId))
             {
                 continue;
             }

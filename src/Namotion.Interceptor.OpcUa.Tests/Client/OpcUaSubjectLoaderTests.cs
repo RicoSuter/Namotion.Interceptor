@@ -690,6 +690,96 @@ public class OpcUaSubjectLoaderTests
         Assert.NotNull(stateAttribute);
     }
 
+    [Fact]
+    public async Task WhenAttributeChildAppearsViaDifferentReferenceTypes_ThenAttributeIsAddedOnce()
+    {
+        // Arrange: a variable's child attribute is returned twice (e.g., via HasComponent + HasProperty)
+        // within a single browse call. The outer parent is referenced only once. This exercises the
+        // NodeId dedup inside LoadAttributeNodesAsync.
+        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaSubjectClientSource>.Instance);
+        mockTypeResolver
+            .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(typeof(int));
+        mockTypeResolver
+            .Setup(t => t.GetDynamicPropertyAttributes(It.IsAny<ReferenceDescription>(), It.IsAny<ISession>()))
+            .Returns((ReferenceDescription reference, ISession session) =>
+            {
+                var namespaceUri = reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex);
+                return
+                [
+                    new OpcUaNodeAttribute(reference.BrowseName.Name, namespaceUri)
+                    {
+                        NodeIdentifier = reference.NodeId.Identifier.ToString(),
+                        NodeNamespaceUri = namespaceUri
+                    }
+                ];
+            });
+
+        var statusNodeId = new NodeId(6001, 2);
+        var stateNodeId = new NodeId(6002, 2);
+
+        // Root returns ServerStatus ONCE. ServerStatus's browse returns State TWICE (same NodeId).
+        var mockSession = CreateMockSession();
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
+            {
+                var nodeId = browseDescriptions[0].NodeId;
+                ReferenceDescriptionCollection children;
+
+                if (nodeId == new NodeId(1, 0))
+                {
+                    children =
+                    [
+                        CreateTestReferenceDescription("ServerStatus", new ExpandedNodeId(statusNodeId))
+                    ];
+                }
+                else if (nodeId == statusNodeId)
+                {
+                    // ServerStatus's browse returns State twice (HasComponent + HasProperty for State)
+                    children =
+                    [
+                        CreateTestReferenceDescription("State", new ExpandedNodeId(stateNodeId)),
+                        CreateTestReferenceDescription("State", new ExpandedNodeId(stateNodeId))
+                    ];
+                }
+                else
+                {
+                    children = [];
+                }
+
+                return new BrowseResponse
+                {
+                    Results = [new BrowseResult { References = children }],
+                    DiagnosticInfos = []
+                };
+            });
+
+        var (loader, _) = CreateLoader(
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
+            shouldAddDynamicAttributes: (_, _) => Task.FromResult(true),
+            typeResolver: mockTypeResolver.Object);
+
+        var subject = CreateTestSubject();
+        var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
+
+        // Act - should not throw "duplicate key" exception
+        await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: State added exactly once on ServerStatus. A duplicate AddAttribute call would
+        // have thrown "duplicate key" during the load, so reaching this point already proves dedup
+        // works; the NotNull check confirms the attribute exists, not that it merely didn't crash.
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+        var serverStatus = registeredSubject.Properties.Single(p => p.Name == "ServerStatus");
+        var stateAttribute = serverStatus.TryGetAttribute("State");
+        Assert.NotNull(stateAttribute);
+    }
+
     private static ReferenceDescription CreateObjectReferenceDescription(string name, ExpandedNodeId nodeId)
     {
         return new ReferenceDescription
