@@ -63,21 +63,18 @@ internal class OpcUaSubjectLoader
         var nodeId = ExpandedNodeId.ToNodeId(node.NodeId, session.NamespaceUris);
         var nodeReferences = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
 
-        // OPC UA servers can expose the same target node via multiple reference types
-        // (e.g. HasComponent + HasProperty), producing duplicate browse entries. Dedup
-        // by raw ExpandedNodeId so each target is processed exactly once per parent.
-        // For Variable targets (values, properties, attributes), there is no "reuse"
-        // semantic: duplicate references are pure noise from the OPC UA layer and the
-        // correct response is to filter them. For Object targets, deduping here is
-        // harmless because subject identity across distinct browse paths is preserved
-        // by subjectsByNodeId in LoadSubjectReferenceAsync.
-        var processedReferenceNodeIds = new HashSet<ExpandedNodeId>();
+        // Dedup duplicate browse entries (e.g. same target via HasComponent + HasProperty).
+        // Resolve to NodeId for the dedup key: ExpandedNodeId compares unequal when the
+        // same target is expressed with NamespaceIndex vs NamespaceUri.
+        var processedReferenceNodeIds = new HashSet<NodeId>();
 
         for (var index = 0; index < nodeReferences.Count; index++)
         {
             var nodeReference = nodeReferences[index];
-            if (nodeReference.NodeId is not null
-                && !processedReferenceNodeIds.Add(nodeReference.NodeId))
+            var resolvedNodeId = nodeReference.NodeId is not null
+                ? ExpandedNodeId.ToNodeId(nodeReference.NodeId, session.NamespaceUris)
+                : null;
+            if (resolvedNodeId is not null && !processedReferenceNodeIds.Add(resolvedNodeId))
             {
                 continue;
             }
@@ -181,17 +178,15 @@ internal class OpcUaSubjectLoader
         // Browse children of the variable node
         var rawChildNodes = await BrowseNodeAsync(parentNodeId, session, cancellationToken).ConfigureAwait(false);
 
-        // OPC UA servers can expose the same child node via multiple reference types
-        // (e.g. HasComponent + HasProperty). Dedup by raw ExpandedNodeId so each
-        // underlying node is processed exactly once. The browse-name component of the
-        // reference is redundant for dedup because a target node has a single browse
-        // name; duplicate references to the same NodeId always carry it.
-        var processedReferenceNodeIds = new HashSet<ExpandedNodeId>();
+        // Dedup duplicate browse entries; see LoadSubjectAsync for the NodeId-vs-ExpandedNodeId rationale.
+        var processedReferenceNodeIds = new HashSet<NodeId>();
         var childNodes = new List<ReferenceDescription>(rawChildNodes.Count);
         foreach (var childNode in rawChildNodes)
         {
-            if (childNode.NodeId is not null
-                && !processedReferenceNodeIds.Add(childNode.NodeId))
+            var resolvedChildNodeId = childNode.NodeId is not null
+                ? ExpandedNodeId.ToNodeId(childNode.NodeId, session.NamespaceUris)
+                : null;
+            if (resolvedChildNodeId is not null && !processedReferenceNodeIds.Add(resolvedChildNodeId))
             {
                 continue;
             }
@@ -236,8 +231,20 @@ internal class OpcUaSubjectLoader
                 continue;
 
             var browseName = childNode.BrowseName.Name;
-            if (matchedNames.Contains(browseName))
+            if (!matchedNames.Add(browseName))
                 continue;
+
+            // Safety net for name collisions: a lifecycle handler may have registered an
+            // unrelated attribute under the same key (e.g. HomeBlaze's [StateAttribute] maps
+            // to a registry attribute literally named "State", colliding with the standard
+            // OPC UA Server.ServerStatus.State child).
+            if (property.TryGetAttribute(browseName) is not null)
+            {
+                _logger.LogWarning(
+                    "Skipping OPC UA child '{AttributeName}' on '{PropertyName}' (parent {ParentNodeId}, child {ChildNodeId}): attribute name already registered.",
+                    browseName, property.Name, parentNodeId, childNode.NodeId);
+                continue;
+            }
 
             var addAsDynamic = _configuration.ShouldAddDynamicAttribute is not null &&
                 await _configuration.ShouldAddDynamicAttribute(childNode, cancellationToken).ConfigureAwait(false);
