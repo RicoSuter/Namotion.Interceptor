@@ -251,7 +251,7 @@ for (var clientIndex = 0; clientIndex < configuration.Clients.Count; clientIndex
                     return new OpcUaClientConfiguration
                     {
                         ServerUrl = $"opc.tcp://localhost:{serverPort}",
-                        RootName = "Root",
+                        RootPath = ["Root"],
                         TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
                         ValueConverter = new OpcUaValueConverter(),
                         SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
