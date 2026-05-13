@@ -67,7 +67,7 @@ internal class OpcUaSubjectLoader
         // (e.g. HasComponent + HasProperty), producing duplicate browse entries. Dedup
         // by raw ExpandedNodeId so each target is processed exactly once per parent.
         // For Variable targets (values, properties, attributes), there is no "reuse"
-        // semantic — duplicate references are pure noise from the OPC UA layer and the
+        // semantic: duplicate references are pure noise from the OPC UA layer and the
         // correct response is to filter them. For Object targets, deduping here is
         // harmless because subject identity across distinct browse paths is preserved
         // by subjectsByNodeId in LoadSubjectReferenceAsync.

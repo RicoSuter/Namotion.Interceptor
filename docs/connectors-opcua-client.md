@@ -630,11 +630,7 @@ Override `TryGetTypeForNodeAsync` on `OpcUaTypeResolver` to customize type mappi
 
 #### Subject Deduplication
 
-When the same OPC UA node appears at multiple paths in the address space (e.g., `Identification` referenced from both `MyMachine` and `MachineryBuildingBlocks`), the client reuses the same subject instance. Reuse applies to single references as well as collection and dictionary elements: any property that resolves to the same `NodeId` during a load is bound to the existing subject, which receives a single set of monitored items. See [connectors-opcua-server.md](connectors-opcua-server.md#subject-deduplication) for the symmetric server-side behavior.
-
-#### Duplicate Browse Reference Handling
-
-OPC UA servers can expose the same target node via multiple reference types in a single browse result (e.g., a node reachable through both `HasComponent` and `HasProperty`). The client deduplicates browse references by target `ExpandedNodeId` so each underlying node is processed exactly once per parent, regardless of how many references point at it. This applies both to property loading (at the parent level) and to attribute discovery (at the variable level).
+When the same OPC UA node appears at multiple paths in the address space (e.g., `Identification` referenced from both `MyMachine` and `MachineryBuildingBlocks`), the client reuses the same subject instance. Reuse applies to single references as well as collection and dictionary elements: any property that resolves to the same `NodeId` during a load is bound to the existing subject, which receives a single set of monitored items. The same applies within a single browse call: if a server exposes one target through multiple reference types (e.g., both `HasComponent` and `HasProperty`), the duplicate browse references are filtered so the underlying node is processed exactly once per parent, at both the property and attribute level. See [connectors-opcua-server.md](connectors-opcua-server.md#subject-deduplication) for the symmetric server-side behavior.
 
 ## Write Error Handling
 
