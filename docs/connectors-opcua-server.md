@@ -178,6 +178,29 @@ The following limits are configured by default. Override `CreateApplicationInsta
 | MaxNodesPerBrowse | 4,000 |
 | MaxMonitoredItemsPerCall | 4,000 |
 
+## Subject Deduplication
+
+When the same C# subject instance is referenced from multiple properties in the model (for example, the same `Identification` instance reachable from both a machine root and a building-blocks folder), the server publishes it as a single OPC UA node referenced from each parent rather than creating duplicate nodes. The mapping is keyed by the registered subject identity, so reuse applies whether the property is a single reference, a collection element, or a dictionary value. See [connectors-opcua-client.md](connectors-opcua-client.md#subject-deduplication) for the symmetric client-side behavior.
+
+### BrowseName Limitation
+
+In OPC UA the `BrowseName` is an attribute of the target node, not of the reference pointing at it, so a node has exactly one BrowseName regardless of how many parents reference it. When the same C# subject is reused, the first property to publish it wins: the BrowseName of that property is stored on the node, and every other reference (from the same parent or another) carries the same BrowseName when clients browse it.
+
+This is invisible for the common case where every reusing property uses the same browse name (the typical cross-parent DAG, e.g. both `MyMachine.Identification` and `MachineryBuildingBlocks.Identification` resolve to "Identification"). It is lossy when two properties reference the same instance under different browse names. The most common shape of this is two properties on the **same parent** pointing at one instance:
+
+```csharp
+[InterceptorSubject]
+public partial class Root
+{
+    public partial SubA Primary { get; set; }
+    public partial SubA Backup { get; set; }   // same instance as Primary
+}
+```
+
+The server publishes a single node (named after whichever property was registered first) plus a second naked `HasComponent` reference from `Root` to that node. A round-trip client browses two references that are indistinguishable (same target NodeId, same BrowseName) and can only bind one of `Primary` / `Backup`; the other stays unset. If you need both names to round-trip, give each property its own subject instance.
+
+The server logs a warning when it detects this case (BrowseName mismatch between the existing node and the new reference). The address space is still constructed, the warning is purely informational.
+
 ## Companion Specifications
 
 The server automatically loads embedded NodeSets for common industrial standards:
