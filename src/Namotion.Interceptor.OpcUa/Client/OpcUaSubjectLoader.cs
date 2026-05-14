@@ -267,13 +267,13 @@ internal class OpcUaSubjectLoader
 
         var existingChildren = property.Children;
         var existingChild = existingChildren.IsEmpty ? default : existingChildren[0];
+        var isNewSubject = existingChild.Subject is null;
         var subjectToLoad = existingChild.Subject
             ?? await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeReference, session, cancellationToken).ConfigureAwait(false);
 
-        if (existingChild.Subject is null)
+        if (isNewSubject)
         {
             subjectToLoad.Context.AddFallbackContext(subject.Context);
-            property.SetValueFromSource(_source, null, null, subjectToLoad);
         }
 
         // Pre-attached children participate in the dedup cache too: any later sibling
@@ -282,6 +282,11 @@ internal class OpcUaSubjectLoader
         subjectsByNodeId.TryAdd(nodeId, subjectToLoad);
 
         await LoadSubjectAsync(subjectToLoad, nodeReference, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
+
+        if (isNewSubject)
+        {
+            property.SetValueFromSource(_source, null, null, subjectToLoad);
+        }
     }
 
     private async Task LoadSubjectCollectionAsync(RegisteredSubjectProperty property,
