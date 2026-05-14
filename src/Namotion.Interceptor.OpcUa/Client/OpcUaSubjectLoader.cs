@@ -420,8 +420,9 @@ internal class OpcUaSubjectLoader
         }
 
         // Also load HasProperty children as regular variable nodes
-        var childNodes = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
-        foreach (var childNode in childNodes)
+        var rawChildNodes = await BrowseNodeAsync(nodeId, session, cancellationToken).ConfigureAwait(false);
+        var childNodes = DistinctByResolvedNodeId(rawChildNodes, session);
+        foreach (var (childNode, childNodeId) in childNodes)
         {
             // Find matching property in child subject (excluding the value property)
             foreach (var childProperty in childSubject.Properties)
@@ -434,7 +435,6 @@ internal class OpcUaSubjectLoader
                 var childPropertyName = childProperty.ResolvePropertyName(_configuration.NodeMapper);
                 if (childPropertyName == childNode.BrowseName.Name)
                 {
-                    var childNodeId = ExpandedNodeId.ToNodeId(childNode.NodeId, session.NamespaceUris);
                     MonitorValueNode(childNodeId, childProperty, monitoredItems);
                     break;
                 }
@@ -448,7 +448,7 @@ internal class OpcUaSubjectLoader
     // expressed with NamespaceIndex vs NamespaceUri. References with an unresolvable
     // namespace URI (ToNodeId returns null) are skipped, since they cannot be addressed
     // for monitoring or further browsing.
-    private static List<(ReferenceDescription Reference, NodeId NodeId)> DistinctByResolvedNodeId(
+    private List<(ReferenceDescription Reference, NodeId NodeId)> DistinctByResolvedNodeId(
         IReadOnlyCollection<ReferenceDescription> references,
         ISession session)
     {
@@ -457,7 +457,14 @@ internal class OpcUaSubjectLoader
         foreach (var reference in references)
         {
             var nodeId = ExpandedNodeId.ToNodeId(reference.NodeId, session.NamespaceUris);
-            if (nodeId is null || !seen.Add(nodeId))
+            if (nodeId is null)
+            {
+                _logger.LogWarning(
+                    "Skipping browse reference '{BrowseName}' with unresolvable NodeId '{NodeId}': namespace URI is not registered in the session's NamespaceTable.",
+                    reference.BrowseName?.Name, reference.NodeId);
+                continue;
+            }
+            if (!seen.Add(nodeId))
             {
                 continue;
             }
