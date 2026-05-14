@@ -151,6 +151,34 @@ public class WriteTimestampTests
     }
 
     [Fact]
+    public void WriteTimestamp_WithNullTimestamp_CascadeChangeEventsShareSingleTimestamp()
+    {
+        // Arrange
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        var person = new Person(context);
+        var changes = new List<SubjectPropertyChange>();
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(c => changes.Add(c));
+
+        // Act
+        using (SubjectChangeContext.WithChangedTimestamp(null))
+        {
+            person.FirstName = "Mother";
+        }
+
+        // Assert: storage stays null (never-written sentinel) but all published change events
+        // (trigger + cascade dependents) share a single synthesized timestamp.
+        Assert.Null(person.GetPropertyReference("FirstName").TryGetWriteTimestamp());
+        Assert.Equal(3, changes.Count); // backed, derived, derived
+        var first = changes[0].ChangedTimestamp;
+        Assert.True(changes.All(c => c.ChangedTimestamp == first));
+    }
+
+    [Fact]
     public void WriteTimestamp_ConcurrentWrites_ValueAndTimestampAreConsistent()
     {
         // Arrange

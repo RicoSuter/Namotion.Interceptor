@@ -165,20 +165,15 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 return;
             }
 
-            var timestampUtcTicks = context.WriteTimestampForStorage;
-            // Share trigger's timestamp with cascade chain so derived recalc events match the
-            // trigger's stored property timestamp. Skip scope push for explicit null (ticks == 0)
-            // where cascade child retains its own behavior.
-            if (timestampUtcTicks > 0)
+            var storageTicks = context.WriteTimestampForStorage;
+            var rawTicks = context.WriteTimestampRaw;
+            // Share trigger's snapped timestamp with cascade chain so every dependent publishes
+            // the same time as the trigger, including the explicit-null scope (rawTicks carries
+            // either positive real ticks or a -UtcNow encoded null; storageTicks is 0 in the
+            // null case so dependents preserve the never-written sentinel in storage).
+            using (SubjectChangeContext.WithChangedTimestamp(rawTicks))
             {
-                using (SubjectChangeContext.WithChangedTimestamp(timestampUtcTicks))
-                {
-                    RecalculateDependents(usedByProperties, context.Property, timestampUtcTicks);
-                }
-            }
-            else
-            {
-                RecalculateDependents(usedByProperties, context.Property, timestampUtcTicks);
+                RecalculateDependents(usedByProperties, context.Property, storageTicks);
             }
         }
     }
