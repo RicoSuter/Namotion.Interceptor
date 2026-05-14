@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 
 namespace Namotion.Interceptor.Interceptors;
 
@@ -22,17 +22,17 @@ public delegate void WriteInterceptionDelegate<TProperty>(ref PropertyWriteConte
 
 /// <summary>
 /// Context for a property write operation.
-/// <typeparamref name="TProperty"/> is a hint — it may be <c>object</c> when values are
+/// <typeparamref name="TProperty"/> is a hint. It may be <c>object</c> when values are
 /// boxed through non-generic paths. Use <c>Property.Metadata.Type</c> for the actual
 /// declared property type.
 /// </summary>
 public struct PropertyWriteContext<TProperty>
 {
-    // Encoding: 0 = uninitialized, >0 = snapped real ticks (storage == publish),
+    // Encoding: 0 = uninitialized, >0 = resolved real ticks (storage == publish),
     // <0 = explicit null scope (storage = 0, publish = -value).
     // Negative encoding lets one long carry both "stored as null" and the publish ticks,
     // keeping the struct compact.
-    private long _writeTimestampTicks;
+    private long _writeTimestamp;
 
     /// <summary>
     /// Gets the property to write a value to.
@@ -62,16 +62,16 @@ public struct PropertyWriteContext<TProperty>
         CurrentValue = currentValue;
         NewValue = newValue;
         IsWritten = false;
-        _writeTimestampTicks = 0;
+        _writeTimestamp = 0;
     }
 
     /// <summary>
     /// Gets the timestamp stamped on the property by this write, or <c>null</c> if the write used
     /// an explicit null-timestamp scope (the property is stamped as never-written).
     ///
-    /// Lazily snapshotted on first access and cached for the remainder of the write so all consumers
+    /// Lazily resolved on first access and cached for the remainder of the write so all consumers
     /// (terminal write, change-event publishers, transaction capture, derived recalc) observe the
-    /// same value regardless of read order. Source: an active <see cref="SubjectChangeContext.WithChangedTimestamp"/>
+    /// same value regardless of read order. Source: an active <see cref="SubjectChangeContext.WithChangedTimestamp(DateTimeOffset?)"/>
     /// scope (when set), or <see cref="SubjectChangeContext.GetTimestampFunction"/> when no scope is active.
     /// </summary>
     public DateTimeOffset? WriteTimestamp
@@ -79,23 +79,23 @@ public struct PropertyWriteContext<TProperty>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
-            var ticks = _writeTimestampTicks;
-            if (ticks == 0) ticks = SnapAndCacheWriteTimestamp();
+            var ticks = _writeTimestamp;
+            if (ticks == 0) ticks = ResolveWriteTimestamp();
             return ticks > 0 ? new DateTimeOffset(ticks, TimeSpan.Zero) : null;
         }
     }
 
     /// <summary>
     /// Raw ticks for property storage: <c>0</c> for the explicit null-timestamp scope (never-written sentinel),
-    /// otherwise the snapped real ticks. Same lazy-snap semantics as <see cref="WriteTimestamp"/>.
+    /// otherwise the resolved real ticks. Same lazy-resolve semantics as <see cref="WriteTimestamp"/>.
     /// </summary>
-    internal long WriteTimestampStorageTicks
+    internal long WriteTimestampForStorage
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
-            var ticks = _writeTimestampTicks;
-            if (ticks == 0) ticks = SnapAndCacheWriteTimestamp();
+            var ticks = _writeTimestamp;
+            if (ticks == 0) ticks = ResolveWriteTimestamp();
             return ticks > 0 ? ticks : 0;
         }
     }
@@ -103,23 +103,23 @@ public struct PropertyWriteContext<TProperty>
     /// <summary>
     /// The timestamp to use when publishing this write as a change event. Always a real value,
     /// even when the write used an explicit null-timestamp scope (consumers expect a value).
-    /// Same lazy-snap semantics as <see cref="WriteTimestamp"/>.
+    /// Same lazy-resolve semantics as <see cref="WriteTimestamp"/>.
     /// </summary>
     internal DateTimeOffset WriteTimestampForPublishing
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
-            var ticks = _writeTimestampTicks;
-            if (ticks == 0) ticks = SnapAndCacheWriteTimestamp();
+            var ticks = _writeTimestamp;
+            if (ticks == 0) ticks = ResolveWriteTimestamp();
             return new DateTimeOffset(ticks > 0 ? ticks : -ticks, TimeSpan.Zero);
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private long SnapAndCacheWriteTimestamp()
+    private long ResolveWriteTimestamp()
     {
-        var scopeTicks = SubjectChangeContext.RawCurrentChangedTimestampTicks;
+        var scopeTicks = SubjectChangeContext.CurrentChangedTimestamp;
         long result;
         if (scopeTicks > 0)
         {
@@ -127,13 +127,13 @@ public struct PropertyWriteContext<TProperty>
         }
         else if (scopeTicks == SubjectChangeContext.NullTimestampTicks)
         {
-            result = -SubjectChangeContext.SnapUtcTicks(); // negative = explicit-null encoding
+            result = -SubjectChangeContext.GetUtcNowTicks(); // negative = explicit-null encoding
         }
         else
         {
-            result = SubjectChangeContext.SnapUtcTicks();
+            result = SubjectChangeContext.GetUtcNowTicks();
         }
-        _writeTimestampTicks = result;
+        _writeTimestamp = result;
         return result;
     }
 

@@ -47,7 +47,7 @@ public static class DerivedPropertyChangeHandlerExtensions
         }
 
         DerivedPropertyChangeHandler.RecalculateDerivedProperty(
-            ref property, SubjectChangeContext.Current.ChangedTimestampUtcTicks);
+            ref property, SubjectChangeContext.Current.ResolveChangedTimestamp());
     }
 
     /// <summary>

@@ -66,7 +66,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 try
                 {
                     data.LastKnownValue = EvaluateAndStabilize(data, change.Property, callerHoldsLock: true);
-                    change.Property.SetWriteTimestampUtcTicks(SubjectChangeContext.Current.ChangedTimestampUtcTicks);
+                    change.Property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
                 }
                 catch (Exception)
                 {
@@ -150,7 +150,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // even when the getter recorded zero deps (e.g. short-circuited at attach).
         if (Volatile.Read(ref data.IsDerived) && context.Property.Metadata.SetValue is not null)
         {
-            var currentTimestampUtcTicks = context.WriteTimestampStorageTicks;
+            var currentTimestampUtcTicks = context.WriteTimestampForStorage;
             var property = context.Property;
             RecalculateDerivedProperty(ref property, currentTimestampUtcTicks);
         }
@@ -165,13 +165,13 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 return;
             }
 
-            var timestampUtcTicks = context.WriteTimestampStorageTicks;
+            var timestampUtcTicks = context.WriteTimestampForStorage;
             // Share trigger's timestamp with cascade chain so derived recalc events match the
             // trigger's stored property timestamp. Skip scope push for explicit null (ticks == 0)
             // where cascade child retains its own behavior.
             if (timestampUtcTicks > 0)
             {
-                using (SubjectChangeContext.WithChangedTimestamp(new DateTimeOffset(timestampUtcTicks, TimeSpan.Zero)))
+                using (SubjectChangeContext.WithChangedTimestamp(timestampUtcTicks))
                 {
                     RecalculateDependents(usedByProperties, context.Property, timestampUtcTicks);
                 }
@@ -279,7 +279,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
                         data.LastKnownValue = newValue;
                         sequence = ++data.RecalculationSequence;
-                        derivedProperty.SetWriteTimestampUtcTicks(timestampUtcTicks);
+                        derivedProperty.SetWriteTimestamp(timestampUtcTicks);
                         break;
                     }
                 }

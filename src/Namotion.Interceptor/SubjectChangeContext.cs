@@ -39,13 +39,15 @@ public readonly struct SubjectChangeContext
     }
 
     /// <summary>
-    /// Snaps the current timestamp ticks, bypassing delegate dispatch when the default function is in use.
+    /// Snaps the current timestamp ticks, bypassing delegate dispatch and the
+    /// <see cref="DateTimeOffset"/> wrap when the default function is in use.
+    /// (<c>DateTime.UtcNow.Ticks</c> equals <c>DateTimeOffset.UtcNow.UtcTicks</c> for the default path.)
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static long SnapUtcTicks()
+    internal static long GetUtcNowTicks()
     {
         return _customTimestampFunction is null
-            ? DateTimeOffset.UtcNow.UtcTicks
+            ? DateTime.UtcNow.Ticks
             : _customTimestampFunction().UtcTicks;
     }
 
@@ -64,45 +66,29 @@ public readonly struct SubjectChangeContext
     }
 
     /// <summary>
-    /// Gets the changed timestamp from the thread-local context or falls back to <see cref="GetTimestampFunction"/>.
-    /// Always returns a valid timestamp (even for "never written" properties) because change notifications
-    /// and connectors (OPC UA, MQTT) need a concrete value. Use <see cref="ChangedTimestampUtcTicks"/>
-    /// for write-timestamp storage where 0 means "no timestamp". Within a write chain, prefer
-    /// <c>PropertyWriteContext.WriteTimestampForPublishing</c> for stability across multiple reads.
+    /// Resolves the changed timestamp as UTC ticks, applying sentinel handling and falling back
+    /// to <see cref="GetTimestampFunction"/> when no scope is active. Returns 0 when the source
+    /// explicitly had no timestamp (preserving "never written" state). This is a method (not a
+    /// property) because it may call <c>UtcNow</c> on the fallback path. Within a write chain,
+    /// prefer <c>PropertyWriteContext.WriteTimestampForStorage</c> for stability across reads.
     /// </summary>
-    internal DateTimeOffset ChangedTimestamp
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal long ResolveChangedTimestamp()
     {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get => _changedTimestampUtcTicks > 0
-            ? new DateTimeOffset(_changedTimestampUtcTicks, TimeSpan.Zero)
-            : GetTimestampFunction();
-    }
+        if (_changedTimestampUtcTicks == NullTimestampTicks)
+            return 0; // Explicitly null: preserve "never written" state
 
-    /// <summary>
-    /// Gets the changed timestamp as raw UTC ticks, avoiding DateTimeOffset allocation on the hot path.
-    /// Returns 0 when the source explicitly had no timestamp (preserving "never written" state).
-    /// Within a write chain, prefer <c>PropertyWriteContext.WriteTimestampStorageTicks</c> for stability.
-    /// </summary>
-    internal long ChangedTimestampUtcTicks
-    {
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        get
-        {
-            if (_changedTimestampUtcTicks == NullTimestampTicks)
-                return 0; // Explicitly null: preserve "never written" state
+        if (_changedTimestampUtcTicks != UndefinedTimestampTicks)
+            return _changedTimestampUtcTicks; // Real timestamp from scope
 
-            if (_changedTimestampUtcTicks != UndefinedTimestampTicks)
-                return _changedTimestampUtcTicks; // Real timestamp from scope
-
-            return GetTimestampFunction().UtcTicks; // No scope: generate current time
-        }
+        return GetUtcNowTicks(); // No scope: generate current time
     }
 
     /// <summary>
     /// Returns the raw scope-state ticks without fallback. Used by <c>PropertyWriteContext</c> for
     /// lazy-snapshot logic: returns 0 (no scope), <see cref="NullTimestampTicks"/>, or positive ticks.
     /// </summary>
-    internal static long RawCurrentChangedTimestampTicks
+    internal static long CurrentChangedTimestamp
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _current._changedTimestampUtcTicks;
@@ -124,6 +110,23 @@ public readonly struct SubjectChangeContext
         var previousState = _current;
         _current = new SubjectChangeContext(
             changed?.UtcTicks ?? NullTimestampTicks,
+            previousState._receivedTimestampUtcTicks,
+            previousState.Source);
+        return new SubjectChangeContextScope(previousState);
+    }
+
+    /// <summary>
+    /// Enters a scope that sets the changed timestamp from raw UTC ticks. Avoids the
+    /// <see cref="DateTimeOffset"/> construct + unwrap round-trip on the cascade scope-push hot path
+    /// where the caller already has ticks. Pass a positive value for a real timestamp, or
+    /// <see cref="NullTimestampTicks"/> for explicit null.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static SubjectChangeContextScope WithChangedTimestamp(long changedTicks)
+    {
+        var previousState = _current;
+        _current = new SubjectChangeContext(
+            changedTicks,
             previousState._receivedTimestampUtcTicks,
             previousState.Source);
         return new SubjectChangeContextScope(previousState);

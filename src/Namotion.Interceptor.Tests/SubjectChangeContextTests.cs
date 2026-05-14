@@ -3,35 +3,21 @@ namespace Namotion.Interceptor.Tests;
 public class SubjectChangeContextTests
 {
     [Fact]
-    public void ChangedTimestamp_WithNoScope_ReturnsUtcNow()
+    public void ResolveChangedTimestamp_WithNoScope_ReturnsUtcNowTicks()
     {
         // Arrange
-        var before = DateTimeOffset.UtcNow;
+        var before = DateTime.UtcNow.Ticks;
 
         // Act
-        var timestamp = SubjectChangeContext.Current.ChangedTimestamp;
+        var ticks = SubjectChangeContext.Current.ResolveChangedTimestamp();
 
         // Assert
-        var after = DateTimeOffset.UtcNow;
-        Assert.InRange(timestamp, before, after);
-    }
-
-    [Fact]
-    public void ChangedTimestampUtcTicks_WithNoScope_ReturnsUtcNowTicks()
-    {
-        // Arrange
-        var before = DateTimeOffset.UtcNow.UtcTicks;
-
-        // Act
-        var ticks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
-
-        // Assert
-        var after = DateTimeOffset.UtcNow.UtcTicks;
+        var after = DateTime.UtcNow.Ticks;
         Assert.InRange(ticks, before, after);
     }
 
     [Fact]
-    public void ChangedTimestamp_WithRealTimestamp_ReturnsProvidedTimestamp()
+    public void ResolveChangedTimestamp_WithRealTimestamp_ReturnsProvidedTicks()
     {
         // Arrange
         var expected = new DateTimeOffset(2025, 6, 15, 12, 0, 0, TimeSpan.Zero);
@@ -39,45 +25,17 @@ public class SubjectChangeContextTests
         // Act & Assert
         using (SubjectChangeContext.WithChangedTimestamp(expected))
         {
-            Assert.Equal(expected, SubjectChangeContext.Current.ChangedTimestamp);
+            Assert.Equal(expected.UtcTicks, SubjectChangeContext.Current.ResolveChangedTimestamp());
         }
     }
 
     [Fact]
-    public void ChangedTimestampUtcTicks_WithRealTimestamp_ReturnsProvidedTicks()
-    {
-        // Arrange
-        var expected = new DateTimeOffset(2025, 6, 15, 12, 0, 0, TimeSpan.Zero);
-
-        // Act & Assert
-        using (SubjectChangeContext.WithChangedTimestamp(expected))
-        {
-            Assert.Equal(expected.UtcTicks, SubjectChangeContext.Current.ChangedTimestampUtcTicks);
-        }
-    }
-
-    [Fact]
-    public void ChangedTimestamp_WithNullTimestamp_FallsBackToUtcNow()
-    {
-        // Arrange
-        var before = DateTimeOffset.UtcNow;
-
-        // Act & Assert
-        using (SubjectChangeContext.WithChangedTimestamp(null))
-        {
-            var timestamp = SubjectChangeContext.Current.ChangedTimestamp;
-            var after = DateTimeOffset.UtcNow;
-            Assert.InRange(timestamp, before, after);
-        }
-    }
-
-    [Fact]
-    public void ChangedTimestampUtcTicks_WithNullTimestamp_ReturnsZero()
+    public void ResolveChangedTimestamp_WithNullTimestamp_ReturnsZero()
     {
         // Act & Assert
         using (SubjectChangeContext.WithChangedTimestamp(null))
         {
-            Assert.Equal(0, SubjectChangeContext.Current.ChangedTimestampUtcTicks);
+            Assert.Equal(0, SubjectChangeContext.Current.ResolveChangedTimestamp());
         }
     }
 
@@ -112,7 +70,7 @@ public class SubjectChangeContextTests
         using (SubjectChangeContext.WithState(source, changed, received))
         {
             Assert.Same(source, SubjectChangeContext.Current.Source);
-            Assert.Equal(changed, SubjectChangeContext.Current.ChangedTimestamp);
+            Assert.Equal(changed.UtcTicks, SubjectChangeContext.Current.ResolveChangedTimestamp());
             Assert.Equal(received, SubjectChangeContext.Current.ReceivedTimestamp);
         }
     }
@@ -123,7 +81,7 @@ public class SubjectChangeContextTests
         // Act & Assert
         using (SubjectChangeContext.WithState(null, null, null))
         {
-            Assert.Equal(0, SubjectChangeContext.Current.ChangedTimestampUtcTicks);
+            Assert.Equal(0, SubjectChangeContext.Current.ResolveChangedTimestamp());
         }
     }
 
@@ -145,16 +103,18 @@ public class SubjectChangeContextTests
             // Act
             using (SubjectChangeContext.WithChangedTimestamp(innerTimestamp))
             {
-                Assert.Equal(innerTimestamp, SubjectChangeContext.Current.ChangedTimestamp);
+                Assert.Equal(innerTimestamp.UtcTicks, SubjectChangeContext.Current.ResolveChangedTimestamp());
             }
 
             // Assert - outer scope restored
-            Assert.Equal(outerTimestamp, SubjectChangeContext.Current.ChangedTimestamp);
+            Assert.Equal(outerTimestamp.UtcTicks, SubjectChangeContext.Current.ResolveChangedTimestamp());
         }
 
-        // No scope - back to default
-        var now = DateTimeOffset.UtcNow;
-        Assert.InRange(SubjectChangeContext.Current.ChangedTimestamp, now.AddSeconds(-1), now.AddSeconds(1));
+        // No scope - back to default (returns UtcNow ticks)
+        var beforeTicks = DateTime.UtcNow.Ticks;
+        var resolved = SubjectChangeContext.Current.ResolveChangedTimestamp();
+        var afterTicks = DateTime.UtcNow.Ticks;
+        Assert.InRange(resolved, beforeTicks, afterTicks);
     }
 
     [Fact]
@@ -172,7 +132,7 @@ public class SubjectChangeContextTests
             {
                 Assert.Same(source, SubjectChangeContext.Current.Source);
                 Assert.Equal(received, SubjectChangeContext.Current.ReceivedTimestamp);
-                Assert.Equal(changed, SubjectChangeContext.Current.ChangedTimestamp);
+                Assert.Equal(changed.UtcTicks, SubjectChangeContext.Current.ResolveChangedTimestamp());
             }
         }
     }
@@ -190,7 +150,7 @@ public class SubjectChangeContextTests
             using (SubjectChangeContext.WithSource(source))
             {
                 Assert.Same(source, SubjectChangeContext.Current.Source);
-                Assert.Equal(changed, SubjectChangeContext.Current.ChangedTimestamp);
+                Assert.Equal(changed.UtcTicks, SubjectChangeContext.Current.ResolveChangedTimestamp());
             }
         }
     }
