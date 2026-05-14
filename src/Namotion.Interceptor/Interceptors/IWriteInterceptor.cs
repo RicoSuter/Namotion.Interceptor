@@ -80,7 +80,7 @@ public struct PropertyWriteContext<TProperty>
         get
         {
             var ticks = _writeTimestamp;
-            if (ticks == 0) ticks = ResolveWriteTimestamp();
+            if (ticks == 0) ticks = ResolveAndCacheWriteTimestamp();
             return ticks > 0 ? new DateTimeOffset(ticks, TimeSpan.Zero) : null;
         }
     }
@@ -95,7 +95,7 @@ public struct PropertyWriteContext<TProperty>
         get
         {
             var ticks = _writeTimestamp;
-            if (ticks == 0) ticks = ResolveWriteTimestamp();
+            if (ticks == 0) ticks = ResolveAndCacheWriteTimestamp();
             return ticks > 0 ? ticks : 0;
         }
     }
@@ -111,13 +111,13 @@ public struct PropertyWriteContext<TProperty>
         get
         {
             var ticks = _writeTimestamp;
-            if (ticks == 0) ticks = ResolveWriteTimestamp();
+            if (ticks == 0) ticks = ResolveAndCacheWriteTimestamp();
             return new DateTimeOffset(ticks > 0 ? ticks : -ticks, TimeSpan.Zero);
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private long ResolveWriteTimestamp()
+    private long ResolveAndCacheWriteTimestamp()
     {
         var scopeTicks = SubjectChangeContext.CurrentChangedTimestamp;
         long result;
