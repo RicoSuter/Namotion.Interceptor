@@ -28,10 +28,18 @@ public delegate void WriteInterceptionDelegate<TProperty>(ref PropertyWriteConte
 /// </summary>
 public struct PropertyWriteContext<TProperty>
 {
-    // Encoding: 0 = uninitialized, >0 = resolved real ticks (storage == publish),
-    // <0 = explicit null scope (storage = 0, publish = -value).
-    // Negative encoding lets one long carry both "stored as null" and the publish ticks,
-    // keeping the struct compact.
+    // Lazy-cache for the write timestamp. One long carries three states:
+    //   == 0  uninitialized; first read calls ResolveAndCacheWriteTimestamp() to populate it.
+    //   >  0  real ticks; both storage and publishing return this value.
+    //   <  0  explicit-null scope (WithChangedTimestamp(null) was active during the write);
+    //         WriteTimestampForStorage returns 0 (the "never-written" sentinel preserved on
+    //         the property), but WriteTimestampForPublishing decodes -ticks and returns the
+    //         positive DateTimeOffset so connectors (OPC UA, MQTT, queue, observable) that
+    //         require a concrete timestamp still receive one.
+    // The negative-encoding lets one 8-byte field carry both "this was null" and the cached
+    // UtcNow ticks, avoiding a second flag field. See ResolveAndCacheWriteTimestamp() for the
+    // encode path and WriteTimestampForStorage / WriteTimestampForPublishing / WriteTimestamp
+    // for the three decode paths.
     private long _writeTimestamp;
 
     /// <summary>
