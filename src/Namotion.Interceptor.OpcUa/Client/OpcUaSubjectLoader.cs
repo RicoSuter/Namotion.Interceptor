@@ -265,11 +265,12 @@ internal class OpcUaSubjectLoader
             return;
         }
 
-        var existingSubject = property.Children.SingleOrDefault();
-        var subjectToLoad = existingSubject.Subject
+        var existingChildren = property.Children;
+        var existingChild = existingChildren.IsEmpty ? default : existingChildren[0];
+        var subjectToLoad = existingChild.Subject
             ?? await _configuration.SubjectFactory.CreateSubjectAsync(property, nodeReference, session, cancellationToken).ConfigureAwait(false);
 
-        if (existingSubject.Subject is null)
+        if (existingChild.Subject is null)
         {
             subjectToLoad.Context.AddFallbackContext(subject.Context);
             property.SetValueFromSource(_source, null, null, subjectToLoad);
@@ -297,8 +298,7 @@ internal class OpcUaSubjectLoader
         var childCount = childNodes.Count;
         var children = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>(childCount);
 
-        // Convert to array once to avoid multiple enumerations
-        var existingChildren = property.Children.ToArray();
+        var existingChildren = property.Children;
 
         for (var i = 0; i < childCount; i++)
         {
@@ -409,7 +409,8 @@ internal class OpcUaSubjectLoader
         List<MonitoredItem> monitoredItems,
         CancellationToken cancellationToken)
     {
-        var childSubject = property.Children.SingleOrDefault().Subject?.TryGetRegisteredSubject();
+        var children = property.Children;
+        var childSubject = (children.IsEmpty ? default : children[0]).Subject?.TryGetRegisteredSubject();
         if (childSubject == null)
         {
             return;
