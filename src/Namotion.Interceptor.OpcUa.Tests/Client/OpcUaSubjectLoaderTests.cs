@@ -786,6 +786,86 @@ public class OpcUaSubjectLoaderTests
         Assert.NotNull(stateAttribute);
     }
 
+    [Fact]
+    public async Task WhenAttributeAlreadyRegisteredByExternalSource_ThenDynamicAttributeIsSkippedWithoutCrash()
+    {
+        // Arrange: simulate the HomeBlaze ServerStatus@State crash. A lifecycle handler from
+        // another source registers a registry attribute (here: "State") on a property *before*
+        // the OPC UA loader browses the server. The browse then returns a same-named dynamic
+        // Variable child, which the loader's second pass would normally try to AddAttribute,
+        // throwing "duplicate key". The safety net in LoadAttributeNodesAsync should detect the
+        // existing registration via TryGetAttribute and skip with a warning instead.
+        var statusNodeId = new NodeId(7001, 2);
+        var stateNodeId = new NodeId(7002, 2);
+
+        var mockSession = CreateMockSession();
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
+            {
+                var nodeId = browseDescriptions[0].NodeId;
+                ReferenceDescriptionCollection children = nodeId == new NodeId(1, 0)
+                    ?
+                    [
+                        CreateTestReferenceDescription("ServerStatus", new ExpandedNodeId(statusNodeId))
+                    ]
+                    : nodeId == statusNodeId
+                        ?
+                        [
+                            CreateTestReferenceDescription("State", new ExpandedNodeId(stateNodeId))
+                        ]
+                        : [];
+
+                return new BrowseResponse
+                {
+                    Results = [new BrowseResult { References = children }],
+                    DiagnosticInfos = []
+                };
+            });
+
+        var (loader, _) = CreateLoader(shouldAddDynamicAttributes: (_, _) => Task.FromResult(true));
+
+        var subject = CreateTestSubject();
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+
+        var serverStatus = registeredSubject.AddProperty(
+            "ServerStatus",
+            typeof(int),
+            _ => 0,
+            (_, _) => { },
+            new OpcUaNodeAttribute("ServerStatus", "urn:test", "opc")
+            {
+                NodeIdentifier = "7001",
+                NodeNamespaceUri = "urn:test"
+            });
+
+        // Pre-register a "State" attribute via a path other than OPC UA browse (no OpcUaNode-
+        // Attribute) so the loader's pass 1 cannot match it via the NodeMapper.
+        object? stateValue = null;
+        var preRegisteredState = serverStatus.AddAttribute(
+            "State",
+            typeof(string),
+            _ => stateValue,
+            (_, o) => stateValue = o);
+
+        var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
+
+        // Act: must not throw "duplicate key".
+        await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: the pre-registered attribute survives unchanged (same reference).
+        // Identity check, not just existence: discriminates the safety-net path from a hypo-
+        // thetical future "make AddAttribute idempotent by replacing" regression that would
+        // also not crash but would silently overwrite the lifecycle-handler registration.
+        var stateAfterLoad = serverStatus.TryGetAttribute("State");
+        Assert.Same(preRegisteredState, stateAfterLoad);
+    }
+
     private static ReferenceDescription CreateObjectReferenceDescription(string name, ExpandedNodeId nodeId)
     {
         return new ReferenceDescription

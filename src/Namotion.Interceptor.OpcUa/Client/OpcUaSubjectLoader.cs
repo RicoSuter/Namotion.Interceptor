@@ -164,7 +164,7 @@ internal class OpcUaSubjectLoader
         var rawChildNodes = await BrowseNodeAsync(parentNodeId, session, cancellationToken).ConfigureAwait(false);
         var childNodes = DistinctByResolvedNodeId(rawChildNodes, session);
 
-        var matchedNames = new HashSet<string>();
+        var processedBrowseNames = new HashSet<string>();
 
         // First pass: match known attributes from C# model
         foreach (var attribute in property.Attributes)
@@ -187,7 +187,7 @@ internal class OpcUaSubjectLoader
             if (matchingNodeId is null)
                 continue;
 
-            matchedNames.Add(attributeBrowseName);
+            processedBrowseNames.Add(attributeBrowseName);
             MonitorValueNode(matchingNodeId, attribute, monitoredItems);
 
             // Recursive: attributes can have attributes
@@ -201,7 +201,7 @@ internal class OpcUaSubjectLoader
                 continue;
 
             var browseName = childNode.BrowseName.Name;
-            if (!matchedNames.Add(browseName))
+            if (!processedBrowseNames.Add(browseName))
                 continue;
 
             // Safety net for name collisions: a lifecycle handler from another source (e.g. HomeBlaze's
@@ -275,6 +275,9 @@ internal class OpcUaSubjectLoader
             property.SetValueFromSource(_source, null, null, subjectToLoad);
         }
 
+        // Pre-attached children participate in the dedup cache too: any later sibling
+        // resolving to the same NodeId will route to this instance via the cache-hit
+        // branch above, rather than creating a parallel subject.
         subjectsByNodeId.TryAdd(nodeId, subjectToLoad);
 
         await LoadSubjectAsync(subjectToLoad, nodeReference, session, monitoredItems, loadedSubjects, subjectsByNodeId, cancellationToken).ConfigureAwait(false);
