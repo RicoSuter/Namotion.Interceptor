@@ -151,17 +151,19 @@ public struct PropertyWriteContext<TProperty>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private long ResolveAndCacheWriteTimestamp()
     {
+        // Branch order optimizes the two common paths: positive scope (production batch writes
+        // that pass a source timestamp) and zero / no scope (microbench, ad-hoc writes). Both
+        // resolve in at most two comparisons, matching the pre-cascade-fix cost. The explicit
+        // null and cascade-shared null cases pay one extra comparison; both are rare.
         var scopeTicks = SubjectChangeContext.CurrentChangedTimestamp;
         long result;
         if (scopeTicks > 0)
         {
             result = scopeTicks; // Real timestamp from scope
         }
-        else if (scopeTicks < SubjectChangeContext.NullTimestampTicks)
+        else if (scopeTicks == 0)
         {
-            // Cascade scope-push carrying an upstream write's encoded null (-trigger.UtcNow);
-            // reuse it verbatim so trigger and dependents publish the same time.
-            result = scopeTicks;
+            result = SubjectChangeContext.GetUtcNowTicks(); // No scope
         }
         else if (scopeTicks == SubjectChangeContext.NullTimestampTicks)
         {
@@ -169,7 +171,10 @@ public struct PropertyWriteContext<TProperty>
         }
         else
         {
-            result = SubjectChangeContext.GetUtcNowTicks();
+            // scopeTicks < NullTimestampTicks: cascade scope-push carrying an upstream write's
+            // encoded null (-trigger.UtcNow); reuse verbatim so trigger and dependents publish
+            // the same time.
+            result = scopeTicks;
         }
         _writeTimestamp = result;
         return result;
