@@ -108,7 +108,12 @@ public readonly struct SubjectChangeContext
             : null;
     }
 
-    /// <summary>Enters a scope that sets only the changed timestamp.</summary>
+    /// <summary>
+    /// Enters a scope so every write inside publishes with the same timestamp. Use this when
+    /// multiple writes belong to one logical event. Pass <c>null</c> when the source has no
+    /// timestamp; the property stays marked as never-written for storage, but change-event
+    /// consumers still receive a captured timestamp.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static SubjectChangeContextScope WithChangedTimestamp(DateTimeOffset? changed)
     {
