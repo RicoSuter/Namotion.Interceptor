@@ -168,12 +168,15 @@ public struct PropertyWriteContext<TProperty>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private long ResolveAndCacheWriteTimestamp()
     {
-        // Branch order follows expected frequency: no scope first (the default for any write
-        // not inside an explicit WithChangedTimestamp(...) scope, the bulk of app surface area),
-        // then positive scope (connector imports that pass a source timestamp), then explicit
-        // null (source had no timestamp; rare). The cascade no longer pushes a scope -- it
-        // pre-populates the dependent's cache directly via the internal PropertyWriteContext
-        // constructor, so this resolve never runs for cascade re-entries.
+        // Three scope states resolve here. The branch order picks "no scope first" since
+        // that's the default for app-level writes (any setter call outside an explicit
+        // WithChangedTimestamp scope); positive scope (connector imports that pass a source
+        // timestamp) pays one extra comparison. The perf delta between orderings is sub-noise
+        // in benchmarks -- this is a stylistic choice that matches the conceptual default for
+        // the typical library user, not a measured win, and either ordering is defensible.
+        // The cascade re-entry path does not run this resolve at all: cascade dependents'
+        // contexts are pre-populated with the trigger's resolved value via the internal
+        // PropertyWriteContext constructor.
         var scopeTicks = SubjectChangeContext.CurrentChangedTimestamp;
         long result;
         if (scopeTicks == 0)
