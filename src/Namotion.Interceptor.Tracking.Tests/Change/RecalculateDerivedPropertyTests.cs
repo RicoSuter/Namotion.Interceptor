@@ -81,6 +81,144 @@ public class RecalculateDerivedPropertyTests
     }
 
     [Fact]
+    public void WhenRecalculateCalledUnderPositiveScope_ThenChangeTimestampMatchesScope()
+    {
+        // Arrange
+        var externalValue = 10.0;
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
+
+        var sensor = new ExternalSensor(context);
+        sensor.ExternalValueProvider = () => externalValue;
+        var property = new PropertyReference(sensor, nameof(ExternalSensor.CalibratedTemperature));
+        property.RecalculateDerivedProperty();
+        changes.Clear();
+
+        var explicitTimestamp = DateTimeOffset.UtcNow.AddDays(-100);
+
+        // Act
+        externalValue = 42.0;
+        using (SubjectChangeContext.WithChangedTimestamp(explicitTimestamp))
+        {
+            property.RecalculateDerivedProperty();
+        }
+
+        // Assert
+        var change = Assert.Single(changes);
+        Assert.Equal(explicitTimestamp, change.ChangedTimestamp);
+        Assert.Equal(explicitTimestamp, property.TryGetWriteTimestamp());
+    }
+
+    [Fact]
+    public void WhenRecalculateCalledWithNoScope_ThenExactlyOneSnapDrivesTheChangeTimestamp()
+    {
+        // Arrange: install a thread-aware mock timestamp function. The mock returns
+        // sequential values per call but only on the test thread, so any parallel test
+        // running on another thread sees the real UtcNow pass-through unaffected.
+        var testThreadId = Environment.CurrentManagedThreadId;
+        var snapCount = 0;
+        var mockBase = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var originalFn = SubjectChangeContext.GetTimestampFunction;
+        SubjectChangeContext.GetTimestampFunction = () =>
+            Environment.CurrentManagedThreadId == testThreadId
+                ? mockBase.AddSeconds(Interlocked.Increment(ref snapCount))
+                : DateTimeOffset.UtcNow;
+        try
+        {
+            var externalValue = 10.0;
+            var changes = new List<SubjectPropertyChange>();
+            var context = InterceptorSubjectContext
+                .Create()
+                .WithFullPropertyTracking();
+
+            context
+                .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+                .Subscribe(changes.Add);
+
+            var sensor = new ExternalSensor(context);
+            sensor.ExternalValueProvider = () => externalValue;
+            var property = new PropertyReference(sensor, nameof(ExternalSensor.CalibratedTemperature));
+            property.RecalculateDerivedProperty();
+            changes.Clear();
+            snapCount = 0;
+
+            // Act
+            externalValue = 42.0;
+            property.RecalculateDerivedProperty();
+
+            // Assert: exactly one mock snap consumed; every observed event used it.
+            Assert.Equal(1, snapCount);
+            var expected = mockBase.AddSeconds(1);
+            var change = Assert.Single(changes);
+            Assert.Equal(expected, change.ChangedTimestamp);
+            Assert.Equal(expected, property.TryGetWriteTimestamp());
+        }
+        finally
+        {
+            SubjectChangeContext.GetTimestampFunction = originalFn;
+        }
+    }
+
+    [Fact]
+    public void WhenRecalculateCalledUnderNullScope_ThenStoredTimestampIsNullAndExactlyOneSnapDrivesTheChangeTimestamp()
+    {
+        // Arrange: thread-aware mock (see no-scope test for rationale).
+        var testThreadId = Environment.CurrentManagedThreadId;
+        var snapCount = 0;
+        var mockBase = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var originalFn = SubjectChangeContext.GetTimestampFunction;
+        SubjectChangeContext.GetTimestampFunction = () =>
+            Environment.CurrentManagedThreadId == testThreadId
+                ? mockBase.AddSeconds(Interlocked.Increment(ref snapCount))
+                : DateTimeOffset.UtcNow;
+        try
+        {
+            var externalValue = 10.0;
+            var changes = new List<SubjectPropertyChange>();
+            var context = InterceptorSubjectContext
+                .Create()
+                .WithFullPropertyTracking();
+
+            context
+                .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+                .Subscribe(changes.Add);
+
+            var sensor = new ExternalSensor(context);
+            sensor.ExternalValueProvider = () => externalValue;
+            var property = new PropertyReference(sensor, nameof(ExternalSensor.CalibratedTemperature));
+            property.RecalculateDerivedProperty();
+            changes.Clear();
+            snapCount = 0;
+
+            // Act
+            externalValue = 42.0;
+            using (SubjectChangeContext.WithChangedTimestamp(null))
+            {
+                property.RecalculateDerivedProperty();
+            }
+
+            // Assert: storage stays null (never-written sentinel); publishing got exactly
+            // one snap which the single observed event published verbatim.
+            Assert.Null(property.TryGetWriteTimestamp());
+            Assert.Equal(1, snapCount);
+            var expected = mockBase.AddSeconds(1);
+            var change = Assert.Single(changes);
+            Assert.Equal(expected, change.ChangedTimestamp);
+        }
+        finally
+        {
+            SubjectChangeContext.GetTimestampFunction = originalFn;
+        }
+    }
+
+
+    [Fact]
     public void WhenRecalculateCalledConcurrently_ThenAllChangesAreSerializedAndNoNotificationsLost()
     {
         // Arrange

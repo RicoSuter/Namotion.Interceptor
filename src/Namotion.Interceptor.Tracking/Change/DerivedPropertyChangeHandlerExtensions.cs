@@ -46,10 +46,12 @@ public static class DerivedPropertyChangeHandlerExtensions
             return;
         }
 
-        // Pass storage ticks as both storage and raw: this preserves the public extension's
-        // existing behavior (re-entry lazy-resolves against the current scope, snapping a fresh
-        // UtcNow for null/no scope). Cascade-shared consistency is only guaranteed inside the
-        // WriteProperty path that builds rawTicks from the active write context.
+        // Pass storage ticks as both storage and raw. For positive and no scope this is a
+        // positive value that seeds the dependent context's cache directly. For null scope it
+        // is 0 (the cache's uninitialized sentinel), which makes the dependent's terminal
+        // write lazy-resolve once; the resolved value then threads through any further
+        // cascade dependents via WriteTimestampRaw, so every change event from this recalc
+        // still shares a single publishing time (verified by mock-now tests in this file).
         var storageTicks = SubjectChangeContext.Current.ResolveChangedTimestamp();
         DerivedPropertyChangeHandler.RecalculateDerivedProperty(ref property, storageTicks, storageTicks);
     }
