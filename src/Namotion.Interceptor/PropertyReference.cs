@@ -96,18 +96,18 @@ public struct PropertyReference : IEquatable<PropertyReference>
 
     /// <summary>
     /// Sets the write timestamp from raw UTC ticks, avoiding DateTimeOffset conversion on the hot path.
-    /// Uses <see cref="Volatile.Write(ref long, long)"/> (plain MOV on x64) rather than
-    /// <see cref="Interlocked.Exchange(ref long, long)"/> because we never use the exchange's
-    /// return value and don't need its full memory-fence semantics: this is a standalone 8-byte
-    /// word, no other state coordinates with it, and aligned 8-byte writes are already atomic
-    /// on every platform we target. Paired with <see cref="Interlocked.Read(ref long)"/> on the
-    /// read side for atomic 64-bit reads on 32-bit runtimes.
+    /// Uses <see cref="Interlocked.Exchange(ref long, long)"/> to guarantee atomic 64-bit writes
+    /// on 32-bit runtimes (the library targets netstandard2.0, which includes x86 .NET Framework;
+    /// ECMA-335 only guarantees atomicity for writes up to <c>native int</c> size, so plain stores
+    /// of a <c>long</c> can tear on 32-bit). Paired with <see cref="Interlocked.Read(ref long)"/>
+    /// on the read side for symmetric atomicity. The exchange's return value is intentionally
+    /// unused.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     internal void SetWriteTimestamp(long utcTicks)
     {
         var holder = (long[])Subject.Data.GetOrAdd((Name, WriteTimestampKey), static _ => new long[1])!;
-        Volatile.Write(ref holder[0], utcTicks);
+        Interlocked.Exchange(ref holder[0], utcTicks);
     }
 
     #region Equality
