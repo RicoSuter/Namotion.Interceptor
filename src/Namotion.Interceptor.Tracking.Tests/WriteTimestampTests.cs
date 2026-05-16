@@ -374,7 +374,7 @@ public class WriteTimestampTests
     }
 
     [Fact]
-    public void WhenReadingContextWriteTimestamp_MultipleReads_ThenAllReturnSameLazilySnappedValue()
+    public void WhenReadingWriteTimestamp_MultipleReads_ThenAllReturnSameValue()
     {
         // Arrange
         var capturingInterceptor = new ContextTimestampCapturingInterceptor();
@@ -385,7 +385,7 @@ public class WriteTimestampTests
 
         var person = new Person(context);
 
-        // Act: reads occur both before and after next() — both must observe the same lazily-snapped value.
+        // Act: reads occur both before and after next(). Both must observe the same lazily-captured value.
         person.FirstName = "John";
 
         // Assert
@@ -402,17 +402,17 @@ public class WriteTimestampTests
     {
         // Pins the deliberate semantic that the cascade does not push a SubjectChangeContext
         // scope: a write performed inside a derived getter's recalc body resolves its timestamp
-        // against the outer (caller's) scope, snapping its own UtcNow when no outer scope is
+        // against the outer (caller's) scope, capturing its own UtcNow when no outer scope is
         // active. The cascade trigger and the side-effect write are independent timestamped
         // events. A future refactor that re-introduced a cascade scope push would make the
-        // side-effect write inherit the trigger's snapped value, which this test catches.
+        // side-effect write inherit the trigger's captured value, which this test catches.
         var testThreadId = Environment.CurrentManagedThreadId;
-        var snapCount = 0;
+        var captureCount = 0;
         var mockBase = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero);
         var originalFn = SubjectChangeContext.GetTimestampFunction;
         SubjectChangeContext.GetTimestampFunction = () =>
             Environment.CurrentManagedThreadId == testThreadId
-                ? mockBase.AddSeconds(Interlocked.Increment(ref snapCount))
+                ? mockBase.AddSeconds(Interlocked.Increment(ref captureCount))
                 : DateTimeOffset.UtcNow;
         try
         {
@@ -423,21 +423,21 @@ public class WriteTimestampTests
 
             var person = new SideEffectWritePerson(context);
             person.Name = "Initial"; // priming write: ensures cascade dependency Name -> Greeting is established
-            snapCount = 0; // ignore all snaps from arrange; only measure the act
+            captureCount = 0; // ignore all captures from arrange; only measure the act
 
-            // Act: a single write under no scope. The trigger snaps once at its terminal write.
+            // Act: a single write under no scope. The trigger captures once at its terminal write.
             // The cascade recalculates Greeting, whose getter writes SideEffectTarget; that
-            // side-effect write resolves under no scope and snaps a distinct UtcNow.
+            // side-effect write resolves under no scope and captures a distinct UtcNow.
             person.Name = "Updated";
 
-            // Assert: at least two snaps (trigger + side effect), and the timestamps are distinct.
-            Assert.True(snapCount >= 2, $"Expected at least 2 snaps (trigger + side effect); got {snapCount}");
+            // Assert: at least two captures (trigger + side effect), and the timestamps are distinct.
+            Assert.True(captureCount >= 2, $"Expected at least 2 captures (trigger + side effect); got {captureCount}");
             var triggerTs = person.GetPropertyReference(nameof(SideEffectWritePerson.Name)).TryGetWriteTimestamp();
             var sideEffectTs = person.GetPropertyReference(nameof(SideEffectWritePerson.SideEffectTarget)).TryGetWriteTimestamp();
             Assert.NotNull(triggerTs);
             Assert.NotNull(sideEffectTs);
             Assert.NotEqual(triggerTs, sideEffectTs);
-            Assert.True(sideEffectTs > triggerTs, "side-effect snap must occur after the trigger snap");
+            Assert.True(sideEffectTs > triggerTs, "side-effect capture must occur after the trigger capture");
         }
         finally
         {

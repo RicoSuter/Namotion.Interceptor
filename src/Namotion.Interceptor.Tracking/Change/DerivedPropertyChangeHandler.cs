@@ -150,10 +150,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // even when the getter recorded zero deps (e.g. short-circuited at attach).
         if (Volatile.Read(ref data.IsDerived) && context.Property.Metadata.SetValue is not null)
         {
-            var rawTicks = context.WriteTimestampRaw;
-            var storageTicks = rawTicks > 0 ? rawTicks : 0L;
+            var rawTimestamp = context.WriteTimestampRaw;
+            var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
             var property = context.Property;
-            RecalculateDerivedProperty(ref property, storageTicks, rawTicks);
+            RecalculateDerivedProperty(ref property, storageTimestamp, rawTimestamp);
         }
 
         var usedByProperties = data.GetUsedByProperties();
@@ -167,15 +167,15 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             }
 
             // Thread the trigger's resolved timestamp into each dependent's context, skipping a
-            // scope push. storageTicks=0 under a null scope preserves the never-written sentinel.
-            var rawTicks = context.WriteTimestampRaw;
-            var storageTicks = rawTicks > 0 ? rawTicks : 0L;
-            RecalculateDependents(usedByProperties, context.Property, storageTicks, rawTicks);
+            // scope push. storageTimestamp=0 under a null scope preserves the never-written sentinel.
+            var rawTimestamp = context.WriteTimestampRaw;
+            var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
+            RecalculateDependents(usedByProperties, context.Property, storageTimestamp, rawTimestamp);
         }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void RecalculateDependents(ReadOnlySpan<PropertyReference> usedByProperties, PropertyReference triggerProperty, long storageTicks, long rawTicks)
+    private static void RecalculateDependents(ReadOnlySpan<PropertyReference> usedByProperties, PropertyReference triggerProperty, long storageTimestamp, long rawTimestamp)
     {
         for (var i = 0; i < usedByProperties.Length; i++)
         {
@@ -187,7 +187,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 continue;
             }
 
-            RecalculateDerivedProperty(ref dependent, storageTicks, rawTicks);
+            RecalculateDerivedProperty(ref dependent, storageTimestamp, rawTimestamp);
         }
     }
 
@@ -198,7 +198,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// IsRecalculating serializes concurrent recalculations; RecalculationNeeded catches state changes
     /// (writes, attach, detach) that occur during the unlocked evaluation window.
     /// </summary>
-    internal static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long timestampUtcTicks, long rawTicks)
+    internal static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long storageTimestamp, long rawTimestamp)
     {
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
 
@@ -270,7 +270,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
                         data.LastKnownValue = newValue;
                         sequence = ++data.RecalculationSequence;
-                        derivedProperty.SetWriteTimestamp(timestampUtcTicks);
+                        derivedProperty.SetWriteTimestamp(storageTimestamp);
                         break;
                     }
                 }
@@ -278,7 +278,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 // Deliver notification while IsRecalculating is still true.
                 // Any concurrent writes during delivery set RecalculationNeeded=true and bail out,
                 // so no new recalculation (or notification) can start until delivery completes.
-                NotifyDerivedPropertyChanged(ref derivedProperty, data, sequence, newValue, oldValue, rawTicks);
+                NotifyDerivedPropertyChanged(ref derivedProperty, data, sequence, newValue, oldValue, rawTimestamp);
 
                 // Handle recalculations that arrived during evaluation or notification delivery.
                 // Uses a loop (not recursion) to prevent stack overflow under sustained concurrent writes.
@@ -324,7 +324,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
             if (needsRetrigger)
             {
-                RecalculateDerivedProperty(ref derivedProperty, timestampUtcTicks, rawTicks);
+                RecalculateDerivedProperty(ref derivedProperty, storageTimestamp, rawTimestamp);
             }
         }
     }
@@ -341,7 +341,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         long sequence,
         object? newValue,
         object? oldValue,
-        long rawTicks)
+        long rawTimestamp)
     {
         if (sequence != Volatile.Read(ref data.RecalculationSequence))
         {
@@ -359,7 +359,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
             // Cascade re-entry: pre-populates the new context's _writeTimestamp with the trigger's
             // raw cached value so the dependent's write skips lazy-resolve (and we therefore do
             // not need a WithChangedTimestamp scope active to share the time with the dependent).
-            derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate, rawTicks);
+            derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate, rawTimestamp);
         }
 
         if (derivedProperty.Subject is IRaisePropertyChanged raiser)

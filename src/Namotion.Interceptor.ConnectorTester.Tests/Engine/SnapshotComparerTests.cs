@@ -501,7 +501,7 @@ public class SnapshotComparerTests
     [Fact]
     public void WhenOneValueTimestampIsNull_ThenSnapshotsMatch()
     {
-        // Arrange: same value, one side has explicit null (NullTimestampTicks contract).
+        // Arrange: same value, one side has explicit null (NullTimestampSentinel contract).
         const string a = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1,"timestamp":null}}}}""";
         const string b = """{"root":"ROOT","subjects":{"ROOT":{"P":{"kind":"Value","value":1,"timestamp":"2026-01-01T00:00:00+00:00"}}}}""";
 

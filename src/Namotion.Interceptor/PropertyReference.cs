@@ -104,10 +104,10 @@ public struct PropertyReference : IEquatable<PropertyReference>
     /// unused.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal void SetWriteTimestamp(long utcTicks)
+    internal void SetWriteTimestamp(long timestamp)
     {
         var holder = (long[])Subject.Data.GetOrAdd((Name, WriteTimestampKey), static _ => new long[1])!;
-        Interlocked.Exchange(ref holder[0], utcTicks);
+        Interlocked.Exchange(ref holder[0], timestamp);
     }
 
     #region Equality

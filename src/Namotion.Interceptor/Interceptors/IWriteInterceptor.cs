@@ -76,13 +76,13 @@ public struct PropertyWriteContext<TProperty>
     /// (and therefore does not need an active <c>WithChangedTimestamp</c> scope to share state
     /// with the trigger). Pass 0 to leave the cache uninitialized (the default lazy behavior).
     /// </summary>
-    internal PropertyWriteContext(PropertyReference property, TProperty currentValue, TProperty newValue, long preResolvedRawTimestamp)
+    internal PropertyWriteContext(PropertyReference property, TProperty currentValue, TProperty newValue, long rawTimestamp)
     {
         Property = property;
         CurrentValue = currentValue;
         NewValue = newValue;
         IsWritten = false;
-        _writeTimestamp = preResolvedRawTimestamp;
+        _writeTimestamp = rawTimestamp;
     }
 
     /// <summary>
@@ -123,7 +123,7 @@ public struct PropertyWriteContext<TProperty>
 
     /// <summary>
     /// Raw encoded cache value (see the <c>_writeTimestamp</c> field comment for the encoding).
-    /// Threaded into cascade dependents' contexts so they share the trigger's snapped time.
+    /// Threaded into cascade dependents' contexts so they share the trigger's captured time.
     /// Same lazy-resolve semantics as <see cref="WriteTimestamp"/>.
     /// </summary>
     internal long WriteTimestampRaw
@@ -147,7 +147,7 @@ public struct PropertyWriteContext<TProperty>
         long result;
         if (scopeTicks == 0)
         {
-            result = SubjectChangeContext.GetUtcNowTicks(); // No scope
+            result = SubjectChangeContext.CaptureTimestamp(); // No scope
         }
         else if (scopeTicks > 0)
         {
@@ -155,10 +155,10 @@ public struct PropertyWriteContext<TProperty>
         }
         else
         {
-            // scopeTicks == NullTimestampTicks (-1): explicit-null scope. Snap UtcNow now and
+            // scopeTicks == NullTimestampSentinel (-1): explicit-null scope. Capture UtcNow and
             // encode as negative so storage decodes to 0 (never-written sentinel) while
             // publishing decodes to a real DateTimeOffset for change-event consumers.
-            result = -SubjectChangeContext.GetUtcNowTicks();
+            result = -SubjectChangeContext.CaptureTimestamp();
         }
         _writeTimestamp = result;
         return result;

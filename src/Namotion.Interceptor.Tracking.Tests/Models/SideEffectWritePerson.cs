@@ -6,7 +6,7 @@ namespace Namotion.Interceptor.Tracking.Tests.Models;
 /// Test model with a derived property whose getter writes to another property as a side
 /// effect. Used to verify that side-effect writes inside a cascade-triggered recalc resolve
 /// their timestamp against the outer scope rather than inheriting the cascade trigger's
-/// snapped value (the deliberate semantic of c58a6db8 / threading-based cascade design).
+/// captured value (the deliberate semantic of the threading-based cascade design).
 /// </summary>
 [InterceptorSubject]
 public partial class SideEffectWritePerson

@@ -65,7 +65,7 @@ public static class SnapshotComparer
     /// <summary>
     /// Compares two normalized snapshots produced by <see cref="Capture"/>.
     /// Falls back from string equality to a JSON-walking comparison that respects the
-    /// architectural null-timestamp contract (see SubjectChangeContext NullTimestampTicks):
+    /// architectural null-timestamp contract (see SubjectChangeContext NullTimestampSentinel):
     /// a null timestamp on either side matches any timestamp value. All other fields
     /// compare by strict JSON equality.
     /// </summary>
