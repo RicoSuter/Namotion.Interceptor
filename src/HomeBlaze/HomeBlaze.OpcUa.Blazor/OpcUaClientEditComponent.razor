@@ -24,9 +24,9 @@
                   OnKeyUp="OnFieldChanged"
                   Class="mt-4" />
 
-    <MudTextField @bind-Value="_rootName"
-                  Label="Root Name"
-                  HelperText="Optional OPC UA root node name under Objects folder"
+    <MudTextField @bind-Value="_rootPath"
+                  Label="Root Path"
+                  HelperText="Optional path under Objects folder (use / as delimiter, e.g. Machines/MyMachine)"
                   Immediate="true"
                   OnKeyUp="OnFieldChanged"
                   Class="mt-4" />
@@ -61,19 +61,19 @@
 
     private string _name = string.Empty;
     private string _serverUrl = string.Empty;
-    private string? _rootName;
+    private string? _rootPath;
     private bool _isEnabled = true;
 
     private string _originalName = string.Empty;
     private string _originalServerUrl = string.Empty;
-    private string? _originalRootName;
+    private string? _originalRootPath;
     private bool _originalIsEnabled = true;
 
     public bool IsValid => !string.IsNullOrWhiteSpace(_name) && !string.IsNullOrWhiteSpace(_serverUrl);
 
     public bool IsDirty => _name != _originalName ||
                            _serverUrl != _originalServerUrl ||
-                           _rootName != _originalRootName ||
+                           _rootPath != _originalRootPath ||
                            _isEnabled != _originalIsEnabled;
 
     public string PreferredDialogSize => "Medium";
@@ -87,12 +87,12 @@
         {
             _name = ClientSubject.Name ?? string.Empty;
             _serverUrl = ClientSubject.ServerUrl ?? string.Empty;
-            _rootName = ClientSubject.RootName;
+            _rootPath = ClientSubject.RootPath;
             _isEnabled = ClientSubject.IsEnabled;
 
             _originalName = _name;
             _originalServerUrl = _serverUrl;
-            _originalRootName = _rootName;
+            _originalRootPath = _rootPath;
             _originalIsEnabled = _isEnabled;
         }
     }
@@ -109,12 +109,12 @@
         {
             ClientSubject.Name = _name;
             ClientSubject.ServerUrl = _serverUrl;
-            ClientSubject.RootName = _rootName;
+            ClientSubject.RootPath = _rootPath;
             ClientSubject.IsEnabled = _isEnabled;
 
             _originalName = _name;
             _originalServerUrl = _serverUrl;
-            _originalRootName = _rootName;
+            _originalRootPath = _rootPath;
             _originalIsEnabled = _isEnabled;
 
             IsDirtyChanged?.Invoke(false);

@@ -20,10 +20,11 @@ public class OpcUaClientConfiguration
     public required string ServerUrl { get; set; }
 
     /// <summary>
-    /// Gets the optional root node name to start browsing from under the Objects folder.
-    /// If not specified, browsing starts from the ObjectsFolder root.
+    /// Gets the optional root path segments to start browsing from under the Objects folder.
+    /// Each element is a browse name to resolve one level deeper (e.g., ["Machines", "MyMachine"] browses Objects/Machines/MyMachine).
+    /// If not specified or empty, browsing starts from the ObjectsFolder root.
     /// </summary>
-    public string? RootName { get; set; }
+    public string[]? RootPath { get; set; }
     
     /// <summary>
     /// Gets the OPC UA client application name used for identification and certificate generation.
