@@ -30,20 +30,21 @@ public struct PropertyWriteContext<TProperty>
 {
     // Lazy-cache for the write timestamp. After resolve, one long carries three states:
     //   == 0    uninitialized; first read calls ResolveAndCacheWriteTimestamp() to populate it.
+    //           Also the value seeded by the public constructor for non-cascade writes.
     //   >  0    real ticks; both storage and publishing return this value.
-    //   < -1    explicit-null scope (WithChangedTimestamp(null) was active during the write, or
-    //           a cascade scope-push carrying the trigger's encoded null forward to dependents),
-    //           carrying the snapped UtcNow ticks as -ticks. Note: exactly -1 is never cached;
-    //           it's the scope-side sentinel for "null with no time yet" and gets resolved to
-    //           -UtcNow.Ticks on first read.
-    //         WriteTimestampForStorage returns 0 (the "never-written" sentinel preserved on
-    //         the property), but WriteTimestampForPublishing decodes -ticks and returns the
-    //         positive DateTimeOffset so connectors (OPC UA, MQTT, queue, observable) that
-    //         require a concrete timestamp still receive one.
+    //   < -1    explicit-null scope: WithChangedTimestamp(null) was active during the write.
+    //           Carries the snapped UtcNow ticks as -ticks. WriteTimestampForStorage returns 0
+    //           (the "never-written" sentinel preserved on the property), but
+    //           WriteTimestampForPublishing decodes -ticks and returns the positive
+    //           DateTimeOffset so connectors (OPC UA, MQTT, queue, observable) that require a
+    //           concrete timestamp still receive one. Exactly -1 is never cached -- it's only a
+    //           scope-side sentinel that gets resolved to -UtcNow.Ticks on first read.
     // The negative-encoding lets one 8-byte field carry both "this was null" and the cached
-    // UtcNow ticks, avoiding a second flag field. See ResolveAndCacheWriteTimestamp() for the
-    // encode path and WriteTimestampForStorage / WriteTimestampForPublishing / WriteTimestamp /
-    // WriteTimestampRaw for the four decode paths.
+    // UtcNow ticks, avoiding a second flag field. Cascade re-entries skip the lazy resolve
+    // entirely: the internal constructor seeds this field with the trigger's already-resolved
+    // value, so dependents inherit the trigger's snapped time without an active scope push.
+    // See ResolveAndCacheWriteTimestamp() for the encode path and WriteTimestampForStorage /
+    // WriteTimestampForPublishing / WriteTimestamp / WriteTimestampRaw for the four decode paths.
     private long _writeTimestamp;
 
     /// <summary>
@@ -75,6 +76,21 @@ public struct PropertyWriteContext<TProperty>
         NewValue = newValue;
         IsWritten = false;
         _writeTimestamp = 0;
+    }
+
+    /// <summary>
+    /// Internal constructor for cascade re-entry: pre-populates the cache with the trigger's
+    /// already-resolved raw timestamp, so the dependent's write does not need to lazy-resolve
+    /// (and therefore does not need an active <c>WithChangedTimestamp</c> scope to share state
+    /// with the trigger). Pass 0 to leave the cache uninitialized (the default lazy behavior).
+    /// </summary>
+    internal PropertyWriteContext(PropertyReference property, TProperty currentValue, TProperty newValue, long preResolvedRawTimestamp)
+    {
+        Property = property;
+        CurrentValue = currentValue;
+        NewValue = newValue;
+        IsWritten = false;
+        _writeTimestamp = preResolvedRawTimestamp;
     }
 
     /// <summary>
@@ -129,12 +145,13 @@ public struct PropertyWriteContext<TProperty>
     }
 
     /// <summary>
-    /// The raw encoded cached value used by the derived-cascade scope push to share this write's
+    /// The raw encoded cached value used by the derived-cascade re-entry to share this write's
     /// snapped time with downstream dependents: positive ticks for a real timestamp, or a value
     /// less than <see cref="SubjectChangeContext.NullTimestampTicks"/> for an explicit-null write
-    /// carrying the trigger's snapped <c>-UtcNow.Ticks</c>. Passing this value through
-    /// <see cref="SubjectChangeContext.WithChangedTimestamp(long)"/> lets every dependent in the
-    /// cascade publish the same timestamp as the trigger, even under an explicit-null scope.
+    /// carrying the trigger's snapped <c>-UtcNow.Ticks</c>. Threading this value through the
+    /// internal <c>PropertyWriteContext</c> constructor lets every dependent in the cascade
+    /// publish the same timestamp as the trigger, even under an explicit-null scope, without
+    /// pushing a thread-local <see cref="SubjectChangeContext"/> scope.
     /// Same lazy-resolve semantics as <see cref="WriteTimestamp"/>.
     /// </summary>
     internal long WriteTimestampRaw
@@ -152,10 +169,11 @@ public struct PropertyWriteContext<TProperty>
     private long ResolveAndCacheWriteTimestamp()
     {
         // Branch order follows expected frequency: no scope first (the default for any write
-        // not inside an explicit WithChangedTimestamp(...) scope, which is the bulk of app
-        // surface area), then positive scope (connector imports that pass a source timestamp),
-        // then explicit null (source has no timestamp), then cascade-shared null (only inside
-        // a null-scope cascade, the rarest case).
+        // not inside an explicit WithChangedTimestamp(...) scope, the bulk of app surface area),
+        // then positive scope (connector imports that pass a source timestamp), then explicit
+        // null (source had no timestamp; rare). The cascade no longer pushes a scope -- it
+        // pre-populates the dependent's cache directly via the internal PropertyWriteContext
+        // constructor, so this resolve never runs for cascade re-entries.
         var scopeTicks = SubjectChangeContext.CurrentChangedTimestamp;
         long result;
         if (scopeTicks == 0)
@@ -166,16 +184,12 @@ public struct PropertyWriteContext<TProperty>
         {
             result = scopeTicks; // Real timestamp from scope
         }
-        else if (scopeTicks == SubjectChangeContext.NullTimestampTicks)
-        {
-            result = -SubjectChangeContext.GetUtcNowTicks(); // negative = explicit-null encoding
-        }
         else
         {
-            // scopeTicks < NullTimestampTicks: cascade scope-push carrying an upstream write's
-            // encoded null (-trigger.UtcNow); reuse verbatim so trigger and dependents publish
-            // the same time.
-            result = scopeTicks;
+            // scopeTicks == NullTimestampTicks (-1): explicit-null scope. Snap UtcNow now and
+            // encode as negative so storage decodes to 0 (never-written sentinel) while
+            // publishing decodes to a real DateTimeOffset for change-event consumers.
+            result = -SubjectChangeContext.GetUtcNowTicks();
         }
         _writeTimestamp = result;
         return result;

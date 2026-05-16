@@ -30,6 +30,24 @@ public class InterceptorExecutor : InterceptorSubjectContext, IInterceptorExecut
         return context.IsWritten;
     }
 
+    /// <summary>
+    /// Cascade re-entry path: skips the lazy-resolve machinery by pre-populating the new write
+    /// context's timestamp cache. Lets the cascade share the trigger's snapped time without
+    /// pushing a <see cref="SubjectChangeContext.WithChangedTimestamp(DateTimeOffset?)"/> scope.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal bool SetPropertyValue<TProperty>(string propertyName, TProperty newValue, TProperty currentValue, Action<IInterceptorSubject, TProperty> writeValue, long preResolvedRawTimestamp)
+    {
+        var context = new PropertyWriteContext<TProperty>(
+            new PropertyReference(_subject, propertyName),
+            currentValue,
+            newValue,
+            preResolvedRawTimestamp);
+
+        ExecuteInterceptedWrite(ref context, writeValue);
+        return context.IsWritten;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public object? InvokeMethod(string methodName, object?[] parameters, Func<IInterceptorSubject, object?[], object?> invokeMethod)
     {

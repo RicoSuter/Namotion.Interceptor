@@ -120,25 +120,6 @@ public readonly struct SubjectChangeContext
         return new SubjectChangeContextScope(previousState);
     }
 
-    /// <summary>
-    /// Enters a scope that sets the changed timestamp from raw UTC ticks. Avoids the
-    /// <see cref="DateTimeOffset"/> construct + unwrap round-trip on the cascade scope-push hot path
-    /// where the caller already has ticks. Accepted values: positive ticks (real timestamp),
-    /// <see cref="NullTimestampTicks"/> (explicit null, snap fresh UtcNow when published), or
-    /// a value less than <see cref="NullTimestampTicks"/> (cascade-shared encoded null carrying
-    /// the trigger's snapped UtcNow as <c>-ticks</c>; see <c>PropertyWriteContext</c>).
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static SubjectChangeContextScope WithChangedTimestamp(long changedTicks)
-    {
-        var previousState = _current;
-        _current = new SubjectChangeContext(
-            changedTicks,
-            previousState._receivedTimestampUtcTicks,
-            previousState.Source);
-        return new SubjectChangeContextScope(previousState);
-    }
-
     /// <summary>Enters a scope that sets only the mutation source.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static SubjectChangeContextScope WithSource(object? source)
