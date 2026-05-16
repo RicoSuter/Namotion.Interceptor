@@ -150,8 +150,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // even when the getter recorded zero deps (e.g. short-circuited at attach).
         if (Volatile.Read(ref data.IsDerived) && context.Property.Metadata.SetValue is not null)
         {
-            var storageTicks = context.WriteTimestampForStorage;
-            var rawTicks = storageTicks > 0 ? storageTicks : context.WriteTimestampRaw;
+            var rawTicks = context.WriteTimestampRaw;
+            var storageTicks = rawTicks > 0 ? rawTicks : 0L;
             var property = context.Property;
             RecalculateDerivedProperty(ref property, storageTicks, rawTicks);
         }
@@ -166,16 +166,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 return;
             }
 
-            // Share trigger's snapped timestamp with cascade dependents by threading the
-            // resolved values directly into each dependent's new write context. This skips
-            // pushing a SubjectChangeContext scope: the dependent's PropertyWriteContext is
-            // constructed with _writeTimestamp = rawTicks already populated, so its cache hits
-            // immediately and never inspects the scope. storageTicks is what each dependent
-            // writes to its own property storage (0 in the null-scope case, preserving the
-            // never-written sentinel); rawTicks is the raw cached encoding the dependent's
-            // publishing path decodes.
-            var storageTicks = context.WriteTimestampForStorage;
-            var rawTicks = storageTicks > 0 ? storageTicks : context.WriteTimestampRaw;
+            // Thread the trigger's resolved timestamp into each dependent's context, skipping a
+            // scope push. storageTicks=0 under a null scope preserves the never-written sentinel.
+            var rawTicks = context.WriteTimestampRaw;
+            var storageTicks = rawTicks > 0 ? rawTicks : 0L;
             RecalculateDependents(usedByProperties, context.Property, storageTicks, rawTicks);
         }
     }

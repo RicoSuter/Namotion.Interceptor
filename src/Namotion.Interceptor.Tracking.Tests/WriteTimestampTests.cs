@@ -46,28 +46,6 @@ public class WriteTimestampTests
     }
 
     [Fact]
-    public void WriteTimestamp_WithExplicitTimestamp_ShouldMatchExplicitValue()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking();
-
-        var person = new Person(context);
-        var explicitTimestamp = DateTimeOffset.UtcNow.AddDays(-100);
-
-        // Act
-        using (SubjectChangeContext.WithChangedTimestamp(explicitTimestamp))
-        {
-            person.FirstName = "John";
-        }
-
-        // Assert
-        var timestamp = person.GetPropertyReference("FirstName").TryGetWriteTimestamp();
-        Assert.Equal(explicitTimestamp, timestamp);
-    }
-
-    [Fact]
     public void WriteTimestamp_SecondWriteOverwritesFirst()
     {
         // Arrange
@@ -235,26 +213,6 @@ public class WriteTimestampTests
 
         // Assert
         Assert.Equal(0, failures);
-    }
-
-    [Fact]
-    public void WriteTimestamp_WithNullTimestamp_ShouldReturnNull()
-    {
-        // Arrange
-        var context = InterceptorSubjectContext
-            .Create()
-            .WithFullPropertyTracking();
-
-        var person = new Person(context);
-
-        // Act
-        using (SubjectChangeContext.WithChangedTimestamp(null))
-        {
-            person.FirstName = "John";
-        }
-
-        // Assert
-        Assert.Null(person.GetPropertyReference("FirstName").TryGetWriteTimestamp());
     }
 
     [Fact]

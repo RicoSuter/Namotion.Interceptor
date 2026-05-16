@@ -15,7 +15,8 @@ internal static class WriteInterceptorFactory<TProperty>
                 {
                     innerWriteValue(context.Property.Subject, context.NewValue);
                     context.IsWritten = true;
-                    context.Property.SetWriteTimestamp(context.WriteTimestampForStorage);
+                    var raw = context.WriteTimestampRaw;
+                    context.Property.SetWriteTimestamp(raw > 0 ? raw : 0);
                 }
             };
         }
@@ -28,7 +29,8 @@ internal static class WriteInterceptorFactory<TProperty>
                 {
                     innerWriteValue(context.Property.Subject, context.NewValue);
                     context.IsWritten = true;
-                    context.Property.SetWriteTimestamp(context.WriteTimestampForStorage);
+                    var raw = context.WriteTimestampRaw;
+                    context.Property.SetWriteTimestamp(raw > 0 ? raw : 0);
                 }
                 return context.NewValue;
             }
