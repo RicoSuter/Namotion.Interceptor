@@ -514,6 +514,19 @@ propertyReference.SetValueFromSource(
 
 This prevents feedback loops where changes from external sources are written back to those same sources.
 
+**Atomic Timestamps**: Use `SubjectChangeContext.WithChangedTimestamp()` when several property writes belong to one logical event and should publish with the same timestamp. Without the scope, each write reads `UtcNow` separately and consumers see distinct events microseconds apart. Pass `null` when the source has no timestamp.
+
+```csharp
+using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
+{
+    position.X = 1.0;
+    position.Y = 2.0;
+    position.Z = 3.0;
+}
+```
+
+The scope reads `UtcNow` once on entry and reuses it for every write inside (also slightly faster). Keep the scope short: the timestamp does not update, so late writes still get the original time.
+
 ## Integration with Other Packages
 
 The Tracking package is foundational and used by:

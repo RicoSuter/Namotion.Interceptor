@@ -81,6 +81,112 @@ public class RecalculateDerivedPropertyTests
     }
 
     [Fact]
+    public void WhenRecalculateCalledUnderExplicitTimestampScope_ThenChangeTimestampMatchesScope()
+    {
+        // Arrange
+        var externalValue = 10.0;
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
+
+        var sensor = new ExternalSensor(context);
+        sensor.ExternalValueProvider = () => externalValue;
+        var property = new PropertyReference(sensor, nameof(ExternalSensor.CalibratedTemperature));
+        property.RecalculateDerivedProperty();
+        changes.Clear();
+
+        var explicitTimestamp = DateTimeOffset.UtcNow.AddDays(-100);
+
+        // Act
+        externalValue = 42.0;
+        using (SubjectChangeContext.WithChangedTimestamp(explicitTimestamp))
+        {
+            property.RecalculateDerivedProperty();
+        }
+
+        // Assert
+        var change = Assert.Single(changes);
+        Assert.Equal(explicitTimestamp, change.ChangedTimestamp);
+        Assert.Equal(explicitTimestamp, property.TryGetWriteTimestamp());
+    }
+
+    [Fact]
+    public void WhenRecalculateCalledWithNoScope_ThenAllEventsShareSingleTimestamp()
+    {
+        // Arrange
+        var externalValue = 10.0;
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
+
+        var sensor = new ExternalSensor(context);
+        sensor.ExternalValueProvider = () => externalValue;
+        var property = new PropertyReference(sensor, nameof(ExternalSensor.CalibratedTemperature));
+        property.RecalculateDerivedProperty();
+        changes.Clear();
+        var capturesBefore = MonotonicTimestampClock.CurrentThreadCount;
+
+        // Act
+        externalValue = 42.0;
+        property.RecalculateDerivedProperty();
+
+        // Assert: exactly one timestamp captured; the observed event and the stored timestamp both use it.
+        var captureCount = MonotonicTimestampClock.CurrentThreadCount - capturesBefore;
+        Assert.Equal(1, captureCount);
+        var change = Assert.Single(changes);
+        var storedTimestamp = property.TryGetWriteTimestamp();
+        Assert.NotNull(storedTimestamp);
+        Assert.Equal(storedTimestamp, change.ChangedTimestamp);
+    }
+
+    [Fact]
+    public void WhenRecalculateCalledUnderNullScope_ThenStoredTimestampIsNullAndAllEventsShareSingleTimestamp()
+    {
+        // Arrange
+        var externalValue = 10.0;
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
+
+        var sensor = new ExternalSensor(context);
+        sensor.ExternalValueProvider = () => externalValue;
+        var property = new PropertyReference(sensor, nameof(ExternalSensor.CalibratedTemperature));
+        property.RecalculateDerivedProperty();
+        changes.Clear();
+        var capturesBefore = MonotonicTimestampClock.CurrentThreadCount;
+
+        // Act
+        externalValue = 42.0;
+        using (SubjectChangeContext.WithChangedTimestamp(null))
+        {
+            property.RecalculateDerivedProperty();
+        }
+
+        // Assert: storage stays null (never-written sentinel); publishing captured exactly
+        // one timestamp which the single observed event published verbatim.
+        Assert.Null(property.TryGetWriteTimestamp());
+        var captureCount = MonotonicTimestampClock.CurrentThreadCount - capturesBefore;
+        Assert.Equal(1, captureCount);
+        Assert.Single(changes);
+    }
+
+
+    [Fact]
     public void WhenRecalculateCalledConcurrently_ThenAllChangesAreSerializedAndNoNotificationsLost()
     {
         // Arrange

@@ -66,7 +66,7 @@ public sealed class PropertyChangeQueue : IWriteInterceptor, IDisposable
         var propertyChange = SubjectPropertyChange.Create(
             context.Property,
             changeContext.Source,
-            changeContext.ChangedTimestamp,
+            context.WriteTimestampForPublishing,
             changeContext.ReceivedTimestamp,
             oldValue,
             newValue);
