@@ -14,7 +14,7 @@ on:
 env:
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
   DOTNET_NOLOGO: true
-  DOTNET_VERSION: 9.0.x
+  DOTNET_VERSION: 10.0.x
   NUGET_DIRECTORY: ${{ github.workspace }}/nuget
 
 defaults:
@@ -120,11 +120,6 @@ jobs:
       - name: Build
         run: dotnet build src/Namotion.Interceptor.slnx --configuration Release
 
-      - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
-
       - name: Install Playwright browsers
         run: pwsh src/HomeBlaze/HomeBlaze.E2E.Tests/bin/Release/net10.0/playwright.ps1 install --with-deps
 
@@ -157,11 +152,6 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: Setup .NET 10
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 10.0.x
 
       - name: Build
         run: dotnet build src/Namotion.Interceptor.slnx --configuration Release
@@ -302,7 +292,12 @@ jobs:
           $version = "${{ github.event.release.tag_name }}" -replace '^v', ''
           echo "VERSION=$version" >> $env:GITHUB_OUTPUT
 
-      - run: dotnet pack src/Namotion.Interceptor.slnx --configuration Release --output ${{ env.NUGET_DIRECTORY }} -p:PackageVersion=${{ steps.version.outputs.VERSION }}
+      - run: dotnet build src/Namotion.Interceptor.slnx --configuration Release
+
+      - run: dotnet pack src/Namotion.Interceptor.slnx --configuration Release --no-build --output ${{ env.NUGET_DIRECTORY }} -p:PackageVersion=${{ steps.version.outputs.VERSION }}
+
+      - name: Remove non-library packages
+        run: Get-ChildItem "${{ env.NUGET_DIRECTORY }}" -Include *.nupkg -Recurse | Where-Object { $_.Name -notlike "Namotion.Interceptor*" } | Remove-Item -Force
 
       - uses: actions/upload-artifact@v4
         with:

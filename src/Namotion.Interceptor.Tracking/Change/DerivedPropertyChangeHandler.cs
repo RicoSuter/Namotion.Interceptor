@@ -66,7 +66,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 try
                 {
                     data.LastKnownValue = EvaluateAndStabilize(data, change.Property, callerHoldsLock: true);
-                    change.Property.SetWriteTimestampUtcTicks(SubjectChangeContext.Current.ChangedTimestampUtcTicks);
+                    change.Property.SetWriteTimestamp(SubjectChangeContext.Current.ResolveChangedTimestamp());
                 }
                 catch (Exception)
                 {
@@ -150,9 +150,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         // even when the getter recorded zero deps (e.g. short-circuited at attach).
         if (Volatile.Read(ref data.IsDerived) && context.Property.Metadata.SetValue is not null)
         {
-            var currentTimestampUtcTicks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
+            var rawTimestamp = context.WriteTimestampRaw;
+            var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
             var property = context.Property;
-            RecalculateDerivedProperty(ref property, currentTimestampUtcTicks);
+            RecalculateDerivedProperty(ref property, storageTimestamp, rawTimestamp);
         }
 
         var usedByProperties = data.GetUsedByProperties();
@@ -165,19 +166,28 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 return;
             }
 
-            var timestampUtcTicks = SubjectChangeContext.Current.ChangedTimestampUtcTicks;
-            for (var i = 0; i < usedByProperties.Length; i++)
-            {
-                var dependent = usedByProperties[i];
-                if (dependent == context.Property)
-                {
-                    // Defensive: DerivedPropertyRecorder filters self-refs, so this is unreachable
-                    // via the normal recorder path.
-                    continue;
-                }
+            // Thread the trigger's resolved timestamp into each dependent's context, skipping a
+            // scope push. storageTimestamp=0 under a null scope preserves the never-written sentinel.
+            var rawTimestamp = context.WriteTimestampRaw;
+            var storageTimestamp = rawTimestamp > 0 ? rawTimestamp : 0L;
+            RecalculateDependents(usedByProperties, context.Property, storageTimestamp, rawTimestamp);
+        }
+    }
 
-                RecalculateDerivedProperty(ref dependent, timestampUtcTicks);
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void RecalculateDependents(ReadOnlySpan<PropertyReference> usedByProperties, PropertyReference triggerProperty, long storageTimestamp, long rawTimestamp)
+    {
+        for (var i = 0; i < usedByProperties.Length; i++)
+        {
+            var dependent = usedByProperties[i];
+            if (dependent == triggerProperty)
+            {
+                // Defensive: DerivedPropertyRecorder filters self-refs, so this is unreachable
+                // via the normal recorder path.
+                continue;
             }
+
+            RecalculateDerivedProperty(ref dependent, storageTimestamp, rawTimestamp);
         }
     }
 
@@ -188,7 +198,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
     /// IsRecalculating serializes concurrent recalculations; RecalculationNeeded catches state changes
     /// (writes, attach, detach) that occur during the unlocked evaluation window.
     /// </summary>
-    private static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long timestampUtcTicks)
+    internal static void RecalculateDerivedProperty(ref PropertyReference derivedProperty, long storageTimestamp, long rawTimestamp)
     {
         // TODO(perf): Avoid boxing when possible (use TProperty generic parameter?)
 
@@ -260,7 +270,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
                         data.LastKnownValue = newValue;
                         sequence = ++data.RecalculationSequence;
-                        derivedProperty.SetWriteTimestampUtcTicks(timestampUtcTicks);
+                        derivedProperty.SetWriteTimestamp(storageTimestamp);
                         break;
                     }
                 }
@@ -268,7 +278,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
                 // Deliver notification while IsRecalculating is still true.
                 // Any concurrent writes during delivery set RecalculationNeeded=true and bail out,
                 // so no new recalculation (or notification) can start until delivery completes.
-                NotifyDerivedPropertyChanged(ref derivedProperty, data, sequence, newValue, oldValue);
+                NotifyDerivedPropertyChanged(ref derivedProperty, data, sequence, newValue, oldValue, rawTimestamp);
 
                 // Handle recalculations that arrived during evaluation or notification delivery.
                 // Uses a loop (not recursion) to prevent stack overflow under sustained concurrent writes.
@@ -314,7 +324,7 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
             if (needsRetrigger)
             {
-                RecalculateDerivedProperty(ref derivedProperty, timestampUtcTicks);
+                RecalculateDerivedProperty(ref derivedProperty, storageTimestamp, rawTimestamp);
             }
         }
     }
@@ -330,7 +340,8 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
         DerivedPropertyData data,
         long sequence,
         object? newValue,
-        object? oldValue)
+        object? oldValue,
+        long rawTimestamp)
     {
         if (sequence != Volatile.Read(ref data.RecalculationSequence))
         {
@@ -345,7 +356,10 @@ public class DerivedPropertyChangeHandler : IReadInterceptor, IWriteInterceptor,
 
         using (SubjectChangeContext.WithSource(null))
         {
-            derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate);
+            // Cascade re-entry: pre-populates the new context's _writeTimestamp with the trigger's
+            // raw cached value so the dependent's write skips lazy-resolve (and we therefore do
+            // not need a WithChangedTimestamp scope active to share the time with the dependent).
+            derivedProperty.SetPropertyValueWithInterception(newValue, oldValue, NoOpWriteDelegate, rawTimestamp);
         }
 
         if (derivedProperty.Subject is IRaisePropertyChanged raiser)

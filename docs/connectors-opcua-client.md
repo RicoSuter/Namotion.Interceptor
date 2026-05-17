@@ -17,26 +17,55 @@ public partial class Machine
     public partial decimal Speed { get; set; }
 }
 
+builder.Services.AddSingleton(machine);
 builder.Services.AddOpcUaSubjectClientSource<Machine>(
     serverUrl: "opc.tcp://plc.factory.com:4840",
     sourceName: "opc",
-    pathPrefix: null,
     rootName: "MyMachine");
 
-// Use in application
-var machine = serviceProvider.GetRequiredService<Machine>();
+// ...
+var host = builder.Build();
 await host.StartAsync();
 Console.WriteLine(machine.Temperature); // Read property which is synchronized with OPC UA server
 machine.Speed = 100; // Writes to OPC UA server
 ```
 
+For multiple client sources, use `AddKeyedOpcUaSubjectClientSource` with a name and resolve via `[FromKeyedServices("name")]` (see [Diagnostics](#diagnostics)).
+
 **Parameters:**
 - `serverUrl` - The OPC UA server endpoint (e.g., `"opc.tcp://localhost:4840"`)
 - `sourceName` - The connector name used to match `[Path]` attributes (e.g., `"opc"` matches `[Path("opc", "Temperature")]`)
-- `pathPrefix` - Optional prefix prepended to property paths when mapping to OPC UA nodes. Use `null` for no prefix.
 - `rootName` - Optional root node name to start browsing from under the Objects folder
 
-Three DI overloads are available: the simple generic shown above, one with a custom subject selector, and a full configuration overload (shown below).
+Two DI overloads are available: the simple generic shown above and a full configuration overload (shown below).
+
+## Resolving the Client Source
+
+After registration, resolve `IOpcUaSubjectClientSource` to access diagnostics, the underlying session, and node ID lookups.
+
+**DI (unnamed registration):**
+
+```csharp
+var source = serviceProvider.GetRequiredService<IOpcUaSubjectClientSource>();
+```
+
+**DI (keyed registration):**
+
+```csharp
+var source = serviceProvider.GetRequiredKeyedService<IOpcUaSubjectClientSource>("server1");
+```
+
+**From a property reference** (useful deep in business code where you hold a `PropertyReference` but not the DI container):
+
+```csharp
+if (property.TryGetSource(out var subjectSource) &&
+    subjectSource is IOpcUaSubjectClientSource source)
+{
+    // use source.Diagnostics, source.CurrentSession, etc.
+}
+```
+
+For direct instantiation (without DI), `CreateOpcUaClientSource` returns `IOpcUaSubjectClientSource` directly.
 
 ## Configuration
 
@@ -354,7 +383,7 @@ All settings can be overridden per-property using `[OpcUaNode]` attribute.
 
 ### Write Retry Queue During Disconnection
 
-The library automatically queues write operations when the connection is lost, preventing data loss during brief network interruptions. On reconnection, queued writes are optimistically re-applied: after loading the server's current state, each queued change is compared against the current property value and only re-applied if the server hasn't changed it (source wins on conflict). This feature is provided by the `SubjectSourceBackgroundService` (see [Connectors — Write Retry Queue](connectors.md#write-retry-queue)).
+Write retry queue behavior (ring buffer, optimistic re-apply on reconnection, source wins on conflict) is provided by `SubjectSourceBase`. See [Connectors — Write Retry Queue](connectors.md#write-retry-queue). Configure via `WriteRetryQueueSize`:
 
 ```csharp
 builder.Services.AddOpcUaSubjectClientSource(
@@ -362,17 +391,12 @@ builder.Services.AddOpcUaSubjectClientSource(
     configurationProvider: sp => new OpcUaClientConfiguration
     {
         ServerUrl = "opc.tcp://plc.factory.com:4840",
-        WriteRetryQueueSize = 1000 // Buffer up to 1000 writes (default)
+        WriteRetryQueueSize = 1000 // Buffer up to 1000 writes (default, 0 to disable)
     });
 
 // Writes are automatically queued during disconnection
 machine.Speed = 100; // Queued if disconnected, written immediately if connected
 ```
-
-**Configuration:**
-- `WriteRetryQueueSize`: Maximum writes to buffer (default: 1000, set to 0 to disable)
-- Ring buffer semantics: drops oldest when full, keeps latest values
-- Optimistic re-apply after reconnection (source wins on conflict)
 
 ### Polling Fallback for Unsupported Nodes
 
@@ -499,30 +523,7 @@ For 24/7 production use, the default configuration provides robust resilience:
 
 ## Extensibility
 
-### Custom Value Converter
-
-Extend `OpcUaValueConverter` to implement custom type conversions between OPC UA and C# types. Override `ConvertToPropertyValue` for OPC UA -> C# conversions and `ConvertToNodeValue` for C# -> OPC UA conversions.
-
-```csharp
-public class CustomValueConverter : OpcUaValueConverter
-{
-    public override object? ConvertToPropertyValue(
-        object? nodeValue, RegisteredSubjectProperty property)
-    {
-        if (property.Type == typeof(MyCustomType) && nodeValue is string str)
-            return MyCustomType.Parse(str);
-        return base.ConvertToPropertyValue(nodeValue, property);
-    }
-
-    public override object? ConvertToNodeValue(
-        object? propertyValue, RegisteredSubjectProperty property)
-    {
-        if (propertyValue is MyCustomType custom)
-            return custom.ToString();
-        return base.ConvertToNodeValue(propertyValue, property);
-    }
-}
-```
+For custom type conversions (used by both client and server), see [Custom Value Converter](connectors-opcua.md#custom-value-converter).
 
 ### Custom Type Resolver
 
@@ -600,11 +601,102 @@ if (dynamicProperty != null)
 }
 ```
 
+#### Type Resolution
+
+The `OpcUaTypeResolver` maps OPC UA nodes to CLR types during dynamic discovery:
+
+- **Object nodes** become `DynamicSubject` (named sub-properties on the parent subject).
+- **Object nodes with `[numeric]` convention** (e.g., `People[0]`, `People[1]`) become `DynamicSubject[]` collections.
+- **Object nodes with `[string]` convention** (e.g., `Devices[SensorA]`) become `IReadOnlyDictionary<string, DynamicSubject>` dictionaries.
+
+The bracket convention is produced by this library's OPC UA server when exposing C# collections and dictionaries. Standard OPC UA servers typically use named children and are always treated as single subjects.
+- **Variable nodes** are mapped to CLR types based on their OPC UA DataType. The resolver uses `session.TypeTree` to walk the type hierarchy, so custom DataType subtypes (e.g., a server-specific `LocalizedText` variant) are correctly resolved to their base built-in type.
+
+| OPC UA BuiltInType | CLR Type | Notes |
+|---|---|---|
+| Boolean, SByte, Byte, Int16, ... | bool, sbyte, byte, short, ... | Direct mapping |
+| String | string | |
+| DateTime | DateTime | |
+| LocalizedText | LocalizedText | |
+| Enumeration | int | Mapped to underlying Int32 |
+| Number | double | Abstract numeric base type |
+| Integer | long | Abstract signed integer |
+| UInteger | ulong | Abstract unsigned integer |
+| ExtensionObject | ExtensionObject | Complex structured types |
+| XmlElement | string | |
+| Variant, Null | (skipped) | Type cannot be determined |
+
+Override `TryGetTypeForNodeAsync` on `OpcUaTypeResolver` to customize type mapping for specific nodes.
+
+#### Subject Deduplication
+
+When the same OPC UA node appears at multiple paths in the address space (e.g., `Identification` referenced from both `MyMachine` and `MachineryBuildingBlocks`), the client reuses the same subject instance. Reuse applies to single references as well as collection and dictionary elements: any property that resolves to the same `NodeId` during a load is bound to the existing subject, which receives a single set of monitored items. The same applies within a single browse call: if a server exposes one target through multiple reference types (e.g., both `HasComponent` and `HasProperty`), the duplicate browse references are filtered so the underlying node is processed exactly once per parent, at both the property and attribute level.
+
+Round-trip identity is preserved for the common cross-parent DAG: if the server-side C# model has a single instance reachable from two different parent paths, the client materializes one instance bound to both parent properties. The case where two properties on the **same parent** reference the same instance under different names does not round-trip because OPC UA stores the BrowseName on the target node rather than on the reference. See [connectors-opcua-server.md](connectors-opcua-server.md#subject-deduplication) for the full discussion of the server-side behavior and its limitations.
+
+## Write Error Handling
+
+When a batch write to the OPC UA server partially fails, the client throws an `OpcUaWriteException`. The exception distinguishes between transient failures (connectivity issues, timeouts that may succeed on retry) and permanent failures (invalid nodes, access denied; should not be retried). The write retry queue (see [Resilience](#write-retry-queue-during-disconnection)) handles transient failures automatically during disconnection, but writes that fail while connected surface this exception.
+
 ## Diagnostics
 
-Monitor client health in production via the `Diagnostics` property on `OpcUaSubjectClientSource`.
+`IOpcUaSubjectClientSource.Diagnostics` exposes a live facade. Resolve it once and poll (see [Resolving the Client Source](#resolving-the-client-source)).
 
-`OpcUaClientDiagnostics` provides: connection state, session ID, subscription/monitored item counts, reconnection metrics, and polling statistics.
+Categories: connection (`IsConnected`, `IsReconnecting`, `SessionId`, `LastConnectedAt`), subscriptions (`SubscriptionCount`, `MonitoredItemCount`), throughput (`IncomingChangesPerSecond`, `OutgoingChangesPerSecond`), reconnection history (`TotalReconnectionAttempts`, `SuccessfulReconnections`, `FailedReconnections`, `AbandonedReconnections`, `LastError`), [polling fallback](#polling-fallback-for-unsupported-nodes) (`PollingItemCount`), [read-after-write](#read-after-write-fallback) (`PendingReadAfterWrites`). All properties are thread-safe for reading.
+
+## Direct Session Access
+
+For scenarios the connector does not cover natively (OPC UA **Methods**, **Alarms & Conditions**), `IOpcUaSubjectClientSource.CurrentSession` exposes the underlying `ISession` (see [Resolving the Client Source](#resolving-the-client-source) for how to obtain the source):
+
+```csharp
+if (source.CurrentSession is { } session)
+{
+    var outputs = await session.CallAsync(parentNodeId, methodId, inputArgs, cancellationToken);
+}
+```
+
+**Lifecycle contract:** read `CurrentSession` immediately before each use. It may be `null` during reconnection and the instance changes after a manual reconnect (Flow C), a transferred-subscription failure (Flow B), or a stall reset. Never cache the reference. For long-running session-bound state (e.g. an A&C `Subscription`), subscribe to `CurrentSessionChanged` (below) or recreate on demand when calls fail with `BadSessionIdInvalid` / `BadSessionNotActivated`.
+
+### Reacting to session swaps with `CurrentSessionChanged`
+
+For consumers holding session-bound state (typically A&C subscriptions), `CurrentSessionChanged` fires on every transition (including to/from `null`). Method-call consumers usually do not need it — they re-read `CurrentSession` per call and surface a stale session as a failure on the next call. The event is for consumers that have no such inbound traffic.
+
+```csharp
+opcUaSource.CurrentSessionChanged += (_, args) =>
+{
+    if (args.PreviousSession is not null)
+    {
+        // Synchronous local cleanup only; transport may already be closed.
+        DisposeMyAlarmsSubscription(args.PreviousSession);
+    }
+
+    if (args.CurrentSession is not null)
+    {
+        // Async work fire-and-forget so the handler returns quickly.
+        var newSession = args.CurrentSession;
+        _ = Task.Run(async () =>
+        {
+            try { await RecreateMyAlarmsSubscriptionAsync(newSession); }
+            catch (Exception ex) { _logger.LogError(ex, "Failed to recreate A&C subscription"); }
+        });
+    }
+};
+```
+
+The event fires on the connector's own thread but **outside** the reconnection lock, in transition order, so a slow handler will not stall reconnection. Use `PreviousSession` only for synchronous local cleanup (its transport may already be closed). For async work on `CurrentSession` use fire-and-forget (`_ = Task.Run(...)`) and tolerate the session being swapped again before the task completes — the next `CurrentSessionChanged` event will surface the new state. Handler exceptions are caught and logged, but per standard event semantics a throwing subscriber skips later subscribers — isolate exceptions in your own handler if multiple must run.
+
+## Node ID Resolution
+
+`IOpcUaSubjectClientSource.TryGetNodeId` resolves the OPC UA `NodeId` bound to a tracked property. This is useful when making raw `ISession` calls that require a `NodeId`:
+
+```csharp
+if (source.TryGetNodeId(machine.GetPropertyReference(nameof(Machine.Temperature)), out var nodeId))
+{
+    // Use nodeId with source.CurrentSession for direct OPC UA operations
+}
+```
+
+Returns `false` if the property is not owned by this source or has not been resolved yet (e.g. before initial connection).
 
 ## Thread Safety
 
@@ -636,7 +728,51 @@ The OPC UA client hooks into the interceptor lifecycle system (see [Subject Life
 - OPC UA subscription items remain on the server until session ends
 - Cleanup is skipped during reconnection to avoid interfering with subscription transfer
 
-**Limitations:**
-- Does NOT dynamically add new subjects to OPC UA after initialization
-- Does NOT update the OPC UA address space when subjects are attached
-- New subjects added after startup require a restart to appear in OPC UA
+See also [Lifecycle Limitations](connectors-opcua.md#lifecycle-limitations) that apply to both client and server.
+
+## Internal Design
+
+### Class Dependency Graph
+
+```
+OpcUaSubjectClientSource (SubjectSourceBase: BackgroundService + ISubjectSource)
+ ├── owns ReconnectionMetrics              (standalone, thread-safe counters)
+ ├── owns IncomingThroughput               (standalone, ThroughputCounter)
+ ├── owns OutgoingThroughput               (standalone, ThroughputCounter)
+ ├── owns SubscriptionHealthMonitor        (standalone)
+ ├── owns OpcUaSubjectLoader               (back-ref to source)
+ ├── owns OpcUaClientDiagnostics           (back-ref to source, read-only facade)
+ ├── creates SessionManager                (back-ref to source)
+ │    ├── creates SubscriptionManager      (back-ref to source)
+ │    │    ├── uses PollingManager
+ │    │    └── uses ReadAfterWriteManager
+ │    ├── creates PollingManager           (back-ref to source)
+ │    └── creates ReadAfterWriteManager
+ └── creates OutboundWriter
+      ├── receives SessionManager
+      └── receives ThroughputCounter
+```
+
+### Responsibilities
+
+| Class | Role |
+|-------|------|
+| `OpcUaSubjectClientSource` | Orchestrator. Inherits `SubjectSourceBase` (which owns the pump skeleton: buffer, listen, load initial state, run change queue, retry on failure). Adds the OPC UA-specific health check loop, reconnection logic, and the `ISubjectSource` contract. |
+| `SessionManager` | Manages the OPC UA session lifecycle (create, reconnect, dispose). Owns `SubscriptionManager`, `PollingManager`, and `ReadAfterWriteManager`. |
+| `SubscriptionManager` | Creates and manages OPC UA subscriptions and monitored items. Routes incoming data change notifications. |
+| `OutboundWriter` | Writes property changes to the OPC UA server. Tracks outgoing throughput. |
+| `PollingManager` | Polling fallback for nodes that don't support subscriptions. Includes a circuit breaker. |
+| `ReadAfterWriteManager` | Schedules read-backs after writes for nodes where exception-based monitoring was revised to sampling. |
+| `SubscriptionHealthMonitor` | Retries failed monitored items that may succeed later (transient server errors). |
+| `OpcUaSubjectLoader` | Browses the OPC UA address space and maps nodes to C# properties. |
+| `OpcUaClientDiagnostics` | Read-only public facade that aggregates diagnostics from all internal components. |
+| `ReconnectionMetrics` | Thread-safe counters for reconnection tracking (attempts, successes, failures, abandoned). |
+| `ThroughputCounter` | Lock-free 60-second sliding window rate counter for incoming/outgoing changes per second. |
+
+### Key Design Decisions
+
+**Single-threaded health loop.** `OpcUaSubjectClientSource` runs a single `RunHealthCheckLoopAsync` task that checks session health, triggers reconnection, and detects stalls. The loop is spawned from `StartListeningAsync` via `BackgroundTaskLifetime.Start`, so it is started and stopped together with the listener. The pump skeleton itself lives in `SubjectSourceBase`. All reconnection coordination flows through this loop.
+
+**Back-reference pattern.** Several classes (`SessionManager`, `SubscriptionManager`, `PollingManager`) receive a reference to `OpcUaSubjectClientSource` to access shared state (metrics, throughput counters, error tracking). `OutboundWriter` demonstrates the preferred alternative: receiving only the specific dependencies it needs via constructor parameters.
+
+**Diagnostics as a facade.** `OpcUaClientDiagnostics` navigates through `OpcUaSubjectClientSource` and `SessionManager` to expose a flat public API. It allocates `PollingDiagnostics` and `ReadAfterWriteDiagnostics` wrappers on demand to avoid exposing internal types.

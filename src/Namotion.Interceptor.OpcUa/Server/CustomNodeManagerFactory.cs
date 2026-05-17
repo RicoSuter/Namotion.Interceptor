@@ -7,7 +7,7 @@ namespace Namotion.Interceptor.OpcUa.Server;
 internal class CustomNodeManagerFactory : INodeManagerFactory
 {
     private readonly IInterceptorSubject _subject;
-    private readonly OpcUaSubjectServerBackgroundService _source;
+    private readonly OpcUaSubjectServer _source;
     private readonly OpcUaServerConfiguration _configuration;
     private readonly ILogger _logger;
 
@@ -17,7 +17,7 @@ internal class CustomNodeManagerFactory : INodeManagerFactory
 
     public CustomNodeManagerFactory(
         IInterceptorSubject subject,
-        OpcUaSubjectServerBackgroundService source,
+        OpcUaSubjectServer source,
         OpcUaServerConfiguration configuration,
         ILogger logger)
     {

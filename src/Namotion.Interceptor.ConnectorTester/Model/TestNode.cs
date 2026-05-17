@@ -21,6 +21,11 @@ public partial class TestNode
     [Path("ws", "IntValue")]
     public partial int IntValue { get; set; }
 
+    [Path("opc", "LongValue")]
+    [Path("mqtt", "LongValue")]
+    [Path("ws", "LongValue")]
+    public partial long LongValue { get; set; }
+
     [Path("opc", "ObjectRef")]
     [Path("mqtt", "ObjectRef")]
     [Path("ws", "ObjectRef")]
@@ -41,26 +46,27 @@ public partial class TestNode
         StringValue = string.Empty;
         DecimalValue = 0;
         IntValue = 0;
+        LongValue = 0;
         ObjectRef = null;
         Collection = [];
         Items = new Dictionary<string, TestNode>();
     }
 
     /// <summary>
-    /// Creates a TestNode root with initial graph: 20 collection children + 10 dictionary entries.
+    /// Creates a TestNode root with a configurable number of children.
     /// </summary>
-    public static TestNode CreateWithGraph(IInterceptorSubjectContext context)
+    /// <param name="context">Interceptor context for the root node.</param>
+    /// <param name="collectionCount">Number of collection children.</param>
+    /// <param name="dictionaryCount">Number of dictionary entries.</param>
+    public static TestNode CreateWithGraph(IInterceptorSubjectContext context, int collectionCount = 20, int dictionaryCount = 10)
     {
-        var root = new TestNode(context)
+        return new TestNode(context)
         {
-            Collection = Enumerable.Range(0, 20)
-                .Select(_ => new TestNode(context))
+            Collection = Enumerable.Range(0, collectionCount)
+                .Select(_ => new TestNode())
                 .ToArray(),
-
-            Items = Enumerable.Range(0, 10)
-                .ToDictionary(i => $"item-{i}", i => new TestNode(context))
+            Items = Enumerable.Range(0, dictionaryCount)
+                .ToDictionary(i => $"item-{i}", _ => new TestNode())
         };
-
-        return root;
     }
 }

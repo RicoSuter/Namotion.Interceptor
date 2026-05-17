@@ -74,7 +74,7 @@ public sealed class SubjectTransactionInterceptor : IReadInterceptor, IWriteInte
             transaction.CaptureChange(
                 context.Property,
                 currentContext.Source,
-                currentContext.ChangedTimestamp,
+                context.WriteTimestampForPublishing,
                 currentContext.ReceivedTimestamp,
                 context.CurrentValue,
                 context.NewValue);

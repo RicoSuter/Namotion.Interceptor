@@ -173,9 +173,8 @@ public class SubjectPathResolver : ILifecycleHandler
             return canonicalPath;
 
         var sb = new StringBuilder(canonicalPath.Length);
-        for (var i = 0; i < canonicalPath.Length; i++)
+        foreach (var ch in canonicalPath)
         {
-            var ch = canonicalPath[i];
             if (ch == '[')
                 sb.Append('/');
             else if (ch != ']')
@@ -342,6 +341,24 @@ public class SubjectPathResolver : ILifecycleHandler
             }
         }
 
+        if (paths.Count > 1)
+        {
+            // Order by path depth (number of '/' separators) so the shallowest path is first.
+            // OrderBy is a documented stable sort: keys are computed once per element, and equal
+            // keys preserve insertion order so paths at the same depth stay deterministic.
+            paths = paths
+                .OrderBy(static path =>
+                {
+                    var depth = 0;
+                    foreach (var ch in path)
+                    {
+                        if (ch == '/') depth++;
+                    }
+                    return depth;
+                })
+                .ToList();
+        }
+
         return paths.Count > 0 ? paths : Array.Empty<string>();
     }
 
@@ -366,16 +383,10 @@ public class SubjectPathResolver : ILifecycleHandler
             string segment;
             if (parent.Index != null)
             {
-                if (isInlinePathsProperty)
-                {
-                    // InlinePaths: just the key (dots are fine with / separator)
-                    segment = parent.Index.ToString()!;
-                }
-                else
-                {
+                // InlinePaths: just the key (dots are fine with / separator)
+                segment = isInlinePathsProperty ? parent.Index.ToString()! :
                     // Regular collection/dict: PropertyName[index]
-                    segment = $"{parent.Property.Name}[{parent.Index}]";
-                }
+                    $"{parent.Property.Name}[{parent.Index}]";
             }
             else
             {

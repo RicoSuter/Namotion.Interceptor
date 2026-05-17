@@ -14,34 +14,46 @@ public partial class Sensor
     public partial decimal Value { get; set; }
 }
 
+builder.Services.AddSingleton(sensor);
 builder.Services.AddOpcUaSubjectServer<Sensor>(
     sourceName: "opc",
-    pathPrefix: null,
     rootName: "MySensor");
 
-var sensor = serviceProvider.GetRequiredService<Sensor>();
+// ...
 sensor.Value = 42.5m;
 await host.StartAsync();
 ```
 
-Three DI overloads are available with increasing control:
+For multiple servers, use `AddKeyedOpcUaSubjectServer` with a name and resolve via `[FromKeyedServices("name")]` (see [Diagnostics](#diagnostics)).
 
-**Simple generic** - resolves the subject from DI automatically:
+Two DI overloads are available with increasing control:
+
+## Resolving the Server
+
+After registration, resolve `IOpcUaSubjectServer` to access diagnostics, the underlying server, and variable node lookups.
+
+**DI (unnamed registration):**
 
 ```csharp
-builder.Services.AddOpcUaSubjectServer<Machine>(
-    sourceName: "opc",
-    pathPrefix: null,
-    rootName: "MyMachine");
+var server = serviceProvider.GetRequiredService<IOpcUaSubjectServer>();
 ```
 
-**With subject selector** - custom subject resolution:
+**DI (keyed registration):**
 
 ```csharp
-builder.Services.AddOpcUaSubjectServer(
+var server = serviceProvider.GetRequiredKeyedService<IOpcUaSubjectServer>("server1");
+```
+
+For direct instantiation (without DI), `CreateOpcUaServer` returns `IOpcUaSubjectServer` directly.
+
+## DI Overloads
+
+**Simple generic** - resolves the subject from DI automatically (subject must be registered as a singleton):
+
+```csharp
+builder.Services.AddSingleton(machine);
+builder.Services.AddOpcUaSubjectServer<Machine>(
     sourceName: "opc",
-    subjectSelector: sp => sp.GetRequiredService<Machine>(),
-    pathPrefix: null,
     rootName: "MyMachine");
 ```
 
@@ -64,7 +76,6 @@ builder.Services.AddOpcUaSubjectServer(
 
 **Parameters:**
 - `sourceName` - The connector name used to match `[Path]` attributes (e.g., `"opc"` matches `[Path("opc", "Temperature")]`)
-- `pathPrefix` - Optional prefix prepended to property paths when mapping to OPC UA nodes. Use `null` for no prefix.
 - `rootName` - Optional root folder name under the OPC UA ObjectsFolder
 
 Multiple servers can be registered in the same DI container. Each registration uses keyed singletons internally, so they operate independently.
@@ -74,7 +85,7 @@ Multiple servers can be registered in the same DI container. Each registration u
 For scenarios without DI, create a server directly from a subject:
 
 ```csharp
-var server = subject.CreateOpcUaServer(configuration, logger);
+IOpcUaSubjectServer server = subject.CreateOpcUaServer(configuration, logger);
 await server.StartAsync(cancellationToken);
 ```
 
@@ -167,6 +178,29 @@ The following limits are configured by default. Override `CreateApplicationInsta
 | MaxNodesPerBrowse | 4,000 |
 | MaxMonitoredItemsPerCall | 4,000 |
 
+## Subject Deduplication
+
+When the same C# subject instance is referenced from multiple properties in the model (for example, the same `Identification` instance reachable from both a machine root and a building-blocks folder), the server publishes it as a single OPC UA node referenced from each parent rather than creating duplicate nodes. The mapping is keyed by the registered subject identity, so reuse applies whether the property is a single reference, a collection element, or a dictionary value. See [connectors-opcua-client.md](connectors-opcua-client.md#subject-deduplication) for the symmetric client-side behavior.
+
+### BrowseName Limitation
+
+In OPC UA the `BrowseName` is an attribute of the target node, not of the reference pointing at it, so a node has exactly one BrowseName regardless of how many parents reference it. When the same C# subject is reused, the first property to publish it wins: the BrowseName of that property is stored on the node, and every other reference (from the same parent or another) carries the same BrowseName when clients browse it.
+
+This is invisible for the common case where every reusing property uses the same browse name (the typical cross-parent DAG, e.g. both `MyMachine.Identification` and `MachineryBuildingBlocks.Identification` resolve to "Identification"). It is lossy when two properties reference the same instance under different browse names. The most common shape of this is two properties on the **same parent** pointing at one instance:
+
+```csharp
+[InterceptorSubject]
+public partial class Root
+{
+    public partial SubA Primary { get; set; }
+    public partial SubA Backup { get; set; }   // same instance as Primary
+}
+```
+
+The server publishes a single node (named after whichever property was registered first) plus a second naked `HasComponent` reference from `Root` to that node. A round-trip client browses two references that are indistinguishable (same target NodeId, same BrowseName) and can only bind one of `Primary` / `Backup`; the other stays unset. If you need both names to round-trip, give each property its own subject instance.
+
+The server logs a warning when it detects this case (BrowseName mismatch between the existing node and the new reference). The address space is still constructed, the warning is purely informational.
+
 ## Companion Specifications
 
 The server automatically loads embedded NodeSets for common industrial standards:
@@ -220,16 +254,35 @@ The `LoadNodeSetFromEmbeddedResource<T>()` helper loads NodeSet XML files embedd
 
 ## Diagnostics
 
-The server runs as a [hosted service](hosting.md). Monitor its health in production via the `Diagnostics` property on `OpcUaSubjectServerBackgroundService`.
+`IOpcUaSubjectServer.Diagnostics` exposes a live facade. Resolve it once and poll (see [Resolving the Server](#resolving-the-server)).
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `IsRunning` | `bool` | Whether the server is accepting connections |
-| `ActiveSessionCount` | `int` | Number of currently connected clients |
-| `StartTime` | `DateTimeOffset?` | When the server started (null if not running) |
-| `Uptime` | `TimeSpan?` | Time since server started (null if not running) |
-| `LastError` | `Exception?` | Most recent error (null if no errors) |
-| `ConsecutiveFailures` | `int` | Number of consecutive startup failures (resets on success) |
+Properties: `IsRunning`, `ActiveSessionCount`, `StartTime`, `Uptime`, `LastError`, `ConsecutiveFailures` (resets on successful start, see [Resilience](#resilience)), `IncomingChangesPerSecond` (client writes to server, 60-second sliding window), `OutgoingChangesPerSecond` (subject changes pushed to OPC UA nodes, 60-second sliding window).
+
+## Direct Server Access
+
+For scenarios the connector does not cover natively (custom node managers, server events, custom session handlers), `IOpcUaSubjectServer.CurrentServer` exposes the underlying `StandardServer` (see [Resolving the Server](#resolving-the-server) for how to obtain the server):
+
+```csharp
+if (server.CurrentServer is { } current)
+{
+    // ... advanced interactions on `current`
+}
+```
+
+**Lifecycle contract:** read `CurrentServer` immediately before each use. It is `null` when the server is not running (startup, between restart attempts, or after a force-kill), and the instance is recreated on every restart. Never cache the reference.
+
+## Variable Node Resolution
+
+`IOpcUaSubjectServer.TryGetVariableNode` resolves the OPC UA `BaseDataVariableState` created for a tracked property. This is useful for raising server-side events or performing advanced operations on a specific node:
+
+```csharp
+if (server.TryGetVariableNode(sensor.GetPropertyReference(nameof(Sensor.Value)), out var variable))
+{
+    // Use variable for direct OPC UA node operations
+}
+```
+
+Returns `false` if the property is not exposed by this server, not yet created, or was removed during a server restart.
 
 ## Resilience
 
@@ -254,7 +307,4 @@ The OPC UA server hooks into the interceptor lifecycle system (see [Subject Life
 - The OPC UA node remains in the address space until server restart (OPC UA SDK limitation)
 - Local tracking is cleaned up immediately to prevent memory leaks
 
-**Limitations:**
-- Does NOT dynamically add new subjects to OPC UA after initialization
-- Does NOT update the OPC UA address space when subjects are attached
-- New subjects added after startup require a restart to appear in OPC UA
+See also [Lifecycle Limitations](connectors-opcua.md#lifecycle-limitations) that apply to both client and server.

@@ -187,6 +187,28 @@ person.LastName = "Doe";
 - When a dependency changes, the derived property is recalculated
 - If the derived value changes, a change event is triggered with `Source = null` (indicating local calculation)
 
+### Manual Recalculation
+
+When a derived property's getter depends on data outside the interceptor system (external APIs, services, static state, etc.), automatic dependency tracking cannot detect changes. Use `RecalculateDerivedProperty()` to manually trigger recalculation:
+
+```csharp
+[InterceptorSubject]
+public partial class Sensor
+{
+    public partial string? Label { get; set; }
+
+    [Derived]
+    public double CalibratedTemperature => _externalService.GetCalibratedTemperature();
+}
+
+// When external data changes, trigger recalculation:
+var property = new PropertyReference(sensor, nameof(Sensor.CalibratedTemperature));
+property.RecalculateDerivedProperty();
+// Getter is re-evaluated; if the value changed, change notifications fire
+```
+
+This goes through the same pipeline as automatic recalculation: the getter is re-evaluated, dependencies are updated, and all notifications (observable, queue, `INotifyPropertyChanged`) fire if the value changed. It is fully thread-safe and can be called concurrently with property writes.
+
 > **Internal design:** For details on the dependency graph, concurrency model, and correctness guarantees, see [Derived Property Design](design/tracking-derived-properties.md).
 
 ## Context Inheritance
@@ -358,14 +380,14 @@ var referenceCount = subject.GetReferenceCount();
 The `SubjectLifecycleChange` includes `ReferenceCount` after the operation. Use the flags to determine the event type:
 
 ```csharp
-handler.HandleLifecycleChange = change =>
+public void HandleLifecycleChange(SubjectLifecycleChange change)
 {
     if (change.IsContextDetach)
     {
         // Subject leaving graph - safe to clean up
         CleanupResources(change.Subject);
     }
-};
+}
 ```
 
 This enables proper cleanup when subjects are removed from all parent references, even when referenced by multiple properties or collections.
@@ -491,6 +513,19 @@ propertyReference.SetValueFromSource(
 ```
 
 This prevents feedback loops where changes from external sources are written back to those same sources.
+
+**Atomic Timestamps**: Use `SubjectChangeContext.WithChangedTimestamp()` when several property writes belong to one logical event and should publish with the same timestamp. Without the scope, each write reads `UtcNow` separately and consumers see distinct events microseconds apart. Pass `null` when the source has no timestamp.
+
+```csharp
+using (SubjectChangeContext.WithChangedTimestamp(DateTimeOffset.UtcNow))
+{
+    position.X = 1.0;
+    position.Y = 2.0;
+    position.Z = 3.0;
+}
+```
+
+The scope reads `UtcNow` once on entry and reuses it for every write inside (also slightly faster). Keep the scope short: the timestamp does not update, so late writes still get the original time.
 
 ## Integration with Other Packages
 

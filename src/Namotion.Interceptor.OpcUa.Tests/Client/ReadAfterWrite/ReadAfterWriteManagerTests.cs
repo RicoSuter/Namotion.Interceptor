@@ -53,6 +53,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
         Assert.Equal(0, _manager.Metrics.Executed);
         Assert.Equal(0, _manager.Metrics.Coalesced);
         Assert.Equal(0, _manager.Metrics.Failed);
+        Assert.Equal(0, _manager.PendingReadCount);
     }
 
     [Fact]
@@ -67,6 +68,7 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
 
         // Assert - should have scheduled a read-after-write
         Assert.Equal(1, _manager.Metrics.Scheduled);
+        Assert.Equal(1, _manager.PendingReadCount);
     }
 
     [Fact]
@@ -127,12 +129,14 @@ public class ReadAfterWriteManagerTests : IAsyncDisposable
 
         // Act
         _manager.ClearPendingReads();
+        Assert.Equal(0, _manager.PendingReadCount);
 
         // Write again - should still be able to schedule (property still tracked)
         _manager.OnPropertyWritten(nodeId);
 
         // Assert - second write should schedule
         Assert.Equal(2, _manager.Metrics.Scheduled);
+        Assert.Equal(1, _manager.PendingReadCount);
     }
 
     [Fact]

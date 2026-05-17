@@ -1,5 +1,6 @@
 ﻿using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.Hosting.Tests.Models;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.Hosting.Tests;
@@ -16,14 +17,14 @@ public class HostedServiceHandlerTests
         await RunWithAppLifecycleAsync(async context =>
         {
             person = new PersonWithBackgroundService(context);
-            await Task.Delay(100);
-            
+            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John");
+
             // Assert
             Assert.Equal("John", person.FirstName);
             Assert.Equal("Doe", person.LastName);
         });
-        
-        await Task.Delay(100);
+
+        await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "Disposed");
         Assert.Equal("Disposed", person.FirstName);
     }
     
@@ -40,14 +41,14 @@ public class HostedServiceHandlerTests
             var hostedService = new PersonBackgroundService(person);
             person.AttachHostedService(hostedService);
 
-            await Task.Delay(100);
+            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John");
 
             // Assert
             Assert.Equal("John", person.FirstName);
             Assert.Equal("Doe", person.LastName);
         });
-        
-        await Task.Delay(100);
+
+        await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "Disposed");
         Assert.Equal("Disposed", person.FirstName);
     }
     
@@ -63,9 +64,9 @@ public class HostedServiceHandlerTests
             var hostedService = new PersonBackgroundService(person);
             person.AttachHostedService(hostedService);
             var attachedHostedServices = person.GetAttachedHostedServices();
-            
-            await Task.Delay(100);
-            
+
+            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John");
+
             Assert.Equal("John", person.FirstName);
             Assert.Equal("Doe", person.LastName);
             Assert.Single(attachedHostedServices);
@@ -75,7 +76,7 @@ public class HostedServiceHandlerTests
             attachedHostedServices = person.GetAttachedHostedServices();
 
             // Assert
-            await Task.Delay(100);
+            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "Disposed");
             Assert.Equal("Disposed", person.FirstName);
             Assert.Empty(attachedHostedServices);
         });
@@ -94,7 +95,7 @@ public class HostedServiceHandlerTests
             person.AttachHostedService(hostedService);
             var attachedHostedServices = person.GetAttachedHostedServices();
 
-            await Task.Delay(100);
+            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "John");
             Assert.Single(attachedHostedServices);
 
             // Act
@@ -102,7 +103,7 @@ public class HostedServiceHandlerTests
             attachedHostedServices = person.GetAttachedHostedServices();
 
             // Assert
-            await Task.Delay(100);
+            await AsyncTestHelpers.WaitUntilAsync(() => person.FirstName == "Disposed");
             Assert.Equal("Disposed", person.FirstName);
             Assert.Empty(attachedHostedServices); // the service has been stopped and
                                                    // removed from list (not allowed to restart again anyway)
@@ -128,7 +129,7 @@ public class HostedServiceHandlerTests
             Assert.Single(person.GetAttachedHostedServices());
         });
 
-        await Task.Delay(100);
+        await AsyncTestHelpers.WaitUntilAsync(() => person!.FirstName == "Disposed");
         Assert.Equal("Disposed", person!.FirstName);
     }
 

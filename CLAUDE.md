@@ -122,6 +122,7 @@ The library has specialized support for:
 ## Coding Style
 
 - **Avoid abbreviations** in variable and parameter names unless the name is very long. Use descriptive names (e.g., `attribute` not `attr`).
+- **No em dashes** in docs, READMEs, or PR descriptions. Restructure into plain sentences instead.
 
 ## Git Rules
 
@@ -131,3 +132,8 @@ The library has specialized support for:
 
 - **Naming**: `When<Condition>_Then<ExpectedBehavior>` (e.g., `WhenDepthIsZero_ThenReturnsNoChildren`)
 - **Structure**: Explicit `// Arrange`, `// Act`, `// Assert` comments separating each phase (use `// Act & Assert` for exception tests)
+- **No hardcoded waits**: Use `AsyncTestHelpers.WaitUntilAsync(() => condition)` or event-based synchronization (`ManualResetEventSlim`, `CountdownEvent`) instead of `Task.Delay`/`Thread.Sleep`. Hardcoded delays are either too long (slow CI) or too short (flaky CI).
+
+## Public API Tracking
+
+The public API for some libraries is snapshot-tested via `PublicApiGenerator` + `Verify`. Each one's test project has a `VerifyChecksTests.PublicApi` test that compares the generated API against a checked-in `VerifyChecksTests.PublicApi.verified.txt`. When the API changes intentionally, accept the new snapshot by replacing `.verified.txt` with the test's `.received.txt` output.

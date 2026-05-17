@@ -1,8 +1,8 @@
 using HomeBlaze.Components;
 using HomeBlaze.Plugins;
 using HomeBlaze.Samples;
-using HomeBlaze.Servers.OpcUa;
-using HomeBlaze.Servers.OpcUa.Blazor;
+using HomeBlaze.OpcUa;
+using HomeBlaze.OpcUa.Blazor;
 using HomeBlaze.Services;
 using HomeBlaze.Storage;
 using HomeBlaze.Storage.Blazor.Files;

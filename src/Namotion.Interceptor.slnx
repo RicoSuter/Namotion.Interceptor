@@ -15,6 +15,7 @@
     <File Path="Directory.Build.props" />
   </Folder>
   <Folder Name="/Connectors/">
+    <Project Path="Namotion.Interceptor.ConnectorTester/Namotion.Interceptor.ConnectorTester.csproj" />
     <Project Path="Namotion.Interceptor.Mqtt.SampleClient/Namotion.Interceptor.Mqtt.SampleClient.csproj" />
     <Project Path="Namotion.Interceptor.Mqtt.SampleServer/Namotion.Interceptor.Mqtt.SampleServer.csproj" />
     <Project Path="Namotion.Interceptor.Mqtt/Namotion.Interceptor.Mqtt.csproj" />
@@ -39,8 +40,8 @@
     <Project Path="HomeBlaze/HomeBlaze.Host/HomeBlaze.Host.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Plugins/HomeBlaze.Plugins.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Samples/HomeBlaze.Samples.csproj" />
-    <Project Path="HomeBlaze/HomeBlaze.Servers.OpcUa/HomeBlaze.Servers.OpcUa.csproj" />
-    <Project Path="HomeBlaze/HomeBlaze.Servers.OpcUa.Blazor/HomeBlaze.Servers.OpcUa.Blazor.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.OpcUa/HomeBlaze.OpcUa.csproj" />
+    <Project Path="HomeBlaze/HomeBlaze.OpcUa.Blazor/HomeBlaze.OpcUa.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Services/HomeBlaze.Services.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage.Blazor/HomeBlaze.Storage.Blazor.csproj" />
     <Project Path="HomeBlaze/HomeBlaze.Storage/HomeBlaze.Storage.csproj" />
@@ -92,7 +93,6 @@
     <Project Path="HomeBlaze/HomeBlaze.Plugins.Tests/HomeBlaze.Plugins.Tests.csproj" />
   </Folder>
   <Folder Name="/Samples/">
-    <Project Path="Namotion.Interceptor.ConnectorTester/Namotion.Interceptor.ConnectorTester.csproj" />
     <Project Path="Namotion.Interceptor.SampleBlazor/Namotion.Interceptor.SampleBlazor.csproj" />
     <Project Path="Namotion.Interceptor.SampleConsole/Namotion.Interceptor.SampleConsole.csproj" />
     <Project Path="Namotion.Interceptor.SampleMachine/Namotion.Interceptor.SampleMachine.csproj" />
@@ -111,6 +111,7 @@
     <Project Path="Namotion.Interceptor.Tracking.Tests/Namotion.Interceptor.Tracking.Tests.csproj" />
     <Project Path="Namotion.Interceptor.Validation.Tests/Namotion.Interceptor.Validation.Tests.csproj" />
     <Project Path="Namotion.Interceptor.WebSocket.Tests/Namotion.Interceptor.WebSocket.Tests.csproj" />
+    <Project Path="Namotion.Interceptor.ConnectorTester.Tests/Namotion.Interceptor.ConnectorTester.Tests.csproj" />
   </Folder>
   <Project Path="Namotion.Interceptor.Dynamic/Namotion.Interceptor.Dynamic.csproj" />
   <Project Path="Namotion.Interceptor.Generator/Namotion.Interceptor.Generator.csproj" />
