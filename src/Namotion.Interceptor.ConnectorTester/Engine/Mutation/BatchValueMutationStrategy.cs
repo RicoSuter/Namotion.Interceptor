@@ -69,7 +69,17 @@ public sealed class BatchValueMutationStrategy : IValueMutationStrategy
 
         while (await timer.WaitForNextTickAsync(cancellationToken))
         {
-            _coordinator.WaitIfPaused(cancellationToken);
+            if (_coordinator.WaitIfPaused(cancellationToken))
+            {
+                // Convergence pause leaves cycleStart frozen while wall-clock advances.
+                // Without resync, the rate limit's idle branch (elapsed < 1s) never fires
+                // for the first ~3 minutes of the next mutate phase: the loop bursts at the
+                // timer's max throughput (~22k/sec at NumberOfBatches=50, timer*1.1) until
+                // cycleStart slowly catches wall (gaining ~0.06s per 0.94s window). Resync
+                // here so every cycle starts at exactly the configured ValueMutationRate.
+                cycleStart = Stopwatch.GetTimestamp();
+                mutationsThisSecond = 0;
+            }
 
             if (mutationsThisSecond >= _valueMutationRate)
             {
