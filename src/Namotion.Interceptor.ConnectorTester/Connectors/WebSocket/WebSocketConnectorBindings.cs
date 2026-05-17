@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.ConnectorTester.Configuration;
+using Namotion.Interceptor.ConnectorTester.Logging;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Registry.Paths;
 using Namotion.Interceptor.WebSocket;
@@ -25,6 +27,7 @@ public sealed class WebSocketConnectorBindings : IConnectorBindings
 
     public void RegisterClient(IServiceCollection services, TestNode root, ParticipantConfiguration participantConfiguration, int port)
     {
+        services.AddSingleton<IHostedService>(_ => new ParticipantContext.Setter(participantConfiguration.Name));
         services.AddWebSocketSubjectClientSource(
             _ => root,
             config =>

@@ -155,11 +155,23 @@ public sealed class CycleLoggerProvider : ILoggerProvider, ICycleLifecycleNotifi
                 LogLevel.Critical => "CRIT",
                 _ => "INFO"
             };
-            var message = $"[{timestamp}] [{level}] [{_categoryName}] {formatter(state, exception)}";
+            // Append the AsyncLocal participant tag when set so multiple instances of the same
+            // client source class (e.g. MqttSubjectClientSource/client-a vs ./client-b) are
+            // distinguishable in the log without requiring per-instance logger categories.
+            var participant = ParticipantContext.Current;
+            var category = participant is null ? _categoryName : $"{_categoryName}/{participant}";
+            var prefix = $"[{timestamp}] [{level}] [{category}] ";
+            var message = prefix + formatter(state, exception);
 
             if (exception != null)
             {
-                message += Environment.NewLine + exception;
+                // Prefix every line of the exception text so the cycle log stays line-grep-able.
+                // Without this, exception/stack-trace lines drop the [time] [level] [category]
+                // prefix and slip through grep filters used to triage CI failures.
+                foreach (var line in exception.ToString().Split('\n'))
+                {
+                    message += Environment.NewLine + prefix + line.TrimEnd('\r');
+                }
             }
 
             // Write to cycle log file (console is handled by the default console provider)
