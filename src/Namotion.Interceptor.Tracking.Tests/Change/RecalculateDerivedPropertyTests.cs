@@ -118,103 +118,71 @@ public class RecalculateDerivedPropertyTests
     [Fact]
     public void WhenRecalculateCalledWithNoScope_ThenAllEventsShareSingleTimestamp()
     {
-        // Arrange: install a thread-aware mock timestamp function. The mock returns
-        // sequential values per call but only on the test thread, so any parallel test
-        // running on another thread sees the real UtcNow pass-through unaffected.
-        var testThreadId = Environment.CurrentManagedThreadId;
-        var captureCount = 0;
-        var mockBase = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero);
-        var originalFn = SubjectChangeContext.GetTimestampFunction;
-        SubjectChangeContext.GetTimestampFunction = () =>
-            Environment.CurrentManagedThreadId == testThreadId
-                ? mockBase.AddSeconds(Interlocked.Increment(ref captureCount))
-                : DateTimeOffset.UtcNow;
-        try
-        {
-            var externalValue = 10.0;
-            var changes = new List<SubjectPropertyChange>();
-            var context = InterceptorSubjectContext
-                .Create()
-                .WithFullPropertyTracking();
+        // Arrange
+        var externalValue = 10.0;
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
 
-            context
-                .GetPropertyChangeObservable(ImmediateScheduler.Instance)
-                .Subscribe(changes.Add);
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
 
-            var sensor = new ExternalSensor(context);
-            sensor.ExternalValueProvider = () => externalValue;
-            var property = new PropertyReference(sensor, nameof(ExternalSensor.CalibratedTemperature));
-            property.RecalculateDerivedProperty();
-            changes.Clear();
-            captureCount = 0;
+        var sensor = new ExternalSensor(context);
+        sensor.ExternalValueProvider = () => externalValue;
+        var property = new PropertyReference(sensor, nameof(ExternalSensor.CalibratedTemperature));
+        property.RecalculateDerivedProperty();
+        changes.Clear();
+        var capturesBefore = MonotonicTimestampClock.CurrentThreadCount;
 
-            // Act
-            externalValue = 42.0;
-            property.RecalculateDerivedProperty();
+        // Act
+        externalValue = 42.0;
+        property.RecalculateDerivedProperty();
 
-            // Assert: exactly one timestamp captured; every observed event used it.
-            Assert.Equal(1, captureCount);
-            var expected = mockBase.AddSeconds(1);
-            var change = Assert.Single(changes);
-            Assert.Equal(expected, change.ChangedTimestamp);
-            Assert.Equal(expected, property.TryGetWriteTimestamp());
-        }
-        finally
-        {
-            SubjectChangeContext.GetTimestampFunction = originalFn;
-        }
+        // Assert: exactly one timestamp captured; the observed event and the stored timestamp both use it.
+        var captureCount = MonotonicTimestampClock.CurrentThreadCount - capturesBefore;
+        Assert.Equal(1, captureCount);
+        var change = Assert.Single(changes);
+        var storedTimestamp = property.TryGetWriteTimestamp();
+        Assert.NotNull(storedTimestamp);
+        Assert.Equal(storedTimestamp, change.ChangedTimestamp);
     }
 
     [Fact]
     public void WhenRecalculateCalledUnderNullScope_ThenStoredTimestampIsNullAndAllEventsShareSingleTimestamp()
     {
-        // Arrange: thread-aware mock (see no-scope test for rationale).
-        var testThreadId = Environment.CurrentManagedThreadId;
-        var captureCount = 0;
-        var mockBase = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero);
-        var originalFn = SubjectChangeContext.GetTimestampFunction;
-        SubjectChangeContext.GetTimestampFunction = () =>
-            Environment.CurrentManagedThreadId == testThreadId
-                ? mockBase.AddSeconds(Interlocked.Increment(ref captureCount))
-                : DateTimeOffset.UtcNow;
-        try
+        // Arrange
+        var externalValue = 10.0;
+        var changes = new List<SubjectPropertyChange>();
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithFullPropertyTracking();
+
+        context
+            .GetPropertyChangeObservable(ImmediateScheduler.Instance)
+            .Subscribe(changes.Add);
+
+        var sensor = new ExternalSensor(context);
+        sensor.ExternalValueProvider = () => externalValue;
+        var property = new PropertyReference(sensor, nameof(ExternalSensor.CalibratedTemperature));
+        property.RecalculateDerivedProperty();
+        changes.Clear();
+        var capturesBefore = MonotonicTimestampClock.CurrentThreadCount;
+
+        // Act
+        externalValue = 42.0;
+        using (SubjectChangeContext.WithChangedTimestamp(null))
         {
-            var externalValue = 10.0;
-            var changes = new List<SubjectPropertyChange>();
-            var context = InterceptorSubjectContext
-                .Create()
-                .WithFullPropertyTracking();
-
-            context
-                .GetPropertyChangeObservable(ImmediateScheduler.Instance)
-                .Subscribe(changes.Add);
-
-            var sensor = new ExternalSensor(context);
-            sensor.ExternalValueProvider = () => externalValue;
-            var property = new PropertyReference(sensor, nameof(ExternalSensor.CalibratedTemperature));
             property.RecalculateDerivedProperty();
-            changes.Clear();
-            captureCount = 0;
-
-            // Act
-            externalValue = 42.0;
-            using (SubjectChangeContext.WithChangedTimestamp(null))
-            {
-                property.RecalculateDerivedProperty();
-            }
-
-            // Assert: storage stays null (never-written sentinel); publishing captured exactly
-            // one timestamp which the single observed event published verbatim.
-            Assert.Null(property.TryGetWriteTimestamp());
-            Assert.Equal(1, captureCount);
-            var expected = mockBase.AddSeconds(1);
-            var change = Assert.Single(changes);
-            Assert.Equal(expected, change.ChangedTimestamp);
         }
-        finally
-        {
-            SubjectChangeContext.GetTimestampFunction = originalFn;
-        }
+
+        // Assert: storage stays null (never-written sentinel); publishing captured exactly
+        // one timestamp which the single observed event published verbatim.
+        Assert.Null(property.TryGetWriteTimestamp());
+        var captureCount = MonotonicTimestampClock.CurrentThreadCount - capturesBefore;
+        Assert.Equal(1, captureCount);
+        Assert.Single(changes);
     }
 
 
