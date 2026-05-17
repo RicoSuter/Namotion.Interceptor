@@ -5,21 +5,12 @@ namespace Namotion.Interceptor.ConnectorTester.Connectors;
 
 public sealed class FaultTargetResolver : IFaultTargetResolver
 {
-    // Populated by the host AFTER builder.Build() returns, before host.RunAsync() starts.
-    // Constructing this in DI from IEnumerable<IHostedService> would re-enter the IHostedService
-    // factories that depend on IFaultTargetResolver and form a resolution cycle.
-    private Dictionary<string, IFaultInjectable> _resolved = new(StringComparer.Ordinal);
-
-    public FaultTargetResolver()
-    {
-    }
-
-    public FaultTargetResolver(
-        IReadOnlyDictionary<string, TestNode> participants,
-        IEnumerable<ISubjectConnector> connectors)
-    {
-        Bind(participants, connectors);
-    }
+    // volatile guarantees that the Bind-time publication of the new dictionary becomes visible
+    // to ChaosEngine threads calling Resolve without an explicit memory barrier. Bind is called
+    // once by the host between builder.Build() and host.RunAsync(), so the happens-before
+    // ordering through Task scheduling already covers the common path; the volatile makes
+    // the contract explicit and protects future callers that might rebind.
+    private volatile Dictionary<string, IFaultInjectable> _resolved = new(StringComparer.Ordinal);
 
     public void Bind(
         IReadOnlyDictionary<string, TestNode> participants,

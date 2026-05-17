@@ -18,27 +18,24 @@ namespace Namotion.Interceptor.ConnectorTester.Hosting;
 
 /// <summary>
 /// Builds the connector tester host: registers connectors, mutation engines, chaos engines,
-/// the optional verification engine, and creates performance profilers. The Build method
-/// returns a composite carrying the host plus the engines/profilers that need to live for
-/// the lifetime of the process.
+/// the optional verification engine, and creates performance profilers. Performance profilers
+/// live as <see cref="IHostedService"/> in each participant's sub-SP so they stop before
+/// the participant SP is torn down (preserving access to the property-change context).
 /// </summary>
 public sealed class ConnectorTesterHost
 {
     public IHost Host { get; }
-    public IReadOnlyList<PerformanceProfiler> Profilers { get; }
     public VerificationEngine? VerificationEngine { get; }
     public RunModeSelection RunModeSelection { get; }
     public string RunDirectory { get; }
 
     private ConnectorTesterHost(
         IHost host,
-        IReadOnlyList<PerformanceProfiler> profilers,
         VerificationEngine? verificationEngine,
         RunModeSelection runModeSelection,
         string runDirectory)
     {
         Host = host;
-        Profilers = profilers;
         VerificationEngine = verificationEngine;
         RunModeSelection = runModeSelection;
         RunDirectory = runDirectory;
@@ -63,8 +60,9 @@ public sealed class ConnectorTesterHost
         builder.Services.AddSingleton<ICycleLifecycleNotifier>(cycleLoggerProvider);
         builder.Logging.AddProvider(cycleLoggerProvider);
 
-        // Shared logger factory for engines created before DI host build.
-        // Includes both console output and cycle logger so engine events appear in per-cycle log files.
+        // Shared logger factory feeds (a) engines created before DI build and (b) per-participant
+        // tagging factories. Console + cycle log providers live here, so any logger created
+        // through this factory (or a TaggingLoggerFactory wrapping it) writes to both sinks.
         var sharedLoggerFactory = LoggerFactory.Create(b =>
         {
             b.AddConsole();
@@ -100,11 +98,21 @@ public sealed class ConnectorTesterHost
         var participants = new Dictionary<string, TestNode>();
         var mutationEngines = new List<MutationEngineHost>();
         var chaosEngines = new List<ChaosEngine>();
+        var participantBundles = new List<ParticipantHostBundle>();
 
         var participantConfigurations = EnumerateActiveParticipants(configuration, runModeSelection).ToList();
 
         foreach (var (participantConfiguration, isServer) in participantConfigurations)
         {
+            // Each participant owns a dedicated IServiceCollection / IServiceProvider so the
+            // library's ILogger<T> resolution returns a participant-tagged logger. Mutation,
+            // chaos, and verification engines stay in the main DI: they already create their
+            // loggers with explicit per-participant categories (e.g. "MutationEngine.client").
+            var participantServices = new ServiceCollection();
+            participantServices.AddSingleton<ILoggerFactory>(
+                new TaggingLoggerFactory(sharedLoggerFactory, participantConfiguration.Name));
+            participantServices.AddSingleton(typeof(ILogger<>), typeof(Logger<>));
+
             var context = InterceptorSubjectContext
                 .Create()
                 .WithFullPropertyTracking()
@@ -113,11 +121,35 @@ public sealed class ConnectorTesterHost
                 .WithLifecycle()
                 .WithTransactions()
                 .WithSourceTransactions()
-                .WithHostedServices(builder.Services);
+                .WithHostedServices(participantServices);
 
             var root = TestNode.CreateWithGraph(context, configuration.CollectionCount, configuration.DictionaryCount);
             participants[participantConfiguration.Name] = root;
 
+            if (isServer)
+            {
+                bindings.RegisterServer(participantServices, root, bindings.DefaultPort);
+            }
+            else
+            {
+                bindings.RegisterClient(participantServices, root, participantConfiguration, bindings.DefaultPort);
+            }
+
+            // PerformanceProfiler lives in the participant SP so its StopAsync runs before
+            // the SP is disposed (which would invalidate the property-change subscription).
+            var capturedContext = context;
+            var capturedName = participantConfiguration.Name;
+            participantServices.AddSingleton<IHostedService>(_ =>
+                new PerformanceProfiler(capturedContext, capturedName,
+                    configuration.MetricsReportingInterval, runDirectory, coordinator));
+
+            var participantServiceProvider = participantServices.BuildServiceProvider();
+            var bundle = new ParticipantHostBundle(participantConfiguration.Name, participantServiceProvider);
+            participantBundles.Add(bundle);
+            builder.Services.AddSingleton<IHostedService>(bundle);
+
+            // Mutation engine stays in the main host so it shares the verification coordinator
+            // graph; its logger category already encodes the participant name explicitly.
             var mutationLogger = sharedLoggerFactory.CreateLogger($"MutationEngine.{participantConfiguration.Name}");
             var mutationEngine = configuration.NumberOfBatches > 0
                 ? MutationEngineHost.CreateBatch(root, participantConfiguration, coordinator, mutationLogger,
@@ -125,15 +157,6 @@ public sealed class ConnectorTesterHost
                 : MutationEngineHost.CreateRandom(root, participantConfiguration, coordinator, mutationLogger);
             mutationEngines.Add(mutationEngine);
             builder.Services.AddSingleton<IHostedService>(mutationEngine);
-
-            if (isServer)
-            {
-                bindings.RegisterServer(builder.Services, root, bindings.DefaultPort);
-            }
-            else
-            {
-                bindings.RegisterClient(builder.Services, root, participantConfiguration, bindings.DefaultPort);
-            }
         }
 
         // Populated after host.Build() to avoid a resolution cycle: ChaosEngine (IHostedService)
@@ -188,10 +211,12 @@ public sealed class ConnectorTesterHost
 
         var host = builder.Build();
 
-        // Bind the fault-target resolver now that the DI container is built. Enumerating
-        // IHostedService here constructs every connector exactly once and caches them as
-        // singletons; host.RunAsync() reuses the same instances when starting hosted services.
-        var allConnectors = host.Services.GetServices<IHostedService>().OfType<ISubjectConnector>().ToList();
+        // Each ParticipantHostBundle already eagerly resolved its hosted services in its
+        // constructor, so the connectors are constructed exactly once. Flatten them here for
+        // the fault-target resolver.
+        var allConnectors = participantBundles
+            .SelectMany(b => b.HostedServices.OfType<ISubjectConnector>())
+            .ToList();
         faultTargetResolver.Bind(participants, allConnectors);
 
         if (runModeSelection.Mode == RunMode.Verify)
@@ -199,16 +224,7 @@ public sealed class ConnectorTesterHost
             verificationEngine = host.Services.GetRequiredService<VerificationEngine>();
         }
 
-        var profilers = participants
-            .Select(participant => new PerformanceProfiler(
-                ((IInterceptorSubject)participant.Value).Context,
-                participant.Key,
-                configuration.MetricsReportingInterval,
-                runDirectory,
-                coordinator))
-            .ToList();
-
-        return new ConnectorTesterHost(host, profilers, verificationEngine, runModeSelection, runDirectory);
+        return new ConnectorTesterHost(host, verificationEngine, runModeSelection, runDirectory);
     }
 
     private static IEnumerable<(ParticipantConfiguration Configuration, bool IsServer)> EnumerateActiveParticipants(

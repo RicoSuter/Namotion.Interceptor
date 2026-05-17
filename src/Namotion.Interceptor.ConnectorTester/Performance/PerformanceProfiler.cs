@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.Extensions.Hosting;
 using Namotion.Interceptor.ConnectorTester.Engine;
 using Namotion.Interceptor.ConnectorTester.Reporting;
 using Namotion.Interceptor.Tracking;
@@ -6,7 +7,7 @@ using Namotion.Interceptor.Tracking.Change;
 
 namespace Namotion.Interceptor.ConnectorTester.Performance;
 
-public class PerformanceProfiler : IDisposable
+public class PerformanceProfiler : IHostedService, IDisposable
 {
     private const int MaxLatencySamples = 10_000;
 
@@ -34,15 +35,16 @@ public class PerformanceProfiler : IDisposable
     private DateTimeOffset _lastThroughputTime;
     private long _windowStartTotalAllocatedBytes;
     private TimeSpan _windowStartCpuTime;
+    private bool _disposed;
 
-    private readonly TestCycleCoordinator? _coordinator;
+    private readonly TestCycleCoordinator _coordinator;
 
     public PerformanceProfiler(
         IInterceptorSubjectContext context,
         string participantName,
         TimeSpan reportingInterval,
         string logDirectory,
-        TestCycleCoordinator? coordinator = null)
+        TestCycleCoordinator coordinator)
     {
         _coordinator = coordinator;
         _participantName = participantName;
@@ -213,7 +215,7 @@ public class PerformanceProfiler : IDisposable
             _csv.AppendRow(new PerformanceCsvRow(
                 Timestamp: now,
                 Participant: _participantName,
-                Cycle: _coordinator?.CurrentCycle ?? 0,
+                Cycle: _coordinator.CurrentCycle,
                 ReceivedPerSecond: avgThroughput,
                 ReceivedAverage: avgChangedLatency,
                 ReceivedP50: p50ChangedLatency,
@@ -236,8 +238,27 @@ public class PerformanceProfiler : IDisposable
         }
     }
 
+    public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task StopAsync(CancellationToken cancellationToken)
+    {
+        // Stops the consumer thread, timer, and subscription. Runs before the participant SP
+        // is disposed (which would invalidate the subscription's backing context), so the
+        // teardown sees a healthy context.
+        Dispose();
+        return Task.CompletedTask;
+    }
+
     public void Dispose()
     {
+        // Idempotent: registered as a singleton in the participant SP, so DI will also
+        // call Dispose on SP teardown after StopAsync has already run.
+        if (_disposed)
+        {
+            return;
+        }
+        _disposed = true;
+
         _cts.Cancel();
         _timer.Dispose();
         _consumerThread.Join(TimeSpan.FromSeconds(2));

@@ -5,6 +5,7 @@ using Namotion.Interceptor.ConnectorTester.Engine;
 using Namotion.Interceptor.ConnectorTester.Engine.Mutation;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Registry;
+using Namotion.Interceptor.Testing;
 using Namotion.Interceptor.Tracking;
 
 namespace Namotion.Interceptor.ConnectorTester.Tests.Engine.Mutation;
@@ -34,11 +35,11 @@ public class MutationEngineHostTests
         };
         var host = MutationEngineHost.CreateRandom(root, configuration, coordinator, NullLogger.Instance);
 
-        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(150));
-
         // Act
         await host.StartAsync(CancellationToken.None);
-        try { await Task.Delay(120, cts.Token); } catch (OperationCanceledException) { }
+        await AsyncTestHelpers.WaitUntilAsync(() => host.ValueMutationCount > 0,
+            timeout: TimeSpan.FromSeconds(5),
+            pollInterval: TimeSpan.FromMilliseconds(20));
         await host.StopAsync(CancellationToken.None);
 
         // Assert

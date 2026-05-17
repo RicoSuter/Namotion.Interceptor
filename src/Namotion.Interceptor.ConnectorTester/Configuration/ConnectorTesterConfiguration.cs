@@ -24,9 +24,9 @@ public class ConnectorTesterConfiguration
     public int DictionaryCount { get; set; } = 10;
 
     /// <summary>
-    /// Number of batches per second for BatchMutationEngine.
-    /// 0 = use RandomMutationEngine (single random mutations).
-    /// Greater than 0 = use BatchMutationEngine (parallel batched updates).
+    /// Number of batches per second for the value mutation loop.
+    /// 0 = use RandomValueMutationStrategy (single random mutations).
+    /// Greater than 0 = use BatchValueMutationStrategy (parallel batched updates).
     /// Each batch mutates ceil(ValueMutationRate / NumberOfBatches) nodes.
     /// </summary>
     public int NumberOfBatches { get; set; } = 0;

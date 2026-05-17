@@ -36,7 +36,8 @@ public class FaultTargetResolverTests
             new FakeConnector { RootSubject = rootA },
             new FakeConnector { RootSubject = rootB }
         };
-        var resolver = new FaultTargetResolver(participants, connectors);
+        var resolver = new FaultTargetResolver();
+        resolver.Bind(participants, connectors);
 
         // Act
         var serverTarget = resolver.Resolve("server");
@@ -54,7 +55,8 @@ public class FaultTargetResolverTests
         // Arrange
         var root = new TestNode(CreateContext());
         var participants = new Dictionary<string, TestNode> { ["server"] = root };
-        var resolver = new FaultTargetResolver(participants, connectors: []);
+        var resolver = new FaultTargetResolver();
+        resolver.Bind(participants, connectors: []);
 
         // Act
         var target = resolver.Resolve("server");

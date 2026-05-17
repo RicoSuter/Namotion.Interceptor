@@ -155,12 +155,10 @@ public sealed class CycleLoggerProvider : ILoggerProvider, ICycleLifecycleNotifi
                 LogLevel.Critical => "CRIT",
                 _ => "INFO"
             };
-            // Append the AsyncLocal participant tag when set so multiple instances of the same
-            // client source class (e.g. MqttSubjectClientSource/client-a vs ./client-b) are
-            // distinguishable in the log without requiring per-instance logger categories.
-            var participant = ParticipantContext.Current;
-            var category = participant is null ? _categoryName : $"{_categoryName}/{participant}";
-            var prefix = $"[{timestamp}] [{level}] [{category}] ";
+            // Participant tagging is baked into _categoryName by TaggingLoggerFactory (one factory
+            // per participant SP), so the suffix is already present here for connector-internal
+            // loggers and absent for main-host loggers (verification engine, etc.).
+            var prefix = $"[{timestamp}] [{level}] [{_categoryName}] ";
             var message = prefix + formatter(state, exception);
 
             if (exception != null)

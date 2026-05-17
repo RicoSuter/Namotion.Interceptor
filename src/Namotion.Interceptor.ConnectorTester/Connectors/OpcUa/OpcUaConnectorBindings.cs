@@ -1,9 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.ConnectorTester.Configuration;
-using Namotion.Interceptor.ConnectorTester.Logging;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.OpcUa;
 using Namotion.Interceptor.OpcUa.Client;
@@ -41,7 +39,6 @@ public sealed class OpcUaConnectorBindings : IConnectorBindings
 
     public void RegisterClient(IServiceCollection services, TestNode root, ParticipantConfiguration participantConfiguration, int port)
     {
-        services.AddSingleton<IHostedService>(_ => new ParticipantContext.Setter(participantConfiguration.Name));
         services.AddKeyedOpcUaSubjectClientSource(
             participantConfiguration.Name,
             _ => root,

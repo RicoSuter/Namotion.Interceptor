@@ -87,8 +87,7 @@ public sealed class StructuralMutator
 
     private void AddToCollection(TestNode target, TestNode[] collection)
     {
-        var newNode = CreateNewNode();
-        target.Collection = [.. collection, newNode];
+        target.Collection = [.. collection, new TestNode()];
     }
 
     private void RemoveFromCollection(TestNode target, TestNode[] collection)
@@ -138,7 +137,7 @@ public sealed class StructuralMutator
         var uniqueKey = $"item-{GlobalMutationCounter.Next()}";
         var newItems = new Dictionary<string, TestNode>(target.Items)
         {
-            [uniqueKey] = CreateNewNode()
+            [uniqueKey] = new TestNode()
         };
         target.Items = newItems;
     }
@@ -167,12 +166,7 @@ public sealed class StructuralMutator
         }
         else if (!atNodeLimit)
         {
-            target.ObjectRef = CreateNewNode();
+            target.ObjectRef = new TestNode();
         }
-    }
-
-    private TestNode CreateNewNode()
-    {
-        return new TestNode();
     }
 }

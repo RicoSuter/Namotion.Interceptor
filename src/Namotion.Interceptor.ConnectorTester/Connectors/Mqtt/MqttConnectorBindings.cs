@@ -1,8 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using MQTTnet.Protocol;
 using Namotion.Interceptor.ConnectorTester.Configuration;
-using Namotion.Interceptor.ConnectorTester.Logging;
 using Namotion.Interceptor.ConnectorTester.Model;
 using Namotion.Interceptor.Mqtt.Client;
 using Namotion.Interceptor.Mqtt.Server;
@@ -33,7 +31,6 @@ public sealed class MqttConnectorBindings : IConnectorBindings
 
     public void RegisterClient(IServiceCollection services, TestNode root, ParticipantConfiguration participantConfiguration, int port)
     {
-        services.AddSingleton<IHostedService>(_ => new ParticipantContext.Setter(participantConfiguration.Name));
         services.AddMqttSubjectClientSource(
             _ => root,
             _ => new MqttClientConfiguration
