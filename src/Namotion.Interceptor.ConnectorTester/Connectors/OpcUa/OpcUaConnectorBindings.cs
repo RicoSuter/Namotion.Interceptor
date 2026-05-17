@@ -57,6 +57,12 @@ public sealed class OpcUaConnectorBindings : IConnectorBindings
                     SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),
                     TelemetryContext = telemetryContext,
                     WriteRetryQueueSize = 10_000,
+                    // Tester-only override: shorten from the library default of 120s so chaos-killed
+                    // sessions get reaped by the server's session-timeout monitor within a single
+                    // 80s cycle, keeping the server's in-flight session working set bounded under
+                    // sustained chaos. Real apps should keep 120s for resilience to transient
+                    // network outages.
+                    SessionTimeout = TimeSpan.FromSeconds(30),
                 };
             });
     }
