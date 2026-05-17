@@ -438,7 +438,21 @@ internal class CustomNodeManager : CustomNodeManager2
 
         if (_subjects.TryGetValue(registeredSubject, out var existingNode))
         {
-            // Subject already created, add reference to existing node
+            // Subject already created, add reference to existing node.
+            // In OPC UA the BrowseName lives on the target node, not the reference, so
+            // when the reusing property's intended browse name differs from the one the
+            // node was first published with, the second name is lost on the wire.
+            if (!existingNode.BrowseName.Equals(browseName))
+            {
+                _logger.LogWarning(
+                    "Subject '{SubjectType}' reused at '{ParentType}.{PropertyName}' under browse name '{NewBrowseName}', but the node was first published as '{ExistingBrowseName}'. The second name is not preserved on the wire; clients cannot bind that property on round-trip. Use a distinct subject instance per property if both names must round-trip.",
+                    registeredSubject.Subject.GetType().Name,
+                    property.Subject.GetType().Name,
+                    property.Name,
+                    browseName,
+                    existingNode.BrowseName);
+            }
+
             var parentNode = FindNodeInAddressSpace(parentNodeId);
             parentNode.AddReference(referenceTypeId ?? ReferenceTypeIds.HasComponent, false, existingNode.NodeId);
         }

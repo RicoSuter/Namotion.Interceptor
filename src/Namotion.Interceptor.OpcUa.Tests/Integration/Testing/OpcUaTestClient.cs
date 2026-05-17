@@ -80,7 +80,7 @@ public class OpcUaTestClient<TRoot> : IAsyncDisposable
                 var config = new OpcUaClientConfiguration
                 {
                     ServerUrl = serverUrl,
-                    RootName = "Root",
+                    RootPath = ["Root"],
                     TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
                     ValueConverter = new OpcUaValueConverter(),
                     SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),

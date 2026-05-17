@@ -6,13 +6,13 @@ namespace Microsoft.Extensions.DependencyInjection
     public static class OpcUaSubjectExtensions
     {
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedOpcUaSubjectClientSource(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.OpcUa.Client.OpcUaClientConfiguration> configurationProvider) { }
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedOpcUaSubjectClientSource<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, string serverUrl, string sourceName, string? rootName = null)
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedOpcUaSubjectClientSource<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, string serverUrl, string sourceName, string[]? rootPath = null)
             where TSubject : Namotion.Interceptor.IInterceptorSubject { }
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedOpcUaSubjectServer(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.OpcUa.Server.OpcUaServerConfiguration> configurationProvider) { }
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddKeyedOpcUaSubjectServer<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string name, string sourceName, string? rootName = null)
             where TSubject : Namotion.Interceptor.IInterceptorSubject { }
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectClientSource(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.OpcUa.Client.OpcUaClientConfiguration> configurationProvider) { }
-        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectClientSource<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string serverUrl, string sourceName, string? rootName = null)
+        public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectClientSource<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string serverUrl, string sourceName, string[]? rootPath = null)
             where TSubject : Namotion.Interceptor.IInterceptorSubject { }
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectServer(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, System.Func<System.IServiceProvider, Namotion.Interceptor.IInterceptorSubject> subjectSelector, System.Func<System.IServiceProvider, Namotion.Interceptor.OpcUa.Server.OpcUaServerConfiguration> configurationProvider) { }
         public static Microsoft.Extensions.DependencyInjection.IServiceCollection AddOpcUaSubjectServer<TSubject>(this Microsoft.Extensions.DependencyInjection.IServiceCollection services, string sourceName, string? rootName = null)
@@ -111,7 +111,7 @@ namespace Namotion.Interceptor.OpcUa.Client
         public System.TimeSpan ReconnectHandlerTimeout { get; set; }
         public System.TimeSpan ReconnectInterval { get; set; }
         public System.TimeSpan? RetryTime { get; set; }
-        public string? RootName { get; set; }
+        public string[]? RootPath { get; set; }
         public required string ServerUrl { get; set; }
         public System.TimeSpan SessionDisposalTimeout { get; set; }
         public Opc.Ua.Client.ISessionFactory? SessionFactory { get; set; }

@@ -50,12 +50,12 @@ public static class OpcUaSubjectExtensions
         this IServiceCollection services,
         string serverUrl,
         string sourceName,
-        string? rootName = null)
+        string[]? rootPath = null)
         where TSubject : IInterceptorSubject
     {
         return services.AddOpcUaSubjectClientSource(
             sp => sp.GetRequiredService<TSubject>(),
-            sp => CreateDefaultClientConfiguration(sp, serverUrl, sourceName, rootName));
+            sp => CreateDefaultClientConfiguration(sp, serverUrl, sourceName, rootPath));
     }
 
     public static IServiceCollection AddOpcUaSubjectClientSource(
@@ -76,13 +76,13 @@ public static class OpcUaSubjectExtensions
         string name,
         string serverUrl,
         string sourceName,
-        string? rootName = null)
+        string[]? rootPath = null)
         where TSubject : IInterceptorSubject
     {
         return services.AddKeyedOpcUaSubjectClientSource(
             name,
             sp => sp.GetRequiredService<TSubject>(),
-            sp => CreateDefaultClientConfiguration(sp, serverUrl, sourceName, rootName));
+            sp => CreateDefaultClientConfiguration(sp, serverUrl, sourceName, rootPath));
     }
 
     public static IServiceCollection AddKeyedOpcUaSubjectClientSource(
@@ -191,7 +191,7 @@ public static class OpcUaSubjectExtensions
     }
 
     private static OpcUaClientConfiguration CreateDefaultClientConfiguration(
-        IServiceProvider sp, string serverUrl, string sourceName, string? rootName)
+        IServiceProvider sp, string serverUrl, string sourceName, string[]? rootPath)
     {
         var loggerFactory = sp.GetRequiredService<ILoggerFactory>();
         var telemetryContext = DefaultTelemetry.Create(builder =>
@@ -200,7 +200,7 @@ public static class OpcUaSubjectExtensions
         return new OpcUaClientConfiguration
         {
             ServerUrl = serverUrl,
-            RootName = rootName,
+            RootPath = rootPath,
             TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
             ValueConverter = new OpcUaValueConverter(),
             SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),

@@ -51,7 +51,7 @@ public sealed class OpcUaConnectorBindings : IConnectorBindings
                 return new OpcUaClientConfiguration
                 {
                     ServerUrl = $"opc.tcp://localhost:{port}",
-                    RootName = "Root",
+                    RootPath = ["Root"],
                     TypeResolver = new OpcUaTypeResolver(sp.GetRequiredService<ILogger<OpcUaTypeResolver>>()),
                     ValueConverter = new OpcUaValueConverter(),
                     SubjectFactory = new OpcUaSubjectFactory(DefaultSubjectFactory.Instance),

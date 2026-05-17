@@ -232,7 +232,7 @@ public partial class OpcUaRegistrationTests
         services.AddOpcUaSubjectClientSource<RegistrationTestSubject>(
             serverUrl: "opc.tcp://localhost:4840",
             sourceName: "opc",
-            rootName: "Root");
+            rootPath: ["Root"]);
 
         // Act
         using var serviceProvider = services.BuildServiceProvider();
@@ -273,7 +273,7 @@ public partial class OpcUaRegistrationTests
             name: "server1",
             serverUrl: "opc.tcp://localhost:4840",
             sourceName: "opc",
-            rootName: "Root");
+            rootPath: ["Root"]);
 
         // Act
         using var serviceProvider = services.BuildServiceProvider();

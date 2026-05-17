@@ -21,7 +21,7 @@
       FullName: {
         Kind: Value,
         Value: UpdatedChild ,
-        Timestamp: DateTimeOffset_2
+        Timestamp: DateTimeOffset_1
       }
     }
   }

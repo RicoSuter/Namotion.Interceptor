@@ -524,10 +524,26 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
 
     private async Task<ReferenceDescription?> TryGetRootNodeAsync(Session session, CancellationToken cancellationToken)
     {
-        if (_configuration.RootName is not null)
+        if (_configuration.RootPath is { Length: > 0 } rootPath)
         {
-            var references = await BrowseNodeAsync(session, ObjectIds.ObjectsFolder, cancellationToken).ConfigureAwait(false);
-            return references.FirstOrDefault(reference => reference.BrowseName.Name == _configuration.RootName);
+            var currentNodeId = ObjectIds.ObjectsFolder;
+
+            for (var i = 0; i < rootPath.Length; i++)
+            {
+                var references = await BrowseNodeAsync(session, currentNodeId, cancellationToken).ConfigureAwait(false);
+                var match = references.FirstOrDefault(reference => reference.BrowseName.Name == rootPath[i]);
+                if (match is null)
+                {
+                    return null;
+                }
+
+                if (i == rootPath.Length - 1)
+                {
+                    return match;
+                }
+
+                currentNodeId = ExpandedNodeId.ToNodeId(match.NodeId, session.NamespaceUris);
+            }
         }
 
         return new ReferenceDescription

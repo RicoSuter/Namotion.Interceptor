@@ -40,10 +40,10 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
     public partial string ServerUrl { get; set; }
 
     /// <summary>
-    /// Optional OPC UA root node name to start browsing from under the Objects folder.
+    /// Optional root path to start browsing from under the Objects folder (use / as delimiter, e.g. "Machines/MyMachine").
     /// </summary>
     [Configuration]
-    public partial string? RootName { get; set; }
+    public partial string? RootPath { get; set; }
 
     /// <summary>
     /// Whether the client is enabled and should auto-start on application startup.
@@ -194,13 +194,14 @@ public partial class OpcUaClient : BackgroundService, IConfigurable, ITitleProvi
                 return;
             }
 
-            var root = new OpcUaDynamicSubject(RootName ?? "Root");
+            var rootPathSegments = RootPath?.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            var root = new OpcUaDynamicSubject(rootPathSegments is { Length: > 0 } ? rootPathSegments[^1] : "Root");
             Root = root;
 
             var configuration = new OpcUaClientConfiguration
             {
                 ServerUrl = ServerUrl,
-                RootName = RootName,
+                RootPath = rootPathSegments,
                 TypeResolver = new HomeBlazeOpcUaTypeResolver(_logger),
                 ValueConverter = new OpcUaValueConverter(),
                 SubjectFactory = new HomeBlazeOpcUaSubjectFactory(),

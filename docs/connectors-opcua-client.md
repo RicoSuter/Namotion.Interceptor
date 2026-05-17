@@ -630,7 +630,9 @@ Override `TryGetTypeForNodeAsync` on `OpcUaTypeResolver` to customize type mappi
 
 #### Subject Deduplication
 
-When the same OPC UA node appears at multiple paths in the address space (e.g., `Identification` referenced from both `MyMachine` and `MachineryBuildingBlocks`), the client reuses the same subject instance. Reuse applies to single references as well as collection and dictionary elements: any property that resolves to the same `NodeId` during a load is bound to the existing subject, which receives a single set of monitored items.
+When the same OPC UA node appears at multiple paths in the address space (e.g., `Identification` referenced from both `MyMachine` and `MachineryBuildingBlocks`), the client reuses the same subject instance. Reuse applies to single references as well as collection and dictionary elements: any property that resolves to the same `NodeId` during a load is bound to the existing subject, which receives a single set of monitored items. The same applies within a single browse call: if a server exposes one target through multiple reference types (e.g., both `HasComponent` and `HasProperty`), the duplicate browse references are filtered so the underlying node is processed exactly once per parent, at both the property and attribute level.
+
+Round-trip identity is preserved for the common cross-parent DAG: if the server-side C# model has a single instance reachable from two different parent paths, the client materializes one instance bound to both parent properties. The case where two properties on the **same parent** reference the same instance under different names does not round-trip because OPC UA stores the BrowseName on the target node rather than on the reference. See [connectors-opcua-server.md](connectors-opcua-server.md#subject-deduplication) for the full discussion of the server-side behavior and its limitations.
 
 ## Write Error Handling
 
