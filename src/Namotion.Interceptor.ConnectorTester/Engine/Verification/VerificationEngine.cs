@@ -140,9 +140,11 @@ public class VerificationEngine : BackgroundService
             {
                 _findingsLog.AppendIfAny(outcome.Snapshots, outcome.Elapsed);
                 _cycleStatistics.RecordPass(_cycleNumber, cycleStopwatch.Elapsed, outcome.Elapsed, activeProfileName);
+                var (subjects, properties) = SnapshotComparer.CountSubjectsAndProperties(outcome.Snapshots[0].Snapshot);
                 _logger.LogInformation(
-                    "=== Cycle {Cycle}: PASS (converged in {ConvergeTime:F1}s, cycle {CycleTime:F0}s) ===",
-                    _cycleNumber, outcome.Elapsed.TotalSeconds, cycleStopwatch.Elapsed.TotalSeconds);
+                    "=== Cycle {Cycle}: PASS (converged in {ConvergeTime:F1}s, cycle {CycleTime:F0}s; verified {Subjects} subjects, {Properties} properties across {Participants} participants) ===",
+                    _cycleNumber, outcome.Elapsed.TotalSeconds, cycleStopwatch.Elapsed.TotalSeconds,
+                    subjects, properties, outcome.Snapshots.Count);
 
                 _cycleLifecycle?.FinishCycle(_cycleNumber, CycleResult.Pass);
                 continue;

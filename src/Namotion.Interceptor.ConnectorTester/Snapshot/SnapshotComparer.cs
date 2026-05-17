@@ -131,6 +131,28 @@ public static class SnapshotComparer
         return JsonNode.Parse(snapshot)?[SubjectsKey]?.AsObject();
     }
 
+    /// <summary>
+    /// Returns (subjects, properties) totals for the snapshot, used on PASS to log a summary
+    /// of what was actually compared. A non-zero, expected count confirms the comparer ran
+    /// over real data; the absence of a diff alone could otherwise hide a regression that
+    /// skipped properties.
+    /// </summary>
+    public static (int Subjects, int Properties) CountSubjectsAndProperties(string snapshot)
+    {
+        var subjects = ParseSubjects(snapshot);
+        if (subjects is null) return (0, 0);
+
+        var properties = 0;
+        foreach (var (_, subjectNode) in subjects)
+        {
+            if (subjectNode is JsonObject subjectObject)
+            {
+                properties += subjectObject.Count;
+            }
+        }
+        return (subjects.Count, properties);
+    }
+
     private static SubjectUpdate NormalizeUpdate(SubjectUpdate update, Dictionary<string, string> idMap)
     {
         string RemapId(string id) => idMap.GetValueOrDefault(id, id);
