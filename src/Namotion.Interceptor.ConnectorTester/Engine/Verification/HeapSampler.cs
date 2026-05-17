@@ -18,9 +18,7 @@ public sealed class HeapSampler
         GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: true, compacting: true);
 
         using var process = Process.GetCurrentProcess();
-        // The forced compacting GC at lines 16-18 already settled the heap, so this just
-        // reads the post-GC size without doing further work.
-        var heapMb = GC.GetTotalMemory(false) / (1024.0 * 1024.0);
+        var heapMb = GC.GetTotalMemory(forceFullCollection: false) / (1024.0 * 1024.0);
         var processMb = process.WorkingSet64 / (1024.0 * 1024.0);
         return (heapMb, processMb);
     }

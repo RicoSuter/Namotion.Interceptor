@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Namotion.Interceptor.Connectors;
 using Namotion.Interceptor.ConnectorTester.Logging;
 
 namespace Namotion.Interceptor.ConnectorTester.Hosting;
@@ -28,9 +29,8 @@ internal sealed class ParticipantHostBundle : IHostedService, IAsyncDisposable
         _logger = participantServiceProvider.GetRequiredService<ILoggerFactory>().CreateLogger<ParticipantHostBundle>();
     }
 
-    public string ParticipantName => _participantName;
-
-    public IReadOnlyList<IHostedService> HostedServices => _hostedServices;
+    /// <summary>Connectors resolved from this participant's SP, exposed for fault-target binding.</summary>
+    public IEnumerable<ISubjectConnector> Connectors => _hostedServices.OfType<ISubjectConnector>();
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {

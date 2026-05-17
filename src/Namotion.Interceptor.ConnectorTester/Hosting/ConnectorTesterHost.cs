@@ -107,7 +107,7 @@ public sealed class ConnectorTesterHost
             // Each participant owns a dedicated IServiceCollection / IServiceProvider so the
             // library's ILogger<T> resolution returns a participant-tagged logger. Mutation,
             // chaos, and verification engines stay in the main DI: they already create their
-            // loggers with explicit per-participant categories (e.g. "MutationEngine.client").
+            // loggers with explicit per-participant categories (e.g. "MutationEngine/client").
             var participantServices = new ServiceCollection();
             participantServices.AddSingleton<ILoggerFactory>(
                 new TaggingLoggerFactory(sharedLoggerFactory, participantConfiguration.Name));
@@ -137,10 +137,8 @@ public sealed class ConnectorTesterHost
 
             // PerformanceProfiler lives in the participant SP so its StopAsync runs before
             // the SP is disposed (which would invalidate the property-change subscription).
-            var capturedContext = context;
-            var capturedName = participantConfiguration.Name;
             participantServices.AddSingleton<IHostedService>(_ =>
-                new PerformanceProfiler(capturedContext, capturedName,
+                new PerformanceProfiler(context, participantConfiguration.Name,
                     configuration.MetricsReportingInterval, runDirectory, coordinator));
 
             var participantServiceProvider = participantServices.BuildServiceProvider();
@@ -150,7 +148,7 @@ public sealed class ConnectorTesterHost
 
             // Mutation engine stays in the main host so it shares the verification coordinator
             // graph; its logger category already encodes the participant name explicitly.
-            var mutationLogger = sharedLoggerFactory.CreateLogger($"MutationEngine.{participantConfiguration.Name}");
+            var mutationLogger = sharedLoggerFactory.CreateLogger($"MutationEngine/{participantConfiguration.Name}");
             var mutationEngine = configuration.NumberOfBatches > 0
                 ? MutationEngineHost.CreateBatch(root, participantConfiguration, coordinator, mutationLogger,
                     configuration.NumberOfBatches, participantConfiguration.Index)
@@ -173,7 +171,7 @@ public sealed class ConnectorTesterHost
                 continue;
             }
 
-            var chaosLogger = sharedLoggerFactory.CreateLogger($"ChaosEngine.{participantConfiguration.Name}");
+            var chaosLogger = sharedLoggerFactory.CreateLogger($"ChaosEngine/{participantConfiguration.Name}");
             var capturedConfiguration = participantConfiguration;
             builder.Services.AddSingleton<IHostedService>(serviceProvider =>
             {
@@ -214,9 +212,7 @@ public sealed class ConnectorTesterHost
         // Each ParticipantHostBundle already eagerly resolved its hosted services in its
         // constructor, so the connectors are constructed exactly once. Flatten them here for
         // the fault-target resolver.
-        var allConnectors = participantBundles
-            .SelectMany(b => b.HostedServices.OfType<ISubjectConnector>())
-            .ToList();
+        var allConnectors = participantBundles.SelectMany(b => b.Connectors).ToList();
         faultTargetResolver.Bind(participants, allConnectors);
 
         if (runModeSelection.Mode == RunMode.Verify)
