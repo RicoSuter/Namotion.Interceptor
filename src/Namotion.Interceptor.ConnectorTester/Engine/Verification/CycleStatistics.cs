@@ -45,11 +45,11 @@ public sealed class CycleStatistics
 
     private void Record(int cycleNumber, TimeSpan cycleDuration, TimeSpan convergeDuration, CycleResult result, string? profileName)
     {
-        WriteStatistics(cycleNumber, cycleDuration, convergeDuration, result);
+        WriteStatistics(cycleNumber, cycleDuration, convergeDuration, result, profileName);
         AppendCsvRows(cycleNumber, cycleDuration, convergeDuration, result, profileName);
     }
 
-    private void WriteStatistics(int cycleNumber, TimeSpan cycleDuration, TimeSpan convergeDuration, CycleResult result)
+    private void WriteStatistics(int cycleNumber, TimeSpan cycleDuration, TimeSpan convergeDuration, CycleResult result, string? profileName)
     {
         var totalMutations = _mutationEngines.Sum(engine => engine.ValueMutationCount);
         var totalChaos = _chaosEngines.Sum(engine => engine.ChaosEventCount);
@@ -57,11 +57,12 @@ public sealed class CycleStatistics
         _logger.LogInformation("""
             --- Cycle {Cycle} Statistics ---
             Duration: {CycleDuration:F0}s (converged in {ConvergeDuration:F1}s)
+            Chaos profile: {Profile}
             Total mutations: {TotalMutations:N0} | Total chaos events: {TotalChaos}
             Result: {Result}
             """,
             cycleNumber, cycleDuration.TotalSeconds, convergeDuration.TotalSeconds,
-            totalMutations, totalChaos, result);
+            profileName ?? "(none)", totalMutations, totalChaos, result);
 
         foreach (var engine in _mutationEngines)
         {
