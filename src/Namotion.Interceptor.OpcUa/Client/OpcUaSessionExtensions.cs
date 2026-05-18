@@ -199,15 +199,8 @@ internal static class OpcUaSessionExtensions
         }
         catch
         {
-            if (ReferenceEquals(continuationPoints, newContinuationPoints))
-            {
-                await ReleaseContinuationPointsAsync(session, continuationPoints, logger).ConfigureAwait(false);
-            }
-            else
-            {
-                await ReleaseContinuationPointsAsync(session, continuationPoints, logger).ConfigureAwait(false);
-                await ReleaseContinuationPointsAsync(session, newContinuationPoints, logger).ConfigureAwait(false);
-            }
+            await ReleaseContinuationPointsAsync(session, continuationPoints, logger).ConfigureAwait(false);
+            await ReleaseContinuationPointsAsync(session, newContinuationPoints, logger).ConfigureAwait(false);
             throw;
         }
 
@@ -227,18 +220,23 @@ internal static class OpcUaSessionExtensions
             return;
         }
 
-        try
+        var batchSize = GetMaxNodesPerBrowse(session);
+        for (var offset = 0; offset < continuationPoints.Count; offset += batchSize)
         {
-            var cpCollection = new ByteStringCollection(continuationPoints.Count);
-            foreach (var (_, continuationPoint) in continuationPoints)
+            try
             {
-                cpCollection.Add(continuationPoint);
+                var end = Math.Min(offset + batchSize, continuationPoints.Count);
+                var cpCollection = new ByteStringCollection(end - offset);
+                for (var i = offset; i < end; i++)
+                {
+                    cpCollection.Add(continuationPoints[i].ContinuationPoint);
+                }
+                await session.BrowseNextAsync(null, true, cpCollection, CancellationToken.None).ConfigureAwait(false);
             }
-            await session.BrowseNextAsync(null, true, cpCollection, CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            logger.LogDebug(ex, "Best-effort release of {Count} continuation points failed.", continuationPoints.Count);
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Best-effort release of continuation points failed at offset {Offset}.", offset);
+            }
         }
     }
 
