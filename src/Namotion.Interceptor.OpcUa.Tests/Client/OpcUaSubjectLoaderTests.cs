@@ -945,6 +945,150 @@ public class OpcUaSubjectLoaderTests
         Assert.Equal(5, ownership.Properties.Count());
     }
 
+    [Fact]
+    public async Task WhenSiblingSubjectsShareVariableNodeId_ThenBothGetAttributesLoaded()
+    {
+        // Arrange: two collection items (Items[0], Items[1]) each have a dynamic
+        // variable "SharedSensor" that points to the SAME OPC UA NodeId.
+        // SharedSensor has a child attribute "Quality".
+        // Both items' SharedSensor properties must get the Quality attribute loaded,
+        // not just the first one (regression: FilterUnvisitedNodes used to drop the
+        // second entry when it shared a NodeId with the first).
+        var collectionId = new NodeId(200, 2);
+        var item0Id = new NodeId(201, 2);
+        var item1Id = new NodeId(202, 2);
+        var sharedSensorId = new NodeId(5001, 2);
+        var qualityId = new NodeId(5002, 2);
+
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [new NodeId(1, 0)] =
+            [
+                CreateObjectReferenceDescription("Items", new ExpandedNodeId(collectionId))
+            ],
+            [collectionId] =
+            [
+                CreateObjectReferenceDescription("Items[0]", new ExpandedNodeId(item0Id)),
+                CreateObjectReferenceDescription("Items[1]", new ExpandedNodeId(item1Id))
+            ],
+            [item0Id] =
+            [
+                CreateTestReferenceDescription("SharedSensor", new ExpandedNodeId(sharedSensorId))
+            ],
+            [item1Id] =
+            [
+                CreateTestReferenceDescription("SharedSensor", new ExpandedNodeId(sharedSensorId))
+            ],
+            [sharedSensorId] =
+            [
+                CreateTestReferenceDescription("Quality", new ExpandedNodeId(qualityId))
+            ]
+        };
+
+        var mockSession = CreateMockSession();
+        SetupBrowseAsync(mockSession, browseTree);
+        SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId, int)>
+        {
+            [sharedSensorId] = (DataTypeIds.Double, -1),
+            [qualityId] = (DataTypeIds.Int32, -1)
+        });
+
+        var (loader, _) = CreateLoader(
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
+            shouldAddDynamicAttributes: (_, _) => Task.FromResult(true));
+
+        var subject = CreateTestSubject();
+        var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
+
+        // Act
+        var monitoredItems = await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: both collection items have a SharedSensor property with a Quality attribute
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+        var itemsProperty = registeredSubject.Properties.Single(p => p.Name == "Items");
+        var items = itemsProperty.GetValue() as DynamicSubject[];
+        Assert.NotNull(items);
+        Assert.Equal(2, items!.Length);
+
+        foreach (var item in items)
+        {
+            var itemRegistered = item.TryGetRegisteredSubject()!;
+            var sensorProperty = itemRegistered.Properties.Single(p => p.Name == "SharedSensor");
+            var qualityAttribute = sensorProperty.TryGetAttribute("Quality");
+            Assert.NotNull(qualityAttribute);
+        }
+    }
+
+    [Fact]
+    public async Task WhenServerRejectsBrowseBatch_ThenRetriesWithSmallerBatches()
+    {
+        // Arrange: server reports no limit (OperationLimits.MaxNodesPerBrowse = 0) but
+        // rejects any BrowseAsync call with more than 1 node via BadTooManyOperations.
+        // The loader must automatically split and retry until each batch fits.
+        var rootId = new NodeId(1, 0);
+        var var1Id = new NodeId(2001, 2);
+        var var2Id = new NodeId(2002, 2);
+
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [rootId] =
+            [
+                CreateTestReferenceDescription("Var1", new ExpandedNodeId(var1Id)),
+                CreateTestReferenceDescription("Var2", new ExpandedNodeId(var2Id))
+            ]
+        };
+
+        var mockSession = CreateMockSession();
+        // OperationLimits defaults to 0 (unlimited), but server actually rejects >1
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
+            {
+                if (browseDescriptions.Count > 1)
+                {
+                    throw new ServiceResultException(StatusCodes.BadTooManyOperations);
+                }
+
+                var results = new BrowseResultCollection();
+                foreach (var desc in browseDescriptions)
+                {
+                    var children = new ReferenceDescriptionCollection();
+                    if (browseTree.TryGetValue(desc.NodeId, out var refs))
+                    {
+                        children.AddRange(refs);
+                    }
+                    results.Add(new BrowseResult { References = children });
+                }
+                return new BrowseResponse { Results = results, DiagnosticInfos = [] };
+            });
+
+        SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId, int)>
+        {
+            [var1Id] = (DataTypeIds.Float, -1),
+            [var2Id] = (DataTypeIds.Double, -1)
+        });
+
+        var (loader, _) = CreateLoader(
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
+
+        var subject = CreateTestSubject();
+        var rootNode = CreateTestReferenceDescription("Root", rootId);
+
+        // Act
+        var monitoredItems = await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: both variables discovered despite server rejecting multi-node browse
+        Assert.Equal(2, monitoredItems.Count);
+        var monitoredNodeIds = monitoredItems.Select(m => m.StartNodeId).ToHashSet();
+        Assert.Contains(var1Id, monitoredNodeIds);
+        Assert.Contains(var2Id, monitoredNodeIds);
+    }
+
     private static ReferenceDescription CreateObjectReferenceDescription(string name, ExpandedNodeId nodeId)
     {
         return new ReferenceDescription

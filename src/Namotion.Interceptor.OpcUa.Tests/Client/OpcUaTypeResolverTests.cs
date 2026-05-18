@@ -102,10 +102,87 @@ public class OpcUaTypeResolverTests
         };
 
         var mockSession = CreateMockSession();
-        var mockTypeTable = new Mock<ITypeTable>();
-        mockSession.SetupGet(s => s.TypeTree).Returns(mockTypeTable.Object);
-        mockSession.SetupGet(s => s.OperationLimits).Returns(new OperationLimits());
+        SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId, int)>
+        {
+            [node1Id] = (DataTypeIds.Float, -1),
+            [node2Id] = (DataTypeIds.Int32, -1),
+            [node3Id] = (DataTypeIds.String, -1)
+        });
 
+        // Act
+        var result = await _resolver.ResolveVariableTypesAsync(mockSession.Object, variables, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(3, result.Count);
+        Assert.Equal(typeof(float), result[node1Id]);
+        Assert.Equal(typeof(int), result[node2Id]);
+        Assert.Equal(typeof(string), result[node3Id]);
+    }
+
+    [Fact]
+    public async Task WhenVariableHasCustomDataTypeSubtype_ThenWalksTypeTreeToBuiltInType()
+    {
+        // Arrange: a Variable whose DataType is a custom NodeId outside the built-in range.
+        // The session's TypeTree walks the custom DataType up to the well-known Double DataType.
+        var customDataTypeId = new NodeId(9001, 2);
+        var variableNodeId = new NodeId(2001, 2);
+
+        var mockTypeTable = new Mock<ITypeTable>();
+        mockTypeTable
+            .Setup(t => t.FindSuperTypeAsync(customDataTypeId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataTypeIds.Double);
+
+        var mockSession = CreateMockSession();
+        mockSession.SetupGet(s => s.TypeTree).Returns(mockTypeTable.Object);
+
+        mockSession
+            .Setup(s => s.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ReadResponse
+            {
+                Results =
+                [
+                    new DataValue { Value = customDataTypeId, StatusCode = StatusCodes.Good },
+                    new DataValue { Value = -1, StatusCode = StatusCodes.Good }
+                ],
+                DiagnosticInfos = []
+            });
+
+        var variables = new List<(NodeId NodeId, ReferenceDescription Reference)>
+        {
+            (variableNodeId, new ReferenceDescription
+            {
+                BrowseName = new QualifiedName("Temperature"),
+                NodeId = new ExpandedNodeId(variableNodeId),
+                NodeClass = NodeClass.Variable
+            })
+        };
+
+        // Act
+        var result = await _resolver.ResolveVariableTypesAsync(mockSession.Object, variables, CancellationToken.None);
+
+        // Assert
+        Assert.Equal(typeof(double), result[variableNodeId]);
+        mockTypeTable.Verify(
+            t => t.FindSuperTypeAsync(customDataTypeId, It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
+    }
+
+    private static Mock<ISession> CreateMockSession()
+    {
+        var mockSession = new Mock<ISession>();
+        mockSession.SetupGet(s => s.NamespaceUris).Returns(new NamespaceTable());
+        mockSession.SetupGet(s => s.TypeTree).Returns(new Mock<ITypeTable>().Object);
+        mockSession.SetupGet(s => s.OperationLimits).Returns(new OperationLimits());
+        return mockSession;
+    }
+
+    private static void SetupReadAsync(Mock<ISession> mockSession, Dictionary<NodeId, (NodeId DataTypeId, int ValueRank)> dataTypes)
+    {
         mockSession
             .Setup(s => s.ReadAsync(
                 It.IsAny<RequestHeader>(),
@@ -119,27 +196,18 @@ public class OpcUaTypeResolverTests
                 for (var i = 0; i < nodesToRead.Count; i += 2)
                 {
                     var nodeId = nodesToRead[i].NodeId;
-                    if (nodeId == node1Id) { results.Add(new DataValue { Value = DataTypeIds.Float, StatusCode = StatusCodes.Good }); results.Add(new DataValue { Value = -1, StatusCode = StatusCodes.Good }); }
-                    else if (nodeId == node2Id) { results.Add(new DataValue { Value = DataTypeIds.Int32, StatusCode = StatusCodes.Good }); results.Add(new DataValue { Value = -1, StatusCode = StatusCodes.Good }); }
-                    else if (nodeId == node3Id) { results.Add(new DataValue { Value = DataTypeIds.String, StatusCode = StatusCodes.Good }); results.Add(new DataValue { Value = -1, StatusCode = StatusCodes.Good }); }
+                    if (dataTypes.TryGetValue(nodeId, out var dt))
+                    {
+                        results.Add(new DataValue { Value = dt.DataTypeId, StatusCode = StatusCodes.Good });
+                        results.Add(new DataValue { Value = dt.ValueRank, StatusCode = StatusCodes.Good });
+                    }
+                    else
+                    {
+                        results.Add(new DataValue { StatusCode = StatusCodes.BadNodeIdUnknown });
+                        results.Add(new DataValue { StatusCode = StatusCodes.BadNodeIdUnknown });
+                    }
                 }
                 return new ReadResponse { Results = results, DiagnosticInfos = [] };
             });
-
-        // Act
-        var result = await _resolver.ResolveVariableTypesAsync(mockSession.Object, variables, CancellationToken.None);
-
-        // Assert
-        Assert.Equal(3, result.Count);
-        Assert.Equal(typeof(float), result[node1Id]);
-        Assert.Equal(typeof(int), result[node2Id]);
-        Assert.Equal(typeof(string), result[node3Id]);
-    }
-
-    private static Mock<ISession> CreateMockSession()
-    {
-        var mockSession = new Mock<ISession>();
-        mockSession.SetupGet(s => s.NamespaceUris).Returns(new NamespaceTable());
-        return mockSession;
     }
 }

@@ -112,8 +112,8 @@ internal class OpcUaSubjectLoader
             if (visitedNodes.Add(parentNodeId))
             {
                 nodeIds.Add(parentNodeId);
-                entries.Add((property, parentNodeId));
             }
+            entries.Add((property, parentNodeId));
         }
         return (nodeIds, entries);
     }
@@ -303,7 +303,7 @@ internal class OpcUaSubjectLoader
         // Step 2: Classify children, collect dynamic nodes
         var allDynamicObjectNodeIds = new List<NodeId>();
         var allDynamicVariableNodes = new List<(NodeId NodeId, ReferenceDescription Reference)>();
-        var subjectStates = new List<SubjectLoadState>(validSubjects.Count);
+        var subjectStates = new List<(IInterceptorSubject Subject, ReferenceDescription Node, RegisteredSubject RegisteredSubject, List<(ReferenceDescription Reference, NodeId ResolvedNodeId, RegisteredSubjectProperty? Property, bool NeedsDynamicType)> ChildEntries)>(validSubjects.Count);
 
         foreach (var (node, subject, registeredSubject, subjectNodeId) in validSubjects)
         {
@@ -317,7 +317,7 @@ internal class OpcUaSubjectLoader
                 allDynamicObjectNodeIds, allDynamicVariableNodes,
                 context.Session, context.CancellationToken).ConfigureAwait(false);
 
-            subjectStates.Add(new SubjectLoadState(subject, node, registeredSubject, childEntries));
+            subjectStates.Add((subject, node, registeredSubject, childEntries));
         }
 
         // Step 3: Batch resolve types (populates BrowseCache for reuse by Collections and next-level Subjects)
@@ -334,16 +334,16 @@ internal class OpcUaSubjectLoader
         var pendingCollections = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
         var pendingDictionaries = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
 
-        foreach (var state in subjectStates)
+        foreach (var (stateSubject, _, stateRegisteredSubject, stateChildEntries) in subjectStates)
         {
-            for (var i = 0; i < state.ChildEntries.Count; i++)
+            for (var i = 0; i < stateChildEntries.Count; i++)
             {
-                var (nodeReference, resolvedNodeId, property, needsDynamicType) = state.ChildEntries[i];
+                var (nodeReference, resolvedNodeId, property, needsDynamicType) = stateChildEntries[i];
 
                 if (needsDynamicType && property is null)
                 {
                     property = TryCreateDynamicProperty(
-                        state.RegisteredSubject, nodeReference, resolvedNodeId,
+                        stateRegisteredSubject, nodeReference, resolvedNodeId,
                         objectTypeMap, variableTypeMap, context.Session);
                 }
 
@@ -368,7 +368,7 @@ internal class OpcUaSubjectLoader
                     else
                     {
                         var result = await PrepareSubjectReferenceAsync(
-                            property, nodeReference, resolvedNodeId, state.Subject,
+                            property, nodeReference, resolvedNodeId, stateSubject,
                             context).ConfigureAwait(false);
 
                         if (result is not null)
@@ -766,12 +766,6 @@ internal class OpcUaSubjectLoader
         await LoadManySubjectsAsync(allChildrenToLoad, context).ConfigureAwait(false);
     }
 
-    private record SubjectLoadState(
-        IInterceptorSubject Subject,
-        ReferenceDescription Node,
-        RegisteredSubject RegisteredSubject,
-        List<(ReferenceDescription Reference, NodeId ResolvedNodeId, RegisteredSubjectProperty? Property, bool NeedsDynamicType)> ChildEntries);
-
     private Task<RegisteredSubjectProperty?> FindSubjectPropertyAsync(
         RegisteredSubject registeredSubject,
         ReferenceDescription nodeReference,
@@ -840,77 +834,139 @@ internal class OpcUaSubjectLoader
             result[nodeId] = new ReferenceDescriptionCollection();
         }
 
-        var batchSize = (int)(session.OperationLimits?.MaxNodesPerBrowse ?? 0);
-        if (batchSize <= 0) batchSize = 512;
+        var batchSize = SessionBatchLimits.GetMaxNodesPerBrowse(session);
 
         for (var offset = 0; offset < nodeIds.Count; offset += batchSize)
         {
             var end = Math.Min(offset + batchSize, nodeIds.Count);
-            var browseDescriptions = new BrowseDescriptionCollection(end - offset);
-            for (var i = offset; i < end; i++)
-            {
-                browseDescriptions.Add(new BrowseDescription
-                {
-                    NodeId = nodeIds[i],
-                    BrowseDirection = BrowseDirection.Forward,
-                    ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
-                    IncludeSubtypes = true,
-                    NodeClassMask = NodeClassMask,
-                    ResultMask = (uint)BrowseResultMask.All
-                });
-            }
+            await BrowseBatchAsync(nodeIds, offset, end, result, session, cancellationToken).ConfigureAwait(false);
+        }
 
-            var response = await session.BrowseAsync(
+        return result;
+    }
+
+    private async Task BrowseBatchAsync(
+        IReadOnlyList<NodeId> nodeIds,
+        int offset,
+        int end,
+        Dictionary<NodeId, ReferenceDescriptionCollection> result,
+        ISession session,
+        CancellationToken cancellationToken)
+    {
+        var count = end - offset;
+        var browseDescriptions = new BrowseDescriptionCollection(count);
+        for (var i = offset; i < end; i++)
+        {
+            browseDescriptions.Add(new BrowseDescription
+            {
+                NodeId = nodeIds[i],
+                BrowseDirection = BrowseDirection.Forward,
+                ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
+                IncludeSubtypes = true,
+                NodeClassMask = NodeClassMask,
+                ResultMask = (uint)BrowseResultMask.All
+            });
+        }
+
+        BrowseResponse response;
+        try
+        {
+            response = await session.BrowseAsync(
                 null, null,
                 _configuration.MaximumReferencesPerNode,
                 browseDescriptions,
                 cancellationToken).ConfigureAwait(false);
+        }
+        catch (ServiceResultException ex) when (count > 1 && SessionBatchLimits.IsBatchTooLarge(ex))
+        {
+            _logger.LogWarning(
+                "BrowseAsync rejected batch of {Count} nodes ({StatusCode}). Splitting into smaller batches.",
+                count, ex.StatusCode);
 
-            var continuationPoints = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
-            for (var i = 0; i < response.Results.Count; i++)
+            var mid = offset + count / 2;
+            await BrowseBatchAsync(nodeIds, offset, mid, result, session, cancellationToken).ConfigureAwait(false);
+            await BrowseBatchAsync(nodeIds, mid, end, result, session, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        var continuationPoints = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
+        for (var i = 0; i < response.Results.Count; i++)
+        {
+            var browseResult = response.Results[i];
+            var nodeId = nodeIds[offset + i];
+            if (StatusCode.IsGood(browseResult.StatusCode) && browseResult.References is { Count: > 0 })
             {
-                var browseResult = response.Results[i];
-                var nodeId = nodeIds[offset + i];
-                if (StatusCode.IsGood(browseResult.StatusCode) && browseResult.References is { Count: > 0 })
-                {
-                    result[nodeId].AddRange(browseResult.References);
-                }
-                if (browseResult.ContinuationPoint is { Length: > 0 })
-                {
-                    continuationPoints.Add((nodeId, browseResult.ContinuationPoint));
-                }
+                result[nodeId].AddRange(browseResult.References);
             }
-
-            while (continuationPoints.Count > 0)
+            if (browseResult.ContinuationPoint is { Length: > 0 })
             {
-                var cpCollection = new ByteStringCollection(continuationPoints.Count);
-                foreach (var (_, cp) in continuationPoints)
-                {
-                    cpCollection.Add(cp);
-                }
-
-                var nextResponse = await session.BrowseNextAsync(
-                    null, false, cpCollection, cancellationToken).ConfigureAwait(false);
-
-                var newContinuationPoints = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
-                for (var i = 0; i < nextResponse.Results.Count; i++)
-                {
-                    var browseResult = nextResponse.Results[i];
-                    var nodeId = continuationPoints[i].NodeId;
-                    if (StatusCode.IsGood(browseResult.StatusCode) && browseResult.References is { Count: > 0 })
-                    {
-                        result[nodeId].AddRange(browseResult.References);
-                    }
-                    if (browseResult.ContinuationPoint is { Length: > 0 })
-                    {
-                        newContinuationPoints.Add((nodeId, browseResult.ContinuationPoint));
-                    }
-                }
-
-                continuationPoints = newContinuationPoints;
+                continuationPoints.Add((nodeId, browseResult.ContinuationPoint));
             }
         }
 
-        return result;
+        await ProcessContinuationPointsAsync(continuationPoints, result, session, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task ProcessContinuationPointsAsync(
+        List<(NodeId NodeId, byte[] ContinuationPoint)> continuationPoints,
+        Dictionary<NodeId, ReferenceDescriptionCollection> result,
+        ISession session,
+        CancellationToken cancellationToken)
+    {
+        while (continuationPoints.Count > 0)
+        {
+            var newContinuationPoints = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
+            await BrowseNextBatchAsync(continuationPoints, 0, continuationPoints.Count, result, newContinuationPoints, session, cancellationToken).ConfigureAwait(false);
+            continuationPoints = newContinuationPoints;
+        }
+    }
+
+    private async Task BrowseNextBatchAsync(
+        List<(NodeId NodeId, byte[] ContinuationPoint)> continuationPoints,
+        int offset,
+        int end,
+        Dictionary<NodeId, ReferenceDescriptionCollection> result,
+        List<(NodeId NodeId, byte[] ContinuationPoint)> newContinuationPoints,
+        ISession session,
+        CancellationToken cancellationToken)
+    {
+        var count = end - offset;
+        var cpCollection = new ByteStringCollection(count);
+        for (var i = offset; i < end; i++)
+        {
+            cpCollection.Add(continuationPoints[i].ContinuationPoint);
+        }
+
+        BrowseNextResponse nextResponse;
+        try
+        {
+            nextResponse = await session.BrowseNextAsync(
+                null, false, cpCollection, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ServiceResultException ex) when (count > 1 && SessionBatchLimits.IsBatchTooLarge(ex))
+        {
+            _logger.LogWarning(
+                "BrowseNextAsync rejected batch of {Count} continuation points ({StatusCode}). Splitting into smaller batches.",
+                count, ex.StatusCode);
+
+            var mid = offset + count / 2;
+            await BrowseNextBatchAsync(continuationPoints, offset, mid, result, newContinuationPoints, session, cancellationToken).ConfigureAwait(false);
+            await BrowseNextBatchAsync(continuationPoints, mid, end, result, newContinuationPoints, session, cancellationToken).ConfigureAwait(false);
+            return;
+        }
+
+        for (var i = 0; i < nextResponse.Results.Count; i++)
+        {
+            var browseResult = nextResponse.Results[i];
+            var nodeId = continuationPoints[offset + i].NodeId;
+            if (StatusCode.IsGood(browseResult.StatusCode) && browseResult.References is { Count: > 0 })
+            {
+                result[nodeId].AddRange(browseResult.References);
+            }
+            if (browseResult.ContinuationPoint is { Length: > 0 })
+            {
+                newContinuationPoints.Add((nodeId, browseResult.ContinuationPoint));
+            }
+        }
     }
 }
