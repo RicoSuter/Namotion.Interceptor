@@ -172,6 +172,69 @@ public class OpcUaTypeResolverTests
             Times.AtLeastOnce);
     }
 
+    [Fact]
+    public async Task WhenServerRejectsReadBatch_ThenRetriesWithSmallerBatches()
+    {
+        // Arrange: server rejects any ReadAsync call with more than 2 ReadValueIds
+        var node1Id = new NodeId(6001, 2);
+        var node2Id = new NodeId(6002, 2);
+
+        var variables = new List<(NodeId NodeId, ReferenceDescription Reference)>
+        {
+            (node1Id, new ReferenceDescription { BrowseName = new QualifiedName("Temp"), NodeId = new ExpandedNodeId(node1Id), NodeClass = NodeClass.Variable }),
+            (node2Id, new ReferenceDescription { BrowseName = new QualifiedName("Count"), NodeId = new ExpandedNodeId(node2Id), NodeClass = NodeClass.Variable }),
+        };
+
+        var dataTypes = new Dictionary<NodeId, (NodeId DataTypeId, int ValueRank)>
+        {
+            [node1Id] = (DataTypeIds.Float, -1),
+            [node2Id] = (DataTypeIds.Int32, -1)
+        };
+
+        var mockSession = CreateMockSession();
+
+        mockSession
+            .Setup(s => s.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, double _, TimestampsToReturn _, ReadValueIdCollection nodesToRead, CancellationToken _) =>
+            {
+                // Reject batches larger than 2 ReadValueIds (= 1 variable with DataType + ValueRank)
+                if (nodesToRead.Count > 2)
+                {
+                    throw new ServiceResultException(StatusCodes.BadTooManyOperations);
+                }
+
+                var results = new DataValueCollection();
+                for (var i = 0; i < nodesToRead.Count; i += 2)
+                {
+                    var nodeId = nodesToRead[i].NodeId;
+                    if (dataTypes.TryGetValue(nodeId, out var dt))
+                    {
+                        results.Add(new DataValue { Value = dt.DataTypeId, StatusCode = StatusCodes.Good });
+                        results.Add(new DataValue { Value = dt.ValueRank, StatusCode = StatusCodes.Good });
+                    }
+                    else
+                    {
+                        results.Add(new DataValue { StatusCode = StatusCodes.BadNodeIdUnknown });
+                        results.Add(new DataValue { StatusCode = StatusCodes.BadNodeIdUnknown });
+                    }
+                }
+                return new ReadResponse { Results = results, DiagnosticInfos = [] };
+            });
+
+        // Act
+        var result = await _resolver.ResolveVariableTypesAsync(mockSession.Object, variables, CancellationToken.None);
+
+        // Assert: both variables resolved despite batch rejection
+        Assert.Equal(2, result.Count);
+        Assert.Equal(typeof(float), result[node1Id]);
+        Assert.Equal(typeof(int), result[node2Id]);
+    }
+
     private static Mock<ISession> CreateMockSession()
     {
         var mockSession = new Mock<ISession>();

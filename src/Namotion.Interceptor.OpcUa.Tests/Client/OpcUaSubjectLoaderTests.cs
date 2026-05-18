@@ -1089,6 +1089,161 @@ public class OpcUaSubjectLoaderTests
         Assert.Contains(var2Id, monitoredNodeIds);
     }
 
+    [Fact]
+    public async Task WhenBrowseReturnsContinuationPoints_ThenAllReferencesAreCollected()
+    {
+        // Arrange: the root node has 3 children but the server returns them across
+        // two pages (initial browse returns 2 + continuation point, BrowseNext returns 1).
+        var rootId = new NodeId(1, 0);
+        var var1Id = new NodeId(2001, 2);
+        var var2Id = new NodeId(2002, 2);
+        var var3Id = new NodeId(2003, 2);
+
+        var continuationToken = new byte[] { 0xCA, 0xFE };
+
+        var mockSession = CreateMockSession();
+
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
+            {
+                var results = new BrowseResultCollection();
+                foreach (var desc in browseDescriptions)
+                {
+                    if (desc.NodeId == rootId)
+                    {
+                        results.Add(new BrowseResult
+                        {
+                            References = new ReferenceDescriptionCollection
+                            {
+                                CreateTestReferenceDescription("Var1", new ExpandedNodeId(var1Id)),
+                                CreateTestReferenceDescription("Var2", new ExpandedNodeId(var2Id))
+                            },
+                            ContinuationPoint = continuationToken
+                        });
+                    }
+                    else
+                    {
+                        results.Add(new BrowseResult { References = new ReferenceDescriptionCollection() });
+                    }
+                }
+                return new BrowseResponse { Results = results, DiagnosticInfos = [] };
+            });
+
+        mockSession
+            .Setup(s => s.BrowseNextAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<bool>(),
+                It.IsAny<ByteStringCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BrowseNextResponse
+            {
+                Results =
+                [
+                    new BrowseResult
+                    {
+                        References = new ReferenceDescriptionCollection
+                        {
+                            CreateTestReferenceDescription("Var3", new ExpandedNodeId(var3Id))
+                        }
+                    }
+                ],
+                DiagnosticInfos = []
+            });
+
+        SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId, int)>
+        {
+            [var1Id] = (DataTypeIds.Float, -1),
+            [var2Id] = (DataTypeIds.Double, -1),
+            [var3Id] = (DataTypeIds.Int32, -1)
+        });
+
+        var (loader, _) = CreateLoader(
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
+
+        var subject = CreateTestSubject();
+        var rootNode = CreateTestReferenceDescription("Root", rootId);
+
+        // Act
+        var monitoredItems = await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: all 3 variables discovered (2 from initial + 1 from continuation)
+        Assert.Equal(3, monitoredItems.Count);
+        var monitoredNodeIds = monitoredItems.Select(m => m.StartNodeId).ToHashSet();
+        Assert.Contains(var1Id, monitoredNodeIds);
+        Assert.Contains(var2Id, monitoredNodeIds);
+        Assert.Contains(var3Id, monitoredNodeIds);
+    }
+
+    [Fact]
+    public async Task WhenDynamicCollectionHasMultipleItems_ThenCollectionPropertyIsCreated()
+    {
+        // Arrange: an Object node's children use bracket-integer naming (e.g., "Item[0]")
+        // which classifies the parent as DynamicSubject[] (collection).
+        var itemsId = new NodeId(300, 2);
+        var item0Id = new NodeId(301, 2);
+        var item1Id = new NodeId(302, 2);
+        var item0ValueId = new NodeId(311, 2);
+        var item1ValueId = new NodeId(312, 2);
+
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [new NodeId(1, 0)] =
+            [
+                CreateObjectReferenceDescription("Items", new ExpandedNodeId(itemsId))
+            ],
+            [itemsId] =
+            [
+                CreateObjectReferenceDescription("Item[0]", new ExpandedNodeId(item0Id)),
+                CreateObjectReferenceDescription("Item[1]", new ExpandedNodeId(item1Id))
+            ],
+            [item0Id] = [CreateTestReferenceDescription("Value", new ExpandedNodeId(item0ValueId))],
+            [item1Id] = [CreateTestReferenceDescription("Value", new ExpandedNodeId(item1ValueId))]
+        };
+
+        var mockSession = CreateMockSession();
+        SetupBrowseAsync(mockSession, browseTree);
+        SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId, int)>
+        {
+            [item0ValueId] = (DataTypeIds.Float, -1),
+            [item1ValueId] = (DataTypeIds.Float, -1)
+        });
+
+        var (loader, _) = CreateLoader(
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
+
+        var subject = CreateTestSubject();
+        var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
+
+        // Act
+        var monitoredItems = await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: Items is a collection with 2 entries
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+        var itemsProperty = registeredSubject.Properties.Single(p => p.Name == "Items");
+        Assert.Equal(typeof(DynamicSubject[]), itemsProperty.Type);
+
+        var collection = itemsProperty.GetValue() as DynamicSubject[];
+        Assert.NotNull(collection);
+        Assert.Equal(2, collection!.Length);
+
+        // Assert: each item has a Value property of type float
+        foreach (var item in collection)
+        {
+            var itemRegistered = item.TryGetRegisteredSubject()!;
+            var valueProperty = itemRegistered.Properties.Single(p => p.Name == "Value");
+            Assert.Equal(typeof(float), valueProperty.Type);
+        }
+
+        // Assert: 2 monitored items (one per item Value)
+        Assert.Equal(2, monitoredItems.Count);
+    }
+
     private static ReferenceDescription CreateObjectReferenceDescription(string name, ExpandedNodeId nodeId)
     {
         return new ReferenceDescription
