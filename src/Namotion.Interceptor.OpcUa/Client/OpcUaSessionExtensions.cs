@@ -8,6 +8,23 @@ internal static class OpcUaSessionExtensions
 {
     private const uint NodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object;
 
+    private static int GetMaxNodesPerBrowse(ISession session)
+    {
+        var limit = session.OperationLimits?.MaxNodesPerBrowse ?? 0;
+        return limit > 0 ? (int)limit : int.MaxValue;
+    }
+
+    private static int GetMaxNodesPerRead(ISession session)
+    {
+        var limit = session.OperationLimits?.MaxNodesPerRead ?? 0;
+        return limit > 0 ? (int)limit : int.MaxValue;
+    }
+
+    private static bool IsBatchTooLarge(ServiceResultException exception) =>
+        exception.StatusCode == StatusCodes.BadTooManyOperations ||
+        exception.StatusCode == StatusCodes.BadEncodingLimitsExceeded ||
+        exception.StatusCode == StatusCodes.BadResponseTooLarge;
+
     public static async Task<Dictionary<NodeId, ReferenceDescriptionCollection>> BrowseNodesAsync(
         this ISession session,
         IReadOnlyList<NodeId> nodeIds,
@@ -26,7 +43,7 @@ internal static class OpcUaSessionExtensions
             result[nodeId] = new ReferenceDescriptionCollection();
         }
 
-        var batchSize = SessionBatchLimits.GetMaxNodesPerBrowse(session);
+        var batchSize = GetMaxNodesPerBrowse(session);
 
         for (var offset = 0; offset < nodeIds.Count; offset += batchSize)
         {
@@ -49,7 +66,7 @@ internal static class OpcUaSessionExtensions
             return allResults;
         }
 
-        var maxBatchSize = SessionBatchLimits.GetMaxNodesPerRead(session);
+        var maxBatchSize = GetMaxNodesPerRead(session);
         await ReadBatchAsync(session, nodesToRead, 0, nodesToRead.Count, maxBatchSize, allResults, logger, cancellationToken).ConfigureAwait(false);
         return allResults;
     }
@@ -118,7 +135,7 @@ internal static class OpcUaSessionExtensions
                 browseDescriptions,
                 cancellationToken).ConfigureAwait(false);
         }
-        catch (ServiceResultException ex) when (count > 1 && SessionBatchLimits.IsBatchTooLarge(ex))
+        catch (ServiceResultException ex) when (count > 1 && IsBatchTooLarge(ex))
         {
             logger.LogWarning(
                 "BrowseAsync rejected batch of {Count} nodes ({StatusCode}). Splitting into smaller batches.",
@@ -186,7 +203,7 @@ internal static class OpcUaSessionExtensions
             nextResponse = await session.BrowseNextAsync(
                 null, false, cpCollection, cancellationToken).ConfigureAwait(false);
         }
-        catch (ServiceResultException ex) when (count > 1 && SessionBatchLimits.IsBatchTooLarge(ex))
+        catch (ServiceResultException ex) when (count > 1 && IsBatchTooLarge(ex))
         {
             logger.LogWarning(
                 "BrowseNextAsync rejected batch of {Count} continuation points ({StatusCode}). Splitting into smaller batches.",
@@ -238,7 +255,7 @@ internal static class OpcUaSessionExtensions
             {
                 response = await session.ReadAsync(null, 0, TimestampsToReturn.Neither, chunk, cancellationToken).ConfigureAwait(false);
             }
-            catch (ServiceResultException ex) when (count > 2 && SessionBatchLimits.IsBatchTooLarge(ex))
+            catch (ServiceResultException ex) when (count > 2 && IsBatchTooLarge(ex))
             {
                 logger.LogWarning(
                     "ReadAsync rejected batch of {Count} items ({StatusCode}). Splitting into smaller batches.",
