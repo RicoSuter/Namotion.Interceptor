@@ -139,6 +139,39 @@ public class DetachCleanupTests
     }
 
     [Fact]
+    public void WhenInlineFirstParentIsRemoved_ThenSurvivingParentsRetainInsertionOrder()
+    {
+        // Arrange: shared child referenced by 3 distinct property slots, attached in
+        // source order: Father (inline _firstParent), Mother, then via Children[0].
+        var context = InterceptorSubjectContext
+            .Create()
+            .WithRegistry();
+
+        var shared = new Person { FirstName = "Shared" };
+        var root = new Person(context)
+        {
+            FirstName = "Root",
+            Father = shared,
+            Mother = shared,
+            Children = [shared]
+        };
+
+        var sharedRegistered = shared.TryGetRegisteredSubject()!;
+        Assert.Equal(
+            new[] { nameof(Person.Father), nameof(Person.Mother), nameof(Person.Children) },
+            sharedRegistered.Parents.Select(p => p.Property.Name).ToArray());
+
+        // Act: remove the inline first parent, forcing promotion from the overflow list.
+        root.Father = null;
+
+        // Assert: survivors keep their insertion order. A tail-pop promotion would
+        // have inverted this to [Children, Mother].
+        Assert.Equal(
+            new[] { nameof(Person.Mother), nameof(Person.Children) },
+            sharedRegistered.Parents.Select(p => p.Property.Name).ToArray());
+    }
+
+    [Fact]
     public void WhenOneParentDetaches_ThenDetachedParentPropertyChildrenIsCleared()
     {
         // Arrange: shared child referenced by two parents

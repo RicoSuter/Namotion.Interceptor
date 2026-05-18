@@ -167,7 +167,7 @@ public class RegisteredSubject
             var entry = new SubjectPropertyParent { Property = parent, Index = index };
             if (_firstParent.Property is not null && _firstParent.Equals(entry))
             {
-                PromoteLastFromAdditional();
+                PromoteFirstFromAdditional();
                 return;
             }
 
@@ -183,10 +183,6 @@ public class RegisteredSubject
         }
     }
 
-    // Called only during context-detach cleanup before the subject is dropped from
-    // the registry, so the order of any remaining (non-matching) entries is not
-    // observable to callers — we use that freedom to promote-from-tail when the
-    // inline slot matches.
     internal void RemoveParentsByProperty(RegisteredSubjectProperty parent)
     {
         lock (_lock)
@@ -207,7 +203,7 @@ public class RegisteredSubject
 
             if (_firstParent.Property == parent)
             {
-                PromoteLastFromAdditional();
+                PromoteFirstFromAdditional();
                 changed = true;
             }
 
@@ -242,15 +238,15 @@ public class RegisteredSubject
         }
     }
 
-    // Clears the inline first-parent slot, O(1) tail-pop promoting from overflow if any,
-    // and invalidates the snapshot. Caller must hold _lock.
-    private void PromoteLastFromAdditional()
+    // Clears the inline first-parent slot, promoting the head of the overflow list if
+    // any so insertion order of survivors is preserved (matches the original
+    // ImmutableArray.Remove semantics). Caller must hold _lock.
+    private void PromoteFirstFromAdditional()
     {
         if (_additionalParents is not null && _additionalParents.Count > 0)
         {
-            var lastIndex = _additionalParents.Count - 1;
-            _firstParent = _additionalParents[lastIndex];
-            _additionalParents.RemoveAt(lastIndex);
+            _firstParent = _additionalParents[0];
+            _additionalParents.RemoveAt(0);
         }
         else
         {
