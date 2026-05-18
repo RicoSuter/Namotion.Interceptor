@@ -7,6 +7,7 @@ namespace Namotion.Interceptor.OpcUa.Client;
 internal static class OpcUaSessionExtensions
 {
     private const uint NodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object;
+    private const int MaxContinuationRounds = 100;
 
     private static int GetMaxNodesPerBrowse(ISession session)
     {
@@ -172,11 +173,72 @@ internal static class OpcUaSessionExtensions
         ILogger logger,
         CancellationToken cancellationToken)
     {
-        while (continuationPoints.Count > 0)
+        var batchSize = GetMaxNodesPerBrowse(session);
+        var round = 0;
+        List<(NodeId NodeId, byte[] ContinuationPoint)> newContinuationPoints = [];
+        try
         {
-            var newContinuationPoints = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
-            await BrowseNextBatchAsync(session, continuationPoints, 0, continuationPoints.Count, result, newContinuationPoints, logger, cancellationToken).ConfigureAwait(false);
-            continuationPoints = newContinuationPoints;
+            while (continuationPoints.Count > 0)
+            {
+                if (++round > MaxContinuationRounds)
+                {
+                    logger.LogWarning(
+                        "Aborting BrowseNext after {MaxRounds} rounds with {Remaining} continuation points still pending. Possible server bug.",
+                        MaxContinuationRounds, continuationPoints.Count);
+                    break;
+                }
+
+                newContinuationPoints = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
+                for (var offset = 0; offset < continuationPoints.Count; offset += batchSize)
+                {
+                    var end = Math.Min(offset + batchSize, continuationPoints.Count);
+                    await BrowseNextBatchAsync(session, continuationPoints, offset, end, result, newContinuationPoints, logger, cancellationToken).ConfigureAwait(false);
+                }
+                continuationPoints = newContinuationPoints;
+            }
+        }
+        catch
+        {
+            if (ReferenceEquals(continuationPoints, newContinuationPoints))
+            {
+                await ReleaseContinuationPointsAsync(session, continuationPoints, logger).ConfigureAwait(false);
+            }
+            else
+            {
+                await ReleaseContinuationPointsAsync(session, continuationPoints, logger).ConfigureAwait(false);
+                await ReleaseContinuationPointsAsync(session, newContinuationPoints, logger).ConfigureAwait(false);
+            }
+            throw;
+        }
+
+        if (continuationPoints.Count > 0)
+        {
+            await ReleaseContinuationPointsAsync(session, continuationPoints, logger).ConfigureAwait(false);
+        }
+    }
+
+    private static async Task ReleaseContinuationPointsAsync(
+        ISession session,
+        List<(NodeId NodeId, byte[] ContinuationPoint)> continuationPoints,
+        ILogger logger)
+    {
+        if (continuationPoints.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var cpCollection = new ByteStringCollection(continuationPoints.Count);
+            foreach (var (_, continuationPoint) in continuationPoints)
+            {
+                cpCollection.Add(continuationPoint);
+            }
+            await session.BrowseNextAsync(null, true, cpCollection, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Best-effort release of {Count} continuation points failed.", continuationPoints.Count);
         }
     }
 

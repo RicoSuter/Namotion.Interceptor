@@ -1181,6 +1181,144 @@ public class OpcUaSubjectLoaderTests
     }
 
     [Fact]
+    public async Task WhenBrowseNextRejectsBatch_ThenRetriesWithSmallerBatches()
+    {
+        // Arrange: two dynamic variable nodes each have a continuation point on initial
+        // browse (phase 5 / LoadAttributeNodesForManyAsync). The server rejects any
+        // BrowseNextAsync call with more than 1 continuation point, forcing a split-and-retry.
+        var rootId = new NodeId(1, 0);
+        var var1Id = new NodeId(2001, 2);
+        var var2Id = new NodeId(2002, 2);
+        var attr1Id = new NodeId(3001, 2);
+        var attr2Id = new NodeId(3002, 2);
+
+        var continuationToken1 = new byte[] { 0x01 };
+        var continuationToken2 = new byte[] { 0x02 };
+
+        var mockSession = CreateMockSession();
+
+        // BrowseAsync: root returns Var1+Var2; Var1 and Var2 each return no immediate
+        // children but carry a continuation point that yields one attribute child each.
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
+            {
+                var results = new BrowseResultCollection();
+                foreach (var desc in browseDescriptions)
+                {
+                    if (desc.NodeId == rootId)
+                    {
+                        results.Add(new BrowseResult
+                        {
+                            References = new ReferenceDescriptionCollection
+                            {
+                                CreateTestReferenceDescription("Var1", new ExpandedNodeId(var1Id)),
+                                CreateTestReferenceDescription("Var2", new ExpandedNodeId(var2Id))
+                            }
+                        });
+                    }
+                    else if (desc.NodeId == var1Id)
+                    {
+                        results.Add(new BrowseResult
+                        {
+                            References = new ReferenceDescriptionCollection(),
+                            ContinuationPoint = continuationToken1
+                        });
+                    }
+                    else if (desc.NodeId == var2Id)
+                    {
+                        results.Add(new BrowseResult
+                        {
+                            References = new ReferenceDescriptionCollection(),
+                            ContinuationPoint = continuationToken2
+                        });
+                    }
+                    else
+                    {
+                        results.Add(new BrowseResult { References = new ReferenceDescriptionCollection() });
+                    }
+                }
+                return new BrowseResponse { Results = results, DiagnosticInfos = [] };
+            });
+
+        // BrowseNextAsync: reject batches > 1, return one attribute child per variable
+        mockSession
+            .Setup(s => s.BrowseNextAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<bool>(),
+                It.IsAny<ByteStringCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, bool _, ByteStringCollection continuationPoints, CancellationToken _) =>
+            {
+                if (continuationPoints.Count > 1)
+                {
+                    throw new ServiceResultException(StatusCodes.BadTooManyOperations);
+                }
+
+                var results = new BrowseResultCollection();
+                foreach (var cp in continuationPoints)
+                {
+                    if (cp.SequenceEqual(continuationToken1))
+                    {
+                        results.Add(new BrowseResult
+                        {
+                            References = new ReferenceDescriptionCollection
+                            {
+                                CreateTestReferenceDescription("Attr1", new ExpandedNodeId(attr1Id))
+                            }
+                        });
+                    }
+                    else if (cp.SequenceEqual(continuationToken2))
+                    {
+                        results.Add(new BrowseResult
+                        {
+                            References = new ReferenceDescriptionCollection
+                            {
+                                CreateTestReferenceDescription("Attr2", new ExpandedNodeId(attr2Id))
+                            }
+                        });
+                    }
+                    else
+                    {
+                        results.Add(new BrowseResult { References = new ReferenceDescriptionCollection() });
+                    }
+                }
+                return new BrowseNextResponse { Results = results, DiagnosticInfos = [] };
+            });
+
+        SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId, int)>
+        {
+            [var1Id] = (DataTypeIds.Float, -1),
+            [var2Id] = (DataTypeIds.Double, -1),
+            [attr1Id] = (DataTypeIds.Int32, -1),
+            [attr2Id] = (DataTypeIds.String, -1)
+        });
+
+        var (loader, _) = CreateLoader(
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
+            shouldAddDynamicAttributes: (_, _) => Task.FromResult(true));
+
+        var subject = CreateTestSubject();
+        var rootNode = CreateTestReferenceDescription("Root", rootId);
+
+        // Act
+        var monitoredItems = await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: all 4 nodes monitored (2 variables + 2 attribute children from continuation)
+        Assert.Equal(4, monitoredItems.Count);
+        var monitoredNodeIds = monitoredItems.Select(m => m.StartNodeId).ToHashSet();
+        Assert.Contains(var1Id, monitoredNodeIds);
+        Assert.Contains(var2Id, monitoredNodeIds);
+        Assert.Contains(attr1Id, monitoredNodeIds);
+        Assert.Contains(attr2Id, monitoredNodeIds);
+    }
+
+    [Fact]
     public async Task WhenDynamicCollectionHasMultipleItems_ThenCollectionPropertyIsCreated()
     {
         // Arrange: an Object node's children use bracket-integer naming (e.g., "Item[0]")

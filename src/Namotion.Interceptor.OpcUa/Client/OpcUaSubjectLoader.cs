@@ -54,7 +54,7 @@ internal class OpcUaSubjectLoader
             new Dictionary<NodeId, IInterceptorSubject>(),
             cancellationToken);
 
-        await LoadManySubjectsAsync([(node, subject)], context).ConfigureAwait(false);
+        await LoadSubjectsAsync([(node, subject)], context).ConfigureAwait(false);
         return context.MonitoredItems;
     }
 
@@ -282,7 +282,7 @@ internal class OpcUaSubjectLoader
         return children;
     }
 
-    private async Task LoadManySubjectsAsync(
+    private async Task LoadSubjectsAsync(
         IReadOnlyList<(ReferenceDescription Node, IInterceptorSubject Subject)> subjects,
         LoadContext context)
     {
@@ -301,7 +301,7 @@ internal class OpcUaSubjectLoader
         // Step 2: Classify children, collect dynamic nodes
         var allDynamicObjectNodeIds = new List<NodeId>();
         var allDynamicVariableNodes = new List<ReferenceDescription>();
-        var subjectStates = new List<(IInterceptorSubject Subject, ReferenceDescription Node, RegisteredSubject RegisteredSubject, List<(ReferenceDescription Reference, NodeId ResolvedNodeId, RegisteredSubjectProperty? Property, bool NeedsDynamicType)> ChildEntries)>(validSubjects.Count);
+        var subjectStates = new List<(IInterceptorSubject Subject, RegisteredSubject RegisteredSubject, List<(ReferenceDescription Reference, NodeId ResolvedNodeId, RegisteredSubjectProperty? Property, bool NeedsDynamicType)> ChildEntries)>(validSubjects.Count);
 
         foreach (var (node, subject, registeredSubject, subjectNodeId) in validSubjects)
         {
@@ -315,7 +315,7 @@ internal class OpcUaSubjectLoader
                 allDynamicObjectNodeIds, allDynamicVariableNodes,
                 context.Session, context.CancellationToken).ConfigureAwait(false);
 
-            subjectStates.Add((subject, node, registeredSubject, childEntries));
+            subjectStates.Add((subject, registeredSubject, childEntries));
         }
 
         // Step 3: Batch resolve types (populates BrowseCache for reuse by Collections and next-level Subjects)
@@ -325,14 +325,23 @@ internal class OpcUaSubjectLoader
             ? await _configuration.TypeResolver.ResolveVariableTypesAsync(context.Session, allDynamicVariableNodes, context.CancellationToken).ConfigureAwait(false)
             : (IReadOnlyDictionary<NodeId, Type?>)new Dictionary<NodeId, Type?>();
 
-        // Step 4: Classify children into batches
+        // Step 4: Dispatch properties and load children
+        await LoadChildPropertiesAsync(subjectStates, objectTypeMap, variableTypeMap, context).ConfigureAwait(false);
+    }
+
+    private async Task LoadChildPropertiesAsync(
+        List<(IInterceptorSubject Subject, RegisteredSubject RegisteredSubject, List<(ReferenceDescription Reference, NodeId ResolvedNodeId, RegisteredSubjectProperty? Property, bool NeedsDynamicType)> ChildEntries)> subjectStates,
+        Dictionary<NodeId, Type> objectTypeMap,
+        IReadOnlyDictionary<NodeId, Type?> variableTypeMap,
+        LoadContext context)
+    {
         var allAttributeVariableNodes = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
         var allPendingSubjectRefs = new List<(RegisteredSubjectProperty Property, ReferenceDescription NodeReference, NodeId ResolvedNodeId, IInterceptorSubject SubjectToLoad, bool IsNew)>();
         var pendingVariableNodes = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
         var pendingCollections = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
         var pendingDictionaries = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
 
-        foreach (var (stateSubject, _, stateRegisteredSubject, stateChildEntries) in subjectStates)
+        foreach (var (stateSubject, stateRegisteredSubject, stateChildEntries) in subjectStates)
         {
             for (var i = 0; i < stateChildEntries.Count; i++)
             {
@@ -392,16 +401,9 @@ internal class OpcUaSubjectLoader
             }
         }
 
-        // Step 4b: Batch-load variable nodes
         await BatchLoadVariableNodesAsync(pendingVariableNodes, context).ConfigureAwait(false);
-
-        // Step 4c: Batch-load collections and dictionaries
         await BatchLoadCollectionsAndDictionariesAsync(pendingCollections, pendingDictionaries, context).ConfigureAwait(false);
-
-        // Step 4d: Batch-load pending subject references
         await LoadPendingSubjectReferencesAsync(allPendingSubjectRefs, context).ConfigureAwait(false);
-
-        // Step 5: Batch attribute browsing
         await LoadAttributeNodesForManyAsync(allAttributeVariableNodes, context).ConfigureAwait(false);
     }
 
@@ -615,7 +617,7 @@ internal class OpcUaSubjectLoader
         {
             refsToLoad.Add((nodeReference, subjectToLoad));
         }
-        await LoadManySubjectsAsync(refsToLoad, context).ConfigureAwait(false);
+        await LoadSubjectsAsync(refsToLoad, context).ConfigureAwait(false);
 
         foreach (var (property, _, _, subjectToLoad, isNew) in pendingRefs)
         {
@@ -761,7 +763,7 @@ internal class OpcUaSubjectLoader
             allChildrenToLoad.AddRange(children);
         }
 
-        await LoadManySubjectsAsync(allChildrenToLoad, context).ConfigureAwait(false);
+        await LoadSubjectsAsync(allChildrenToLoad, context).ConfigureAwait(false);
     }
 
     private Task<RegisteredSubjectProperty?> FindSubjectPropertyAsync(
@@ -786,5 +788,4 @@ internal class OpcUaSubjectLoader
 
         monitoredItems.Add(monitoredItem);
     }
-
 }

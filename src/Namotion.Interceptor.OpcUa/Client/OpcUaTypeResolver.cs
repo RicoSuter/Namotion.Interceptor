@@ -1,5 +1,4 @@
-﻿using System.Collections.Concurrent;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Dynamic;
 using Namotion.Interceptor.OpcUa.Attributes;
@@ -11,7 +10,6 @@ namespace Namotion.Interceptor.OpcUa.Client;
 public class OpcUaTypeResolver
 {
     private readonly ILogger _logger;
-    private readonly ConcurrentDictionary<(string NamespaceUri, object Identifier), Type?> _typeCache = new();
 
     public OpcUaTypeResolver(ILogger logger)
     {
@@ -66,33 +64,23 @@ public class OpcUaTypeResolver
             return result;
         }
 
-        var uncachedVariables = new List<(NodeId NodeId, ReferenceDescription Reference)>(variables.Count);
+        var resolvedVariables = new List<(NodeId NodeId, ReferenceDescription Reference)>(variables.Count);
         foreach (var reference in variables)
         {
             var nodeId = ExpandedNodeId.ToNodeId(reference.NodeId, session.NamespaceUris);
-            if (nodeId is null)
+            if (nodeId is not null)
             {
-                continue;
-            }
-
-            var cacheKey = GetCacheKey(reference, session);
-            if (_typeCache.TryGetValue(cacheKey, out var cachedType))
-            {
-                result[nodeId] = cachedType;
-            }
-            else
-            {
-                uncachedVariables.Add((nodeId, reference));
+                resolvedVariables.Add((nodeId, reference));
             }
         }
 
-        if (uncachedVariables.Count == 0)
+        if (resolvedVariables.Count == 0)
         {
             return result;
         }
 
-        var nodesToRead = new ReadValueIdCollection(uncachedVariables.Count * 2);
-        foreach (var (nodeId, _) in uncachedVariables)
+        var nodesToRead = new ReadValueIdCollection(resolvedVariables.Count * 2);
+        foreach (var (nodeId, _) in resolvedVariables)
         {
             nodesToRead.Add(new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.DataType });
             nodesToRead.Add(new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.ValueRank });
@@ -100,9 +88,9 @@ public class OpcUaTypeResolver
 
         var allResults = await session.ReadNodesAsync(nodesToRead, _logger, cancellationToken).ConfigureAwait(false);
 
-        for (var i = 0; i < uncachedVariables.Count; i++)
+        for (var i = 0; i < resolvedVariables.Count; i++)
         {
-            var (nodeId, reference) = uncachedVariables[i];
+            var (nodeId, reference) = resolvedVariables[i];
             var dataTypeIndex = i * 2;
             var valueRankIndex = dataTypeIndex + 1;
 
@@ -130,8 +118,6 @@ public class OpcUaTypeResolver
                 _logger.LogDebug(ex, "Failed to infer CLR type for node {BrowseName}", reference.BrowseName.Name);
             }
 
-            var cacheKey = GetCacheKey(reference, session);
-            _typeCache.TryAdd(cacheKey, type);
             result[nodeId] = type;
         }
 
@@ -172,7 +158,4 @@ public class OpcUaTypeResolver
         BuiltInType.Null => null,
         _ => null
     };
-
-    private static (string NamespaceUri, object Identifier) GetCacheKey(ReferenceDescription reference, ISession session) =>
-        (reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex), reference.NodeId.Identifier);
 }
