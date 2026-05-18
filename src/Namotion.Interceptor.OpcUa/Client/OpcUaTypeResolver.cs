@@ -60,7 +60,6 @@ public class OpcUaTypeResolver
         IReadOnlyList<(NodeId NodeId, ReferenceDescription Reference)> variables,
         CancellationToken cancellationToken)
     {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
         var result = new Dictionary<NodeId, Type?>(variables.Count);
         if (variables.Count == 0)
         {
@@ -136,7 +135,6 @@ public class OpcUaTypeResolver
             result[nodeId] = type;
         }
 
-        _logger.LogInformation("ResolveVariableTypesAsync: {Count} variables resolved in {ElapsedMs}ms", variables.Count, sw.ElapsedMilliseconds);
         return result;
     }
 
