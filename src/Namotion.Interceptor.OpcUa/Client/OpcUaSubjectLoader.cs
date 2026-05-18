@@ -232,7 +232,7 @@ internal class OpcUaSubjectLoader
             var children = objectBrowseResults.TryGetValue(nodeId, out var c)
                 ? c
                 : new ReferenceDescriptionCollection();
-            objectTypeMap[nodeId] = OpcUaTypeResolver.ResolveObjectNodeType(children);
+            objectTypeMap[nodeId] = _configuration.TypeResolver.ResolveObjectNodeType(children);
             context.BrowseCache[nodeId] = children;
         }
 

@@ -29,7 +29,7 @@ public class OpcUaTypeResolver
         ];
     }
 
-    internal static Type ResolveObjectNodeType(IReadOnlyList<ReferenceDescription> children)
+    public virtual Type ResolveObjectNodeType(IReadOnlyList<ReferenceDescription> children)
     {
         if (children.Count > 0 && children[0].NodeClass == NodeClass.Object)
         {
@@ -124,7 +124,7 @@ public class OpcUaTypeResolver
         return result;
     }
 
-    private static Type? TryMapBuiltInType(BuiltInType builtInType) => builtInType switch
+    protected virtual Type? TryMapBuiltInType(BuiltInType builtInType) => builtInType switch
     {
         BuiltInType.Boolean => typeof(bool),
         BuiltInType.SByte => typeof(sbyte),
