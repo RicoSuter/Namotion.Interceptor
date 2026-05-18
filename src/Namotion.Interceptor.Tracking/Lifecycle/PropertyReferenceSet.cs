@@ -29,7 +29,7 @@ internal struct PropertyReferenceSet
             return false;
         }
 
-        Additional ??= new HashSet<PropertyReference>();
+        Additional ??= new HashSet<PropertyReference>(PropertyReference.Comparer);
         return Additional.Add(propertyRef);
     }
 
@@ -44,6 +44,9 @@ internal struct PropertyReferenceSet
             }
 
             // Promote an arbitrary element from Additional into the First slot.
+            // Set semantics: callers only Add/Remove/check IsEmpty, never iterate,
+            // so promotion order does not matter. foreach-break avoids the enumerator
+            // heap allocation that Enumerable.First() would incur.
             PropertyReference promoted = default;
             foreach (var item in Additional)
             {

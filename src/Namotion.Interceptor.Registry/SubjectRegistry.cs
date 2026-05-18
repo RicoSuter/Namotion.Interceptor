@@ -14,22 +14,25 @@ public class SubjectRegistry : ISubjectRegistry, ISubjectIdRegistry, ISubjectIdR
     /// <inheritdoc />
     public IReadOnlyDictionary<IInterceptorSubject, RegisteredSubject> KnownSubjects
     {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
             var snapshot = Volatile.Read(ref _knownSubjectsSnapshot);
+            return snapshot ?? GetKnownSubjectsSlow();
+        }
+    }
+
+    private ImmutableDictionary<IInterceptorSubject, RegisteredSubject> GetKnownSubjectsSlow()
+    {
+        lock (_knownSubjects)
+        {
+            var snapshot = _knownSubjectsSnapshot;
             if (snapshot is not null)
                 return snapshot;
 
-            lock (_knownSubjects)
-            {
-                snapshot = _knownSubjectsSnapshot;
-                if (snapshot is not null)
-                    return snapshot;
-
-                snapshot = _knownSubjects.ToImmutableDictionary();
-                Volatile.Write(ref _knownSubjectsSnapshot, snapshot);
-                return snapshot;
-            }
+            snapshot = _knownSubjects.ToImmutableDictionary();
+            Volatile.Write(ref _knownSubjectsSnapshot, snapshot);
+            return snapshot;
         }
     }
 

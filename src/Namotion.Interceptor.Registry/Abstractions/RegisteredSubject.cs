@@ -45,29 +45,38 @@ public class RegisteredSubject
     /// </summary>
     public ImmutableArray<SubjectPropertyParent> Parents
     {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get
         {
             var snapshot = Volatile.Read(ref _parentsSnapshot);
-            if (snapshot is not null)
-                return ImmutableCollectionsMarshal.AsImmutableArray(snapshot);
-
-            lock (_lock)
-            {
-                snapshot = _parentsSnapshot;
-                if (snapshot is null)
-                {
-                    snapshot = BuildParentsSnapshot();
-                    Volatile.Write(ref _parentsSnapshot, snapshot);
-                }
-                return ImmutableCollectionsMarshal.AsImmutableArray(snapshot);
-            }
+            return snapshot is not null
+                ? ImmutableCollectionsMarshal.AsImmutableArray(snapshot)
+                : GetParentsSlow();
         }
     }
 
+    private ImmutableArray<SubjectPropertyParent> GetParentsSlow()
+    {
+        lock (_lock)
+        {
+            var snapshot = _parentsSnapshot;
+            if (snapshot is null)
+            {
+                snapshot = BuildParentsSnapshot();
+                Volatile.Write(ref _parentsSnapshot, snapshot);
+            }
+            return ImmutableCollectionsMarshal.AsImmutableArray(snapshot);
+        }
+    }
+
+    // Builds a fresh array snapshot of the current parent set. Must be called under _lock.
+    // The returned array is treated as immutable once published via Volatile.Write; mutators
+    // must invalidate (write null) and let the next reader build a new array, never mutate
+    // a published snapshot in place — readers that bypass the lock rely on this.
     private SubjectPropertyParent[] BuildParentsSnapshot()
     {
         if (_firstParent.Property is null)
-            return Array.Empty<SubjectPropertyParent>();
+            return [];
 
         if (_additionalParents is null || _additionalParents.Count == 0)
             return [_firstParent];
@@ -153,7 +162,7 @@ public class RegisteredSubject
             }
             else
             {
-                _additionalParents ??= new List<SubjectPropertyParent>();
+                _additionalParents ??= [];
                 _additionalParents.Add(entry);
             }
             InvalidateParentsSnapshot();
