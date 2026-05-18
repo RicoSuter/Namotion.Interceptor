@@ -1244,6 +1244,72 @@ public class OpcUaSubjectLoaderTests
         Assert.Equal(2, monitoredItems.Count);
     }
 
+    [Fact]
+    public async Task WhenObjectChildrenHaveStringBracketNames_ThenDictionaryPropertyIsCreated()
+    {
+        // Arrange: an Object node's children use bracket-string naming (e.g., "Device[SensorA]")
+        // which classifies the parent as IReadOnlyDictionary<string, DynamicSubject>.
+        var devicesId = new NodeId(300, 2);
+        var sensorAId = new NodeId(301, 2);
+        var sensorBId = new NodeId(302, 2);
+        var sensorAValueId = new NodeId(311, 2);
+        var sensorBValueId = new NodeId(312, 2);
+
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [new NodeId(1, 0)] =
+            [
+                CreateObjectReferenceDescription("Devices", new ExpandedNodeId(devicesId))
+            ],
+            [devicesId] =
+            [
+                CreateObjectReferenceDescription("Device[SensorA]", new ExpandedNodeId(sensorAId)),
+                CreateObjectReferenceDescription("Device[SensorB]", new ExpandedNodeId(sensorBId))
+            ],
+            [sensorAId] = [CreateTestReferenceDescription("Value", new ExpandedNodeId(sensorAValueId))],
+            [sensorBId] = [CreateTestReferenceDescription("Value", new ExpandedNodeId(sensorBValueId))]
+        };
+
+        var mockSession = CreateMockSession();
+        SetupBrowseAsync(mockSession, browseTree);
+        SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId, int)>
+        {
+            [sensorAValueId] = (DataTypeIds.Float, -1),
+            [sensorBValueId] = (DataTypeIds.Float, -1)
+        });
+
+        var (loader, _) = CreateLoader(
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
+
+        var subject = CreateTestSubject();
+        var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
+
+        // Act
+        var monitoredItems = await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: Devices is a dictionary with 2 entries
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+        var devicesProperty = registeredSubject.Properties.Single(p => p.Name == "Devices");
+        Assert.Equal(typeof(IReadOnlyDictionary<string, DynamicSubject>), devicesProperty.Type);
+
+        var dictionary = devicesProperty.GetValue() as IReadOnlyDictionary<string, DynamicSubject>;
+        Assert.NotNull(dictionary);
+        Assert.Equal(2, dictionary!.Count);
+        Assert.True(dictionary.ContainsKey("Device[SensorA]"));
+        Assert.True(dictionary.ContainsKey("Device[SensorB]"));
+
+        // Assert: each entry has a Value property
+        foreach (var entry in dictionary.Values)
+        {
+            var entryRegistered = entry.TryGetRegisteredSubject()!;
+            var valueProperty = entryRegistered.Properties.Single(p => p.Name == "Value");
+            Assert.Equal(typeof(float), valueProperty.Type);
+        }
+
+        // Assert: 2 monitored items (one per sensor Value)
+        Assert.Equal(2, monitoredItems.Count);
+    }
+
     private static ReferenceDescription CreateObjectReferenceDescription(string name, ExpandedNodeId nodeId)
     {
         return new ReferenceDescription

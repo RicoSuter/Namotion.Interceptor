@@ -103,9 +103,11 @@ public static class SubjectPropertyTypeExtensions
     private static bool IsSubjectReferenceTypeSlow(Type type)
     {
         return IsSubjectReferenceTypeCache.GetOrAdd(type, static t =>
-            t.IsInterface ||
-            t == typeof(object) ||
-            typeof(IInterceptorSubject).IsAssignableFrom(t));
+            !t.IsSubjectDictionaryType() &&
+            !t.IsSubjectCollectionType() &&
+            (t.IsInterface ||
+             t == typeof(object) ||
+             typeof(IInterceptorSubject).IsAssignableFrom(t)));
     }
 
     private static bool IsSubjectCollectionTypeSlow(Type type)
