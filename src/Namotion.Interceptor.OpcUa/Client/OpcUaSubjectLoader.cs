@@ -40,6 +40,7 @@ internal class OpcUaSubjectLoader
         public HashSet<IInterceptorSubject> LoadedSubjects { get; } = loadedSubjects;
         public Dictionary<NodeId, IInterceptorSubject> SubjectsByNodeId { get; } = subjectsByNodeId;
         public CancellationToken CancellationToken { get; } = cancellationToken;
+        public Dictionary<NodeId, ReferenceDescriptionCollection> BrowseCache { get; } = new();
     }
 
     public async Task<IReadOnlyList<MonitoredItem>> LoadSubjectAsync(
@@ -319,8 +320,8 @@ internal class OpcUaSubjectLoader
             subjectStates.Add(new SubjectLoadState(subject, node, registeredSubject, childEntries));
         }
 
-        // Step 3: Batch resolve types
-        var objectTypeMap = await ResolveObjectTypesAsync(allDynamicObjectNodeIds, context.Session, context.CancellationToken).ConfigureAwait(false);
+        // Step 3: Batch resolve types (populates BrowseCache for reuse by Collections and next-level Subjects)
+        var objectTypeMap = await ResolveObjectTypesAsync(allDynamicObjectNodeIds, context).ConfigureAwait(false);
 
         var variableTypeMap = allDynamicVariableNodes.Count > 0
             ? await _configuration.TypeResolver.ResolveVariableTypesAsync(context.Session, allDynamicVariableNodes, context.CancellationToken).ConfigureAwait(false)
@@ -437,9 +438,28 @@ internal class OpcUaSubjectLoader
             }
         }
 
-        var browseResults = validSubjects.Count > 0
-            ? await BrowseManyNodesAsync(subjectNodeIds, context.Session, context.CancellationToken).ConfigureAwait(false)
-            : new Dictionary<NodeId, ReferenceDescriptionCollection>();
+        var uncachedNodeIds = new List<NodeId>(subjectNodeIds.Count);
+        var browseResults = new Dictionary<NodeId, ReferenceDescriptionCollection>(subjectNodeIds.Count);
+        foreach (var nodeId in subjectNodeIds)
+        {
+            if (context.BrowseCache.TryGetValue(nodeId, out var cached))
+            {
+                browseResults[nodeId] = cached;
+            }
+            else
+            {
+                uncachedNodeIds.Add(nodeId);
+            }
+        }
+
+        if (uncachedNodeIds.Count > 0)
+        {
+            var freshResults = await BrowseManyNodesAsync(uncachedNodeIds, context.Session, context.CancellationToken).ConfigureAwait(false);
+            foreach (var (nodeId, refs) in freshResults)
+            {
+                browseResults[nodeId] = refs;
+            }
+        }
 
         return (validSubjects, browseResults);
     }
@@ -499,8 +519,7 @@ internal class OpcUaSubjectLoader
 
     private async Task<Dictionary<NodeId, Type>> ResolveObjectTypesAsync(
         IReadOnlyList<NodeId> objectNodeIds,
-        ISession session,
-        CancellationToken cancellationToken)
+        LoadContext context)
     {
         var objectTypeMap = new Dictionary<NodeId, Type>();
         if (objectNodeIds.Count == 0)
@@ -508,13 +527,14 @@ internal class OpcUaSubjectLoader
             return objectTypeMap;
         }
 
-        var objectBrowseResults = await BrowseManyNodesAsync(objectNodeIds, session, cancellationToken).ConfigureAwait(false);
+        var objectBrowseResults = await BrowseManyNodesAsync(objectNodeIds, context.Session, context.CancellationToken).ConfigureAwait(false);
         foreach (var nodeId in objectNodeIds)
         {
             var children = objectBrowseResults.TryGetValue(nodeId, out var c)
                 ? c
                 : new ReferenceDescriptionCollection();
             objectTypeMap[nodeId] = OpcUaTypeResolver.ClassifyObjectNode(children);
+            context.BrowseCache[nodeId] = children;
         }
 
         return objectTypeMap;
@@ -685,17 +705,32 @@ internal class OpcUaSubjectLoader
             return;
         }
 
-        var allNodeIds = new List<NodeId>(totalCount);
+        var missingNodeIds = new HashSet<NodeId>();
         foreach (var (_, nodeId) in pendingCollections)
         {
-            allNodeIds.Add(nodeId);
+            if (!context.BrowseCache.ContainsKey(nodeId))
+            {
+                missingNodeIds.Add(nodeId);
+            }
         }
         foreach (var (_, nodeId) in pendingDictionaries)
         {
-            allNodeIds.Add(nodeId);
+            if (!context.BrowseCache.ContainsKey(nodeId))
+            {
+                missingNodeIds.Add(nodeId);
+            }
         }
 
-        var browseResults = await BrowseManyNodesAsync(allNodeIds, context.Session, context.CancellationToken).ConfigureAwait(false);
+        if (missingNodeIds.Count > 0)
+        {
+            var freshResults = await BrowseManyNodesAsync(missingNodeIds.ToList(), context.Session, context.CancellationToken).ConfigureAwait(false);
+            foreach (var (nodeId, refs) in freshResults)
+            {
+                context.BrowseCache[nodeId] = refs;
+            }
+        }
+
+        var browseResults = context.BrowseCache;
         var allChildrenToLoad = new List<(ReferenceDescription Node, IInterceptorSubject Subject)>();
 
         foreach (var (property, nodeId) in pendingCollections)

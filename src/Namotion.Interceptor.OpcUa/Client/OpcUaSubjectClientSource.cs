@@ -122,6 +122,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
             await _structureLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
+                var loadStopwatch = Stopwatch.StartNew();
+
                 var rootNode = await TryGetRootNodeAsync(session, cancellationToken).ConfigureAwait(false);
                 if (rootNode is not null)
                 {
@@ -139,6 +141,8 @@ internal sealed class OpcUaSubjectClientSource : SubjectSourceBase, IOpcUaSubjec
                 {
                     _logger.LogWarning("Connected to OPC UA server successfully but could not find root node.");
                 }
+
+                _logger.LogInformation("OPC UA subject loading and subscription setup completed in {ElapsedMs}ms.", loadStopwatch.ElapsedMilliseconds);
             }
             finally
             {

@@ -66,18 +66,35 @@ public class OpcUaTypeResolver
             return result;
         }
 
+        var uncachedVariables = new List<(NodeId NodeId, ReferenceDescription Reference)>(variables.Count);
+        foreach (var (nodeId, reference) in variables)
+        {
+            var cacheKey = GetCacheKey(reference, session);
+            if (_typeCache.TryGetValue(cacheKey, out var cachedType))
+            {
+                result[nodeId] = cachedType;
+            }
+            else
+            {
+                uncachedVariables.Add((nodeId, reference));
+            }
+        }
+
+        if (uncachedVariables.Count == 0)
+        {
+            return result;
+        }
+
         var batchSize = (int)(session.OperationLimits?.MaxNodesPerRead ?? 0);
         if (batchSize <= 0) batchSize = 512;
 
-        // Build ReadValueIdCollection: 2 entries per variable (DataType + ValueRank)
-        var nodesToRead = new ReadValueIdCollection(variables.Count * 2);
-        foreach (var (nodeId, _) in variables)
+        var nodesToRead = new ReadValueIdCollection(uncachedVariables.Count * 2);
+        foreach (var (nodeId, _) in uncachedVariables)
         {
             nodesToRead.Add(new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.DataType });
             nodesToRead.Add(new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.ValueRank });
         }
 
-        // Read in chunks
         var allResults = new DataValueCollection(nodesToRead.Count);
         for (var offset = 0; offset < nodesToRead.Count; offset += batchSize)
         {
@@ -92,20 +109,11 @@ public class OpcUaTypeResolver
             allResults.AddRange(response.Results);
         }
 
-        // Map results: every 2 entries correspond to one variable
-        for (var i = 0; i < variables.Count; i++)
+        for (var i = 0; i < uncachedVariables.Count; i++)
         {
-            var (nodeId, reference) = variables[i];
+            var (nodeId, reference) = uncachedVariables[i];
             var dataTypeIndex = i * 2;
             var valueRankIndex = dataTypeIndex + 1;
-
-            var cacheKey = (reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex), reference.NodeId.Identifier);
-
-            if (_typeCache.TryGetValue(cacheKey, out var cachedType))
-            {
-                result[nodeId] = cachedType;
-                continue;
-            }
 
             Type? type = null;
             try
@@ -131,6 +139,7 @@ public class OpcUaTypeResolver
                 _logger.LogDebug(ex, "Failed to infer CLR type for node {BrowseName}", reference.BrowseName.Name);
             }
 
+            var cacheKey = GetCacheKey(reference, session);
             _typeCache.TryAdd(cacheKey, type);
             result[nodeId] = type;
         }
@@ -172,4 +181,7 @@ public class OpcUaTypeResolver
         BuiltInType.Null => null,
         _ => null
     };
+
+    private static (string NamespaceUri, object Identifier) GetCacheKey(ReferenceDescription reference, ISession session) =>
+        (reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex), reference.NodeId.Identifier);
 }
