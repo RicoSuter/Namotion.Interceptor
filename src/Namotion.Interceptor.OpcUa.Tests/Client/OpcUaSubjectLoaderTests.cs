@@ -866,6 +866,188 @@ public class OpcUaSubjectLoaderTests
         Assert.Same(preRegisteredState, stateAfterLoad);
     }
 
+    /// <summary>
+    /// Multi-level tree with mixed node types:
+    ///   Plant (root Object)
+    ///   ├── Sensors (Object, collection via [N] pattern)
+    ///   │   ├── Sensors[0] (Object) → Value (Variable, float)
+    ///   │   ├── Sensors[1] (Object) → Value (Variable, float)
+    ///   │   └── Sensors[2] (Object) → Value (Variable, float)
+    ///   ├── Settings (Object, single subject reference)
+    ///   │   └── Parameter1 (Variable, int)
+    ///   └── Status (Variable, double)
+    /// </summary>
+    [Fact]
+    public async Task WhenLoadingMultiLevelTreeWithMixedNodeTypes_ThenAllMonitoredItemsAndStructureAreCorrect()
+    {
+        // Arrange: NodeId constants for every node in the tree
+        var simulationId = new NodeId(100, 2);
+        var sensorsId = new NodeId(200, 2);
+        var sensor0Id = new NodeId(201, 2);
+        var sensor1Id = new NodeId(202, 2);
+        var sensor2Id = new NodeId(203, 2);
+        var sensor0ValueId = new NodeId(211, 2);
+        var sensor1ValueId = new NodeId(212, 2);
+        var sensor2ValueId = new NodeId(213, 2);
+        var settingsId = new NodeId(300, 2);
+        var parameter1Id = new NodeId(301, 2);
+        var statusId = new NodeId(400, 2);
+
+        // Build browse tree: map each NodeId to its children
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [simulationId] =
+            [
+                CreateObjectReferenceDescription("Sensors", new ExpandedNodeId(sensorsId)),
+                CreateObjectReferenceDescription("Settings", new ExpandedNodeId(settingsId)),
+                CreateTestReferenceDescription("Status", new ExpandedNodeId(statusId))
+            ],
+            [sensorsId] =
+            [
+                CreateObjectReferenceDescription("Sensors[0]", new ExpandedNodeId(sensor0Id)),
+                CreateObjectReferenceDescription("Sensors[1]", new ExpandedNodeId(sensor1Id)),
+                CreateObjectReferenceDescription("Sensors[2]", new ExpandedNodeId(sensor2Id))
+            ],
+            [sensor0Id] = [CreateTestReferenceDescription("Value", new ExpandedNodeId(sensor0ValueId))],
+            [sensor1Id] = [CreateTestReferenceDescription("Value", new ExpandedNodeId(sensor1ValueId))],
+            [sensor2Id] = [CreateTestReferenceDescription("Value", new ExpandedNodeId(sensor2ValueId))],
+            [settingsId] = [CreateTestReferenceDescription("Parameter1", new ExpandedNodeId(parameter1Id))]
+        };
+
+        // DataType mapping for Variable nodes
+        var dataTypes = new Dictionary<NodeId, (NodeId DataTypeId, int ValueRank)>
+        {
+            [sensor0ValueId] = (DataTypeIds.Float, -1),
+            [sensor1ValueId] = (DataTypeIds.Float, -1),
+            [sensor2ValueId] = (DataTypeIds.Float, -1),
+            [parameter1Id] = (DataTypeIds.Int32, -1),
+            [statusId] = (DataTypeIds.Double, -1)
+        };
+
+        var mockSession = CreateMockSession();
+
+        // Mock BrowseAsync: return children for known nodes, empty for others (leaf Variables)
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
+            {
+                var nodeId = browseDescriptions[0].NodeId;
+                var children = new ReferenceDescriptionCollection();
+                if (browseTree.TryGetValue(nodeId, out var refs))
+                {
+                    children.AddRange(refs);
+                }
+
+                return new BrowseResponse
+                {
+                    Results = [new BrowseResult { References = children }],
+                    DiagnosticInfos = []
+                };
+            });
+
+        // Mock ReadAsync: return DataType + ValueRank for Variable nodes
+        mockSession
+            .Setup(s => s.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, double _, TimestampsToReturn _, ReadValueIdCollection nodesToRead, CancellationToken _) =>
+            {
+                var nodeId = nodesToRead[0].NodeId;
+                if (dataTypes.TryGetValue(nodeId, out var dt))
+                {
+                    return new ReadResponse
+                    {
+                        Results =
+                        [
+                            new DataValue { Value = dt.DataTypeId, StatusCode = StatusCodes.Good },
+                            new DataValue { Value = dt.ValueRank, StatusCode = StatusCodes.Good }
+                        ],
+                        DiagnosticInfos = []
+                    };
+                }
+
+                return new ReadResponse
+                {
+                    Results =
+                    [
+                        new DataValue { StatusCode = StatusCodes.BadNodeIdUnknown },
+                        new DataValue { StatusCode = StatusCodes.BadNodeIdUnknown }
+                    ],
+                    DiagnosticInfos = []
+                };
+            });
+
+        // Mock TypeTree for GetBuiltInTypeAsync
+        var mockTypeTable = new Mock<ITypeTable>();
+        mockSession.SetupGet(s => s.TypeTree).Returns(mockTypeTable.Object);
+
+        var (loader, ownership) = CreateLoader(
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
+
+        var subject = CreateTestSubject();
+        var rootNode = CreateObjectReferenceDescription("Plant", new ExpandedNodeId(simulationId));
+
+        // Act
+        var monitoredItems = await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: structure
+        var registeredSubject = subject.TryGetRegisteredSubject()!;
+        var propertyNames = registeredSubject.Properties.Select(p => p.Name).OrderBy(n => n).ToArray();
+        Assert.Contains("Sensors", propertyNames);
+        Assert.Contains("Settings", propertyNames);
+        Assert.Contains("Status", propertyNames);
+
+        // Assert: Sensors is a collection with 3 items
+        var sensorsProperty = registeredSubject.Properties.Single(p => p.Name == "Sensors");
+        Assert.Equal(typeof(DynamicSubject[]), sensorsProperty.Type);
+        var collection = sensorsProperty.GetValue() as DynamicSubject[];
+        Assert.NotNull(collection);
+        Assert.Equal(3, collection!.Length);
+
+        // Assert: each collection item has a Value property of type float
+        foreach (var item in collection)
+        {
+            var itemRegistered = item.TryGetRegisteredSubject()!;
+            var valueProperty = itemRegistered.Properties.Single(p => p.Name == "Value");
+            Assert.Equal(typeof(float), valueProperty.Type);
+        }
+
+        // Assert: Settings is a single subject reference with Parameter1
+        var settingsProperty = registeredSubject.Properties.Single(p => p.Name == "Settings");
+        Assert.Equal(typeof(DynamicSubject), settingsProperty.Type);
+        var settingsSubject = settingsProperty.GetValue() as IInterceptorSubject;
+        Assert.NotNull(settingsSubject);
+        var settingsRegistered = settingsSubject!.TryGetRegisteredSubject()!;
+        var param1 = settingsRegistered.Properties.Single(p => p.Name == "Parameter1");
+        Assert.Equal(typeof(int), param1.Type);
+
+        // Assert: Status is a scalar double
+        var statusProperty = registeredSubject.Properties.Single(p => p.Name == "Status");
+        Assert.Equal(typeof(double), statusProperty.Type);
+
+        // Assert: monitored items count (3 Sensor Values + Parameter1 + Status = 5)
+        Assert.Equal(5, monitoredItems.Count);
+
+        // Assert: monitored items point to the correct NodeIds
+        var monitoredNodeIds = monitoredItems.Select(m => m.StartNodeId).ToHashSet();
+        Assert.Contains(sensor0ValueId, monitoredNodeIds);
+        Assert.Contains(sensor1ValueId, monitoredNodeIds);
+        Assert.Contains(sensor2ValueId, monitoredNodeIds);
+        Assert.Contains(parameter1Id, monitoredNodeIds);
+        Assert.Contains(statusId, monitoredNodeIds);
+
+        // Assert: all monitored item properties are owned by the source
+        Assert.Equal(5, ownership.Properties.Count());
+    }
+
     private static ReferenceDescription CreateObjectReferenceDescription(string name, ExpandedNodeId nodeId)
     {
         return new ReferenceDescription

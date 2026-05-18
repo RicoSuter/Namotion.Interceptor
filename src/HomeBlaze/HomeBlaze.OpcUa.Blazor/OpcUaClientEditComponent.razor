@@ -31,6 +31,20 @@
                   OnKeyUp="OnFieldChanged"
                   Class="mt-4" />
 
+    <MudTextField @bind-Value="_username"
+                  Label="Username (optional)"
+                  HelperText="Leave empty for anonymous authentication"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged"
+                  Class="mt-4" />
+
+    <MudTextField @bind-Value="_password"
+                  Label="Password (optional)"
+                  InputType="InputType.Password"
+                  Immediate="true"
+                  OnKeyUp="OnFieldChanged"
+                  Class="mt-4" />
+
     <MudCheckBox @bind-Value="_isEnabled"
                  @bind-Value:after="OnFieldChanged"
                  Label="Enabled (auto-start on application startup)"
@@ -62,11 +76,15 @@
     private string _name = string.Empty;
     private string _serverUrl = string.Empty;
     private string? _rootPath;
+    private string? _username;
+    private string? _password;
     private bool _isEnabled = true;
 
     private string _originalName = string.Empty;
     private string _originalServerUrl = string.Empty;
     private string? _originalRootPath;
+    private string? _originalUsername;
+    private string? _originalPassword;
     private bool _originalIsEnabled = true;
 
     public bool IsValid => !string.IsNullOrWhiteSpace(_name) && !string.IsNullOrWhiteSpace(_serverUrl);
@@ -74,6 +92,8 @@
     public bool IsDirty => _name != _originalName ||
                            _serverUrl != _originalServerUrl ||
                            _rootPath != _originalRootPath ||
+                           _username != _originalUsername ||
+                           _password != _originalPassword ||
                            _isEnabled != _originalIsEnabled;
 
     public string PreferredDialogSize => "Medium";
@@ -88,11 +108,15 @@
             _name = ClientSubject.Name ?? string.Empty;
             _serverUrl = ClientSubject.ServerUrl ?? string.Empty;
             _rootPath = ClientSubject.RootPath;
+            _username = ClientSubject.Username;
+            _password = ClientSubject.Password;
             _isEnabled = ClientSubject.IsEnabled;
 
             _originalName = _name;
             _originalServerUrl = _serverUrl;
             _originalRootPath = _rootPath;
+            _originalUsername = _username;
+            _originalPassword = _password;
             _originalIsEnabled = _isEnabled;
         }
     }
@@ -110,11 +134,15 @@
             ClientSubject.Name = _name;
             ClientSubject.ServerUrl = _serverUrl;
             ClientSubject.RootPath = _rootPath;
+            ClientSubject.Username = _username;
+            ClientSubject.Password = _password;
             ClientSubject.IsEnabled = _isEnabled;
 
             _originalName = _name;
             _originalServerUrl = _serverUrl;
             _originalRootPath = _rootPath;
+            _originalUsername = _username;
+            _originalPassword = _password;
             _originalIsEnabled = _isEnabled;
 
             IsDirtyChanged?.Invoke(false);
