@@ -85,8 +85,6 @@ public class OpcUaTypeResolver
             return result;
         }
 
-        var maxReadIdsPerBatch = SessionBatchLimits.GetMaxNodesPerRead(session);
-
         var nodesToRead = new ReadValueIdCollection(uncachedVariables.Count * 2);
         foreach (var (nodeId, _) in uncachedVariables)
         {
@@ -94,8 +92,7 @@ public class OpcUaTypeResolver
             nodesToRead.Add(new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.ValueRank });
         }
 
-        var allResults = new DataValueCollection(nodesToRead.Count);
-        await ReadBatchAsync(nodesToRead, 0, nodesToRead.Count, maxReadIdsPerBatch, allResults, session, cancellationToken).ConfigureAwait(false);
+        var allResults = await session.ReadNodesAsync(nodesToRead, _logger, cancellationToken).ConfigureAwait(false);
 
         for (var i = 0; i < uncachedVariables.Count; i++)
         {
@@ -169,45 +166,6 @@ public class OpcUaTypeResolver
         BuiltInType.Null => null,
         _ => null
     };
-
-    private async Task ReadBatchAsync(
-        ReadValueIdCollection nodesToRead,
-        int offset,
-        int end,
-        int maxBatchSize,
-        DataValueCollection allResults,
-        ISession session,
-        CancellationToken cancellationToken)
-    {
-        for (var batchStart = offset; batchStart < end; batchStart += maxBatchSize)
-        {
-            var batchEnd = Math.Min(batchStart + maxBatchSize, end);
-            var count = batchEnd - batchStart;
-            var chunk = new ReadValueIdCollection(count);
-            for (var i = batchStart; i < batchEnd; i++)
-            {
-                chunk.Add(nodesToRead[i]);
-            }
-
-            ReadResponse response;
-            try
-            {
-                response = await session.ReadAsync(null, 0, TimestampsToReturn.Neither, chunk, cancellationToken).ConfigureAwait(false);
-            }
-            catch (ServiceResultException ex) when (count > 2 && SessionBatchLimits.IsBatchTooLarge(ex))
-            {
-                _logger.LogWarning(
-                    "ReadAsync rejected batch of {Count} items ({StatusCode}). Splitting into smaller batches.",
-                    count, ex.StatusCode);
-
-                var halvedBatch = Math.Max(2, count / 2);
-                await ReadBatchAsync(nodesToRead, batchStart, batchEnd, halvedBatch, allResults, session, cancellationToken).ConfigureAwait(false);
-                continue;
-            }
-
-            allResults.AddRange(response.Results);
-        }
-    }
 
     private static (string NamespaceUri, object Identifier) GetCacheKey(ReferenceDescription reference, ISession session) =>
         (reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex), reference.NodeId.Identifier);

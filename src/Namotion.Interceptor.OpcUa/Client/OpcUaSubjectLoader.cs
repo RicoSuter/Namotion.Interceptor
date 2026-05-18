@@ -9,8 +9,6 @@ namespace Namotion.Interceptor.OpcUa.Client;
 
 internal class OpcUaSubjectLoader
 {
-    private const uint NodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object;
-
     private readonly OpcUaClientConfiguration _configuration;
     private readonly ILogger _logger;
     private readonly SourceOwnershipManager _ownership;
@@ -80,7 +78,7 @@ internal class OpcUaSubjectLoader
                 break;
             }
 
-            var browseResults = await BrowseManyNodesAsync(nodesToBrowse, context.Session, context.CancellationToken).ConfigureAwait(false);
+            var browseResults = await context.Session.BrowseNodesAsync(nodesToBrowse, _configuration.MaximumReferencesPerNode, _logger, context.CancellationToken).ConfigureAwait(false);
             var dynamicAttributeNodes = new List<(RegisteredSubjectProperty OwnerProperty, NodeId ChildNodeId, ReferenceDescription ChildNode, string BrowseName)>();
             var nextRound = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
 
@@ -91,7 +89,7 @@ internal class OpcUaSubjectLoader
                     continue;
                 }
 
-                var childNodes = DistinctByResolvedNodeId(rawChildren, context.Session);
+                var childNodes = context.Session.DistinctByResolvedNodeId(rawChildren, _logger);
                 var processedBrowseNames = MatchKnownAttributes(property, childNodes, nextRound, context);
                 await CollectDynamicAttributesAsync(property, parentNodeId, childNodes, processedBrowseNames, dynamicAttributeNodes, context).ConfigureAwait(false);
             }
@@ -310,7 +308,7 @@ internal class OpcUaSubjectLoader
             var browseResults = subjectNodeId is not null && allBrowseResults.TryGetValue(subjectNodeId, out var r)
                 ? r
                 : new ReferenceDescriptionCollection();
-            var distinctReferences = DistinctByResolvedNodeId(browseResults, context.Session);
+            var distinctReferences = context.Session.DistinctByResolvedNodeId(browseResults, _logger);
 
             var childEntries = await ClassifyChildReferencesAsync(
                 registeredSubject, distinctReferences,
@@ -454,7 +452,7 @@ internal class OpcUaSubjectLoader
 
         if (uncachedNodeIds.Count > 0)
         {
-            var freshResults = await BrowseManyNodesAsync(uncachedNodeIds, context.Session, context.CancellationToken).ConfigureAwait(false);
+            var freshResults = await context.Session.BrowseNodesAsync(uncachedNodeIds, _configuration.MaximumReferencesPerNode, _logger, context.CancellationToken).ConfigureAwait(false);
             foreach (var (nodeId, refs) in freshResults)
             {
                 browseResults[nodeId] = refs;
@@ -527,7 +525,7 @@ internal class OpcUaSubjectLoader
             return objectTypeMap;
         }
 
-        var objectBrowseResults = await BrowseManyNodesAsync(objectNodeIds, context.Session, context.CancellationToken).ConfigureAwait(false);
+        var objectBrowseResults = await context.Session.BrowseNodesAsync(objectNodeIds, _configuration.MaximumReferencesPerNode, _logger, context.CancellationToken).ConfigureAwait(false);
         foreach (var nodeId in objectNodeIds)
         {
             var children = objectBrowseResults.TryGetValue(nodeId, out var c)
@@ -664,7 +662,7 @@ internal class OpcUaSubjectLoader
             return;
         }
 
-        var browseResults = await BrowseManyNodesAsync(nodeIds, context.Session, context.CancellationToken).ConfigureAwait(false);
+        var browseResults = await context.Session.BrowseNodesAsync(nodeIds, _configuration.MaximumReferencesPerNode, _logger, context.CancellationToken).ConfigureAwait(false);
 
         foreach (var (nodeId, childSubject, valueProperty) in nodesToBrowse)
         {
@@ -673,7 +671,7 @@ internal class OpcUaSubjectLoader
                 continue;
             }
 
-            var childNodes = DistinctByResolvedNodeId(rawChildren, context.Session);
+            var childNodes = context.Session.DistinctByResolvedNodeId(rawChildren, _logger);
             foreach (var (childNode, childNodeId) in childNodes)
             {
                 foreach (var childProperty in childSubject.Properties)
@@ -723,7 +721,7 @@ internal class OpcUaSubjectLoader
 
         if (missingNodeIds.Count > 0)
         {
-            var freshResults = await BrowseManyNodesAsync(missingNodeIds.ToList(), context.Session, context.CancellationToken).ConfigureAwait(false);
+            var freshResults = await context.Session.BrowseNodesAsync(missingNodeIds.ToList(), _configuration.MaximumReferencesPerNode, _logger, context.CancellationToken).ConfigureAwait(false);
             foreach (var (nodeId, refs) in freshResults)
             {
                 context.BrowseCache[nodeId] = refs;
@@ -736,7 +734,7 @@ internal class OpcUaSubjectLoader
         foreach (var (property, nodeId) in pendingCollections)
         {
             var rawChildren = browseResults.TryGetValue(nodeId, out var r) ? r : new ReferenceDescriptionCollection();
-            var childNodes = DistinctByResolvedNodeId(rawChildren, context.Session);
+            var childNodes = context.Session.DistinctByResolvedNodeId(rawChildren, _logger);
 
             var children = await ResolveChildSubjectsAsync(property, childNodes, isDictionary: false, context).ConfigureAwait(false);
 
@@ -748,7 +746,7 @@ internal class OpcUaSubjectLoader
         foreach (var (property, nodeId) in pendingDictionaries)
         {
             var rawChildren = browseResults.TryGetValue(nodeId, out var r) ? r : new ReferenceDescriptionCollection();
-            var childNodes = DistinctByResolvedNodeId(rawChildren, context.Session);
+            var childNodes = context.Session.DistinctByResolvedNodeId(rawChildren, _logger);
 
             var children = await ResolveChildSubjectsAsync(property, childNodes, isDictionary: true, context).ConfigureAwait(false);
 
@@ -789,184 +787,4 @@ internal class OpcUaSubjectLoader
         monitoredItems.Add(monitoredItem);
     }
 
-    // ExpandedNodeId compares unequal when the same target is expressed with NamespaceIndex
-    // vs NamespaceUri; resolving to NodeId via the session's NamespaceTable produces a
-    // canonical key for dedup. Unresolvable namespace URIs (ToNodeId returns null) are
-    // skipped since they cannot be addressed for monitoring or further browsing.
-    private List<(ReferenceDescription Reference, NodeId NodeId)> DistinctByResolvedNodeId(
-        IReadOnlyCollection<ReferenceDescription> references,
-        ISession session)
-    {
-        var seen = new HashSet<NodeId>(references.Count);
-        var result = new List<(ReferenceDescription, NodeId)>(references.Count);
-        foreach (var reference in references)
-        {
-            var nodeId = ExpandedNodeId.ToNodeId(reference.NodeId, session.NamespaceUris);
-            if (nodeId is null)
-            {
-                _logger.LogWarning(
-                    "Skipping browse reference '{BrowseName}' with unresolvable NodeId '{NodeId}': namespace URI is not registered in the session's NamespaceTable.",
-                    reference.BrowseName?.Name, reference.NodeId);
-                continue;
-            }
-            if (!seen.Add(nodeId))
-            {
-                continue;
-            }
-            result.Add((reference, nodeId));
-        }
-        return result;
-    }
-
-    private async Task<Dictionary<NodeId, ReferenceDescriptionCollection>> BrowseManyNodesAsync(
-        IReadOnlyList<NodeId> nodeIds,
-        ISession session,
-        CancellationToken cancellationToken)
-    {
-        var result = new Dictionary<NodeId, ReferenceDescriptionCollection>(nodeIds.Count);
-        if (nodeIds.Count == 0)
-        {
-            return result;
-        }
-
-        foreach (var nodeId in nodeIds)
-        {
-            result[nodeId] = new ReferenceDescriptionCollection();
-        }
-
-        var batchSize = SessionBatchLimits.GetMaxNodesPerBrowse(session);
-
-        for (var offset = 0; offset < nodeIds.Count; offset += batchSize)
-        {
-            var end = Math.Min(offset + batchSize, nodeIds.Count);
-            await BrowseBatchAsync(nodeIds, offset, end, result, session, cancellationToken).ConfigureAwait(false);
-        }
-
-        return result;
-    }
-
-    private async Task BrowseBatchAsync(
-        IReadOnlyList<NodeId> nodeIds,
-        int offset,
-        int end,
-        Dictionary<NodeId, ReferenceDescriptionCollection> result,
-        ISession session,
-        CancellationToken cancellationToken)
-    {
-        var count = end - offset;
-        var browseDescriptions = new BrowseDescriptionCollection(count);
-        for (var i = offset; i < end; i++)
-        {
-            browseDescriptions.Add(new BrowseDescription
-            {
-                NodeId = nodeIds[i],
-                BrowseDirection = BrowseDirection.Forward,
-                ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
-                IncludeSubtypes = true,
-                NodeClassMask = NodeClassMask,
-                ResultMask = (uint)BrowseResultMask.All
-            });
-        }
-
-        BrowseResponse response;
-        try
-        {
-            response = await session.BrowseAsync(
-                null, null,
-                _configuration.MaximumReferencesPerNode,
-                browseDescriptions,
-                cancellationToken).ConfigureAwait(false);
-        }
-        catch (ServiceResultException ex) when (count > 1 && SessionBatchLimits.IsBatchTooLarge(ex))
-        {
-            _logger.LogWarning(
-                "BrowseAsync rejected batch of {Count} nodes ({StatusCode}). Splitting into smaller batches.",
-                count, ex.StatusCode);
-
-            var mid = offset + count / 2;
-            await BrowseBatchAsync(nodeIds, offset, mid, result, session, cancellationToken).ConfigureAwait(false);
-            await BrowseBatchAsync(nodeIds, mid, end, result, session, cancellationToken).ConfigureAwait(false);
-            return;
-        }
-
-        var continuationPoints = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
-        for (var i = 0; i < response.Results.Count; i++)
-        {
-            var browseResult = response.Results[i];
-            var nodeId = nodeIds[offset + i];
-            if (StatusCode.IsGood(browseResult.StatusCode) && browseResult.References is { Count: > 0 })
-            {
-                result[nodeId].AddRange(browseResult.References);
-            }
-            if (browseResult.ContinuationPoint is { Length: > 0 })
-            {
-                continuationPoints.Add((nodeId, browseResult.ContinuationPoint));
-            }
-        }
-
-        await ProcessContinuationPointsAsync(continuationPoints, result, session, cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task ProcessContinuationPointsAsync(
-        List<(NodeId NodeId, byte[] ContinuationPoint)> continuationPoints,
-        Dictionary<NodeId, ReferenceDescriptionCollection> result,
-        ISession session,
-        CancellationToken cancellationToken)
-    {
-        while (continuationPoints.Count > 0)
-        {
-            var newContinuationPoints = new List<(NodeId NodeId, byte[] ContinuationPoint)>();
-            await BrowseNextBatchAsync(continuationPoints, 0, continuationPoints.Count, result, newContinuationPoints, session, cancellationToken).ConfigureAwait(false);
-            continuationPoints = newContinuationPoints;
-        }
-    }
-
-    private async Task BrowseNextBatchAsync(
-        List<(NodeId NodeId, byte[] ContinuationPoint)> continuationPoints,
-        int offset,
-        int end,
-        Dictionary<NodeId, ReferenceDescriptionCollection> result,
-        List<(NodeId NodeId, byte[] ContinuationPoint)> newContinuationPoints,
-        ISession session,
-        CancellationToken cancellationToken)
-    {
-        var count = end - offset;
-        var cpCollection = new ByteStringCollection(count);
-        for (var i = offset; i < end; i++)
-        {
-            cpCollection.Add(continuationPoints[i].ContinuationPoint);
-        }
-
-        BrowseNextResponse nextResponse;
-        try
-        {
-            nextResponse = await session.BrowseNextAsync(
-                null, false, cpCollection, cancellationToken).ConfigureAwait(false);
-        }
-        catch (ServiceResultException ex) when (count > 1 && SessionBatchLimits.IsBatchTooLarge(ex))
-        {
-            _logger.LogWarning(
-                "BrowseNextAsync rejected batch of {Count} continuation points ({StatusCode}). Splitting into smaller batches.",
-                count, ex.StatusCode);
-
-            var mid = offset + count / 2;
-            await BrowseNextBatchAsync(continuationPoints, offset, mid, result, newContinuationPoints, session, cancellationToken).ConfigureAwait(false);
-            await BrowseNextBatchAsync(continuationPoints, mid, end, result, newContinuationPoints, session, cancellationToken).ConfigureAwait(false);
-            return;
-        }
-
-        for (var i = 0; i < nextResponse.Results.Count; i++)
-        {
-            var browseResult = nextResponse.Results[i];
-            var nodeId = continuationPoints[offset + i].NodeId;
-            if (StatusCode.IsGood(browseResult.StatusCode) && browseResult.References is { Count: > 0 })
-            {
-                result[nodeId].AddRange(browseResult.References);
-            }
-            if (browseResult.ContinuationPoint is { Length: > 0 })
-            {
-                newContinuationPoints.Add((nodeId, browseResult.ContinuationPoint));
-            }
-        }
-    }
 }
