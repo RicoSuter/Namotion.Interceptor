@@ -53,8 +53,8 @@ public static class SubjectPropertyTypeExtensions
     }
 
     /// <summary>
-    /// Returns true if the given type is a subject reference type (interface, object, or IInterceptorSubject).
-    /// Results are cached per type for O(1) lookups after the first call.
+    /// Returns true if the given type is a single subject reference (interface, object, or IInterceptorSubject).
+    /// Mutually exclusive with <see cref="IsSubjectCollectionType"/> and <see cref="IsSubjectDictionaryType"/>.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsSubjectReferenceType(this Type type)
@@ -65,10 +65,8 @@ public static class SubjectPropertyTypeExtensions
     }
 
     /// <summary>
-    /// Returns true if the given type is a collection that can hold subject reference types.
-    /// Uses generic type info when available for precise checks, falls back to non-generic
-    /// ICollection check for legacy types (e.g. ArrayList).
-    /// Results are cached per type for O(1) lookups after the first call.
+    /// Returns true if the given type is a collection of subject references.
+    /// Mutually exclusive with <see cref="IsSubjectReferenceType"/> and <see cref="IsSubjectDictionaryType"/>.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsSubjectCollectionType(this Type type)
@@ -79,10 +77,8 @@ public static class SubjectPropertyTypeExtensions
     }
 
     /// <summary>
-    /// Returns true if the given type is a dictionary that can hold subject reference values.
-    /// Uses generic type info when available for precise checks, falls back to non-generic
-    /// IDictionary check for legacy types (e.g. Hashtable).
-    /// Results are cached per type for O(1) lookups after the first call.
+    /// Returns true if the given type is a dictionary with subject reference values.
+    /// Mutually exclusive with <see cref="IsSubjectReferenceType"/> and <see cref="IsSubjectCollectionType"/>.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsSubjectDictionaryType(this Type type)
@@ -114,6 +110,9 @@ public static class SubjectPropertyTypeExtensions
     {
         return IsSubjectCollectionTypeCache.GetOrAdd(type, static t =>
         {
+            if (t.IsSubjectDictionaryType())
+                return false;
+
             if (!typeof(IEnumerable).IsAssignableFrom(t))
                 return false;
 
