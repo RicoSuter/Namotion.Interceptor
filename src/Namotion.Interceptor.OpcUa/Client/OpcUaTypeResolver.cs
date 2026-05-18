@@ -1,5 +1,4 @@
-﻿using System.Collections.Generic;
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using Namotion.Interceptor.Dynamic;
 using Namotion.Interceptor.OpcUa.Attributes;
 using Opc.Ua;
@@ -97,11 +96,20 @@ public class OpcUaTypeResolver
             Type? type = null;
             try
             {
-                if (dataTypeIndex < allResults.Count && valueRankIndex < allResults.Count &&
-                    StatusCode.IsGood(allResults[dataTypeIndex].StatusCode))
+                if (valueRankIndex >= allResults.Count)
                 {
-                    var dataTypeId = allResults[dataTypeIndex].Value as NodeId;
-                    if (dataTypeId is not null)
+                    _logger.LogWarning("ReadAsync returned {AllResultsCount} results but " +
+                                       "expected at least {ValueRankIndex} for {ResolvedVariablesCount} variables.", 
+                        allResults.Count, valueRankIndex + 1, resolvedVariables.Count);
+                }
+                else if (!StatusCode.IsGood(allResults[dataTypeIndex].StatusCode))
+                {
+                    _logger.LogWarning("Failed to read DataType for node {BrowseName} ({StatusCode}).", 
+                        reference.BrowseName.Name, allResults[dataTypeIndex].StatusCode);
+                }
+                else
+                {
+                    if (allResults[dataTypeIndex].Value is NodeId dataTypeId)
                     {
                         var builtIn = await TypeInfo.GetBuiltInTypeAsync(dataTypeId, session.TypeTree, cancellationToken).ConfigureAwait(false);
                         var elementType = TryMapBuiltInType(builtIn);
@@ -115,7 +123,7 @@ public class OpcUaTypeResolver
             }
             catch (Exception ex)
             {
-                _logger.LogDebug(ex, "Failed to infer CLR type for node {BrowseName}", reference.BrowseName.Name);
+                _logger.LogWarning(ex, "Failed to infer CLR type for node {BrowseName}.", reference.BrowseName.Name);
             }
 
             result[nodeId] = type;
