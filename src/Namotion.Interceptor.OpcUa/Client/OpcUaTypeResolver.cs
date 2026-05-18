@@ -31,7 +31,7 @@ public class OpcUaTypeResolver
         ];
     }
 
-    internal static Type ClassifyObjectNode(IReadOnlyList<ReferenceDescription> children)
+    internal static Type ResolveObjectNodeType(IReadOnlyList<ReferenceDescription> children)
     {
         if (children.Count > 0 && children[0].NodeClass == NodeClass.Object)
         {

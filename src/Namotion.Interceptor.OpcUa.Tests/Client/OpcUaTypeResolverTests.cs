@@ -30,7 +30,7 @@ public class OpcUaTypeResolverTests
         };
 
         // Act
-        var result = OpcUaTypeResolver.ClassifyObjectNode(children);
+        var result = OpcUaTypeResolver.ResolveObjectNodeType(children);
 
         // Assert
         Assert.Equal(typeof(DynamicSubject[]), result);
@@ -50,7 +50,7 @@ public class OpcUaTypeResolverTests
         };
 
         // Act
-        var result = OpcUaTypeResolver.ClassifyObjectNode(children);
+        var result = OpcUaTypeResolver.ResolveObjectNodeType(children);
 
         // Assert
         Assert.Equal(typeof(IReadOnlyDictionary<string, DynamicSubject>), result);
@@ -70,7 +70,7 @@ public class OpcUaTypeResolverTests
         };
 
         // Act
-        var result = OpcUaTypeResolver.ClassifyObjectNode(children);
+        var result = OpcUaTypeResolver.ResolveObjectNodeType(children);
 
         // Assert
         Assert.Equal(typeof(DynamicSubject), result);
@@ -80,7 +80,7 @@ public class OpcUaTypeResolverTests
     public void WhenObjectHasNoChildren_ThenClassifiesAsSubject()
     {
         // Act
-        var result = OpcUaTypeResolver.ClassifyObjectNode(new ReferenceDescriptionCollection());
+        var result = OpcUaTypeResolver.ResolveObjectNodeType(new ReferenceDescriptionCollection());
 
         // Assert
         Assert.Equal(typeof(DynamicSubject), result);
