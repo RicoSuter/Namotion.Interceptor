@@ -55,9 +55,9 @@ public class OpcUaTypeResolver
         return typeof(DynamicSubject);
     }
 
-    public async Task<Dictionary<NodeId, Type?>> ResolveVariableTypesAsync(
+    public virtual async Task<IReadOnlyDictionary<NodeId, Type?>> ResolveVariableTypesAsync(
         ISession session,
-        IReadOnlyList<(NodeId NodeId, ReferenceDescription Reference)> variables,
+        IReadOnlyList<ReferenceDescription> variables,
         CancellationToken cancellationToken)
     {
         var result = new Dictionary<NodeId, Type?>(variables.Count);
@@ -67,8 +67,14 @@ public class OpcUaTypeResolver
         }
 
         var uncachedVariables = new List<(NodeId NodeId, ReferenceDescription Reference)>(variables.Count);
-        foreach (var (nodeId, reference) in variables)
+        foreach (var reference in variables)
         {
+            var nodeId = ExpandedNodeId.ToNodeId(reference.NodeId, session.NamespaceUris);
+            if (nodeId is null)
+            {
+                continue;
+            }
+
             var cacheKey = GetCacheKey(reference, session);
             if (_typeCache.TryGetValue(cacheKey, out var cachedType))
             {

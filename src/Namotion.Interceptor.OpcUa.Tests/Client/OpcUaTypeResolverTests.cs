@@ -94,11 +94,11 @@ public class OpcUaTypeResolverTests
         var node2Id = new NodeId(5002, 2);
         var node3Id = new NodeId(5003, 2);
 
-        var variables = new List<(NodeId NodeId, ReferenceDescription Reference)>
+        var variables = new List<ReferenceDescription>
         {
-            (node1Id, new ReferenceDescription { BrowseName = new QualifiedName("Temp"), NodeId = new ExpandedNodeId(node1Id), NodeClass = NodeClass.Variable }),
-            (node2Id, new ReferenceDescription { BrowseName = new QualifiedName("Count"), NodeId = new ExpandedNodeId(node2Id), NodeClass = NodeClass.Variable }),
-            (node3Id, new ReferenceDescription { BrowseName = new QualifiedName("Name"), NodeId = new ExpandedNodeId(node3Id), NodeClass = NodeClass.Variable }),
+            new() { BrowseName = new QualifiedName("Temp"), NodeId = new ExpandedNodeId(node1Id), NodeClass = NodeClass.Variable },
+            new() { BrowseName = new QualifiedName("Count"), NodeId = new ExpandedNodeId(node2Id), NodeClass = NodeClass.Variable },
+            new() { BrowseName = new QualifiedName("Name"), NodeId = new ExpandedNodeId(node3Id), NodeClass = NodeClass.Variable },
         };
 
         var mockSession = CreateMockSession();
@@ -152,14 +152,14 @@ public class OpcUaTypeResolverTests
                 DiagnosticInfos = []
             });
 
-        var variables = new List<(NodeId NodeId, ReferenceDescription Reference)>
+        var variables = new List<ReferenceDescription>
         {
-            (variableNodeId, new ReferenceDescription
+            new()
             {
                 BrowseName = new QualifiedName("Temperature"),
                 NodeId = new ExpandedNodeId(variableNodeId),
                 NodeClass = NodeClass.Variable
-            })
+            }
         };
 
         // Act
@@ -179,10 +179,10 @@ public class OpcUaTypeResolverTests
         var node1Id = new NodeId(6001, 2);
         var node2Id = new NodeId(6002, 2);
 
-        var variables = new List<(NodeId NodeId, ReferenceDescription Reference)>
+        var variables = new List<ReferenceDescription>
         {
-            (node1Id, new ReferenceDescription { BrowseName = new QualifiedName("Temp"), NodeId = new ExpandedNodeId(node1Id), NodeClass = NodeClass.Variable }),
-            (node2Id, new ReferenceDescription { BrowseName = new QualifiedName("Count"), NodeId = new ExpandedNodeId(node2Id), NodeClass = NodeClass.Variable }),
+            new() { BrowseName = new QualifiedName("Temp"), NodeId = new ExpandedNodeId(node1Id), NodeClass = NodeClass.Variable },
+            new() { BrowseName = new QualifiedName("Count"), NodeId = new ExpandedNodeId(node2Id), NodeClass = NodeClass.Variable },
         };
 
         var dataTypes = new Dictionary<NodeId, (NodeId DataTypeId, int ValueRank)>

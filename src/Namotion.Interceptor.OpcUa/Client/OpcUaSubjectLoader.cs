@@ -204,12 +204,12 @@ internal class OpcUaSubjectLoader
             return;
         }
 
-        var variableInputs = new List<(NodeId NodeId, ReferenceDescription Reference)>(dynamicAttributeNodes.Count);
-        foreach (var (_, childNodeId, childNode, _) in dynamicAttributeNodes)
+        var variableReferences = new List<ReferenceDescription>(dynamicAttributeNodes.Count);
+        foreach (var (_, _, childNode, _) in dynamicAttributeNodes)
         {
-            variableInputs.Add((childNodeId, childNode));
+            variableReferences.Add(childNode);
         }
-        var resolvedTypes = await _configuration.TypeResolver.ResolveVariableTypesAsync(context.Session, variableInputs, context.CancellationToken).ConfigureAwait(false);
+        var resolvedTypes = await _configuration.TypeResolver.ResolveVariableTypesAsync(context.Session, variableReferences, context.CancellationToken).ConfigureAwait(false);
 
         foreach (var (ownerProperty, childNodeId, childNode, browseName) in dynamicAttributeNodes)
         {
@@ -300,7 +300,7 @@ internal class OpcUaSubjectLoader
 
         // Step 2: Classify children, collect dynamic nodes
         var allDynamicObjectNodeIds = new List<NodeId>();
-        var allDynamicVariableNodes = new List<(NodeId NodeId, ReferenceDescription Reference)>();
+        var allDynamicVariableNodes = new List<ReferenceDescription>();
         var subjectStates = new List<(IInterceptorSubject Subject, ReferenceDescription Node, RegisteredSubject RegisteredSubject, List<(ReferenceDescription Reference, NodeId ResolvedNodeId, RegisteredSubjectProperty? Property, bool NeedsDynamicType)> ChildEntries)>(validSubjects.Count);
 
         foreach (var (node, subject, registeredSubject, subjectNodeId) in validSubjects)
@@ -323,7 +323,7 @@ internal class OpcUaSubjectLoader
 
         var variableTypeMap = allDynamicVariableNodes.Count > 0
             ? await _configuration.TypeResolver.ResolveVariableTypesAsync(context.Session, allDynamicVariableNodes, context.CancellationToken).ConfigureAwait(false)
-            : new Dictionary<NodeId, Type?>();
+            : (IReadOnlyDictionary<NodeId, Type?>)new Dictionary<NodeId, Type?>();
 
         // Step 4: Classify children into batches
         var allAttributeVariableNodes = new List<(RegisteredSubjectProperty Property, NodeId NodeId)>();
@@ -467,7 +467,7 @@ internal class OpcUaSubjectLoader
             RegisteredSubject registeredSubject,
             List<(ReferenceDescription Reference, NodeId NodeId)> distinctReferences,
             List<NodeId> dynamicObjectNodeIds,
-            List<(NodeId NodeId, ReferenceDescription Reference)> dynamicVariableNodes,
+            List<ReferenceDescription> dynamicVariableNodes,
             ISession session,
             CancellationToken cancellationToken)
     {
@@ -508,7 +508,7 @@ internal class OpcUaSubjectLoader
             }
             else if (nodeReference.NodeClass == NodeClass.Variable)
             {
-                dynamicVariableNodes.Add((resolvedNodeId, nodeReference));
+                dynamicVariableNodes.Add(nodeReference);
             }
         }
 
@@ -543,7 +543,7 @@ internal class OpcUaSubjectLoader
         ReferenceDescription nodeReference,
         NodeId resolvedNodeId,
         Dictionary<NodeId, Type> objectTypeMap,
-        Dictionary<NodeId, Type?> variableTypeMap,
+        IReadOnlyDictionary<NodeId, Type?> variableTypeMap,
         ISession session)
     {
         Type? inferredType = null;
