@@ -173,8 +173,8 @@ internal static class OpcUaSessionExtensions
         ILogger logger,
         CancellationToken cancellationToken)
     {
-        var batchSize = GetMaxNodesPerBrowse(session);
         var round = 0;
+        var batchSize = GetMaxNodesPerBrowse(session);
         List<(NodeId NodeId, byte[] ContinuationPoint)> newContinuationPoints = [];
         try
         {
@@ -226,12 +226,12 @@ internal static class OpcUaSessionExtensions
             try
             {
                 var end = Math.Min(offset + batchSize, continuationPoints.Count);
-                var cpCollection = new ByteStringCollection(end - offset);
+                var collection = new ByteStringCollection(end - offset);
                 for (var i = offset; i < end; i++)
                 {
-                    cpCollection.Add(continuationPoints[i].ContinuationPoint);
+                    collection.Add(continuationPoints[i].ContinuationPoint);
                 }
-                await session.BrowseNextAsync(null, true, cpCollection, CancellationToken.None).ConfigureAwait(false);
+                await session.BrowseNextAsync(null, true, collection, CancellationToken.None).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
