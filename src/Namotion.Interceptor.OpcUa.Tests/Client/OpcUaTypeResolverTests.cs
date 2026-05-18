@@ -17,203 +17,95 @@ public class OpcUaTypeResolverTests
     }
 
     [Fact]
-    public async Task WhenObjectNodeChildrenHaveBracketNames_ThenTypeIsDynamicSubjectArray()
+    public void WhenObjectChildrenHaveBracketIntNames_ThenClassifiesAsCollection()
     {
         // Arrange
-        var objectReference = new ReferenceDescription
-        {
-            BrowseName = new QualifiedName("Items"),
-            NodeId = new ExpandedNodeId(new NodeId(1000, 2)),
-            NodeClass = NodeClass.Object
-        };
-
-        var mockSession = CreateMockSession();
-        var childCollection = new ReferenceDescriptionCollection
+        var children = new ReferenceDescriptionCollection
         {
             new ReferenceDescription
             {
                 BrowseName = new QualifiedName("Item[0]"),
-                NodeId = new ExpandedNodeId(new NodeId(1001, 2)),
-                NodeClass = NodeClass.Object
-            },
-            new ReferenceDescription
-            {
-                BrowseName = new QualifiedName("Item[1]"),
-                NodeId = new ExpandedNodeId(new NodeId(1002, 2)),
                 NodeClass = NodeClass.Object
             }
         };
 
-        mockSession
-            .Setup(s => s.BrowseAsync(
-                It.IsAny<RequestHeader>(),
-                It.IsAny<ViewDescription>(),
-                It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new BrowseResponse
-            {
-                Results =
-                [
-                    new BrowseResult { References = childCollection }
-                ],
-                DiagnosticInfos = []
-            });
-
         // Act
-        var result = await _resolver.TryGetTypeForNodeAsync(mockSession.Object, objectReference, CancellationToken.None);
+        var result = OpcUaTypeResolver.ClassifyObjectNode(children);
 
         // Assert
         Assert.Equal(typeof(DynamicSubject[]), result);
     }
 
     [Fact]
-    public async Task WhenObjectNodeChildrenHaveRegularNames_ThenTypeIsDynamicSubject()
+    public void WhenObjectChildrenHaveBracketStringNames_ThenClassifiesAsDictionary()
     {
         // Arrange
-        var objectReference = new ReferenceDescription
-        {
-            BrowseName = new QualifiedName("Sensor"),
-            NodeId = new ExpandedNodeId(new NodeId(2000, 2)),
-            NodeClass = NodeClass.Object
-        };
-
-        var mockSession = CreateMockSession();
-        var childCollection = new ReferenceDescriptionCollection
-        {
-            new ReferenceDescription
-            {
-                BrowseName = new QualifiedName("Temperature"),
-                NodeId = new ExpandedNodeId(new NodeId(2001, 2)),
-                NodeClass = NodeClass.Variable
-            },
-            new ReferenceDescription
-            {
-                BrowseName = new QualifiedName("Pressure"),
-                NodeId = new ExpandedNodeId(new NodeId(2002, 2)),
-                NodeClass = NodeClass.Variable
-            }
-        };
-
-        mockSession
-            .Setup(s => s.BrowseAsync(
-                It.IsAny<RequestHeader>(),
-                It.IsAny<ViewDescription>(),
-                It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new BrowseResponse
-            {
-                Results =
-                [
-                    new BrowseResult { References = childCollection }
-                ],
-                DiagnosticInfos = []
-            });
-
-        // Act
-        var result = await _resolver.TryGetTypeForNodeAsync(mockSession.Object, objectReference, CancellationToken.None);
-
-        // Assert
-        Assert.Equal(typeof(DynamicSubject), result);
-    }
-
-    [Fact]
-    public async Task WhenObjectNodeHasNoChildren_ThenTypeIsDynamicSubject()
-    {
-        // Arrange
-        var objectReference = new ReferenceDescription
-        {
-            BrowseName = new QualifiedName("Empty"),
-            NodeId = new ExpandedNodeId(new NodeId(3000, 2)),
-            NodeClass = NodeClass.Object
-        };
-
-        var mockSession = CreateMockSession();
-        mockSession
-            .Setup(s => s.BrowseAsync(
-                It.IsAny<RequestHeader>(),
-                It.IsAny<ViewDescription>(),
-                It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new BrowseResponse
-            {
-                Results =
-                [
-                    new BrowseResult { References = new ReferenceDescriptionCollection() }
-                ],
-                DiagnosticInfos = []
-            });
-
-        // Act
-        var result = await _resolver.TryGetTypeForNodeAsync(mockSession.Object, objectReference, CancellationToken.None);
-
-        // Assert
-        Assert.Equal(typeof(DynamicSubject), result);
-    }
-
-    [Fact]
-    public async Task WhenObjectNodeChildrenHaveNonNumericBracketNames_ThenTypeIsReadOnlyDictionary()
-    {
-        // Arrange
-        var objectReference = new ReferenceDescription
-        {
-            BrowseName = new QualifiedName("Devices"),
-            NodeId = new ExpandedNodeId(new NodeId(4000, 2)),
-            NodeClass = NodeClass.Object
-        };
-
-        var mockSession = CreateMockSession();
-        var childCollection = new ReferenceDescriptionCollection
+        var children = new ReferenceDescriptionCollection
         {
             new ReferenceDescription
             {
                 BrowseName = new QualifiedName("Device[SensorA]"),
-                NodeId = new ExpandedNodeId(new NodeId(4001, 2)),
                 NodeClass = NodeClass.Object
             }
         };
 
-        mockSession
-            .Setup(s => s.BrowseAsync(
-                It.IsAny<RequestHeader>(),
-                It.IsAny<ViewDescription>(),
-                It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new BrowseResponse
-            {
-                Results =
-                [
-                    new BrowseResult { References = childCollection }
-                ],
-                DiagnosticInfos = []
-            });
-
         // Act
-        var result = await _resolver.TryGetTypeForNodeAsync(mockSession.Object, objectReference, CancellationToken.None);
+        var result = OpcUaTypeResolver.ClassifyObjectNode(children);
 
         // Assert
         Assert.Equal(typeof(IReadOnlyDictionary<string, DynamicSubject>), result);
     }
 
     [Fact]
-    public async Task WhenVariableHasCustomDataTypeSubtype_ThenWalksTypeTreeToBuiltInType()
+    public void WhenObjectChildrenHaveRegularNames_ThenClassifiesAsSubject()
     {
-        // Arrange: a Variable whose DataType is a custom NodeId outside the built-in range.
-        // The session's TypeTree walks the custom DataType up to the well-known Double DataType.
-        // This locks in the fix that uses session.TypeTree instead of the static (no-walk) overload.
-        var customDataTypeId = new NodeId(5001, 2);
-        var variableNodeId = new NodeId(2001, 2);
+        // Arrange
+        var children = new ReferenceDescriptionCollection
+        {
+            new ReferenceDescription
+            {
+                BrowseName = new QualifiedName("Temperature"),
+                NodeClass = NodeClass.Variable
+            }
+        };
 
-        var mockTypeTable = new Mock<ITypeTable>();
-        mockTypeTable
-            .Setup(t => t.FindSuperTypeAsync(customDataTypeId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(DataTypeIds.Double);
+        // Act
+        var result = OpcUaTypeResolver.ClassifyObjectNode(children);
+
+        // Assert
+        Assert.Equal(typeof(DynamicSubject), result);
+    }
+
+    [Fact]
+    public void WhenObjectHasNoChildren_ThenClassifiesAsSubject()
+    {
+        // Act
+        var result = OpcUaTypeResolver.ClassifyObjectNode(new ReferenceDescriptionCollection());
+
+        // Assert
+        Assert.Equal(typeof(DynamicSubject), result);
+    }
+
+    [Fact]
+    public async Task WhenResolvingMultipleVariables_ThenBatchReadsAndMapsTypes()
+    {
+        // Arrange
+        var node1Id = new NodeId(5001, 2);
+        var node2Id = new NodeId(5002, 2);
+        var node3Id = new NodeId(5003, 2);
+
+        var variables = new List<(NodeId NodeId, ReferenceDescription Reference)>
+        {
+            (node1Id, new ReferenceDescription { BrowseName = new QualifiedName("Temp"), NodeId = new ExpandedNodeId(node1Id), NodeClass = NodeClass.Variable }),
+            (node2Id, new ReferenceDescription { BrowseName = new QualifiedName("Count"), NodeId = new ExpandedNodeId(node2Id), NodeClass = NodeClass.Variable }),
+            (node3Id, new ReferenceDescription { BrowseName = new QualifiedName("Name"), NodeId = new ExpandedNodeId(node3Id), NodeClass = NodeClass.Variable }),
+        };
 
         var mockSession = CreateMockSession();
+        var mockTypeTable = new Mock<ITypeTable>();
         mockSession.SetupGet(s => s.TypeTree).Returns(mockTypeTable.Object);
+        mockSession.SetupGet(s => s.OperationLimits).Returns(new OperationLimits());
+
         mockSession
             .Setup(s => s.ReadAsync(
                 It.IsAny<RequestHeader>(),
@@ -221,32 +113,27 @@ public class OpcUaTypeResolverTests
                 It.IsAny<TimestampsToReturn>(),
                 It.IsAny<ReadValueIdCollection>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ReadResponse
+            .ReturnsAsync((RequestHeader _, double _, TimestampsToReturn _, ReadValueIdCollection nodesToRead, CancellationToken _) =>
             {
-                ResponseHeader = new ResponseHeader(),
-                Results =
-                [
-                    new DataValue { Value = customDataTypeId, StatusCode = StatusCodes.Good },
-                    new DataValue { Value = -1, StatusCode = StatusCodes.Good }
-                ],
-                DiagnosticInfos = []
+                var results = new DataValueCollection();
+                for (var i = 0; i < nodesToRead.Count; i += 2)
+                {
+                    var nodeId = nodesToRead[i].NodeId;
+                    if (nodeId == node1Id) { results.Add(new DataValue { Value = DataTypeIds.Float, StatusCode = StatusCodes.Good }); results.Add(new DataValue { Value = -1, StatusCode = StatusCodes.Good }); }
+                    else if (nodeId == node2Id) { results.Add(new DataValue { Value = DataTypeIds.Int32, StatusCode = StatusCodes.Good }); results.Add(new DataValue { Value = -1, StatusCode = StatusCodes.Good }); }
+                    else if (nodeId == node3Id) { results.Add(new DataValue { Value = DataTypeIds.String, StatusCode = StatusCodes.Good }); results.Add(new DataValue { Value = -1, StatusCode = StatusCodes.Good }); }
+                }
+                return new ReadResponse { Results = results, DiagnosticInfos = [] };
             });
 
-        var variableReference = new ReferenceDescription
-        {
-            BrowseName = new QualifiedName("Temperature"),
-            NodeId = new ExpandedNodeId(variableNodeId),
-            NodeClass = NodeClass.Variable
-        };
-
         // Act
-        var result = await _resolver.TryGetTypeForNodeAsync(mockSession.Object, variableReference, CancellationToken.None);
+        var result = await _resolver.ResolveVariableTypesAsync(mockSession.Object, variables, CancellationToken.None);
 
         // Assert
-        Assert.Equal(typeof(double), result);
-        mockTypeTable.Verify(
-            t => t.FindSuperTypeAsync(customDataTypeId, It.IsAny<CancellationToken>()),
-            Times.AtLeastOnce);
+        Assert.Equal(3, result.Count);
+        Assert.Equal(typeof(float), result[node1Id]);
+        Assert.Equal(typeof(int), result[node2Id]);
+        Assert.Equal(typeof(string), result[node3Id]);
     }
 
     private static Mock<ISession> CreateMockSession()

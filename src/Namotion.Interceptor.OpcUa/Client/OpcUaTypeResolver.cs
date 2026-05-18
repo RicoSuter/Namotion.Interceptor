@@ -31,110 +31,116 @@ public class OpcUaTypeResolver
         ];
     }
 
-    public virtual async Task<Type?> TryGetTypeForNodeAsync(ISession session, ReferenceDescription reference, CancellationToken cancellationToken)
+    public static Type ClassifyObjectNode(IReadOnlyList<ReferenceDescription> children)
     {
-        // Check cache first
-        var cacheKey = (reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex), reference.NodeId.Identifier);
-        if (_typeCache.TryGetValue(cacheKey, out var cachedType))
+        if (children.Count > 0 && children[0].NodeClass == NodeClass.Object)
         {
-            return cachedType;
+            var name = children[0].BrowseName?.Name;
+            if (name is not null)
+            {
+                var bracketStart = name.LastIndexOf('[');
+                if (bracketStart >= 0 && name.EndsWith("]"))
+                {
+                    var content = name.AsSpan(bracketStart + 1, name.Length - bracketStart - 2);
+                    if (int.TryParse(content, out _))
+                    {
+                        return typeof(DynamicSubject[]);
+                    }
+
+                    return typeof(IReadOnlyDictionary<string, DynamicSubject>);
+                }
+            }
         }
 
-        var type = await TryGetTypeForNodeWithoutCacheAsync(session, reference, cancellationToken).ConfigureAwait(false);
-        _typeCache.TryAdd(cacheKey, type);
-        return type;
+        return typeof(DynamicSubject);
     }
 
-    private async Task<Type?> TryGetTypeForNodeWithoutCacheAsync(ISession session, ReferenceDescription reference, CancellationToken cancellationToken)
+    public async Task<Dictionary<NodeId, Type?>> ResolveVariableTypesAsync(
+        ISession session,
+        IReadOnlyList<(NodeId NodeId, ReferenceDescription Reference)> variables,
+        CancellationToken cancellationToken)
     {
-        var nodeId = ExpandedNodeId.ToNodeId(reference.NodeId, session.NamespaceUris);
-
-        if (reference.NodeClass != NodeClass.Variable)
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var result = new Dictionary<NodeId, Type?>(variables.Count);
+        if (variables.Count == 0)
         {
-            var browseDescriptions = new BrowseDescriptionCollection
-            {
-                new BrowseDescription
-                {
-                    NodeId = nodeId!,
-                    BrowseDirection = BrowseDirection.Forward,
-                    ReferenceTypeId = ReferenceTypeIds.HierarchicalReferences,
-                    IncludeSubtypes = true,
-                    NodeClassMask = (uint)NodeClass.Variable | (uint)NodeClass.Object,
-                    ResultMask = (uint)(BrowseResultMask.BrowseName | BrowseResultMask.NodeClass)
-                }
-            };
+            return result;
+        }
 
-            // Browse only the first child: the [index] convention requires every collection/dictionary
-            // element to follow the pattern, so the first reference is enough to classify the parent.
-            var response = await session.BrowseAsync(null, null, 1u, browseDescriptions, cancellationToken);
-            if (response.Results.Count > 0 &&
-                response.Results[0].References.Count > 0 &&
-                response.Results[0].References[0].NodeClass == NodeClass.Object)
+        var batchSize = (int)(session.OperationLimits?.MaxNodesPerRead ?? 0);
+        if (batchSize <= 0) batchSize = 512;
+
+        // Build ReadValueIdCollection: 2 entries per variable (DataType + ValueRank)
+        var nodesToRead = new ReadValueIdCollection(variables.Count * 2);
+        foreach (var (nodeId, _) in variables)
+        {
+            nodesToRead.Add(new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.DataType });
+            nodesToRead.Add(new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.ValueRank });
+        }
+
+        // Read in chunks
+        var allResults = new DataValueCollection(nodesToRead.Count);
+        for (var offset = 0; offset < nodesToRead.Count; offset += batchSize)
+        {
+            var chunk = new ReadValueIdCollection();
+            var end = Math.Min(offset + batchSize, nodesToRead.Count);
+            for (var i = offset; i < end; i++)
             {
-                var name = response.Results[0].References[0].BrowseName?.Name;
-                if (name is not null)
+                chunk.Add(nodesToRead[i]);
+            }
+
+            var response = await session.ReadAsync(null, 0, TimestampsToReturn.Neither, chunk, cancellationToken).ConfigureAwait(false);
+            allResults.AddRange(response.Results);
+        }
+
+        // Map results: every 2 entries correspond to one variable
+        for (var i = 0; i < variables.Count; i++)
+        {
+            var (nodeId, reference) = variables[i];
+            var dataTypeIndex = i * 2;
+            var valueRankIndex = dataTypeIndex + 1;
+
+            var cacheKey = (reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex), reference.NodeId.Identifier);
+
+            if (_typeCache.TryGetValue(cacheKey, out var cachedType))
+            {
+                result[nodeId] = cachedType;
+                continue;
+            }
+
+            Type? type = null;
+            try
+            {
+                if (dataTypeIndex < allResults.Count && valueRankIndex < allResults.Count &&
+                    StatusCode.IsGood(allResults[dataTypeIndex].StatusCode))
                 {
-                    var bracketStart = name.LastIndexOf('[');
-                    if (bracketStart >= 0 && name.EndsWith("]"))
+                    var dataTypeId = allResults[dataTypeIndex].Value as NodeId;
+                    if (dataTypeId is not null)
                     {
-                        var content = name.AsSpan(bracketStart + 1, name.Length - bracketStart - 2);
-                        if (int.TryParse(content, out _))
+                        var builtIn = await TypeInfo.GetBuiltInTypeAsync(dataTypeId, session.TypeTree, cancellationToken).ConfigureAwait(false);
+                        var elementType = TryMapBuiltInType(builtIn);
+                        if (elementType is not null)
                         {
-                            return typeof(DynamicSubject[]);
+                            var valueRank = allResults[valueRankIndex].Value is int vr ? vr : -1;
+                            type = valueRank >= 0 ? elementType.MakeArrayType() : elementType;
                         }
-
-                        return typeof(IReadOnlyDictionary<string, DynamicSubject>);
                     }
                 }
             }
-
-            return typeof(DynamicSubject);
-        }
-
-        try
-        {
-            if (nodeId is null)
+            catch (Exception ex)
             {
-                return null;
+                _logger.LogDebug(ex, "Failed to infer CLR type for node {BrowseName}", reference.BrowseName.Name);
             }
 
-            var nodesToRead = new ReadValueIdCollection(2)
-            {
-                new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.DataType },
-                new ReadValueId { NodeId = nodeId, AttributeId = Opc.Ua.Attributes.ValueRank }
-            };
-
-            var response = await session.ReadAsync(null, 0, TimestampsToReturn.Neither, nodesToRead, cancellationToken);
-            if (response.Results.Count >= 2 && StatusCode.IsGood(response.Results[0].StatusCode))
-            {
-                var dataTypeId = response.Results[0].Value as NodeId;
-                if (dataTypeId != null)
-                {
-                    var builtIn = await TypeInfo.GetBuiltInTypeAsync(dataTypeId, session.TypeTree, cancellationToken);
-                    var elementType = TryMapBuiltInType(builtIn);
-                    if (elementType is not null)
-                    {
-                        // If ValueRank >= 0 we treat it as (at least) an array - simplification for multi-dim arrays.
-                        var valueRank = response.Results[1].Value is int vr ? vr : -1; // -1 => scalar
-                        if (valueRank >= 0)
-                        {
-                            return elementType.MakeArrayType();
-                        }
-
-                        return elementType;
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Failed to infer CLR type for node {BrowseName}", reference.BrowseName.Name);
+            _typeCache.TryAdd(cacheKey, type);
+            result[nodeId] = type;
         }
 
-        return null;
+        _logger.LogInformation("ResolveVariableTypesAsync: {Count} variables resolved in {ElapsedMs}ms", variables.Count, sw.ElapsedMilliseconds);
+        return result;
     }
 
-    private static Type? TryMapBuiltInType(BuiltInType builtInType) => builtInType switch
+    public static Type? TryMapBuiltInType(BuiltInType builtInType) => builtInType switch
     {
         BuiltInType.Boolean => typeof(bool),
         BuiltInType.SByte => typeof(sbyte),

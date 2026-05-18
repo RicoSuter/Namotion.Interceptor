@@ -100,15 +100,9 @@ public class OpcUaSubjectLoaderTests
     [Fact]
     public async Task LoadSubjectAsync_WithDynamicPropertiesEnabled_ShouldAddDynamicProperties()
     {
-        // Arrange: override base configuration for this loader
-        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaSubjectClientSource>.Instance);
-        mockTypeResolver
-            .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(typeof(int));
-
+        // Arrange
         var (loader, _) = CreateLoader(
-            shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
-            typeResolver: mockTypeResolver.Object);
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
         var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
@@ -117,6 +111,11 @@ public class OpcUaSubjectLoaderTests
         [
             CreateTestReferenceDescription("DynamicProperty", new NodeId(2001, 2))
         ]);
+
+        SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId, int)>
+        {
+            [new NodeId(2001, 2)] = (DataTypeIds.Int32, -1)
+        });
 
         // Act
         await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
@@ -153,15 +152,9 @@ public class OpcUaSubjectLoaderTests
     [Fact]
     public async Task LoadSubjectAsync_WithObjectType_ShouldNotAddProperty()
     {
-        // Arrange: override base configuration for this loader
-        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaSubjectClientSource>.Instance);
-        mockTypeResolver
-            .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Type?)null); // Simulate unresolved type (should return DynamicObject or similar when an expandable object is required)
-
+        // Arrange: ReadAsync returns a bad status code so the type cannot be resolved
         var (loader, _) = CreateLoader(
-            shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
-            typeResolver: mockTypeResolver.Object);
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
         var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
@@ -171,10 +164,13 @@ public class OpcUaSubjectLoaderTests
             CreateTestReferenceDescription("UnknownTypeProperty", new NodeId(2001, 2))
         ]);
 
+        // No DataType mapping for NodeId 2001 => ReadAsync returns BadNodeIdUnknown => type resolves to null
+        SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId, int)>());
+
         // Act
         var result = await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
 
-        // Assert - Should not add property with object type
+        // Assert - Should not add property with unresolved type
         Assert.Empty(result);
     }
 
@@ -274,7 +270,73 @@ public class OpcUaSubjectLoaderTests
         // would cause every ExpandedNodeId carrying a NamespaceUri to resolve to null.
         namespaceTable.Append("urn:test");
         mockSession.SetupGet(s => s.NamespaceUris).Returns(namespaceTable);
+        mockSession.SetupGet(s => s.OperationLimits).Returns(new OperationLimits());
+        mockSession.SetupGet(s => s.TypeTree).Returns(new Mock<ITypeTable>().Object);
         return mockSession;
+    }
+
+    /// <summary>
+    /// Sets up ReadAsync on a mock session to return DataType + ValueRank for given node-to-DataTypeId mappings.
+    /// Handles both single-node and batch ReadAsync calls.
+    /// </summary>
+    private static void SetupReadAsync(Mock<ISession> mockSession, Dictionary<NodeId, (NodeId DataTypeId, int ValueRank)> dataTypes)
+    {
+        mockSession
+            .Setup(s => s.ReadAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<double>(),
+                It.IsAny<TimestampsToReturn>(),
+                It.IsAny<ReadValueIdCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, double _, TimestampsToReturn _, ReadValueIdCollection nodesToRead, CancellationToken _) =>
+            {
+                var results = new DataValueCollection();
+                // ReadValueIds come in pairs: DataType + ValueRank per node
+                for (var i = 0; i < nodesToRead.Count; i += 2)
+                {
+                    var nodeId = nodesToRead[i].NodeId;
+                    if (dataTypes.TryGetValue(nodeId, out var dt))
+                    {
+                        results.Add(new DataValue { Value = dt.DataTypeId, StatusCode = StatusCodes.Good });
+                        results.Add(new DataValue { Value = dt.ValueRank, StatusCode = StatusCodes.Good });
+                    }
+                    else
+                    {
+                        results.Add(new DataValue { StatusCode = StatusCodes.BadNodeIdUnknown });
+                        results.Add(new DataValue { StatusCode = StatusCodes.BadNodeIdUnknown });
+                    }
+                }
+                return new ReadResponse { Results = results, DiagnosticInfos = [] };
+            });
+    }
+
+    /// <summary>
+    /// Sets up BrowseAsync on a mock session to dispatch per NodeId, handling both single-node
+    /// and multi-node BrowseDescriptionCollections (as used by BrowseManyNodesAsync).
+    /// </summary>
+    private static void SetupBrowseAsync(Mock<ISession> mockSession, Dictionary<NodeId, ReferenceDescription[]> browseTree)
+    {
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
+            {
+                var results = new BrowseResultCollection();
+                foreach (var desc in browseDescriptions)
+                {
+                    var children = new ReferenceDescriptionCollection();
+                    if (browseTree.TryGetValue(desc.NodeId, out var refs))
+                    {
+                        children.AddRange(refs);
+                    }
+                    results.Add(new BrowseResult { References = children });
+                }
+                return new BrowseResponse { Results = results, DiagnosticInfos = [] };
+            });
     }
 
     private Mock<ISession> CreateMockSessionWithNoChildren()
@@ -304,14 +366,8 @@ public class OpcUaSubjectLoaderTests
     public async Task WhenDynamicPropertyHasNumberDataType_ThenPropertyTypeIsDouble()
     {
         // Arrange
-        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaSubjectClientSource>.Instance);
-        mockTypeResolver
-            .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(typeof(double));
-
         var (loader, _) = CreateLoader(
-            shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
-            typeResolver: mockTypeResolver.Object);
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
         var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
@@ -319,6 +375,11 @@ public class OpcUaSubjectLoaderTests
         [
             CreateTestReferenceDescription("NumericValue", new NodeId(3001, 2))
         ]);
+
+        SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId, int)>
+        {
+            [new NodeId(3001, 2)] = (DataTypeIds.Double, -1)
+        });
 
         // Act
         await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
@@ -333,14 +394,8 @@ public class OpcUaSubjectLoaderTests
     public async Task WhenDynamicPropertyHasExtensionObjectDataType_ThenPropertyTypeIsExtensionObject()
     {
         // Arrange
-        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaSubjectClientSource>.Instance);
-        mockTypeResolver
-            .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(typeof(ExtensionObject));
-
         var (loader, _) = CreateLoader(
-            shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
-            typeResolver: mockTypeResolver.Object);
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
         var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
@@ -348,6 +403,11 @@ public class OpcUaSubjectLoaderTests
         [
             CreateTestReferenceDescription("ComplexValue", new NodeId(3002, 2))
         ]);
+
+        SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId, int)>
+        {
+            [new NodeId(3002, 2)] = (DataTypeIds.Structure, -1)
+        });
 
         // Act
         await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
@@ -361,84 +421,33 @@ public class OpcUaSubjectLoaderTests
     [Fact]
     public async Task WhenSameNodeAppearsAtMultiplePaths_ThenSubjectIsReused()
     {
-        // Arrange: create a type resolver that returns DynamicSubject for Object nodes
-        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaSubjectClientSource>.Instance);
-        mockTypeResolver
-            .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((ISession _, ReferenceDescription reference, CancellationToken _) =>
-            {
-                if (reference.NodeClass == NodeClass.Object)
-                    return typeof(DynamicSubject);
-                return typeof(double);
-            });
-        mockTypeResolver
-            .Setup(t => t.GetDynamicPropertyAttributes(It.IsAny<ReferenceDescription>(), It.IsAny<ISession>()))
-            .Returns((ReferenceDescription reference, ISession session) =>
-            {
-                var namespaceUri = reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex);
-                return
-                [
-                    new OpcUaNodeAttribute(reference.BrowseName.Name, namespaceUri)
-                    {
-                        NodeIdentifier = reference.NodeId.Identifier.ToString(),
-                        NodeNamespaceUri = namespaceUri
-                    }
-                ];
-            });
-
+        // Arrange
         var sharedNodeId = new NodeId(9999, 2);
 
         // Parent1 has child "SharedChild" -> sharedNodeId
         // Parent2 has child "SharedChild" -> sharedNodeId (same NodeId)
-        var parent1Children = new ReferenceDescription[]
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
         {
-            CreateObjectReferenceDescription("SharedChild", new ExpandedNodeId(sharedNodeId))
-        };
-        var parent2Children = new ReferenceDescription[]
-        {
-            CreateObjectReferenceDescription("SharedChild", new ExpandedNodeId(sharedNodeId))
-        };
-
-        var rootChildren = new ReferenceDescription[]
-        {
-            CreateObjectReferenceDescription("Parent1", new ExpandedNodeId(new NodeId(1001, 2))),
-            CreateObjectReferenceDescription("Parent2", new ExpandedNodeId(new NodeId(1002, 2)))
+            [new NodeId(1, 0)] =
+            [
+                CreateObjectReferenceDescription("Parent1", new ExpandedNodeId(new NodeId(1001, 2))),
+                CreateObjectReferenceDescription("Parent2", new ExpandedNodeId(new NodeId(1002, 2)))
+            ],
+            [new NodeId(1001, 2)] =
+            [
+                CreateObjectReferenceDescription("SharedChild", new ExpandedNodeId(sharedNodeId))
+            ],
+            [new NodeId(1002, 2)] =
+            [
+                CreateObjectReferenceDescription("SharedChild", new ExpandedNodeId(sharedNodeId))
+            ]
         };
 
         var mockSession = CreateMockSession();
-        mockSession
-            .Setup(s => s.BrowseAsync(
-                It.IsAny<RequestHeader>(),
-                It.IsAny<ViewDescription>(),
-                It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
-            {
-                var nodeId = browseDescriptions[0].NodeId;
-                ReferenceDescription[] children;
-
-                if (nodeId == new NodeId(1, 0))
-                    children = rootChildren;
-                else if (nodeId == new NodeId(1001, 2))
-                    children = parent1Children;
-                else if (nodeId == new NodeId(1002, 2))
-                    children = parent2Children;
-                else
-                    children = [];
-
-                var collection = new ReferenceDescriptionCollection();
-                collection.AddRange(children);
-                return new BrowseResponse
-                {
-                    Results = [new BrowseResult { References = collection }],
-                    DiagnosticInfos = []
-                };
-            });
+        SetupBrowseAsync(mockSession, browseTree);
 
         var (loader, _) = CreateLoader(
-            shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
-            typeResolver: mockTypeResolver.Object);
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
         var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
@@ -470,87 +479,34 @@ public class OpcUaSubjectLoaderTests
     [Fact]
     public async Task WhenSameNodeAppearsInCollectionsFromMultipleParents_ThenSubjectIsReused()
     {
-        // Arrange: type resolver returns DynamicSubject[] for "Collection*" nodes, DynamicSubject for other Objects.
-        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaSubjectClientSource>.Instance);
-        mockTypeResolver
-            .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((ISession _, ReferenceDescription reference, CancellationToken _) =>
-            {
-                if (reference.BrowseName.Name?.StartsWith("Collection") == true)
-                    return typeof(DynamicSubject[]);
-                if (reference.NodeClass == NodeClass.Object)
-                    return typeof(DynamicSubject);
-                return typeof(double);
-            });
-        mockTypeResolver
-            .Setup(t => t.GetDynamicPropertyAttributes(It.IsAny<ReferenceDescription>(), It.IsAny<ISession>()))
-            .Returns((ReferenceDescription reference, ISession session) =>
-            {
-                var namespaceUri = reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex);
-                return
-                [
-                    new OpcUaNodeAttribute(reference.BrowseName.Name, namespaceUri)
-                    {
-                        NodeIdentifier = reference.NodeId.Identifier.ToString(),
-                        NodeNamespaceUri = namespaceUri
-                    }
-                ];
-            });
-
+        // Arrange
         var sharedNodeId = new NodeId(8888, 2);
         var collection1NodeId = new NodeId(2001, 2);
         var collection2NodeId = new NodeId(2002, 2);
 
         // Both collections contain a "SharedItem[0]" element with the same NodeId.
-        var collection1Children = new ReferenceDescription[]
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
         {
-            CreateObjectReferenceDescription("SharedItem[0]", new ExpandedNodeId(sharedNodeId))
-        };
-        var collection2Children = new ReferenceDescription[]
-        {
-            CreateObjectReferenceDescription("SharedItem[0]", new ExpandedNodeId(sharedNodeId))
-        };
-
-        var rootChildren = new ReferenceDescription[]
-        {
-            CreateObjectReferenceDescription("Collection1", new ExpandedNodeId(collection1NodeId)),
-            CreateObjectReferenceDescription("Collection2", new ExpandedNodeId(collection2NodeId))
+            [new NodeId(1, 0)] =
+            [
+                CreateObjectReferenceDescription("Collection1", new ExpandedNodeId(collection1NodeId)),
+                CreateObjectReferenceDescription("Collection2", new ExpandedNodeId(collection2NodeId))
+            ],
+            [collection1NodeId] =
+            [
+                CreateObjectReferenceDescription("SharedItem[0]", new ExpandedNodeId(sharedNodeId))
+            ],
+            [collection2NodeId] =
+            [
+                CreateObjectReferenceDescription("SharedItem[0]", new ExpandedNodeId(sharedNodeId))
+            ]
         };
 
         var mockSession = CreateMockSession();
-        mockSession
-            .Setup(s => s.BrowseAsync(
-                It.IsAny<RequestHeader>(),
-                It.IsAny<ViewDescription>(),
-                It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
-            {
-                var nodeId = browseDescriptions[0].NodeId;
-                ReferenceDescription[] children;
-
-                if (nodeId == new NodeId(1, 0))
-                    children = rootChildren;
-                else if (nodeId == collection1NodeId)
-                    children = collection1Children;
-                else if (nodeId == collection2NodeId)
-                    children = collection2Children;
-                else
-                    children = [];
-
-                var collection = new ReferenceDescriptionCollection();
-                collection.AddRange(children);
-                return new BrowseResponse
-                {
-                    Results = [new BrowseResult { References = collection }],
-                    DiagnosticInfos = []
-                };
-            });
+        SetupBrowseAsync(mockSession, browseTree);
 
         var (loader, _) = CreateLoader(
-            shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
-            typeResolver: mockTypeResolver.Object);
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
 
         var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
@@ -613,75 +569,34 @@ public class OpcUaSubjectLoaderTests
     public async Task WhenDynamicPropertyAppearsViaDifferentReferenceTypes_ThenAttributeIsAddedOnce()
     {
         // Arrange: a dynamic variable node appears twice, and its child attribute should only be added once
-        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaSubjectClientSource>.Instance);
-        mockTypeResolver
-            .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(typeof(int));
-        mockTypeResolver
-            .Setup(t => t.GetDynamicPropertyAttributes(It.IsAny<ReferenceDescription>(), It.IsAny<ISession>()))
-            .Returns((ReferenceDescription reference, ISession session) =>
-            {
-                var namespaceUri = reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex);
-                return
-                [
-                    new OpcUaNodeAttribute(reference.BrowseName.Name, namespaceUri)
-                    {
-                        NodeIdentifier = reference.NodeId.Identifier.ToString(),
-                        NodeNamespaceUri = namespaceUri
-                    }
-                ];
-            });
-
         var statusNodeId = new NodeId(5001, 2);
         var stateNodeId = new NodeId(5002, 2);
 
         // Browse returns ServerStatus twice (different reference types), and ServerStatus has a State child
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [new NodeId(1, 0)] =
+            [
+                CreateTestReferenceDescription("ServerStatus", new ExpandedNodeId(statusNodeId)),
+                CreateTestReferenceDescription("ServerStatus", new ExpandedNodeId(statusNodeId))
+            ],
+            [statusNodeId] =
+            [
+                CreateTestReferenceDescription("State", new ExpandedNodeId(stateNodeId))
+            ]
+        };
+
         var mockSession = CreateMockSession();
-        mockSession
-            .Setup(s => s.BrowseAsync(
-                It.IsAny<RequestHeader>(),
-                It.IsAny<ViewDescription>(),
-                It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
-            {
-                var nodeId = browseDescriptions[0].NodeId;
-                ReferenceDescriptionCollection children;
-
-                if (nodeId == new NodeId(1, 0))
-                {
-                    // Root returns ServerStatus twice
-                    children =
-                    [
-                        CreateTestReferenceDescription("ServerStatus", new ExpandedNodeId(statusNodeId)),
-                        CreateTestReferenceDescription("ServerStatus", new ExpandedNodeId(statusNodeId))
-                    ];
-                }
-                else if (nodeId == statusNodeId)
-                {
-                    // ServerStatus has a State child
-                    children =
-                    [
-                        CreateTestReferenceDescription("State", new ExpandedNodeId(stateNodeId))
-                    ];
-                }
-                else
-                {
-                    children = [];
-                }
-
-                return new BrowseResponse
-                {
-                    Results = [new BrowseResult { References = children }],
-                    DiagnosticInfos = []
-                };
-            });
+        SetupBrowseAsync(mockSession, browseTree);
+        SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId, int)>
+        {
+            [statusNodeId] = (DataTypeIds.Int32, -1),
+            [stateNodeId] = (DataTypeIds.Int32, -1)
+        });
 
         var (loader, _) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
-            shouldAddDynamicAttributes: (_, _) => Task.FromResult(true),
-            typeResolver: mockTypeResolver.Object);
+            shouldAddDynamicAttributes: (_, _) => Task.FromResult(true));
 
         var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
@@ -701,75 +616,36 @@ public class OpcUaSubjectLoaderTests
     {
         // Arrange: a variable's child attribute is returned twice (e.g., via HasComponent + HasProperty)
         // within a single browse call. The outer parent is referenced only once. This exercises the
-        // NodeId dedup inside LoadAttributeNodesAsync.
-        var mockTypeResolver = new Mock<OpcUaTypeResolver>(NullLogger<OpcUaSubjectClientSource>.Instance);
-        mockTypeResolver
-            .Setup(t => t.TryGetTypeForNodeAsync(It.IsAny<ISession>(), It.IsAny<ReferenceDescription>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(typeof(int));
-        mockTypeResolver
-            .Setup(t => t.GetDynamicPropertyAttributes(It.IsAny<ReferenceDescription>(), It.IsAny<ISession>()))
-            .Returns((ReferenceDescription reference, ISession session) =>
-            {
-                var namespaceUri = reference.NodeId.NamespaceUri ?? session.NamespaceUris.GetString(reference.NodeId.NamespaceIndex);
-                return
-                [
-                    new OpcUaNodeAttribute(reference.BrowseName.Name, namespaceUri)
-                    {
-                        NodeIdentifier = reference.NodeId.Identifier.ToString(),
-                        NodeNamespaceUri = namespaceUri
-                    }
-                ];
-            });
-
+        // NodeId dedup inside LoadAttributeNodesForManyAsync.
         var statusNodeId = new NodeId(6001, 2);
         var stateNodeId = new NodeId(6002, 2);
 
         // Root returns ServerStatus ONCE. ServerStatus's browse returns State TWICE (same NodeId).
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [new NodeId(1, 0)] =
+            [
+                CreateTestReferenceDescription("ServerStatus", new ExpandedNodeId(statusNodeId))
+            ],
+            [statusNodeId] =
+            [
+                // ServerStatus's browse returns State twice (HasComponent + HasProperty for State)
+                CreateTestReferenceDescription("State", new ExpandedNodeId(stateNodeId)),
+                CreateTestReferenceDescription("State", new ExpandedNodeId(stateNodeId))
+            ]
+        };
+
         var mockSession = CreateMockSession();
-        mockSession
-            .Setup(s => s.BrowseAsync(
-                It.IsAny<RequestHeader>(),
-                It.IsAny<ViewDescription>(),
-                It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
-            {
-                var nodeId = browseDescriptions[0].NodeId;
-                ReferenceDescriptionCollection children;
-
-                if (nodeId == new NodeId(1, 0))
-                {
-                    children =
-                    [
-                        CreateTestReferenceDescription("ServerStatus", new ExpandedNodeId(statusNodeId))
-                    ];
-                }
-                else if (nodeId == statusNodeId)
-                {
-                    // ServerStatus's browse returns State twice (HasComponent + HasProperty for State)
-                    children =
-                    [
-                        CreateTestReferenceDescription("State", new ExpandedNodeId(stateNodeId)),
-                        CreateTestReferenceDescription("State", new ExpandedNodeId(stateNodeId))
-                    ];
-                }
-                else
-                {
-                    children = [];
-                }
-
-                return new BrowseResponse
-                {
-                    Results = [new BrowseResult { References = children }],
-                    DiagnosticInfos = []
-                };
-            });
+        SetupBrowseAsync(mockSession, browseTree);
+        SetupReadAsync(mockSession, new Dictionary<NodeId, (NodeId, int)>
+        {
+            [statusNodeId] = (DataTypeIds.Int32, -1),
+            [stateNodeId] = (DataTypeIds.Int32, -1)
+        });
 
         var (loader, _) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true),
-            shouldAddDynamicAttributes: (_, _) => Task.FromResult(true),
-            typeResolver: mockTypeResolver.Object);
+            shouldAddDynamicAttributes: (_, _) => Task.FromResult(true));
 
         var subject = CreateTestSubject();
         var rootNode = CreateTestReferenceDescription("Root", new NodeId(1, 0));
@@ -793,40 +669,23 @@ public class OpcUaSubjectLoaderTests
         // another source registers a registry attribute (here: "State") on a property *before*
         // the OPC UA loader browses the server. The browse then returns a same-named dynamic
         // Variable child, which the loader's second pass would normally try to AddAttribute,
-        // throwing "duplicate key". The safety net in LoadAttributeNodesAsync should detect the
+        // throwing "duplicate key". The safety net in LoadAttributeNodesForManyAsync should detect the
         // existing registration via TryGetAttribute and skip with a warning instead.
         var statusNodeId = new NodeId(7001, 2);
         var stateNodeId = new NodeId(7002, 2);
 
         var mockSession = CreateMockSession();
-        mockSession
-            .Setup(s => s.BrowseAsync(
-                It.IsAny<RequestHeader>(),
-                It.IsAny<ViewDescription>(),
-                It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
-            {
-                var nodeId = browseDescriptions[0].NodeId;
-                ReferenceDescriptionCollection children = nodeId == new NodeId(1, 0)
-                    ?
-                    [
-                        CreateTestReferenceDescription("ServerStatus", new ExpandedNodeId(statusNodeId))
-                    ]
-                    : nodeId == statusNodeId
-                        ?
-                        [
-                            CreateTestReferenceDescription("State", new ExpandedNodeId(stateNodeId))
-                        ]
-                        : [];
-
-                return new BrowseResponse
-                {
-                    Results = [new BrowseResult { References = children }],
-                    DiagnosticInfos = []
-                };
-            });
+        SetupBrowseAsync(mockSession, new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [new NodeId(1, 0)] =
+            [
+                CreateTestReferenceDescription("ServerStatus", new ExpandedNodeId(statusNodeId))
+            ],
+            [statusNodeId] =
+            [
+                CreateTestReferenceDescription("State", new ExpandedNodeId(stateNodeId))
+            ]
+        });
 
         var (loader, _) = CreateLoader(shouldAddDynamicAttributes: (_, _) => Task.FromResult(true));
 
@@ -864,6 +723,100 @@ public class OpcUaSubjectLoaderTests
         // also not crash but would silently overwrite the lifecycle-handler registration.
         var stateAfterLoad = serverStatus.TryGetAttribute("State");
         Assert.Same(preRegisteredState, stateAfterLoad);
+    }
+
+    [Fact]
+    public async Task WhenNodeCountExceedsMaxNodesPerBrowse_ThenBrowseIsChunked()
+    {
+        // Arrange: set MaxNodesPerBrowse = 2, tree has 4 leaf variables as dynamic properties.
+        // Phase 5 (LoadAttributeNodesForManyAsync) batch-browses all 4 variable nodes at once
+        // via BrowseManyNodesAsync, which must chunk into multiple BrowseAsync calls.
+        var rootId = new NodeId(1, 0);
+        var var1Id = new NodeId(2001, 2);
+        var var2Id = new NodeId(2002, 2);
+        var var3Id = new NodeId(2003, 2);
+        var var4Id = new NodeId(2004, 2);
+
+        var browseTree = new Dictionary<NodeId, ReferenceDescription[]>
+        {
+            [rootId] =
+            [
+                CreateTestReferenceDescription("Var1", new ExpandedNodeId(var1Id)),
+                CreateTestReferenceDescription("Var2", new ExpandedNodeId(var2Id)),
+                CreateTestReferenceDescription("Var3", new ExpandedNodeId(var3Id)),
+                CreateTestReferenceDescription("Var4", new ExpandedNodeId(var4Id))
+            ]
+            // Variable leaf nodes have no children in the browse tree, so they return empty results.
+        };
+
+        var dataTypes = new Dictionary<NodeId, (NodeId DataTypeId, int ValueRank)>
+        {
+            [var1Id] = (DataTypeIds.Float, -1),
+            [var2Id] = (DataTypeIds.Double, -1),
+            [var3Id] = (DataTypeIds.Int32, -1),
+            [var4Id] = (DataTypeIds.String, -1)
+        };
+
+        var mockSession = CreateMockSession();
+        mockSession.SetupGet(s => s.OperationLimits).Returns(new OperationLimits
+        {
+            MaxNodesPerBrowse = 2,
+            MaxNodesPerRead = 0 // unlimited reads
+        });
+
+        var browseCallCount = 0;
+        mockSession
+            .Setup(s => s.BrowseAsync(
+                It.IsAny<RequestHeader>(),
+                It.IsAny<ViewDescription>(),
+                It.IsAny<uint>(),
+                It.IsAny<BrowseDescriptionCollection>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
+            {
+                Interlocked.Increment(ref browseCallCount);
+                var results = new BrowseResultCollection();
+                foreach (var desc in browseDescriptions)
+                {
+                    var children = new ReferenceDescriptionCollection();
+                    if (browseTree.TryGetValue(desc.NodeId, out var refs))
+                    {
+                        children.AddRange(refs);
+                    }
+                    results.Add(new BrowseResult { References = children });
+                }
+                return new BrowseResponse { Results = results, DiagnosticInfos = [] };
+            });
+
+        SetupReadAsync(mockSession, dataTypes);
+
+        var (loader, ownership) = CreateLoader(
+            shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
+
+        var subject = CreateTestSubject();
+        var rootNode = CreateTestReferenceDescription("Root", rootId);
+
+        // Act
+        var monitoredItems = await loader.LoadSubjectAsync(subject, rootNode, mockSession.Object, CancellationToken.None);
+
+        // Assert: all 4 variable properties are discovered and monitored
+        Assert.Equal(4, monitoredItems.Count);
+
+        var monitoredNodeIds = monitoredItems.Select(m => m.StartNodeId).ToHashSet();
+        Assert.Contains(var1Id, monitoredNodeIds);
+        Assert.Contains(var2Id, monitoredNodeIds);
+        Assert.Contains(var3Id, monitoredNodeIds);
+        Assert.Contains(var4Id, monitoredNodeIds);
+
+        // Assert: all properties are owned by the source
+        Assert.Equal(4, ownership.Properties.Count());
+
+        // Assert: BrowseAsync was called more than once, proving chunking occurred.
+        // Call 1: root node browse (BrowseNodeAsync, single node).
+        // Calls 2+: Phase 5 batch-browses the 4 variable nodes in chunks of 2
+        //           (BrowseManyNodesAsync splits 4 nodes into 2 calls of 2).
+        Assert.True(browseCallCount >= 3,
+            $"Expected at least 3 BrowseAsync calls (1 root + 2 chunked attribute batches), but got {browseCallCount}.");
     }
 
     /// <summary>
@@ -926,68 +879,12 @@ public class OpcUaSubjectLoaderTests
 
         var mockSession = CreateMockSession();
 
-        // Mock BrowseAsync: return children for known nodes, empty for others (leaf Variables)
-        mockSession
-            .Setup(s => s.BrowseAsync(
-                It.IsAny<RequestHeader>(),
-                It.IsAny<ViewDescription>(),
-                It.IsAny<uint>(),
-                It.IsAny<BrowseDescriptionCollection>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync((RequestHeader _, ViewDescription _, uint _, BrowseDescriptionCollection browseDescriptions, CancellationToken _) =>
-            {
-                var nodeId = browseDescriptions[0].NodeId;
-                var children = new ReferenceDescriptionCollection();
-                if (browseTree.TryGetValue(nodeId, out var refs))
-                {
-                    children.AddRange(refs);
-                }
-
-                return new BrowseResponse
-                {
-                    Results = [new BrowseResult { References = children }],
-                    DiagnosticInfos = []
-                };
-            });
+        // Mock BrowseAsync: return children for known nodes, empty for others (leaf Variables).
+        // Handles multi-node BrowseDescriptionCollections from BrowseManyNodesAsync.
+        SetupBrowseAsync(mockSession, browseTree);
 
         // Mock ReadAsync: return DataType + ValueRank for Variable nodes
-        mockSession
-            .Setup(s => s.ReadAsync(
-                It.IsAny<RequestHeader>(),
-                It.IsAny<double>(),
-                It.IsAny<TimestampsToReturn>(),
-                It.IsAny<ReadValueIdCollection>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync((RequestHeader _, double _, TimestampsToReturn _, ReadValueIdCollection nodesToRead, CancellationToken _) =>
-            {
-                var nodeId = nodesToRead[0].NodeId;
-                if (dataTypes.TryGetValue(nodeId, out var dt))
-                {
-                    return new ReadResponse
-                    {
-                        Results =
-                        [
-                            new DataValue { Value = dt.DataTypeId, StatusCode = StatusCodes.Good },
-                            new DataValue { Value = dt.ValueRank, StatusCode = StatusCodes.Good }
-                        ],
-                        DiagnosticInfos = []
-                    };
-                }
-
-                return new ReadResponse
-                {
-                    Results =
-                    [
-                        new DataValue { StatusCode = StatusCodes.BadNodeIdUnknown },
-                        new DataValue { StatusCode = StatusCodes.BadNodeIdUnknown }
-                    ],
-                    DiagnosticInfos = []
-                };
-            });
-
-        // Mock TypeTree for GetBuiltInTypeAsync
-        var mockTypeTable = new Mock<ITypeTable>();
-        mockSession.SetupGet(s => s.TypeTree).Returns(mockTypeTable.Object);
+        SetupReadAsync(mockSession, dataTypes);
 
         var (loader, ownership) = CreateLoader(
             shouldAddDynamicProperties: (_, _) => Task.FromResult(true));
